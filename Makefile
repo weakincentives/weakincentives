@@ -20,7 +20,7 @@ lint-fix:
 typecheck:
 	uv run ty check .
 
-# Run tests
+# Run tests with coverage (80% minimum)
 test:
 	uv run pytest
 
