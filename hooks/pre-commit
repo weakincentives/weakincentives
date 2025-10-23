@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-commit hook to run make check
+
+echo "Running make check..."
+make check
+
+if [ $? -ne 0 ]; then
+    echo "❌ make check failed. Commit aborted."
+    echo "Fix the issues above or use 'git commit --no-verify' to bypass this hook."
+    exit 1
+fi
+
+echo "✅ All checks passed!"
+exit 0

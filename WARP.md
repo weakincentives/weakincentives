@@ -12,10 +12,13 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 - **uv** package manager (used for all commands)
 
 ### Setup
-Install dependencies:
+Install dependencies and git hooks:
 ```bash
 uv sync
+./install-hooks.sh
 ```
+
+The `install-hooks.sh` script installs git hooks from the `hooks/` directory, including a pre-commit hook that runs `make check`.
 
 ## Common Commands
 
