@@ -1,10 +1,10 @@
 [project]
 name = "weakincentives"
 version = "0.1.0"
-description = "Add your description here"
+description = "Tools for developing and optimizing side effect free background agents"
 readme = "README.md"
 authors = [
-    { name = "Andrei Savu", email = "andrei@rulebound.com" }
+    { name = "Andrei Savu", email = "andrei@weakincentives.com" }
 ]
 requires-python = ">=3.14"
 dependencies = []
