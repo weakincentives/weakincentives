@@ -8,6 +8,33 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = []
+license = { text = "Apache-2.0" }
+keywords = [
+    "ai",
+    "agents",
+    "background-agents",
+    "side-effect-free",
+    "optimization",
+    "weak-incentives",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://weakincentives.com/"
+Documentation = "https://github.com/weakincentives/weakincentives#readme"
+Repository = "https://github.com/weakincentives/weakincentives"
+"Issue Tracker" = "https://github.com/weakincentives/weakincentives/issues"
 
 [build-system]
 requires = ["hatchling"]
