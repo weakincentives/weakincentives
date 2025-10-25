@@ -20,9 +20,9 @@ lint-fix:
 typecheck:
 	uv run ty check .
 
-# Run tests with coverage (80% minimum)
+# Run tests with coverage (100% minimum)
 test:
-	uv run pytest
+	uv run pytest --cov-fail-under=100
 
 # Run all checks (format check, lint, typecheck, test)
 check: format-check lint typecheck test
