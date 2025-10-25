@@ -171,8 +171,14 @@ class Prompt:
             param_lookup[params_type] = value
 
         rendered_sections: list[str] = []
+        skip_depth: int | None = None
 
         for node in self._section_nodes:
+            if skip_depth is not None:
+                if node.depth > skip_depth:
+                    continue
+                skip_depth = None
+
             params_type = node.section.params
             section_params = param_lookup.get(params_type)
 
@@ -198,6 +204,7 @@ class Prompt:
                 )
 
             if not node.section.is_enabled(section_params):
+                skip_depth = node.depth
                 continue
 
             try:
