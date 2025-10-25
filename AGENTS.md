@@ -52,6 +52,7 @@ Prefer `make check` before every commit; git hooks will call the same pipeline.
 
 ## Adding Features
 - Mirror the structure in `tests/` when adding new modules—write tests alongside new code and keep them deterministic.
+- Follow test-driven development best practices while iterating; commit to the red→green→refactor loop so features stay focused and covered.
 - Reference `specs/PROMPTS.md` before modifying or introducing prompt-related functionality.
 - Keep the `README.md` concise; extended onboarding belongs here in `AGENTS.md`.
 - When introducing new tooling, extend the `Makefile` so agents can discover it without hunting through scripts.
