@@ -78,3 +78,23 @@ def test_prompt_rejects_duplicate_param_dataclasses():
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.dataclass_type is DuplicateParams
     assert exc.value.section_path == ("Second",)
+
+
+def test_prompt_validates_text_section_placeholders():
+    @dataclass
+    class PlaceholderParams:
+        value: str
+
+    section = TextSection(
+        title="Invalid",
+        body="Missing ${oops}",
+        params=PlaceholderParams,
+    )
+
+    with pytest.raises(PromptValidationError) as exc:
+        Prompt(root_sections=[section])
+
+    assert isinstance(exc.value, PromptValidationError)
+    assert exc.value.placeholder == "oops"
+    assert exc.value.section_path == ("Invalid",)
+    assert exc.value.dataclass_type is PlaceholderParams

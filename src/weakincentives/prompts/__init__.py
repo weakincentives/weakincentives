@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from collections.abc import Sequence
 from string import Template
 from typing import Any, Callable, Generic, TypeVar
@@ -78,6 +78,11 @@ class Section(Generic[_ParamsT], ABC):
     def render(self, params: _ParamsT, depth: int) -> str:
         """Produce markdown output for the section at the supplied depth."""
 
+    def placeholder_names(self) -> set[str]:
+        """Return placeholder identifiers used by the section template."""
+
+        return set()
+
 
 class TextSection(Section[_ParamsT]):
     """Render markdown text content using string.Template."""
@@ -109,6 +114,19 @@ class TextSection(Section[_ParamsT]):
         if rendered_body:
             return f"{heading}\n\n{rendered_body.strip()}"
         return heading
+
+    def placeholder_names(self) -> set[str]:
+        template = Template(textwrap.dedent(self.body).strip())
+        placeholders: set[str] = set()
+        for match in template.pattern.finditer(template.template):
+            named = match.group("named")
+            if named:
+                placeholders.add(named)
+                continue
+            braced = match.group("braced")
+            if braced:
+                placeholders.add(braced)
+        return placeholders
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +172,26 @@ class Prompt:
 
         if section.defaults is not None:
             self.defaults[params_type] = section.defaults
+
+        if not is_dataclass(params_type):
+            raise PromptValidationError(
+                "Section params must be a dataclass.",
+                section_path=path,
+                dataclass_type=params_type,
+            )
+
+        section_placeholders = section.placeholder_names()
+        self.placeholders[path] = set(section_placeholders)
+        param_fields = {field.name for field in fields(params_type)}
+        unknown_placeholders = section_placeholders - param_fields
+        if unknown_placeholders:
+            placeholder = sorted(unknown_placeholders)[0]
+            raise PromptValidationError(
+                "Template references unknown placeholder.",
+                section_path=path,
+                dataclass_type=params_type,
+                placeholder=placeholder,
+            )
 
         for child in section.children:
             child_path = path + (child.title,)
