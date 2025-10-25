@@ -110,7 +110,14 @@ class TextSection(Section[_ParamsT]):
         heading_level = "#" * (depth + 2)
         heading = f"{heading_level} {self.title.strip()}"
         template = Template(textwrap.dedent(self.body).strip())
-        rendered_body = template.safe_substitute(vars(params))
+        try:
+            rendered_body = template.safe_substitute(vars(params))
+        except KeyError as error:  # pragma: no cover - handled at prompt level
+            missing = error.args[0]
+            raise PromptRenderError(
+                "Missing placeholder during render.",
+                placeholder=str(missing),
+            ) from error
         if rendered_body:
             return f"{heading}\n\n{rendered_body.strip()}"
         return heading
@@ -203,14 +210,30 @@ class Prompt:
                     dataclass_type=params_type,
                 )
 
-            if not node.section.is_enabled(section_params):
+            try:
+                enabled = node.section.is_enabled(section_params)
+            except Exception as error:  # pragma: no cover - defensive guard
+                raise PromptRenderError(
+                    "Section enabled predicate failed.",
+                    section_path=node.path,
+                    dataclass_type=params_type,
+                ) from error
+
+            if not enabled:
                 skip_depth = node.depth
                 continue
 
             try:
                 rendered = node.section.render(section_params, node.depth)
-            except PromptRenderError:
-                raise
+            except PromptRenderError as error:
+                if error.section_path and error.dataclass_type:
+                    raise
+                raise PromptRenderError(
+                    error.message,
+                    section_path=node.path,
+                    dataclass_type=params_type,
+                    placeholder=error.placeholder,
+                ) from error
             except Exception as error:  # pragma: no cover - defensive guard
                 raise PromptRenderError(
                     "Section rendering failed.",

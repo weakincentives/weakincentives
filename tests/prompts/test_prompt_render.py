@@ -184,3 +184,51 @@ def test_prompt_render_skips_disabled_parent_and_children():
     assert "Parent" not in output
     assert "Child" not in output
     assert "Leaf" not in output
+
+
+def test_prompt_render_wraps_template_errors_with_context():
+    @dataclass
+    class ErrorParams:
+        value: str
+
+    class ExplodingSection(TextSection[ErrorParams]):
+        def render(self, params: ErrorParams, depth: int) -> str:
+            raise ValueError("boom")
+
+    section = ExplodingSection(
+        title="Explode",
+        body="unused",
+        params=ErrorParams,
+    )
+    prompt = Prompt(root_sections=[section])
+
+    with pytest.raises(PromptRenderError) as exc:
+        prompt.render(params=[ErrorParams(value="x")])
+
+    assert isinstance(exc.value, PromptRenderError)
+    assert exc.value.section_path == ("Explode",)
+    assert exc.value.dataclass_type is ErrorParams
+
+
+def test_prompt_render_propagates_enabled_errors():
+    @dataclass
+    class ToggleParams:
+        flag: bool
+
+    def raising_enabled(params: ToggleParams) -> bool:
+        raise RuntimeError("enabled failure")
+
+    section = TextSection(
+        title="Guard",
+        body="Guard: ${flag}",
+        params=ToggleParams,
+        enabled=raising_enabled,
+    )
+    prompt = Prompt(root_sections=[section])
+
+    with pytest.raises(PromptRenderError) as exc:
+        prompt.render(params=[ToggleParams(flag=True)])
+
+    assert isinstance(exc.value, PromptRenderError)
+    assert exc.value.section_path == ("Guard",)
+    assert exc.value.dataclass_type is ToggleParams
