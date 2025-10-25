@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from string import Template
 from typing import Any, Callable, Generic, TypeVar
+
+import textwrap
 
 
 SectionPath = tuple[str, ...]
@@ -75,9 +78,42 @@ class Section(Generic[_ParamsT], ABC):
         """Produce markdown output for the section at the supplied depth."""
 
 
+class TextSection(Section[_ParamsT]):
+    """Render markdown text content using string.Template."""
+
+    def __init__(
+        self,
+        *,
+        title: str,
+        body: str,
+        params: type[_ParamsT],
+        defaults: _ParamsT | None = None,
+        children: Sequence[Section[Any]] | None = None,
+        enabled: Callable[[_ParamsT], bool] | None = None,
+    ) -> None:
+        super().__init__(
+            title=title,
+            params=params,
+            defaults=defaults,
+            children=children,
+            enabled=enabled,
+        )
+        self.body = body
+
+    def render(self, params: _ParamsT, depth: int) -> str:
+        heading_level = "#" * (depth + 2)
+        heading = f"{heading_level} {self.title.strip()}"
+        template = Template(textwrap.dedent(self.body).strip())
+        rendered_body = template.safe_substitute(vars(params))
+        if rendered_body:
+            return f"{heading}\n\n{rendered_body.strip()}"
+        return heading
+
+
 __all__ = [
     "PromptError",
     "PromptValidationError",
     "PromptRenderError",
     "Section",
+    "TextSection",
 ]
