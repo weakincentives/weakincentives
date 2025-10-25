@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from collections.abc import Sequence
 from string import Template
 from typing import Any, Callable, Generic, TypeVar
@@ -110,10 +111,68 @@ class TextSection(Section[_ParamsT]):
         return heading
 
 
+@dataclass(frozen=True, slots=True)
+class PromptSectionNode:
+    """Flattened view of a section within a prompt."""
+
+    section: Section[Any]
+    depth: int
+    path: SectionPath
+
+
+class Prompt:
+    """Coordinate prompt sections and their parameter bindings."""
+
+    def __init__(self, *, root_sections: Sequence[Section[Any]] | None = None) -> None:
+        self.root_sections: tuple[Section[Any], ...] = tuple(root_sections or ())
+        self._section_nodes: list[PromptSectionNode] = []
+        self._params_registry: dict[type[Any], PromptSectionNode] = {}
+        self.defaults: dict[type[Any], Any] = {}
+        self.placeholders: dict[SectionPath, set[str]] = {}
+
+        for section in self.root_sections:
+            self._register_section(section, path=(section.title,), depth=0)
+
+    def _register_section(
+        self,
+        section: Section[Any],
+        *,
+        path: SectionPath,
+        depth: int,
+    ) -> None:
+        params_type = section.params
+        if params_type in self._params_registry:
+            raise PromptValidationError(
+                "Duplicate params dataclass registered for prompt section.",
+                section_path=path,
+                dataclass_type=params_type,
+            )
+
+        node = PromptSectionNode(section=section, depth=depth, path=path)
+        self._section_nodes.append(node)
+        self._params_registry[params_type] = node
+
+        if section.defaults is not None:
+            self.defaults[params_type] = section.defaults
+
+        for child in section.children:
+            child_path = path + (child.title,)
+            self._register_section(child, path=child_path, depth=depth + 1)
+
+    @property
+    def sections(self) -> tuple[PromptSectionNode, ...]:
+        return tuple(self._section_nodes)
+
+    @property
+    def params_types(self) -> set[type[Any]]:
+        return set(self._params_registry.keys())
+
+
 __all__ = [
     "PromptError",
     "PromptValidationError",
     "PromptRenderError",
+    "Prompt",
     "Section",
     "TextSection",
 ]
