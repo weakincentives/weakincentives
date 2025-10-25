@@ -99,10 +99,8 @@ def test_prompt_render_merges_defaults_and_overrides():
     prompt = build_prompt()
 
     output = prompt.render(
-        params=[
-            IntroParams(title="hello"),
-            DetailsParams(body="world"),
-        ]
+        IntroParams(title="hello"),
+        DetailsParams(body="world"),
     )
 
     assert output == "\n\n".join(
@@ -118,10 +116,8 @@ def test_prompt_render_accepts_unordered_inputs():
     prompt = build_prompt()
 
     output = prompt.render(
-        params=[
-            DetailsParams(body="unordered"),
-            IntroParams(title="still works"),
-        ]
+        DetailsParams(body="unordered"),
+        IntroParams(title="still works"),
     )
 
     assert "still works" in output
@@ -132,7 +128,7 @@ def test_prompt_render_requires_parameter_values():
     prompt = build_prompt()
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(params=[IntroParams(title="missing detail")])
+        prompt.render(IntroParams(title="missing detail"))
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.dataclass_type is DetailsParams
@@ -142,7 +138,7 @@ def test_prompt_render_requires_dataclass_instances():
     prompt = build_prompt()
 
     with pytest.raises(PromptValidationError) as exc:
-        prompt.render(params=[IntroParams])
+        prompt.render(IntroParams)
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.dataclass_type is IntroParams
@@ -152,12 +148,10 @@ def test_prompt_render_renders_nested_sections_and_depth():
     prompt = build_nested_prompt()
 
     output = prompt.render(
-        params=[
-            ParentToggleParams(heading="Main Heading", include_children=True),
-            ChildNestedParams(detail="Child detail"),
-            LeafParams(note="Deep note"),
-            SummaryParams(summary="All done"),
-        ]
+        ParentToggleParams(heading="Main Heading", include_children=True),
+        ChildNestedParams(detail="Child detail"),
+        LeafParams(note="Deep note"),
+        SummaryParams(summary="All done"),
     )
 
     assert output == "\n\n".join(
@@ -174,10 +168,8 @@ def test_prompt_render_skips_disabled_parent_and_children():
     prompt = build_nested_prompt()
 
     output = prompt.render(
-        params=[
-            ParentToggleParams(heading="Unused", include_children=False),
-            SummaryParams(summary="Visible"),
-        ]
+        ParentToggleParams(heading="Unused", include_children=False),
+        SummaryParams(summary="Visible"),
     )
 
     assert output == "## Summary\n\nSummary: Visible"
@@ -203,7 +195,7 @@ def test_prompt_render_wraps_template_errors_with_context():
     prompt = Prompt(root_sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(params=[ErrorParams(value="x")])
+        prompt.render(ErrorParams(value="x"))
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.section_path == ("Explode",)
@@ -227,7 +219,7 @@ def test_prompt_render_propagates_enabled_errors():
     prompt = Prompt(root_sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(params=[ToggleParams(flag=True)])
+        prompt.render(ToggleParams(flag=True))
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.section_path == ("Guard",)

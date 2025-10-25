@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, is_dataclass, replace
 from collections.abc import Sequence
+from dataclasses import dataclass, fields, is_dataclass, replace
 from typing import Any
 
 from .errors import (
@@ -34,7 +34,7 @@ class Prompt:
         for section in self.root_sections:
             self._register_section(section, path=(section.title,), depth=0)
 
-    def render(self, *, params: Sequence[Any]) -> str:
+    def render(self, *params: Any) -> str:
         """Render the prompt using provided parameter dataclass instances."""
 
         param_lookup: dict[type[Any], Any] = {}

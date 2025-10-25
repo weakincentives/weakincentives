@@ -68,11 +68,9 @@ def test_prompt_integration_renders_expected_markdown():
     prompt = build_compose_prompt()
 
     output = prompt.render(
-        params=[
-            RoutingParams(recipient="Jordan", subject="Q2 sync"),
-            ToneParams(tone="warm"),
-            ContentParams(summary="Top takeaways from yesterday's meeting."),
-        ]
+        RoutingParams(recipient="Jordan", subject="Q2 sync"),
+        ToneParams(tone="warm"),
+        ContentParams(summary="Top takeaways from yesterday's meeting."),
     )
 
     assert output == "\n\n".join(
@@ -88,11 +86,9 @@ def test_prompt_integration_handles_disabled_sections():
     prompt = build_compose_prompt()
 
     output = prompt.render(
-        params=[
-            RoutingParams(recipient="Avery"),
-            ToneParams(tone="direct"),
-            ContentParams(summary="   \n"),
-        ]
+        RoutingParams(recipient="Avery"),
+        ToneParams(tone="direct"),
+        ContentParams(summary="   \n"),
     )
 
     assert "Content Guidance" not in output
@@ -103,14 +99,14 @@ def test_prompt_integration_rejects_mismatched_types():
     prompt = build_compose_prompt()
 
     with pytest.raises(PromptValidationError):
-        prompt.render(params=[RoutingParams])
+        prompt.render(RoutingParams)
 
 
 def test_prompt_integration_propagates_render_errors():
     prompt = build_compose_prompt()
 
     with pytest.raises(PromptRenderError):
-        prompt.render(params=[RoutingParams(recipient="Kim")])
+        prompt.render(RoutingParams(recipient="Kim"))
 
 
 def test_prompt_module_public_exports():

@@ -33,7 +33,7 @@ def test_prompt_render_rejects_unregistered_params_type() -> None:
     prompt = Prompt(root_sections=[section])
 
     with pytest.raises(PromptValidationError) as exc:
-        prompt.render(params=[UnregisteredParams(value="bad")])
+        prompt.render(UnregisteredParams(value="bad"))
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is UnregisteredParams
@@ -56,7 +56,7 @@ def test_prompt_render_detects_constructor_returning_none() -> None:
     prompt = Prompt(root_sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(params=[])
+        prompt.render()
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("Null",)
@@ -81,7 +81,7 @@ def test_prompt_render_wraps_prompt_errors_with_context() -> None:
     prompt = Prompt(root_sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(params=[BrokenParams(value="x")])
+        prompt.render(BrokenParams(value="x"))
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("Broken",)
@@ -230,7 +230,7 @@ def test_prompt_render_propagates_errors_with_existing_context() -> None:
     prompt = Prompt(root_sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(params=[ContextParams(value="x")])
+        prompt.render(ContextParams(value="x"))
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("Provided",)
