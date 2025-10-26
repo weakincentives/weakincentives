@@ -37,7 +37,7 @@ on `Template.safe_substitute` to render its `body` string, applies `textwrap.ded
 and emits normalized markdown. Each section declares a `params` dataclass type that lists the variables it requires, an
 optional `defaults` instance that pre-populates values, a raw `body` string interpreted by the concrete section class,
 optional child sections exposed through the `children` collection, and an optional boolean `enabled` callable. The
-callable receives the effective dataclass instance (defaults merged with any override supplied at render time) and lets
+callable receives the effective dataclass instance (either the override passed to `render` or the fallback defaults) and lets
 authors skip entire subtrees dynamically while still staying inside the strict `Template` feature set.
 
 ## Construction Rules
@@ -50,11 +50,11 @@ dataclass attributes are acceptable, but missing placeholders trigger `PromptVal
 absent we rely on the dataclass' own default field values by instantiating it with no arguments during rendering.
 
 ## Rendering Flow
-`Prompt.render` accepts an iterable of dataclass instances. Ordering is irrelevant because rendering matches instances
-by their concrete dataclass type. For each section we compute the effective params by starting with its configured
-default when present, otherwise instantiating the dataclass with no arguments (trusting field defaults and factories),
-and then replacing that baseline with any provided override. If instantiating the dataclass fails because required
-fields lack values and no override was supplied we surface `PromptRenderError`. Once parameters are in place we call
+`Prompt.render` accepts dataclass instances as positional arguments. Ordering is irrelevant because rendering matches
+instances by their concrete dataclass type. For each section we compute the effective params by starting with its
+configured default when present, otherwise instantiating the dataclass with no arguments (trusting field defaults and
+factories). If instantiating the dataclass fails because required fields lack values and no override was supplied we
+surface `PromptRenderError`. Once parameters are in place we call
 `section.is_enabled(params)`; disabled sections short-circuit the traversal, meaning their children do not render and
 their defaults are ignored. Active sections invoke `section.render(params, depth)`, which always emits a markdown
 heading at the appropriate depth followed by the body content. Text bodies are dedented, stripped, and separated by a
@@ -93,6 +93,11 @@ class ToneParams:
 class ContentParams:
     summary: str
 
+
+@dataclass
+class InstructionParams:
+    pass
+
 tone_section = TextSection(
     title="Tone",
     body="""
@@ -128,16 +133,15 @@ compose_email = Prompt(
             body="""
             Please craft the email below.
             """,
+            params=InstructionParams,
             children=[tone_section, content_section],
         ),
     ],
 )
 
 rendered = compose_email.render(
-    [
-        MessageRoutingParams(recipient="Jordan", subject="Q2 sync"),
-        ToneParams(tone="warm"),
-        ContentParams(summary="Top takeaways from yesterday's meeting."),
-    ]
+    MessageRoutingParams(recipient="Jordan", subject="Q2 sync"),
+    ToneParams(tone="warm"),
+    ContentParams(summary="Top takeaways from yesterday's meeting."),
 )
 ```

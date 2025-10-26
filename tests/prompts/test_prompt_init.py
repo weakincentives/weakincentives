@@ -40,7 +40,7 @@ def test_prompt_initialization_flattens_sections_depth_first():
         children=[child, sibling],
     )
 
-    prompt = Prompt(sections=[root])
+    prompt = Prompt(name="demo", sections=[root])
 
     titles = [node.section.title for node in prompt.sections]
     depths = [node.depth for node in prompt.sections]
@@ -54,6 +54,7 @@ def test_prompt_initialization_flattens_sections_depth_first():
         ("Root", "Sibling"),
     ]
     assert prompt.params_types == {RootParams, ChildParams, SiblingParams}
+    assert prompt.name == "demo"
 
 
 def test_prompt_rejects_duplicate_param_dataclasses():

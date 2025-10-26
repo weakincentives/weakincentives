@@ -24,7 +24,13 @@ class PromptSectionNode:
 class Prompt:
     """Coordinate prompt sections and their parameter bindings."""
 
-    def __init__(self, *, sections: Sequence[Section[Any]] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        sections: Sequence[Section[Any]] | None = None,
+    ) -> None:
+        self.name = name
         self._sections: tuple[Section[Any], ...] = tuple(sections or ())
         self._section_nodes: list[PromptSectionNode] = []
         self._params_registry: dict[type[Any], PromptSectionNode] = {}
