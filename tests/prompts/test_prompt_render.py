@@ -44,7 +44,7 @@ def build_prompt() -> Prompt:
         params=OutroParams,
         defaults=OutroParams(footer="bye"),
     )
-    return Prompt(root_sections=[intro, details, outro])
+    return Prompt(sections=[intro, details, outro])
 
 
 @dataclass
@@ -92,7 +92,7 @@ def build_nested_prompt() -> Prompt:
         body="Summary: ${summary}",
         params=SummaryParams,
     )
-    return Prompt(root_sections=[parent, summary])
+    return Prompt(sections=[parent, summary])
 
 
 def test_prompt_render_merges_defaults_and_overrides():
@@ -192,7 +192,7 @@ def test_prompt_render_wraps_template_errors_with_context():
         body="unused",
         params=ErrorParams,
     )
-    prompt = Prompt(root_sections=[section])
+    prompt = Prompt(sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ErrorParams(value="x"))
@@ -216,7 +216,7 @@ def test_prompt_render_propagates_enabled_errors():
         params=ToggleParams,
         enabled=raising_enabled,
     )
-    prompt = Prompt(root_sections=[section])
+    prompt = Prompt(sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ToggleParams(flag=True))

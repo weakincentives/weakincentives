@@ -24,14 +24,14 @@ class PromptSectionNode:
 class Prompt:
     """Coordinate prompt sections and their parameter bindings."""
 
-    def __init__(self, *, root_sections: Sequence[Section[Any]] | None = None) -> None:
-        self.root_sections: tuple[Section[Any], ...] = tuple(root_sections or ())
+    def __init__(self, *, sections: Sequence[Section[Any]] | None = None) -> None:
+        self._sections: tuple[Section[Any], ...] = tuple(sections or ())
         self._section_nodes: list[PromptSectionNode] = []
         self._params_registry: dict[type[Any], PromptSectionNode] = {}
         self.defaults: dict[type[Any], Any] = {}
         self.placeholders: dict[SectionPath, set[str]] = {}
 
-        for section in self.root_sections:
+        for section in self._sections:
             self._register_section(section, path=(section.title,), depth=0)
 
     def render(self, *params: Any) -> str:

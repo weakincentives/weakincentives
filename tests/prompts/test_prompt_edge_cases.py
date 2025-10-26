@@ -30,7 +30,7 @@ def test_prompt_render_rejects_unregistered_params_type() -> None:
         body="Registered: ${value}",
         params=RegisteredParams,
     )
-    prompt = Prompt(root_sections=[section])
+    prompt = Prompt(sections=[section])
 
     with pytest.raises(PromptValidationError) as exc:
         prompt.render(UnregisteredParams(value="bad"))
@@ -53,7 +53,7 @@ def test_prompt_render_detects_constructor_returning_none() -> None:
         body="Null body",
         params=NullConstructedParams,
     )
-    prompt = Prompt(root_sections=[section])
+    prompt = Prompt(sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render()
@@ -78,7 +78,7 @@ class BrokenSection(Section[BrokenParams]):
 
 def test_prompt_render_wraps_prompt_errors_with_context() -> None:
     section = BrokenSection()
-    prompt = Prompt(root_sections=[section])
+    prompt = Prompt(sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(BrokenParams(value="x"))
@@ -101,7 +101,7 @@ def test_prompt_register_requires_dataclass_params() -> None:
     section = InvalidParamsSection()
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(root_sections=[section])
+        Prompt(sections=[section])
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is int
@@ -122,7 +122,7 @@ def test_prompt_register_validates_defaults_type() -> None:
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(root_sections=[section])
+        Prompt(sections=[section])
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is DefaultsParams
@@ -148,7 +148,7 @@ def test_prompt_register_requires_defaults_type_match() -> None:
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(root_sections=[section])
+        Prompt(sections=[section])
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is DefaultsMismatchParams
@@ -227,7 +227,7 @@ class ContextAwareSection(Section[ContextParams]):
 
 def test_prompt_render_propagates_errors_with_existing_context() -> None:
     section = ContextAwareSection()
-    prompt = Prompt(root_sections=[section])
+    prompt = Prompt(sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ContextParams(value="x"))

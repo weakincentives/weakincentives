@@ -31,7 +31,7 @@ section = TextSection(
     body="Hello ${name}!",
     params=GreetingParams,
 )
-prompt = Prompt(root_sections=[section])
+prompt = Prompt(sections=[section])
 
 print(prompt.render(GreetingParams(name="Ada")))
 # -> '## Greeting\n\nHello Ada!'

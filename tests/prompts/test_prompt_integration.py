@@ -48,7 +48,7 @@ def build_compose_prompt() -> Prompt:
         enabled=lambda params: bool(params.summary.strip()),
     )
 
-    root_sections = [
+    sections = [
         TextSection(
             title="Message Routing",
             body="""
@@ -61,7 +61,7 @@ def build_compose_prompt() -> Prompt:
         ),
     ]
 
-    return Prompt(root_sections=root_sections)
+    return Prompt(sections=sections)
 
 
 def test_prompt_integration_renders_expected_markdown():

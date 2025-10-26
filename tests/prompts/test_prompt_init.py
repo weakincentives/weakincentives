@@ -40,7 +40,7 @@ def test_prompt_initialization_flattens_sections_depth_first():
         children=[child, sibling],
     )
 
-    prompt = Prompt(root_sections=[root])
+    prompt = Prompt(sections=[root])
 
     titles = [node.section.title for node in prompt.sections]
     depths = [node.depth for node in prompt.sections]
@@ -73,7 +73,7 @@ def test_prompt_rejects_duplicate_param_dataclasses():
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(root_sections=[first, second])
+        Prompt(sections=[first, second])
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.dataclass_type is DuplicateParams
@@ -92,7 +92,7 @@ def test_prompt_validates_text_section_placeholders():
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(root_sections=[section])
+        Prompt(sections=[section])
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.placeholder == "oops"
