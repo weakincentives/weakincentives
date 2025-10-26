@@ -2,6 +2,8 @@
 
 Tools for developing and optimizing side effect free background agents.
 
+**Built by coding agents, for coding agents.**
+
 ## Overview
 - Python 3.14 library with a growing prompt-composition toolkit.
 - `Prompt`, `Section`, and `TextSection` abstractions help build structured, parameterised Markdown prompts.
