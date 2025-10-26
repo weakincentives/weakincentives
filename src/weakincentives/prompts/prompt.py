@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
-from typing import Any
+from typing import Any, Iterator, TYPE_CHECKING
 
 from .errors import (
     PromptRenderError,
@@ -10,6 +10,9 @@ from .errors import (
     SectionPath,
 )
 from .section import Section
+
+if TYPE_CHECKING:
+    from .tool import Tool
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,68 +46,11 @@ class Prompt:
     def render(self, *params: Any) -> str:
         """Render the prompt using provided parameter dataclass instances."""
 
-        param_lookup: dict[type[Any], Any] = {}
-        for value in params:
-            provided_type = value if isinstance(value, type) else type(value)
-            if isinstance(value, type) or not is_dataclass(value):
-                raise PromptValidationError(
-                    "Prompt.render expects dataclass instances.",
-                    dataclass_type=provided_type,
-                )
-            params_type = provided_type
-            if params_type not in self._params_registry:
-                raise PromptValidationError(
-                    "Unexpected params type supplied to prompt render.",
-                    dataclass_type=params_type,
-                )
-            param_lookup[params_type] = value
-
+        param_lookup = self._collect_param_lookup(params)
         rendered_sections: list[str] = []
-        skip_depth: int | None = None
 
-        for node in self._section_nodes:
-            if skip_depth is not None:
-                if node.depth > skip_depth:
-                    continue
-                skip_depth = None
-
+        for node, section_params in self._iter_enabled_sections(param_lookup):
             params_type = node.section.params
-            section_params = param_lookup.get(params_type)
-
-            if section_params is None:
-                default_value = self.defaults.get(params_type)
-                if default_value is not None:
-                    section_params = replace(default_value)
-                else:
-                    try:
-                        section_params = params_type()  # type: ignore[call-arg]
-                    except TypeError as error:
-                        raise PromptRenderError(
-                            "Missing parameters for section.",
-                            section_path=node.path,
-                            dataclass_type=params_type,
-                        ) from error
-
-            if section_params is None:
-                raise PromptRenderError(
-                    "Missing parameters for section.",
-                    section_path=node.path,
-                    dataclass_type=params_type,
-                )
-
-            try:
-                enabled = node.section.is_enabled(section_params)
-            except Exception as error:  # pragma: no cover - defensive guard
-                raise PromptRenderError(
-                    "Section enabled predicate failed.",
-                    section_path=node.path,
-                    dataclass_type=params_type,
-                ) from error
-
-            if not enabled:
-                skip_depth = node.depth
-                continue
-
             try:
                 rendered = node.section.render(section_params, node.depth)
             except PromptRenderError as error:
@@ -127,6 +73,19 @@ class Prompt:
                 rendered_sections.append(rendered)
 
         return "\n\n".join(rendered_sections)
+
+    def tools(self, *params: Any) -> tuple["Tool[Any, Any]", ...]:
+        """Return tools exposed by enabled sections in traversal order."""
+
+        param_lookup = self._collect_param_lookup(params)
+        collected: list["Tool[Any, Any]"] = []
+
+        for node, _section_params in self._iter_enabled_sections(param_lookup):
+            section_tools = node.section.tools()
+            if section_tools:
+                collected.extend(section_tools)
+
+        return tuple(collected)
 
     def _register_section(
         self,
@@ -194,6 +153,84 @@ class Prompt:
     @property
     def params_types(self) -> set[type[Any]]:
         return set(self._params_registry.keys())
+
+    def _collect_param_lookup(self, params: tuple[Any, ...]) -> dict[type[Any], Any]:
+        lookup: dict[type[Any], Any] = {}
+        for value in params:
+            provided_type = value if isinstance(value, type) else type(value)
+            if isinstance(value, type) or not is_dataclass(value):
+                raise PromptValidationError(
+                    "Prompt expects dataclass instances.",
+                    dataclass_type=provided_type,
+                )
+            params_type = provided_type
+            if params_type not in self._params_registry:
+                raise PromptValidationError(
+                    "Unexpected params type supplied to prompt.",
+                    dataclass_type=params_type,
+                )
+            lookup[params_type] = value
+        return lookup
+
+    def _resolve_section_params(
+        self,
+        node: PromptSectionNode,
+        param_lookup: dict[type[Any], Any],
+    ) -> Any:
+        params_type = node.section.params
+        section_params = param_lookup.get(params_type)
+
+        if section_params is None:
+            default_value = self.defaults.get(params_type)
+            if default_value is not None:
+                section_params = replace(default_value)
+            else:
+                try:
+                    section_params = params_type()  # type: ignore[call-arg]
+                except TypeError as error:
+                    raise PromptRenderError(
+                        "Missing parameters for section.",
+                        section_path=node.path,
+                        dataclass_type=params_type,
+                    ) from error
+
+        if section_params is None:
+            raise PromptRenderError(
+                "Missing parameters for section.",
+                section_path=node.path,
+                dataclass_type=params_type,
+            )
+
+        return section_params
+
+    def _iter_enabled_sections(
+        self,
+        param_lookup: dict[type[Any], Any],
+    ) -> Iterator[tuple[PromptSectionNode, Any]]:
+        skip_depth: int | None = None
+
+        for node in self._section_nodes:
+            if skip_depth is not None:
+                if node.depth > skip_depth:
+                    continue
+                skip_depth = None
+
+            section_params = self._resolve_section_params(node, param_lookup)
+
+            try:
+                enabled = node.section.is_enabled(section_params)
+            except Exception as error:  # pragma: no cover - defensive guard
+                raise PromptRenderError(
+                    "Section enabled predicate failed.",
+                    section_path=node.path,
+                    dataclass_type=node.section.params,
+                ) from error
+
+            if not enabled:
+                skip_depth = node.depth
+                continue
+
+            yield node, section_params
 
 
 __all__ = ["Prompt", "PromptSectionNode"]
