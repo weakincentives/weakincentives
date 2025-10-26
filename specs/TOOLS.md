@@ -26,21 +26,25 @@ of the prompt tree so authors can manage instructions and callable affordances i
   execution semantics.
 
 ## Core Concepts
+### `ToolResult` Dataclass
+Tools return structured data that pairs a language-model-facing message with typed payload metadata. `ToolResult[PayloadT]`
+instances capture that response tuple, and every tool handler returns one directly:
+- `message: str` – short textual reply returned to the LLM.
+- `payload: PayloadT` – strongly typed result produced by the tool's business logic. The payload type is declared on the
+  `Tool` so downstream adapters can reason about the schema without guessing.
+
 ### `Tool` Dataclass
-`Tool` instances describe callable affordances. They carry:
+`Tool[ParamsT, ResultT]` instances describe callable affordances. They carry:
 - `name: str` – unique identifier scoped to a single prompt instance. Validation enforces ASCII-only lowercase letters,
   digits, or underscores with length ≤ 64 characters for SDK compatibility.
 - `description: str` – concise model-facing summary. We constrain summaries to ASCII, strip surrounding whitespace, and
   require 1–200 characters so payloads stay portable.
-- `params: type[dataclass]` – typed argument container. Fields must be annotated; dataclass `metadata` may hold extra
-  hints (descriptions, enums, examples).
-- `handler: Callable[[dataclass], Awaitable[Any]] | Callable[[dataclass], Any] | None` – optional runtime hook surfaced to
-  orchestration layers. Handlers must accept exactly one argument: an instance of the declared `params` dataclass, and the
-  prompt validator enforces this signature before execution. The
-  prompt package never executes handlers directly.
+- `handler: Callable[[ParamsT], ToolResult[ResultT]] | None` – optional runtime hook surfaced to orchestration layers.
+  Handlers must accept exactly one argument of type `ParamsT`, and when provided they must return a `ToolResult[ResultT]`.
 
-Parameter dataclasses inherit the same validation rules as section params: every placeholder referenced in markdown must
-exist on the dataclass, and required fields without defaults must be supplied when rendering.
+Parameter and result dataclasses inherit the same validation rules as section params: every placeholder referenced in
+markdown must exist on the dataclass, and required fields without defaults must be supplied when rendering. Tools bind the
+dataclass *types* through their generic parameters—no redundant instance plumbing lives in the prompt configuration.
 
 ### `ToolsSection`
 `ToolsSection` subclasses `Section`, unlocking existing enablement logic, heading management, and child composition:
@@ -74,14 +78,15 @@ section-level defaults and enablement rules.
 
 ## Runtime Execution
 `ToolsSection` only documents callable capabilities. Higher-level orchestration code is responsible for invoking the
-appropriate handler when an LLM emits a tool call, passing the params dataclass instance as the sole argument. The prompt
-layer simply exposes handlers associated with each tool and remains side effect free. The package provides no sync/async
-bridging helpers; orchestrators decide when to `await` or call handlers directly.
+appropriate handler when an LLM emits a tool call, passing the params dataclass instance as the sole argument. Handlers
+return a `ToolResult[result_type]` directly. The prompt layer remains side effect free—it surfaces handlers and
+`result_type` metadata without executing them. The package provides no sync/async bridging helpers; orchestrators decide
+when to `await` or call handlers directly.
 
 ## Example
 ```python
 from dataclasses import dataclass, field
-from weakincentives.prompts import Prompt, TextSection, ToolsSection, Tool
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult, ToolsSection
 
 @dataclass
 class LookupParams:
@@ -89,13 +94,23 @@ class LookupParams:
     include_related: bool = field(default=False)
 
 @dataclass
+class LookupResult:
+    entity_id: str
+    document_url: str
+
+@dataclass
 class GuidanceParams:
     primary_tool: str
 
-lookup_tool = Tool(
+def lookup_handler(params: LookupParams) -> ToolResult[LookupResult]:
+    result = LookupResult(entity_id=params.entity_id, document_url="https://example.com")
+    message = f"Fetched entity {result.entity_id}."
+    return ToolResult(message=message, payload=result)
+
+lookup_tool = Tool[LookupParams, LookupResult](
     name="lookup_entity",
     description="Fetch structured information for a given entity id.",
-    params=LookupParams,
+    handler=lookup_handler,
 )
 
 tooling_overview = Prompt(
@@ -133,8 +148,8 @@ the tool listing, preserving context budget while keeping a single source of tru
 - Construction failures raise `PromptValidationError` with contextual data (`section path`, `tool.name`, parameter
   dataclass).
 - Rendering without required tool parameters raises `PromptRenderError`, mirroring existing section behavior.
-- Registering two tools with the same name or parameter dataclass triggers `PromptValidationError` to preserve lookup
-  determinism.
-- Handler references that do not accept exactly one argument matching the `params` dataclass raise
+- Registering two tools with the same name, parameter dataclass, or result dataclass triggers `PromptValidationError` to
+  preserve lookup determinism.
+- Handler references that do not accept exactly one argument matching the `ParamsT` dataclass raise
   `PromptValidationError` during prompt validation.
 - Disabled `ToolsSection` instances contribute neither markdown nor entries in `Prompt.tools()`.

@@ -1,49 +1,83 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, is_dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field, is_dataclass
+import inspect
 import re
-from typing import Generic, TypeVar
+from typing import (
+    Annotated,
+    Any,
+    Generic,
+    TypeVar,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from .errors import PromptValidationError
 
 _ParamsT = TypeVar("_ParamsT")
-_HandlerReturnT = TypeVar("_HandlerReturnT")
+_ResultT = TypeVar("_ResultT")
+_ResultPayloadT = TypeVar("_ResultPayloadT")
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
 
 @dataclass(slots=True)
-class Tool(Generic[_ParamsT]):
+class ToolResult(Generic[_ResultPayloadT]):
+    """Structured response emitted by a tool handler."""
+
+    message: str
+    payload: _ResultPayloadT
+
+
+@dataclass(slots=True)
+class Tool(Generic[_ParamsT, _ResultT]):
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
     description: str
-    params: type[_ParamsT]
-    handler: (
-        Callable[[_ParamsT], _HandlerReturnT]
-        | Callable[[_ParamsT], Awaitable[_HandlerReturnT]]
-        | None
-    ) = None
+    handler: Callable[[_ParamsT], ToolResult[_ResultT]] | None
+    params_type: type[_ParamsT] = field(init=False, repr=False)
+    result_type: type[_ResultT] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        params_type = self.params
+        params_type = getattr(self, "params_type", None)
+        result_type = getattr(self, "result_type", None)
+        if params_type is None or result_type is None:
+            raise PromptValidationError(
+                "Tool must be instantiated with concrete type arguments.",
+                placeholder="type_arguments",
+            )
+
         if not isinstance(params_type, type) or not is_dataclass(params_type):
             raise PromptValidationError(
-                "Tool params must be a dataclass type.",
+                "Tool ParamsT must be a dataclass type.",
                 dataclass_type=params_type
                 if isinstance(params_type, type)
                 else type(params_type),
-                placeholder="params",
+                placeholder="ParamsT",
             )
+        if not isinstance(result_type, type) or not is_dataclass(result_type):
+            raise PromptValidationError(
+                "Tool ResultT must be a dataclass type.",
+                dataclass_type=result_type
+                if isinstance(result_type, type)
+                else type(result_type),
+                placeholder="ResultT",
+            )
+
+        self.params_type = params_type
+        self.result_type = result_type
 
         raw_name = self.name
         stripped_name = raw_name.strip()
         if raw_name != stripped_name:
+            normalized_name = stripped_name
             raise PromptValidationError(
                 "Tool name must not contain surrounding whitespace.",
                 dataclass_type=params_type,
-                placeholder=stripped_name,
+                placeholder=normalized_name,
             )
 
         name_clean = raw_name
@@ -76,8 +110,112 @@ class Tool(Generic[_ParamsT]):
                 placeholder="description",
             ) from error
 
+        handler = self.handler
+        if handler is not None:
+            self._validate_handler(handler, params_type, result_type)
+
         self.name = name_clean
         self.description = description_clean
 
+    def _validate_handler(
+        self,
+        handler: Callable[[_ParamsT], ToolResult[_ResultT]],
+        params_type: type[_ParamsT],
+        result_type: type[_ResultT],
+    ) -> None:
+        if not callable(handler):
+            raise PromptValidationError(
+                "Tool handler must be callable.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
 
-__all__ = ["Tool"]
+        signature = inspect.signature(handler)
+        parameters = list(signature.parameters.values())
+
+        if len(parameters) != 1:
+            raise PromptValidationError(
+                "Tool handler must accept exactly one argument.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+
+        parameter = parameters[0]
+        if parameter.kind not in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            raise PromptValidationError(
+                "Tool handler parameter must be positional.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+
+        try:
+            hints = get_type_hints(handler, include_extras=True)
+        except Exception:  # pragma: no cover - fallback for invalid hints
+            hints = {}
+
+        annotation = hints.get(parameter.name, parameter.annotation)
+        if annotation is inspect._empty:
+            raise PromptValidationError(
+                "Tool handler parameter must be annotated with ParamsT.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+        if get_origin(annotation) is Annotated:
+            annotation = get_args(annotation)[0]
+        if annotation is not params_type:
+            raise PromptValidationError(
+                "Tool handler parameter annotation must match ParamsT.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+
+        return_annotation = hints.get("return", signature.return_annotation)
+        if return_annotation is inspect._empty:
+            raise PromptValidationError(
+                "Tool handler must annotate its return value with ToolResult[ResultT].",
+                dataclass_type=params_type,
+                placeholder="return",
+            )
+        if get_origin(return_annotation) is Annotated:
+            return_annotation = get_args(return_annotation)[0]
+
+        origin = get_origin(return_annotation)
+        if origin is ToolResult:
+            result_args = get_args(return_annotation)
+            if len(result_args) == 1 and result_args[0] is result_type:
+                return
+        raise PromptValidationError(
+            "Tool handler return annotation must be ToolResult[ResultT].",
+            dataclass_type=params_type,
+            placeholder="return",
+        )
+
+    @classmethod
+    def __class_getitem__(cls, item: object) -> type["Tool[Any, Any]"]:
+        params_type, result_type = cls._normalize_generic_arguments(item)
+
+        class _SpecializedTool(cls):  # type: ignore[misc]
+            def __post_init__(self) -> None:  # type: ignore[override]
+                self.params_type = params_type
+                self.result_type = result_type
+                super().__post_init__()
+
+        _SpecializedTool.__name__ = cls.__name__
+        _SpecializedTool.__qualname__ = cls.__qualname__
+        _SpecializedTool.__module__ = cls.__module__
+        return _SpecializedTool
+
+    @staticmethod
+    def _normalize_generic_arguments(item: object) -> tuple[type[Any], type[Any]]:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
+        params_type, result_type = item
+        if not isinstance(params_type, type) or not isinstance(result_type, type):
+            raise TypeError("Tool[...] type arguments must be types.")
+        return params_type, result_type
+
+
+__all__ = ["Tool", "ToolResult"]
