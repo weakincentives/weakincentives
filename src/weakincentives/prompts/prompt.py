@@ -39,6 +39,8 @@ class Prompt:
         self._params_registry: dict[type[Any], PromptSectionNode] = {}
         self.defaults: dict[type[Any], Any] = {}
         self.placeholders: dict[SectionPath, set[str]] = {}
+        self._tool_name_registry: dict[str, SectionPath] = {}
+        self._tool_params_registry: dict[type[Any], SectionPath] = {}
 
         for section in self._sections:
             self._register_section(section, path=(section.title,), depth=0)
@@ -142,6 +144,8 @@ class Prompt:
                 placeholder=placeholder,
             )
 
+        self._register_section_tools(section, path)
+
         for child in section.children:
             child_path = path + (child.title,)
             self._register_section(child, path=child_path, depth=depth + 1)
@@ -231,6 +235,35 @@ class Prompt:
                 continue
 
             yield node, section_params
+
+    def _register_section_tools(
+        self,
+        section: Section[Any],
+        path: SectionPath,
+    ) -> None:
+        section_tools = section.tools()
+        if not section_tools:
+            return
+
+        for tool in section_tools:
+            existing_path = self._tool_name_registry.get(tool.name)
+            if existing_path is not None:
+                raise PromptValidationError(
+                    "Duplicate tool name registered for prompt.",
+                    section_path=path,
+                    dataclass_type=tool.params_type,
+                )
+
+            existing_params_path = self._tool_params_registry.get(tool.params_type)
+            if existing_params_path is not None:
+                raise PromptValidationError(
+                    "Duplicate tool params dataclass registered for prompt.",
+                    section_path=path,
+                    dataclass_type=tool.params_type,
+                )
+
+            self._tool_name_registry[tool.name] = path
+            self._tool_params_registry[tool.params_type] = path
 
 
 __all__ = ["Prompt", "PromptSectionNode"]

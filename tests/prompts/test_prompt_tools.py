@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
+
+import pytest
 
 from weakincentives.prompts import Prompt, TextSection
+from weakincentives.prompts.errors import PromptValidationError
 from weakincentives.prompts.tool import Tool, ToolsSection
 
 
@@ -110,3 +114,54 @@ def test_prompt_tools_depth_first_and_enablement() -> None:
     )
 
     assert disabled_secondary == (primary_tool,)
+
+
+def test_prompt_tools_rejects_duplicate_tool_names() -> None:
+    first_section = ToolsSection(
+        title="First Tools",
+        tools=[_build_primary_tool()],
+        params=PrimarySectionParams,
+        defaults=PrimarySectionParams(),
+    )
+    second_section = ToolsSection(
+        title="Second Tools",
+        tools=[_build_primary_tool()],
+        params=SecondaryToggleParams,
+        defaults=SecondaryToggleParams(),
+    )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Prompt(sections=[first_section, second_section])
+
+    error = cast(PromptValidationError, error_info.value)
+    assert error.section_path == ("Second Tools",)
+    assert error.dataclass_type is PrimaryToolParams
+
+
+def test_prompt_tools_rejects_duplicate_tool_params_dataclass() -> None:
+    primary_tool = _build_primary_tool()
+    alternate_tool = Tool[PrimaryToolParams, PrimaryToolPayload](
+        name="alternate_primary",
+        description="Alternate primary operation.",
+        handler=None,
+    )
+
+    first_section = ToolsSection(
+        title="Primary",
+        tools=[primary_tool],
+        params=PrimarySectionParams,
+        defaults=PrimarySectionParams(),
+    )
+    second_section = ToolsSection(
+        title="Alternate",
+        tools=[alternate_tool],
+        params=SecondaryToggleParams,
+        defaults=SecondaryToggleParams(),
+    )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Prompt(sections=[first_section, second_section])
+
+    error = cast(PromptValidationError, error_info.value)
+    assert error.section_path == ("Alternate",)
+    assert error.dataclass_type is PrimaryToolParams
