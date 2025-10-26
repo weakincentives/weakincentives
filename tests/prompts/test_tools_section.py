@@ -29,6 +29,11 @@ class ToolResultPayload:
     value: str
 
 
+class _BareSection(Section[ExampleParams]):
+    def render(self, params: ExampleParams, depth: int) -> str:
+        return ""
+
+
 def _handler(params: ToolParams) -> ToolResult[ToolResultPayload]:
     return ToolResult(
         message=params.value, payload=ToolResultPayload(value=params.value)
@@ -65,6 +70,12 @@ def test_tools_section_renders_heading_and_description() -> None:
     )
 
 
+def test_section_tools_defaults_to_empty_tuple() -> None:
+    section = _BareSection(title="Base", params=ExampleParams)
+
+    assert section.tools() == ()
+
+
 def test_tools_section_exposes_tools_in_order() -> None:
     first = _build_tool("first")
     second = _build_tool("second")
@@ -74,7 +85,11 @@ def test_tools_section_exposes_tools_in_order() -> None:
         params=ExampleParams,
     )
 
-    assert section.tools() == (first, second)
+    tools = section.tools()
+
+    assert tools == (first, second)
+    assert tools[0] is first
+    assert tools[1] is second
 
 
 def test_tools_section_renders_heading_without_description() -> None:

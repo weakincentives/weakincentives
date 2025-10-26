@@ -41,5 +41,10 @@ class Section(Generic[_ParamsT], ABC):
 
         return set()
 
+    def tools(self) -> tuple[Any, ...]:
+        """Return the tools exposed by this section."""
+
+        return ()
+
 
 __all__ = ["Section", "_ParamsT"]
