@@ -15,7 +15,7 @@ This handbook is the primary source of truth for autonomous or assisted agents w
 - `Makefile`: Canonical task surface (formatting, linting, typing, tests, aggregate checks, clean-up).
 - `uv.lock`: Dependency lockfile maintained by `uv`.
 - `hooks/` & `install-hooks.sh`: Symlink-based Git hook installer. Hooks expect `make check` to pass before commits land.
-- `bump-version.sh`: Helper to increment the version in `pyproject.toml`; supports `major|minor|patch` or an explicit semantic version.
+- Version tags (`vX.Y.Z`, the `v` prefix is required) in git control the published package version; cut them manually when releasing.
 
 ## Environment & Setup
 1. Install Python 3.14 (pyenv users can run `pyenv install 3.14.0` if needed).
@@ -59,7 +59,7 @@ Prefer `make check` before every commit; git hooks will call the same pipeline.
 - Repeat the loop until the feature-level acceptance scenario is covered, finish with `make check`, and capture the final iteration summary in the commit message or handoff notes.
 
 ## Release & Versioning Notes
-- The package version lives in `pyproject.toml`. Use `./bump-version.sh [major|minor|patch|X.Y.Z]` to update it; the script prints next steps for tagging and pushing.
+- Package releases read their version from the latest git tag (`vX.Y.Z`, must include the `v`). Use `git tag vX.Y.Z` followed by `git push origin vX.Y.Z` when you’re ready to release.
 - No publishing automation exists yet—coordinate manual releases outside this repository.
 
 ## Adding Features

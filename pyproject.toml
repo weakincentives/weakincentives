@@ -1,6 +1,6 @@
 [project]
 name = "weakincentives"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Tools for developing and optimizing side effect free background agents"
 readme = "README.md"
 authors = [
@@ -37,8 +37,14 @@ Repository = "https://github.com/weakincentives/weakincentives"
 "Issue Tracker" = "https://github.com/weakincentives/weakincentives/issues"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.vcs]
+tag-pattern = "v(?P<version>.+)"
 
 [dependency-groups]
 dev = [
