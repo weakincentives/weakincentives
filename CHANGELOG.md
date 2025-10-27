@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Simplified tool registration by removing `ToolsSection`; every `Section` now accepts a `tools` sequence.
+- Allow prompts to reuse the same params dataclass across multiple sections while honoring per-section defaults.
 
 ### Removed
 - Deleted the deprecated `plans/` directory now that prompt and tools specifications live under `specs/`.

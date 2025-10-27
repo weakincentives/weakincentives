@@ -45,8 +45,10 @@ inside the strict `Template` feature set.
 
 ## Construction Rules
 When a `Prompt` is instantiated it registers every section by the type of its parameter dataclass, storing the default
-instance if provided. Types must be unique across the entire tree so type based lookup remains deterministic; a
-duplicate immediately raises `PromptValidationError`. The constructor also parses each section's template, extracts
+instance if provided. Parameter types can repeat across sections—callers supply overrides by type and the prompt fans
+that instance out to every matching section. Each section may still define its own default instance; when no override is
+provided, the prompt uses the section-specific default, falling back to the first default declared for that type, and
+finally the dataclass' zero-argument constructor. The constructor also parses each section's template, extracts
 every placeholder token, and verifies that each token corresponds to an attribute on the declared dataclass. Extra
 dataclass attributes are acceptable, but missing placeholders trigger `PromptValidationError` with enough context
 (section title, placeholder name) for developers to resolve the issue quickly. Default instances are optional; when

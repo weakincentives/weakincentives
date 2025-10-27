@@ -22,6 +22,11 @@ class SiblingParams:
     note: str
 
 
+@dataclass
+class DuplicateParams:
+    value: str
+
+
 def test_prompt_initialization_flattens_sections_depth_first():
     child = TextSection[ChildParams](
         title="Child",
@@ -54,11 +59,28 @@ def test_prompt_initialization_flattens_sections_depth_first():
     assert prompt.name == "demo"
 
 
-def test_prompt_rejects_duplicate_param_dataclasses():
-    @dataclass
-    class DuplicateParams:
-        value: str
+def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
+    first = TextSection[DuplicateParams](
+        title="First",
+        body="First: ${value}",
+        defaults=DuplicateParams(value="alpha"),
+    )
+    second = TextSection[DuplicateParams](
+        title="Second",
+        body="Second: ${value}",
+        defaults=DuplicateParams(value="beta"),
+    )
 
+    prompt = Prompt(sections=[first, second])
+
+    rendered = prompt.render()
+
+    assert "First: alpha" in rendered
+    assert "Second: beta" in rendered
+    assert prompt.params_types == {DuplicateParams}
+
+
+def test_prompt_reuses_provided_params_for_duplicate_sections():
     first = TextSection[DuplicateParams](
         title="First",
         body="First: ${value}",
@@ -68,12 +90,31 @@ def test_prompt_rejects_duplicate_param_dataclasses():
         body="Second: ${value}",
     )
 
-    with pytest.raises(PromptValidationError) as exc:
-        Prompt(sections=[first, second])
+    prompt = Prompt(sections=[first, second])
 
-    assert isinstance(exc.value, PromptValidationError)
-    assert exc.value.dataclass_type is DuplicateParams
-    assert exc.value.section_path == ("Second",)
+    rendered = prompt.render(DuplicateParams(value="shared"))
+
+    assert "First: shared" in rendered
+    assert "Second: shared" in rendered
+
+
+def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_default():
+    first = TextSection[DuplicateParams](
+        title="First",
+        body="First: ${value}",
+        defaults=DuplicateParams(value="alpha"),
+    )
+    second = TextSection[DuplicateParams](
+        title="Second",
+        body="Second: ${value}",
+    )
+
+    prompt = Prompt(sections=[first, second])
+
+    rendered = prompt.render()
+
+    assert "First: alpha" in rendered
+    assert "Second: alpha" in rendered
 
 
 def test_prompt_validates_text_section_placeholders():

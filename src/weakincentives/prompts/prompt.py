@@ -34,8 +34,9 @@ class Prompt:
         self.name = name
         self._sections: tuple[Section[Any], ...] = tuple(sections or ())
         self._section_nodes: list[PromptSectionNode] = []
-        self._params_registry: dict[type[Any], PromptSectionNode] = {}
-        self.defaults: dict[type[Any], object] = {}
+        self._params_registry: dict[type[Any], list[PromptSectionNode]] = {}
+        self._defaults_by_path: dict[SectionPath, object] = {}
+        self._defaults_by_type: dict[type[Any], object] = {}
         self.placeholders: dict[SectionPath, set[str]] = {}
         self._tool_name_registry: dict[str, SectionPath] = {}
 
@@ -94,13 +95,6 @@ class Prompt:
         depth: int,
     ) -> None:
         params_type = section.params
-        if params_type in self._params_registry:
-            raise PromptValidationError(
-                "Duplicate params dataclass registered for prompt section.",
-                section_path=path,
-                dataclass_type=params_type,
-            )
-
         if not is_dataclass(params_type):
             raise PromptValidationError(
                 "Section params must be a dataclass.",
@@ -110,7 +104,7 @@ class Prompt:
 
         node = PromptSectionNode(section=section, depth=depth, path=path)
         self._section_nodes.append(node)
-        self._params_registry[params_type] = node
+        self._params_registry.setdefault(params_type, []).append(node)
 
         if section.defaults is not None:
             default_value = section.defaults
@@ -126,7 +120,8 @@ class Prompt:
                     section_path=path,
                     dataclass_type=params_type,
                 )
-            self.defaults[params_type] = default_value
+            self._defaults_by_path[path] = default_value
+            self._defaults_by_type.setdefault(params_type, default_value)
 
         section_placeholders = section.placeholder_names()
         self.placeholders[path] = set(section_placeholders)
@@ -189,18 +184,22 @@ class Prompt:
         section_params = param_lookup.get(params_type)
 
         if section_params is None:
-            default_value = self.defaults.get(params_type)
+            default_value = self._defaults_by_path.get(node.path)
             if default_value is not None:
                 section_params = replace(default_value)
             else:
-                try:
-                    section_params = params_type()  # type: ignore[call-arg]
-                except TypeError as error:
-                    raise PromptRenderError(
-                        "Missing parameters for section.",
-                        section_path=node.path,
-                        dataclass_type=params_type,
-                    ) from error
+                type_default = self._defaults_by_type.get(params_type)
+                if type_default is not None:
+                    section_params = replace(type_default)
+                else:
+                    try:
+                        section_params = params_type()  # type: ignore[call-arg]
+                    except TypeError as error:
+                        raise PromptRenderError(
+                            "Missing parameters for section.",
+                            section_path=node.path,
+                            dataclass_type=params_type,
+                        ) from error
 
         if section_params is None:
             raise PromptRenderError(

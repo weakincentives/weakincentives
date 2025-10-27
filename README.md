@@ -63,10 +63,6 @@ class GuidanceParams:
     primary_tool: str
 
 @dataclass
-class ToolDescriptionParams:
-    primary_tool: str = "lookup_entity"
-
-@dataclass
 class LookupParams:
     entity_id: str
 
@@ -85,11 +81,10 @@ lookup_tool = Tool[LookupParams, LookupResult](
     handler=lookup_handler,
 )
 
-tool_overview = TextSection[ToolDescriptionParams](
+tool_overview = TextSection[GuidanceParams](
     title="Available Tools",
     body="Invoke ${primary_tool} whenever you need fresh context.",
     tools=[lookup_tool],
-    defaults=ToolDescriptionParams(),
 )
 
 prompt = Prompt(

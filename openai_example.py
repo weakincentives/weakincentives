@@ -26,11 +26,6 @@ class AgentGuidance:
     primary_tool: str = "echo_text"
 
 
-@dataclass
-class ToolOverview:
-    primary_tool: str = "echo_text"
-
-
 def echo_text_handler(params: EchoToolParams) -> ToolResult[EchoToolResult]:
     result = EchoToolResult(text=params.text.upper())
     return ToolResult(message=f"Echoed text: {result.text}", payload=result)
@@ -70,11 +65,10 @@ def build_prompt() -> Prompt:
         description="Return the provided text in uppercase characters.",
         handler=echo_text_handler,
     )
-    tool_overview = TextSection[ToolOverview](
+    tool_overview = TextSection[AgentGuidance](
         title="Available Tools",
         body="Expose ${primary_tool} to turn arbitrary input into uppercase text.",
         tools=[echo_tool],
-        defaults=ToolOverview(),
     )
     guidance_section = TextSection[AgentGuidance](
         title="Agent Guidance",
@@ -93,11 +87,10 @@ class BasicOpenAIAgent:
 
     def __init__(self, model: str = "gpt-4o-mini") -> None:
         self._guidance = AgentGuidance()
-        self._tool_overview = ToolOverview(primary_tool=self._guidance.primary_tool)
         self.prompt = build_prompt()
         self.model = model
-        self._system_prompt = self.prompt.render(self._guidance, self._tool_overview)
-        self._tools = self.prompt.tools(self._guidance, self._tool_overview)
+        self._system_prompt = self.prompt.render(self._guidance)
+        self._tools = self.prompt.tools(self._guidance)
         self._tool_specs = [tool_to_openai_spec(tool) for tool in self._tools]
         self._tool_registry = {
             tool.name: tool for tool in self._tools if tool.handler is not None
