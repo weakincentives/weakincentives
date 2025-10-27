@@ -2,31 +2,31 @@
 
 # Format code with ruff
 format:
-	uv run ruff format .
+	@uv run ruff format -q .
 
 # Check formatting without making changes
 format-check:
-	uv run ruff format --check .
+	@uv run ruff format -q --check .
 
 # Run ruff linter
 lint:
-	uv run ruff check --preview --no-cache .
+	@uv run ruff check --preview -q .
 
 # Run ruff linter with fixes
 lint-fix:
-	uv run ruff check --fix .
+	@uv run ruff check --fix -q .
 
 # Run Bandit security scanner
 bandit:
-	uv run python tools/run_bandit.py -q -r src/weakincentives
+	@uv run python tools/run_bandit.py -q -r src/weakincentives
 
 # Run type checker
 typecheck:
-	uv run ty check --error-on-warning .
+	@uv run ty check --error-on-warning -qq .
 
 # Run tests with coverage (100% minimum)
 test:
-	uv run pytest --strict-config --strict-markers --maxfail=1 --cov-fail-under=100
+	@uv run python tools/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --no-summary --cov-report=
 
 # Run all checks (format check, lint, typecheck, bandit, test)
 check: format-check lint typecheck bandit test

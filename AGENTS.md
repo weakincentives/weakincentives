@@ -28,15 +28,15 @@ This handbook is the primary source of truth for autonomous or assisted agents w
    The hook installer wires every script in `hooks/` into `.git/hooks/` via symlinks.
 
 ## Day-to-Day Commands
-All commands are defined in `Makefile` and should be executed with `uv` to ensure a consistent virtualenv.
+All commands are defined in `Makefile` and should be executed with `uv` to ensure a consistent virtualenv. The targets are configured to run in quiet mode—by default they suppress success chatter and surface only warnings or errors. Mirror this style when invoking tools manually so downstream agents process as few tokens as possible.
 
-- `make format`: Auto-format via `ruff format`.
-- `make format-check`: Formatting audit without changes.
-- `make lint` / `make lint-fix`: Static analysis with Ruff (`--fix` enables autofixes).
-- `make typecheck`: Runs `ty check .` (targeting Python 3.14).
-- `make test`: Executes pytest with coverage thresholds enforced (`--cov-fail-under=80`).
-- `make check`: Aggregates format-check, lint, typecheck, and tests.
-- `make all`: Runs format, lint-fix, typecheck, and tests for fully automated cleanup.
+- `make format`: Auto-format via `ruff format -q`.
+- `make format-check`: Formatting audit without changes (`ruff format -q --check`).
+- `make lint` / `make lint-fix`: Static analysis with Ruff in quiet mode (`ruff check --preview -q`; add `--fix` when autofixing).
+- `make typecheck`: Runs `ty check -qq --error-on-warning` for silent success.
+- `make test`: Executes pytest through `tools/run_pytest.py`, only emitting failures or warnings while enforcing coverage (`--cov-fail-under=80`).
+- `make check`: Aggregates format-check, lint, typecheck, Bandit, and tests with minimal output.
+- `make all`: Runs format, lint-fix, Bandit, typecheck, and tests while staying quiet on success.
 - `make clean`: Purges caches (`__pycache__`, `.pytest_cache`, `.ruff_cache`, `*.pyc`).
 
 Prefer `make check` before every commit; git hooks will call the same pipeline.
