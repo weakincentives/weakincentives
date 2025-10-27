@@ -11,7 +11,7 @@ from .errors import (
 from .prompt import Prompt, PromptSectionNode
 from .section import Section
 from .text import TextSection
-from .tool import Tool, ToolResult
+from .tool import Tool, ToolResult, ToolsSection
 
 __all__ = [
     "Prompt",
@@ -24,4 +24,5 @@ __all__ = [
     "TextSection",
     "Tool",
     "ToolResult",
+    "ToolsSection",
 ]

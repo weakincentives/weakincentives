@@ -6,7 +6,7 @@ Tools for developing and optimizing side effect free background agents.
 
 ## Overview
 - Python 3.14 library with a growing prompt-composition toolkit.
-- `Prompt`, `Section`, and `TextSection` abstractions help build structured, parameterised Markdown prompts.
+- `Prompt`, `Section`, `TextSection`, and `ToolsSection` abstractions help build structured, parameterised Markdown prompts.
 - Strict typing, Ruff formatting/linting, and pytest coverage keep the surface reliable while the API evolves.
 
 ## Quick Start
@@ -40,6 +40,64 @@ print(prompt.render(GreetingParams(name="Ada")))
 ```
 
 Sections can declare child sections, defaults, and `enabled` predicates. The prompt prevents placeholder/parameter mismatches and reports rich context when validation or rendering fails.
+
+## Working with Tools
+```python
+from dataclasses import dataclass
+
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult, ToolsSection
+
+@dataclass
+class GuidanceParams:
+    primary_tool: str
+
+@dataclass
+class ToolDescriptionParams:
+    primary_tool: str = "lookup_entity"
+
+@dataclass
+class LookupParams:
+    entity_id: str
+
+@dataclass
+class LookupResult:
+    entity_id: str
+    document_url: str
+
+def lookup_handler(params: LookupParams) -> ToolResult[LookupResult]:
+    result = LookupResult(entity_id=params.entity_id, document_url="https://example.com")
+    return ToolResult(message=f"Fetched {result.entity_id}.", payload=result)
+
+lookup_tool = Tool[LookupParams, LookupResult](
+    name="lookup_entity",
+    description="Fetch structured information for a given entity id.",
+    handler=lookup_handler,
+)
+
+prompt = Prompt(
+    sections=[
+        TextSection(
+            title="Guidance",
+            body="Use ${primary_tool} for critical lookups.",
+            params=GuidanceParams,
+            children=[
+                ToolsSection(
+                    title="Available Tools",
+                    tools=[lookup_tool],
+                    params=ToolDescriptionParams,
+                    defaults=ToolDescriptionParams(),
+                    description="Invoke ${primary_tool} whenever you need fresh context.",
+                )
+            ],
+        )
+    ]
+)
+
+tools = prompt.tools(GuidanceParams(primary_tool="lookup_entity"))
+assert tools[0].handler is lookup_handler
+```
+
+`Prompt.tools()` returns the tools contributed by enabled `ToolsSection`s in depth-first order, making it easy to hand descriptors and handlers to an orchestration layer without duplicating configuration.
 
 ## Development Workflow
 - `make format` / `make format-check` – auto-format or audit with Ruff.
