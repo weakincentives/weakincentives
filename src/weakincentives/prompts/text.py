@@ -9,7 +9,7 @@ from .errors import PromptRenderError
 from .section import Section
 
 
-class TextSection[T](Section[T]):
+class TextSection[ParamsT](Section[ParamsT]):
     """Render markdown text content using string.Template."""
 
     def __init__(
@@ -17,21 +17,19 @@ class TextSection[T](Section[T]):
         *,
         title: str,
         body: str,
-        params: type[T],
-        defaults: T | None = None,
+        defaults: ParamsT | None = None,
         children: Sequence[Section[Any]] | None = None,
-        enabled: Callable[[T], bool] | None = None,
+        enabled: Callable[[ParamsT], bool] | None = None,
     ) -> None:
         super().__init__(
             title=title,
-            params=params,
             defaults=defaults,
             children=children,
             enabled=enabled,
         )
         self.body = body
 
-    def render(self, params: T, depth: int) -> str:
+    def render(self, params: ParamsT, depth: int) -> str:
         heading_level = "#" * (depth + 2)
         heading = f"{heading_level} {self.title.strip()}"
         template = Template(textwrap.dedent(self.body).strip())

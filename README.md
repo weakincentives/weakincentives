@@ -40,10 +40,9 @@ from weakincentives.prompts import Prompt, TextSection
 class GreetingParams:
     name: str
 
-section = TextSection(
+section = TextSection[GreetingParams](
     title="Greeting",
     body="Hello ${name}!",
-    params=GreetingParams,
 )
 prompt = Prompt(sections=[section])
 
@@ -88,15 +87,13 @@ lookup_tool = Tool[LookupParams, LookupResult](
 
 prompt = Prompt(
     sections=[
-        TextSection(
+        TextSection[GuidanceParams](
             title="Guidance",
             body="Use ${primary_tool} for critical lookups.",
-            params=GuidanceParams,
             children=[
-                ToolsSection(
+                ToolsSection[ToolDescriptionParams](
                     title="Available Tools",
                     tools=[lookup_tool],
-                    params=ToolDescriptionParams,
                     defaults=ToolDescriptionParams(),
                     description="Invoke ${primary_tool} whenever you need fresh context.",
                 )

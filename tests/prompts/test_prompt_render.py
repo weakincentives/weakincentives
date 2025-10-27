@@ -28,20 +28,17 @@ class OutroParams:
 
 
 def build_prompt() -> Prompt:
-    intro = TextSection(
+    intro = TextSection[IntroParams](
         title="Intro",
         body="Intro: ${title}",
-        params=IntroParams,
     )
-    details = TextSection(
+    details = TextSection[DetailsParams](
         title="Details",
         body="Details: ${body}",
-        params=DetailsParams,
     )
-    outro = TextSection(
+    outro = TextSection[OutroParams](
         title="Outro",
         body="Outro: ${footer}",
-        params=OutroParams,
         defaults=OutroParams(footer="bye"),
     )
     return Prompt(sections=[intro, details, outro])
@@ -69,28 +66,24 @@ class SummaryParams:
 
 
 def build_nested_prompt() -> Prompt:
-    leaf = TextSection(
+    leaf = TextSection[LeafParams](
         title="Leaf",
         body="Leaf: ${note}",
-        params=LeafParams,
     )
-    child = TextSection(
+    child = TextSection[ChildNestedParams](
         title="Child",
         body="Child detail: ${detail}",
-        params=ChildNestedParams,
         children=[leaf],
     )
-    parent = TextSection(
+    parent = TextSection[ParentToggleParams](
         title="Parent",
         body="Parent: ${heading}",
-        params=ParentToggleParams,
         children=[child],
         enabled=lambda params: params.include_children,
     )
-    summary = TextSection(
+    summary = TextSection[SummaryParams](
         title="Summary",
         body="Summary: ${summary}",
-        params=SummaryParams,
     )
     return Prompt(sections=[parent, summary])
 
@@ -200,7 +193,6 @@ def test_prompt_render_wraps_template_errors_with_context():
     section = ExplodingSection(
         title="Explode",
         body="unused",
-        params=ErrorParams,
     )
     prompt = Prompt(sections=[section])
 
@@ -220,10 +212,9 @@ def test_prompt_render_propagates_enabled_errors():
     def raising_enabled(params: ToggleParams) -> bool:
         raise RuntimeError("enabled failure")
 
-    section = TextSection(
+    section = TextSection[ToggleParams](
         title="Guard",
         body="Guard: ${flag}",
-        params=ToggleParams,
         enabled=raising_enabled,
     )
     prompt = Prompt(sections=[section])

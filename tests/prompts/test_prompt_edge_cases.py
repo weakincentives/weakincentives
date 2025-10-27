@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -25,10 +25,9 @@ class UnregisteredParams:
 
 
 def test_prompt_render_rejects_unregistered_params_type() -> None:
-    section = TextSection(
+    section = TextSection[RegisteredParams](
         title="Registered",
         body="Registered: ${value}",
-        params=RegisteredParams,
     )
     prompt = Prompt(sections=[section])
 
@@ -48,10 +47,9 @@ class NullConstructedParams:
 
 
 def test_prompt_render_detects_constructor_returning_none() -> None:
-    section = TextSection(
+    section = TextSection[NullConstructedParams](
         title="Null",
         body="Null body",
-        params=NullConstructedParams,
     )
     prompt = Prompt(sections=[section])
 
@@ -70,7 +68,7 @@ class BrokenParams:
 
 class BrokenSection(Section[BrokenParams]):
     def __init__(self) -> None:
-        super().__init__(title="Broken", params=BrokenParams)
+        super().__init__(title="Broken")
 
     def render(self, params: BrokenParams, depth: int) -> str:
         raise PromptRenderError("inner", placeholder="value")
@@ -91,7 +89,7 @@ def test_prompt_render_wraps_prompt_errors_with_context() -> None:
 
 class InvalidParamsSection(Section[int]):
     def __init__(self) -> None:
-        super().__init__(title="Invalid", params=int)
+        super().__init__(title="Invalid")
 
     def render(self, params: int, depth: int) -> str:  # pragma: no cover - defensive
         return "invalid"
@@ -114,11 +112,10 @@ class DefaultsParams:
 
 
 def test_prompt_register_validates_defaults_type() -> None:
-    section = TextSection(
+    section = TextSection[DefaultsParams](
         title="Defaults",
         body="Defaults",
-        params=DefaultsParams,
-        defaults=DefaultsParams,
+        defaults=cast(Any, DefaultsParams),
     )
 
     with pytest.raises(PromptValidationError) as exc:
@@ -140,11 +137,10 @@ class OtherParams:
 
 
 def test_prompt_register_requires_defaults_type_match() -> None:
-    section = TextSection(
+    section = TextSection[DefaultsMismatchParams](
         title="Mismatch",
         body="Mismatch",
-        params=DefaultsMismatchParams,
-        defaults=OtherParams(value="x"),
+        defaults=cast(Any, OtherParams(value="x")),
     )
 
     with pytest.raises(PromptValidationError) as exc:
@@ -162,7 +158,7 @@ class PlaceholderParams:
 
 class BareSection(Section[PlaceholderParams]):
     def __init__(self) -> None:
-        super().__init__(title="Bare", params=PlaceholderParams)
+        super().__init__(title="Bare")
 
     def render(self, params: PlaceholderParams, depth: int) -> str:
         return "bare"
@@ -180,10 +176,9 @@ class HeadingOnlyParams:
 
 
 def test_text_section_returns_heading_when_body_empty() -> None:
-    section = TextSection(
+    section = TextSection[HeadingOnlyParams](
         title="Heading",
         body="\n",
-        params=HeadingOnlyParams,
     )
 
     output = section.render(HeadingOnlyParams(), depth=0)
@@ -198,10 +193,9 @@ class PlaceholderNamesParams:
 
 
 def test_text_section_placeholder_names_cover_named_and_braced() -> None:
-    section = TextSection(
+    section = TextSection[PlaceholderNamesParams](
         title="Placeholders",
         body="Value: $value and ${other}",
-        params=PlaceholderNamesParams,
     )
 
     assert section.placeholder_names() == {"value", "other"}
@@ -214,7 +208,7 @@ class ContextParams:
 
 class ContextAwareSection(Section[ContextParams]):
     def __init__(self) -> None:
-        super().__init__(title="Context", params=ContextParams)
+        super().__init__(title="Context")
 
     def render(self, params: ContextParams, depth: int) -> str:
         raise PromptRenderError(

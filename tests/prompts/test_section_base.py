@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from weakincentives.prompts import Section
 
 
@@ -18,7 +20,7 @@ class ExampleSection(Section[ExampleParams]):
 
 
 def test_section_defaults_children_and_enabled():
-    section = ExampleSection(title="Demo", params=ExampleParams)
+    section = ExampleSection(title="Demo")
 
     assert section.children == ()
     assert section.is_enabled(ExampleParams()) is True
@@ -26,14 +28,13 @@ def test_section_defaults_children_and_enabled():
 
 
 def test_section_allows_custom_children_and_enabled():
-    child = ExampleSection(title="Child", params=ExampleParams)
+    child = ExampleSection(title="Child")
 
     def toggle(params: ExampleParams) -> bool:
         return params.value == "go"
 
     section = ExampleSection(
         title="Parent",
-        params=ExampleParams,
         children=[child],
         enabled=toggle,
     )
@@ -41,3 +42,20 @@ def test_section_allows_custom_children_and_enabled():
     assert section.children == (child,)
     assert section.is_enabled(ExampleParams(value="stop")) is False
     assert section.is_enabled(ExampleParams(value="go")) is True
+
+
+class PlainSection(Section):
+    def render(
+        self, params: object, depth: int
+    ) -> str:  # pragma: no cover - exercise instantiation guard
+        return ""
+
+
+def test_section_requires_specialized_type_parameter() -> None:
+    with pytest.raises(TypeError):
+        PlainSection(title="Plain")
+
+
+def test_section_rejects_multiple_type_arguments() -> None:
+    with pytest.raises(TypeError):
+        Section.__class_getitem__((int, str))  # type: ignore[call-arg]

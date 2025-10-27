@@ -217,7 +217,6 @@ class ToolsSection[ParamsT](Section[ParamsT]):
         *,
         title: str,
         tools: Sequence[Tool[Any, Any]],
-        params: type[ParamsT],
         description: str | None = None,
         defaults: ParamsT | None = None,
         children: Sequence[Section[Any]] | None = None,
@@ -225,7 +224,6 @@ class ToolsSection[ParamsT](Section[ParamsT]):
     ) -> None:
         super().__init__(
             title=title,
-            params=params,
             defaults=defaults,
             children=children,
             enabled=enabled,

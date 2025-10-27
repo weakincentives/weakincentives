@@ -54,10 +54,9 @@ def test_tools_section_inherits_section() -> None:
 
 def test_tools_section_renders_heading_and_description() -> None:
     example_tool = _build_tool("echo")
-    section = ToolsSection(
+    section = ToolsSection[ExampleParams](
         title="Available Tools",
         tools=[example_tool],
-        params=ExampleParams,
         description="""
         Prefer ${primary_tool} when you need structured output.
         """,
@@ -71,7 +70,7 @@ def test_tools_section_renders_heading_and_description() -> None:
 
 
 def test_section_tools_defaults_to_empty_tuple() -> None:
-    section = _BareSection(title="Base", params=ExampleParams)
+    section = _BareSection(title="Base")
 
     assert section.tools() == ()
 
@@ -79,10 +78,9 @@ def test_section_tools_defaults_to_empty_tuple() -> None:
 def test_tools_section_exposes_tools_in_order() -> None:
     first = _build_tool("first")
     second = _build_tool("second")
-    section = ToolsSection(
+    section = ToolsSection[ExampleParams](
         title="Order",
         tools=[first, second],
-        params=ExampleParams,
     )
 
     tools = section.tools()
@@ -93,10 +91,9 @@ def test_tools_section_exposes_tools_in_order() -> None:
 
 
 def test_tools_section_renders_heading_without_description() -> None:
-    section = ToolsSection(
+    section = ToolsSection[ExampleParams](
         title="Just Heading",
         tools=[_build_tool("first")],
-        params=ExampleParams,
     )
 
     rendered = section.render(ExampleParams(primary_tool="first"), depth=0)
@@ -105,10 +102,9 @@ def test_tools_section_renders_heading_without_description() -> None:
 
 
 def test_tools_section_ignores_empty_description_after_substitute() -> None:
-    section = ToolsSection(
+    section = ToolsSection[ExampleParams](
         title="Empty",
         tools=[_build_tool("first")],
-        params=ExampleParams,
         description="${primary_tool}",
     )
 
@@ -118,10 +114,9 @@ def test_tools_section_ignores_empty_description_after_substitute() -> None:
 
 
 def test_tools_section_placeholder_names_handles_named_and_braced() -> None:
-    section = ToolsSection(
+    section = ToolsSection[ExampleParams](
         title="Placeholders",
         tools=[_build_tool("echo")],
-        params=ExampleParams,
         description="""
         Prefer ${primary_tool} alongside $primary_tool.
         """,
@@ -135,10 +130,9 @@ def test_tools_section_placeholder_names_handles_named_and_braced() -> None:
 def test_tools_section_placeholder_names_returns_empty_for_missing_description() -> (
     None
 ):
-    section = ToolsSection(
+    section = ToolsSection[ExampleParams](
         title="No Description",
         tools=[_build_tool("first")],
-        params=ExampleParams,
     )
 
     assert section.placeholder_names() == set()
@@ -146,10 +140,9 @@ def test_tools_section_placeholder_names_returns_empty_for_missing_description()
 
 def test_tools_section_raises_render_error_for_missing_placeholder() -> None:
     example_tool = _build_tool("echo")
-    section = ToolsSection(
+    section = ToolsSection[ExampleParams](
         title="Available Tools",
         tools=[example_tool],
-        params=ExampleParams,
         description="Use ${primary_tool} wisely.",
     )
 
@@ -163,10 +156,9 @@ def test_tools_section_raises_render_error_for_missing_placeholder() -> None:
 
 def test_tools_section_requires_tools() -> None:
     with pytest.raises(ValueError) as error_info:
-        ToolsSection(
+        ToolsSection[ExampleParams](
             title="Empty",
             tools=[],
-            params=ExampleParams,
         )
 
     assert "Tool instance" in str(error_info.value)
@@ -174,10 +166,9 @@ def test_tools_section_requires_tools() -> None:
 
 def test_tools_section_rejects_non_tool_entries() -> None:
     with pytest.raises(TypeError) as error_info:
-        ToolsSection(
+        ToolsSection[ExampleParams](
             title="Invalid",
             tools=["oops"],  # type: ignore[arg-type]
-            params=ExampleParams,
         )
 
     assert "Tool instances" in str(error_info.value)

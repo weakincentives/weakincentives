@@ -23,20 +23,17 @@ class SiblingParams:
 
 
 def test_prompt_initialization_flattens_sections_depth_first():
-    child = TextSection(
+    child = TextSection[ChildParams](
         title="Child",
         body="Child: ${detail}",
-        params=ChildParams,
     )
-    sibling = TextSection(
+    sibling = TextSection[SiblingParams](
         title="Sibling",
         body="Sibling: ${note}",
-        params=SiblingParams,
     )
-    root = TextSection(
+    root = TextSection[RootParams](
         title="Root",
         body="Root: ${title}",
-        params=RootParams,
         children=[child, sibling],
     )
 
@@ -62,15 +59,13 @@ def test_prompt_rejects_duplicate_param_dataclasses():
     class DuplicateParams:
         value: str
 
-    first = TextSection(
+    first = TextSection[DuplicateParams](
         title="First",
         body="First: ${value}",
-        params=DuplicateParams,
     )
-    second = TextSection(
+    second = TextSection[DuplicateParams](
         title="Second",
         body="Second: ${value}",
-        params=DuplicateParams,
     )
 
     with pytest.raises(PromptValidationError) as exc:
@@ -86,10 +81,9 @@ def test_prompt_validates_text_section_placeholders():
     class PlaceholderParams:
         value: str
 
-    section = TextSection(
+    section = TextSection[PlaceholderParams](
         title="Invalid",
         body="Missing ${oops}",
-        params=PlaceholderParams,
     )
 
     with pytest.raises(PromptValidationError) as exc:
@@ -107,10 +101,9 @@ def test_text_section_rejects_non_section_children():
         value: str
 
     with pytest.raises(TypeError) as exc:
-        TextSection(
+        TextSection[ParentParams](
             title="Parent",
             body="${value}",
-            params=ParentParams,
             children=["not a section"],  # type: ignore[arg-type]
         )
 

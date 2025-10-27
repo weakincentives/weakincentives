@@ -70,24 +70,21 @@ def _build_prompt() -> tuple[
     primary_tool = _build_primary_tool()
     secondary_tool = _build_secondary_tool()
 
-    guidance = TextSection(
+    guidance = TextSection[GuidanceParams](
         title="Guidance",
         body="Use ${primary_tool} when available.",
-        params=GuidanceParams,
         enabled=lambda params: params.allow_tools,
         children=[
-            ToolsSection(
+            ToolsSection[PrimarySectionParams](
                 title="Primary",
                 tools=[primary_tool],
-                params=PrimarySectionParams,
                 defaults=PrimarySectionParams(),
             )
         ],
     )
-    secondary = ToolsSection(
+    secondary = ToolsSection[SecondaryToggleParams](
         title="Secondary",
         tools=[secondary_tool],
-        params=SecondaryToggleParams,
         defaults=SecondaryToggleParams(enabled=True),
         enabled=lambda params: params.enabled,
     )
@@ -117,16 +114,14 @@ def test_prompt_tools_depth_first_and_enablement() -> None:
 
 
 def test_prompt_tools_rejects_duplicate_tool_names() -> None:
-    first_section = ToolsSection(
+    first_section = ToolsSection[PrimarySectionParams](
         title="First Tools",
         tools=[_build_primary_tool()],
-        params=PrimarySectionParams,
         defaults=PrimarySectionParams(),
     )
-    second_section = ToolsSection(
+    second_section = ToolsSection[SecondaryToggleParams](
         title="Second Tools",
         tools=[_build_primary_tool()],
-        params=SecondaryToggleParams,
         defaults=SecondaryToggleParams(),
     )
 
@@ -146,16 +141,14 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
         handler=None,
     )
 
-    first_section = ToolsSection(
+    first_section = ToolsSection[PrimarySectionParams](
         title="Primary",
         tools=[primary_tool],
-        params=PrimarySectionParams,
         defaults=PrimarySectionParams(),
     )
-    second_section = ToolsSection(
+    second_section = ToolsSection[SecondaryToggleParams](
         title="Alternate",
         tools=[alternate_tool],
-        params=SecondaryToggleParams,
         defaults=SecondaryToggleParams(),
     )
 
@@ -175,7 +168,7 @@ class _InvalidToolSection(Section[GuidanceParams]):
 
 
 def test_prompt_tools_requires_tool_instances() -> None:
-    invalid_section = _InvalidToolSection(title="Invalid", params=GuidanceParams)
+    invalid_section = _InvalidToolSection(title="Invalid")
 
     with pytest.raises(PromptValidationError) as error_info:
         Prompt(sections=[invalid_section])
@@ -189,10 +182,9 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     tool = _build_primary_tool()
     tool.params_type = str  # type: ignore[assignment]
 
-    section = ToolsSection(
+    section = ToolsSection[PrimarySectionParams](
         title="Primary",
         tools=[tool],
-        params=PrimarySectionParams,
         defaults=PrimarySectionParams(),
     )
 

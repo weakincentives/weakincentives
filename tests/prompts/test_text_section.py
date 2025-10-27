@@ -11,13 +11,12 @@ class GreetingParams:
 
 
 def test_text_section_renders_heading_and_body():
-    section = TextSection(
+    section = TextSection[GreetingParams](
         title="Greeting",
         body="""
             Greeting:
             ${greeting}
         """,
-        params=GreetingParams,
     )
 
     output = section.render(GreetingParams(greeting="hello"), depth=0)
@@ -30,10 +29,9 @@ def test_text_section_performs_safe_substitution():
     class PlaceholderParams:
         value: str
 
-    section = TextSection(
+    section = TextSection[PlaceholderParams](
         title="Placeholder Demo",
         body="Value: ${value}",
-        params=PlaceholderParams,
     )
 
     output = section.render(PlaceholderParams(value="42"), depth=1)

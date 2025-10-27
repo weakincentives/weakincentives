@@ -117,17 +117,15 @@ lookup_tool = Tool[LookupParams, LookupResult](
 tooling_overview = Prompt(
     name="tools_overview",
     sections=[
-        TextSection(
+        TextSection[GuidanceParams](
             title="Guidance",
             body="""
             Use tools when you need up-to-date context. Prefer ${primary_tool} for critical lookups.
             """,
-            params=GuidanceParams,
             children=[
-                ToolsSection(
+                ToolsSection[GuidanceParams](
                     title="Available Tools",
                     tools=[lookup_tool],
-                    params=GuidanceParams,
                     description="""
                     Invoke ${primary_tool} whenever you need fresh entity context.
                     """,

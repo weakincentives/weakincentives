@@ -30,32 +30,29 @@ class ContentParams:
 
 
 def build_compose_prompt() -> Prompt:
-    tone_section = TextSection(
+    tone_section = TextSection[ToneParams](
         title="Tone",
         body="""
         Target tone: ${tone}
         """,
-        params=ToneParams,
     )
 
-    content_section = TextSection(
+    content_section = TextSection[ContentParams](
         title="Content Guidance",
         body="""
         Include the following summary:
         ${summary}
         """,
-        params=ContentParams,
         enabled=lambda params: bool(params.summary.strip()),
     )
 
     sections = [
-        TextSection(
+        TextSection[RoutingParams](
             title="Message Routing",
             body="""
             To: ${recipient}
             Subject: ${subject}
             """,
-            params=RoutingParams,
             defaults=RoutingParams(subject="(optional subject)"),
             children=[tone_section, content_section],
         ),

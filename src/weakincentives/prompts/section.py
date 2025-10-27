@@ -5,21 +5,28 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 
-class Section[T](ABC):
+class Section[ParamsT](ABC):
     """Abstract building block for prompt content."""
 
     def __init__(
         self,
         *,
         title: str,
-        params: type[T],
-        defaults: T | None = None,
+        defaults: ParamsT | None = None,
         children: Sequence[Section[Any]] | None = None,
-        enabled: Callable[[T], bool] | None = None,
+        enabled: Callable[[ParamsT], bool] | None = None,
     ) -> None:
+        params_type = getattr(self.__class__, "_params_type", None)
+        if not isinstance(params_type, type):
+            raise TypeError(
+                "Section must be instantiated with a concrete ParamsT type."
+            )
+
+        self.params_type: type[ParamsT] = params_type
+        self.params: type[ParamsT] = params_type
         self.title = title
-        self.params = params
         self.defaults = defaults
+
         normalized_children: list[Section[Any]] = []
         for child in children or ():
             if not isinstance(child, Section):
@@ -28,7 +35,7 @@ class Section[T](ABC):
         self.children = tuple(normalized_children)
         self._enabled = enabled
 
-    def is_enabled(self, params: T) -> bool:
+    def is_enabled(self, params: ParamsT) -> bool:
         """Return True when the section should render for the given params."""
 
         if self._enabled is None:
@@ -36,7 +43,7 @@ class Section[T](ABC):
         return bool(self._enabled(params))
 
     @abstractmethod
-    def render(self, params: T, depth: int) -> str:
+    def render(self, params: ParamsT, depth: int) -> str:
         """Produce markdown output for the section at the supplied depth."""
 
     def placeholder_names(self) -> set[str]:
@@ -48,6 +55,25 @@ class Section[T](ABC):
         """Return the tools exposed by this section."""
 
         return ()
+
+    @classmethod
+    def __class_getitem__(cls, item: object) -> type[Section[Any]]:
+        params_type = cls._normalize_generic_argument(item)
+
+        class _SpecializedSection(cls):  # type: ignore[misc]
+            pass
+
+        _SpecializedSection.__name__ = cls.__name__
+        _SpecializedSection.__qualname__ = cls.__qualname__
+        _SpecializedSection.__module__ = cls.__module__
+        _SpecializedSection._params_type = params_type
+        return _SpecializedSection
+
+    @staticmethod
+    def _normalize_generic_argument(item: object) -> object:
+        if isinstance(item, tuple):
+            raise TypeError("Section[...] expects a single type argument.")
+        return item
 
 
 __all__ = ["Section"]

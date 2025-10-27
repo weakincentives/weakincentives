@@ -49,21 +49,19 @@ def test_prompt_tools_integration_example() -> None:
         handler=_lookup_handler,
     )
 
-    tools_section = ToolsSection(
+    tools_section = ToolsSection[ToolDescriptionParams](
         title="Available Tools",
         tools=[lookup_tool],
-        params=ToolDescriptionParams,
         defaults=ToolDescriptionParams(),
         description="Invoke ${primary_tool} whenever you need fresh entity context.",
     )
 
-    guidance = TextSection(
+    guidance = TextSection[GuidanceParams](
         title="Guidance",
         body=(
             "Use tools when you need up-to-date context. "
             "Prefer ${primary_tool} for critical lookups."
         ),
-        params=GuidanceParams,
         children=[tools_section],
     )
 

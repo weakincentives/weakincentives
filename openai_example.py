@@ -70,19 +70,17 @@ def build_prompt() -> Prompt:
         description="Return the provided text in uppercase characters.",
         handler=echo_text_handler,
     )
-    guidance_section = TextSection(
+    guidance_section = TextSection[AgentGuidance](
         title="Agent Guidance",
         body=(
             "You are a minimal demo agent. Call ${primary_tool} whenever the user "
             "wants text transformed."
         ),
-        params=AgentGuidance,
         defaults=AgentGuidance(),
         children=[
-            ToolsSection(
+            ToolsSection[ToolOverview](
                 title="Available Tools",
                 tools=[echo_tool],
-                params=ToolOverview,
                 defaults=ToolOverview(),
                 description=(
                     "Expose ${primary_tool} to turn arbitrary input into uppercase text."

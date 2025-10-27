@@ -98,42 +98,38 @@ class ContentParams:
 class InstructionParams:
     pass
 
-tone_section = TextSection(
+tone_section = TextSection[ToneParams](
     title="Tone",
     body="""
     Target tone: ${tone}
     """,
-    params=ToneParams,
 )
 
-content_section = TextSection(
+content_section = TextSection[ContentParams](
     title="Content Guidance",
     body="""
     Include the following summary:
     ${summary}
     """,
-    params=ContentParams,
     enabled=lambda params: bool(params.summary.strip()),
 )
 
 compose_email = Prompt(
     name="compose_email",
     sections=[
-        TextSection(
+        TextSection[MessageRoutingParams](
             title="Message Routing",
             body="""
             To: ${recipient}
             Subject: ${subject}
             """,
-            params=MessageRoutingParams,
             defaults=MessageRoutingParams(subject="(optional subject)"),
         ),
-        TextSection(
+        TextSection[InstructionParams](
             title="Instruction",
             body="""
             Please craft the email below.
             """,
-            params=InstructionParams,
             children=[tone_section, content_section],
         ),
     ],
