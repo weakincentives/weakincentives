@@ -35,14 +35,14 @@ class Prompt:
         self._sections: tuple[Section[Any], ...] = tuple(sections or ())
         self._section_nodes: list[PromptSectionNode] = []
         self._params_registry: dict[type[Any], PromptSectionNode] = {}
-        self.defaults: dict[type[Any], Any] = {}
+        self.defaults: dict[type[Any], object] = {}
         self.placeholders: dict[SectionPath, set[str]] = {}
         self._tool_name_registry: dict[str, SectionPath] = {}
 
         for section in self._sections:
             self._register_section(section, path=(section.title,), depth=0)
 
-    def render(self, *params: Any) -> str:
+    def render(self, *params: object) -> str:
         """Render the prompt using provided parameter dataclass instances."""
 
         param_lookup = self._collect_param_lookup(params)
@@ -73,7 +73,7 @@ class Prompt:
 
         return "\n\n".join(rendered_sections)
 
-    def tools(self, *params: Any) -> tuple[Tool[Any, Any], ...]:
+    def tools(self, *params: object) -> tuple[Tool[Any, Any], ...]:
         """Return tools exposed by enabled sections in traversal order."""
 
         param_lookup = self._collect_param_lookup(params)
@@ -155,8 +155,10 @@ class Prompt:
     def params_types(self) -> set[type[Any]]:
         return set(self._params_registry.keys())
 
-    def _collect_param_lookup(self, params: tuple[Any, ...]) -> dict[type[Any], Any]:
-        lookup: dict[type[Any], Any] = {}
+    def _collect_param_lookup(
+        self, params: tuple[object, ...]
+    ) -> dict[type[Any], object]:
+        lookup: dict[type[Any], object] = {}
         for value in params:
             provided_type = value if isinstance(value, type) else type(value)
             if isinstance(value, type) or not is_dataclass(value):
@@ -181,8 +183,8 @@ class Prompt:
     def _resolve_section_params(
         self,
         node: PromptSectionNode,
-        param_lookup: dict[type[Any], Any],
-    ) -> Any:
+        param_lookup: dict[type[Any], object],
+    ) -> object:
         params_type = node.section.params
         section_params = param_lookup.get(params_type)
 
@@ -211,8 +213,8 @@ class Prompt:
 
     def _iter_enabled_sections(
         self,
-        param_lookup: dict[type[Any], Any],
-    ) -> Iterator[tuple[PromptSectionNode, Any]]:
+        param_lookup: dict[type[Any], object],
+    ) -> Iterator[tuple[PromptSectionNode, object]]:
         skip_depth: int | None = None
 
         for node in self._section_nodes:

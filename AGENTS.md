@@ -45,6 +45,7 @@ Prefer `make check` before every commit; git hooks will call the same pipeline.
 - Pytest is configured in `pyproject.toml` to collect coverage on `src/weakincentives` and fail if coverage dips below 80%.
 - Type hints are part of the public contract (`py.typed`). Keep new code fully typed and run `make typecheck` when touching typing-sensitive areas.
 - Ruff is both the formatter and the linter. Obey the default line length of 88 and the Python target version `py314`.
+- Lint runs enable `I`, `UP`, `B`, `SIM`, `C4`, `ANN`, `RET`, `RSE`, `PTH`, and `ISC` rule families; fix or explicitly justify any violations when contributing.
 
 ## Release & Versioning Notes
 - The package version lives in `pyproject.toml`. Use `./bump-version.sh [major|minor|patch|X.Y.Z]` to update it; the script prints next steps for tagging and pushing.

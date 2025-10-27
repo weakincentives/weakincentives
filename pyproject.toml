@@ -53,7 +53,8 @@ line-length = 88
 target-version = "py314"
 
 [tool.ruff.lint]
-extend-select = ["I", "UP"]
+extend-select = ["I", "UP", "B", "SIM", "C4", "ANN", "RET", "RSE", "PTH", "ISC"]
+per-file-ignores = {"tests/**/*.py" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204"]}
 
 [tool.ruff.format]
 quote-style = "double"
