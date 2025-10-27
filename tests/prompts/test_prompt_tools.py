@@ -138,7 +138,7 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
     assert error.dataclass_type is PrimaryToolParams
 
 
-def test_prompt_tools_rejects_duplicate_tool_params_dataclass() -> None:
+def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
     primary_tool = _build_primary_tool()
     alternate_tool = Tool[PrimaryToolParams, PrimaryToolPayload](
         name="alternate_primary",
@@ -159,9 +159,8 @@ def test_prompt_tools_rejects_duplicate_tool_params_dataclass() -> None:
         defaults=SecondaryToggleParams(),
     )
 
-    with pytest.raises(PromptValidationError) as error_info:
-        Prompt(sections=[first_section, second_section])
+    prompt = Prompt(sections=[first_section, second_section])
 
-    error = cast(PromptValidationError, error_info.value)
-    assert error.section_path == ("Alternate",)
-    assert error.dataclass_type is PrimaryToolParams
+    tools = prompt.tools()
+    assert {tool.name for tool in tools} == {"primary_lookup", "alternate_primary"}
+    assert all(tool.params_type is PrimaryToolParams for tool in tools)

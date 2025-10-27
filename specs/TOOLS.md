@@ -57,7 +57,8 @@ dataclass *types* through their generic parameters—no redundant instance plumb
 - Exposes the contained tools back to the prompt runtime so they can be returned via `Prompt.tools()`.
 
 Multiple `ToolsSection` instances can appear in one prompt. During validation the prompt aggregates every tool, ensures
-names and parameter dataclasses remain unique, and records declaration order. Disabled sections (via `is_enabled`) omit
+names remain unique, and records declaration order. Tools are free to share parameter or result dataclasses when that
+improves reuse. Disabled sections (via `is_enabled`) omit
 both markdown and tool entries. Per-tool enablement remains out of scope for this iteration.
 
 ## Schema Generation
@@ -68,8 +69,8 @@ needed without touching the prompt core.
 ## Prompt Integration
 `Prompt` continues to accept an ordered tree of sections. `ToolsSection` integrates without new constructor arguments:
 1. During initialization the prompt walks the section tree depth-first, collecting tools from each `ToolsSection`.
-2. Validation enforces unique tool names and parameter dataclasses across the entire prompt; composite prompts must
-   coordinate naming themselves until we revisit hierarchical namespaces.
+2. Validation enforces unique tool names across the entire prompt; composite prompts must coordinate naming themselves
+   until we revisit hierarchical namespaces. Parameter and result dataclasses may repeat across tools.
 3. Declaration order is cached so callers can retrieve tools without re-traversing the tree.
 
 `Prompt.render(...)` still returns the rendered markdown string, accepting dataclass overrides exactly as before. A new
@@ -148,8 +149,7 @@ the tool listing, preserving context budget while keeping a single source of tru
 - Construction failures raise `PromptValidationError` with contextual data (`section path`, `tool.name`, parameter
   dataclass).
 - Rendering without required tool parameters raises `PromptRenderError`, mirroring existing section behavior.
-- Registering two tools with the same name, parameter dataclass, or result dataclass triggers `PromptValidationError` to
-  preserve lookup determinism.
+- Registering two tools with the same name triggers `PromptValidationError` to preserve lookup determinism.
 - Handler references that do not accept exactly one argument matching the `ParamsT` dataclass raise
   `PromptValidationError` during prompt validation.
 - Disabled `ToolsSection` instances contribute neither markdown nor entries in `Prompt.tools()`.
