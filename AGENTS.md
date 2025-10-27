@@ -33,10 +33,12 @@ All commands are defined in `Makefile` and should be executed with `uv` to ensur
 - `make format`: Auto-format via `ruff format -q`.
 - `make format-check`: Formatting audit without changes (`ruff format -q --check`).
 - `make lint` / `make lint-fix`: Static analysis with Ruff in quiet mode (`ruff check --preview -q`; add `--fix` when autofixing).
+- `make bandit`: Security linting via `tools/run_bandit.py`, which patches Python 3.14 AST regressions before invoking Bandit.
+- `make pip-audit`: Dependency vulnerability audit that stays silent on success via `tools/run_pip_audit.py`.
 - `make typecheck`: Runs `ty check -qq --error-on-warning` for silent success.
 - `make test`: Executes pytest through `tools/run_pytest.py`, only emitting failures or warnings while enforcing coverage (`--cov-fail-under=80`).
-- `make check`: Aggregates format-check, lint, typecheck, Bandit, and tests with minimal output.
-- `make all`: Runs format, lint-fix, Bandit, typecheck, and tests while staying quiet on success.
+- `make check`: Aggregates format-check, lint, typecheck, Bandit, pip-audit, and tests with minimal output.
+- `make all`: Runs format, lint-fix, Bandit, pip-audit, typecheck, and tests while staying quiet on success.
 - `make clean`: Purges caches (`__pycache__`, `.pytest_cache`, `.ruff_cache`, `*.pyc`).
 
 Prefer `make check` before every commit; git hooks will call the same pipeline.
