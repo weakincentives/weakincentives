@@ -34,6 +34,7 @@ All commands are defined in `Makefile` and should be executed with `uv` to ensur
 - `make format-check`: Formatting audit without changes (`ruff format -q --check`).
 - `make lint` / `make lint-fix`: Static analysis with Ruff in quiet mode (`ruff check --preview -q`; add `--fix` when autofixing).
 - `make bandit`: Security linting via `tools/run_bandit.py`, which patches Python 3.14 AST regressions before invoking Bandit.
+- `make deptry`: Dependency graph audit on `src/weakincentives` that surfaces unused or missing requirements while staying quiet on success.
 - `make pip-audit`: Dependency vulnerability audit that stays silent on success via `tools/run_pip_audit.py`.
 - `make typecheck`: Runs `ty check -qq --error-on-warning` for silent success.
 - `make test`: Executes pytest through `tools/run_pytest.py`, only emitting failures or warnings while enforcing coverage (`--cov-fail-under=80`).
@@ -48,6 +49,14 @@ Prefer `make check` before every commit; git hooks will call the same pipeline.
 - Type hints are part of the public contract (`py.typed`). Keep new code fully typed and run `make typecheck` when touching typing-sensitive areas.
 - Ruff is both the formatter and the linter. Obey the default line length of 88 and the Python target version `py314`.
 - Lint runs enable `I`, `UP`, `B`, `SIM`, `C4`, `ANN`, `RET`, `RSE`, `PTH`, and `ISC` rule families; fix or explicitly justify any violations when contributing.
+
+## TDD Workflow Recipe
+- Read the relevant spec in `specs/` and any prior plans to anchor scope, capture target module paths, and list the concrete behaviors you will validate.
+- Break the work into thin iterations that each pair a specific test module or case (for example `tests/prompts/test_text_section.py`) with the minimal production changes required in `src/weakincentives/`.
+- For every iteration, author the failing test first, run it directly with `uv run pytest tests/path_to_test.py -k target_case`, and confirm it asserts the desired API, errors, and context payloads.
+- Implement only the code needed to satisfy the new test (including exports and defaults), then rerun the targeted test and expand to `make test` once the local loop is green.
+- Refactor immediately after the test passes: deduplicate helpers, thread depth or placeholder metadata, and update docs so the next iteration starts from a clean slate.
+- Repeat the loop until the feature-level acceptance scenario is covered, finish with `make check`, and capture the final iteration summary in the commit message or handoff notes.
 
 ## Release & Versioning Notes
 - The package version lives in `pyproject.toml`. Use `./bump-version.sh [major|minor|patch|X.Y.Z]` to update it; the script prints next steps for tagging and pushing.
