@@ -26,6 +26,10 @@ uv sync
 ./install-hooks.sh
 ```
 
+## Optional Extras
+- `openai`: install with `uv sync --extra openai` or `pip install weakincentives[openai]` to enable the OpenAI adapter utilities.
+- `make test` and downstream aggregates run with all extras enabled, so adapter coverage stays green if an optional provider regresses.
+
 ## Using the Prompt Toolkit
 ```python
 from dataclasses import dataclass

@@ -44,6 +44,10 @@ All commands are defined in `Makefile` and should be executed with `uv` to ensur
 
 Prefer `make check` before every commit; git hooks will call the same pipeline.
 
+## Optional Dependencies
+- `openai` is exposed as an extra. Install it with `uv sync --extra openai` during development or `pip install weakincentives[openai]` for consumers. Adapter modules guard imports and raise clear guidance when the extra is missing, so the core package stays lean.
+- `make test` (and thus `make check` / `make all`) automatically run with all extras enabled via `uv run --all-extras`, ensuring adapter integrations stay validated.
+
 ## Testing & Quality Expectations
 - Pytest is configured in `pyproject.toml` to collect coverage on `src/weakincentives` and fail if coverage dips below 80%.
 - Type hints are part of the public contract (`py.typed`). Keep new code fully typed and run `make typecheck` when touching typing-sensitive areas.

@@ -34,7 +34,7 @@ typecheck:
 
 # Run tests with coverage (100% minimum)
 test:
-	@uv run python tools/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --no-summary --cov-report=
+	@uv run --all-extras python tools/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --no-summary --cov-report=
 
 # Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, test)
 check: format-check lint typecheck bandit deptry pip-audit test
