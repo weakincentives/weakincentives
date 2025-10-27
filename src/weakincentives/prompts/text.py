@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from string import Template
-from typing import Any, Callable
-
 import textwrap
+from collections.abc import Callable, Sequence
+from string import Template
+from typing import Any
 
 from .errors import PromptRenderError
-from .section import Section, _ParamsT
+from .section import Section
 
 
-class TextSection(Section[_ParamsT]):
+class TextSection[T](Section[T]):
     """Render markdown text content using string.Template."""
 
     def __init__(
@@ -18,10 +17,10 @@ class TextSection(Section[_ParamsT]):
         *,
         title: str,
         body: str,
-        params: type[_ParamsT],
-        defaults: _ParamsT | None = None,
+        params: type[T],
+        defaults: T | None = None,
         children: Sequence[Section[Any]] | None = None,
-        enabled: Callable[[_ParamsT], bool] | None = None,
+        enabled: Callable[[T], bool] | None = None,
     ) -> None:
         super().__init__(
             title=title,
@@ -32,7 +31,7 @@ class TextSection(Section[_ParamsT]):
         )
         self.body = body
 
-    def render(self, params: _ParamsT, depth: int) -> str:
+    def render(self, params: T, depth: int) -> str:
         heading_level = "#" * (depth + 2)
         heading = f"{heading_level} {self.title.strip()}"
         template = Template(textwrap.dedent(self.body).strip())

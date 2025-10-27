@@ -10,7 +10,7 @@ format-check:
 
 # Run ruff linter
 lint:
-	uv run ruff check .
+	uv run ruff check --preview --no-cache .
 
 # Run ruff linter with fixes
 lint-fix:
@@ -18,11 +18,11 @@ lint-fix:
 
 # Run type checker
 typecheck:
-	uv run ty check .
+	uv run ty check --error-on-warning .
 
 # Run tests with coverage (100% minimum)
 test:
-	uv run pytest --cov-fail-under=100
+	uv run pytest --strict-config --strict-markers --maxfail=1 --cov-fail-under=100
 
 # Run all checks (format check, lint, typecheck, test)
 check: format-check lint typecheck test

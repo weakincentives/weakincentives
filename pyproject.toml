@@ -52,6 +52,9 @@ dev = [
 line-length = 88
 target-version = "py314"
 
+[tool.ruff.lint]
+extend-select = ["I", "UP"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

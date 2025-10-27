@@ -1,48 +1,36 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, is_dataclass
 import inspect
 import re
-from typing import (
-    Annotated,
-    Any,
-    Generic,
-    TypeVar,
-    get_args,
-    get_origin,
-    get_type_hints,
-)
 import textwrap
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, is_dataclass
 from string import Template
+from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
 from .errors import PromptRenderError, PromptValidationError
 from .section import Section
-
-_ParamsT = TypeVar("_ParamsT")
-_ResultT = TypeVar("_ResultT")
-_ResultPayloadT = TypeVar("_ResultPayloadT")
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
 
 @dataclass(slots=True)
-class ToolResult(Generic[_ResultPayloadT]):
+class ToolResult[ResultPayloadT]:
     """Structured response emitted by a tool handler."""
 
     message: str
-    payload: _ResultPayloadT
+    payload: ResultPayloadT
 
 
 @dataclass(slots=True)
-class Tool(Generic[_ParamsT, _ResultT]):
+class Tool[ParamsT, ResultT]:
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
     description: str
-    handler: Callable[[_ParamsT], ToolResult[_ResultT]] | None
-    params_type: type[_ParamsT] = field(init=False, repr=False)
-    result_type: type[_ResultT] = field(init=False, repr=False)
+    handler: Callable[[ParamsT], ToolResult[ResultT]] | None
+    params_type: type[ParamsT] = field(init=False, repr=False)
+    result_type: type[ResultT] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         params_type = getattr(self, "params_type", None)
@@ -122,9 +110,9 @@ class Tool(Generic[_ParamsT, _ResultT]):
 
     def _validate_handler(
         self,
-        handler: Callable[[_ParamsT], ToolResult[_ResultT]],
-        params_type: type[_ParamsT],
-        result_type: type[_ResultT],
+        handler: Callable[[ParamsT], ToolResult[ResultT]],
+        params_type: type[ParamsT],
+        result_type: type[ResultT],
     ) -> None:
         if not callable(handler):
             raise PromptValidationError(
@@ -197,7 +185,7 @@ class Tool(Generic[_ParamsT, _ResultT]):
         )
 
     @classmethod
-    def __class_getitem__(cls, item: object) -> type["Tool[Any, Any]"]:
+    def __class_getitem__(cls, item: object) -> type[Tool[Any, Any]]:
         params_type, result_type = cls._normalize_generic_arguments(item)
 
         class _SpecializedTool(cls):  # type: ignore[misc]
@@ -221,7 +209,7 @@ class Tool(Generic[_ParamsT, _ResultT]):
         return params_type, result_type
 
 
-class ToolsSection(Section[_ParamsT]):
+class ToolsSection[ParamsT](Section[ParamsT]):
     """Section that documents tools without emitting per-tool markdown."""
 
     def __init__(
@@ -229,11 +217,11 @@ class ToolsSection(Section[_ParamsT]):
         *,
         title: str,
         tools: Sequence[Tool[Any, Any]],
-        params: type[_ParamsT],
+        params: type[ParamsT],
         description: str | None = None,
-        defaults: _ParamsT | None = None,
+        defaults: ParamsT | None = None,
         children: Sequence[Section[Any]] | None = None,
-        enabled: Callable[[_ParamsT], bool] | None = None,
+        enabled: Callable[[ParamsT], bool] | None = None,
     ) -> None:
         super().__init__(
             title=title,
@@ -253,7 +241,7 @@ class ToolsSection(Section[_ParamsT]):
             Template(description_text) if description_text is not None else None
         )
 
-    def render(self, params: _ParamsT, depth: int) -> str:
+    def render(self, params: ParamsT, depth: int) -> str:
         heading_level = "#" * (depth + 2)
         heading = f"{heading_level} {self.title.strip()}"
 

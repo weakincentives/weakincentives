@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
-from typing import Any, Iterator, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .errors import (
     PromptRenderError,
@@ -75,11 +75,11 @@ class Prompt:
 
         return "\n\n".join(rendered_sections)
 
-    def tools(self, *params: Any) -> tuple["Tool[Any, Any]", ...]:
+    def tools(self, *params: Any) -> tuple[Tool[Any, Any], ...]:
         """Return tools exposed by enabled sections in traversal order."""
 
         param_lookup = self._collect_param_lookup(params)
-        collected: list["Tool[Any, Any]"] = []
+        collected: list[Tool[Any, Any]] = []
 
         for node, _section_params in self._iter_enabled_sections(param_lookup):
             section_tools = node.section.tools()
