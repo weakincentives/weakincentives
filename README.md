@@ -9,6 +9,14 @@ Tools for developing and optimizing side effect free background agents.
 - `Prompt`, `Section`, `TextSection`, and `ToolsSection` abstractions help build structured, parameterised Markdown prompts.
 - Strict typing, Ruff formatting/linting, and pytest coverage keep the surface reliable while the API evolves.
 
+## Guiding Principles
+- Dataclasses anchor every contract so schema issues surface immediately.
+- Fail loudly with contextual diagnostics instead of masking invalid templates or sections.
+- Keep markdown structure deterministic and readable with disciplined section hierarchies.
+- Prefer declarative configuration over embedded control flow within prompts and tools.
+- Reuse shared dataclasses freely, while keeping tool names unique and descriptive.
+- Document behavior in the prompt layer and leave provider-specific execution to adapters.
+
 ## Quick Start
 ```bash
 # Install dependencies and the managed virtualenv
