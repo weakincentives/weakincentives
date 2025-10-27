@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 _ERROR_MESSAGE = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -23,8 +23,17 @@ class _OpenAIModule(Protocol):
     OpenAI: _OpenAIClientFactory
 
 
-# Structural alias used for both runtime and type checking when the optional extra is absent.
-OpenAI = _OpenAIProtocol
+if TYPE_CHECKING:
+    try:
+        from openai import OpenAI as _ConcreteOpenAI
+    except (
+        ModuleNotFoundError
+    ):  # pragma: no cover - optional dependency absent during typing
+        OpenAI = _OpenAIProtocol
+    else:  # pragma: no cover - exercised in environments with the extra installed
+        OpenAI = _ConcreteOpenAI
+else:
+    OpenAI = _OpenAIProtocol
 
 
 def _load_openai_module() -> _OpenAIModule:

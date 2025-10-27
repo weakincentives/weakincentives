@@ -30,9 +30,9 @@ pip-audit:
 
 # Run type checker
 typecheck:
-	@uv run ty check --error-on-warning -qq . || \
+	@uv run --all-extras ty check --error-on-warning -qq . || \
 		(echo "ty check failed; rerunning with verbose output..." >&2; \
-		uv run ty check --error-on-warning .)
+		uv run --all-extras ty check --error-on-warning .)
 
 # Run tests with coverage (100% minimum)
 test:
