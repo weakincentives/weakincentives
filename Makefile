@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck all clean
+.PHONY: format check test lint typecheck bandit all clean
 
 # Format code with ruff
 format:
@@ -16,6 +16,10 @@ lint:
 lint-fix:
 	uv run ruff check --fix .
 
+# Run Bandit security scanner
+bandit:
+	uv run python tools/run_bandit.py -q -r src/weakincentives
+
 # Run type checker
 typecheck:
 	uv run ty check --error-on-warning .
@@ -24,11 +28,11 @@ typecheck:
 test:
 	uv run pytest --strict-config --strict-markers --maxfail=1 --cov-fail-under=100
 
-# Run all checks (format check, lint, typecheck, test)
-check: format-check lint typecheck test
+# Run all checks (format check, lint, typecheck, bandit, test)
+check: format-check lint typecheck bandit test
 
 # Run all checks and fixes
-all: format lint-fix typecheck test
+all: format lint-fix bandit typecheck test
 
 # Clean cache files
 clean:

@@ -1,0 +1,48 @@
+"""Bandit runner with Python 3.14 AST compatibility shims."""
+
+from __future__ import annotations
+
+import ast
+import importlib
+import sys
+from collections.abc import Callable
+
+BanditMain = Callable[[], int | None]
+
+
+def _patch_ast() -> None:
+    """Restore AST nodes removed in Python 3.14 that Bandit still expects."""
+
+    constant = getattr(ast, "Constant", None)
+    if constant is None:
+        return
+
+    for deprecated in ("Num", "Str", "Bytes", "NameConstant", "Ellipsis"):
+        if not hasattr(ast, deprecated):
+            setattr(ast, deprecated, constant)  # type: ignore[attr-defined]
+
+    def _make_property() -> property:
+        return property(lambda self: self.value)
+
+    for attr_name in ("n", "s", "b"):
+        if not hasattr(constant, attr_name):
+            setattr(constant, attr_name, _make_property())
+
+
+def _load_bandit_main() -> BanditMain:
+    module = importlib.import_module("bandit.__main__")
+    main_attr = module.main
+    if not callable(main_attr):  # pragma: no cover - defensive guard
+        raise TypeError("bandit.__main__.main is not callable")
+    return main_attr
+
+
+def main() -> int:
+    _patch_ast()
+    bandit_main = _load_bandit_main()
+    result = bandit_main()
+    return 0 if result is None else int(result)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
