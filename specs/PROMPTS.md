@@ -34,11 +34,14 @@ determine visibility and `render(params, depth)` to emit the markdown fragment (
 variants can plug in alternative templating engines or emit structured output (markdown tables, CSV, JSON) without
 rewriting prompt logic, so long as they honor the heading pipeline. The default concrete subclass, `TextSection`, relies
 on `Template.safe_substitute` to render its `body` string, applies `textwrap.dedent` and stripping before substitution,
-and emits normalized markdown. Each section declares a `params` dataclass type that lists the variables it requires, an
-optional `defaults` instance that pre-populates values, a raw `body` string interpreted by the concrete section class,
-optional child sections exposed through the `children` collection, and an optional boolean `enabled` callable. The
-callable receives the effective dataclass instance (either the override passed to `render` or the fallback defaults) and lets
-authors skip entire subtrees dynamically while still staying inside the strict `Template` feature set.
+and emits normalized markdown. Concrete sections are instantiated by specializing the generic `Section[ParamsT]` base class (for example
+`TextSection[GuidanceParams](...)`). This pins the dataclass type to the section before any instance is created, and the
+base class rejects attempts to construct an unspecialized section or provide multiple type arguments. Each specialized
+section exposes the `params_type` metadata, accepts an optional `defaults` instance that pre-populates values, stores the
+raw `body` string interpreted by the concrete section class, wires optional child sections through the `children` collection,
+and supports an optional boolean `enabled` callable. The callable receives the effective dataclass instance (either the
+override passed to `render` or the fallback defaults) and lets authors skip entire subtrees dynamically while still staying
+inside the strict `Template` feature set.
 
 ## Construction Rules
 When a `Prompt` is instantiated it registers every section by the type of its parameter dataclass, storing the default
