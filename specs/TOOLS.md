@@ -2,14 +2,14 @@
 
 ## Introduction
 Large language model runtimes expect prompts to advertise structured "tools" (a.k.a. function calls) that can be invoked
-mid-interaction. The existing `Prompt` abstraction centralizes markdown instructions but lacks a native way to describe
-those tools. This document defines `ToolsSection`, a `Section` subclass that collects tool definitions alongside the rest
-of the prompt tree so authors can manage instructions and callable affordances in one place.
+mid-interaction. The prompt abstraction now allows every `Section` to contribute tools directly through a shared
+interface, eliminating the need for a dedicated `ToolsSection`. This keeps instructions and callable affordances
+co-located while reusing the existing section hierarchy for ordering and enablement.
 
 ## Goals
 - **Section-First Integration**: Allow tools to live inside the existing section hierarchy so ordering and enablement stay
   consistent with the rest of the prompt.
-- **Single Source of Truth**: Co-locate tool contracts with the prompt that introduces them, eliminating ad-hoc external
+- **Single Source of Truth**: Co-locate tool contracts with the prompt that introduces them, removing ad-hoc external
   registries.
 - **Type-Safe Tooling**: Retain the dataclass-first approach to argument validation so schema issues surface before a
   request reaches an LLM.
@@ -18,8 +18,8 @@ of the prompt tree so authors can manage instructions and callable affordances i
 
 ## Guiding Principles
 - **Explicit Contracts**: Tool names, parameter shapes, and summaries are declared statically in code.
-- **Composable Structure**: Multiple `ToolsSection` instances can appear anywhere in the tree; the prompt collects their
-  contents in render order.
+- **Composable Structure**: Any section can expose tools; the prompt collects their contents in render order while
+  honoring enablement predicates.
 - **Strict Validation**: Duplicate tool names, missing required fields, or parameter mismatches raise
   `PromptValidationError` during construction.
 - **Runtime Agnostic**: The prompt layer stops at describing tools; adapter layers handle provider-specific payloads and
@@ -46,48 +46,36 @@ Parameter and result dataclasses inherit the same validation rules as section pa
 markdown must exist on the dataclass, and required fields without defaults must be supplied when rendering. Tools bind the
 dataclass *types* through their generic parameters—no redundant instance plumbing lives in the prompt configuration.
 
-### `ToolsSection`
-`ToolsSection` subclasses `Section`, unlocking existing enablement logic, heading management, and child composition:
-- Accepts `tools: Sequence[Tool]` and an optional markdown `description` template that can reference the section's
-  parameters for additional guidance.
-- Shares the surrounding section's `params` dataclass so authors can keep instructional text and tool definitions aligned.
-- Minimizes rendered output by omitting per-tool listings from markdown; authors can add a concise description if human
-  readers need inline guidance. Deeper schema output is intentionally deferred to adapter layers, and additional
-  formatting hooks will be introduced only if real prompts require customization beyond this default.
-- Exposes the contained tools back to the prompt runtime so they can be returned via `Prompt.tools()`.
-
-Multiple `ToolsSection` instances can appear in one prompt. During validation the prompt aggregates every tool, ensures
-names remain unique, and records declaration order. Tools are free to share parameter or result dataclasses when that
-improves reuse. Disabled sections (via `is_enabled`) omit
-both markdown and tool entries. Per-tool enablement remains out of scope for this iteration.
-
-## Schema Generation
-Schema serialization is out of scope for this iteration. The prompt layer guarantees access to strongly typed `Tool`
-objects; provider adapters (OpenAI, Anthropic, etc.) can translate those into JSON Schema or API-specific payloads as
-needed without touching the prompt core.
+### Section Tool Registration
+`Section.__init__` accepts an optional `tools` sequence. Sections normalize the sequence into a tuple, validate each entry
+is a `Tool`, and expose the collection via `Section.tools()`. Because every section shares this capability, authors can:
+- Attach tools to existing `TextSection`s without creating new subclasses.
+- Associate tools with otherwise minimal sections that only emit headings or act as grouping nodes.
+- Allow child sections to contribute additional tooling while parent enablement gates the entire branch.
 
 ## Prompt Integration
-`Prompt` continues to accept an ordered tree of sections. `ToolsSection` integrates without new constructor arguments:
-1. During initialization the prompt walks the section tree depth-first, collecting tools from each `ToolsSection`.
-2. Validation enforces unique tool names across the entire prompt; composite prompts must coordinate naming themselves
-   until we revisit hierarchical namespaces. Parameter and result dataclasses may repeat across tools.
+`Prompt` continues to accept an ordered tree of sections. During initialization it walks the tree depth-first, collecting
+all tools contributed by each section:
+1. Validation enforces unique tool names across the entire prompt; composite prompts must coordinate naming themselves
+   until hierarchical namespaces are introduced.
+2. Parameter and result dataclasses may repeat across tools to encourage reuse.
 3. Declaration order is cached so callers can retrieve tools without re-traversing the tree.
 
-`Prompt.render(...)` still returns the rendered markdown string, accepting dataclass overrides exactly as before. A new
-`Prompt.tools()` accessor exposes an ordered list of `Tool` objects contributed by enabled `ToolsSection`s, honoring
+`Prompt.render(...)` still returns the rendered markdown string, accepting dataclass overrides exactly as before. The
+`Prompt.tools()` accessor now surfaces an ordered list of `Tool` objects contributed by enabled sections, honoring
 section-level defaults and enablement rules.
 
 ## Runtime Execution
-`ToolsSection` only documents callable capabilities. Higher-level orchestration code is responsible for invoking the
-appropriate handler when an LLM emits a tool call, passing the params dataclass instance as the sole argument. Handlers
-return a `ToolResult[result_type]` directly. The prompt layer remains side effect free—it surfaces handlers and
-`result_type` metadata without executing them. The package provides no sync/async bridging helpers; orchestrators decide
-when to `await` or call handlers directly.
+Sections only document callable capabilities. Higher-level orchestration code is responsible for invoking the appropriate
+handler when an LLM emits a tool call, passing the params dataclass instance as the sole argument. Handlers return a
+`ToolResult[result_type]` directly. The prompt layer remains side effect free—it surfaces handlers and `result_type`
+metadata without executing them. The package provides no sync/async bridging helpers; orchestrators decide when to `await`
+or call handlers directly.
 
 ## Example
 ```python
 from dataclasses import dataclass, field
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult, ToolsSection
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 
 @dataclass
 class LookupParams:
@@ -102,6 +90,10 @@ class LookupResult:
 @dataclass
 class GuidanceParams:
     primary_tool: str
+
+@dataclass
+class ToolDescriptionParams:
+    primary_tool: str = "lookup_entity"
 
 def lookup_handler(params: LookupParams) -> ToolResult[LookupResult]:
     result = LookupResult(entity_id=params.entity_id, document_url="https://example.com")
@@ -123,25 +115,29 @@ tooling_overview = Prompt(
             Use tools when you need up-to-date context. Prefer ${primary_tool} for critical lookups.
             """,
             children=[
-                ToolsSection[GuidanceParams](
+                TextSection[ToolDescriptionParams](
                     title="Available Tools",
-                    tools=[lookup_tool],
-                    description="""
+                    body="""
                     Invoke ${primary_tool} whenever you need fresh entity context.
                     """,
+                    tools=[lookup_tool],
+                    defaults=ToolDescriptionParams(),
                 )
             ],
         )
     ],
 )
 
-markdown = tooling_overview.render(GuidanceParams(primary_tool="lookup_entity"))
+markdown = tooling_overview.render(
+    GuidanceParams(primary_tool="lookup_entity"),
+    ToolDescriptionParams(),
+)
 tools = tooling_overview.tools()
 assert tools[0].name == "lookup_entity"
 ```
 
-In the example above the `ToolsSection` contributes its title and optional description to the markdown output but omits
-the tool listing, preserving context budget while keeping a single source of truth for adapters.
+In the example the nested `TextSection` documents the tooling guidance while registering the `lookup_entity` tool. Because
+sections own their tool collections directly, no additional subclasses are needed to describe a toolbox.
 
 ## Validation and Error Handling
 - Construction failures raise `PromptValidationError` with contextual data (`section path`, `tool.name`, parameter
@@ -150,4 +146,4 @@ the tool listing, preserving context budget while keeping a single source of tru
 - Registering two tools with the same name triggers `PromptValidationError` to preserve lookup determinism.
 - Handler references that do not accept exactly one argument matching the `ParamsT` dataclass raise
   `PromptValidationError` during prompt validation.
-- Disabled `ToolsSection` instances contribute neither markdown nor entries in `Prompt.tools()`.
+- Disabled sections contribute neither markdown nor entries in `Prompt.tools()`.

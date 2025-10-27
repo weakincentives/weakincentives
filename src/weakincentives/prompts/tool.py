@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import inspect
 import re
-import textwrap
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field, is_dataclass
-from string import Template
 from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
-from .errors import PromptRenderError, PromptValidationError
-from .section import Section
+from .errors import PromptValidationError
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
@@ -209,93 +206,4 @@ class Tool[ParamsT, ResultT]:
         return params_type, result_type
 
 
-class ToolsSection[ParamsT](Section[ParamsT]):
-    """Section that documents tools without emitting per-tool markdown."""
-
-    def __init__(
-        self,
-        *,
-        title: str,
-        tools: Sequence[Tool[Any, Any]],
-        description: str | None = None,
-        defaults: ParamsT | None = None,
-        children: Sequence[Section[Any]] | None = None,
-        enabled: Callable[[ParamsT], bool] | None = None,
-    ) -> None:
-        super().__init__(
-            title=title,
-            defaults=defaults,
-            children=children,
-            enabled=enabled,
-        )
-        if not tools:
-            raise ValueError("ToolsSection requires at least one Tool instance.")
-
-        normalized_tools: list[Tool[Any, Any]] = []
-        for tool in tools:
-            if not isinstance(tool, Tool):
-                raise TypeError("ToolsSection tools must be Tool instances.")
-            normalized_tools.append(tool)
-
-        self._tools = tuple(normalized_tools)
-
-        description_text = None
-        if description is not None:
-            stripped_description = textwrap.dedent(description).strip()
-            if stripped_description:
-                description_text = stripped_description
-        self._description_template = (
-            Template(description_text) if description_text is not None else None
-        )
-
-    def render(self, params: ParamsT, depth: int) -> str:
-        heading_level = "#" * (depth + 2)
-        heading = f"{heading_level} {self.title.strip()}"
-
-        if self._description_template is None:
-            return heading
-
-        context = vars(params)
-        missing = self.placeholder_names() - set(context)
-        if missing:
-            placeholder = sorted(missing)[0]
-            raise PromptRenderError(
-                "Missing placeholder during render.",
-                placeholder=placeholder,
-            )
-
-        try:
-            description = self._description_template.safe_substitute(context)
-        except (
-            KeyError
-        ) as error:  # pragma: no cover - defensive parity with TextSection
-            placeholder = str(error.args[0]) if error.args else None
-            raise PromptRenderError(
-                "Missing placeholder during render.",
-                placeholder=placeholder,
-            ) from error
-
-        if description:
-            return f"{heading}\n\n{description.strip()}"
-        return heading
-
-    def placeholder_names(self) -> set[str]:
-        template = self._description_template
-        if template is None:
-            return set()
-        placeholders: set[str] = set()
-        for match in template.pattern.finditer(template.template):
-            named = match.group("named")
-            if named:
-                placeholders.add(named)
-                continue
-            braced = match.group("braced")
-            if braced:
-                placeholders.add(braced)
-        return placeholders
-
-    def tools(self) -> tuple[Tool[Any, Any], ...]:
-        return self._tools
-
-
-__all__ = ["Tool", "ToolResult", "ToolsSection"]
+__all__ = ["Tool", "ToolResult"]

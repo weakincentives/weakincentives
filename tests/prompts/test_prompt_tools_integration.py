@@ -2,13 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from weakincentives.prompts import (
-    Prompt,
-    TextSection,
-    Tool,
-    ToolResult,
-    ToolsSection,
-)
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 
 
 @dataclass
@@ -49,11 +43,11 @@ def test_prompt_tools_integration_example() -> None:
         handler=_lookup_handler,
     )
 
-    tools_section = ToolsSection[ToolDescriptionParams](
+    tools_section = TextSection[ToolDescriptionParams](
         title="Available Tools",
+        body="Invoke ${primary_tool} whenever you need fresh entity context.",
         tools=[lookup_tool],
         defaults=ToolDescriptionParams(),
-        description="Invoke ${primary_tool} whenever you need fresh entity context.",
     )
 
     guidance = TextSection[GuidanceParams](

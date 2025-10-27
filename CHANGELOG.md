@@ -8,8 +8,8 @@ All notable changes to this project will be documented in this file.
 - Introduced a complete prompt composition framework with a `Section` base class, `TextSection` rendering, dedicated
   exceptions, placeholder validation, conditional nesting, improved render ergonomics, and 100% coverage backed by new
   tests.
-- Added prompt tool orchestration primitives: a spec-aligned `Tool` dataclass with shared dataclass support, prompt-
-  level tool aggregation and duplicate detection, and a `ToolsSection` that surfaces default tool registrations.
+- Added prompt tool orchestration primitives: a spec-aligned `Tool` dataclass with shared dataclass support and prompt-
+  level tool aggregation with duplicate detection.
 - Shipped an optional OpenAI adapter behind the `openai` extra, including adapter tests and usage documentation.
 
 ### Tooling
@@ -27,6 +27,9 @@ All notable changes to this project will be documented in this file.
   prompt integration expectations.
 - Captured prompt and tools contracts under `specs/`, and refreshed the README to emphasize agent-focused positioning
   and prompt ergonomics.
+
+### Changed
+- Simplified tool registration by removing `ToolsSection`; every `Section` now accepts a `tools` sequence.
 
 ### Removed
 - Deleted the deprecated `plans/` directory now that prompt and tools specifications live under `specs/`.

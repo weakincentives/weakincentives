@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .tool import Tool
 
 
 class Section[ParamsT](ABC):
@@ -15,6 +18,7 @@ class Section[ParamsT](ABC):
         defaults: ParamsT | None = None,
         children: Sequence[Section[Any]] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
+        tools: Sequence[Tool[Any, Any]] | None = None,
     ) -> None:
         params_type = getattr(self.__class__, "_params_type", None)
         if not isinstance(params_type, type):
@@ -34,6 +38,7 @@ class Section[ParamsT](ABC):
             normalized_children.append(child)
         self.children = tuple(normalized_children)
         self._enabled = enabled
+        self._tools = self._normalize_tools(tools)
 
     def is_enabled(self, params: ParamsT) -> bool:
         """Return True when the section should render for the given params."""
@@ -54,7 +59,7 @@ class Section[ParamsT](ABC):
     def tools(self) -> tuple[Any, ...]:
         """Return the tools exposed by this section."""
 
-        return ()
+        return self._tools
 
     @classmethod
     def __class_getitem__(cls, item: object) -> type[Section[Any]]:
@@ -74,6 +79,22 @@ class Section[ParamsT](ABC):
         if isinstance(item, tuple):
             raise TypeError("Section[...] expects a single type argument.")
         return item
+
+    @staticmethod
+    def _normalize_tools(
+        tools: Sequence[Tool[Any, Any]] | None,
+    ) -> tuple[Tool[Any, Any], ...]:
+        if not tools:
+            return ()
+
+        from .tool import Tool
+
+        normalized: list[Tool[Any, Any]] = []
+        for tool in tools:
+            if not isinstance(tool, Tool):
+                raise TypeError("Section tools must be Tool instances.")
+            normalized.append(tool)
+        return tuple(normalized)
 
 
 __all__ = ["Section"]

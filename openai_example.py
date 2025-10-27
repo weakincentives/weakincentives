@@ -8,7 +8,7 @@ from dataclasses import MISSING, dataclass, fields
 from typing import Any
 
 from weakincentives.adapters import create_openai_client
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult, ToolsSection
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 
 
 @dataclass
@@ -70,6 +70,12 @@ def build_prompt() -> Prompt:
         description="Return the provided text in uppercase characters.",
         handler=echo_text_handler,
     )
+    tool_overview = TextSection[ToolOverview](
+        title="Available Tools",
+        body="Expose ${primary_tool} to turn arbitrary input into uppercase text.",
+        tools=[echo_tool],
+        defaults=ToolOverview(),
+    )
     guidance_section = TextSection[AgentGuidance](
         title="Agent Guidance",
         body=(
@@ -77,22 +83,13 @@ def build_prompt() -> Prompt:
             "wants text transformed."
         ),
         defaults=AgentGuidance(),
-        children=[
-            ToolsSection[ToolOverview](
-                title="Available Tools",
-                tools=[echo_tool],
-                defaults=ToolOverview(),
-                description=(
-                    "Expose ${primary_tool} to turn arbitrary input into uppercase text."
-                ),
-            )
-        ],
+        children=[tool_overview],
     )
     return Prompt(name="echo_agent", sections=[guidance_section])
 
 
 class BasicOpenAIAgent:
-    """Single-turn OpenAI agent that wires Prompt + ToolsSection definitions."""
+    """Single-turn OpenAI agent that wires Prompt + tool definitions."""
 
     def __init__(self, model: str = "gpt-4o-mini") -> None:
         self._guidance = AgentGuidance()

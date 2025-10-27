@@ -6,7 +6,7 @@ Tools for developing and optimizing side effect free background agents.
 
 ## Overview
 - Python 3.14 library with a growing prompt-composition toolkit.
-- `Prompt`, `Section`, `TextSection`, and `ToolsSection` abstractions help build structured, parameterised Markdown prompts.
+- `Prompt`, `Section`, `TextSection`, and `Tool` abstractions help build structured, parameterised Markdown prompts with attached tool metadata.
 - Strict typing, Ruff formatting/linting, and pytest coverage keep the surface reliable while the API evolves.
 
 ## Guiding Principles
@@ -56,7 +56,7 @@ Sections can declare child sections, defaults, and `enabled` predicates. The pro
 ```python
 from dataclasses import dataclass
 
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult, ToolsSection
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 
 @dataclass
 class GuidanceParams:
@@ -85,19 +85,19 @@ lookup_tool = Tool[LookupParams, LookupResult](
     handler=lookup_handler,
 )
 
+tool_overview = TextSection[ToolDescriptionParams](
+    title="Available Tools",
+    body="Invoke ${primary_tool} whenever you need fresh context.",
+    tools=[lookup_tool],
+    defaults=ToolDescriptionParams(),
+)
+
 prompt = Prompt(
     sections=[
         TextSection[GuidanceParams](
             title="Guidance",
             body="Use ${primary_tool} for critical lookups.",
-            children=[
-                ToolsSection[ToolDescriptionParams](
-                    title="Available Tools",
-                    tools=[lookup_tool],
-                    defaults=ToolDescriptionParams(),
-                    description="Invoke ${primary_tool} whenever you need fresh context.",
-                )
-            ],
+            children=[tool_overview],
         )
     ]
 )
@@ -106,7 +106,7 @@ tools = prompt.tools(GuidanceParams(primary_tool="lookup_entity"))
 assert tools[0].handler is lookup_handler
 ```
 
-`Prompt.tools()` returns the tools contributed by enabled `ToolsSection`s in depth-first order, making it easy to hand descriptors and handlers to an orchestration layer without duplicating configuration.
+`Prompt.tools()` returns the tools contributed by enabled sections in depth-first order, making it easy to hand descriptors and handlers to an orchestration layer without duplicating configuration.
 
 ## Development Workflow
 - `make format` / `make format-check` – auto-format or audit with Ruff.

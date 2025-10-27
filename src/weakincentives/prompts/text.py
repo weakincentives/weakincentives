@@ -3,10 +3,13 @@ from __future__ import annotations
 import textwrap
 from collections.abc import Callable, Sequence
 from string import Template
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .errors import PromptRenderError
 from .section import Section
+
+if TYPE_CHECKING:
+    from .tool import Tool
 
 
 class TextSection[ParamsT](Section[ParamsT]):
@@ -20,12 +23,14 @@ class TextSection[ParamsT](Section[ParamsT]):
         defaults: ParamsT | None = None,
         children: Sequence[Section[Any]] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
+        tools: Sequence[Tool[Any, Any]] | None = None,
     ) -> None:
         super().__init__(
             title=title,
             defaults=defaults,
             children=children,
             enabled=enabled,
+            tools=tools,
         )
         self.body = body
 

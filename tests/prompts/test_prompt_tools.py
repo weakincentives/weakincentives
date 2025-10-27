@@ -7,7 +7,7 @@ import pytest
 
 from weakincentives.prompts import Prompt, Section, TextSection
 from weakincentives.prompts.errors import PromptValidationError
-from weakincentives.prompts.tool import Tool, ToolsSection
+from weakincentives.prompts.tool import Tool
 
 
 @dataclass
@@ -70,20 +70,21 @@ def _build_prompt() -> tuple[
     primary_tool = _build_primary_tool()
     secondary_tool = _build_secondary_tool()
 
+    primary_section = TextSection[PrimarySectionParams](
+        title="Primary",
+        body="",
+        tools=[primary_tool],
+        defaults=PrimarySectionParams(),
+    )
     guidance = TextSection[GuidanceParams](
         title="Guidance",
         body="Use ${primary_tool} when available.",
         enabled=lambda params: params.allow_tools,
-        children=[
-            ToolsSection[PrimarySectionParams](
-                title="Primary",
-                tools=[primary_tool],
-                defaults=PrimarySectionParams(),
-            )
-        ],
+        children=[primary_section],
     )
-    secondary = ToolsSection[SecondaryToggleParams](
+    secondary = TextSection[SecondaryToggleParams](
         title="Secondary",
+        body="",
         tools=[secondary_tool],
         defaults=SecondaryToggleParams(enabled=True),
         enabled=lambda params: params.enabled,
@@ -114,13 +115,15 @@ def test_prompt_tools_depth_first_and_enablement() -> None:
 
 
 def test_prompt_tools_rejects_duplicate_tool_names() -> None:
-    first_section = ToolsSection[PrimarySectionParams](
+    first_section = TextSection[PrimarySectionParams](
         title="First Tools",
+        body="",
         tools=[_build_primary_tool()],
         defaults=PrimarySectionParams(),
     )
-    second_section = ToolsSection[SecondaryToggleParams](
+    second_section = TextSection[SecondaryToggleParams](
         title="Second Tools",
+        body="",
         tools=[_build_primary_tool()],
         defaults=SecondaryToggleParams(),
     )
@@ -141,13 +144,15 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
         handler=None,
     )
 
-    first_section = ToolsSection[PrimarySectionParams](
+    first_section = TextSection[PrimarySectionParams](
         title="Primary",
+        body="",
         tools=[primary_tool],
         defaults=PrimarySectionParams(),
     )
-    second_section = ToolsSection[SecondaryToggleParams](
+    second_section = TextSection[SecondaryToggleParams](
         title="Alternate",
+        body="",
         tools=[alternate_tool],
         defaults=SecondaryToggleParams(),
     )
@@ -182,8 +187,9 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     tool = _build_primary_tool()
     tool.params_type = str  # type: ignore[assignment]
 
-    section = ToolsSection[PrimarySectionParams](
+    section = TextSection[PrimarySectionParams](
         title="Primary",
+        body="",
         tools=[tool],
         defaults=PrimarySectionParams(),
     )
