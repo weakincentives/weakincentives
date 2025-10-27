@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompts import Prompt, TextSection
+from weakincentives.prompts import Prompt, Section, TextSection
 from weakincentives.prompts.errors import PromptValidationError
 from weakincentives.prompts.tool import Tool, ToolsSection
 
@@ -164,3 +164,41 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
     tools = prompt.tools()
     assert {tool.name for tool in tools} == {"primary_lookup", "alternate_primary"}
     assert all(tool.params_type is PrimaryToolParams for tool in tools)
+
+
+class _InvalidToolSection(Section[GuidanceParams]):
+    def render(self, params: GuidanceParams, depth: int) -> str:
+        return ""
+
+    def tools(self) -> tuple[Any, ...]:
+        return ("not-a-tool",)
+
+
+def test_prompt_tools_requires_tool_instances() -> None:
+    invalid_section = _InvalidToolSection(title="Invalid", params=GuidanceParams)
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Prompt(sections=[invalid_section])
+
+    error = cast(PromptValidationError, error_info.value)
+    assert error.section_path == ("Invalid",)
+    assert error.dataclass_type is GuidanceParams
+
+
+def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
+    tool = _build_primary_tool()
+    tool.params_type = str  # type: ignore[assignment]
+
+    section = ToolsSection(
+        title="Primary",
+        tools=[tool],
+        params=PrimarySectionParams,
+        defaults=PrimarySectionParams(),
+    )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Prompt(sections=[section])
+
+    error = cast(PromptValidationError, error_info.value)
+    assert error.section_path == ("Primary",)
+    assert error.dataclass_type is str

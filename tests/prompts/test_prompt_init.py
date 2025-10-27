@@ -99,3 +99,19 @@ def test_prompt_validates_text_section_placeholders():
     assert exc.value.placeholder == "oops"
     assert exc.value.section_path == ("Invalid",)
     assert exc.value.dataclass_type is PlaceholderParams
+
+
+def test_text_section_rejects_non_section_children():
+    @dataclass
+    class ParentParams:
+        value: str
+
+    with pytest.raises(TypeError) as exc:
+        TextSection(
+            title="Parent",
+            body="${value}",
+            params=ParentParams,
+            children=["not a section"],  # type: ignore[arg-type]
+        )
+
+    assert "Section instances" in str(exc.value)

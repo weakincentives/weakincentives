@@ -144,6 +144,16 @@ def test_prompt_render_requires_dataclass_instances():
     assert exc.value.dataclass_type is IntroParams
 
 
+def test_prompt_render_rejects_duplicate_param_instances():
+    prompt = build_prompt()
+
+    with pytest.raises(PromptValidationError) as exc:
+        prompt.render(IntroParams(title="first"), IntroParams(title="second"))
+
+    assert isinstance(exc.value, PromptValidationError)
+    assert exc.value.dataclass_type is IntroParams
+
+
 def test_prompt_render_renders_nested_sections_and_depth():
     prompt = build_nested_prompt()
 

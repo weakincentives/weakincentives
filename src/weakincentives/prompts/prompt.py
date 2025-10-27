@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .errors import (
     PromptRenderError,
@@ -10,9 +10,7 @@ from .errors import (
     SectionPath,
 )
 from .section import Section
-
-if TYPE_CHECKING:
-    from .tool import Tool
+from .tool import Tool
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +165,11 @@ class Prompt:
                     dataclass_type=provided_type,
                 )
             params_type = provided_type
+            if params_type in lookup:
+                raise PromptValidationError(
+                    "Duplicate params type supplied to prompt.",
+                    dataclass_type=params_type,
+                )
             if params_type not in self._params_registry:
                 raise PromptValidationError(
                     "Unexpected params type supplied to prompt.",
@@ -245,6 +248,23 @@ class Prompt:
             return
 
         for tool in section_tools:
+            if not isinstance(tool, Tool):
+                raise PromptValidationError(
+                    "Section tools() must return Tool instances.",
+                    section_path=path,
+                    dataclass_type=section.params,
+                )
+            params_type = getattr(tool, "params_type", None)
+            if not isinstance(params_type, type) or not is_dataclass(params_type):
+                raise PromptValidationError(
+                    "Tool params_type must be a dataclass type.",
+                    section_path=path,
+                    dataclass_type=(
+                        params_type
+                        if isinstance(params_type, type)
+                        else type(params_type)
+                    ),
+                )
             existing_path = self._tool_name_registry.get(tool.name)
             if existing_path is not None:
                 raise PromptValidationError(

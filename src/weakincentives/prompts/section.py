@@ -20,7 +20,12 @@ class Section[T](ABC):
         self.title = title
         self.params = params
         self.defaults = defaults
-        self.children: tuple[Section[Any], ...] = tuple(children or ())
+        normalized_children: list[Section[Any]] = []
+        for child in children or ():
+            if not isinstance(child, Section):
+                raise TypeError("Section children must be Section instances.")
+            normalized_children.append(child)
+        self.children = tuple(normalized_children)
         self._enabled = enabled
 
     def is_enabled(self, params: T) -> bool:

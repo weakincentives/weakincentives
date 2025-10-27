@@ -159,3 +159,25 @@ def test_tools_section_raises_render_error_for_missing_placeholder() -> None:
     error = error_info.value
     assert isinstance(error, PromptRenderError)
     assert error.placeholder == "primary_tool"
+
+
+def test_tools_section_requires_tools() -> None:
+    with pytest.raises(ValueError) as error_info:
+        ToolsSection(
+            title="Empty",
+            tools=[],
+            params=ExampleParams,
+        )
+
+    assert "Tool instance" in str(error_info.value)
+
+
+def test_tools_section_rejects_non_tool_entries() -> None:
+    with pytest.raises(TypeError) as error_info:
+        ToolsSection(
+            title="Invalid",
+            tools=["oops"],  # type: ignore[arg-type]
+            params=ExampleParams,
+        )
+
+    assert "Tool instances" in str(error_info.value)

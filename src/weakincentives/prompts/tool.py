@@ -230,7 +230,16 @@ class ToolsSection[ParamsT](Section[ParamsT]):
             children=children,
             enabled=enabled,
         )
-        self._tools: tuple[Tool[Any, Any], ...] = tuple(tools)
+        if not tools:
+            raise ValueError("ToolsSection requires at least one Tool instance.")
+
+        normalized_tools: list[Tool[Any, Any]] = []
+        for tool in tools:
+            if not isinstance(tool, Tool):
+                raise TypeError("ToolsSection tools must be Tool instances.")
+            normalized_tools.append(tool)
+
+        self._tools = tuple(normalized_tools)
 
         description_text = None
         if description is not None:
