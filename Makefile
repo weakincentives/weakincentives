@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck bandit pip-audit all clean
+.PHONY: format check test lint typecheck bandit deptry pip-audit all clean
 
 # Format code with ruff
 format:
@@ -20,6 +20,10 @@ lint-fix:
 bandit:
 	@uv run python tools/run_bandit.py -q -r src/weakincentives
 
+# Check for unused or missing dependencies with deptry
+deptry:
+	@uv run python tools/run_deptry.py
+
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
 	@uv run python tools/run_pip_audit.py
@@ -32,11 +36,11 @@ typecheck:
 test:
 	@uv run python tools/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --no-summary --cov-report=
 
-# Run all checks (format check, lint, typecheck, bandit, pip-audit, test)
-check: format-check lint typecheck bandit pip-audit test
+# Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, test)
+check: format-check lint typecheck bandit deptry pip-audit test
 
 # Run all checks and fixes
-all: format lint-fix bandit pip-audit typecheck test
+all: format lint-fix bandit deptry pip-audit typecheck test
 
 # Clean cache files
 clean:
