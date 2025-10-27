@@ -26,6 +26,11 @@ class AgentGuidance:
     primary_tool: str = "echo_text"
 
 
+@dataclass
+class UserTurnParams:
+    content: str
+
+
 def echo_text_handler(params: EchoToolParams) -> ToolResult[EchoToolResult]:
     result = EchoToolResult(text=params.text.upper())
     return ToolResult(message=f"Echoed text: {result.text}", payload=result)
@@ -59,7 +64,7 @@ def tool_to_openai_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
     }
 
 
-def build_prompt() -> Prompt:
+def build_system_prompt() -> Prompt:
     echo_tool = Tool[EchoToolParams, EchoToolResult](
         name="echo_text",
         description="Return the provided text in uppercase characters.",
@@ -82,62 +87,86 @@ def build_prompt() -> Prompt:
     return Prompt(name="echo_agent", sections=[guidance_section])
 
 
+def build_user_turn_prompt() -> Prompt:
+    user_turn_section = TextSection[UserTurnParams](
+        title="User Turn",
+        body=(
+            "The user has provided a new instruction. Use it to decide whether to "
+            "call tools or respond directly.\n\nInstruction:\n${content}"
+        ),
+    )
+    return Prompt(name="echo_user_turn", sections=[user_turn_section])
+
+
 class BasicOpenAIAgent:
-    """Single-turn OpenAI agent that wires Prompt + tool definitions."""
+    """Multi-turn OpenAI agent that wires Prompt + tool definitions."""
 
     def __init__(self, model: str = "gpt-4o-mini") -> None:
         self._guidance = AgentGuidance()
-        self.prompt = build_prompt()
+        self.system_prompt_template = build_system_prompt()
+        self.user_prompt_template = build_user_turn_prompt()
         self.model = model
-        self._system_prompt = self.prompt.render(self._guidance)
-        self._tools = self.prompt.tools(self._guidance)
+        self._system_prompt = self.system_prompt_template.render(self._guidance)
+        self._tools = self.system_prompt_template.tools(self._guidance)
         self._tool_specs = [tool_to_openai_spec(tool) for tool in self._tools]
         self._tool_registry = {
             tool.name: tool for tool in self._tools if tool.handler is not None
         }
         self._client = create_openai_client()
+        self._messages: list[dict[str, Any]] = []
+        self.reset()
 
-    def run(self, user_message: str) -> str:
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt},
-            {"role": "user", "content": user_message},
-        ]
-        first_response = self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=self._tool_specs,
-            tool_choice="auto",
-        )
-        choice = first_response.choices[0]
-        message = choice.message
-        tool_calls = message.tool_calls or []
-        if not tool_calls:
-            return message.content or ""
+    def run(self, user_message: str, *, max_turns: int = 8) -> str:
+        self.reset()
+        return self.send_user_message(user_message, max_turns=max_turns)
 
-        tool_call = tool_calls[0]
-        arguments = self._parse_arguments(tool_call.function.arguments)
-        tool_result = self._call_tool(tool_call.function.name, arguments)
+    def reset(self) -> None:
+        self._messages = [{"role": "system", "content": self._system_prompt}]
 
-        messages.append(
-            {
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": tool_calls,
-            }
+    def send_user_message(self, user_message: str, *, max_turns: int = 8) -> str:
+        user_content = self.user_prompt_template.render(
+            UserTurnParams(content=user_message)
         )
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": tool_result.message,
-            }
-        )
+        self._messages.append({"role": "user", "content": user_content})
+        return self._advance_conversation(max_turns=max_turns)
 
-        follow_up = self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-        )
-        return follow_up.choices[0].message.content or ""
+    def _advance_conversation(self, max_turns: int) -> str:
+        for _ in range(max_turns):
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=self._messages,
+                tools=self._tool_specs,
+                tool_choice="auto",
+            )
+            choice = response.choices[0]
+            message = choice.message
+            tool_calls = message.tool_calls or []
+
+            if not tool_calls:
+                final_content = message.content or ""
+                self._messages.append({"role": "assistant", "content": final_content})
+                return final_content
+
+            self._messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content or "",
+                    "tool_calls": tool_calls,
+                }
+            )
+
+            for tool_call in tool_calls:
+                arguments = self._parse_arguments(tool_call.function.arguments)
+                tool_result = self._call_tool(tool_call.function.name, arguments)
+                self._messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_result.message,
+                    }
+                )
+
+        raise RuntimeError("Agent stopped after reaching the maximum number of turns.")
 
     @staticmethod
     def _parse_arguments(arguments_json: str | None) -> dict[str, Any]:
@@ -163,8 +192,19 @@ def main() -> None:
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
     agent = BasicOpenAIAgent()
-    answer = agent.run("Please shout 'hello world'.")
-    print(answer)
+    print("Type 'exit' or 'quit' to stop the conversation.")
+    while True:
+        try:
+            prompt = input("You: ").strip()
+        except EOFError:  # pragma: no cover - interactive convenience
+            break
+        if not prompt:
+            print("Goodbye.")
+            break
+        if prompt.lower() in {"exit", "quit"}:
+            break
+        answer = agent.send_user_message(prompt)
+        print(f"Agent: {answer}")
 
 
 if __name__ == "__main__":
