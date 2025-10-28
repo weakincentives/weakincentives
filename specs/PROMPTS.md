@@ -1,6 +1,7 @@
 # Prompt Class Specification
 
 ## Introduction
+
 The `Prompt` abstraction centralizes every string template that flows to an LLM so the codebase has a single,
 inspectable source for system prompts and per-turn instructions. Each prompt is a markdown document assembled from
 typed `Section` objects whose templates rely on Python's `string.Template` engine. By forcing prompt authors to
@@ -8,12 +9,14 @@ declare explicit data carriers we reduce the chance of mismatched placeholders, 
 and give downstream callers a predictable, debuggable API.
 
 ## Goals
+
 Keep authoring friction low while providing strong validation. Make prompt structure obvious in logs and docs without
 forcing developers to learn complex templating rules. Encourage reuse by composing hierarchical sections, yet ensure
 that every placeholder a template references is captured in a dataclass so rendering bugs surface before a request
 reaches an LLM. The design should be simple enough to maintain but strict enough to prevent silent failures.
 
 ## Guiding Principles
+
 - **Type-Safety First**: Every placeholder maps to a dataclass field so template issues surface early in development
   rather than during an LLM call.
 - **Strict, Predictable Failures**: Validation and render errors fail loudly with actionable context instead of
@@ -26,6 +29,7 @@ reaches an LLM. The design should be simple enough to maintain but strict enough
   which keeps diffs clear and tooling feasible.
 
 ## Design Overview
+
 A `Prompt` owns a name and an ordered tree of `Section` instances. Rendering walks this tree depth first and produces
 markdown where the heading level is `##` for roots and adds one `#` per level of depth (so depth one becomes `###`,
 depth two `####`, and so on). The implementation keeps `Section` as the abstract base class that defines the shared
@@ -44,6 +48,7 @@ override passed to `render` or the fallback defaults) and lets authors skip enti
 inside the strict `Template` feature set.
 
 ## Construction Rules
+
 When a `Prompt` is instantiated it registers every section by the type of its parameter dataclass, storing the default
 instance if provided. Parameter types can repeat across sections—callers supply overrides by type and the prompt fans
 that instance out to every matching section. Each section may still define its own default instance; when no override is
@@ -55,6 +60,7 @@ dataclass attributes are acceptable, but missing placeholders trigger `PromptVal
 absent we rely on the dataclass' own default field values by instantiating it with no arguments during rendering.
 
 ## Rendering Flow
+
 `Prompt.render` accepts dataclass instances as positional arguments. Ordering is irrelevant because rendering matches
 instances by their concrete dataclass type. For each section we compute the effective params by starting with its
 configured default when present, otherwise instantiating the dataclass with no arguments (trusting field defaults and
@@ -66,6 +72,7 @@ heading at the appropriate depth followed by the body content. Text bodies are d
 single blank line so the final document is readable and deterministic.
 
 ## Validation and Error Handling
+
 All validation errors throw `PromptValidationError`, while issues discovered during rendering—missing dataclass
 instances, failed selector callables, `Template` substitution failures—raise `PromptRenderError`. Both exceptions
 should carry structured data describing the section path, the offending placeholder, and the dataclass type so calling
@@ -74,6 +81,7 @@ silently dropping sections or coercing mismatched data; strict failure modes kee
 transcripts.
 
 ## Non-Goals
+
 We deliberately exclude templating features that go beyond `Template.safe_substitute`: no conditionals, loops, or
 arbitrary expression evaluation. Prompt composition also stops at sections; we do not embed one prompt inside another,
 favoring explicit `children` for reuse. Telemetry, logging sinks, and additional metadata such as channel tags or
@@ -81,6 +89,7 @@ custom heading levels remain out of scope until real-world usage demonstrates a 
 concerns placeholder presence and dataclass coverage; naming conventions are unchecked by design.
 
 ## Usage Sketch
+
 ```python
 from dataclasses import dataclass
 from weakincentives.prompts import Prompt, TextSection

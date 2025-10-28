@@ -1,12 +1,14 @@
 # Tool Registration Specification
 
 ## Introduction
+
 Large language model runtimes expect prompts to advertise structured "tools" (a.k.a. function calls) that can be invoked
 mid-interaction. The prompt abstraction now allows every `Section` to contribute tools directly through a shared
 interface, eliminating the need for a dedicated `ToolsSection`. This keeps instructions and callable affordances
 co-located while reusing the existing section hierarchy for ordering and enablement.
 
 ## Goals
+
 - **Section-First Integration**: Allow tools to live inside the existing section hierarchy so ordering and enablement stay
   consistent with the rest of the prompt.
 - **Single Source of Truth**: Co-locate tool contracts with the prompt that introduces them, removing ad-hoc external
@@ -17,6 +19,7 @@ co-located while reusing the existing section hierarchy for ordering and enablem
   OpenAI or Anthropic clients without guessing.
 
 ## Guiding Principles
+
 - **Explicit Contracts**: Tool names, parameter shapes, and summaries are declared statically in code.
 - **Composable Structure**: Any section can expose tools; the prompt collects their contents in render order while
   honoring enablement predicates.
@@ -26,15 +29,20 @@ co-located while reusing the existing section hierarchy for ordering and enablem
   execution semantics.
 
 ## Core Concepts
+
 ### `ToolResult` Dataclass
+
 Tools return structured data that pairs a language-model-facing message with typed payload metadata. `ToolResult[PayloadT]`
 instances capture that response tuple, and every tool handler returns one directly:
+
 - `message: str` – short textual reply returned to the LLM.
 - `payload: PayloadT` – strongly typed result produced by the tool's business logic. The payload type is declared on the
   `Tool` so downstream adapters can reason about the schema without guessing.
 
 ### `Tool` Dataclass
+
 `Tool[ParamsT, ResultT]` instances describe callable affordances. They carry:
+
 - `name: str` – unique identifier scoped to a single prompt instance. Validation enforces ASCII-only lowercase letters,
   digits, or underscores with length ≤ 64 characters for SDK compatibility.
 - `description: str` – concise model-facing summary. We constrain summaries to ASCII, strip surrounding whitespace, and
@@ -47,25 +55,30 @@ markdown must exist on the dataclass, and required fields without defaults must 
 dataclass *types* through their generic parameters—no redundant instance plumbing lives in the prompt configuration.
 
 ### Section Tool Registration
+
 `Section.__init__` accepts an optional `tools` sequence. Sections normalize the sequence into a tuple, validate each entry
 is a `Tool`, and expose the collection via `Section.tools()`. Because every section shares this capability, authors can:
+
 - Attach tools to existing `TextSection`s without creating new subclasses.
 - Associate tools with otherwise minimal sections that only emit headings or act as grouping nodes.
 - Allow child sections to contribute additional tooling while parent enablement gates the entire branch.
 
 ## Prompt Integration
+
 `Prompt` continues to accept an ordered tree of sections. During initialization it walks the tree depth-first, collecting
 all tools contributed by each section:
+
 1. Validation enforces unique tool names across the entire prompt; composite prompts must coordinate naming themselves
    until hierarchical namespaces are introduced.
-2. Parameter and result dataclasses may repeat across tools to encourage reuse.
-3. Declaration order is cached so callers can retrieve tools without re-traversing the tree.
+1. Parameter and result dataclasses may repeat across tools to encourage reuse.
+1. Declaration order is cached so callers can retrieve tools without re-traversing the tree.
 
 `Prompt.render(...)` still returns the rendered markdown string, accepting dataclass overrides exactly as before. The
 `Prompt.tools()` accessor now surfaces an ordered list of `Tool` objects contributed by enabled sections, honoring
 section-level defaults and enablement rules.
 
 ## Runtime Execution
+
 Sections only document callable capabilities. Higher-level orchestration code is responsible for invoking the appropriate
 handler when an LLM emits a tool call, passing the params dataclass instance as the sole argument. Handlers return a
 `ToolResult[result_type]` directly. The prompt layer remains side effect free—it surfaces handlers and `result_type`
@@ -73,6 +86,7 @@ metadata without executing them. The package provides no sync/async bridging hel
 or call handlers directly.
 
 ## Example
+
 ```python
 from dataclasses import dataclass, field
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
@@ -140,6 +154,7 @@ In the example the nested `TextSection` documents the tooling guidance while reg
 sections own their tool collections directly, no additional subclasses are needed to describe a toolbox.
 
 ## Validation and Error Handling
+
 - Construction failures raise `PromptValidationError` with contextual data (`section path`, `tool.name`, parameter
   dataclass).
 - Rendering without required tool parameters raises `PromptRenderError`, mirroring existing section behavior.
