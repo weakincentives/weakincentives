@@ -32,45 +32,80 @@ Use `uv run ...` when invoking ad-hoc scripts so everything runs inside the mana
 
 ## Usage Example
 
-```python
+````python
 from dataclasses import dataclass
 
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
-
-@dataclass
-class GuidanceParams:
-    name: str
-
-@dataclass
-class LookupParams:
-    entity_id: str
-
-@dataclass
-class LookupResult:
-    entity_id: str
-
-
-def lookup_handler(params: LookupParams) -> ToolResult[LookupResult]:
-    result = LookupResult(entity_id=params.entity_id)
-    return ToolResult(message=f"Fetched {result.entity_id}.", payload=result)
-
-
-lookup_tool = Tool[LookupParams, LookupResult](
-    name="lookup_entity",
-    description="Fetch information for an entity id.",
-    handler=lookup_handler,
+from weakincentives.prompts import (
+    Prompt,
+    TextSection,
+    Tool,
+    ToolResult,
+    parse_output,
 )
 
-overview = TextSection[GuidanceParams](
-    title="Guidance",
-    body="Use ${name}'s lookup tool when you need context.",
-    tools=[lookup_tool],
+
+@dataclass
+class ResearchGuidance:
+    topic: str
+
+
+@dataclass
+class SourceLookup:
+    source_id: str
+
+
+@dataclass
+class SourceDetails:
+    source_id: str
+    title: str
+
+
+@dataclass
+class ResearchSummary:
+    summary: str
+    citations: list[str]
+
+
+def lookup_source(params: SourceLookup) -> ToolResult[SourceDetails]:
+    details = SourceDetails(source_id=params.source_id, title="Ada Lovelace Archive")
+    return ToolResult(message=f"Loaded {details.title}", payload=details)
+
+
+catalog_tool = Tool[SourceLookup, SourceDetails](
+    name="catalog_lookup",
+    description="Look up a primary source identifier and return structured details.",
+    handler=lookup_source,
 )
 
-prompt = Prompt(name="demo", sections=[overview])
-print(prompt.render(GuidanceParams(name="Ada")))
-print(prompt.tools(GuidanceParams(name="Ada")))
-```
+research_section = TextSection[ResearchGuidance](
+    title="Task",
+    body=(
+        "Research ${topic}. Use the `catalog_lookup` tool for citations and return"
+        " a JSON summary with citations."
+    ),
+    tools=[catalog_tool],
+)
+
+prompt = Prompt[ResearchSummary](
+    name="research_run",
+    sections=[research_section],
+)
+
+rendered = prompt.render(ResearchGuidance(topic="Ada Lovelace"))
+print(rendered.text)
+print([tool.name for tool in rendered.tools])
+
+reply = """```json
+{
+  "summary": "Ada Lovelace pioneered computing...",
+  "citations": ["catalog_lookup:ada-archive"]
+}
+```"""
+
+parsed = parse_output(reply, rendered)
+print(parsed.summary)
+print(parsed.citations)
+````
 
 ## Optional Extras
 
