@@ -87,7 +87,7 @@ def test_prompt_render_wraps_prompt_errors_with_context() -> None:
     assert error.placeholder == "value"
 
 
-class InvalidParamsSection(Section[int]):
+class InvalidParamsSection(Section[int]):  # type: ignore[arg-type]
     def __init__(self) -> None:
         super().__init__(title="Invalid")
 

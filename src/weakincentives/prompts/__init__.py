@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ._types import SupportsDataclass
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -23,6 +24,7 @@ __all__ = [
     "PromptValidationError",
     "Section",
     "SectionPath",
+    "SupportsDataclass",
     "TextSection",
     "Tool",
     "ToolResult",

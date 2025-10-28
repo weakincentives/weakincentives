@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from typing import Any, ClassVar, Literal, cast, get_args, get_origin
 
+from ._types import SupportsDataclass
 from .errors import (
     PromptRenderError,
     PromptValidationError,
@@ -21,22 +22,24 @@ class RenderedPrompt[OutputT = Any]:
     output_type: type[Any] | None
     output_container: Literal["object", "array"] | None
     allow_extra_keys: bool | None
-    _tools: tuple[Tool[Any, Any], ...] = field(default_factory=tuple)
+    _tools: tuple[Tool[SupportsDataclass, SupportsDataclass], ...] = field(
+        default_factory=tuple
+    )
 
     def __str__(self) -> str:  # pragma: no cover - convenience for logging
         return self.text
 
     @property
-    def tools(self) -> tuple[Tool[Any, Any], ...]:
+    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
         """Tools contributed by enabled sections in traversal order."""
 
         return self._tools
 
 
-def _clone_dataclass(instance: object) -> object:
+def _clone_dataclass(instance: SupportsDataclass) -> SupportsDataclass:
     """Return a shallow copy of the provided dataclass instance."""
 
-    return cast(object, replace(cast(Any, instance)))
+    return cast(SupportsDataclass, replace(cast(Any, instance)))
 
 
 def _format_specialization_argument(argument: object | None) -> str:
@@ -48,10 +51,10 @@ def _format_specialization_argument(argument: object | None) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class PromptSectionNode:
+class PromptSectionNode[ParamsT: SupportsDataclass]:
     """Flattened view of a section within a prompt."""
 
-    section: Section[Any]
+    section: Section[ParamsT]
     depth: int
     path: SectionPath
 
@@ -93,11 +96,15 @@ class Prompt[OutputT = Any]:
         allow_extra_keys: bool = False,
     ) -> None:
         self.name = name
-        self._sections: tuple[Section[Any], ...] = tuple(sections or ())
-        self._section_nodes: list[PromptSectionNode] = []
-        self._params_registry: dict[type[Any], list[PromptSectionNode]] = {}
-        self._defaults_by_path: dict[SectionPath, object] = {}
-        self._defaults_by_type: dict[type[Any], object] = {}
+        self._sections: tuple[Section[SupportsDataclass], ...] = tuple(
+            cast(Section[SupportsDataclass], section) for section in sections or ()
+        )
+        self._section_nodes: list[PromptSectionNode[SupportsDataclass]] = []
+        self._params_registry: dict[
+            type[SupportsDataclass], list[PromptSectionNode[SupportsDataclass]]
+        ] = {}
+        self._defaults_by_path: dict[SectionPath, SupportsDataclass] = {}
+        self._defaults_by_type: dict[type[SupportsDataclass], SupportsDataclass] = {}
         self.placeholders: dict[SectionPath, set[str]] = {}
         self._tool_name_registry: dict[str, SectionPath] = {}
 
@@ -115,17 +122,17 @@ class Prompt[OutputT = Any]:
         for section in self._sections:
             self._register_section(section, path=(section.title,), depth=0)
 
-    def render(self, *params: object) -> RenderedPrompt[OutputT]:
+    def render(self, *params: SupportsDataclass) -> RenderedPrompt[OutputT]:
         """Render the prompt using provided parameter dataclass instances."""
 
         param_lookup = self._collect_param_lookup(params)
         rendered_sections: list[str] = []
-        collected_tools: list[Tool[Any, Any]] = []
+        collected_tools: list[Tool[SupportsDataclass, SupportsDataclass]] = []
 
         for node, section_params in self._iter_enabled_sections(param_lookup):
             params_type = node.section.params
             try:
-                rendered = node.section.render(cast(Any, section_params), node.depth)
+                rendered = node.section.render(section_params, node.depth)
             except PromptRenderError as error:
                 if error.section_path and error.dataclass_type:
                     raise
@@ -165,7 +172,7 @@ class Prompt[OutputT = Any]:
 
     def _register_section(
         self,
-        section: Section[Any],
+        section: Section[SupportsDataclass],
         *,
         path: SectionPath,
         depth: int,
@@ -178,7 +185,9 @@ class Prompt[OutputT = Any]:
                 dataclass_type=params_type,
             )
 
-        node = PromptSectionNode(section=section, depth=depth, path=path)
+        node: PromptSectionNode[SupportsDataclass] = PromptSectionNode(
+            section=section, depth=depth, path=path
+        )
         self._section_nodes.append(node)
         self._params_registry.setdefault(params_type, []).append(node)
 
@@ -219,11 +228,11 @@ class Prompt[OutputT = Any]:
             self._register_section(child, path=child_path, depth=depth + 1)
 
     @property
-    def sections(self) -> tuple[PromptSectionNode, ...]:
+    def sections(self) -> tuple[PromptSectionNode[SupportsDataclass], ...]:
         return tuple(self._section_nodes)
 
     @property
-    def params_types(self) -> set[type[Any]]:
+    def params_types(self) -> set[type[SupportsDataclass]]:
         return set(self._params_registry.keys())
 
     def _resolve_output_spec(
@@ -285,17 +294,20 @@ of the expected schema{ending}"""
         )
 
     def _collect_param_lookup(
-        self, params: tuple[object, ...]
-    ) -> dict[type[Any], object]:
-        lookup: dict[type[Any], object] = {}
+        self, params: tuple[SupportsDataclass, ...]
+    ) -> dict[type[SupportsDataclass], SupportsDataclass]:
+        lookup: dict[type[SupportsDataclass], SupportsDataclass] = {}
         for value in params:
-            provided_type = value if isinstance(value, type) else type(value)
+            if isinstance(value, type):
+                provided_type: type[Any] = value
+            else:
+                provided_type = type(value)
             if isinstance(value, type) or not is_dataclass(value):
                 raise PromptValidationError(
                     "Prompt expects dataclass instances.",
                     dataclass_type=provided_type,
                 )
-            params_type = provided_type
+            params_type = cast(type[SupportsDataclass], provided_type)
             if params_type in lookup:
                 raise PromptValidationError(
                     "Duplicate params type supplied to prompt.",
@@ -311,11 +323,11 @@ of the expected schema{ending}"""
 
     def _resolve_section_params(
         self,
-        node: PromptSectionNode,
-        param_lookup: dict[type[Any], object],
-    ) -> object:
+        node: PromptSectionNode[SupportsDataclass],
+        param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+    ) -> SupportsDataclass:
         params_type = node.section.params
-        section_params = param_lookup.get(params_type)
+        section_params: SupportsDataclass | None = param_lookup.get(params_type)
 
         if section_params is None:
             default_value = self._defaults_by_path.get(node.path)
@@ -327,7 +339,7 @@ of the expected schema{ending}"""
                     section_params = _clone_dataclass(type_default)
                 else:
                     try:
-                        constructor = cast(Callable[[], object], params_type)
+                        constructor = cast(Callable[[], SupportsDataclass], params_type)
                         section_params = constructor()
                     except TypeError as error:
                         raise PromptRenderError(
@@ -336,19 +348,12 @@ of the expected schema{ending}"""
                             dataclass_type=params_type,
                         ) from error
 
-        if section_params is None:
-            raise PromptRenderError(
-                "Missing parameters for section.",
-                section_path=node.path,
-                dataclass_type=params_type,
-            )
-
         return section_params
 
     def _iter_enabled_sections(
         self,
-        param_lookup: dict[type[Any], object],
-    ) -> Iterator[tuple[PromptSectionNode, object]]:
+        param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+    ) -> Iterator[tuple[PromptSectionNode[SupportsDataclass], SupportsDataclass]]:
         skip_depth: int | None = None
 
         for node in self._section_nodes:
@@ -360,7 +365,7 @@ of the expected schema{ending}"""
             section_params = self._resolve_section_params(node, param_lookup)
 
             try:
-                enabled = node.section.is_enabled(cast(Any, section_params))
+                enabled = node.section.is_enabled(section_params)
             except Exception as error:  # pragma: no cover - defensive guard
                 raise PromptRenderError(
                     "Section enabled predicate failed.",
@@ -376,14 +381,14 @@ of the expected schema{ending}"""
 
     def _register_section_tools(
         self,
-        section: Section[Any],
+        section: Section[SupportsDataclass],
         path: SectionPath,
     ) -> None:
         section_tools = section.tools()
         if not section_tools:
             return
 
-        tools_iterable: Sequence[object] = cast(Sequence[object], section_tools)
+        tools_iterable = cast(Sequence[object], section_tools)
         for tool_candidate in tools_iterable:
             if not isinstance(tool_candidate, Tool):
                 raise PromptValidationError(
@@ -391,8 +396,12 @@ of the expected schema{ending}"""
                     section_path=path,
                     dataclass_type=section.params,
                 )
-            tool: Tool[Any, Any] = cast(Tool[Any, Any], tool_candidate)
-            params_type = cast(type[Any] | None, getattr(tool, "params_type", None))
+            tool: Tool[SupportsDataclass, SupportsDataclass] = cast(
+                Tool[SupportsDataclass, SupportsDataclass], tool_candidate
+            )
+            params_type = cast(
+                type[SupportsDataclass] | None, getattr(tool, "params_type", None)
+            )
             if not isinstance(params_type, type) or not is_dataclass(params_type):
                 raise PromptValidationError(
                     "Tool params_type must be a dataclass type.",
