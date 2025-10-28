@@ -2,11 +2,11 @@
 
 ## Near-Term Initiatives
 
-### Structured Output Prompts
+### Session State Container
 
-- Define prompt scaffolding that yields machine-parseable responses without manual post-processing.
-- Align prompt templates with `specs/PROMPTS.md` requirements and extend tests covering JSON and key-value formats.
-- Document fallback behavior when models cannot guarantee structure.
+- Formalize a `Session` abstraction that captures conversation state, tool outputs, and transient metadata.
+- Define serialization hooks so sessions can persist across process restarts without leaking sensitive data.
+- Thread the session object through existing prompt and tool layers, backed by integration tests that assert idempotent replay.
 
 ### Notes System Retrospectives
 
@@ -25,12 +25,6 @@
 - Introduce utilities for detecting and tagging named entities across inputs.
 - Preserve, normalize, or obfuscate entities in outputs according to privacy and compliance guidelines.
 - Validate the pipeline with targeted tests that cover multilingual and domain-specific vocabularies.
-
-### Session State Container
-
-- Formalize a `Session` abstraction that captures conversation state, tool outputs, and transient metadata.
-- Define serialization hooks so sessions can persist across process restarts without leaking sensitive data.
-- Thread the session object through existing prompt and tool layers, backed by integration tests that assert idempotent replay.
 
 ### Built-In Planning & Virtual Filesystem Tools
 
