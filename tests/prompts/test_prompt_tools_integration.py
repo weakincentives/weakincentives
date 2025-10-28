@@ -70,7 +70,7 @@ def test_prompt_tools_integration_example() -> None:
         "### Available Tools\n\nInvoke lookup_entity whenever you need fresh entity context."
     )
 
-    tools = prompt.tools(GuidanceParams(primary_tool="lookup_entity"))
+    tools = rendered.tools
 
     assert tools == (lookup_tool,)
     assert tools[0].handler is _lookup_handler

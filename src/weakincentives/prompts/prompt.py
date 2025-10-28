@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from typing import Any, ClassVar, Literal, cast, get_args, get_origin
 
 from .errors import (
@@ -21,9 +21,16 @@ class RenderedPrompt[OutputT = Any]:
     output_type: type[Any] | None
     output_container: Literal["object", "array"] | None
     allow_extra_keys: bool | None
+    _tools: tuple[Tool[Any, Any], ...] = field(default_factory=tuple)
 
     def __str__(self) -> str:  # pragma: no cover - convenience for logging
         return self.text
+
+    @property
+    def tools(self) -> tuple[Tool[Any, Any], ...]:
+        """Tools contributed by enabled sections in traversal order."""
+
+        return self._tools
 
 
 def _clone_dataclass(instance: object) -> object:
@@ -113,6 +120,7 @@ class Prompt[OutputT = Any]:
 
         param_lookup = self._collect_param_lookup(params)
         rendered_sections: list[str] = []
+        collected_tools: list[Tool[Any, Any]] = []
 
         for node, section_params in self._iter_enabled_sections(param_lookup):
             params_type = node.section.params
@@ -134,6 +142,10 @@ class Prompt[OutputT = Any]:
                     dataclass_type=params_type,
                 ) from error
 
+            section_tools = node.section.tools()
+            if section_tools:
+                collected_tools.extend(section_tools)
+
             if rendered:
                 rendered_sections.append(rendered)
 
@@ -148,20 +160,8 @@ class Prompt[OutputT = Any]:
             output_type=self._output_type,
             output_container=self._output_container,
             allow_extra_keys=self._allow_extra_keys,
+            _tools=tuple(collected_tools),
         )
-
-    def tools(self, *params: object) -> tuple[Tool[Any, Any], ...]:
-        """Return tools exposed by enabled sections in traversal order."""
-
-        param_lookup = self._collect_param_lookup(params)
-        collected: list[Tool[Any, Any]] = []
-
-        for node, _section_params in self._iter_enabled_sections(param_lookup):
-            section_tools = node.section.tools()
-            if section_tools:
-                collected.extend(section_tools)
-
-        return tuple(collected)
 
     def _register_section(
         self,

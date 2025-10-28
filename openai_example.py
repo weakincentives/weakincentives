@@ -242,8 +242,9 @@ class BasicOpenAIAgent:
         self.system_prompt_template = build_system_prompt()
         self.user_prompt_template = build_user_turn_prompt()
         self.model = model
-        self._system_prompt = self.system_prompt_template.render(self._guidance).text
-        self._tools = self.system_prompt_template.tools(self._guidance)
+        rendered_system_prompt = self.system_prompt_template.render(self._guidance)
+        self._system_prompt = rendered_system_prompt.text
+        self._tools = rendered_system_prompt.tools
         self._tool_specs = [tool_to_openai_spec(tool) for tool in self._tools]
         self._tool_registry = {
             tool.name: tool for tool in self._tools if tool.handler is not None
