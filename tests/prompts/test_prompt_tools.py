@@ -96,20 +96,20 @@ def _build_prompt() -> tuple[
 def test_prompt_tools_depth_first_and_enablement() -> None:
     prompt, primary_tool, secondary_tool = _build_prompt()
 
-    default_tools = prompt.tools(GuidanceParams(primary_tool="primary_lookup"))
+    default_tools = prompt.render(GuidanceParams(primary_tool="primary_lookup")).tools
 
     assert default_tools == (primary_tool, secondary_tool)
 
-    disabled_parent = prompt.tools(
+    disabled_parent = prompt.render(
         GuidanceParams(primary_tool="primary_lookup", allow_tools=False)
-    )
+    ).tools
 
     assert disabled_parent == (secondary_tool,)
 
-    disabled_secondary = prompt.tools(
+    disabled_secondary = prompt.render(
         GuidanceParams(primary_tool="primary_lookup"),
         SecondaryToggleParams(enabled=False),
-    )
+    ).tools
 
     assert disabled_secondary == (primary_tool,)
 
@@ -159,7 +159,7 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
 
     prompt = Prompt(sections=[first_section, second_section])
 
-    tools = prompt.tools()
+    tools = prompt.render().tools
     assert {tool.name for tool in tools} == {"primary_lookup", "alternate_primary"}
     assert all(tool.params_type is PrimaryToolParams for tool in tools)
 

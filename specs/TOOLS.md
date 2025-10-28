@@ -65,7 +65,7 @@ is a `Tool`, and expose the collection via `Section.tools()`. Because every sect
 
 ## Prompt Integration
 
-`Prompt` continues to accept an ordered tree of sections. During initialization it walks the tree depth-first, collecting
+`Prompt` continues to accept an ordered tree of sections. During initialization it walks the tree depth-first, validating
 all tools contributed by each section:
 
 1. Validation enforces unique tool names across the entire prompt; composite prompts must coordinate naming themselves
@@ -74,8 +74,9 @@ all tools contributed by each section:
 1. Declaration order is cached so callers can retrieve tools without re-traversing the tree.
 
 `Prompt.render(...)` still returns the rendered markdown string, accepting dataclass overrides exactly as before. The
-`Prompt.tools()` accessor now surfaces an ordered list of `Tool` objects contributed by enabled sections, honoring
-section-level defaults and enablement rules.
+resulting `RenderedPrompt` now exposes a `.tools` property that surfaces an ordered tuple of `Tool` objects contributed by
+enabled sections, honoring section-level defaults and enablement rules. Callers no longer re-traverse the prompt tree to
+resolve tooling; they rely on the rendered instance for both markdown and tool metadata.
 
 ## Runtime Execution
 
@@ -142,11 +143,12 @@ tooling_overview = Prompt(
     ],
 )
 
-markdown = tooling_overview.render(
+rendered = tooling_overview.render(
     GuidanceParams(primary_tool="lookup_entity"),
     ToolDescriptionParams(),
 )
-tools = tooling_overview.tools()
+markdown = rendered.text
+tools = rendered.tools
 assert tools[0].name == "lookup_entity"
 ```
 
@@ -161,4 +163,4 @@ sections own their tool collections directly, no additional subclasses are neede
 - Registering two tools with the same name triggers `PromptValidationError` to preserve lookup determinism.
 - Handler references that do not accept exactly one argument matching the `ParamsT` dataclass raise
   `PromptValidationError` during prompt validation.
-- Disabled sections contribute neither markdown nor entries in `Prompt.tools()`.
+- Disabled sections contribute neither markdown nor entries in `RenderedPrompt.tools`.
