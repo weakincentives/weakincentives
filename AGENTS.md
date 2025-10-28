@@ -9,7 +9,7 @@ This handbook is the primary source of truth for autonomous or assisted agents w
 - **Build backend**: `hatchling` (configured in `pyproject.toml`).
 
 ## Repository Tour
-- `src/weakincentives/`: Library source. Presently only exposes `hello()` as a placeholder entry point to keep packaging sane.
+- `src/weakincentives/`: Library source. Currently contains the prompt scaffolding and supporting modules.
 - `tests/`: Pytest suite. `tests/test_example.py` demonstrates the expected structure and ensures the package imports.
 - `specs/`: Design docs and product specifications. `PROMPTS.md` defines the prompt abstraction requirements—read this before adding prompt-related code.
 - `Makefile`: Canonical task surface (formatting, linting, typing, tests, aggregate checks, clean-up).

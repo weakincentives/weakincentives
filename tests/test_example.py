@@ -1,11 +1,5 @@
-from weakincentives import hello
+"""Smoke tests to verify the test harness is wired correctly."""
 
 
 def test_example():
-    """A dummy test to verify pytest is working."""
     assert 1 + 1 == 2
-
-
-def test_hello():
-    """Test the hello function."""
-    assert hello() == "Hello from weakincentives!"
