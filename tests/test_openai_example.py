@@ -95,10 +95,13 @@ def test_agent_run_handles_multiple_turns(monkeypatch: pytest.MonkeyPatch) -> No
     assert first_messages[1]["content"] == expected_user_prompt
     second_messages = fake_client.calls[1]["messages"]
     assert isinstance(second_messages, list)
-    assert second_messages[-1] == {
-        "role": "tool",
-        "tool_call_id": "tool-call-1",
-        "content": "Echoed text: HELLO",
+    last_message = second_messages[-1]
+    assert last_message["role"] == "tool"
+    assert last_message["tool_call_id"] == "tool-call-1"
+    content = json.loads(last_message["content"])
+    assert content == {
+        "message": "Echoed text: HELLO",
+        "payload": {"text": "HELLO"},
     }
 
 
