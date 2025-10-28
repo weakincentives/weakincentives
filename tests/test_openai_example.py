@@ -84,7 +84,7 @@ def test_agent_run_handles_multiple_turns(monkeypatch: pytest.MonkeyPatch) -> No
     agent = example.BasicOpenAIAgent()
     expected_user_prompt = agent.user_prompt_template.render(
         example.UserTurnParams(content="Use the echo tool.")
-    )
+    ).text
     result = agent.run("Use the echo tool.")
 
     assert result == "All done."
@@ -129,11 +129,11 @@ def test_agent_supports_multiple_user_turns(monkeypatch: pytest.MonkeyPatch) -> 
 
     first_user_prompt = agent.user_prompt_template.render(
         example.UserTurnParams(content="Hello")
-    )
+    ).text
     first_reply = agent.send_user_message("Hello")
     second_user_prompt = agent.user_prompt_template.render(
         example.UserTurnParams(content="Thanks")
-    )
+    ).text
     second_reply = agent.send_user_message("Thanks")
 
     assert first_reply == "First answer."

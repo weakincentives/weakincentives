@@ -8,13 +8,15 @@ from .errors import (
     PromptValidationError,
     SectionPath,
 )
-from .prompt import Prompt, PromptSectionNode
+from .prompt import Prompt, PromptSectionNode, RenderedPrompt
 from .section import Section
+from .structured import OutputParseError, parse_output
 from .text import TextSection
 from .tool import Tool, ToolResult
 
 __all__ = [
     "Prompt",
+    "RenderedPrompt",
     "PromptSectionNode",
     "PromptError",
     "PromptRenderError",
@@ -24,4 +26,6 @@ __all__ = [
     "TextSection",
     "Tool",
     "ToolResult",
+    "OutputParseError",
+    "parse_output",
 ]

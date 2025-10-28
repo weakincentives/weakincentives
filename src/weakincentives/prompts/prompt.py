@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
-from typing import Any, cast
+from typing import Any, ClassVar, Literal, cast, get_args, get_origin
 
 from .errors import (
     PromptRenderError,
@@ -13,10 +13,31 @@ from .section import Section
 from .tool import Tool
 
 
+@dataclass(frozen=True, slots=True)
+class RenderedPrompt[OutputT = Any]:
+    """Rendered prompt text paired with structured output metadata."""
+
+    text: str
+    output_type: type[Any] | None
+    output_container: Literal["object", "array"] | None
+    allow_extra_keys: bool | None
+
+    def __str__(self) -> str:  # pragma: no cover - convenience for logging
+        return self.text
+
+
 def _clone_dataclass(instance: object) -> object:
     """Return a shallow copy of the provided dataclass instance."""
 
     return cast(object, replace(cast(Any, instance)))
+
+
+def _format_specialization_argument(argument: object | None) -> str:
+    if argument is None:  # pragma: no cover - defensive formatting
+        return "?"
+    if isinstance(argument, type):
+        return argument.__name__
+    return repr(argument)  # pragma: no cover - fallback for debugging
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,14 +49,41 @@ class PromptSectionNode:
     path: SectionPath
 
 
-class Prompt:
+class Prompt[OutputT = Any]:
     """Coordinate prompt sections and their parameter bindings."""
+
+    _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
+    _output_dataclass_candidate: ClassVar[Any] = None
+
+    def __class_getitem__(cls, item: object) -> type[Prompt[Any]]:
+        origin = get_origin(item)
+        candidate = item
+        container: Literal["object", "array"] | None = "object"
+
+        if origin is list:
+            args = get_args(item)
+            candidate = args[0] if len(args) == 1 else None
+            container = "array"
+            label = f"list[{_format_specialization_argument(candidate)}]"
+        else:
+            container = "object"
+            label = _format_specialization_argument(candidate)
+
+        name = f"{cls.__name__}[{label}]"
+        namespace = {
+            "__module__": cls.__module__,
+            "_output_container_spec": container if candidate is not None else None,
+            "_output_dataclass_candidate": candidate,
+        }
+        return type(name, (cls,), namespace)
 
     def __init__(
         self,
         *,
         name: str | None = None,
         sections: Sequence[Section[Any]] | None = None,
+        inject_output_instructions: bool = True,
+        allow_extra_keys: bool = False,
     ) -> None:
         self.name = name
         self._sections: tuple[Section[Any], ...] = tuple(sections or ())
@@ -46,10 +94,21 @@ class Prompt:
         self.placeholders: dict[SectionPath, set[str]] = {}
         self._tool_name_registry: dict[str, SectionPath] = {}
 
+        self._output_type: type[Any] | None
+        self._output_container: Literal["object", "array"] | None
+        self._allow_extra_keys: bool | None
+        (
+            self._output_type,
+            self._output_container,
+            self._allow_extra_keys,
+        ) = self._resolve_output_spec(allow_extra_keys)
+
+        self.inject_output_instructions = inject_output_instructions
+
         for section in self._sections:
             self._register_section(section, path=(section.title,), depth=0)
 
-    def render(self, *params: object) -> str:
+    def render(self, *params: object) -> RenderedPrompt[OutputT]:
         """Render the prompt using provided parameter dataclass instances."""
 
         param_lookup = self._collect_param_lookup(params)
@@ -78,7 +137,18 @@ class Prompt:
             if rendered:
                 rendered_sections.append(rendered)
 
-        return "\n\n".join(rendered_sections)
+        text = "\n\n".join(rendered_sections)
+
+        if self._should_inject_response_format():
+            instructions = self._build_response_format_section()
+            text = f"{text}\n\n{instructions}" if text else instructions
+
+        return RenderedPrompt(
+            text=text,
+            output_type=self._output_type,
+            output_container=self._output_container,
+            allow_extra_keys=self._allow_extra_keys,
+        )
 
     def tools(self, *params: object) -> tuple[Tool[Any, Any], ...]:
         """Return tools exposed by enabled sections in traversal order."""
@@ -155,6 +225,64 @@ class Prompt:
     @property
     def params_types(self) -> set[type[Any]]:
         return set(self._params_registry.keys())
+
+    def _resolve_output_spec(
+        self, allow_extra_keys: bool
+    ) -> tuple[type[Any] | None, Literal["object", "array"] | None, bool | None]:
+        candidate = getattr(type(self), "_output_dataclass_candidate", None)
+        container = cast(
+            Literal["object", "array"] | None,
+            getattr(type(self), "_output_container_spec", None),
+        )
+
+        if candidate is None or container is None:
+            return None, None, None
+
+        if not isinstance(candidate, type):  # pragma: no cover - defensive guard
+            candidate_type = cast(type[Any], type(candidate))
+            raise PromptValidationError(
+                "Prompt output type must be a dataclass.",
+                dataclass_type=candidate_type,
+            )
+
+        if not is_dataclass(candidate):
+            bad_dataclass = cast(type[Any], candidate)
+            raise PromptValidationError(
+                "Prompt output type must be a dataclass.",
+                dataclass_type=bad_dataclass,
+            )
+
+        dataclass_type = cast(type[Any], candidate)
+        return dataclass_type, container, allow_extra_keys
+
+    def _should_inject_response_format(self) -> bool:
+        return (
+            self._output_type is not None
+            and self._output_container is not None
+            and self.inject_output_instructions
+        )
+
+    def _build_response_format_section(self) -> str:
+        container = self._output_container
+        if container is None:  # pragma: no cover - defensive guard
+            raise RuntimeError(
+                "Output container missing during response format construction."
+            )
+
+        article = "an" if container.startswith(("a", "e", "i", "o", "u")) else "a"
+        ending = ". Do not add extra keys." if not self._allow_extra_keys else "."
+        template = """## Response Format
+
+Return ONLY a single fenced JSON code block. Do not include any text
+before or after the block.
+
+The top-level JSON value MUST be {article} {container} that matches the fields
+of the expected schema{ending}"""
+        return template.format(
+            article=article,
+            container=container,
+            ending=ending,
+        )
 
     def _collect_param_lookup(
         self, params: tuple[object, ...]
@@ -286,4 +414,4 @@ class Prompt:
             self._tool_name_registry[tool.name] = path
 
 
-__all__ = ["Prompt", "PromptSectionNode"]
+__all__ = ["Prompt", "PromptSectionNode", "RenderedPrompt"]
