@@ -6,6 +6,7 @@ Tools for developing and optimizing side effect free background agents. The code
 - Fully typed prompt composition primitives (`Prompt`, `Section`, `TextSection`, `Tool`, `ToolResult`) for assembling deterministic Markdown prompts with attached tool metadata.
 - Optional OpenAI adapter that gates imports behind a friendly error and returns the SDK client when the extra dependency is present.
 - A quiet quality gate wired through Ruff, Ty, pytest (100% coverage), Bandit, Deptry, and pip-audit, all executed via `uv`.
+- Stdlib-only dataclass serde utilities (`parse`, `dump`, `clone`, `schema`) for Pydantic-like ergonomics without third-party dependencies.
 
 ## Getting Started
 1. Install Python 3.14 (pyenv users can run `pyenv install 3.14.0`).

@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## v0.2.0 - Unreleased
 
 ### Features
+- Added a stdlib-only `weakincentives.serde` module with `parse`, `dump`, `clone`, and `schema` helpers for dataclass validation and JSON serialization.
 - Introduced a complete prompt composition framework with a `Section` base class, `TextSection` rendering, dedicated
   exceptions, placeholder validation, conditional nesting, improved render ergonomics, and 100% coverage backed by new
   tests.
