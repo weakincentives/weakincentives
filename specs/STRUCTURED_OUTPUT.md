@@ -9,7 +9,7 @@ Some prompts must yield machine-parseable responses (e.g., a JSON object or arra
 Keep the surface area tiny while delivering strong guarantees:
 
 * Enable structured responses with **one declaration**: `Prompt[OutputT]`.
-* Avoid new `Section` subclasses or extra config files.
+* Avoid requiring authors to manage new `Section` subclasses or extra config files—the framework appends a builtin `ResponseFormat` section when needed.
 * Keep prompts readable: inject a small, deterministic "Response Format" block.
 * Validate outputs strictly into typed dataclasses with actionable failures.
 * Remain fully backward-compatible when no output type is declared.
@@ -25,7 +25,7 @@ Keep the surface area tiny while delivering strong guarantees:
 
 `Prompt` becomes *optionally generic*. When specialized, `Prompt[OutputT]` declares that the final assistant message must be JSON matching the dataclass `OutputT`. If the specialization is `Prompt[list[ItemT]]`, the final message must be a top-level JSON array of objects matching `ItemT`.
 
-At render time the prompt assembles markdown from its sections (unchanged), then--when an output type is present and injection is enabled--appends a short, deterministic "Response Format" block at the end with root-level heading (`## Response Format`). This block instructs the model to return **only** a single fenced JSON block with the required top-level container (object or array), and no extra prose.
+At render time the prompt assembles markdown from its sections (unchanged), then--when an output type is present and injection is enabled--appends a short, deterministic "Response Format" block via a builtin specialized `ResponseFormat` section at the end with root-level heading (`## Response Format`). This block instructs the model to return **only** a single fenced JSON block with the required top-level container (object or array), and no extra prose.
 
 `RenderedPrompt` carries the declared output metadata so downstream code can call a small parser that turns the model's final message into an instance of `OutputT` (or a `list[ItemT]`) with strict validation and conservative type coercions.
 
@@ -51,7 +51,7 @@ Rendering of sections is identical to the existing `Prompt` flow: depth-first tr
 
 1. Join rendered sections with a single blank line between fragments.
 
-2. If the prompt is specialized and `inject_output_instructions=True`, append:
+2. If the prompt is specialized and `inject_output_instructions=True`, append a builtin `ResponseFormat` section whose body is:
 
    ```
    ## Response Format
@@ -110,7 +110,7 @@ This keeps the final prompt readable and the output contract easy to discover pr
 ## Non-Goals
 
 * No `OutputSpec` type, no schema blobs in the prompt, no KV/text output mode in v1.
-* No additional `Section` types or templating features.
+* No additional `Section` types or templating features for authors to manage; the builtin `ResponseFormat` section is injected automatically when required.
 * No streaming decode, repair loops, or retry orchestration.
 * No logging/tracing/telemetry concerns.
 
