@@ -4,19 +4,15 @@ import inspect
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, is_dataclass
-from typing import Annotated, Any, Generic, TypeVar, cast, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, cast, get_args, get_origin, get_type_hints
 
 from .errors import PromptValidationError
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
-ParamsT = TypeVar("ParamsT")
-ResultT = TypeVar("ResultT")
-ResultPayloadT = TypeVar("ResultPayloadT")
-
 
 @dataclass(slots=True)
-class ToolResult(Generic[ResultPayloadT]):
+class ToolResult[ResultPayloadT]:
     """Structured response emitted by a tool handler."""
 
     message: str
@@ -24,7 +20,7 @@ class ToolResult(Generic[ResultPayloadT]):
 
 
 @dataclass(slots=True)
-class Tool(Generic[ParamsT, ResultT]):
+class Tool[ParamsT, ResultT]:
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
@@ -189,17 +185,19 @@ class Tool(Generic[ParamsT, ResultT]):
         )
 
     @classmethod
-    def __class_getitem__(
-        cls, item: object
-    ) -> type["Tool[Any, Any]"]:
+    def __class_getitem__(cls, item: object) -> type[Tool[Any, Any]]:
         if not isinstance(item, tuple):
             raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
         typed_item = cast(tuple[Any, Any], item)
         try:
             params_candidate, result_candidate = typed_item
         except ValueError as error:
-            raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).") from error
-        if not isinstance(params_candidate, type) or not isinstance(result_candidate, type):
+            raise TypeError(
+                "Tool[...] expects two type arguments (ParamsT, ResultT)."
+            ) from error
+        if not isinstance(params_candidate, type) or not isinstance(
+            result_candidate, type
+        ):
             raise TypeError("Tool[...] type arguments must be types.")
         params_type = cast(type[Any], params_candidate)
         result_type = cast(type[Any], result_candidate)
@@ -214,5 +212,6 @@ class Tool(Generic[ParamsT, ResultT]):
         _SpecializedTool.__qualname__ = cls.__qualname__
         _SpecializedTool.__module__ = cls.__module__
         return _SpecializedTool
+
 
 __all__ = ["Tool", "ToolResult"]

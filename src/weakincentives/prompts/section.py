@@ -2,16 +2,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
 
 
-ParamsT = TypeVar("ParamsT")
-
-
-class Section(Generic[ParamsT], ABC):
+class Section[ParamsT](ABC):
     """Abstract building block for prompt content."""
 
     _params_type: ClassVar[type[Any] | None] = None
@@ -25,7 +22,9 @@ class Section(Generic[ParamsT], ABC):
         enabled: Callable[[ParamsT], bool] | None = None,
         tools: Sequence[object] | None = None,
     ) -> None:
-        params_type = cast(type[ParamsT] | None, getattr(self.__class__, "_params_type", None))
+        params_type = cast(
+            type[ParamsT] | None, getattr(self.__class__, "_params_type", None)
+        )
         if params_type is None:
             raise TypeError(
                 "Section must be instantiated with a concrete ParamsT type."
@@ -61,13 +60,13 @@ class Section(Generic[ParamsT], ABC):
 
         return set()
 
-    def tools(self) -> tuple["Tool[Any, Any]", ...]:
+    def tools(self) -> tuple[Tool[Any, Any], ...]:
         """Return the tools exposed by this section."""
 
         return self._tools
 
     @classmethod
-    def __class_getitem__(cls, item: object) -> type["Section[Any]"]:
+    def __class_getitem__(cls, item: object) -> type[Section[Any]]:
         params_type = cls._normalize_generic_argument(item)
 
         class _SpecializedSection(cls):  # type: ignore[misc]
@@ -88,7 +87,7 @@ class Section(Generic[ParamsT], ABC):
     @staticmethod
     def _normalize_tools(
         tools: Sequence[object] | None,
-    ) -> tuple["Tool[Any, Any]", ...]:
+    ) -> tuple[Tool[Any, Any], ...]:
         if not tools:
             return ()
 
