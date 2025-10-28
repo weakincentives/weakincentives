@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 from .errors import (
     PromptRenderError,
@@ -11,6 +11,12 @@ from .errors import (
 )
 from .section import Section
 from .tool import Tool
+
+
+def _clone_dataclass(instance: object) -> object:
+    """Return a shallow copy of the provided dataclass instance."""
+
+    return cast(object, replace(cast(Any, instance)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +58,7 @@ class Prompt:
         for node, section_params in self._iter_enabled_sections(param_lookup):
             params_type = node.section.params
             try:
-                rendered = node.section.render(section_params, node.depth)
+                rendered = node.section.render(cast(Any, section_params), node.depth)
             except PromptRenderError as error:
                 if error.section_path and error.dataclass_type:
                     raise
@@ -186,14 +192,15 @@ class Prompt:
         if section_params is None:
             default_value = self._defaults_by_path.get(node.path)
             if default_value is not None:
-                section_params = replace(default_value)
+                section_params = _clone_dataclass(default_value)
             else:
                 type_default = self._defaults_by_type.get(params_type)
                 if type_default is not None:
-                    section_params = replace(type_default)
+                    section_params = _clone_dataclass(type_default)
                 else:
                     try:
-                        section_params = params_type()  # type: ignore[call-arg]
+                        constructor = cast(Callable[[], object], params_type)
+                        section_params = constructor()
                     except TypeError as error:
                         raise PromptRenderError(
                             "Missing parameters for section.",
@@ -225,7 +232,7 @@ class Prompt:
             section_params = self._resolve_section_params(node, param_lookup)
 
             try:
-                enabled = node.section.is_enabled(section_params)
+                enabled = node.section.is_enabled(cast(Any, section_params))
             except Exception as error:  # pragma: no cover - defensive guard
                 raise PromptRenderError(
                     "Section enabled predicate failed.",
@@ -248,14 +255,16 @@ class Prompt:
         if not section_tools:
             return
 
-        for tool in section_tools:
-            if not isinstance(tool, Tool):
+        tools_iterable: Sequence[object] = cast(Sequence[object], section_tools)
+        for tool_candidate in tools_iterable:
+            if not isinstance(tool_candidate, Tool):
                 raise PromptValidationError(
                     "Section tools() must return Tool instances.",
                     section_path=path,
                     dataclass_type=section.params,
                 )
-            params_type = getattr(tool, "params_type", None)
+            tool: Tool[Any, Any] = cast(Tool[Any, Any], tool_candidate)
+            params_type = cast(type[Any] | None, getattr(tool, "params_type", None))
             if not isinstance(params_type, type) or not is_dataclass(params_type):
                 raise PromptValidationError(
                     "Tool params_type must be a dataclass type.",
