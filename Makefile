@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check all clean
+.PHONY: format format-check lint lint-fix bandit markdown-check deptry pip-audit typecheck test check all clean
 
 # Format code with ruff
 format:
@@ -18,15 +18,15 @@ lint-fix:
 
 # Run Bandit security scanner
 bandit:
-        @uv run python tools/run_bandit.py -q -r src/weakincentives
+	@uv run python tools/run_bandit.py -q -r src/weakincentives
 
 # Run mdformat in check mode across Markdown files
 markdown-check:
-        @uv run python tools/run_mdformat.py
+	@uv run python tools/run_mdformat.py
 
 # Check for unused or missing dependencies with deptry
 deptry:
-        @uv run python tools/run_deptry.py
+	@uv run python tools/run_deptry.py
 
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
@@ -35,8 +35,8 @@ pip-audit:
 # Run type checker
 typecheck:
 	@uv run --all-extras ty check --error-on-warning -qq . || \
-		(echo "ty check failed; rerunning with verbose output..." >&2; \
-		uv run --all-extras ty check --error-on-warning .)
+	(echo "ty check failed; rerunning with verbose output..." >&2; \
+	uv run --all-extras ty check --error-on-warning .)
 
 # Run tests with coverage (100% minimum)
 test:
