@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import textwrap
-from dataclasses import MISSING, dataclass, fields
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -16,6 +16,7 @@ except ImportError:  # pragma: no cover - defensive fallback
 
 from weakincentives.adapters import create_openai_client
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.serde import dump, parse, schema
 
 
 @dataclass
@@ -161,30 +162,15 @@ def current_time_handler(
     )
 
 
-def _schema_for_params(params_type: type[Any]) -> dict[str, Any]:
-    """Naive JSON schema generator for the tool parameter dataclass."""
-
-    properties: dict[str, Any] = {}
-    required: list[str] = []
-    for field in fields(params_type):
-        properties[field.name] = {"type": "string"}
-        if field.default is MISSING and field.default_factory is MISSING:
-            required.append(field.name)
-    return {
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": False,
-    }
-
-
 def tool_to_openai_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
+    parameters_schema = schema(tool.params_type, extra="forbid")
+    parameters_schema.pop("title", None)
     return {
         "type": "function",
         "function": {
             "name": tool.name,
             "description": tool.description,
-            "parameters": _schema_for_params(tool.params_type),
+            "parameters": parameters_schema,
         },
     }
 
@@ -319,19 +305,26 @@ class BasicOpenAIAgent:
 
             for tool_call in tool_calls:
                 arguments = self._parse_arguments(tool_call.function.arguments)
-                tool_result = self._call_tool(tool_call.function.name, arguments)
+                tool_result, serialized_params = self._call_tool(
+                    tool_call.function.name, arguments
+                )
+                tool_payload = dump(tool_result.payload, exclude_none=True)
+                tool_content = {
+                    "message": tool_result.message,
+                    "payload": tool_payload,
+                }
                 self._messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": tool_result.message,
+                        "content": json.dumps(tool_content),
                     }
                 )
                 self._last_trace.append(
                     ReasoningStep(
                         thought=message.content or "",
                         action=tool_call.function.name,
-                        action_input=arguments,
+                        action_input=serialized_params,
                         observation=tool_result.message,
                     )
                 )
@@ -350,12 +343,15 @@ class BasicOpenAIAgent:
             raise RuntimeError("Tool call arguments must be a JSON object.")
         return parsed
 
-    def _call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult[Any]:
+    def _call_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> tuple[ToolResult[Any], dict[str, Any]]:
         tool = self._tool_registry.get(name)
         if tool is None or tool.handler is None:
             raise RuntimeError(f"No handler registered for tool '{name}'.")
-        params = tool.params_type(**arguments)
-        return tool.handler(params)
+        params = parse(tool.params_type, arguments, extra="forbid")
+        serialized_params = dump(params, exclude_none=True)
+        return tool.handler(params), serialized_params
 
     @property
     def last_trace(self) -> list[ReasoningStep]:
