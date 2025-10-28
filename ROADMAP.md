@@ -7,6 +7,11 @@
 - Align prompt templates with `specs/PROMPTS.md` requirements and extend tests covering JSON and key-value formats.
 - Document fallback behavior when models cannot guarantee structure.
 
+### Notes System Retrospectives
+- Establish a notes pattern that captures retrospectives for individual prompt invocations and entire sessions.
+- Model notes as entities that can attach to `Section` objects and `Tool` objects to preserve context.
+- Outline lifecycle and storage expectations so notes integrate cleanly with existing session state abstractions.
+
 ### Single Turn Prompt Optimizations
 - Profile current single-turn flows to surface latency and token usage hot spots.
 - Experiment with prompt compression techniques and instruction restructuring to maintain quality while reducing cost.
