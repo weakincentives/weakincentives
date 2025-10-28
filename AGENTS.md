@@ -34,6 +34,7 @@ All commands are defined in `Makefile` and should be executed with `uv` to ensur
 - `make format-check`: Formatting audit without changes (`ruff format -q --check`).
 - `make lint` / `make lint-fix`: Static analysis with Ruff in quiet mode (`ruff check --preview -q`; add `--fix` when autofixing).
 - `make bandit`: Security linting via `tools/run_bandit.py`, which patches Python 3.14 AST regressions before invoking Bandit.
+- `make markdown-check`: Validates Markdown formatting through `tools/run_mdformat.py`, which runs `mdformat --check` quietly on success. This target is also part of `make check`.
 - `make deptry`: Dependency graph audit on `src/weakincentives` that surfaces unused or missing requirements while staying quiet on success.
 - `make pip-audit`: Dependency vulnerability audit that stays silent on success via `tools/run_pip_audit.py`.
 - `make typecheck`: Runs `ty check -qq --error-on-warning` for silent success.

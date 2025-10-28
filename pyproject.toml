@@ -60,6 +60,7 @@ dev = [
     "pip-audit>=2.7.3",
     "ruff>=0.14.1",
     "ty>=0.0.1a23",
+    "mdformat>=0.7",
 ]
 
 [tool.ruff]
