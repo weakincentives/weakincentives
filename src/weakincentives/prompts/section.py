@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
 
+from ._types import SupportsDataclass
 
-class Section[ParamsT](ABC):
+
+class Section[ParamsT: SupportsDataclass](ABC):
     """Abstract building block for prompt content."""
 
-    _params_type: ClassVar[type[Any] | None] = None
+    _params_type: ClassVar[type[SupportsDataclass] | None] = None
 
     def __init__(
         self,
@@ -35,12 +37,14 @@ class Section[ParamsT](ABC):
         self.title = title
         self.defaults = defaults
 
-        normalized_children: list[Section[Any]] = []
+        normalized_children: list[Section[SupportsDataclass]] = []
         for child in children or ():
             if not isinstance(child, Section):
                 raise TypeError("Section children must be Section instances.")
-            normalized_children.append(cast(Section[Any], child))
-        self.children: tuple[Section[Any], ...] = tuple(normalized_children)
+            normalized_children.append(cast(Section[SupportsDataclass], child))
+        self.children: tuple[Section[SupportsDataclass], ...] = tuple(
+            normalized_children
+        )
         self._enabled = enabled
         self._tools = self._normalize_tools(tools)
 
@@ -60,13 +64,13 @@ class Section[ParamsT](ABC):
 
         return set()
 
-    def tools(self) -> tuple[Tool[Any, Any], ...]:
+    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
         """Return the tools exposed by this section."""
 
         return self._tools
 
     @classmethod
-    def __class_getitem__(cls, item: object) -> type[Section[Any]]:
+    def __class_getitem__(cls, item: object) -> type[Section[SupportsDataclass]]:
         params_type = cls._normalize_generic_argument(item)
 
         class _SpecializedSection(cls):  # type: ignore[misc]
@@ -75,8 +79,8 @@ class Section[ParamsT](ABC):
         _SpecializedSection.__name__ = cls.__name__
         _SpecializedSection.__qualname__ = cls.__qualname__
         _SpecializedSection.__module__ = cls.__module__
-        _SpecializedSection._params_type = cast(type[Any], params_type)
-        return _SpecializedSection
+        _SpecializedSection._params_type = cast(type[SupportsDataclass], params_type)
+        return _SpecializedSection  # type: ignore[return-value]
 
     @staticmethod
     def _normalize_generic_argument(item: object) -> object:
@@ -87,17 +91,17 @@ class Section[ParamsT](ABC):
     @staticmethod
     def _normalize_tools(
         tools: Sequence[object] | None,
-    ) -> tuple[Tool[Any, Any], ...]:
+    ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
         if not tools:
             return ()
 
         from .tool import Tool
 
-        normalized: list[Tool[Any, Any]] = []
+        normalized: list[Tool[SupportsDataclass, SupportsDataclass]] = []
         for tool in tools:
             if not isinstance(tool, Tool):
                 raise TypeError("Section tools must be Tool instances.")
-            normalized.append(cast(Tool[Any, Any], tool))
+            normalized.append(cast(Tool[SupportsDataclass, SupportsDataclass], tool))
         return tuple(normalized)
 
 

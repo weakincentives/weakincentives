@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, is_dataclass
 from typing import Annotated, Any, cast, get_args, get_origin, get_type_hints
 
+from ._types import SupportsDataclass
 from .errors import PromptValidationError
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
@@ -20,7 +21,7 @@ class ToolResult[ResultPayloadT]:
 
 
 @dataclass(slots=True)
-class Tool[ParamsT, ResultT]:
+class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
@@ -30,15 +31,19 @@ class Tool[ParamsT, ResultT]:
     result_type: type[Any] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        params_type = cast(type[Any] | None, getattr(self, "params_type", None))
-        result_type = cast(type[Any] | None, getattr(self, "result_type", None))
+        params_type = cast(
+            type[SupportsDataclass] | None, getattr(self, "params_type", None)
+        )
+        result_type = cast(
+            type[SupportsDataclass] | None, getattr(self, "result_type", None)
+        )
         if params_type is None or result_type is None:
             origin = getattr(self, "__orig_class__", None)
             if origin is not None:  # pragma: no cover - defensive fallback
                 args = get_args(origin)
                 if len(args) == 2 and all(isinstance(arg, type) for arg in args):
-                    params_type = cast(type[Any], args[0])
-                    result_type = cast(type[Any], args[1])
+                    params_type = cast(type[SupportsDataclass], args[0])
+                    result_type = cast(type[SupportsDataclass], args[1])
         if params_type is None or result_type is None:
             raise PromptValidationError(
                 "Tool must be instantiated with concrete type arguments.",
@@ -111,8 +116,8 @@ class Tool[ParamsT, ResultT]:
     def _validate_handler(
         self,
         handler: Callable[[ParamsT], ToolResult[ResultT]],
-        params_type: type[Any],
-        result_type: type[Any],
+        params_type: type[SupportsDataclass],
+        result_type: type[SupportsDataclass],
     ) -> None:
         if not callable(handler):
             raise PromptValidationError(
@@ -185,7 +190,9 @@ class Tool[ParamsT, ResultT]:
         )
 
     @classmethod
-    def __class_getitem__(cls, item: object) -> type[Tool[Any, Any]]:
+    def __class_getitem__(
+        cls, item: object
+    ) -> type[Tool[SupportsDataclass, SupportsDataclass]]:
         if not isinstance(item, tuple):
             raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
         typed_item = cast(tuple[Any, Any], item)
@@ -199,8 +206,8 @@ class Tool[ParamsT, ResultT]:
             result_candidate, type
         ):
             raise TypeError("Tool[...] type arguments must be types.")
-        params_type = cast(type[Any], params_candidate)
-        result_type = cast(type[Any], result_candidate)
+        params_type = cast(type[SupportsDataclass], params_candidate)
+        result_type = cast(type[SupportsDataclass], result_candidate)
 
         class _SpecializedTool(cls):  # type: ignore[misc]
             def __post_init__(self) -> None:  # type: ignore[override]
@@ -211,7 +218,7 @@ class Tool[ParamsT, ResultT]:
         _SpecializedTool.__name__ = cls.__name__
         _SpecializedTool.__qualname__ = cls.__qualname__
         _SpecializedTool.__module__ = cls.__module__
-        return _SpecializedTool
+        return _SpecializedTool  # type: ignore[return-value]
 
 
 __all__ = ["Tool", "ToolResult"]
