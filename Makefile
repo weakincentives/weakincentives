@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck bandit deptry pip-audit all clean
+.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check all clean
 
 # Format code with ruff
 format:
@@ -28,11 +28,15 @@ deptry:
 pip-audit:
 	@uv run python tools/run_pip_audit.py
 
+# Validate Markdown formatting
+markdown-check:
+	@uv run python tools/run_mdformat.py
+
 # Run type checkers
 typecheck:
 	@uv run --all-extras ty check --error-on-warning -qq . || \
-		(echo "ty check failed; rerunning with verbose output..." >&2; \
-		uv run --all-extras ty check --error-on-warning .)
+                (echo "ty check failed; rerunning with verbose output..." >&2; \
+                uv run --all-extras ty check --error-on-warning .)
 	@uv run --all-extras pyright --project pyproject.toml || \
 		(echo "pyright failed; rerunning with verbose output..." >&2; \
 		uv run --all-extras pyright --project pyproject.toml --verbose)
@@ -41,8 +45,8 @@ typecheck:
 test:
 	@uv run --all-extras python tools/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --no-summary --cov-report=
 
-# Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, test)
-check: format-check lint typecheck bandit deptry pip-audit test
+# Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, markdown, test)
+check: format-check lint typecheck bandit deptry pip-audit markdown-check test
 
 # Run all checks and fixes
 all: format lint-fix bandit deptry pip-audit typecheck test

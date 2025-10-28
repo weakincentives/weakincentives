@@ -61,6 +61,7 @@ dev = [
     "ruff>=0.14.1",
     "pyright>=1.1.389",
     "ty>=0.0.1a23",
+    "mdformat>=0.7",
 ]
 
 [tool.ruff]

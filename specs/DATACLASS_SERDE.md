@@ -84,11 +84,11 @@ schema(cls, *, alias_generator=None, extra="ignore") -> dict[str, Any]
 ## Constraints & Hooks
 
 1. Merge metadata from `Annotated` annotations and `field.metadata`. When both provide a key, the `Annotated` payload wins.
-2. Apply string normalisers before constraint checks. Validators run next and may return a transformed value. `convert` /
+1. Apply string normalisers before constraint checks. Validators run next and may return a transformed value. `convert` /
    `transform` executes last and should return the final value.
-3. Path-aware errors use dotted/indexed notation such as `"address.street"`, `"line_items[0].price"`, and
+1. Path-aware errors use dotted/indexed notation such as `"address.street"`, `"line_items[0].price"`, and
    `"attributes[sku]"`. Missing required inputs raise `ValueError("Missing required field: 'field'")`.
-4. Union parsing tries branches in declaration order and surfaces the final failure message. Optional unions treat `None` and
+1. Union parsing tries branches in declaration order and surfaces the final failure message. Optional unions treat `None` and
    empty strings as missing when coercion is enabled.
 
 ## Limitations

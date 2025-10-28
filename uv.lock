@@ -333,6 +333,18 @@ wheels = [
 ]
 
 [[package]]
+name = "mdformat"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown-it-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3f/05/32b5e14b192b0a8a309f32232c580aefedd9d06017cb8fe8fce34bec654c/mdformat-1.0.0.tar.gz", hash = "sha256:4954045fcae797c29f86d4ad879e43bb151fa55dbaf74ac6eaeacf1d45bb3928", size = 56953, upload-time = "2025-10-16T12:05:03.695Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/9a/8fe71b95985ca7a4001effbcc58e5a07a1f2a2884203f74dcf48a3b08315/mdformat-1.0.0-py3-none-any.whl", hash = "sha256:bca015d65a1d063a02e885a91daee303057bc7829c2cd37b2075a50dbb65944b", size = 53288, upload-time = "2025-10-16T12:05:02.607Z" },
+]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -811,6 +823,7 @@ openai = [
 dev = [
     { name = "bandit" },
     { name = "deptry" },
+    { name = "mdformat" },
     { name = "pip-audit" },
     { name = "pyright" },
     { name = "pytest" },
@@ -827,6 +840,7 @@ provides-extras = ["openai"]
 dev = [
     { name = "bandit", specifier = ">=1.7.8" },
     { name = "deptry", specifier = ">=0.16.3" },
+    { name = "mdformat", specifier = ">=0.7" },
     { name = "pip-audit", specifier = ">=2.7.3" },
     { name = "pyright", specifier = ">=1.1.389" },
     { name = "pytest", specifier = ">=8.4.2" },
