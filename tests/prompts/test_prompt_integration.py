@@ -64,13 +64,13 @@ def build_compose_prompt() -> Prompt:
 def test_prompt_integration_renders_expected_markdown():
     prompt = build_compose_prompt()
 
-    output = prompt.render(
+    rendered = prompt.render(
         RoutingParams(recipient="Jordan", subject="Q2 sync"),
         ToneParams(tone="warm"),
         ContentParams(summary="Top takeaways from yesterday's meeting."),
     )
 
-    assert output == "\n\n".join(
+    assert rendered.text == "\n\n".join(
         [
             "## Message Routing\n\nTo: Jordan\nSubject: Q2 sync",
             "### Tone\n\nTarget tone: warm",
@@ -82,14 +82,14 @@ def test_prompt_integration_renders_expected_markdown():
 def test_prompt_integration_handles_disabled_sections():
     prompt = build_compose_prompt()
 
-    output = prompt.render(
+    rendered = prompt.render(
         RoutingParams(recipient="Avery"),
         ToneParams(tone="direct"),
         ContentParams(summary="   \n"),
     )
 
-    assert "Content Guidance" not in output
-    assert "Target tone: direct" in output
+    assert "Content Guidance" not in rendered.text
+    assert "Target tone: direct" in rendered.text
 
 
 def test_prompt_integration_rejects_mismatched_types():

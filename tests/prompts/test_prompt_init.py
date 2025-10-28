@@ -75,8 +75,8 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
 
     rendered = prompt.render()
 
-    assert "First: alpha" in rendered
-    assert "Second: beta" in rendered
+    assert "First: alpha" in rendered.text
+    assert "Second: beta" in rendered.text
     assert prompt.params_types == {DuplicateParams}
 
 
@@ -94,8 +94,8 @@ def test_prompt_reuses_provided_params_for_duplicate_sections():
 
     rendered = prompt.render(DuplicateParams(value="shared"))
 
-    assert "First: shared" in rendered
-    assert "Second: shared" in rendered
+    assert "First: shared" in rendered.text
+    assert "Second: shared" in rendered.text
 
 
 def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_default():
@@ -113,8 +113,8 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
 
     rendered = prompt.render()
 
-    assert "First: alpha" in rendered
-    assert "Second: alpha" in rendered
+    assert "First: alpha" in rendered.text
+    assert "Second: alpha" in rendered.text
 
 
 def test_prompt_validates_text_section_placeholders():

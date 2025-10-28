@@ -61,7 +61,8 @@ def test_prompt_tools_integration_example() -> None:
 
     prompt = Prompt(name="tools_overview", sections=[guidance])
 
-    markdown = prompt.render(GuidanceParams(primary_tool="lookup_entity"))
+    rendered = prompt.render(GuidanceParams(primary_tool="lookup_entity"))
+    markdown = rendered.text
 
     assert markdown == (
         "## Guidance\n\nUse tools when you need up-to-date context. "
