@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompts import Prompt, Section, TextSection
+from weakincentives.prompts import Prompt, Section, SupportsDataclass, TextSection
 from weakincentives.prompts.errors import PromptValidationError
 from weakincentives.prompts.tool import Tool
 
@@ -73,24 +73,42 @@ def _build_prompt() -> tuple[
     primary_section = TextSection[PrimarySectionParams](
         title="Primary",
         body="",
-        tools=[primary_tool],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [primary_tool],
+        ),
         defaults=PrimarySectionParams(),
     )
     guidance = TextSection[GuidanceParams](
         title="Guidance",
         body="Use ${primary_tool} when available.",
         enabled=lambda params: params.allow_tools,
-        children=[primary_section],
+        children=cast(
+            list[Section[SupportsDataclass]],
+            [primary_section],
+        ),
     )
     secondary = TextSection[SecondaryToggleParams](
         title="Secondary",
         body="",
-        tools=[secondary_tool],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [secondary_tool],
+        ),
         defaults=SecondaryToggleParams(enabled=True),
         enabled=lambda params: params.enabled,
     )
 
-    return Prompt(sections=[guidance, secondary]), primary_tool, secondary_tool
+    return (
+        Prompt(
+            sections=cast(
+                list[Section[SupportsDataclass]],
+                [guidance, secondary],
+            )
+        ),
+        primary_tool,
+        secondary_tool,
+    )
 
 
 def test_prompt_tools_depth_first_and_enablement() -> None:
@@ -118,18 +136,29 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
     first_section = TextSection[PrimarySectionParams](
         title="First Tools",
         body="",
-        tools=[_build_primary_tool()],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [_build_primary_tool()],
+        ),
         defaults=PrimarySectionParams(),
     )
     second_section = TextSection[SecondaryToggleParams](
         title="Second Tools",
         body="",
-        tools=[_build_primary_tool()],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [_build_primary_tool()],
+        ),
         defaults=SecondaryToggleParams(),
     )
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(sections=[first_section, second_section])
+        Prompt(
+            sections=cast(
+                list[Section[SupportsDataclass]],
+                [first_section, second_section],
+            )
+        )
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("Second Tools",)
@@ -147,17 +176,28 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
     first_section = TextSection[PrimarySectionParams](
         title="Primary",
         body="",
-        tools=[primary_tool],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [primary_tool],
+        ),
         defaults=PrimarySectionParams(),
     )
     second_section = TextSection[SecondaryToggleParams](
         title="Alternate",
         body="",
-        tools=[alternate_tool],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [alternate_tool],
+        ),
         defaults=SecondaryToggleParams(),
     )
 
-    prompt = Prompt(sections=[first_section, second_section])
+    prompt = Prompt(
+        sections=cast(
+            list[Section[SupportsDataclass]],
+            [first_section, second_section],
+        )
+    )
 
     tools = prompt.tools()
     assert {tool.name for tool in tools} == {"primary_lookup", "alternate_primary"}
@@ -168,7 +208,7 @@ class _InvalidToolSection(Section[GuidanceParams]):
     def render(self, params: GuidanceParams, depth: int) -> str:
         return ""
 
-    def tools(self) -> tuple[Any, ...]:
+    def tools(self) -> tuple[Any, ...]:  # type: ignore[override]
         return ("not-a-tool",)
 
 
@@ -176,7 +216,12 @@ def test_prompt_tools_requires_tool_instances() -> None:
     invalid_section = _InvalidToolSection(title="Invalid")
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(sections=[invalid_section])
+        Prompt(
+            sections=cast(
+                list[Section[SupportsDataclass]],
+                [invalid_section],
+            )
+        )
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("Invalid",)
@@ -190,12 +235,20 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     section = TextSection[PrimarySectionParams](
         title="Primary",
         body="",
-        tools=[tool],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [tool],
+        ),
         defaults=PrimarySectionParams(),
     )
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(sections=[section])
+        Prompt(
+            sections=cast(
+                list[Section[SupportsDataclass]],
+                [section],
+            )
+        )
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("Primary",)

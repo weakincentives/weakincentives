@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompts import Section
+from weakincentives.prompts import Section, SupportsDataclass
+from typing import cast
 
 
 @dataclass
@@ -35,7 +36,7 @@ def test_section_allows_custom_children_and_enabled():
 
     section = ExampleSection(
         title="Parent",
-        children=[child],
+        children=cast(list[Section[SupportsDataclass]], [child]),
         enabled=toggle,
     )
 
@@ -44,7 +45,7 @@ def test_section_allows_custom_children_and_enabled():
     assert section.is_enabled(ExampleParams(value="go")) is True
 
 
-class PlainSection(Section):
+class PlainSection(Section):  # type: ignore[type-var]
     def render(
         self, params: object, depth: int
     ) -> str:  # pragma: no cover - exercise instantiation guard

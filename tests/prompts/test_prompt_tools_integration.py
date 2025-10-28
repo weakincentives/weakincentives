@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import cast
 
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.prompts import (
+    Prompt,
+    Section,
+    SupportsDataclass,
+    TextSection,
+    Tool,
+    ToolResult,
+)
 
 
 @dataclass
@@ -46,7 +54,10 @@ def test_prompt_tools_integration_example() -> None:
     tools_section = TextSection[ToolDescriptionParams](
         title="Available Tools",
         body="Invoke ${primary_tool} whenever you need fresh entity context.",
-        tools=[lookup_tool],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [lookup_tool],
+        ),
         defaults=ToolDescriptionParams(),
     )
 
@@ -56,10 +67,16 @@ def test_prompt_tools_integration_example() -> None:
             "Use tools when you need up-to-date context. "
             "Prefer ${primary_tool} for critical lookups."
         ),
-        children=[tools_section],
+        children=cast(
+            list[Section[SupportsDataclass]],
+            [tools_section],
+        ),
     )
 
-    prompt = Prompt(name="tools_overview", sections=[guidance])
+    prompt = Prompt(
+        name="tools_overview",
+        sections=cast(list[Section[SupportsDataclass]], [guidance]),
+    )
 
     markdown = prompt.render(GuidanceParams(primary_tool="lookup_entity"))
 

@@ -3,16 +3,17 @@ from __future__ import annotations
 import textwrap
 from collections.abc import Callable, Sequence
 from string import Template
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .errors import PromptRenderError
 from .section import Section
+from ._typing import SupportsDataclass
 
 if TYPE_CHECKING:
     from .tool import Tool
 
 
-class TextSection[ParamsT](Section[ParamsT]):
+class TextSection[ParamsT: SupportsDataclass](Section[ParamsT]):
     """Render markdown text content using string.Template."""
 
     def __init__(
@@ -21,9 +22,9 @@ class TextSection[ParamsT](Section[ParamsT]):
         title: str,
         body: str,
         defaults: ParamsT | None = None,
-        children: Sequence[Section[Any]] | None = None,
+        children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
-        tools: Sequence[Tool[Any, Any]] | None = None,
+        tools: Sequence["Tool[SupportsDataclass, SupportsDataclass]"] | None = None,
     ) -> None:
         super().__init__(
             title=title,

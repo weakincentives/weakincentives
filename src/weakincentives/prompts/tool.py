@@ -4,15 +4,16 @@ import inspect
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, is_dataclass
-from typing import Annotated, Any, get_args, get_origin, get_type_hints
+from typing import Annotated, get_args, get_origin, get_type_hints
 
 from .errors import PromptValidationError
+from ._typing import SupportsDataclass
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
 
 @dataclass(slots=True)
-class ToolResult[ResultPayloadT]:
+class ToolResult[ResultPayloadT: SupportsDataclass]:
     """Structured response emitted by a tool handler."""
 
     message: str
@@ -20,7 +21,7 @@ class ToolResult[ResultPayloadT]:
 
 
 @dataclass(slots=True)
-class Tool[ParamsT, ResultT]:
+class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
@@ -182,7 +183,9 @@ class Tool[ParamsT, ResultT]:
         )
 
     @classmethod
-    def __class_getitem__(cls, item: object) -> type[Tool[Any, Any]]:
+    def __class_getitem__(
+        cls, item: object
+    ) -> type["Tool[SupportsDataclass, SupportsDataclass]"]:
         params_type, result_type = cls._normalize_generic_arguments(item)
 
         class _SpecializedTool(cls):  # type: ignore[misc]
@@ -197,7 +200,9 @@ class Tool[ParamsT, ResultT]:
         return _SpecializedTool
 
     @staticmethod
-    def _normalize_generic_arguments(item: object) -> tuple[type[Any], type[Any]]:
+    def _normalize_generic_arguments(
+        item: object,
+    ) -> tuple[type[SupportsDataclass], type[SupportsDataclass]]:
         if not isinstance(item, tuple) or len(item) != 2:
             raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
         params_type, result_type = item

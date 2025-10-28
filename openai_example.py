@@ -7,7 +7,7 @@ import os
 import textwrap
 from dataclasses import MISSING, dataclass, fields
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 try:  # pragma: no cover - optional dependency in stdlib for 3.9+
     from zoneinfo import ZoneInfo
@@ -15,7 +15,14 @@ except ImportError:  # pragma: no cover - defensive fallback
     ZoneInfo = None  # type: ignore[assignment]
 
 from weakincentives.adapters import create_openai_client
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.prompts import (
+    Prompt,
+    Section,
+    SupportsDataclass,
+    TextSection,
+    Tool,
+    ToolResult,
+)
 
 
 @dataclass
@@ -221,7 +228,10 @@ def build_system_prompt() -> Prompt:
             - current_time: fetch the current timestamp in a requested timezone.
             """
         ).strip(),
-        tools=[echo_tool, math_tool, notes_tool, time_tool],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [echo_tool, math_tool, notes_tool, time_tool],
+        ),
     )
     guidance_section = TextSection[AgentGuidance](
         title="Agent Guidance",
@@ -232,9 +242,12 @@ def build_system_prompt() -> Prompt:
             "answer grounded in those observations."
         ),
         defaults=AgentGuidance(),
-        children=[tool_overview],
+        children=cast(list[Section[SupportsDataclass]], [tool_overview]),
     )
-    return Prompt(name="echo_agent", sections=[guidance_section])
+    return Prompt(
+        name="echo_agent",
+        sections=cast(list[Section[SupportsDataclass]], [guidance_section]),
+    )
 
 
 def build_user_turn_prompt() -> Prompt:
@@ -245,7 +258,10 @@ def build_user_turn_prompt() -> Prompt:
             "call tools or respond directly.\n\nInstruction:\n${content}"
         ),
     )
-    return Prompt(name="echo_user_turn", sections=[user_turn_section])
+    return Prompt(
+        name="echo_user_turn",
+        sections=cast(list[Section[SupportsDataclass]], [user_turn_section]),
+    )
 
 
 class BasicOpenAIAgent:
@@ -350,7 +366,9 @@ class BasicOpenAIAgent:
             raise RuntimeError("Tool call arguments must be a JSON object.")
         return parsed
 
-    def _call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult[Any]:
+    def _call_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> ToolResult[SupportsDataclass]:
         tool = self._tool_registry.get(name)
         if tool is None or tool.handler is None:
             raise RuntimeError(f"No handler registered for tool '{name}'.")

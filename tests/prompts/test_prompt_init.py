@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
-from weakincentives.prompts import Prompt, PromptValidationError, TextSection
+from weakincentives.prompts import (
+    Prompt,
+    PromptValidationError,
+    Section,
+    SupportsDataclass,
+    TextSection,
+)
 
 
 @dataclass
@@ -39,10 +46,16 @@ def test_prompt_initialization_flattens_sections_depth_first():
     root = TextSection[RootParams](
         title="Root",
         body="Root: ${title}",
-        children=[child, sibling],
+        children=cast(
+            list[Section[SupportsDataclass]],
+            [child, sibling],
+        ),
     )
 
-    prompt = Prompt(name="demo", sections=[root])
+    prompt = Prompt(
+        name="demo",
+        sections=cast(list[Section[SupportsDataclass]], [root]),
+    )
 
     titles = [node.section.title for node in prompt.sections]
     depths = [node.depth for node in prompt.sections]
@@ -71,7 +84,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
         defaults=DuplicateParams(value="beta"),
     )
 
-    prompt = Prompt(sections=[first, second])
+    prompt = Prompt(sections=cast(list[Section[SupportsDataclass]], [first, second]))
 
     rendered = prompt.render()
 
@@ -90,7 +103,7 @@ def test_prompt_reuses_provided_params_for_duplicate_sections():
         body="Second: ${value}",
     )
 
-    prompt = Prompt(sections=[first, second])
+    prompt = Prompt(sections=cast(list[Section[SupportsDataclass]], [first, second]))
 
     rendered = prompt.render(DuplicateParams(value="shared"))
 
@@ -109,7 +122,7 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
         body="Second: ${value}",
     )
 
-    prompt = Prompt(sections=[first, second])
+    prompt = Prompt(sections=cast(list[Section[SupportsDataclass]], [first, second]))
 
     rendered = prompt.render()
 
@@ -128,7 +141,7 @@ def test_prompt_validates_text_section_placeholders():
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(sections=[section])
+        Prompt(sections=cast(list[Section[SupportsDataclass]], [section]))
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.placeholder == "oops"

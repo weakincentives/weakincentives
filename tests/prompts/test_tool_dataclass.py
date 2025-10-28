@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, cast
 
 import pytest
 
+from weakincentives.prompts import SupportsDataclass
 from weakincentives.prompts.errors import PromptValidationError
 from weakincentives.prompts.tool import Tool, ToolResult
 
@@ -132,8 +133,11 @@ def test_tool_rejects_non_dataclass_params_generic() -> None:
 
 
 def test_tool_rejects_non_dataclass_result_generic() -> None:
-    def handler(params: ExampleParams) -> ToolResult[str]:
-        return ToolResult(message=params.message, payload=params.message)
+    def handler(params: ExampleParams) -> ToolResult[str]:  # type: ignore[type-var]
+        return ToolResult(
+            message=params.message,
+            payload=cast(SupportsDataclass, params.message),
+        )
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, str](  # type: ignore[type-var]
@@ -268,8 +272,11 @@ def test_tool_rejects_handler_missing_return_annotation() -> None:
 
 
 def test_tool_rejects_handler_with_wrong_return_annotation() -> None:
-    def handler(params: ExampleParams) -> ToolResult[str]:
-        return ToolResult(message=params.message, payload=params.message)
+    def handler(params: ExampleParams) -> ToolResult[str]:  # type: ignore[type-var]
+        return ToolResult(
+            message=params.message,
+            payload=cast(SupportsDataclass, params.message),
+        )
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, ExampleResult](

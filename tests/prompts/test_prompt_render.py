@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
@@ -8,6 +9,8 @@ from weakincentives.prompts import (
     Prompt,
     PromptRenderError,
     PromptValidationError,
+    Section,
+    SupportsDataclass,
     TextSection,
 )
 
@@ -41,7 +44,12 @@ def build_prompt() -> Prompt:
         body="Outro: ${footer}",
         defaults=OutroParams(footer="bye"),
     )
-    return Prompt(sections=[intro, details, outro])
+    return Prompt(
+        sections=cast(
+            list[Section[SupportsDataclass]],
+            [intro, details, outro],
+        )
+    )
 
 
 @dataclass
@@ -73,19 +81,19 @@ def build_nested_prompt() -> Prompt:
     child = TextSection[ChildNestedParams](
         title="Child",
         body="Child detail: ${detail}",
-        children=[leaf],
+        children=cast(list[Section[SupportsDataclass]], [leaf]),
     )
     parent = TextSection[ParentToggleParams](
         title="Parent",
         body="Parent: ${heading}",
-        children=[child],
+        children=cast(list[Section[SupportsDataclass]], [child]),
         enabled=lambda params: params.include_children,
     )
     summary = TextSection[SummaryParams](
         title="Summary",
         body="Summary: ${summary}",
     )
-    return Prompt(sections=[parent, summary])
+    return Prompt(sections=cast(list[Section[SupportsDataclass]], [parent, summary]))
 
 
 def test_prompt_render_merges_defaults_and_overrides():
@@ -194,7 +202,7 @@ def test_prompt_render_wraps_template_errors_with_context():
         title="Explode",
         body="unused",
     )
-    prompt = Prompt(sections=[section])
+    prompt = Prompt(sections=cast(list[Section[SupportsDataclass]], [section]))
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ErrorParams(value="x"))
@@ -217,7 +225,7 @@ def test_prompt_render_propagates_enabled_errors():
         body="Guard: ${flag}",
         enabled=raising_enabled,
     )
-    prompt = Prompt(sections=[section])
+    prompt = Prompt(sections=cast(list[Section[SupportsDataclass]], [section]))
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ToggleParams(flag=True))

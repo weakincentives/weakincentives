@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ._typing import SupportsDataclass
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -24,4 +25,5 @@ __all__ = [
     "TextSection",
     "Tool",
     "ToolResult",
+    "SupportsDataclass",
 ]

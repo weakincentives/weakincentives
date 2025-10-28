@@ -4,11 +4,15 @@ from dataclasses import dataclass
 
 import pytest
 
+from typing import cast
+
 from weakincentives import prompts
 from weakincentives.prompts import (
     Prompt,
     PromptRenderError,
     PromptValidationError,
+    Section,
+    SupportsDataclass,
     TextSection,
 )
 
@@ -54,11 +58,14 @@ def build_compose_prompt() -> Prompt:
             Subject: ${subject}
             """,
             defaults=RoutingParams(subject="(optional subject)"),
-            children=[tone_section, content_section],
+            children=cast(
+                list[Section[SupportsDataclass]],
+                [tone_section, content_section],
+            ),
         ),
     ]
 
-    return Prompt(sections=sections)
+    return Prompt(sections=cast(list[Section[SupportsDataclass]], sections))
 
 
 def test_prompt_integration_renders_expected_markdown():

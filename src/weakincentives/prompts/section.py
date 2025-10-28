@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .tool import Tool
 
+from ._typing import SupportsDataclass
 
-class Section[ParamsT](ABC):
+
+class Section[ParamsT: SupportsDataclass](ABC):
     """Abstract building block for prompt content."""
 
     def __init__(
@@ -16,9 +18,9 @@ class Section[ParamsT](ABC):
         *,
         title: str,
         defaults: ParamsT | None = None,
-        children: Sequence[Section[Any]] | None = None,
+        children: Sequence["Section[SupportsDataclass]"] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
-        tools: Sequence[Tool[Any, Any]] | None = None,
+        tools: Sequence["Tool[SupportsDataclass, SupportsDataclass]"] | None = None,
     ) -> None:
         params_type = getattr(self.__class__, "_params_type", None)
         if not isinstance(params_type, type):
@@ -31,14 +33,17 @@ class Section[ParamsT](ABC):
         self.title = title
         self.defaults = defaults
 
-        normalized_children: list[Section[Any]] = []
+        normalized_children: list[Section[SupportsDataclass]] = []
         for child in children or ():
             if not isinstance(child, Section):
                 raise TypeError("Section children must be Section instances.")
             normalized_children.append(child)
         self.children = tuple(normalized_children)
         self._enabled = enabled
-        self._tools = self._normalize_tools(tools)
+        self._tools: tuple[
+            "Tool[SupportsDataclass, SupportsDataclass]",
+            ...,
+        ] = self._normalize_tools(tools)
 
     def is_enabled(self, params: ParamsT) -> bool:
         """Return True when the section should render for the given params."""
@@ -56,13 +61,13 @@ class Section[ParamsT](ABC):
 
         return set()
 
-    def tools(self) -> tuple[Any, ...]:
+    def tools(self) -> tuple["Tool[SupportsDataclass, SupportsDataclass]", ...]:
         """Return the tools exposed by this section."""
 
         return self._tools
 
     @classmethod
-    def __class_getitem__(cls, item: object) -> type[Section[Any]]:
+    def __class_getitem__(cls, item: object) -> type["Section[SupportsDataclass]"]:
         params_type = cls._normalize_generic_argument(item)
 
         class _SpecializedSection(cls):  # type: ignore[misc]
@@ -82,14 +87,14 @@ class Section[ParamsT](ABC):
 
     @staticmethod
     def _normalize_tools(
-        tools: Sequence[Tool[Any, Any]] | None,
-    ) -> tuple[Tool[Any, Any], ...]:
+        tools: Sequence["Tool[SupportsDataclass, SupportsDataclass]"] | None,
+    ) -> tuple["Tool[SupportsDataclass, SupportsDataclass]", ...]:
         if not tools:
             return ()
 
         from .tool import Tool
 
-        normalized: list[Tool[Any, Any]] = []
+        normalized: list[Tool[SupportsDataclass, SupportsDataclass]] = []
         for tool in tools:
             if not isinstance(tool, Tool):
                 raise TypeError("Section tools must be Tool instances.")

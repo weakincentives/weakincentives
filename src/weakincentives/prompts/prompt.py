@@ -2,22 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
-from typing import Any
 
-from .errors import (
-    PromptRenderError,
-    PromptValidationError,
-    SectionPath,
-)
+from ._typing import SupportsDataclass
+from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .section import Section
 from .tool import Tool
 
 
 @dataclass(frozen=True, slots=True)
-class PromptSectionNode:
+class PromptSectionNode[ParamsT: SupportsDataclass]:
     """Flattened view of a section within a prompt."""
 
-    section: Section[Any]
+    section: Section[ParamsT]
     depth: int
     path: SectionPath
 
@@ -29,21 +25,23 @@ class Prompt:
         self,
         *,
         name: str | None = None,
-        sections: Sequence[Section[Any]] | None = None,
+        sections: Sequence[Section[SupportsDataclass]] | None = None,
     ) -> None:
         self.name = name
-        self._sections: tuple[Section[Any], ...] = tuple(sections or ())
-        self._section_nodes: list[PromptSectionNode] = []
-        self._params_registry: dict[type[Any], list[PromptSectionNode]] = {}
-        self._defaults_by_path: dict[SectionPath, object] = {}
-        self._defaults_by_type: dict[type[Any], object] = {}
+        self._sections: tuple[Section[SupportsDataclass], ...] = tuple(sections or ())
+        self._section_nodes: list[PromptSectionNode[SupportsDataclass]] = []
+        self._params_registry: dict[
+            type[SupportsDataclass], list[PromptSectionNode[SupportsDataclass]]
+        ] = {}
+        self._defaults_by_path: dict[SectionPath, SupportsDataclass] = {}
+        self._defaults_by_type: dict[type[SupportsDataclass], SupportsDataclass] = {}
         self.placeholders: dict[SectionPath, set[str]] = {}
         self._tool_name_registry: dict[str, SectionPath] = {}
 
         for section in self._sections:
             self._register_section(section, path=(section.title,), depth=0)
 
-    def render(self, *params: object) -> str:
+    def render(self, *params: SupportsDataclass) -> str:
         """Render the prompt using provided parameter dataclass instances."""
 
         param_lookup = self._collect_param_lookup(params)
@@ -74,11 +72,13 @@ class Prompt:
 
         return "\n\n".join(rendered_sections)
 
-    def tools(self, *params: object) -> tuple[Tool[Any, Any], ...]:
+    def tools(
+        self, *params: SupportsDataclass
+    ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
         """Return tools exposed by enabled sections in traversal order."""
 
         param_lookup = self._collect_param_lookup(params)
-        collected: list[Tool[Any, Any]] = []
+        collected: list[Tool[SupportsDataclass, SupportsDataclass]] = []
 
         for node, _section_params in self._iter_enabled_sections(param_lookup):
             section_tools = node.section.tools()
@@ -89,7 +89,7 @@ class Prompt:
 
     def _register_section(
         self,
-        section: Section[Any],
+        section: Section[SupportsDataclass],
         *,
         path: SectionPath,
         depth: int,
@@ -102,7 +102,11 @@ class Prompt:
                 dataclass_type=params_type,
             )
 
-        node = PromptSectionNode(section=section, depth=depth, path=path)
+        node: PromptSectionNode[SupportsDataclass] = PromptSectionNode(
+            section=section,
+            depth=depth,
+            path=path,
+        )
         self._section_nodes.append(node)
         self._params_registry.setdefault(params_type, []).append(node)
 
@@ -143,17 +147,17 @@ class Prompt:
             self._register_section(child, path=child_path, depth=depth + 1)
 
     @property
-    def sections(self) -> tuple[PromptSectionNode, ...]:
+    def sections(self) -> tuple[PromptSectionNode[SupportsDataclass], ...]:
         return tuple(self._section_nodes)
 
     @property
-    def params_types(self) -> set[type[Any]]:
+    def params_types(self) -> set[type[SupportsDataclass]]:
         return set(self._params_registry.keys())
 
     def _collect_param_lookup(
-        self, params: tuple[object, ...]
-    ) -> dict[type[Any], object]:
-        lookup: dict[type[Any], object] = {}
+        self, params: tuple[SupportsDataclass, ...]
+    ) -> dict[type[SupportsDataclass], SupportsDataclass]:
+        lookup: dict[type[SupportsDataclass], SupportsDataclass] = {}
         for value in params:
             provided_type = value if isinstance(value, type) else type(value)
             if isinstance(value, type) or not is_dataclass(value):
@@ -177,9 +181,9 @@ class Prompt:
 
     def _resolve_section_params(
         self,
-        node: PromptSectionNode,
-        param_lookup: dict[type[Any], object],
-    ) -> object:
+        node: PromptSectionNode[SupportsDataclass],
+        param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+    ) -> SupportsDataclass:
         params_type = node.section.params
         section_params = param_lookup.get(params_type)
 
@@ -212,8 +216,8 @@ class Prompt:
 
     def _iter_enabled_sections(
         self,
-        param_lookup: dict[type[Any], object],
-    ) -> Iterator[tuple[PromptSectionNode, object]]:
+        param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+    ) -> Iterator[tuple[PromptSectionNode[SupportsDataclass], SupportsDataclass]]:
         skip_depth: int | None = None
 
         for node in self._section_nodes:
@@ -241,7 +245,7 @@ class Prompt:
 
     def _register_section_tools(
         self,
-        section: Section[Any],
+        section: Section[SupportsDataclass],
         path: SectionPath,
     ) -> None:
         section_tools = section.tools()

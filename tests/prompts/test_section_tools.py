@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
+from weakincentives.prompts import SupportsDataclass
 from weakincentives.prompts.section import Section
 from weakincentives.prompts.text import TextSection
 from weakincentives.prompts.tool import Tool, ToolResult
@@ -55,7 +57,13 @@ def test_sections_reject_non_tool_entries() -> None:
 def test_sections_expose_tools_in_order() -> None:
     first = _build_tool("first")
     second = _build_tool("second")
-    section = _BareSection(title="With Tools", tools=[first, second])
+    section = _BareSection(
+        title="With Tools",
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [first, second],
+        ),
+    )
 
     tools = section.tools()
 
@@ -69,7 +77,10 @@ def test_text_section_accepts_tools() -> None:
     section = TextSection[SectionParams](
         title="Paragraph",
         body="Hello",
-        tools=[tool],
+        tools=cast(
+            list[Tool[SupportsDataclass, SupportsDataclass]],
+            [tool],
+        ),
     )
 
     assert section.tools() == (tool,)
