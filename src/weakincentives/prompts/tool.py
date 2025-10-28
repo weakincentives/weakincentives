@@ -4,15 +4,19 @@ import inspect
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, is_dataclass
-from typing import Annotated, Any, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Generic, TypeVar, cast, get_args, get_origin, get_type_hints
 
 from .errors import PromptValidationError
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
 
+ParamsT = TypeVar("ParamsT")
+ResultT = TypeVar("ResultT")
+ResultPayloadT = TypeVar("ResultPayloadT")
+
 
 @dataclass(slots=True)
-class ToolResult[ResultPayloadT]:
+class ToolResult(Generic[ResultPayloadT]):
     """Structured response emitted by a tool handler."""
 
     message: str
@@ -20,38 +24,41 @@ class ToolResult[ResultPayloadT]:
 
 
 @dataclass(slots=True)
-class Tool[ParamsT, ResultT]:
+class Tool(Generic[ParamsT, ResultT]):
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
     description: str
     handler: Callable[[ParamsT], ToolResult[ResultT]] | None
-    params_type: type[ParamsT] = field(init=False, repr=False)
-    result_type: type[ResultT] = field(init=False, repr=False)
+    params_type: type[Any] = field(init=False, repr=False)
+    result_type: type[Any] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        params_type = getattr(self, "params_type", None)
-        result_type = getattr(self, "result_type", None)
+        params_type = cast(type[Any] | None, getattr(self, "params_type", None))
+        result_type = cast(type[Any] | None, getattr(self, "result_type", None))
+        if params_type is None or result_type is None:
+            origin = getattr(self, "__orig_class__", None)
+            if origin is not None:  # pragma: no cover - defensive fallback
+                args = get_args(origin)
+                if len(args) == 2 and all(isinstance(arg, type) for arg in args):
+                    params_type = cast(type[Any], args[0])
+                    result_type = cast(type[Any], args[1])
         if params_type is None or result_type is None:
             raise PromptValidationError(
                 "Tool must be instantiated with concrete type arguments.",
                 placeholder="type_arguments",
             )
 
-        if not isinstance(params_type, type) or not is_dataclass(params_type):
+        if not is_dataclass(params_type):
             raise PromptValidationError(
                 "Tool ParamsT must be a dataclass type.",
-                dataclass_type=params_type
-                if isinstance(params_type, type)
-                else type(params_type),
+                dataclass_type=params_type,
                 placeholder="ParamsT",
             )
-        if not isinstance(result_type, type) or not is_dataclass(result_type):
+        if not is_dataclass(result_type):
             raise PromptValidationError(
                 "Tool ResultT must be a dataclass type.",
-                dataclass_type=result_type
-                if isinstance(result_type, type)
-                else type(result_type),
+                dataclass_type=result_type,
                 placeholder="ResultT",
             )
 
@@ -108,8 +115,8 @@ class Tool[ParamsT, ResultT]:
     def _validate_handler(
         self,
         handler: Callable[[ParamsT], ToolResult[ResultT]],
-        params_type: type[ParamsT],
-        result_type: type[ResultT],
+        params_type: type[Any],
+        result_type: type[Any],
     ) -> None:
         if not callable(handler):
             raise PromptValidationError(
@@ -145,7 +152,7 @@ class Tool[ParamsT, ResultT]:
             hints = {}
 
         annotation = hints.get(parameter.name, parameter.annotation)
-        if annotation is inspect._empty:
+        if annotation is inspect.Parameter.empty:
             raise PromptValidationError(
                 "Tool handler parameter must be annotated with ParamsT.",
                 dataclass_type=params_type,
@@ -161,7 +168,7 @@ class Tool[ParamsT, ResultT]:
             )
 
         return_annotation = hints.get("return", signature.return_annotation)
-        if return_annotation is inspect._empty:
+        if return_annotation is inspect.Signature.empty:
             raise PromptValidationError(
                 "Tool handler must annotate its return value with ToolResult[ResultT].",
                 dataclass_type=params_type,
@@ -172,8 +179,8 @@ class Tool[ParamsT, ResultT]:
 
         origin = get_origin(return_annotation)
         if origin is ToolResult:
-            result_args = get_args(return_annotation)
-            if len(result_args) == 1 and result_args[0] is result_type:
+            result_args_raw = get_args(return_annotation)
+            if result_args_raw == (result_type,):
                 return
         raise PromptValidationError(
             "Tool handler return annotation must be ToolResult[ResultT].",
@@ -182,8 +189,20 @@ class Tool[ParamsT, ResultT]:
         )
 
     @classmethod
-    def __class_getitem__(cls, item: object) -> type[Tool[Any, Any]]:
-        params_type, result_type = cls._normalize_generic_arguments(item)
+    def __class_getitem__(
+        cls, item: object
+    ) -> type["Tool[Any, Any]"]:
+        if not isinstance(item, tuple):
+            raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
+        typed_item = cast(tuple[Any, Any], item)
+        try:
+            params_candidate, result_candidate = typed_item
+        except ValueError as error:
+            raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).") from error
+        if not isinstance(params_candidate, type) or not isinstance(result_candidate, type):
+            raise TypeError("Tool[...] type arguments must be types.")
+        params_type = cast(type[Any], params_candidate)
+        result_type = cast(type[Any], result_candidate)
 
         class _SpecializedTool(cls):  # type: ignore[misc]
             def __post_init__(self) -> None:  # type: ignore[override]
@@ -195,15 +214,5 @@ class Tool[ParamsT, ResultT]:
         _SpecializedTool.__qualname__ = cls.__qualname__
         _SpecializedTool.__module__ = cls.__module__
         return _SpecializedTool
-
-    @staticmethod
-    def _normalize_generic_arguments(item: object) -> tuple[type[Any], type[Any]]:
-        if not isinstance(item, tuple) or len(item) != 2:
-            raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
-        params_type, result_type = item
-        if not isinstance(params_type, type) or not isinstance(result_type, type):
-            raise TypeError("Tool[...] type arguments must be types.")
-        return params_type, result_type
-
 
 __all__ = ["Tool", "ToolResult"]

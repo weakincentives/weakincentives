@@ -28,11 +28,14 @@ deptry:
 pip-audit:
 	@uv run python tools/run_pip_audit.py
 
-# Run type checker
+# Run type checkers
 typecheck:
 	@uv run --all-extras ty check --error-on-warning -qq . || \
 		(echo "ty check failed; rerunning with verbose output..." >&2; \
 		uv run --all-extras ty check --error-on-warning .)
+	@uv run --all-extras pyright --project pyproject.toml || \
+		(echo "pyright failed; rerunning with verbose output..." >&2; \
+		uv run --all-extras pyright --project pyproject.toml --verbose)
 
 # Run tests with coverage (100% minimum)
 test:

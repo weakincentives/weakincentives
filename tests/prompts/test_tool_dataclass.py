@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any, cast
 
 import pytest
 
@@ -56,6 +56,25 @@ def test_tool_class_getitem_requires_two_type_arguments() -> None:
 def test_tool_class_getitem_requires_type_objects() -> None:
     with pytest.raises(TypeError):
         Tool[ExampleParams, "not-a-type"]  # type: ignore[index]
+
+
+def test_tool_class_getitem_rejects_extra_type_arguments() -> None:
+    with pytest.raises(TypeError):
+        Tool[ExampleParams, ExampleResult, ExampleResult]  # type: ignore[index]
+
+
+def test_tool_subclass_resolves_generic_arguments() -> None:
+    class _SubclassTool(Tool[ExampleParams, ExampleResult]):
+        pass
+
+    tool = _SubclassTool(
+        name="lookup_entity",
+        description="Fetch info",
+        handler=_example_handler,
+    )
+
+    assert tool.params_type is ExampleParams
+    assert tool.result_type is ExampleResult
 
 
 def test_tool_rejects_name_with_surrounding_whitespace() -> None:

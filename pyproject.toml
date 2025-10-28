@@ -59,6 +59,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "pip-audit>=2.7.3",
     "ruff>=0.14.1",
+    "pyright>=1.1.389",
     "ty>=0.0.1a23",
 ]
 
@@ -76,3 +77,8 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=80"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+include = ["src"]
+exclude = ["src/weakincentives/serde"]
