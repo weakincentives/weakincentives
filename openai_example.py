@@ -21,14 +21,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from weakincentives.adapters import OpenAIAdapter
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.serde import dump
+
 try:  # pragma: no cover - optional dependency in stdlib for 3.9+
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover - defensive fallback
     ZoneInfo = None  # type: ignore[assignment]
-
-from weakincentives.adapters import create_openai_client
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
-from weakincentives.serde import dump, parse, schema
 
 
 @dataclass
@@ -79,14 +79,6 @@ class AgentGuidance:
 @dataclass
 class UserTurnParams:
     content: str
-
-
-@dataclass
-class ReasoningStep:
-    thought: str
-    action: str | None
-    action_input: dict[str, Any] | None
-    observation: str | None
 
 
 KNOWLEDGE_BASE: dict[str, str] = {
@@ -174,20 +166,7 @@ def current_time_handler(
     )
 
 
-def tool_to_openai_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
-    parameters_schema = schema(tool.params_type, extra="forbid")
-    parameters_schema.pop("title", None)
-    return {
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": parameters_schema,
-        },
-    }
-
-
-def build_system_prompt() -> Prompt:
+def _build_tools() -> tuple[Tool[Any, Any], ...]:
     echo_tool = Tool[EchoToolParams, EchoToolResult](
         name="echo_text",
         description="Return the provided text in uppercase characters.",
@@ -208,6 +187,11 @@ def build_system_prompt() -> Prompt:
         description="Return the current timestamp, optionally in a specific timezone.",
         handler=current_time_handler,
     )
+    return (echo_tool, math_tool, notes_tool, time_tool)
+
+
+def build_prompt() -> Prompt:
+    tools = _build_tools()
     tool_overview = TextSection[AgentGuidance](
         title="Available Tools",
         body=textwrap.dedent(
@@ -219,7 +203,7 @@ def build_system_prompt() -> Prompt:
             - current_time: fetch the current timestamp in a requested timezone.
             """
         ).strip(),
-        tools=[echo_tool, math_tool, notes_tool, time_tool],
+        tools=tools,
     )
     guidance_section = TextSection[AgentGuidance](
         title="Agent Guidance",
@@ -232,10 +216,6 @@ def build_system_prompt() -> Prompt:
         defaults=AgentGuidance(),
         children=[tool_overview],
     )
-    return Prompt(name="echo_agent", sections=[guidance_section])
-
-
-def build_user_turn_prompt() -> Prompt:
     user_turn_section = TextSection[UserTurnParams](
         title="User Turn",
         body=(
@@ -243,140 +223,46 @@ def build_user_turn_prompt() -> Prompt:
             "call tools or respond directly.\n\nInstruction:\n${content}"
         ),
     )
-    return Prompt(name="echo_user_turn", sections=[user_turn_section])
+    return Prompt(name="echo_agent", sections=[guidance_section, user_turn_section])
 
 
-class BasicOpenAIAgent:
-    """Multi-turn OpenAI agent that wires Prompt + tool definitions."""
+class OpenAIReActSession:
+    """Interactive session powered by the OpenAIAdapter."""
 
     def __init__(self, model: str = "gpt-4o-mini") -> None:
-        self._guidance = AgentGuidance()
-        self.system_prompt_template = build_system_prompt()
-        self.user_prompt_template = build_user_turn_prompt()
-        self.model = model
-        rendered_system_prompt = self.system_prompt_template.render(self._guidance)
-        self._system_prompt = rendered_system_prompt.text
-        self._tools = rendered_system_prompt.tools
-        self._tool_specs = [tool_to_openai_spec(tool) for tool in self._tools]
-        self._tool_registry = {
-            tool.name: tool for tool in self._tools if tool.handler is not None
-        }
-        self._client = create_openai_client()
-        self._messages: list[dict[str, Any]] = []
-        self._last_trace: list[ReasoningStep] = []
-        self.reset()
+        self._adapter = OpenAIAdapter(model=model)
+        self._prompt = build_prompt()
 
-    def run(self, user_message: str, *, max_turns: int = 8) -> str:
-        self.reset()
-        return self.send_user_message(user_message, max_turns=max_turns)
+    def evaluate(self, user_message: str) -> str:
+        response = self._adapter.evaluate(
+            self._prompt,
+            UserTurnParams(content=user_message),
+        )
 
-    def reset(self) -> None:
-        self._messages = [{"role": "system", "content": self._system_prompt}]
-        self._last_trace = []
-
-    def send_user_message(self, user_message: str, *, max_turns: int = 8) -> str:
-        self._last_trace = []
-        user_content = self.user_prompt_template.render(
-            UserTurnParams(content=user_message)
-        ).text
-        self._messages.append({"role": "user", "content": user_content})
-        return self._advance_conversation(max_turns=max_turns)
-
-    def _advance_conversation(self, max_turns: int) -> str:
-        for _ in range(max_turns):
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=self._messages,
-                tools=self._tool_specs,
-                tool_choice="auto",
+        for index, record in enumerate(response.tool_results, start=1):
+            serialized_params = dump(record.params, exclude_none=True)
+            payload = dump(record.result.payload, exclude_none=True)
+            print(
+                f"[tool {index}] {record.name} called with {serialized_params}\n"
+                f"           → {record.result.message}"
             )
-            choice = response.choices[0]
-            message = choice.message
-            tool_calls = message.tool_calls or []
+            if payload:
+                print(f"           payload: {payload}")
 
-            if not tool_calls:
-                final_content = message.content or ""
-                self._messages.append({"role": "assistant", "content": final_content})
-                if final_content:
-                    self._last_trace.append(
-                        ReasoningStep(
-                            thought=final_content,
-                            action=None,
-                            action_input=None,
-                            observation=None,
-                        )
-                    )
-                return final_content
-
-            self._messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content or "",
-                    "tool_calls": tool_calls,
-                }
-            )
-
-            for tool_call in tool_calls:
-                arguments = self._parse_arguments(tool_call.function.arguments)
-                tool_result, serialized_params = self._call_tool(
-                    tool_call.function.name, arguments
-                )
-                tool_payload = dump(tool_result.payload, exclude_none=True)
-                tool_content = {
-                    "message": tool_result.message,
-                    "payload": tool_payload,
-                }
-                self._messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(tool_content),
-                    }
-                )
-                self._last_trace.append(
-                    ReasoningStep(
-                        thought=message.content or "",
-                        action=tool_call.function.name,
-                        action_input=serialized_params,
-                        observation=tool_result.message,
-                    )
-                )
-
-        raise RuntimeError("Agent stopped after reaching the maximum number of turns.")
-
-    @staticmethod
-    def _parse_arguments(arguments_json: str | None) -> dict[str, Any]:
-        if not arguments_json:
-            return {}
-        try:
-            parsed = json.loads(arguments_json)
-        except json.JSONDecodeError as error:  # pragma: no cover - defensive
-            raise RuntimeError("Failed to decode tool call arguments.") from error
-        if not isinstance(parsed, dict):
-            raise RuntimeError("Tool call arguments must be a JSON object.")
-        return parsed
-
-    def _call_tool(
-        self, name: str, arguments: dict[str, Any]
-    ) -> tuple[ToolResult[Any], dict[str, Any]]:
-        tool = self._tool_registry.get(name)
-        if tool is None or tool.handler is None:
-            raise RuntimeError(f"No handler registered for tool '{name}'.")
-        params = parse(tool.params_type, arguments, extra="forbid")
-        serialized_params = dump(params, exclude_none=True)
-        return tool.handler(params), serialized_params
-
-    @property
-    def last_trace(self) -> list[ReasoningStep]:
-        """Return a shallow copy of the most recent ReAct trace."""
-
-        return list(self._last_trace)
+        if response.output is not None:
+            rendered_output = dump(response.output, exclude_none=True)
+            return json.dumps(rendered_output)
+        if response.text:
+            return response.text
+        return "(no response from assistant)"
 
 
-def main() -> None:
+if __name__ == "__main__":
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
-    agent = BasicOpenAIAgent()
+
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    session = OpenAIReActSession(model=model)
     print("Type 'exit' or 'quit' to stop the conversation.")
     while True:
         try:
@@ -388,18 +274,5 @@ def main() -> None:
             break
         if prompt.lower() in {"exit", "quit"}:
             break
-        answer = agent.send_user_message(prompt)
-        trace = agent.last_trace
-        for index, step in enumerate(trace, start=1):
-            if step.action is None:
-                continue
-            print(
-                f"[step {index}] Thought: {step.thought}\n"
-                f"        Action: {step.action} {step.action_input}\n"
-                f"   Observation: {step.observation}"
-            )
+        answer = session.evaluate(prompt)
         print(f"Agent: {answer}")
-
-
-if __name__ == "__main__":
-    main()
