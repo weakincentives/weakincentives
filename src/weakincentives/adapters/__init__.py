@@ -12,6 +12,20 @@
 
 """Integration adapters for optional third-party providers."""
 
-from .openai import OpenAIProtocol, create_openai_client
+from .core import (
+    PromptEvaluationError,
+    PromptResponse,
+    ProviderAdapter,
+    ToolCallRecord,
+)
+from .openai import OpenAIAdapter, OpenAIProtocol, create_openai_client
 
-__all__ = ["create_openai_client", "OpenAIProtocol"]
+__all__ = [
+    "ProviderAdapter",
+    "PromptResponse",
+    "PromptEvaluationError",
+    "ToolCallRecord",
+    "OpenAIAdapter",
+    "create_openai_client",
+    "OpenAIProtocol",
+]

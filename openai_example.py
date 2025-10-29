@@ -21,14 +21,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from weakincentives.adapters import OpenAIAdapter, create_openai_client
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.serde import dump, parse, schema
+
 try:  # pragma: no cover - optional dependency in stdlib for 3.9+
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover - defensive fallback
     ZoneInfo = None  # type: ignore[assignment]
-
-from weakincentives.adapters import create_openai_client
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
-from weakincentives.serde import dump, parse, schema
 
 
 @dataclass
@@ -174,20 +174,7 @@ def current_time_handler(
     )
 
 
-def tool_to_openai_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
-    parameters_schema = schema(tool.params_type, extra="forbid")
-    parameters_schema.pop("title", None)
-    return {
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": parameters_schema,
-        },
-    }
-
-
-def build_system_prompt() -> Prompt:
+def _build_tools() -> tuple[Tool[Any, Any], ...]:
     echo_tool = Tool[EchoToolParams, EchoToolResult](
         name="echo_text",
         description="Return the provided text in uppercase characters.",
@@ -208,6 +195,11 @@ def build_system_prompt() -> Prompt:
         description="Return the current timestamp, optionally in a specific timezone.",
         handler=current_time_handler,
     )
+    return (echo_tool, math_tool, notes_tool, time_tool)
+
+
+def build_prompt() -> Prompt:
+    echo_tool, math_tool, notes_tool, time_tool = _build_tools()
     tool_overview = TextSection[AgentGuidance](
         title="Available Tools",
         body=textwrap.dedent(
@@ -220,6 +212,55 @@ def build_system_prompt() -> Prompt:
             """
         ).strip(),
         tools=[echo_tool, math_tool, notes_tool, time_tool],
+    )
+    guidance_section = TextSection[AgentGuidance](
+        title="Agent Guidance",
+        body=(
+            "You are a demo assistant that follows a Reason + Act pattern. When a user "
+            "asks for help, think through the request, decide whether a tool is "
+            "needed, call it, observe the result, and then reply with a concise "
+            "answer grounded in those observations."
+        ),
+        defaults=AgentGuidance(),
+        children=[tool_overview],
+    )
+    user_turn_section = TextSection[UserTurnParams](
+        title="User Turn",
+        body=(
+            "The user has provided a new instruction. Use it to decide whether to "
+            "call tools or respond directly.\n\nInstruction:\n${content}"
+        ),
+    )
+    return Prompt(name="echo_agent", sections=[guidance_section, user_turn_section])
+
+
+def tool_to_openai_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
+    parameters_schema = schema(tool.params_type, extra="forbid")
+    parameters_schema.pop("title", None)
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": parameters_schema,
+        },
+    }
+
+
+def build_system_prompt() -> Prompt:
+    tools = _build_tools()
+    tool_overview = TextSection[AgentGuidance](
+        title="Available Tools",
+        body=textwrap.dedent(
+            """
+            You can interact with four tools during the conversation:
+            - ${primary_tool}: uppercases any provided text.
+            - solve_math: evaluate structured math expressions.
+            - search_notes: surface stored company knowledge.
+            - current_time: fetch the current timestamp in a requested timezone.
+            """
+        ).strip(),
+        tools=tools,
     )
     guidance_section = TextSection[AgentGuidance](
         title="Agent Guidance",
@@ -373,10 +414,44 @@ class BasicOpenAIAgent:
         return list(self._last_trace)
 
 
-def main() -> None:
+class OpenAIReActSession:
+    """Interactive session powered by the OpenAIAdapter."""
+
+    def __init__(self, model: str = "gpt-4o-mini") -> None:
+        client = create_openai_client()
+        self._adapter = OpenAIAdapter(client, model=model)
+        self._prompt = build_prompt()
+
+    def evaluate(self, user_message: str) -> str:
+        response = self._adapter.evaluate(
+            self._prompt,
+            UserTurnParams(content=user_message),
+        )
+
+        for index, record in enumerate(response.tool_results, start=1):
+            serialized_params = dump(record.params, exclude_none=True)
+            payload = dump(record.result.payload, exclude_none=True)
+            print(
+                f"[tool {index}] {record.name} called with {serialized_params}\n"
+                f"           → {record.result.message}"
+            )
+            if payload:
+                print(f"           payload: {payload}")
+
+        if response.output is not None:
+            rendered_output = dump(response.output, exclude_none=True)
+            return json.dumps(rendered_output)
+        if response.text:
+            return response.text
+        return "(no response from assistant)"
+
+
+if __name__ == "__main__":
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
-    agent = BasicOpenAIAgent()
+
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    session = OpenAIReActSession(model=model)
     print("Type 'exit' or 'quit' to stop the conversation.")
     while True:
         try:
@@ -388,18 +463,5 @@ def main() -> None:
             break
         if prompt.lower() in {"exit", "quit"}:
             break
-        answer = agent.send_user_message(prompt)
-        trace = agent.last_trace
-        for index, step in enumerate(trace, start=1):
-            if step.action is None:
-                continue
-            print(
-                f"[step {index}] Thought: {step.thought}\n"
-                f"        Action: {step.action} {step.action_input}\n"
-                f"   Observation: {step.observation}"
-            )
+        answer = session.evaluate(prompt)
         print(f"Agent: {answer}")
-
-
-if __name__ == "__main__":
-    main()
