@@ -1,0 +1,168 @@
+# Adapter Evaluation Specification
+
+## Introduction
+
+Adapters bridge a rendered `Prompt` to a specific model provider using a synchronous, blocking API. Each adapter takes a
+prompt plus its parameter dataclasses, calls the provider until a final assistant reply is produced, executes any
+requested tools locally, and returns a typed `PromptResponse`. The surface stays intentionally narrow: a single prompt
+render per request, no streaming transport, and no concurrency requirements.
+
+## Goals
+
+- **Prompt-Centric**: Accept a `Prompt` instance and the dataclass params needed to render it without duplicating
+  templating logic in adapters.
+- **Deterministic Tooling**: Execute declared `Tool` handlers synchronously with structured params, collecting the
+  resulting `ToolResult` objects for downstream consumers.
+- **Typed Outputs**: Reuse the structured output metadata exposed by `Prompt` to parse the final assistant message into
+  a dataclass when available, falling back to raw text otherwise.
+- **Provider-Agnostic Core**: Keep evaluation semantics the same for every model API so swapping providers only affects
+  the adapter implementation, not the calling code.
+
+## Guiding Principles
+
+- **Blocking API**: `evaluate` runs to completion on the calling thread; no async contract or streaming callbacks.
+- **Single Evaluation Scope**: One adapter call equals one rendered prompt and one terminal assistant message.
+- **Tool Safety**: Tool execution happens locally via registered handlers; adapters never proxy tool calls back to the
+  provider.
+- **Structured Diagnostics**: Failures raise purpose-built exceptions with enough context (prompt name, tool, provider
+  payload) to debug without scraping logs.
+
+## Core Interfaces
+
+### `ProviderAdapter`
+
+```python
+class ProviderAdapter(Protocol):
+    def evaluate(
+        self,
+        prompt: Prompt[OutputT],
+        *params: object,
+        parse_output: bool = True,
+    ) -> PromptResponse[OutputT]:
+        ...
+```
+
+Implementations own the provider client and any serialization glue needed for that API. The call must not mutate the
+provided `Prompt` instance.
+
+- `params`: Positional dataclass instances forwarded to `prompt.render(*params)`; adapters must preserve type matching.
+- `parse_output`: When `True`, adapters call `parse_output` on the final message if the prompt declares structured
+  output; disable to keep only the raw text.
+
+### `PromptResponse`
+
+```python
+@dataclass(slots=True)
+class PromptResponse(Generic[OutputT]):
+    prompt_name: str
+    text: str | None
+    output: OutputT | None
+    tool_results: tuple[ToolCallRecord[Any, Any], ...]
+    provider_payload: dict[str, Any] | None = None
+```
+
+- `prompt_name`: Mirrors `prompt.name` for logging.
+- `text`: The final assistant message (plain string) when structured output is absent or parsing is disabled.
+- `output`: Parsed dataclass or list when available; `None` if the prompt did not declare structured output.
+- `tool_results`: Ordered records describing each executed tool call.
+- `provider_payload`: Optional raw response fragment returned by the SDK for auditing.
+
+### `ToolCallRecord`
+
+```python
+@dataclass(slots=True)
+class ToolCallRecord(Generic[ParamsT, ResultT]):
+    name: str
+    params: ParamsT
+    result: ToolResult[ResultT]
+    call_id: str | None = None
+```
+
+Records capture the tool name, the instantiated params dataclass, the handler's `ToolResult`, and any provider-issued
+identifier (when available).
+
+## Evaluation Flow
+
+1. **Render** – Call `rendered = prompt.render(*params)` once per evaluation. This yields the markdown
+   (`rendered.text`), tool registry (`rendered.tools`), and optional output contract metadata.
+1. **Prepare Payload** – Construct the provider-specific request body using `rendered.text` as the system prompt (or
+   equivalent) and translate each `Tool` into the provider's tool schema.
+1. **Call Provider** – Issue a blocking completion/chat request. When the provider emits a tool call, decode the name
+   and arguments, materialize the params dataclass (e.g., via `serde.parse`), run the `Tool.handler`, append a
+   `ToolCallRecord`, and feed the handler's `ToolResult.message` back to the provider as the tool response.
+1. **Repeat** – Continue the call-tool-respond loop until the provider returns a final assistant message with no further
+   tool invocations.
+1. **Assemble Response** – Populate `PromptResponse` with the final text. If `rendered.output_type` is present and
+   `parse_output` is `True`, call `parse_output(final_text, rendered)` to produce `output`; otherwise leave it as
+   `None`.
+1. **Return** – Hand the fully populated `PromptResponse` back to the caller.
+
+## Tool Execution
+
+- Match tool calls by exact `Tool.name`. Missing handlers raise `PromptEvaluationError` immediately.
+- Arguments must deserialize into the declared params dataclass. Validation failures bubble as
+  `PromptEvaluationError` with the offending payload attached.
+- Handlers run synchronously and must return `ToolResult[...]`.
+- The `ToolResult.message` is the only content echoed back to the provider; the structured payload stays local and is
+  captured in the `ToolCallRecord`.
+
+## Error Handling
+
+Raise `PromptEvaluationError` (new exception type in the adapters package) for:
+
+- Provider failures (non-2xx responses, SDK errors).
+- Unknown tool names or missing handlers when the model requests a tool.
+- Parameter deserialization errors.
+- Tool handler exceptions (include the original exception as context).
+- Structured output parsing failures when `parse_output=True`.
+
+The exception should expose:
+
+- `prompt_name`
+- `stage` (`"request"`, `"tool"`, `"response"`, etc.)
+- Provider-specific diagnostics (status code, request id)
+- The original exception or payload when relevant
+
+## Non-Goals
+
+- Streaming or incremental token delivery.
+- Multi-turn conversation management; higher-level orchestration should build on top of `ProviderAdapter` if needed.
+- Automatic retries or backoff logic; callers decide whether to retry failed evaluations.
+- Background execution or async contracts.
+
+## Usage Sketch
+
+```python
+from dataclasses import dataclass
+
+from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.prompts import Prompt, TextSection
+
+
+@dataclass
+class MessageParams:
+    sender: str
+    topic: str
+
+
+adapter: ProviderAdapter  # e.g., OpenAIAdapter
+prompt = Prompt(
+    name="draft_reply",
+    sections=[
+        TextSection[MessageParams](
+            title="Task",
+            body="Please draft a reply to ${sender} about ${topic}.",
+        )
+    ],
+)
+response = adapter.evaluate(
+    prompt,
+    MessageParams(sender="Jordan", topic="launch plan"),
+)
+print(response.text or response.output)
+for call in response.tool_results:
+    print(call.name, call.result.payload)
+```
+
+The caller supplies the prompt and dataclass params, the adapter handles rendering, provider interaction, tool execution,
+and structured output parsing, and the returned `PromptResponse` aggregates every artifact from the single evaluation.
