@@ -24,7 +24,7 @@ from typing import Any
 from weakincentives.adapters import OpenAIAdapter
 from weakincentives.adapters.openai import create_openai_client
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
-from weakincentives.serde import dump, parse, schema
+from weakincentives.serde import dump
 
 try:  # pragma: no cover - optional dependency in stdlib for 3.9+
     from zoneinfo import ZoneInfo
@@ -80,14 +80,6 @@ class AgentGuidance:
 @dataclass
 class UserTurnParams:
     content: str
-
-
-@dataclass
-class ReasoningStep:
-    thought: str
-    action: str | None
-    action_input: dict[str, Any] | None
-    observation: str | None
 
 
 KNOWLEDGE_BASE: dict[str, str] = {
@@ -200,55 +192,6 @@ def _build_tools() -> tuple[Tool[Any, Any], ...]:
 
 
 def build_prompt() -> Prompt:
-    echo_tool, math_tool, notes_tool, time_tool = _build_tools()
-    tool_overview = TextSection[AgentGuidance](
-        title="Available Tools",
-        body=textwrap.dedent(
-            """
-            You can interact with four tools during the conversation:
-            - ${primary_tool}: uppercases any provided text.
-            - solve_math: evaluate structured math expressions.
-            - search_notes: surface stored company knowledge.
-            - current_time: fetch the current timestamp in a requested timezone.
-            """
-        ).strip(),
-        tools=[echo_tool, math_tool, notes_tool, time_tool],
-    )
-    guidance_section = TextSection[AgentGuidance](
-        title="Agent Guidance",
-        body=(
-            "You are a demo assistant that follows a Reason + Act pattern. When a user "
-            "asks for help, think through the request, decide whether a tool is "
-            "needed, call it, observe the result, and then reply with a concise "
-            "answer grounded in those observations."
-        ),
-        defaults=AgentGuidance(),
-        children=[tool_overview],
-    )
-    user_turn_section = TextSection[UserTurnParams](
-        title="User Turn",
-        body=(
-            "The user has provided a new instruction. Use it to decide whether to "
-            "call tools or respond directly.\n\nInstruction:\n${content}"
-        ),
-    )
-    return Prompt(name="echo_agent", sections=[guidance_section, user_turn_section])
-
-
-def tool_to_openai_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
-    parameters_schema = schema(tool.params_type, extra="forbid")
-    parameters_schema.pop("title", None)
-    return {
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": parameters_schema,
-        },
-    }
-
-
-def build_system_prompt() -> Prompt:
     tools = _build_tools()
     tool_overview = TextSection[AgentGuidance](
         title="Available Tools",
@@ -274,10 +217,6 @@ def build_system_prompt() -> Prompt:
         defaults=AgentGuidance(),
         children=[tool_overview],
     )
-    return Prompt(name="echo_agent", sections=[guidance_section])
-
-
-def build_user_turn_prompt() -> Prompt:
     user_turn_section = TextSection[UserTurnParams](
         title="User Turn",
         body=(
@@ -285,134 +224,7 @@ def build_user_turn_prompt() -> Prompt:
             "call tools or respond directly.\n\nInstruction:\n${content}"
         ),
     )
-    return Prompt(name="echo_user_turn", sections=[user_turn_section])
-
-
-class BasicOpenAIAgent:
-    """Multi-turn OpenAI agent that wires Prompt + tool definitions."""
-
-    def __init__(self, model: str = "gpt-4o-mini") -> None:
-        self._guidance = AgentGuidance()
-        self.system_prompt_template = build_system_prompt()
-        self.user_prompt_template = build_user_turn_prompt()
-        self.model = model
-        rendered_system_prompt = self.system_prompt_template.render(self._guidance)
-        self._system_prompt = rendered_system_prompt.text
-        self._tools = rendered_system_prompt.tools
-        self._tool_specs = [tool_to_openai_spec(tool) for tool in self._tools]
-        self._tool_registry = {
-            tool.name: tool for tool in self._tools if tool.handler is not None
-        }
-        self._client = create_openai_client()
-        self._messages: list[dict[str, Any]] = []
-        self._last_trace: list[ReasoningStep] = []
-        self.reset()
-
-    def run(self, user_message: str, *, max_turns: int = 8) -> str:
-        self.reset()
-        return self.send_user_message(user_message, max_turns=max_turns)
-
-    def reset(self) -> None:
-        self._messages = [{"role": "system", "content": self._system_prompt}]
-        self._last_trace = []
-
-    def send_user_message(self, user_message: str, *, max_turns: int = 8) -> str:
-        self._last_trace = []
-        user_content = self.user_prompt_template.render(
-            UserTurnParams(content=user_message)
-        ).text
-        self._messages.append({"role": "user", "content": user_content})
-        return self._advance_conversation(max_turns=max_turns)
-
-    def _advance_conversation(self, max_turns: int) -> str:
-        for _ in range(max_turns):
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=self._messages,
-                tools=self._tool_specs,
-                tool_choice="auto",
-            )
-            choice = response.choices[0]
-            message = choice.message
-            tool_calls = message.tool_calls or []
-
-            if not tool_calls:
-                final_content = message.content or ""
-                self._messages.append({"role": "assistant", "content": final_content})
-                if final_content:
-                    self._last_trace.append(
-                        ReasoningStep(
-                            thought=final_content,
-                            action=None,
-                            action_input=None,
-                            observation=None,
-                        )
-                    )
-                return final_content
-
-            self._messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content or "",
-                    "tool_calls": tool_calls,
-                }
-            )
-
-            for tool_call in tool_calls:
-                arguments = self._parse_arguments(tool_call.function.arguments)
-                tool_result, serialized_params = self._call_tool(
-                    tool_call.function.name, arguments
-                )
-                tool_payload = dump(tool_result.payload, exclude_none=True)
-                tool_content = {
-                    "message": tool_result.message,
-                    "payload": tool_payload,
-                }
-                self._messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(tool_content),
-                    }
-                )
-                self._last_trace.append(
-                    ReasoningStep(
-                        thought=message.content or "",
-                        action=tool_call.function.name,
-                        action_input=serialized_params,
-                        observation=tool_result.message,
-                    )
-                )
-
-        raise RuntimeError("Agent stopped after reaching the maximum number of turns.")
-
-    @staticmethod
-    def _parse_arguments(arguments_json: str | None) -> dict[str, Any]:
-        if not arguments_json:
-            return {}
-        try:
-            parsed = json.loads(arguments_json)
-        except json.JSONDecodeError as error:  # pragma: no cover - defensive
-            raise RuntimeError("Failed to decode tool call arguments.") from error
-        if not isinstance(parsed, dict):
-            raise RuntimeError("Tool call arguments must be a JSON object.")
-        return parsed
-
-    def _call_tool(
-        self, name: str, arguments: dict[str, Any]
-    ) -> tuple[ToolResult[Any], dict[str, Any]]:
-        tool = self._tool_registry.get(name)
-        if tool is None or tool.handler is None:
-            raise RuntimeError(f"No handler registered for tool '{name}'.")
-        params = parse(tool.params_type, arguments, extra="forbid")
-        serialized_params = dump(params, exclude_none=True)
-        return tool.handler(params), serialized_params
-
-    @property
-    def last_trace(self) -> list[ReasoningStep]:
-        """Return a shallow copy of the most recent ReAct trace."""
-
-        return list(self._last_trace)
+    return Prompt(name="echo_agent", sections=[guidance_section, user_turn_section])
 
 
 class OpenAIReActSession:

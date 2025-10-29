@@ -19,10 +19,13 @@ import sys
 from collections.abc import Callable
 from importlib import util
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from typing import Any, Protocol, cast
+from types import ModuleType
+from typing import Protocol, cast
 
 import pytest
+
+from weakincentives.adapters.core import PromptResponse, ToolCallRecord
+from weakincentives.prompts import Prompt
 
 
 def _load_openai_example() -> ModuleType:
@@ -37,132 +40,127 @@ def _load_openai_example() -> ModuleType:
 
 
 class _ExampleModule(Protocol):
-    BasicOpenAIAgent: type[Any]
-    UserTurnParams: type[Any]
-    create_openai_client: Callable[..., Any]
+    AgentGuidance: type[object]
+    EchoToolParams: type[object]
+    EchoToolResult: type[object]
+    OpenAIAdapter: type[object]
+    OpenAIReActSession: type[object]
+    ToolResult: type[object]
+    UserTurnParams: type[object]
+    build_prompt: Callable[[], Prompt[object]]
+    create_openai_client: Callable[..., object]
 
 
 example = cast(_ExampleModule, _load_openai_example())
 
 
-class FakeClient:
-    """Stub OpenAI client that replays pre-defined responses."""
-
-    def __init__(self, responses: list[SimpleNamespace]) -> None:
-        self._responses = list(responses)
-        self.calls: list[dict[str, Any]] = []
-        self.chat = SimpleNamespace(
-            completions=SimpleNamespace(create=self._create),
-        )
-
-    def _create(self, **kwargs: object) -> SimpleNamespace:
-        if not self._responses:
-            raise AssertionError("No more fake responses queued.")
-        snapshot: dict[str, object] = dict(kwargs)
-        messages = snapshot.get("messages")
-        if isinstance(messages, list):
-            snapshot["messages"] = [dict(message) for message in messages]
-        self.calls.append(snapshot)
-        return self._responses.pop(0)
-
-
-def _response_with_tool_call(*, arguments: dict[str, object]) -> SimpleNamespace:
-    tool_call = SimpleNamespace(
-        id="tool-call-1",
-        function=SimpleNamespace(
-            name="echo_text",
-            arguments=json.dumps(arguments),
-        ),
+def test_build_prompt_renders_tool_metadata() -> None:
+    prompt = example.build_prompt()
+    rendered = prompt.render(
+        example.AgentGuidance(),
+        example.UserTurnParams(content="Hello"),
     )
-    message = SimpleNamespace(content=None, tool_calls=[tool_call])
-    choice = SimpleNamespace(message=message)
-    return SimpleNamespace(choices=[choice])
 
+    tool_names = [tool.name for tool in rendered.tools]
 
-def _final_response(content: str) -> SimpleNamespace:
-    message = SimpleNamespace(content=content, tool_calls=None)
-    choice = SimpleNamespace(message=message)
-    return SimpleNamespace(choices=[choice])
-
-
-def test_agent_run_handles_multiple_turns(monkeypatch: pytest.MonkeyPatch) -> None:
-    responses = [
-        _response_with_tool_call(arguments={"text": "hello"}),
-        _final_response("All done."),
+    assert rendered.text.startswith("## Agent Guidance")
+    assert tool_names == [
+        "echo_text",
+        "solve_math",
+        "search_notes",
+        "current_time",
     ]
-    fake_client = FakeClient(responses)
+
+
+def test_session_evaluate_routes_through_adapter(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_client = object()
     monkeypatch.setattr(example, "create_openai_client", lambda: fake_client)
 
-    agent = example.BasicOpenAIAgent()
-    expected_user_prompt = agent.user_prompt_template.render(
-        example.UserTurnParams(content="Use the echo tool.")
-    ).text
-    result = agent.run("Use the echo tool.")
+    tool_result = example.ToolResult(
+        message="Echoed text: HELLO",
+        payload=example.EchoToolResult(text="HELLO"),
+    )
+    tool_record = ToolCallRecord(
+        name="echo_text",
+        params=example.EchoToolParams(text="hello"),
+        result=tool_result,
+        call_id="tool-call-1",
+    )
+    prompt_response = PromptResponse(
+        prompt_name="echo_agent",
+        text="All done.",
+        output=None,
+        tool_results=(tool_record,),
+        provider_payload={"raw": "payload"},
+    )
+
+    captured_client: list[object] = []
+    captured_model: list[str] = []
+    captured_calls: list[tuple[Prompt[object], tuple[object, ...], bool]] = []
+
+    class StubAdapter:
+        def __init__(self, client: object, *, model: str) -> None:
+            captured_client.append(client)
+            captured_model.append(model)
+
+        def evaluate(
+            self, prompt: Prompt[object], *params: object, parse_output: bool = True
+        ) -> PromptResponse:
+            captured_calls.append((prompt, params, parse_output))
+            return prompt_response
+
+    monkeypatch.setattr(example, "OpenAIAdapter", StubAdapter)
+
+    session = example.OpenAIReActSession(model="gpt-mock")
+    result = session.evaluate("Use the echo tool.")
+    output = capsys.readouterr().out.splitlines()
 
     assert result == "All done."
-    assert len(fake_client.calls) == 2
-    first_messages = fake_client.calls[0]["messages"]
-    assert isinstance(first_messages, list)
-    assert [message["role"] for message in first_messages] == ["system", "user"]
-    assert first_messages[1]["content"] == expected_user_prompt
-    second_messages = fake_client.calls[1]["messages"]
-    assert isinstance(second_messages, list)
-    last_message = second_messages[-1]
-    assert last_message["role"] == "tool"
-    assert last_message["tool_call_id"] == "tool-call-1"
-    content = json.loads(last_message["content"])
-    assert content == {
-        "message": "Echoed text: HELLO",
-        "payload": {"text": "HELLO"},
-    }
+    assert captured_client[0] is fake_client
+    assert captured_model[0] == "gpt-mock"
+    assert len(captured_calls) == 1
+
+    call_prompt, call_params, parse_output = captured_calls[0]
+    assert isinstance(call_prompt, Prompt)
+    assert parse_output is True
+    assert len(call_params) == 1
+    assert isinstance(call_params[0], example.UserTurnParams)
+
+    assert output[0].startswith("[tool 1] echo_text called with")
+    assert "Echoed text: HELLO" in " ".join(output)
+    assert any("payload" in line for line in output)
 
 
-def test_agent_run_respects_max_turns(monkeypatch: pytest.MonkeyPatch) -> None:
-    responses = [
-        _response_with_tool_call(arguments={"text": "oops"}),
-    ] * 2
-    fake_client = FakeClient(responses)
+def test_session_evaluate_serializes_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client = object()
     monkeypatch.setattr(example, "create_openai_client", lambda: fake_client)
 
-    agent = example.BasicOpenAIAgent()
-    with pytest.raises(RuntimeError, match="maximum number of turns"):
-        agent.run("Loop forever.", max_turns=1)
+    prompt_response = PromptResponse(
+        prompt_name="echo_agent",
+        text=None,
+        output=example.EchoToolResult(text="structured"),
+        tool_results=(),
+        provider_payload=None,
+    )
 
+    class StubAdapter:
+        def __init__(self, client: object, *, model: str) -> None:
+            self.client = client
+            self.model = model
 
-def test_agent_supports_multiple_user_turns(monkeypatch: pytest.MonkeyPatch) -> None:
-    responses = [
-        _final_response("First answer."),
-        _final_response("Second answer."),
-    ]
-    fake_client = FakeClient(responses)
-    monkeypatch.setattr(example, "create_openai_client", lambda: fake_client)
+        def evaluate(
+            self, prompt: Prompt[object], *params: object, parse_output: bool = True
+        ) -> PromptResponse:
+            return prompt_response
 
-    agent = example.BasicOpenAIAgent()
+    monkeypatch.setattr(example, "OpenAIAdapter", StubAdapter)
 
-    first_user_prompt = agent.user_prompt_template.render(
-        example.UserTurnParams(content="Hello")
-    ).text
-    first_reply = agent.send_user_message("Hello")
-    second_user_prompt = agent.user_prompt_template.render(
-        example.UserTurnParams(content="Thanks")
-    ).text
-    second_reply = agent.send_user_message("Thanks")
+    session = example.OpenAIReActSession(model="gpt-structured")
+    result = session.evaluate("Return structured output.")
+    serialized = json.loads(result)
 
-    assert first_reply == "First answer."
-    assert second_reply == "Second answer."
-
-    assert len(fake_client.calls) == 2
-    first_messages = fake_client.calls[0]["messages"]
-    second_messages = fake_client.calls[1]["messages"]
-
-    assert [message["role"] for message in first_messages] == ["system", "user"]
-    assert first_messages[1]["content"] == first_user_prompt
-
-    assert [message["role"] for message in second_messages] == [
-        "system",
-        "user",
-        "assistant",
-        "user",
-    ]
-    assert second_messages[2]["content"] == "First answer."
-    assert second_messages[3]["content"] == second_user_prompt
+    assert serialized == {"text": "structured"}
