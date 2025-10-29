@@ -10,6 +10,7 @@ from .errors import (
     PromptValidationError,
     SectionPath,
 )
+from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
 from .tool import Tool
 
@@ -96,9 +97,10 @@ class Prompt[OutputT = Any]:
         allow_extra_keys: bool = False,
     ) -> None:
         self.name = name
-        self._sections: tuple[Section[SupportsDataclass], ...] = tuple(
+        base_sections: list[Section[SupportsDataclass]] = [
             cast(Section[SupportsDataclass], section) for section in sections or ()
-        )
+        ]
+        self._sections: tuple[Section[SupportsDataclass], ...] = tuple(base_sections)
         self._section_nodes: list[PromptSectionNode[SupportsDataclass]] = []
         self._params_registry: dict[
             type[SupportsDataclass], list[PromptSectionNode[SupportsDataclass]]
@@ -119,8 +121,24 @@ class Prompt[OutputT = Any]:
 
         self.inject_output_instructions = inject_output_instructions
 
-        for section in self._sections:
+        for section in base_sections:
             self._register_section(section, path=(section.title,), depth=0)
+
+        self._response_section: ResponseFormatSection | None = None
+        if self._output_type is not None and self._output_container is not None:
+            response_params = self._build_response_format_params()
+            response_section = ResponseFormatSection(
+                params=response_params,
+                enabled=lambda _params, prompt=self: prompt.inject_output_instructions,
+            )
+            self._response_section = response_section
+            section_for_registry = cast(Section[SupportsDataclass], response_section)
+            self._sections += (section_for_registry,)
+            self._register_section(
+                section_for_registry,
+                path=(response_section.title,),
+                depth=0,
+            )
 
     def render(self, *params: SupportsDataclass) -> RenderedPrompt[OutputT]:
         """Render the prompt using provided parameter dataclass instances."""
@@ -157,10 +175,6 @@ class Prompt[OutputT = Any]:
                 rendered_sections.append(rendered)
 
         text = "\n\n".join(rendered_sections)
-
-        if self._should_inject_response_format():
-            instructions = self._build_response_format_section()
-            text = f"{text}\n\n{instructions}" if text else instructions
 
         return RenderedPrompt(
             text=text,
@@ -264,33 +278,21 @@ class Prompt[OutputT = Any]:
         dataclass_type = cast(type[Any], candidate)
         return dataclass_type, container, allow_extra_keys
 
-    def _should_inject_response_format(self) -> bool:
-        return (
-            self._output_type is not None
-            and self._output_container is not None
-            and self.inject_output_instructions
-        )
-
-    def _build_response_format_section(self) -> str:
+    def _build_response_format_params(self) -> ResponseFormatParams:
         container = self._output_container
         if container is None:  # pragma: no cover - defensive guard
             raise RuntimeError(
                 "Output container missing during response format construction."
             )
 
-        article = "an" if container.startswith(("a", "e", "i", "o", "u")) else "a"
-        ending = ". Do not add extra keys." if not self._allow_extra_keys else "."
-        template = """## Response Format
-
-Return ONLY a single fenced JSON code block. Do not include any text
-before or after the block.
-
-The top-level JSON value MUST be {article} {container} that matches the fields
-of the expected schema{ending}"""
-        return template.format(
+        article: Literal["a", "an"] = (
+            "an" if container.startswith(("a", "e", "i", "o", "u")) else "a"
+        )
+        extra_clause = ". Do not add extra keys." if not self._allow_extra_keys else "."
+        return ResponseFormatParams(
             article=article,
             container=container,
-            ending=ending,
+            extra_clause=extra_clause,
         )
 
     def _collect_param_lookup(

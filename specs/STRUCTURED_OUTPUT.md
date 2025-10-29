@@ -9,7 +9,8 @@ Some prompts must yield machine-parseable responses (e.g., a JSON object or arra
 Keep the surface area tiny while delivering strong guarantees:
 
 - Enable structured responses with **one declaration**: `Prompt[OutputT]`.
-- Avoid requiring authors to manage new `Section` subclasses or extra config files—the framework appends a builtin `ResponseFormat` section when needed.
+- Avoid requiring authors to manage new `Section` subclasses or extra config files—the framework appends a builtin
+  `ResponseFormatSection` when needed.
 - Keep prompts readable: inject a small, deterministic "Response Format" block.
 - Validate outputs strictly into typed dataclasses with actionable failures.
 - Remain fully backward-compatible when no output type is declared.
@@ -25,9 +26,44 @@ Keep the surface area tiny while delivering strong guarantees:
 
 `Prompt` becomes *optionally generic*. When specialized, `Prompt[OutputT]` declares that the final assistant message must be JSON matching the dataclass `OutputT`. If the specialization is `Prompt[list[ItemT]]`, the final message must be a top-level JSON array of objects matching `ItemT`.
 
-At render time the prompt assembles markdown from its sections (unchanged), then--when an output type is present and injection is enabled--appends a short, deterministic "Response Format" block via a builtin specialized `ResponseFormat` section at the end with root-level heading (`## Response Format`). This block instructs the model to return **only** a single fenced JSON block with the required top-level container (object or array), and no extra prose.
+At render time the prompt assembles markdown from its sections (unchanged). When an output type is present and
+injection is enabled the prompt appends a builtin `ResponseFormatSection` to the end of the tree. The section renders a
+deterministic "Response Format" block with a root-level heading (`## Response Format`) that instructs the model to
+return **only** a single fenced JSON block with the required top-level container (object or array) and no extra prose.
 
 `RenderedPrompt` carries the declared output metadata so downstream code can call a small parser that turns the model's final message into an instance of `OutputT` (or a `list[ItemT]`) with strict validation and conservative type coercions.
+
+## Response Format Section
+
+The framework exposes an internal `ResponseFormatSection`, a `TextSection[ResponseFormatParams]`, that renders the JSON
+return instructions. Authors never instantiate it directly; the prompt inserts the section automatically whenever
+structured output is requested and `inject_output_instructions=True`.
+
+```python
+@dataclass(slots=True)
+class ResponseFormatParams:
+    article: Literal["a", "an"]
+    container: Literal["object", "array"]
+    extra_clause: str  # either ". Do not add extra keys." or "."
+```
+
+The dataclass lives inside the prompts package and is typed with `typing.Literal` so downstream tooling can rely on the
+exact strings emitted.
+
+The section title is always `"Response Format"`, ensuring a root-level `## Response Format` heading. Its body template
+remains fixed:
+
+```
+Return ONLY a single fenced JSON code block. Do not include any text
+before or after the block.
+
+The top-level JSON value MUST be ${article} ${container} that matches the fields
+of the expected schema${extra_clause}
+```
+
+During construction the prompt resolves `container` (`"object"` for scalar outputs, `"array"` for `list[...]`), derives
+`article` from the container, and sets `extra_clause` to `. Do not add extra keys.` unless `allow_extra_keys=True`.
+Those params feed the section at render time so the output instructions stay consistent with the declared contract.
 
 ## Construction Rules
 
@@ -54,17 +90,9 @@ Rendering of sections is identical to the existing `Prompt` flow: depth-first tr
 
 1. Join rendered sections with a single blank line between fragments.
 
-1. If the prompt is specialized and `inject_output_instructions=True`, append a builtin `ResponseFormat` section whose body is:
-
-   ```
-   ## Response Format
-
-   Return ONLY a single fenced JSON code block. Do not include any text
-   before or after the block.
-
-   The top-level JSON value MUST be a <object|array> that matches the fields
-   of the expected schema. Do not add extra keys.
-   ```
+1. If the prompt is specialized and `inject_output_instructions=True`, append a `ResponseFormatSection` populated with the
+   derived params above. Rendering the section produces the canonical instructions template with `${container}` and
+   `${extra_clause}` resolved for the current prompt.
 
 1. Return a `RenderedPrompt` that also exposes:
 
@@ -117,7 +145,7 @@ This keeps the final prompt readable and the output contract easy to discover pr
 ## Non-Goals
 
 - No `OutputSpec` type, no schema blobs in the prompt, no KV/text output mode in v1.
-- No additional `Section` types or templating features for authors to manage; the builtin `ResponseFormat` section is injected automatically when required.
+- No additional `Section` types or templating features for authors to manage; the builtin `ResponseFormatSection` is injected automatically when required.
 - No streaming decode, repair loops, or retry orchestration.
 - No logging/tracing/telemetry concerns.
 

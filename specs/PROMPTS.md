@@ -23,7 +23,7 @@ reaches an LLM. The design should be simple enough to maintain but strict enough
   silently dropping sections or placeholders.
 - **Composable Markdown Structure**: Hierarchical sections with deterministic heading levels keep long prompts
   readable and easy to audit.
-- **Minimal Templating Surface**: Limiting features to `Template.safe_substitute` plus boolean selectors prevents
+- **Minimal Templating Surface**: Limiting features to `Template.substitute` plus boolean selectors prevents
   complex control flow while still allowing dynamic content.
 - **Declarative over Imperative**: Prompts describe structured content (sections + params) instead of embedding logic,
   which keeps diffs clear and tooling feasible.
@@ -37,7 +37,8 @@ contract—metadata, parameter typing, optional defaults, `children`, and two co
 determine visibility and `render(params, depth)` to emit the markdown fragment (including the heading). Future
 variants can plug in alternative templating engines or emit structured output (markdown tables, CSV, JSON) without
 rewriting prompt logic, so long as they honor the heading pipeline. The default concrete subclass, `TextSection`, relies
-on `Template.safe_substitute` to render its `body` string, applies `textwrap.dedent` and stripping before substitution,
+on `Template.substitute` to render its `body` string (missing placeholders raise immediately),
+applies `textwrap.dedent` and stripping before substitution,
 and emits normalized markdown. Concrete sections are instantiated by specializing the generic `Section[ParamsT]` base class (for example
 `TextSection[GuidanceParams](...)`). This pins the dataclass type to the section before any instance is created, and the
 base class rejects attempts to construct an unspecialized section or provide multiple type arguments. Each specialized
@@ -82,7 +83,7 @@ transcripts.
 
 ## Non-Goals
 
-We deliberately exclude templating features that go beyond `Template.safe_substitute`: no conditionals, loops, or
+We deliberately exclude templating features that go beyond `Template.substitute`: no conditionals, loops, or
 arbitrary expression evaluation. Prompt composition also stops at sections; we do not embed one prompt inside another,
 favoring explicit `children` for reuse. Telemetry, logging sinks, and additional metadata such as channel tags or
 custom heading levels remain out of scope until real-world usage demonstrates a need. The only validation we perform
