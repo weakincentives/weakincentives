@@ -18,7 +18,7 @@ from .core import (
     ProviderAdapter,
     ToolCallRecord,
 )
-from .openai import OpenAIAdapter, OpenAIProtocol, create_openai_client
+from .openai import OpenAIAdapter, OpenAIProtocol
 
 __all__ = [
     "ProviderAdapter",
@@ -26,6 +26,5 @@ __all__ = [
     "PromptEvaluationError",
     "ToolCallRecord",
     "OpenAIAdapter",
-    "create_openai_client",
     "OpenAIProtocol",
 ]

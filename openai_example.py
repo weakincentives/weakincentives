@@ -21,7 +21,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from weakincentives.adapters import OpenAIAdapter, create_openai_client
+from weakincentives.adapters import OpenAIAdapter
+from weakincentives.adapters.openai import create_openai_client
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 from weakincentives.serde import dump, parse, schema
 

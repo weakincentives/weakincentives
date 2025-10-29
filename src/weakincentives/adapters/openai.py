@@ -343,4 +343,4 @@ def _parse_tool_arguments(
     return dict(cast(Mapping[str, Any], parsed))
 
 
-__all__ = ["OpenAIAdapter", "create_openai_client", "OpenAIProtocol"]
+__all__ = ["OpenAIAdapter", "OpenAIProtocol"]
