@@ -92,7 +92,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=80"
+addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=100"
 
 [tool.pyright]
 typeCheckingMode = "strict"
