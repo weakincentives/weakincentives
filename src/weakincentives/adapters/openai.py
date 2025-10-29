@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from importlib import import_module
 from typing import Protocol, cast
 
@@ -11,8 +12,41 @@ _ERROR_MESSAGE = (
 )
 
 
+class _CompletionFunctionCall(Protocol):
+    name: str
+    arguments: str | None
+
+
+class _ToolCall(Protocol):
+    id: str
+    function: _CompletionFunctionCall
+
+
+class _Message(Protocol):
+    content: str | None
+    tool_calls: Sequence[_ToolCall] | None
+
+
+class _CompletionChoice(Protocol):
+    message: _Message
+
+
+class _CompletionResponse(Protocol):
+    choices: Sequence[_CompletionChoice]
+
+
+class _CompletionsAPI(Protocol):
+    def create(self, *args: object, **kwargs: object) -> _CompletionResponse: ...
+
+
+class _ChatAPI(Protocol):
+    completions: _CompletionsAPI
+
+
 class _OpenAIProtocol(Protocol):
     """Structural type for the OpenAI client."""
+
+    chat: _ChatAPI
 
 
 class _OpenAIClientFactory(Protocol):

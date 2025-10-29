@@ -26,7 +26,7 @@ Use `uv run ...` when invoking ad-hoc scripts so everything runs inside the mana
 - `make format` / `make format-check` — run Ruff formatters.
 - `make lint` / `make lint-fix` — lint with Ruff.
 - `make typecheck` — execute Ty with warnings promoted to errors.
-- `make test` — run pytest via `tools/run_pytest.py` with `--cov-fail-under=100`.
+- `make test` — run pytest via `build/run_pytest.py` with `--cov-fail-under=100`.
 - `make bandit`, `make deptry`, `make pip-audit` — security, dependency, and vulnerability audits.
 - `make check` — aggregate the quiet quality gate; prefer this before commits.
 
@@ -138,7 +138,7 @@ If the dependency is missing, the helper raises a runtime error with install ins
 - `src/weakincentives/adapters/` — optional provider integrations.
 - `tests/` — pytest suites covering prompts, tools, and adapters.
 - `specs/` — design docs; see `specs/PROMPTS.md` for prompt requirements.
-- `tools/` — thin wrappers that keep CLI tools quiet inside `uv`.
+- `build/` — thin wrappers that keep CLI tools quiet inside `uv`.
 - `hooks/` — symlink-friendly git hooks (install via `./install-hooks.sh`).
 
 ## Releases

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import textwrap
 from collections.abc import Callable, Sequence
+from dataclasses import fields, is_dataclass
 from string import Template
+from typing import Any
 
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
@@ -36,7 +38,8 @@ class TextSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         heading = f"{heading_level} {self.title.strip()}"
         template = Template(textwrap.dedent(self.body).strip())
         try:
-            rendered_body = template.safe_substitute(vars(params))
+            normalized_params = self._normalize_params(params)
+            rendered_body = template.substitute(normalized_params)
         except KeyError as error:  # pragma: no cover - handled at prompt level
             missing = error.args[0]
             raise PromptRenderError(
@@ -59,6 +62,16 @@ class TextSection[ParamsT: SupportsDataclass](Section[ParamsT]):
             if braced:
                 placeholders.add(braced)
         return placeholders
+
+    @staticmethod
+    def _normalize_params(params: ParamsT) -> dict[str, Any]:
+        if not is_dataclass(params) or isinstance(params, type):
+            raise PromptRenderError(
+                "Section params must be a dataclass instance.",
+                dataclass_type=type(params),
+            )
+
+        return {field.name: getattr(params, field.name) for field in fields(params)}
 
 
 __all__ = ["TextSection"]

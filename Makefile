@@ -18,19 +18,19 @@ lint-fix:
 
 # Run Bandit security scanner
 bandit:
-	@uv run python tools/run_bandit.py -q -r src/weakincentives
+	@uv run python build/run_bandit.py -q -r src/weakincentives
 
 # Check for unused or missing dependencies with deptry
 deptry:
-	@uv run python tools/run_deptry.py
+	@uv run python build/run_deptry.py
 
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
-	@uv run python tools/run_pip_audit.py
+	@uv run python build/run_pip_audit.py
 
 # Validate Markdown formatting
 markdown-check:
-	@uv run python tools/run_mdformat.py
+	@uv run python build/run_mdformat.py
 
 # Run type checkers
 typecheck:
@@ -43,7 +43,7 @@ typecheck:
 
 # Run tests with coverage (100% minimum)
 test:
-	@uv run --all-extras python tools/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --no-summary --cov-report=
+	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --no-summary --cov-report=
 
 # Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, markdown, test)
 check: format-check lint typecheck bandit deptry pip-audit markdown-check test

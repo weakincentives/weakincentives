@@ -32,6 +32,12 @@
 - Establish section templates that ensure tools render consistently in prompts and downstream telemetry.
 - Ship representative examples and regression tests demonstrating safe defaults and extensibility points.
 
+### Sandboxed Code Execution
+
+- Provide hardened sandboxes so agents can run generated code with strict CPU, memory, filesystem, and network guardrails.
+- Surface sandbox lifecycle APIs that expose logs, artifacts, and exit metadata without leaking host resources.
+- Add validation suites and stress tests that assert isolation boundaries hold across supported runtimes.
+
 ### Agentic Reasoning Loop
 
 - Design an orchestrator that coordinates system prompts, user turns, tool routing, and session state updates.
