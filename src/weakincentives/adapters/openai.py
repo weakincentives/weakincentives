@@ -101,11 +101,26 @@ class OpenAIAdapter:
 
     def __init__(
         self,
-        client: _OpenAIProtocol,
         *,
         model: str,
         tool_choice: str | Mapping[str, Any] | None = "auto",
+        client: _OpenAIProtocol | None = None,
+        client_factory: _OpenAIClientFactory | None = None,
+        client_kwargs: Mapping[str, object] | None = None,
     ) -> None:
+        if client is not None:
+            if client_factory is not None:
+                raise ValueError(
+                    "client_factory cannot be provided when an explicit client is supplied.",
+                )
+            if client_kwargs:
+                raise ValueError(
+                    "client_kwargs cannot be provided when an explicit client is supplied.",
+                )
+        else:
+            factory = client_factory or create_openai_client
+            client = factory(**dict(client_kwargs or {}))
+
         self._client = client
         self._model = model
         self._tool_choice = tool_choice

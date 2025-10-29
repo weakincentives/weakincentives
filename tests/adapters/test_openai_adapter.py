@@ -67,6 +67,100 @@ def test_create_openai_client_returns_openai_instance(monkeypatch):
     assert client.kwargs == {"api_key": "secret-key"}
 
 
+def test_openai_adapter_constructs_client_when_not_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _reload_module()
+
+    prompt = Prompt(
+        name="greeting",
+        sections=[
+            TextSection[_GreetingParams](
+                title="Greeting",
+                body="Say hello to ${user}.",
+            )
+        ],
+    )
+
+    message = _DummyMessage(content="Hello, Sam!", tool_calls=None)
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    captured_kwargs: list[dict[str, object]] = []
+
+    def fake_factory(**kwargs: object) -> _DummyOpenAIClient:
+        captured_kwargs.append(dict(kwargs))
+        return client
+
+    monkeypatch.setattr(module, "create_openai_client", fake_factory)
+
+    adapter = module.OpenAIAdapter(
+        model="gpt-test",
+        client_kwargs={"api_key": "secret-key"},
+    )
+
+    result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
+
+    assert result.text == "Hello, Sam!"
+    assert captured_kwargs == [{"api_key": "secret-key"}]
+
+
+def test_openai_adapter_supports_custom_client_factory() -> None:
+    module = _reload_module()
+
+    prompt = Prompt(
+        name="greeting",
+        sections=[
+            TextSection[_GreetingParams](
+                title="Greeting",
+                body="Say hello to ${user}.",
+            )
+        ],
+    )
+
+    message = _DummyMessage(content="Hello again!", tool_calls=None)
+    response = _DummyResponse([_DummyChoice(message)])
+    captured_kwargs: list[dict[str, object]] = []
+
+    def fake_factory(**kwargs: object) -> _DummyOpenAIClient:
+        captured_kwargs.append(dict(kwargs))
+        return _DummyOpenAIClient([response])
+
+    adapter = module.OpenAIAdapter(
+        model="gpt-test",
+        client_factory=fake_factory,
+        client_kwargs={"api_key": "secret-key"},
+    )
+
+    result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
+
+    assert result.text == "Hello again!"
+    assert captured_kwargs == [{"api_key": "secret-key"}]
+
+
+def test_openai_adapter_rejects_client_kwargs_with_explicit_client() -> None:
+    module = _reload_module()
+    client = _DummyOpenAIClient([])
+
+    with pytest.raises(ValueError):
+        module.OpenAIAdapter(
+            model="gpt-test",
+            client=client,
+            client_kwargs={"api_key": "secret"},
+        )
+
+
+def test_openai_adapter_rejects_client_factory_with_explicit_client() -> None:
+    module = _reload_module()
+    client = _DummyOpenAIClient([])
+
+    with pytest.raises(ValueError):
+        module.OpenAIAdapter(
+            model="gpt-test",
+            client=client,
+            client_factory=lambda **_: client,
+        )
+
+
 @dataclass
 class _GreetingParams:
     user: str
@@ -189,7 +283,7 @@ def test_openai_adapter_returns_plain_text_response():
     message = _DummyMessage(content="Hello, Sam!", tool_calls=None)
     response = _DummyResponse([_DummyChoice(message)])
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
 
@@ -272,7 +366,7 @@ def test_openai_adapter_executes_tools_and_parses_output():
     second_message = _DummyMessage(content=json.dumps({"answer": "Policy summary"}))
     second = _DummyResponse([_DummyChoice(second_message)])
     client = _DummyOpenAIClient([first, second])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     result = adapter.evaluate(prompt, _ToolParams(query="policies"))
 
@@ -321,7 +415,7 @@ def test_openai_adapter_raises_when_tool_handler_missing():
         [_DummyChoice(_DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(prompt, _ToolParams(query="policies"))
@@ -365,7 +459,7 @@ def test_openai_adapter_handles_tool_call_without_arguments():
         [_DummyChoice(_DummyMessage(content="All done", tool_calls=None))]
     )
     client = _DummyOpenAIClient([response_with_tool, final_response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     result = adapter.evaluate(prompt, _OptionalParams())
 
@@ -390,7 +484,7 @@ def test_openai_adapter_raises_when_structured_output_missing_json():
         [_DummyChoice(_DummyMessage(content="no-json", tool_calls=None))]
     )
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(prompt, _ToolParams(query="policies"))
@@ -421,7 +515,7 @@ def test_openai_adapter_raises_for_unknown_tool():
         [_DummyChoice(_DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(prompt, _ToolParams(query="policies"))
@@ -459,7 +553,7 @@ def test_openai_adapter_raises_when_tool_params_invalid():
         [_DummyChoice(_DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(prompt, _ToolParams(query="policies"))
@@ -500,7 +594,7 @@ def test_openai_adapter_raises_when_handler_fails():
         [_DummyChoice(_DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(prompt, _ToolParams(query="policies"))
@@ -526,7 +620,7 @@ def test_openai_adapter_records_provider_payload_from_mapping():
         [_DummyChoice(_DummyMessage(content="Hello!", tool_calls=None))]
     )
     client = _DummyOpenAIClient([mapping_response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
 
@@ -550,7 +644,7 @@ def test_openai_adapter_ignores_non_mapping_model_dump():
         [_DummyChoice(_DummyMessage(content="Hello!", tool_calls=None))]
     )
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
 
@@ -574,7 +668,7 @@ def test_openai_adapter_handles_response_without_model_dump():
         [_DummyChoice(_DummyMessage(content="Hello!", tool_calls=None))]
     )
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
 
@@ -614,7 +708,7 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
         [_DummyChoice(_DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
     client = _DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(client, model="gpt-test")
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(prompt, _ToolParams(query="policies"))

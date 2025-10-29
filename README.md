@@ -121,15 +121,15 @@ or
 pip install weakincentives[openai]
 ```
 
-Then create a client:
+Then create an adapter (it will build the OpenAI client for you):
 
 ```python
-from weakincentives.adapters.openai import create_openai_client
+from weakincentives.adapters import OpenAIAdapter
 
-client = create_openai_client(api_key="sk-...")
+adapter = OpenAIAdapter(model="gpt-4o-mini", client_kwargs={"api_key": "sk-..."})
 ```
 
-If the dependency is missing, the helper raises a runtime error with install instructions.
+If the dependency is missing, the adapter raises a runtime error with install instructions.
 
 ## Project Layout
 

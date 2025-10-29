@@ -22,7 +22,6 @@ from datetime import datetime
 from typing import Any
 
 from weakincentives.adapters import OpenAIAdapter
-from weakincentives.adapters.openai import create_openai_client
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 from weakincentives.serde import dump
 
@@ -231,8 +230,7 @@ class OpenAIReActSession:
     """Interactive session powered by the OpenAIAdapter."""
 
     def __init__(self, model: str = "gpt-4o-mini") -> None:
-        client = create_openai_client()
-        self._adapter = OpenAIAdapter(client, model=model)
+        self._adapter = OpenAIAdapter(model=model)
         self._prompt = build_prompt()
 
     def evaluate(self, user_message: str) -> str:

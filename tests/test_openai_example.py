@@ -48,7 +48,6 @@ class _ExampleModule(Protocol):
     ToolResult: type[object]
     UserTurnParams: type[object]
     build_prompt: Callable[[], Prompt[object]]
-    create_openai_client: Callable[..., object]
 
 
 example = cast(_ExampleModule, _load_openai_example())
@@ -75,9 +74,6 @@ def test_build_prompt_renders_tool_metadata() -> None:
 def test_session_evaluate_routes_through_adapter(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fake_client = object()
-    monkeypatch.setattr(example, "create_openai_client", lambda: fake_client)
-
     tool_result = example.ToolResult(
         message="Echoed text: HELLO",
         payload=example.EchoToolResult(text="HELLO"),
@@ -96,14 +92,14 @@ def test_session_evaluate_routes_through_adapter(
         provider_payload={"raw": "payload"},
     )
 
-    captured_client: list[object] = []
     captured_model: list[str] = []
+    captured_kwargs: list[dict[str, object]] = []
     captured_calls: list[tuple[Prompt[object], tuple[object, ...], bool]] = []
 
     class StubAdapter:
-        def __init__(self, client: object, *, model: str) -> None:
-            captured_client.append(client)
+        def __init__(self, *, model: str, **kwargs: object) -> None:
             captured_model.append(model)
+            captured_kwargs.append(dict(kwargs))
 
         def evaluate(
             self, prompt: Prompt[object], *params: object, parse_output: bool = True
@@ -118,8 +114,8 @@ def test_session_evaluate_routes_through_adapter(
     output = capsys.readouterr().out.splitlines()
 
     assert result == "All done."
-    assert captured_client[0] is fake_client
     assert captured_model[0] == "gpt-mock"
+    assert captured_kwargs[0] == {}
     assert len(captured_calls) == 1
 
     call_prompt, call_params, parse_output = captured_calls[0]
@@ -136,9 +132,6 @@ def test_session_evaluate_routes_through_adapter(
 def test_session_evaluate_serializes_structured_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_client = object()
-    monkeypatch.setattr(example, "create_openai_client", lambda: fake_client)
-
     prompt_response = PromptResponse(
         prompt_name="echo_agent",
         text=None,
@@ -148,8 +141,7 @@ def test_session_evaluate_serializes_structured_output(
     )
 
     class StubAdapter:
-        def __init__(self, client: object, *, model: str) -> None:
-            self.client = client
+        def __init__(self, *, model: str) -> None:
             self.model = model
 
         def evaluate(
