@@ -20,7 +20,11 @@ from pathlib import Path
 def iter_project_files(target: Path) -> list[Path]:
     if not target.exists():
         return []
-    return [path for path in sorted(target.rglob("*")) if path.is_file()]
+    return [
+        path
+        for path in sorted(target.rglob("*"))
+        if path.is_file() and path.suffix != ".pyc"
+    ]
 
 
 def emit_file(path: Path, project_root: Path) -> None:
