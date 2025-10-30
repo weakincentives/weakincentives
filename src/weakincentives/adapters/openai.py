@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from importlib import import_module
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..prompts._types import SupportsDataclass
@@ -97,6 +97,9 @@ def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
     return openai_module.OpenAI(**kwargs)
 
 
+ToolChoice = Literal["auto"] | Mapping[str, Any] | None
+
+
 class OpenAIAdapter:
     """Adapter that evaluates prompts against OpenAI's Responses API."""
 
@@ -104,7 +107,7 @@ class OpenAIAdapter:
         self,
         *,
         model: str,
-        tool_choice: str | Mapping[str, Any] | None = "auto",
+        tool_choice: ToolChoice = "auto",
         client: _OpenAIProtocol | None = None,
         client_factory: _OpenAIClientFactory | None = None,
         client_kwargs: Mapping[str, object] | None = None,
@@ -124,7 +127,7 @@ class OpenAIAdapter:
 
         self._client = client
         self._model = model
-        self._tool_choice = tool_choice
+        self._tool_choice: ToolChoice = tool_choice
 
     def evaluate[OutputT](
         self,
@@ -145,7 +148,7 @@ class OpenAIAdapter:
         tool_events: list[ToolInvoked] = []
         provider_payload: dict[str, Any] | None = None
         # Allow forcing a specific tool once, then fall back to provider defaults.
-        next_tool_choice: str | Mapping[str, Any] | None = self._tool_choice
+        next_tool_choice: ToolChoice = self._tool_choice
 
         while True:
             request_payload: dict[str, Any] = {
