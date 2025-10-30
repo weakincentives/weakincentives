@@ -20,9 +20,9 @@ The OpenAI adapter already renders prompts into a `RenderedPrompt` object that c
 ## Provider Schema Derivation
 
 1. Inspect `RenderedPrompt.output_type`, `output_container`, and `allow_extra_keys`.
-2. Use the existing serde helpers to build a JSON Schema fragment for the target dataclass. Pass `extra="forbid"` when extra keys are disallowed.
-3. When `output_container == "array"`, wrap the schema in an array definition with `items` pointing to the dataclass schema.
-4. Generate a deterministic schema `name` (e.g., based on `prompt.name`) so repeated calls stay stable.
+1. Use the existing serde helpers to build a JSON Schema fragment for the target dataclass. Pass `extra="forbid"` when extra keys are disallowed.
+1. When `output_container == "array"`, wrap the schema in an array definition with `items` pointing to the dataclass schema.
+1. Generate a deterministic schema `name` (e.g., based on `prompt.name`) so repeated calls stay stable.
 
 ## Request Payload Updates
 
@@ -35,9 +35,9 @@ The OpenAI adapter already renders prompts into a `RenderedPrompt` object that c
 ## Response Handling
 
 1. When OpenAI returns parsed content (e.g., via `message.parsed` or a content part typed as `output_json`), deserialize that payload directly into the target dataclass using the existing serde parsing helpers.
-2. Skip the fallback JSON extraction when the parsed payload succeeds.
-3. If the provider response lacks parsed data, continue using `parse_structured_output` on the assistant's text message.
-4. Propagate failures as `PromptEvaluationError` with the `"response"` stage to align with existing error handling.
+1. Skip the fallback JSON extraction when the parsed payload succeeds.
+1. If the provider response lacks parsed data, continue using `parse_structured_output` on the assistant's text message.
+1. Propagate failures as `PromptEvaluationError` with the `"response"` stage to align with existing error handling.
 
 ## Prompt Instructions
 
@@ -49,4 +49,3 @@ The OpenAI adapter already renders prompts into a `RenderedPrompt` object that c
 - Extend OpenAI adapter tests to assert that `response_format` is populated whenever structured output metadata is present.
 - Add fixtures covering provider responses with parsed content to validate the new happy path.
 - Ensure tests continue to cover the legacy fallback path where only text is returned.
-

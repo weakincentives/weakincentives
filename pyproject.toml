@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Andrei Savu", email = "andrei@weakincentives.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = []
 license = { text = "Apache-2.0" }
 keywords = [
@@ -24,6 +24,8 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -69,7 +71,7 @@ dev = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py314"
+target-version = "py312"
 
 [tool.ruff.lint]
 extend-select = ["I", "UP", "B", "SIM", "C4", "ANN", "RET", "RSE", "PTH", "ISC", "CPY"]

@@ -14,7 +14,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    cast,
+    get_args,
+    get_origin,
+)
 
 from ._types import SupportsDataclass
 from .errors import (
@@ -31,7 +39,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class RenderedPrompt[OutputT = Any]:
+class RenderedPrompt[OutputT]:
     """Rendered prompt text paired with structured output metadata."""
 
     text: str
@@ -75,7 +83,7 @@ class PromptSectionNode[ParamsT: SupportsDataclass]:
     path: SectionPath
 
 
-class Prompt[OutputT = Any]:
+class Prompt[OutputT]:
     """Coordinate prompt sections and their parameter bindings."""
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
