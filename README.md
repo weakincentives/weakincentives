@@ -10,7 +10,7 @@ ______________________________________________________________________
 
 ## Requirements
 
-- Python **3.14+**
+- Python **3.12+**
 - Astral’s **uv** CLI (all commands below assume `uv`)
 
 ______________________________________________________________________
@@ -146,7 +146,7 @@ ______________________________________________________________________
 
 ### Environment Setup
 
-1. Install Python 3.14 (e.g., `pyenv install 3.14.0`)
+1. Install Python 3.12 (e.g., `pyenv install 3.12.0`)
 
 1. Install [`uv`](https://github.com/astral-sh/uv)
 
