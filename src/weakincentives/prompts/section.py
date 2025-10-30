@@ -15,14 +15,14 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, Final, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
 
 from ._types import SupportsDataclass
 
-_SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+_SLUG_PATTERN: Final[re.Pattern[str]] = re.compile(r"[^a-z0-9]+")
 
 
 def _slugify(value: str) -> str:

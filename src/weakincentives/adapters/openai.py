@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from importlib import import_module
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Final, Literal, Protocol, cast
 
 from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..prompts._types import SupportsDataclass
@@ -28,7 +28,7 @@ from ..prompts.tool import Tool, ToolResult
 from ..serde import parse, schema
 from .core import PromptEvaluationError, PromptResponse
 
-_ERROR_MESSAGE = (
+_ERROR_MESSAGE: Final[str] = (
     "OpenAI support requires the optional 'openai' dependency. "
     "Install it with `uv sync --extra openai` or `pip install weakincentives[openai]`."
 )

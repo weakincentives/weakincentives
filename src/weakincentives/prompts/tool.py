@@ -16,12 +16,12 @@ import inspect
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, is_dataclass
-from typing import Annotated, Any, cast, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Final, cast, get_args, get_origin, get_type_hints
 
 from ._types import SupportsDataclass
 from .errors import PromptValidationError
 
-_NAME_PATTERN = re.compile(r"^[a-z0-9_]{1,64}$")
+_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_]{1,64}$")
 
 
 @dataclass(slots=True)

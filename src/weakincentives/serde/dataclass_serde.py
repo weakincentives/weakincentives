@@ -22,10 +22,10 @@ from enum import Enum
 from pathlib import Path
 from re import Pattern
 from typing import Any as _AnyType
-from typing import Literal, Union, cast, get_args, get_origin, get_type_hints
+from typing import Final, Literal, Union, cast, get_args, get_origin, get_type_hints
 from uuid import UUID
 
-MISSING_SENTINEL: object = object()
+MISSING_SENTINEL: Final[object] = object()
 
 
 class _ExtrasDescriptor:
@@ -49,7 +49,7 @@ class _ExtrasDescriptor:
             self._store[key] = dict(value)
 
 
-_SLOTTED_EXTRAS: dict[type[object], _ExtrasDescriptor] = {}
+_SLOTTED_EXTRAS: Final[dict[type[object], _ExtrasDescriptor]] = {}
 
 
 def _ordered_values(values: Iterable[object]) -> list[object]:
