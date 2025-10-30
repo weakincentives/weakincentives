@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from typing import Final
+
 from ._types import SupportsDataclass
 from .errors import (
     PromptError,
@@ -27,7 +29,7 @@ from .structured import OutputParseError, parse_output
 from .text import TextSection
 from .tool import Tool, ToolResult
 
-__all__ = [
+__all__: Final[list[str]] = [
     "Prompt",
     "RenderedPrompt",
     "PromptSectionNode",

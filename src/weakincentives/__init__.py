@@ -12,4 +12,6 @@
 
 """Top-level package for the weakincentives library."""
 
-__all__ = []
+from typing import Final
+
+__all__: Final[list[str]] = []

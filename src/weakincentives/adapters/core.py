@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeVar
+from typing import Any, Final, Protocol, TypeVar
 
 from ..events import EventBus, ToolInvoked
 from ..prompts._types import SupportsDataclass
@@ -68,7 +68,7 @@ class PromptEvaluationError(RuntimeError):
         self.provider_payload = provider_payload
 
 
-__all__ = [
+__all__: Final[list[str]] = [
     "ProviderAdapter",
     "PromptEvaluationError",
     "PromptResponse",

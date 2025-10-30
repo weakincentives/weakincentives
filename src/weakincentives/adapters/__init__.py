@@ -12,6 +12,8 @@
 
 """Integration adapters for optional third-party providers."""
 
+from typing import Final
+
 from .core import (
     PromptEvaluationError,
     PromptResponse,
@@ -19,7 +21,7 @@ from .core import (
 )
 from .openai import OpenAIAdapter, OpenAIProtocol
 
-__all__ = [
+__all__: Final[list[str]] = [
     "ProviderAdapter",
     "PromptResponse",
     "PromptEvaluationError",

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Final, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -24,4 +24,4 @@ class SupportsDataclass(Protocol):
     __dataclass_fields__: ClassVar[dict[str, Any]]
 
 
-__all__ = ["SupportsDataclass"]
+__all__: Final[list[str]] = ["SupportsDataclass"]

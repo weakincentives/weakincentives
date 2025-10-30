@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 if TYPE_CHECKING:
     from .prompt import Prompt
@@ -66,7 +66,7 @@ class PromptVersionStore(Protocol):
     ) -> PromptOverride | None: ...
 
 
-__all__ = [
+__all__: Final[list[str]] = [
     "PromptDescriptor",
     "PromptOverride",
     "PromptVersionStore",

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Final
 
 SectionPath = tuple[str, ...]
 
@@ -49,7 +50,7 @@ class PromptRenderError(PromptError):
     """Raised when rendering a prompt fails."""
 
 
-__all__ = [
+__all__: Final[list[str]] = [
     "PromptError",
     "PromptValidationError",
     "PromptRenderError",

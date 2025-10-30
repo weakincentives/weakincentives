@@ -26,6 +26,8 @@
 
 """Stdlib dataclass serde utilities."""
 
+from typing import Final
+
 from .dataclass_serde import clone, dump, parse, schema
 
-__all__ = ["parse", "dump", "clone", "schema"]
+__all__: Final[list[str]] = ["parse", "dump", "clone", "schema"]

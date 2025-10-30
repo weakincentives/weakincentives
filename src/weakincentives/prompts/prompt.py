@@ -14,7 +14,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Final,
+    Literal,
+    cast,
+    get_args,
+    get_origin,
+)
 
 from ._types import SupportsDataclass
 from .errors import (
@@ -497,4 +506,4 @@ class Prompt[OutputT = Any]:
             self._tool_name_registry[tool.name] = path
 
 
-__all__ = ["Prompt", "PromptSectionNode", "RenderedPrompt"]
+__all__: Final[list[str]] = ["Prompt", "PromptSectionNode", "RenderedPrompt"]

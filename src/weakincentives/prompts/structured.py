@@ -15,14 +15,16 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
 from ..serde.dataclass_serde import parse as parse_dataclass
 from .prompt import RenderedPrompt
 
-__all__ = ["OutputParseError", "parse_output"]
+__all__: Final[list[str]] = ["OutputParseError", "parse_output"]
 
-_JSON_FENCE_PATTERN = re.compile(r"```json\s*\n(.*?)```", re.IGNORECASE | re.DOTALL)
+_JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"```json\s*\n(.*?)```", re.IGNORECASE | re.DOTALL
+)
 
 
 class OutputParseError(Exception):

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 from .prompts._types import SupportsDataclass
 
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 EventHandler = Callable[[object], None]
 
-logger = logging.getLogger(__name__)
+logger: Final[logging.Logger] = logging.getLogger(__name__)
 
 
 class EventBus(Protocol):
@@ -94,7 +94,7 @@ class ToolInvoked:
     call_id: str | None = None
 
 
-__all__ = [
+__all__: Final[list[str]] = [
     "EventBus",
     "InProcessEventBus",
     "NullEventBus",

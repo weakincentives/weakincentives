@@ -16,7 +16,7 @@ import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any
+from typing import Any, Final
 
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
@@ -94,4 +94,4 @@ class TextSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         return self.body_template
 
 
-__all__ = ["TextSection"]
+__all__: Final[list[str]] = ["TextSection"]
