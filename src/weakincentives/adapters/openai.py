@@ -19,13 +19,14 @@ from collections.abc import Mapping, Sequence
 from importlib import import_module
 from typing import Any, Protocol, cast
 
+from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..prompts._types import SupportsDataclass
 from ..prompts.prompt import Prompt
 from ..prompts.structured import OutputParseError
 from ..prompts.structured import parse_output as parse_structured_output
-from ..prompts.tool import Tool
+from ..prompts.tool import Tool, ToolResult
 from ..serde import dump, parse, schema
-from .core import PromptEvaluationError, PromptResponse, ToolCallRecord
+from .core import PromptEvaluationError, PromptResponse
 
 _ERROR_MESSAGE = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -130,6 +131,7 @@ class OpenAIAdapter:
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,
         parse_output: bool = True,
+        bus: EventBus,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
         rendered = prompt.render(*params)  # type: ignore[reportArgumentType]
@@ -140,7 +142,7 @@ class OpenAIAdapter:
         tools = list(rendered.tools)
         tool_specs = [_tool_to_openai_spec(tool) for tool in tools]
         tool_registry = {tool.name: tool for tool in tools}
-        tool_records: list[ToolCallRecord[Any, Any]] = []
+        tool_events: list[ToolInvoked] = []
         provider_payload: dict[str, Any] | None = None
 
         while True:
@@ -188,13 +190,21 @@ class OpenAIAdapter:
                         ) from error
                     text_value = None
 
-                return PromptResponse(
+                response = PromptResponse(
                     prompt_name=prompt_name,
                     text=text_value,
                     output=output,
-                    tool_results=tuple(tool_records),
+                    tool_results=tuple(tool_events),
                     provider_payload=provider_payload,
                 )
+                bus.publish(
+                    PromptExecuted(
+                        prompt_name=prompt_name,
+                        adapter="openai",
+                        response=cast(PromptResponse[object], response),
+                    )
+                )
+                return response
 
             assistant_tool_calls = [_serialize_tool_call(call) for call in tool_calls]
             messages.append(
@@ -254,14 +264,16 @@ class OpenAIAdapter:
                         provider_payload=provider_payload,
                     ) from error
 
-                tool_records.append(
-                    ToolCallRecord(
-                        name=tool_name,
-                        params=tool_params,
-                        result=tool_result,
-                        call_id=getattr(tool_call, "id", None),
-                    )
+                invocation = ToolInvoked(
+                    prompt_name=prompt_name,
+                    adapter="openai",
+                    name=tool_name,
+                    params=tool_params,
+                    result=cast(ToolResult[object], tool_result),
+                    call_id=getattr(tool_call, "id", None),
                 )
+                tool_events.append(invocation)
+                bus.publish(invocation)
 
                 payload = dump(tool_result.payload, exclude_none=True)
                 tool_content = {

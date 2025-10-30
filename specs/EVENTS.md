@@ -22,12 +22,12 @@ prompt execution observable inside a single process.
   default.
 - Subscriptions are type-scoped. Handlers receive concrete event dataclasses, not envelopes or loosely typed dictionaries.
 - The module ships with two ready-made implementations:
-  - `NullEventBus` satisfies the interface and drops every event. It is the module-level default returned by
-    `get_default_bus()` so adapters can publish safely even when no subscribers opt in.
+  - `NullEventBus` satisfies the interface and drops every event. Callers can pass it to adapter evaluations when
+    telemetry is not required.
   - `InProcessEventBus` stores handlers in a per-type registry and iterates over a snapshot on publish. It guarantees
     in-order delivery and isolates subscriber exceptions by logging and continuing.
-- `set_default_bus(bus)` lets embedders override the process-wide bus. Adapters MUST call `get_default_bus()` when a bus
-  is not supplied explicitly so global configuration is respected.
+- Callers MUST provide an `EventBus` instance for each adapter evaluation. There is no module-level default; pass
+  `NullEventBus()` to opt out of telemetry or wire up a custom bus scoped to the current request.
 
 ## Event Dataclasses
 
@@ -48,8 +48,8 @@ metadata is intentionally excluded from this minimal event until we have a concr
 
 ### `ToolInvoked`
 
-A thin rename of the existing `ToolCallRecord`, emitted every time an adapter executes a tool handler. Fields mirror the
-record so aggregated tooling data stays consistent across APIs:
+Emitted every time an adapter executes a tool handler. The dataclass mirrors the information returned through
+`PromptResponse.tool_results` so aggregated tooling data stays consistent across APIs:
 
 - `prompt_name: str` – name of the prompt that requested the tool invocation.
 - `adapter: str` – adapter identifier.

@@ -17,9 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar
 
+from ..events import EventBus, ToolInvoked
 from ..prompts._types import SupportsDataclass
 from ..prompts.prompt import Prompt
-from ..prompts.tool import ToolResult
 
 OutputT = TypeVar("OutputT")
 
@@ -32,20 +32,11 @@ class ProviderAdapter(Protocol[OutputT]):
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,
         parse_output: bool = True,
+        bus: EventBus,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response."""
 
         ...
-
-
-@dataclass(slots=True)
-class ToolCallRecord[ParamsT, ResultT]:
-    """Record describing a single tool invocation during evaluation."""
-
-    name: str
-    params: ParamsT
-    result: ToolResult[ResultT]
-    call_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -55,7 +46,7 @@ class PromptResponse[OutputT]:
     prompt_name: str
     text: str | None
     output: OutputT | None
-    tool_results: tuple[ToolCallRecord[Any, Any], ...]
+    tool_results: tuple[ToolInvoked, ...]
     provider_payload: dict[str, Any] | None = None
 
 
@@ -81,5 +72,4 @@ __all__ = [
     "ProviderAdapter",
     "PromptEvaluationError",
     "PromptResponse",
-    "ToolCallRecord",
 ]

@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from weakincentives.adapters import OpenAIAdapter
+from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 from weakincentives.serde import dump
 
@@ -229,25 +230,33 @@ def build_prompt() -> Prompt:
 class OpenAIReActSession:
     """Interactive session powered by the OpenAIAdapter."""
 
-    def __init__(self, model: str = "gpt-4o-mini") -> None:
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        *,
+        bus: EventBus | None = None,
+    ) -> None:
+        self._bus = bus or InProcessEventBus()
+        self._bus.subscribe(ToolInvoked, self._display_tool_event)
         self._adapter = OpenAIAdapter(model=model)
         self._prompt = build_prompt()
+
+    def _display_tool_event(self, event: ToolInvoked) -> None:
+        serialized_params = dump(event.params, exclude_none=True)
+        payload = dump(event.result.payload, exclude_none=True)
+        print(
+            f"[tool] {event.name} called with {serialized_params}\n"
+            f"       → {event.result.message}"
+        )
+        if payload:
+            print(f"       payload: {payload}")
 
     def evaluate(self, user_message: str) -> str:
         response = self._adapter.evaluate(
             self._prompt,
             UserTurnParams(content=user_message),
+            bus=self._bus,
         )
-
-        for index, record in enumerate(response.tool_results, start=1):
-            serialized_params = dump(record.params, exclude_none=True)
-            payload = dump(record.result.payload, exclude_none=True)
-            print(
-                f"[tool {index}] {record.name} called with {serialized_params}\n"
-                f"           → {record.result.message}"
-            )
-            if payload:
-                print(f"           payload: {payload}")
 
         if response.output is not None:
             rendered_output = dump(response.output, exclude_none=True)
