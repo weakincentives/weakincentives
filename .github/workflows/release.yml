@@ -29,10 +29,13 @@ jobs:
     
     - name: Install dependencies
       run: uv sync
-    
+
     - name: Run checks
       run: make check
     
+    - name: Restore clean lockfile
+      run: git checkout -- uv.lock
+
     - name: Build package
       run: uv build
     
