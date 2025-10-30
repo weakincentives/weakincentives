@@ -39,6 +39,20 @@ def test_section_defaults_children_and_enabled():
     assert section.params is ExampleParams
 
 
+def test_section_key_defaults_to_slug_and_fallback():
+    spaced = ExampleSection(title="Spacing Out")
+    blank = ExampleSection(title="   ")
+
+    assert spaced.key == "spacing-out"
+    assert blank.key == "section"
+
+
+def test_section_original_body_template_default_is_none():
+    section = ExampleSection(title="Has No Template")
+
+    assert section.original_body_template() is None
+
+
 def test_section_allows_custom_children_and_enabled():
     child = ExampleSection(title="Child")
 

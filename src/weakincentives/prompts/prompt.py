@@ -12,9 +12,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from typing import Any, ClassVar, Literal, cast, get_args, get_origin
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_args, get_origin
 
 from ._types import SupportsDataclass
 from .errors import (
@@ -25,6 +25,9 @@ from .errors import (
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
 from .tool import Tool
+
+if TYPE_CHECKING:
+    from .versioning import PromptVersionStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,11 +106,16 @@ class Prompt[OutputT = Any]:
     def __init__(
         self,
         *,
+        key: str,
         name: str | None = None,
         sections: Sequence[Section[Any]] | None = None,
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
     ) -> None:
+        stripped_key = key.strip()
+        if not stripped_key:
+            raise PromptValidationError("Prompt key must be a non-empty string.")
+        self.key = stripped_key
         self.name = name
         base_sections: list[Section[SupportsDataclass]] = [
             cast(Section[SupportsDataclass], section) for section in sections or ()
@@ -134,7 +142,7 @@ class Prompt[OutputT = Any]:
         self.inject_output_instructions = inject_output_instructions
 
         for section in base_sections:
-            self._register_section(section, path=(section.title,), depth=0)
+            self._register_section(section, path=(section.key,), depth=0)
 
         self._response_section: ResponseFormatSection | None = None
         if self._output_type is not None and self._output_container is not None:
@@ -148,7 +156,7 @@ class Prompt[OutputT = Any]:
             self._sections += (section_for_registry,)
             self._register_section(
                 section_for_registry,
-                path=(response_section.title,),
+                path=(response_section.key,),
                 depth=0,
             )
 
@@ -156,45 +164,32 @@ class Prompt[OutputT = Any]:
         """Render the prompt using provided parameter dataclass instances."""
 
         param_lookup = self._collect_param_lookup(params)
-        rendered_sections: list[str] = []
-        collected_tools: list[Tool[SupportsDataclass, SupportsDataclass]] = []
+        return self._render_internal(param_lookup)
 
-        for node, section_params in self._iter_enabled_sections(param_lookup):
-            params_type = node.section.params
-            try:
-                rendered = node.section.render(section_params, node.depth)
-            except PromptRenderError as error:
-                if error.section_path and error.dataclass_type:
-                    raise
-                raise PromptRenderError(
-                    error.message,
-                    section_path=node.path,
-                    dataclass_type=params_type,
-                    placeholder=error.placeholder,
-                ) from error
-            except Exception as error:  # pragma: no cover - defensive guard
-                raise PromptRenderError(
-                    "Section rendering failed.",
-                    section_path=node.path,
-                    dataclass_type=params_type,
-                ) from error
+    def render_with_overrides(
+        self,
+        *params: SupportsDataclass,
+        version_store: PromptVersionStore,
+        tag: str = "latest",
+    ) -> RenderedPrompt[OutputT]:
+        """Render the prompt using overrides supplied by a version store."""
 
-            section_tools = node.section.tools()
-            if section_tools:
-                collected_tools.extend(section_tools)
+        from .versioning import PromptDescriptor
 
-            if rendered:
-                rendered_sections.append(rendered)
+        descriptor = PromptDescriptor.from_prompt(self)
+        override = version_store.resolve(descriptor, tag=tag)
 
-        text = "\n\n".join(rendered_sections)
+        overrides: dict[SectionPath, str] = {}
+        if override is not None and override.prompt_key == descriptor.key:
+            descriptor_index = {
+                section.path: section.content_hash for section in descriptor.sections
+            }
+            for path, body in override.overrides.items():
+                if path in descriptor_index:
+                    overrides[path] = body
 
-        return RenderedPrompt(
-            text=text,
-            output_type=self._output_type,
-            output_container=self._output_container,
-            allow_extra_keys=self._allow_extra_keys,
-            _tools=tuple(collected_tools),
-        )
+        param_lookup = self._collect_param_lookup(params)
+        return self._render_internal(param_lookup, overrides)
 
     def _register_section(
         self,
@@ -250,7 +245,7 @@ class Prompt[OutputT = Any]:
         self._register_section_tools(section, path)
 
         for child in section.children:
-            child_path = path + (child.title,)
+            child_path = path + (child.key,)
             self._register_section(child, path=child_path, depth=depth + 1)
 
     @property
@@ -334,6 +329,71 @@ class Prompt[OutputT = Any]:
                 )
             lookup[params_type] = value
         return lookup
+
+    def _render_internal(
+        self,
+        param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
+        overrides: Mapping[SectionPath, str] | None = None,
+    ) -> RenderedPrompt[OutputT]:
+        rendered_sections: list[str] = []
+        collected_tools: list[Tool[SupportsDataclass, SupportsDataclass]] = []
+        override_lookup = dict(overrides or {})
+
+        for node, section_params in self._iter_enabled_sections(dict(param_lookup)):
+            override_body = override_lookup.get(node.path)
+            rendered = self._render_section(node, section_params, override_body)
+
+            section_tools = node.section.tools()
+            if section_tools:
+                collected_tools.extend(section_tools)
+
+            if rendered:
+                rendered_sections.append(rendered)
+
+        text = "\n\n".join(rendered_sections)
+
+        return RenderedPrompt(
+            text=text,
+            output_type=self._output_type,
+            output_container=self._output_container,
+            allow_extra_keys=self._allow_extra_keys,
+            _tools=tuple(collected_tools),
+        )
+
+    def _render_section(
+        self,
+        node: PromptSectionNode[SupportsDataclass],
+        section_params: SupportsDataclass,
+        override_body: str | None,
+    ) -> str:
+        params_type = node.section.params
+        try:
+            render_override = getattr(node.section, "render_with_body", None)
+            if override_body is not None and callable(render_override):
+                override_renderer = cast(
+                    Callable[[str, SupportsDataclass, int], str],
+                    render_override,
+                )
+                rendered = override_renderer(override_body, section_params, node.depth)
+            else:
+                rendered = node.section.render(section_params, node.depth)
+        except PromptRenderError as error:
+            if error.section_path and error.dataclass_type:
+                raise
+            raise PromptRenderError(
+                error.message,
+                section_path=node.path,
+                dataclass_type=params_type,
+                placeholder=error.placeholder,
+            ) from error
+        except Exception as error:  # pragma: no cover - defensive guard
+            raise PromptRenderError(
+                "Section rendering failed.",
+                section_path=node.path,
+                dataclass_type=params_type,
+            ) from error
+
+        return rendered
 
     def _resolve_section_params(
         self,

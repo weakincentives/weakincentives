@@ -95,7 +95,9 @@ def _build_greeting_prompt() -> Prompt:
             "You are a concise assistant. Provide a short friendly greeting for ${audience}."
         ),
     )
-    return Prompt(name="greeting", sections=[greeting_section])
+    return Prompt(
+        key="integration-greeting", name="greeting", sections=[greeting_section]
+    )
 
 
 def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
@@ -123,7 +125,11 @@ def _build_tool_prompt(
         ),
         tools=(tool,),
     )
-    return Prompt(name="uppercase_workflow", sections=[instruction_section])
+    return Prompt(
+        key="integration-uppercase",
+        name="uppercase_workflow",
+        sections=[instruction_section],
+    )
 
 
 def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
@@ -136,6 +142,7 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
         ),
     )
     return Prompt[ReviewAnalysis](
+        key="integration-structured",
         name="structured_review",
         sections=[analysis_section],
     )

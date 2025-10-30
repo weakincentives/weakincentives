@@ -31,24 +31,29 @@ class TextSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         *,
         title: str,
         body: str,
+        key: str | None = None,
         defaults: ParamsT | None = None,
         children: Sequence[object] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
         tools: Sequence[object] | None = None,
     ) -> None:
+        self.body_template = body
         super().__init__(
             title=title,
+            key=key,
             defaults=defaults,
             children=children,
             enabled=enabled,
             tools=tools,
         )
-        self.body = body
 
     def render(self, params: ParamsT, depth: int) -> str:
+        return self.render_with_body(self.body_template, params, depth)
+
+    def render_with_body(self, body: str, params: ParamsT, depth: int) -> str:
         heading_level = "#" * (depth + 2)
         heading = f"{heading_level} {self.title.strip()}"
-        template = Template(textwrap.dedent(self.body).strip())
+        template = Template(textwrap.dedent(body).strip())
         try:
             normalized_params = self._normalize_params(params)
             rendered_body = template.substitute(normalized_params)
@@ -63,7 +68,7 @@ class TextSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         return heading
 
     def placeholder_names(self) -> set[str]:
-        template = Template(textwrap.dedent(self.body).strip())
+        template = Template(textwrap.dedent(self.body_template).strip())
         placeholders: set[str] = set()
         for match in template.pattern.finditer(template.template):
             named = match.group("named")
@@ -84,6 +89,9 @@ class TextSection[ParamsT: SupportsDataclass](Section[ParamsT]):
             )
 
         return {field.name: getattr(params, field.name) for field in fields(params)}
+
+    def original_body_template(self) -> str:
+        return self.body_template
 
 
 __all__ = ["TextSection"]

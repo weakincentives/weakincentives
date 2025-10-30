@@ -53,7 +53,7 @@ def build_prompt() -> Prompt:
         body="Outro: ${footer}",
         defaults=OutroParams(footer="bye"),
     )
-    return Prompt(sections=[intro, details, outro])
+    return Prompt(key="render-basic", sections=[intro, details, outro])
 
 
 @dataclass
@@ -97,7 +97,7 @@ def build_nested_prompt() -> Prompt:
         title="Summary",
         body="Summary: ${summary}",
     )
-    return Prompt(sections=[parent, summary])
+    return Prompt(key="render-nested", sections=[parent, summary])
 
 
 def test_prompt_render_merges_defaults_and_overrides():
@@ -206,13 +206,13 @@ def test_prompt_render_wraps_template_errors_with_context():
         title="Explode",
         body="unused",
     )
-    prompt = Prompt(sections=[section])
+    prompt = Prompt(key="render-error", sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ErrorParams(value="x"))
 
     assert isinstance(exc.value, PromptRenderError)
-    assert exc.value.section_path == ("Explode",)
+    assert exc.value.section_path == ("explode",)
     assert exc.value.dataclass_type is ErrorParams
 
 
@@ -229,11 +229,11 @@ def test_prompt_render_propagates_enabled_errors():
         body="Guard: ${flag}",
         enabled=raising_enabled,
     )
-    prompt = Prompt(sections=[section])
+    prompt = Prompt(key="render-enabled-error", sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ToggleParams(flag=True))
 
     assert isinstance(exc.value, PromptRenderError)
-    assert exc.value.section_path == ("Guard",)
+    assert exc.value.section_path == ("guard",)
     assert exc.value.dataclass_type is ToggleParams

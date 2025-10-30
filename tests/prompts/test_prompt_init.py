@@ -54,7 +54,7 @@ def test_prompt_initialization_flattens_sections_depth_first():
         children=[child, sibling],
     )
 
-    prompt = Prompt(name="demo", sections=[root])
+    prompt = Prompt(key="prompt-init", name="demo", sections=[root])
 
     titles = [node.section.title for node in prompt.sections]
     depths = [node.depth for node in prompt.sections]
@@ -63,12 +63,19 @@ def test_prompt_initialization_flattens_sections_depth_first():
     assert titles == ["Root", "Child", "Sibling"]
     assert depths == [0, 1, 1]
     assert paths == [
-        ("Root",),
-        ("Root", "Child"),
-        ("Root", "Sibling"),
+        ("root",),
+        ("root", "child"),
+        ("root", "sibling"),
     ]
     assert prompt.params_types == {RootParams, ChildParams, SiblingParams}
     assert prompt.name == "demo"
+
+
+def test_prompt_requires_non_empty_key():
+    section = TextSection[RootParams](title="Root", body="Body: ${title}")
+
+    with pytest.raises(PromptValidationError):
+        Prompt(key="   ", sections=[section])
 
 
 def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
@@ -83,7 +90,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
         defaults=DuplicateParams(value="beta"),
     )
 
-    prompt = Prompt(sections=[first, second])
+    prompt = Prompt(key="duplicate-defaults", sections=[first, second])
 
     rendered = prompt.render()
 
@@ -102,7 +109,7 @@ def test_prompt_reuses_provided_params_for_duplicate_sections():
         body="Second: ${value}",
     )
 
-    prompt = Prompt(sections=[first, second])
+    prompt = Prompt(key="duplicate-shared", sections=[first, second])
 
     rendered = prompt.render(DuplicateParams(value="shared"))
 
@@ -121,7 +128,7 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
         body="Second: ${value}",
     )
 
-    prompt = Prompt(sections=[first, second])
+    prompt = Prompt(key="duplicate-type-default", sections=[first, second])
 
     rendered = prompt.render()
 
@@ -140,11 +147,11 @@ def test_prompt_validates_text_section_placeholders():
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(sections=[section])
+        Prompt(key="invalid-placeholder", sections=[section])
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.placeholder == "oops"
-    assert exc.value.section_path == ("Invalid",)
+    assert exc.value.section_path == ("invalid",)
     assert exc.value.dataclass_type is PlaceholderParams
 
 
