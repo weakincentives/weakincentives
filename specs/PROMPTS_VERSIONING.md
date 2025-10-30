@@ -2,44 +2,209 @@
 
 ## Purpose
 
-External systems need stable identifiers and reproducible digests for every `Prompt` and content-bearing section so optimized variants can be stored, recalled, and diffed against in-code defaults. This spec extends the existing prompt model with minimal metadata to make each artifact addressable and hashable without disrupting current rendering behavior. All `Section` instances carry stable keys; only `TextSection` (and concrete subclasses such as `ResponseFormatSection`) participate in automatic content hashing. Custom section types must opt into the hashing contract explicitly if they need versioning semantics.
+External optimization services need a stable way to identify prompts and to override their content without editing source files. This document defines the metadata that the prompt library must expose so callers can detect when code changes a prompt, decide whether an override is still valid, and swap in alternative text at render time.
 
-## Core Concepts
+## Terminology
 
-- **Key**: Mandatory machine identifier distinct from display titles. Keys appear on both `Prompt` and `Section` instances and compose into section paths.
-- **Content Hash**: Deterministic digest (e.g., SHA-256) derived solely from the original section body template (prior to rendering). Serves as the version token.
-- **Descriptor**: Lightweight data object that captures keys and section content hashes for export to external systems.
-- **Tag**: Human-readable label such as `stable` or `latest` that selects which optimized artifact a resolver should return without changing the hash contract.
+- **Prompt key** – Required machine identifier for every `Prompt`. Distinct from the optional human-readable `name`.
+- **Section key** – Required machine identifier for every `Section`. Keys compose into ordered tuples (`SectionPath`) that uniquely identify a location inside a prompt.
+- **Hash-aware section** – A section type (currently `TextSection` and subclasses such as `ResponseFormatSection`) whose original body template participates in content hashing.
+- **Content hash** – Deterministic digest (SHA-256) of a hash-aware section’s original body template as written in source control. Runtime overrides never change the descriptor hash.
+- **Lookup key** – The triple `(prompt_key, section_path, expected_hash)` used to decide whether an override still applies.
+- **Tag** – Free-form label (e.g., `latest`, `stable`, `experiment-a`) that callers use to request a specific family of overrides.
 
-## Addressability
+## Data Model
 
-1. Require a `key: str` when constructing a `Prompt`. Keep `name` as the optional human label.
-1. Add an optional `key: str | None` to `Section`; default to a slug derived from the title when not provided.
-1. Represent section identity with a `SectionPath` = tuple of section keys from root to leaf. Paths stay stable even if titles change. Sections that do not participate in hashing still expose keys so downstream systems can reference them even without hashes.
-1. Expose helper utilities that enumerate every section path alongside the prompt key. Include content hashes only for sections that opt into hashing.
+1. Every `Prompt` constructor must accept `key: str`.
+1. Every `Section` constructor must accept `key: str | None`, defaulting to a slug of the title when omitted. Keys remain stable even for sections that do not participate in hashing.
+1. `SectionPath` is the tuple of section keys from root to the target section. The root section’s key appears first.
+1. A prompt descriptor enumerates only hash-aware sections. Each entry includes:
+   - `path: SectionPath`
+   - `content_hash: str` (SHA-256 of the original body template)
+1. Hash-aware sections must expose their original body template string so the hashing utility can operate without rendering parameters.
 
-## Hashing
+## Hashing Rules
 
-1. Compute a deterministic content hash (e.g., SHA-256) for every hash-aware section using only the original body template string defined in code (ignore defaults, predicates, child keys, and runtime parameter values). Custom section classes that want to participate must supply the same hashing hooks.
-1. Derive the `Prompt` content hash from its key plus the ordered set of participating section body hashes so the prompt hash changes whenever any descendant hash-aware section's in-code body template changes. Override bodies returned at runtime never influence descriptor hashes.
-1. Emit hashes through the descriptor API so external systems can treat `(key, content_hash)` as the cache key and detect drift at any level.
-1. Provide helpers that surface these hashes alongside the section tree to simplify change detection for callers.
+1. Compute hashes solely from the original body template text. Ignore defaults, enable predicates, tools, children, and runtime params.
+1. The lookup key `(prompt_key, section_path, expected_hash)` is authoritative. An override is valid only when its stored `expected_hash` equals the descriptor value for the matching path.
 
-## External Overrides
+## Descriptor Contract
 
-1. Define a `PromptVersionStore` protocol with `resolve(description, tag="latest") -> PromptOverride | None`. Implementations return optimized prompt text plus section body overrides (keyed by section path) and the original body hash each override expects. Each section override is the raw body template that should replace the in-code body string.
-1. Update `Prompt.render` to query the store before rendering. When the store provides an override whose expected source hash matches the in-code section hash, substitute the persisted body template before rendering; otherwise fall back to code-defined defaults. The replacement template may hash to a different value once applied.
-1. Require resolvers to understand at least the `latest` (default) and `stable` tags so callers can opt into slower-moving artifacts without bypassing hash validation. Additional tags remain implementation-defined.
-1. Ship a default `PromptVersionStore` implementation backed by the local filesystem so projects can persist overrides without extra infrastructure.
-1. Allow partial overrides: unspecified sections still render from the in-code tree, leveraging existing parameter resolution. Sections that do not participate in hashing never receive overrides. Overrides only apply when the expected source hash matches; the replacement template is free to produce a new hash for downstream consumers.
+Expose `PromptDescriptor` with:
+
+```python
+@dataclass(slots=True)
+class SectionDescriptor:
+    path: tuple[str, ...]
+    content_hash: str
+
+@dataclass(slots=True)
+class PromptDescriptor:
+    key: str
+    sections: list[SectionDescriptor]  # ordered depth-first
+```
+
+- `PromptDescriptor.from_prompt(prompt: Prompt) -> PromptDescriptor` walks the section tree, gathers all hash-aware sections, and computes hashes.
+- The descriptor omits sections that lack hashes but callers can still traverse the prompt tree if needed via other APIs.
+
+## Override Contract
+
+Introduce:
+
+```python
+@dataclass(slots=True)
+class PromptOverride:
+    prompt_key: str
+    tag: str
+    overrides: dict[tuple[str, ...], str]  # SectionPath -> replacement body template
+```
+
+- Each dict entry represents the new body template to use when the lookup key matches.
+- The replacement template may hash to any value after application; descriptors continue to publish the in-code hash.
+
+Define a `PromptVersionStore` protocol:
+
+```python
+class PromptVersionStore(Protocol):
+    def resolve(
+        self,
+        description: PromptDescriptor,
+        tag: str = "latest",
+    ) -> PromptOverride | None: ...
+```
+
+Responsibilities:
+
+1. Receive the descriptor and optional tag.
+1. Examine available overrides keyed by `(prompt_key, section_path, expected_hash)`.
+1. Return a `PromptOverride` containing only the overrides whose expected hash matches the descriptor. Return `None` when nothing applies.
+1. Tags are advisory; stores decide which strings they honor.
+
+## Rendering API
+
+Augment `Prompt` with:
+
+```python
+class Prompt:
+    def render_with_overrides(
+        self,
+        *params: SupportsDataclass,
+        version_store: PromptVersionStore,
+        tag: str = "latest",
+    ) -> RenderedPrompt:
+        ...
+```
+
+Behavior:
+
+1. Produce the `PromptDescriptor` for `self`.
+1. Ask the store for overrides using the descriptor and tag.
+1. For each section path in the override, confirm `expected_hash == descriptor` before substituting the new body template.
+1. Render the prompt using the modified bodies, falling back to defaults for sections without overrides or mismatched hashes.
+1. Return the same `RenderedPrompt` structure used by `Prompt.render`.
+
+A convenience `render` method MAY delegate to `render_with_overrides` when no store is provided.
 
 ## Operational Flow
 
-1. **Bootstrap**: On startup or during a build step, enumerate descriptors for all prompts and publish them to the external optimization service.
-1. **Runtime**: Each render call consults the `PromptVersionStore`. If an override is unavailable or stale, render using defaults and optionally record the computed hash so the store can detect changes later.
-1. **Author Workflow**: Developers do not manage manual version numbers. Hashes automatically detect drift whenever code changes a prompt or section.
+1. **Bootstrap** – Enumerate descriptors for all prompts and publish them to the optimization service. The service stores overrides keyed by `(prompt_key, section_path, expected_hash)` and tagged as desired.
+1. **Runtime** – Call `prompt.render_with_overrides(..., version_store=store, tag=...)`. Overrides whose lookup key matches replace the in-code bodies; the rest are ignored.
+1. **Author workflow** – Developers edit prompt bodies in source control. Any change produces a new hash, invalidating stale overrides automatically because the lookup key no longer matches.
+
+## Usage Example
+
+```python
+from dataclasses import dataclass
+
+from weakincentives.prompts import Prompt, TextSection
+from weakincentives.prompts.versioning import (
+    PromptDescriptor,
+    PromptOverride,
+    PromptVersionStore,
+)
+
+
+@dataclass
+class GreetingParams:
+    audience: str
+
+
+prompt = Prompt(
+    key="welcome_prompt",
+    sections=[
+        TextSection[GreetingParams](
+            key="system",
+            title="System",
+            body="You are a concise assistant. Greet ${audience} politely.",
+        ),
+        TextSection[GreetingParams](
+            key="closing",
+            title="Closing",
+            body="Say goodbye to ${audience}.",
+        ),
+    ],
+)
+
+descriptor = PromptDescriptor.from_prompt(prompt)
+
+
+class MemoryStore(PromptVersionStore):
+    def __init__(self) -> None:
+        self._data: dict[
+            tuple[str, tuple[str, ...], str],
+            dict[str, str],
+        ] = {}
+
+    def register(
+        self,
+        *,
+        prompt_key: str,
+        section_path: tuple[str, ...],
+        expected_hash: str,
+        tag: str,
+        body: str,
+    ) -> None:
+        lookup = (prompt_key, section_path, expected_hash)
+        self._data.setdefault(lookup, {})[tag] = body
+
+    def resolve(
+        self,
+        description: PromptDescriptor,
+        tag: str = "latest",
+    ) -> PromptOverride | None:
+        overrides: dict[tuple[str, ...], str] = {}
+        for section in description.sections:
+            lookup = (description.key, section.path, section.content_hash)
+            tagged = self._data.get(lookup)
+            if tagged is None:
+                continue
+            body = tagged.get(tag)
+            if body is not None:
+                overrides[section.path] = body
+        if not overrides:
+            return None
+        return PromptOverride(description.key, tag, overrides)
+
+
+store = MemoryStore()
+store.register(
+    prompt_key=descriptor.key,
+    section_path=descriptor.sections[0].path,
+    expected_hash=descriptor.sections[0].content_hash,
+    tag="stable",
+    body="You are an enthusiastic assistant. Welcome ${audience} with energy.",
+)
+
+rendered = prompt.render_with_overrides(
+    GreetingParams(audience="Operators"),
+    version_store=store,
+    tag="stable",
+)
+```
+
+The store only returns overrides when `(prompt_key, section_path, expected_hash)` matches the descriptor. The descriptor itself continues to report the original in-code hash even after an override is applied.
 
 ## Non-Goals
 
 - Introducing new templating features or changing section rendering semantics.
-- Persisting runtime analytics; external systems own their storage format and retention policies.
+- Persisting analytics or override history; external systems control storage and retention.
