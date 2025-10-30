@@ -58,6 +58,7 @@ dev = [
     "bandit>=1.7.8",
     "deptry>=0.16.3",
     "pytest>=8.4.2",
+    "pytest-timeout>=2.3.1",
     "pytest-cov>=6.0.0",
     "pip-audit>=2.7.3",
     "ruff>=0.14.1",
@@ -95,6 +96,10 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=100"
+markers = [
+    "integration: marks tests that exercise live provider integrations.",
+    "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
+]
 
 [tool.pyright]
 typeCheckingMode = "strict"

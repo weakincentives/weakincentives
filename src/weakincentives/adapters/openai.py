@@ -142,6 +142,8 @@ class OpenAIAdapter:
         tool_registry = {tool.name: tool for tool in tools}
         tool_records: list[ToolCallRecord[Any, Any]] = []
         provider_payload: dict[str, Any] | None = None
+        # Allow forcing a specific tool once, then fall back to provider defaults.
+        next_tool_choice: str | Mapping[str, Any] | None = self._tool_choice
 
         while True:
             request_payload: dict[str, Any] = {
@@ -150,8 +152,8 @@ class OpenAIAdapter:
             }
             if tool_specs:
                 request_payload["tools"] = tool_specs
-                if self._tool_choice is not None:
-                    request_payload["tool_choice"] = self._tool_choice
+                if next_tool_choice is not None:
+                    request_payload["tool_choice"] = next_tool_choice
 
             try:
                 response = self._client.chat.completions.create(**request_payload)
@@ -275,6 +277,12 @@ class OpenAIAdapter:
                         "content": json.dumps(tool_content),
                     }
                 )
+
+            if isinstance(next_tool_choice, Mapping):
+                tool_choice_mapping = cast(Mapping[str, object], next_tool_choice)
+                if tool_choice_mapping.get("type") == "function":
+                    # Relax forced single-function choice after the first call.
+                    next_tool_choice = "auto"
 
 
 def _tool_to_openai_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
