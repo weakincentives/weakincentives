@@ -79,6 +79,7 @@ def test_openai_adapter_constructs_client_when_not_provided(
     module = _reload_module()
 
     prompt = Prompt(
+        key="openai-greeting",
         name="greeting",
         sections=[
             TextSection[_GreetingParams](
@@ -118,6 +119,7 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
     module = _reload_module()
 
     prompt = Prompt(
+        key="openai-greeting",
         name="greeting",
         sections=[
             TextSection[_GreetingParams](
@@ -285,6 +287,7 @@ def test_openai_adapter_returns_plain_text_response():
     module = _reload_module()
 
     prompt = Prompt(
+        key="openai-plain",
         name="greeting",
         sections=[
             TextSection[_GreetingParams](
@@ -363,6 +366,7 @@ def test_openai_adapter_executes_tools_and_parses_output():
     )
 
     prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-success",
         name="search",
         sections=[
             TextSection[_ToolParams](
@@ -418,6 +422,7 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
     )
 
     prompt = Prompt(
+        key="openai-tools-relaxed",
         name="search",
         sections=[
             TextSection[_ToolParams](
@@ -475,6 +480,7 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     )
 
     prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-events",
         name="search",
         sections=[
             TextSection[_ToolParams](
@@ -534,6 +540,7 @@ def test_openai_adapter_raises_when_tool_handler_missing():
     )
 
     prompt = Prompt(
+        key="openai-tools-missing-handler",
         name="search",
         sections=[
             TextSection[_ToolParams](
@@ -579,6 +586,7 @@ def test_openai_adapter_handles_tool_call_without_arguments():
     )
 
     prompt = Prompt(
+        key="openai-optional-tool",
         name="optional",
         sections=[
             TextSection[_OptionalParams](
@@ -617,6 +625,7 @@ def test_openai_adapter_raises_when_structured_output_missing_json():
     module = _reload_module()
 
     prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-missing-json",
         name="search",
         sections=[
             TextSection[_ToolParams](
@@ -647,6 +656,7 @@ def test_openai_adapter_raises_for_unknown_tool():
     module = _reload_module()
 
     prompt = Prompt(
+        key="openai-unknown-tool",
         name="search",
         sections=[
             TextSection[_ToolParams](
@@ -688,6 +698,7 @@ def test_openai_adapter_raises_when_tool_params_invalid():
     )
 
     prompt = Prompt(
+        key="openai-invalid-tool-params",
         name="search",
         sections=[
             TextSection[_ToolParams](
@@ -733,6 +744,7 @@ def test_openai_adapter_raises_when_handler_fails():
     )
 
     prompt = Prompt(
+        key="openai-handler-failure",
         name="search",
         sections=[
             TextSection[_ToolParams](
@@ -769,6 +781,7 @@ def test_openai_adapter_records_provider_payload_from_mapping():
     module = _reload_module()
 
     prompt = Prompt(
+        key="openai-provider-payload",
         name="greeting",
         sections=[
             TextSection[_GreetingParams](
@@ -797,6 +810,7 @@ def test_openai_adapter_ignores_non_mapping_model_dump():
     module = _reload_module()
 
     prompt = Prompt(
+        key="openai-weird-dump",
         name="greeting",
         sections=[
             TextSection[_GreetingParams](
@@ -825,6 +839,7 @@ def test_openai_adapter_handles_response_without_model_dump():
     module = _reload_module()
 
     prompt = Prompt(
+        key="openai-simple-response",
         name="greeting",
         sections=[
             TextSection[_GreetingParams](
@@ -863,6 +878,7 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
     )
 
     prompt = Prompt(
+        key="openai-bad-tool-arguments",
         name="search",
         sections=[
             TextSection[_ToolParams](

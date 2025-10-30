@@ -224,7 +224,11 @@ def build_prompt() -> Prompt:
             "call tools or respond directly.\n\nInstruction:\n${content}"
         ),
     )
-    return Prompt(name="echo_agent", sections=[guidance_section, user_turn_section])
+    return Prompt(
+        key="example-echo-agent",
+        name="echo_agent",
+        sections=[guidance_section, user_turn_section],
+    )
 
 
 class OpenAIReActSession:

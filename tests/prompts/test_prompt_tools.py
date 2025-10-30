@@ -102,7 +102,11 @@ def _build_prompt() -> tuple[
         enabled=lambda params: params.enabled,
     )
 
-    return Prompt(sections=[guidance, secondary]), primary_tool, secondary_tool
+    return (
+        Prompt(key="tools-basic", sections=[guidance, secondary]),
+        primary_tool,
+        secondary_tool,
+    )
 
 
 def test_prompt_tools_depth_first_and_enablement() -> None:
@@ -141,10 +145,10 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
     )
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(sections=[first_section, second_section])
+        Prompt(key="tools-duplicate", sections=[first_section, second_section])
 
     error = cast(PromptValidationError, error_info.value)
-    assert error.section_path == ("Second Tools",)
+    assert error.section_path == ("second-tools",)
     assert error.dataclass_type is PrimaryToolParams
 
 
@@ -169,7 +173,9 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
         defaults=SecondaryToggleParams(),
     )
 
-    prompt = Prompt(sections=[first_section, second_section])
+    prompt = Prompt(
+        key="tools-duplicate-params", sections=[first_section, second_section]
+    )
 
     tools = prompt.render().tools
     assert {tool.name for tool in tools} == {"primary_lookup", "alternate_primary"}
@@ -188,10 +194,10 @@ def test_prompt_tools_requires_tool_instances() -> None:
     invalid_section = _InvalidToolSection(title="Invalid")
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(sections=[invalid_section])
+        Prompt(key="tools-invalid-instance", sections=[invalid_section])
 
     error = cast(PromptValidationError, error_info.value)
-    assert error.section_path == ("Invalid",)
+    assert error.section_path == ("invalid",)
     assert error.dataclass_type is GuidanceParams
 
 
@@ -207,8 +213,8 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     )
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(sections=[section])
+        Prompt(key="tools-bad-params-type", sections=[section])
 
     error = cast(PromptValidationError, error_info.value)
-    assert error.section_path == ("Primary",)
+    assert error.section_path == ("primary",)
     assert error.dataclass_type is str

@@ -71,7 +71,7 @@ def test_prompt_tools_integration_example() -> None:
         children=[tools_section],
     )
 
-    prompt = Prompt(name="tools_overview", sections=[guidance])
+    prompt = Prompt(key="tools-overview", name="tools_overview", sections=[guidance])
 
     rendered = prompt.render(GuidanceParams(primary_tool="lookup_entity"))
     markdown = rendered.text

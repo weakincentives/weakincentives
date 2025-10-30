@@ -70,7 +70,7 @@ def build_compose_prompt() -> Prompt:
         ),
     ]
 
-    return Prompt(sections=sections)
+    return Prompt(key="compose-email", sections=sections)
 
 
 def test_prompt_integration_renders_expected_markdown():

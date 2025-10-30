@@ -54,6 +54,7 @@ def _build_summary_prompt(
         body="Summarize ${topic} and include view counts.",
     )
     return Prompt[Summary](
+        key="summaries",
         name="summaries",
         sections=[task_section],
         inject_output_instructions=inject_output_instructions,
@@ -95,7 +96,7 @@ def test_prompt_can_disable_response_format_injection() -> None:
 
 def test_prompt_specialization_requires_dataclass() -> None:
     with pytest.raises(PromptValidationError) as exc:
-        Prompt[str](sections=[])
+        Prompt[str](key="invalid-output", sections=[])
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is str
@@ -173,6 +174,7 @@ def test_parse_output_supports_array_container() -> None:
         body="Return search results.",
     )
     prompt = Prompt[list[ResultItem]](
+        key="search-array-support",
         name="search",
         sections=[task_section],
     )
@@ -205,7 +207,7 @@ def test_parse_output_requires_specialized_prompt() -> None:
         title="Task",
         body="Return guidance.",
     )
-    prompt = Prompt(name="plain", sections=[task_section])
+    prompt = Prompt(key="plain-guidance", name="plain", sections=[task_section])
     rendered = prompt.render(Guidance(topic="Ada"))
 
     with pytest.raises(OutputParseError):
@@ -217,7 +219,11 @@ def test_parse_output_array_requires_array_container() -> None:
         title="Task",
         body="Return search results.",
     )
-    prompt = Prompt[list[ResultItem]](name="search", sections=[task_section])
+    prompt = Prompt[list[ResultItem]](
+        key="search-array",
+        name="search",
+        sections=[task_section],
+    )
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = """```json\n{\n  \"title\": \"Ada\"\n}\n```"""
@@ -230,7 +236,11 @@ def test_parse_output_array_requires_array_container() -> None:
 
 def test_parse_output_array_requires_object_items() -> None:
     task_section = TextSection[Guidance](title="Task", body="Return search results.")
-    prompt = Prompt[list[ResultItem]](name="search", sections=[task_section])
+    prompt = Prompt[list[ResultItem]](
+        key="search-array-items",
+        name="search",
+        sections=[task_section],
+    )
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = """```json\n[\n  \"not an object\"\n]\n```"""
@@ -243,7 +253,11 @@ def test_parse_output_array_requires_object_items() -> None:
 
 def test_parse_output_array_reports_item_validation_error() -> None:
     task_section = TextSection[Guidance](title="Task", body="Return search results.")
-    prompt = Prompt[list[ResultItem]](name="search", sections=[task_section])
+    prompt = Prompt[list[ResultItem]](
+        key="search-array-validation",
+        name="search",
+        sections=[task_section],
+    )
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = """```json\n[{\n  \"title\": \"Ada\"\n}]\n```"""

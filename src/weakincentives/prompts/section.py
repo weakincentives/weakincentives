@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, ClassVar, cast
@@ -20,6 +21,16 @@ if TYPE_CHECKING:
     from .tool import Tool
 
 from ._types import SupportsDataclass
+
+_SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(value: str) -> str:
+    normalized = value.strip().lower()
+    slug = _SLUG_PATTERN.sub("-", normalized).strip("-")
+    if not slug:
+        return "section"
+    return slug
 
 
 class Section[ParamsT: SupportsDataclass](ABC):
@@ -31,6 +42,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         self,
         *,
         title: str,
+        key: str | None = None,
         defaults: ParamsT | None = None,
         children: Sequence[object] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
@@ -47,6 +59,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         self.params_type: type[ParamsT] = params_type
         self.params: type[ParamsT] = params_type
         self.title = title
+        self.key = key or _slugify(title)
         self.defaults = defaults
 
         normalized_children: list[Section[SupportsDataclass]] = []
@@ -80,6 +93,11 @@ class Section[ParamsT: SupportsDataclass](ABC):
         """Return the tools exposed by this section."""
 
         return self._tools
+
+    def original_body_template(self) -> str | None:
+        """Return the template text that participates in hashing, when available."""
+
+        return None
 
     @classmethod
     def __class_getitem__(cls, item: object) -> type[Section[SupportsDataclass]]:
