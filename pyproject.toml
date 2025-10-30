@@ -50,6 +50,8 @@ source = "vcs"
 
 [tool.hatch.version.vcs]
 tag-pattern = "v(?P<version>.+)"
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
 
 [dependency-groups]
 dev = [
