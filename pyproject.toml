@@ -47,13 +47,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
-
-[tool.hatch.version.vcs]
 tag-pattern = "v(?P<version>.+)"
-version_scheme = "no-guess-dev"
-local_scheme = "no-local-version"
 
-[tool.hatch.version.vcs.raw-options]
+[tool.hatch.version.raw-options]
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
 
