@@ -25,6 +25,13 @@ from weakincentives.adapters import OpenAIAdapter
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 from weakincentives.serde import dump
+from weakincentives.session import (
+    DataEvent,
+    Session,
+    ToolData,
+    select_all,
+    select_latest,
+)
 
 try:  # pragma: no cover - optional dependency in stdlib for 3.9+
     from zoneinfo import ZoneInfo
@@ -80,6 +87,17 @@ class AgentGuidance:
 @dataclass
 class UserTurnParams:
     content: str
+
+
+@dataclass(slots=True, frozen=True)
+class ToolCallLog:
+    """Recorded tool invocation captured by the session."""
+
+    name: str
+    prompt_name: str
+    message: str
+    payload: dict[str, Any]
+    call_id: str | None
 
 
 KNOWLEDGE_BASE: dict[str, str] = {
@@ -241,6 +259,8 @@ class OpenAIReActSession:
         bus: EventBus | None = None,
     ) -> None:
         self._bus = bus or InProcessEventBus()
+        self._session = Session(bus=self._bus)
+        self._register_tool_history()
         self._bus.subscribe(ToolInvoked, self._display_tool_event)
         self._adapter = OpenAIAdapter(model=model)
         self._prompt = build_prompt()
@@ -254,6 +274,10 @@ class OpenAIReActSession:
         )
         if payload:
             print(f"       payload: {payload}")
+        latest = select_latest(self._session, ToolCallLog)
+        if latest is not None:
+            count = len(select_all(self._session, ToolCallLog))
+            print(f"       (session recorded this call as #{count})")
 
     def evaluate(self, user_message: str) -> str:
         response = self._adapter.evaluate(
@@ -269,6 +293,58 @@ class OpenAIReActSession:
             return response.text
         return "(no response from assistant)"
 
+    def render_tool_history(self) -> str:
+        """Return a formatted history of tool calls captured by the session."""
+
+        history = select_all(self._session, ToolCallLog)
+        if not history:
+            return "No tool calls recorded yet."
+
+        lines: list[str] = []
+        for index, record in enumerate(history, start=1):
+            lines.append(
+                f"{index}. {record.name} ({record.prompt_name}) → {record.message}"
+            )
+            if record.call_id:
+                lines.append(f"   call_id: {record.call_id}")
+            if record.payload:
+                payload_dump = json.dumps(record.payload, ensure_ascii=False)
+                lines.append(f"   payload: {payload_dump}")
+        return "\n".join(lines)
+
+    def _register_tool_history(self) -> None:
+        """Register reducers that project tool calls into a shared log slice."""
+
+        for result_type in (
+            EchoToolResult,
+            MathToolResult,
+            SearchNotesToolResult,
+            CurrentTimeToolResult,
+        ):
+            self._session.register_reducer(
+                result_type,
+                self._record_tool_call,
+                slice_type=ToolCallLog,
+            )
+
+    def _record_tool_call(
+        self,
+        slice_values: tuple[ToolCallLog, ...],
+        event: DataEvent,
+    ) -> tuple[ToolCallLog, ...]:
+        if not isinstance(event, ToolData):
+            return slice_values
+
+        payload = dump(event.value, exclude_none=True)
+        record = ToolCallLog(
+            name=event.source.name,
+            prompt_name=event.source.prompt_name,
+            message=event.source.result.message,
+            payload=payload,
+            call_id=event.source.call_id,
+        )
+        return slice_values + (record,)
+
 
 if __name__ == "__main__":
     if "OPENAI_API_KEY" not in os.environ:
@@ -277,6 +353,7 @@ if __name__ == "__main__":
     model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     session = OpenAIReActSession(model=model)
     print("Type 'exit' or 'quit' to stop the conversation.")
+    print("Type 'history' to display the recorded tool call summary.")
     while True:
         try:
             prompt = input("You: ").strip()
@@ -287,5 +364,8 @@ if __name__ == "__main__":
             break
         if prompt.lower() in {"exit", "quit"}:
             break
+        if prompt.lower() == "history":
+            print(session.render_tool_history())
+            continue
         answer = session.evaluate(prompt)
         print(f"Agent: {answer}")
