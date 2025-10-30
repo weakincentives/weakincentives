@@ -20,18 +20,18 @@ External systems need stable identifiers and reproducible digests for every `Pro
 
 ## Hashing
 
-1. Compute a deterministic content hash (e.g., SHA-256) for every hash-aware section using only the original body template string (ignore defaults, predicates, child keys, and runtime parameter values). Custom section classes that want to participate must supply the same hashing hooks.
-1. Derive the `Prompt` content hash from its key plus the ordered set of participating section body hashes so the prompt hash changes whenever any descendant hash-aware section's body template changes.
+1. Compute a deterministic content hash (e.g., SHA-256) for every hash-aware section using only the original body template string defined in code (ignore defaults, predicates, child keys, and runtime parameter values). Custom section classes that want to participate must supply the same hashing hooks.
+1. Derive the `Prompt` content hash from its key plus the ordered set of participating section body hashes so the prompt hash changes whenever any descendant hash-aware section's in-code body template changes. Override bodies returned at runtime never influence descriptor hashes.
 1. Emit hashes through the descriptor API so external systems can treat `(key, content_hash)` as the cache key and detect drift at any level.
 1. Provide helpers that surface these hashes alongside the section tree to simplify change detection for callers.
 
 ## External Overrides
 
-1. Define a `PromptVersionStore` protocol with `resolve(description, tag="latest") -> PromptOverride | None`. Implementations return optimized prompt text, section body overrides (keyed by section path), the hash the store used, and the tag they satisfied. Each section override is the raw body template that should replace the in-code body string.
-1. Update `Prompt.render` to query the store before rendering. When the store returns overrides whose hashes match the target section body hashes, substitute the persisted body template before rendering; otherwise fall back to code-defined defaults.
+1. Define a `PromptVersionStore` protocol with `resolve(description, tag="latest") -> PromptOverride | None`. Implementations return optimized prompt text plus section body overrides (keyed by section path) and the original body hash each override expects. Each section override is the raw body template that should replace the in-code body string.
+1. Update `Prompt.render` to query the store before rendering. When the store provides an override whose expected source hash matches the in-code section hash, substitute the persisted body template before rendering; otherwise fall back to code-defined defaults. The replacement template may hash to a different value once applied.
 1. Require resolvers to understand at least the `latest` (default) and `stable` tags so callers can opt into slower-moving artifacts without bypassing hash validation. Additional tags remain implementation-defined.
 1. Ship a default `PromptVersionStore` implementation backed by the local filesystem so projects can persist overrides without extra infrastructure.
-1. Allow partial overrides: unspecified sections still render from the in-code tree, leveraging existing parameter resolution. Sections that do not participate in hashing never receive overrides. Stored body templates must hash to the value advertised by the store before they are applied.
+1. Allow partial overrides: unspecified sections still render from the in-code tree, leveraging existing parameter resolution. Sections that do not participate in hashing never receive overrides. Overrides only apply when the expected source hash matches; the replacement template is free to produce a new hash for downstream consumers.
 
 ## Operational Flow
 
