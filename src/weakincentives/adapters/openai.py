@@ -25,7 +25,7 @@ from ..prompts.prompt import Prompt
 from ..prompts.structured import OutputParseError
 from ..prompts.structured import parse_output as parse_structured_output
 from ..prompts.tool import Tool, ToolResult
-from ..serde import dump, parse, schema
+from ..serde import parse, schema
 from .core import PromptEvaluationError, PromptResponse
 
 _ERROR_MESSAGE = (
@@ -280,16 +280,11 @@ class OpenAIAdapter:
                 tool_events.append(invocation)
                 bus.publish(invocation)
 
-                payload = dump(tool_result.payload, exclude_none=True)
-                tool_content = {
-                    "message": tool_result.message,
-                    "payload": payload,
-                }
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": getattr(tool_call, "id", None),
-                        "content": json.dumps(tool_content),
+                        "content": tool_result.message,
                     }
                 )
 
