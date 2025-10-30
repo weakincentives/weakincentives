@@ -51,6 +51,10 @@ source = "vcs"
 [tool.hatch.version.vcs]
 tag-pattern = "v(?P<version>.+)"
 
+[tool.hatch.version.vcs.raw-options]
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+
 [dependency-groups]
 dev = [
     "bandit>=1.7.8",
