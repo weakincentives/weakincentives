@@ -38,6 +38,7 @@ class ProviderAdapter(Protocol):
         prompt: Prompt[OutputT],
         *params: object,
         parse_output: bool = True,
+        bus: EventBus,
     ) -> PromptResponse[OutputT]:
         ...
 ```
@@ -48,6 +49,8 @@ provided `Prompt` instance.
 - `params`: Positional dataclass instances forwarded to `prompt.render(*params)`; adapters must preserve type matching.
 - `parse_output`: When `True`, adapters call `parse_output` on the final message if the prompt declares structured
   output; disable to keep only the raw text.
+- `bus`: Evaluation-scoped event dispatcher supplied by the caller. Pass `NullEventBus()` to discard telemetry or reuse a
+  shared bus when coordinating multiple adapters within the same request.
 
 ### `PromptResponse`
 
@@ -57,29 +60,18 @@ class PromptResponse(Generic[OutputT]):
     prompt_name: str
     text: str | None
     output: OutputT | None
-    tool_results: tuple[ToolCallRecord[Any, Any], ...]
+    tool_results: tuple[ToolInvoked, ...]
     provider_payload: dict[str, Any] | None = None
 ```
 
 - `prompt_name`: Mirrors `prompt.name` for logging.
 - `text`: The final assistant message (plain string) when structured output is absent or parsing is disabled.
 - `output`: Parsed dataclass or list when available; `None` if the prompt did not declare structured output.
-- `tool_results`: Ordered records describing each executed tool call.
+- `tool_results`: Ordered `ToolInvoked` events describing each executed tool call.
 - `provider_payload`: Optional raw response fragment returned by the SDK for auditing.
 
-### `ToolCallRecord`
-
-```python
-@dataclass(slots=True)
-class ToolCallRecord(Generic[ParamsT, ResultT]):
-    name: str
-    params: ParamsT
-    result: ToolResult[ResultT]
-    call_id: str | None = None
-```
-
-Records capture the tool name, the instantiated params dataclass, the handler's `ToolResult`, and any provider-issued
-identifier (when available).
+Adapters emit the same `ToolInvoked` instances through the evaluation-scoped event bus provided by the caller. Consumers
+that subscribe to `ToolInvoked` will receive the identical objects stored on the `PromptResponse`.
 
 ## Evaluation Flow
 
@@ -88,8 +80,9 @@ identifier (when available).
 1. **Prepare Payload** – Construct the provider-specific request body using `rendered.text` as the system prompt (or
    equivalent) and translate each `Tool` into the provider's tool schema.
 1. **Call Provider** – Issue a blocking completion/chat request. When the provider emits a tool call, decode the name
-   and arguments, materialize the params dataclass (e.g., via `serde.parse`), run the `Tool.handler`, append a
-   `ToolCallRecord`, and feed the handler's `ToolResult.message` back to the provider as the tool response.
+   and arguments, materialize the params dataclass (e.g., via `serde.parse`), run the `Tool.handler`, publish a
+   `ToolInvoked` event through the supplied bus (capturing the params/result/call ID), append it to
+   `PromptResponse.tool_results`, and feed the handler's `ToolResult.message` back to the provider as the tool response.
 1. **Repeat** – Continue the call-tool-respond loop until the provider returns a final assistant message with no further
    tool invocations.
 1. **Assemble Response** – Populate `PromptResponse` with the final text. If `rendered.output_type` is present and
@@ -104,7 +97,7 @@ identifier (when available).
   `PromptEvaluationError` with the offending payload attached.
 - Handlers run synchronously and must return `ToolResult[...]`.
 - The `ToolResult.message` is the only content echoed back to the provider; the structured payload stays local and is
-  captured in the `ToolCallRecord`.
+  captured in the `ToolInvoked` event/response entry.
 
 ## Error Handling
 
@@ -136,6 +129,7 @@ The exception should expose:
 from dataclasses import dataclass
 
 from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.events import InProcessEventBus
 from weakincentives.prompts import Prompt, TextSection
 
 
@@ -146,6 +140,7 @@ class MessageParams:
 
 
 adapter: ProviderAdapter  # e.g., OpenAIAdapter
+bus = InProcessEventBus()
 prompt = Prompt(
     name="draft_reply",
     sections=[
@@ -158,6 +153,7 @@ prompt = Prompt(
 response = adapter.evaluate(
     prompt,
     MessageParams(sender="Jordan", topic="launch plan"),
+    bus=bus,
 )
 print(response.text or response.output)
 for call in response.tool_results:

@@ -22,6 +22,12 @@ from typing import Any, cast
 import pytest
 
 from weakincentives.adapters import PromptEvaluationError
+from weakincentives.events import (
+    InProcessEventBus,
+    NullEventBus,
+    PromptExecuted,
+    ToolInvoked,
+)
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 
 MODULE_PATH = "weakincentives.adapters.openai"
@@ -98,7 +104,11 @@ def test_openai_adapter_constructs_client_when_not_provided(
         client_kwargs={"api_key": "secret-key"},
     )
 
-    result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
+    result = adapter.evaluate(
+        prompt,
+        _GreetingParams(user="Sam"),
+        bus=NullEventBus(),
+    )
 
     assert result.text == "Hello, Sam!"
     assert captured_kwargs == [{"api_key": "secret-key"}]
@@ -131,7 +141,11 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
         client_kwargs={"api_key": "secret-key"},
     )
 
-    result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
+    result = adapter.evaluate(
+        prompt,
+        _GreetingParams(user="Sam"),
+        bus=NullEventBus(),
+    )
 
     assert result.text == "Hello again!"
     assert captured_kwargs == [{"api_key": "secret-key"}]
@@ -285,7 +299,11 @@ def test_openai_adapter_returns_plain_text_response():
     client = _DummyOpenAIClient([response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
+    result = adapter.evaluate(
+        prompt,
+        _GreetingParams(user="Sam"),
+        bus=NullEventBus(),
+    )
 
     assert result.prompt_name == "greeting"
     assert result.text == "Hello, Sam!"
@@ -368,7 +386,11 @@ def test_openai_adapter_executes_tools_and_parses_output():
     client = _DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    result = adapter.evaluate(prompt, _ToolParams(query="policies"))
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
 
     assert result.text is None
     assert result.output == _StructuredAnswer(answer="Policy summary")
@@ -428,7 +450,11 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
         tool_choice=forced_choice,
     )
 
-    result = adapter.evaluate(prompt, _ToolParams(query="policies"))
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
 
     assert result.text == "All done"
 
@@ -437,6 +463,65 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
     second_request = cast(dict[str, Any], client.completions.requests[1])
     assert first_request.get("tool_choice") == forced_choice
     assert second_request.get("tool_choice") == "auto"
+
+
+def test_openai_adapter_emits_events_during_evaluation() -> None:
+    module = _reload_module()
+
+    tool = Tool[_ToolParams, _ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=_simple_handler,
+    )
+
+    prompt = Prompt[_StructuredAnswer](
+        name="search",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = _DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "policies"}),
+    )
+    first = _DummyResponse(
+        [_DummyChoice(_DummyMessage(content="thinking", tool_calls=[tool_call]))]
+    )
+    second_message = _DummyMessage(content=json.dumps({"answer": "Policy summary"}))
+    second = _DummyResponse([_DummyChoice(second_message)])
+    client = _DummyOpenAIClient([first, second])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
+    prompt_events: list[PromptExecuted] = []
+    bus.subscribe(ToolInvoked, tool_events.append)
+    bus.subscribe(PromptExecuted, prompt_events.append)
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=bus,
+    )
+
+    assert len(tool_events) == 1
+    tool_event = tool_events[0]
+    assert tool_event.prompt_name == "search"
+    assert tool_event.adapter == "openai"
+    assert tool_event.name == "search_notes"
+    assert tool_event.call_id == "call_1"
+    assert tool_event is result.tool_results[0]
+
+    assert len(prompt_events) == 1
+    prompt_event = prompt_events[0]
+    assert prompt_event.prompt_name == "search"
+    assert prompt_event.adapter == "openai"
+    assert prompt_event.response is result
 
 
 def test_openai_adapter_raises_when_tool_handler_missing():
@@ -471,7 +556,11 @@ def test_openai_adapter_raises_when_tool_handler_missing():
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(prompt, _ToolParams(query="policies"))
+        adapter.evaluate(
+            prompt,
+            _ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "tool"
@@ -514,7 +603,11 @@ def test_openai_adapter_handles_tool_call_without_arguments():
     client = _DummyOpenAIClient([response_with_tool, final_response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    result = adapter.evaluate(prompt, _OptionalParams())
+    result = adapter.evaluate(
+        prompt,
+        _OptionalParams(),
+        bus=NullEventBus(),
+    )
 
     assert result.text == "All done"
     assert result.tool_results[0].params.query == "default"
@@ -540,7 +633,11 @@ def test_openai_adapter_raises_when_structured_output_missing_json():
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(prompt, _ToolParams(query="policies"))
+        adapter.evaluate(
+            prompt,
+            _ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "response"
@@ -571,7 +668,11 @@ def test_openai_adapter_raises_for_unknown_tool():
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(prompt, _ToolParams(query="policies"))
+        adapter.evaluate(
+            prompt,
+            _ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "tool"
@@ -609,7 +710,11 @@ def test_openai_adapter_raises_when_tool_params_invalid():
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(prompt, _ToolParams(query="policies"))
+        adapter.evaluate(
+            prompt,
+            _ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "tool"
@@ -650,7 +755,11 @@ def test_openai_adapter_raises_when_handler_fails():
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(prompt, _ToolParams(query="policies"))
+        adapter.evaluate(
+            prompt,
+            _ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "tool"
@@ -675,7 +784,11 @@ def test_openai_adapter_records_provider_payload_from_mapping():
     client = _DummyOpenAIClient([mapping_response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
+    result = adapter.evaluate(
+        prompt,
+        _GreetingParams(user="Sam"),
+        bus=NullEventBus(),
+    )
 
     assert result.provider_payload == {"meta": "value"}
 
@@ -699,7 +812,11 @@ def test_openai_adapter_ignores_non_mapping_model_dump():
     client = _DummyOpenAIClient([response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
+    result = adapter.evaluate(
+        prompt,
+        _GreetingParams(user="Sam"),
+        bus=NullEventBus(),
+    )
 
     assert result.provider_payload is None
 
@@ -723,7 +840,11 @@ def test_openai_adapter_handles_response_without_model_dump():
     client = _DummyOpenAIClient([response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    result = adapter.evaluate(prompt, _GreetingParams(user="Sam"))
+    result = adapter.evaluate(
+        prompt,
+        _GreetingParams(user="Sam"),
+        bus=NullEventBus(),
+    )
 
     assert result.provider_payload is None
 
@@ -764,7 +885,11 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(prompt, _ToolParams(query="policies"))
+        adapter.evaluate(
+            prompt,
+            _ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "tool"

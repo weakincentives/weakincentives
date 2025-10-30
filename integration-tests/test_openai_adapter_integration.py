@@ -20,6 +20,7 @@ from dataclasses import dataclass
 import pytest
 
 from weakincentives.adapters import OpenAIAdapter
+from weakincentives.events import NullEventBus
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 
 pytest.importorskip("openai")
@@ -144,7 +145,7 @@ def test_openai_adapter_returns_text(adapter: OpenAIAdapter) -> None:
     prompt = _build_greeting_prompt()
     params = GreetingParams(audience="integration tests")
 
-    response = adapter.evaluate(prompt, params, parse_output=False)
+    response = adapter.evaluate(prompt, params, parse_output=False, bus=NullEventBus())
 
     assert response.prompt_name == "greeting"
     assert response.text is not None
@@ -161,7 +162,7 @@ def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
         tool_choice={"type": "function", "function": {"name": tool.name}},
     )
 
-    response = adapter.evaluate(prompt, params, parse_output=False)
+    response = adapter.evaluate(prompt, params, parse_output=False, bus=NullEventBus())
 
     assert response.prompt_name == "uppercase_workflow"
     assert response.tool_results, "Expected at least one tool invocation."
@@ -185,7 +186,7 @@ def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None
         ),
     )
 
-    response = adapter.evaluate(prompt, sample)
+    response = adapter.evaluate(prompt, sample, bus=NullEventBus())
 
     assert response.prompt_name == "structured_review"
     assert response.output is not None

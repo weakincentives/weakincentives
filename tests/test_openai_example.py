@@ -24,7 +24,8 @@ from typing import Protocol, cast
 
 import pytest
 
-from weakincentives.adapters.core import PromptResponse, ToolCallRecord
+from weakincentives.adapters.core import PromptResponse
+from weakincentives.events import EventBus, ToolInvoked
 from weakincentives.prompts import Prompt
 
 
@@ -78,7 +79,9 @@ def test_session_evaluate_routes_through_adapter(
         message="Echoed text: HELLO",
         payload=example.EchoToolResult(text="HELLO"),
     )
-    tool_record = ToolCallRecord(
+    tool_event = ToolInvoked(
+        prompt_name="echo_agent",
+        adapter="openai",
         name="echo_text",
         params=example.EchoToolParams(text="hello"),
         result=tool_result,
@@ -88,13 +91,13 @@ def test_session_evaluate_routes_through_adapter(
         prompt_name="echo_agent",
         text="All done.",
         output=None,
-        tool_results=(tool_record,),
+        tool_results=(tool_event,),
         provider_payload={"raw": "payload"},
     )
 
     captured_model: list[str] = []
     captured_kwargs: list[dict[str, object]] = []
-    captured_calls: list[tuple[Prompt[object], tuple[object, ...], bool]] = []
+    captured_calls: list[tuple[Prompt[object], tuple[object, ...], bool, EventBus]] = []
 
     class StubAdapter:
         def __init__(self, *, model: str, **kwargs: object) -> None:
@@ -102,9 +105,15 @@ def test_session_evaluate_routes_through_adapter(
             captured_kwargs.append(dict(kwargs))
 
         def evaluate(
-            self, prompt: Prompt[object], *params: object, parse_output: bool = True
+            self,
+            prompt: Prompt[object],
+            *params: object,
+            parse_output: bool = True,
+            bus: EventBus,
         ) -> PromptResponse:
-            captured_calls.append((prompt, params, parse_output))
+            captured_calls.append((prompt, params, parse_output, bus))
+            if hasattr(bus, "publish"):
+                bus.publish(tool_event)
             return prompt_response
 
     monkeypatch.setattr(example, "OpenAIAdapter", StubAdapter)
@@ -118,13 +127,14 @@ def test_session_evaluate_routes_through_adapter(
     assert captured_kwargs[0] == {}
     assert len(captured_calls) == 1
 
-    call_prompt, call_params, parse_output = captured_calls[0]
+    call_prompt, call_params, parse_output, bus = captured_calls[0]
     assert isinstance(call_prompt, Prompt)
     assert parse_output is True
     assert len(call_params) == 1
     assert isinstance(call_params[0], example.UserTurnParams)
+    assert bus is not None
 
-    assert output[0].startswith("[tool 1] echo_text called with")
+    assert output[0].startswith("[tool] echo_text called with")
     assert "Echoed text: HELLO" in " ".join(output)
     assert any("payload" in line for line in output)
 
@@ -145,7 +155,11 @@ def test_session_evaluate_serializes_structured_output(
             self.model = model
 
         def evaluate(
-            self, prompt: Prompt[object], *params: object, parse_output: bool = True
+            self,
+            prompt: Prompt[object],
+            *params: object,
+            parse_output: bool = True,
+            bus: EventBus,
         ) -> PromptResponse:
             return prompt_response
 
