@@ -27,15 +27,16 @@ External systems need stable identifiers and reproducible digests for every `Pro
 
 ## External Overrides
 
-1. Define a `VersionStore` protocol with `resolve_prompt(descriptor, tag="latest") -> PromptOverride | None`. Implementations return optimized prompt text, section overrides (by section path), the hash the store used, and the tag they satisfied.
+1. Define a `PromptVersionStore` protocol with `resolve(description, tag="latest") -> PromptOverride | None`. Implementations return optimized prompt text, section overrides (by section path), the hash the store used, and the tag they satisfied.
 1. Update `Prompt.render` to query the store before rendering. When the store returns overrides that match the requested body hash, render the persisted content; otherwise fall back to code-defined defaults.
 1. Require resolvers to understand at least the `latest` (default) and `stable` tags so callers can opt into slower-moving artifacts without bypassing hash validation. Additional tags remain implementation-defined.
+1. Ship a default `PromptVersionStore` implementation backed by the local filesystem so projects can persist overrides without extra infrastructure.
 1. Allow partial overrides: unspecified sections still render from the in-code tree, leveraging existing parameter resolution.
 
 ## Operational Flow
 
 1. **Bootstrap**: On startup or during a build step, enumerate descriptors for all prompts and publish them to the external optimization service.
-1. **Runtime**: Each render call consults the `VersionStore`. If an override is unavailable or stale, render using defaults and optionally record the computed hash so the store can detect changes later.
+1. **Runtime**: Each render call consults the `PromptVersionStore`. If an override is unavailable or stale, render using defaults and optionally record the computed hash so the store can detect changes later.
 1. **Author Workflow**: Developers do not manage manual version numbers. Hashes automatically detect drift whenever code changes a prompt or section.
 
 ## Non-Goals
