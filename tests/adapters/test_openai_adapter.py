@@ -411,6 +411,13 @@ def test_openai_adapter_executes_tools_and_parses_output():
     assert function_spec["name"] == "search_notes"
     assert first_request.get("tool_choice") == "auto"
 
+    second_request = cast(dict[str, Any], client.completions.requests[1])
+    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    tool_message = second_messages[-1]
+    assert tool_message["role"] == "tool"
+    assert tool_message["content"] == "completed"
+    assert "payload" not in tool_message
+
 
 def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
     module = _reload_module()
