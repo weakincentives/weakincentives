@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal
 
 from .text import TextSection
 
@@ -30,7 +30,9 @@ class ResponseFormatParams:
     extra_clause: str
 
 
-_RESPONSE_FORMAT_BODY = """Return ONLY a single fenced JSON code block. Do not include any text
+_RESPONSE_FORMAT_BODY: Final[
+    str
+] = """Return ONLY a single fenced JSON code block. Do not include any text
 before or after the block.
 
 The top-level JSON value MUST be ${article} ${container} that matches the fields
