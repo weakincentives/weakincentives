@@ -1,61 +1,60 @@
 # Weak Incentives
 
-Tools for developing and optimizing side effect free background agents. The library ships prompt composition primitives, structured tool metadata, and optional provider adapters so you can scaffold deterministic automation flows quickly. All commands below assume Astral's `uv` CLI.
+**Lean, typed building blocks for side-effect-free background agents.**
+Compose deterministic prompts, define typed tools, and get strict JSON back—without heavy dependencies. Optional adapters (OpenAI today) snap in when you need a provider.
 
-## For Library Users
+> **Why this library?**
+> ✅ Deterministic prompts • ✅ Typed tools • ✅ Strict JSON output • ✅ Minimal runtime deps
 
-### Installation
+______________________________________________________________________
 
-- `uv add weakincentives`
-- Add `uv add "weakincentives[openai]"` (or `uv sync --extra openai` when cloning the repo) to enable the OpenAI adapter helpers.
+## Requirements
 
-### Key Features
+- Python **3.14+**
+- Astral’s **uv** CLI (all commands below assume `uv`)
 
-- Fully typed prompt composition primitives (`Prompt`, `Section`, `TextSection`, `Tool`, `ToolResult`) for assembling deterministic Markdown prompts with attached tool metadata.
-- Stdlib-only dataclass serde utilities (`parse`, `dump`, `clone`, `schema`) for Pydantic-like ergonomics without third-party dependencies.
-- Optional OpenAI adapter that gates imports behind a friendly error and returns the SDK client when the extra is present.
-- Quiet-by-default package with minimal runtime dependencies so background agents stay lean and predictable.
+______________________________________________________________________
 
-### Quickstart
+## Install
+
+```bash
+uv add weakincentives
+# optional: OpenAI helpers
+uv add "weakincentives[openai]"
+# (or, when cloning: uv sync --extra openai)
+```
+
+______________________________________________________________________
+
+## 60-Second Quickstart
 
 ````python
 from dataclasses import dataclass
+from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult, parse_output
 
-from weakincentives.prompts import (
-    Prompt,
-    TextSection,
-    Tool,
-    ToolResult,
-    parse_output,
-)
-
-
+# ---- Inputs & outputs (dataclasses = your contract) ----
 @dataclass
 class ResearchGuidance:
     topic: str
 
-
 @dataclass
 class SourceLookup:
     source_id: str
-
 
 @dataclass
 class SourceDetails:
     source_id: str
     title: str
 
-
 @dataclass
 class ResearchSummary:
     summary: str
     citations: list[str]
 
-
+# ---- Local tool (typed params → typed result) ----
 def lookup_source(params: SourceLookup) -> ToolResult[SourceDetails]:
     details = SourceDetails(source_id=params.source_id, title="Ada Lovelace Archive")
     return ToolResult(message=f"Loaded {details.title}", payload=details)
-
 
 catalog_tool = Tool[SourceLookup, SourceDetails](
     name="catalog_lookup",
@@ -63,11 +62,12 @@ catalog_tool = Tool[SourceLookup, SourceDetails](
     handler=lookup_source,
 )
 
+# ---- Prompt with a tool and a typed JSON output ----
 research_section = TextSection[ResearchGuidance](
     title="Task",
     body=(
-        "Research ${topic}. Use the `catalog_lookup` tool for citations and return"
-        " a JSON summary with citations."
+        "Research ${topic}. Use the `catalog_lookup` tool for citations and return "
+        "a JSON summary with citations."
     ),
     tools=[catalog_tool],
 )
@@ -77,70 +77,116 @@ prompt = Prompt[ResearchSummary](
     sections=[research_section],
 )
 
+# Render once and pass to your model adapter of choice
 rendered = prompt.render(ResearchGuidance(topic="Ada Lovelace"))
-print(rendered.text)
-print([tool.name for tool in rendered.tools])
+print(rendered.text)                 # deterministic markdown
+print([t.name for t in rendered.tools])  # ('catalog_lookup',)
 
+# Later: parse the model’s reply strictly into your dataclass
 reply = """```json
 {
   "summary": "Ada Lovelace pioneered computing...",
   "citations": ["catalog_lookup:ada-archive"]
 }
 ```"""
-
 parsed = parse_output(reply, rendered)
 print(parsed.summary)
 print(parsed.citations)
 ````
 
-### Optional Extras
+______________________________________________________________________
 
-Use the OpenAI helpers once the extra is installed:
+## Key Ideas (at a glance)
+
+- **Typed prompts, deterministic renders**
+  `Prompt` + `TextSection` compose markdown with strict placeholder checks. Missing or unknown fields error early.
+- **Tools live where they’re documented**
+  Attach `Tool[Params, Result]` to any section. Handlers run **locally**; models only see the short tool message.
+- **Strict JSON output**
+  Declare `Prompt[T]` or `Prompt[list[T]]` and get a built-in “Response Format” section plus a strict `parse_output(...)`.
+- **Stdlib serde, zero heavy deps**
+  `parse`, `dump`, `clone`, `schema` give Pydantic-like ergonomics with dataclasses only.
+- **Quiet, predictable runtime**
+  Minimal imports; adapters use a **blocking single-turn** API and emit in-process telemetry events.
+
+______________________________________________________________________
+
+## Optional Adapter (OpenAI)
 
 ```python
 from weakincentives.adapters import OpenAIAdapter
 
 adapter = OpenAIAdapter(model="gpt-4o-mini", client_kwargs={"api_key": "sk-..."})
+# response = adapter.evaluate(prompt, ResearchGuidance(topic="..."), bus=...)
+# response.text or response.output (if you used Prompt[T])
 ```
 
-If the dependency is missing, the adapter raises a runtime error with installation guidance.
+If the dependency is missing, the adapter raises a clear runtime error with install guidance.
+
+______________________________________________________________________
+
+## When to Use / When to Skip
+
+**Use it when you need:**
+
+- Background jobs/cron workers that **must** return well-typed JSON or fail fast
+- Local, audited tool calls with typed params/results
+- Minimal runtime footprint and deterministic prompts
+
+**Probably skip if you need:**
+
+- **Streaming** tokens or async/concurrency out of the box
+- RAG/connectors/graph composers
+- Multi-turn agent orchestration today
+  *(these are discussed in the roadmap/specs, but not shipped yet)*
+
+______________________________________________________________________
 
 ## For Library Developers
 
 ### Environment Setup
 
-1. Install Python 3.14 (pyenv users can run `pyenv install 3.14.0`).
-1. Install [`uv`](https://github.com/astral-sh/uv).
-1. Sync the virtualenv and optional git hooks:
+1. Install Python 3.14 (e.g., `pyenv install 3.14.0`)
+
+1. Install [`uv`](https://github.com/astral-sh/uv)
+
+1. Sync the env and (optional) git hooks:
+
    ```bash
    uv sync
-   ./install-hooks.sh  # optional – wires git hooks that call make check
+   ./install-hooks.sh  # wires git hooks that call `make check`
    ```
-1. Use `uv run ...` when invoking ad-hoc scripts so everything stays inside the managed environment.
+
+1. Use `uv run ...` for ad-hoc scripts to stay inside the managed env.
 
 ### Development Workflow
 
-- `make format` / `make format-check` — run Ruff formatters.
-- `make lint` / `make lint-fix` — lint with Ruff.
-- `make typecheck` — execute Ty with warnings promoted to errors.
-- `make test` — run pytest via `build/run_pytest.py` with `--cov-fail-under=100`.
-- `make bandit`, `make deptry`, `make pip-audit` — security, dependency, and vulnerability audits.
-- `make check` — aggregate the quiet quality gate; run this before every commit (git hooks enforce it).
+- `make format` / `make format-check` — Ruff formatting
+- `make lint` / `make lint-fix` — Ruff linting
+- `make typecheck` — Ty with warnings as errors
+- `make test` — pytest via `build/run_pytest.py` with `--cov-fail-under=100`
+- `make bandit`, `make deptry`, `make pip-audit` — security & deps checks
+- `make check` — aggregate gate (enforced by git hooks)
 
 ### Project Layout
 
-- `src/weakincentives/` — package root for the Python module.
-- `src/weakincentives/prompts/` — prompt, section, and tool primitives.
-- `src/weakincentives/adapters/` — optional provider integrations.
-- `tests/` — pytest suites covering prompts, tools, and adapters.
-- `specs/` — design docs; see `specs/PROMPTS.md` for prompt requirements.
-- `build/` — thin wrappers that keep CLI tools quiet inside `uv`.
-- `hooks/` — symlink-friendly git hooks (install via `./install-hooks.sh`).
+- `src/weakincentives/` — package root
+- `src/weakincentives/prompts/` — prompt, section, tool primitives
+- `src/weakincentives/adapters/` — optional provider integrations
+- `tests/` — coverage for prompts, tools, adapters
+- `specs/` — design docs (see `specs/PROMPTS.md` for prompt requirements)
+- `build/` — quiet wrappers for CLI tools under `uv`
+- `hooks/` — symlink-friendly git hooks
 
-### Release Notes
+### Releases
 
-Version numbers come from git tags named `vX.Y.Z`. Tag the repository manually before pushing a release.
+Tag git as `vX.Y.Z`. Version is derived from tags.
 
-### More Documentation
+### More Docs
 
-`AGENTS.md` captures the full agent handbook, workflows, and TDD expectations. `ROADMAP.md` and `specs/` document upcoming work and prompt requirements.
+See `AGENTS.md` for the agent handbook and workflows.
+`ROADMAP.md` and `specs/` cover upcoming work and formal requirements.
+
+______________________________________________________________________
+
+**License:** Apache-2.0 • **Status:** Alpha (APIs may change)
