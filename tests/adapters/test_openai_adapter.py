@@ -14,7 +14,7 @@ import importlib
 import json
 import sys
 import types
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib import import_module as std_import_module
 from typing import Any, cast
@@ -406,6 +406,63 @@ def test_openai_adapter_executes_tools_and_parses_output():
     function_spec = cast(dict[str, Any], tools[0]["function"])
     assert function_spec["name"] == "search_notes"
     assert first_request.get("tool_choice") == "auto"
+
+
+def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
+    module = _reload_module()
+
+    tool = Tool[_ToolParams, _ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=_simple_handler,
+    )
+
+    prompt = Prompt(
+        name="search",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = _DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "policies"}),
+    )
+    first = _DummyResponse(
+        [_DummyChoice(_DummyMessage(content="thinking", tool_calls=[tool_call]))]
+    )
+    final_message = _DummyMessage(content="All done")
+    second = _DummyResponse([_DummyChoice(final_message)])
+    client = _DummyOpenAIClient([first, second])
+
+    forced_choice: Mapping[str, object] = {
+        "type": "function",
+        "function": {"name": tool.name},
+    }
+    adapter = module.OpenAIAdapter(
+        model="gpt-test",
+        client=client,
+        tool_choice=forced_choice,
+    )
+
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    assert result.text == "All done"
+
+    assert len(client.completions.requests) == 2
+    first_request = cast(dict[str, Any], client.completions.requests[0])
+    second_request = cast(dict[str, Any], client.completions.requests[1])
+    assert first_request.get("tool_choice") == forced_choice
+    assert second_request.get("tool_choice") == "auto"
 
 
 def test_openai_adapter_emits_events_during_evaluation() -> None:
