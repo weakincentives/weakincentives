@@ -10,99 +10,88 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the OpenAI example agent."""
+"""Tests for the example code review agent."""
 
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Callable
-from importlib import util
-from pathlib import Path
-from types import ModuleType
 from typing import Protocol, cast
 
 import pytest
 
+from examples import common
+from examples import openai as openai_example
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.events import EventBus, ToolInvoked
 from weakincentives.prompt import Prompt
+from weakincentives.prompt.tool import ToolResult
 
 
-def _load_openai_example() -> ModuleType:
-    module_path = Path(__file__).resolve().parent.parent / "openai_example.py"
-    spec = util.spec_from_file_location("openai_example", module_path)
-    if spec is None or spec.loader is None:  # pragma: no cover - defensive
-        raise RuntimeError("Unable to load openai_example module.")
-    module = util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+class _CodeReviewModule(Protocol):
+    CodeReviewSession: type[object]
+    ReviewGuidance: type[object]
+    ReviewResponse: type[object]
+    ReviewTurnParams: type[object]
+    ReadFileParams: type[object]
+    ReadFileResult: type[object]
+    build_code_review_prompt: Callable[[], Prompt[object]]
+    build_tools: Callable[[], tuple[object, ...]]
 
 
-class _ExampleModule(Protocol):
-    AgentGuidance: type[object]
-    EchoToolParams: type[object]
-    EchoToolResult: type[object]
-    OpenAIAdapter: type[object]
-    OpenAIReActSession: type[object]
-    ToolResult: type[object]
-    UserTurnParams: type[object]
-    build_prompt: Callable[[], Prompt[object]]
+code_review = cast(_CodeReviewModule, common)
 
 
-example = cast(_ExampleModule, _load_openai_example())
-
-
-def test_build_prompt_renders_tool_metadata() -> None:
-    prompt = example.build_prompt()
+def test_build_prompt_lists_code_review_tools() -> None:
+    prompt = code_review.build_code_review_prompt()
     rendered = prompt.render(
-        example.AgentGuidance(),
-        example.UserTurnParams(content="Hello"),
+        code_review.ReviewGuidance(),
+        code_review.ReviewTurnParams(request="Review the latest change."),
     )
 
     tool_names = [tool.name for tool in rendered.tools]
 
-    assert rendered.text.startswith("## Agent Guidance")
+    assert "code review assistant" in rendered.text.lower()
     assert tool_names == [
-        "echo_text",
-        "solve_math",
-        "search_notes",
-        "current_time",
+        "read_file",
+        "list_changed_files",
+        "show_git_diff",
+        "show_git_history",
     ]
+    assert rendered.output_type is code_review.ReviewResponse
 
 
 def test_session_evaluate_routes_through_adapter(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    tool_result = example.ToolResult(
-        message="Echoed text: HELLO",
-        value=example.EchoToolResult(text="HELLO"),
+    tool_result = ToolResult(
+        message="Read lines 1 to 1 from README.md.",
+        value=code_review.ReadFileResult(snippet="Example"),
     )
     tool_event = ToolInvoked(
-        prompt_name="echo_agent",
+        prompt_name="code_review_agent",
         adapter="openai",
-        name="echo_text",
-        params=example.EchoToolParams(text="hello"),
+        name="read_file",
+        params=code_review.ReadFileParams(path="README.md"),
         result=tool_result,
         call_id="tool-call-1",
     )
     prompt_response = PromptResponse(
-        prompt_name="echo_agent",
-        text="All done.",
-        output=None,
+        prompt_name="code_review_agent",
+        text=None,
+        output=code_review.ReviewResponse(
+            summary="Looks good.", issues=["None"], next_steps=["Ship it."]
+        ),
         tool_results=(tool_event,),
         provider_payload={"raw": "payload"},
     )
 
     captured_model: list[str] = []
-    captured_kwargs: list[dict[str, object]] = []
     captured_calls: list[tuple[Prompt[object], tuple[object, ...], bool, EventBus]] = []
 
     class StubAdapter:
-        def __init__(self, *, model: str, **kwargs: object) -> None:
+        def __init__(self, *, model: str) -> None:
             captured_model.append(model)
-            captured_kwargs.append(dict(kwargs))
 
         def evaluate(
             self,
@@ -112,61 +101,30 @@ def test_session_evaluate_routes_through_adapter(
             bus: EventBus,
         ) -> PromptResponse:
             captured_calls.append((prompt, params, parse_output, bus))
-            if hasattr(bus, "publish"):
-                bus.publish(tool_event)
+            bus.publish(tool_event)
             return prompt_response
 
-    monkeypatch.setattr(example, "OpenAIAdapter", StubAdapter)
+    monkeypatch.setattr(openai_example, "OpenAIAdapter", StubAdapter)
 
-    session = example.OpenAIReActSession(model="gpt-mock")
-    result = session.evaluate("Use the echo tool.")
-    output = capsys.readouterr().out.splitlines()
+    session = openai_example.CodeReviewSession(StubAdapter(model="gpt-mock"))
+    result = session.evaluate("Please review the latest diff.")
+    output_lines = capsys.readouterr().out.splitlines()
 
-    assert result == "All done."
+    assert json.loads(result) == {
+        "summary": "Looks good.",
+        "issues": ["None"],
+        "next_steps": ["Ship it."],
+    }
     assert captured_model[0] == "gpt-mock"
-    assert captured_kwargs[0] == {}
     assert len(captured_calls) == 1
 
     call_prompt, call_params, parse_output, bus = captured_calls[0]
     assert isinstance(call_prompt, Prompt)
     assert parse_output is True
     assert len(call_params) == 1
-    assert isinstance(call_params[0], example.UserTurnParams)
+    assert isinstance(call_params[0], code_review.ReviewTurnParams)
     assert bus is not None
 
-    assert output[0].startswith("[tool] echo_text called with")
-    assert "Echoed text: HELLO" in " ".join(output)
-    assert any("payload" in line for line in output)
-
-
-def test_session_evaluate_serializes_structured_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    prompt_response = PromptResponse(
-        prompt_name="echo_agent",
-        text=None,
-        output=example.EchoToolResult(text="structured"),
-        tool_results=(),
-        provider_payload=None,
-    )
-
-    class StubAdapter:
-        def __init__(self, *, model: str) -> None:
-            self.model = model
-
-        def evaluate(
-            self,
-            prompt: Prompt[object],
-            *params: object,
-            parse_output: bool = True,
-            bus: EventBus,
-        ) -> PromptResponse:
-            return prompt_response
-
-    monkeypatch.setattr(example, "OpenAIAdapter", StubAdapter)
-
-    session = example.OpenAIReActSession(model="gpt-structured")
-    result = session.evaluate("Return structured output.")
-    serialized = json.loads(result)
-
-    assert serialized == {"text": "structured"}
+    assert output_lines[0].startswith("[tool] read_file called with")
+    assert "payload" in " ".join(output_lines)
+    assert "session recorded this call" in output_lines[-1]

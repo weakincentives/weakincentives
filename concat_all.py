@@ -42,7 +42,7 @@ def main() -> None:
     prelude_files = [project_root / "README.md", project_root / "ROADMAP.md"]
     postlude_files = [
         project_root / "pyproject.toml",
-        project_root / "openai_example.py",
+        project_root / "examples" / "openai.py",
     ]
     targets = [project_root / "specs", project_root / "src"]
 
