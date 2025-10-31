@@ -14,15 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    ClassVar,
-    Literal,
-    cast,
-    get_args,
-    get_origin,
-)
+from types import MappingProxyType
+from typing import Any, ClassVar, Literal, cast, get_args, get_origin
 
 from ._types import SupportsDataclass
 from .errors import (
@@ -33,9 +26,9 @@ from .errors import (
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
 from .tool import Tool
+from .versioning import PromptVersionStore, ToolOverride
 
-if TYPE_CHECKING:
-    from .versioning import PromptVersionStore
+_EMPTY_TOOL_FIELD_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +42,9 @@ class RenderedPrompt[OutputT]:
     _tools: tuple[Tool[SupportsDataclass, SupportsDataclass], ...] = field(
         default_factory=tuple
     )
+    _tool_param_field_descriptions: Mapping[str, Mapping[str, str]] = field(
+        default=_EMPTY_TOOL_FIELD_DESCRIPTIONS
+    )
 
     def __str__(self) -> str:  # pragma: no cover - convenience for logging
         return self.text
@@ -58,6 +54,14 @@ class RenderedPrompt[OutputT]:
         """Tools contributed by enabled sections in traversal order."""
 
         return self._tools
+
+    @property
+    def tool_param_field_descriptions(
+        self,
+    ) -> Mapping[str, Mapping[str, str]]:
+        """Description patches keyed by tool name."""
+
+        return self._tool_param_field_descriptions
 
 
 def _clone_dataclass(instance: SupportsDataclass) -> SupportsDataclass:
@@ -196,6 +200,7 @@ class Prompt[OutputT]:
         override = version_store.resolve(descriptor, tag=tag)
 
         overrides: dict[SectionPath, str] = {}
+        tool_overrides: dict[str, ToolOverride] = {}
         if override is not None and override.prompt_key == descriptor.key:
             descriptor_index = {
                 section.path: section.content_hash for section in descriptor.sections
@@ -203,11 +208,23 @@ class Prompt[OutputT]:
             for path, body in override.overrides.items():
                 if path in descriptor_index:
                     overrides[path] = body
+            if override.tool_overrides:
+                descriptor_tool_index = {
+                    tool.name: tool.contract_hash for tool in descriptor.tools
+                }
+                for name, tool_override in override.tool_overrides.items():
+                    descriptor_hash = descriptor_tool_index.get(name)
+                    if (
+                        descriptor_hash is not None
+                        and tool_override.expected_contract_hash == descriptor_hash
+                    ):
+                        tool_overrides[name] = tool_override
 
         param_lookup = self._collect_param_lookup(params)
         return self._render_internal(
             param_lookup,
             overrides,
+            tool_overrides,
             inject_output_instructions=inject_output_instructions,
         )
 
@@ -354,12 +371,15 @@ class Prompt[OutputT]:
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
+        tool_overrides: Mapping[str, ToolOverride] | None = None,
         *,
         inject_output_instructions: bool | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclass, SupportsDataclass]] = []
         override_lookup = dict(overrides or {})
+        tool_override_lookup = dict(tool_overrides or {})
+        field_description_patches: dict[str, dict[str, str]] = {}
 
         for node, section_params in self._iter_enabled_sections(
             dict(param_lookup),
@@ -370,7 +390,22 @@ class Prompt[OutputT]:
 
             section_tools = node.section.tools()
             if section_tools:
-                collected_tools.extend(section_tools)
+                for tool in section_tools:
+                    override = tool_override_lookup.get(tool.name)
+                    patched_tool = tool
+                    if override is not None:
+                        if (
+                            override.description is not None
+                            and override.description != tool.description
+                        ):
+                            patched_tool = replace(
+                                tool, description=override.description
+                            )
+                        if override.param_field_descriptions:
+                            field_description_patches[tool.name] = dict(
+                                override.param_field_descriptions
+                            )
+                    collected_tools.append(patched_tool)
 
             if rendered:
                 rendered_sections.append(rendered)
@@ -383,6 +418,9 @@ class Prompt[OutputT]:
             output_container=self._output_container,
             allow_extra_keys=self._allow_extra_keys,
             _tools=tuple(collected_tools),
+            _tool_param_field_descriptions=_freeze_tool_param_field_descriptions(
+                field_description_patches
+            ),
         )
 
     def _render_section(
@@ -530,3 +568,14 @@ class Prompt[OutputT]:
 
 
 __all__ = ["Prompt", "PromptSectionNode", "RenderedPrompt"]
+
+
+def _freeze_tool_param_field_descriptions(
+    descriptions: Mapping[str, dict[str, str]],
+) -> Mapping[str, Mapping[str, str]]:
+    if not descriptions:
+        return MappingProxyType({})
+    frozen: dict[str, Mapping[str, str]] = {}
+    for name, field_mapping in descriptions.items():
+        frozen[name] = MappingProxyType(dict(field_mapping))
+    return MappingProxyType(frozen)
