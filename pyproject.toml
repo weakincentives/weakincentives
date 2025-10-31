@@ -42,6 +42,9 @@ Repository = "https://github.com/weakincentives/weakincentives"
 openai = [
     "openai>=2.6.1",
 ]
+litellm = [
+    "litellm>=1.44.6",
+]
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -107,3 +110,8 @@ markers = [
 typeCheckingMode = "strict"
 include = ["src"]
 exclude = ["src/weakincentives/serde"]
+
+[tool.deptry]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["litellm"]

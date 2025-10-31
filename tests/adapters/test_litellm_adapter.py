@@ -24,13 +24,13 @@ try:
     from tests.adapters._test_stubs import (
         DummyChoice,
         DummyMessage,
-        DummyOpenAIClient,
         DummyResponse,
         DummyToolCall,
         GreetingParams,
         MappingResponse,
         OptionalParams,
         OptionalPayload,
+        RecordingCompletion,
         SimpleResponse,
         StructuredAnswer,
         ToolParams,
@@ -42,13 +42,13 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     from ._test_stubs import (
         DummyChoice,
         DummyMessage,
-        DummyOpenAIClient,
         DummyResponse,
         DummyToolCall,
         GreetingParams,
         MappingResponse,
         OptionalParams,
         OptionalPayload,
+        RecordingCompletion,
         SimpleResponse,
         StructuredAnswer,
         ToolParams,
@@ -65,56 +65,87 @@ from weakincentives.events import (
 )
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 
-MODULE_PATH = "weakincentives.adapters.openai"
+MODULE_PATH = "weakincentives.adapters.litellm"
 
 
 def _reload_module():
     return importlib.reload(std_import_module(MODULE_PATH))
 
 
-def test_create_openai_client_requires_optional_dependency(monkeypatch):
+def test_create_litellm_completion_requires_optional_dependency(monkeypatch):
     module = _reload_module()
 
     def fail_import(name: str, package: str | None = None):
-        if name == "openai":
-            raise ModuleNotFoundError("No module named 'openai'")
+        if name == "litellm":
+            raise ModuleNotFoundError("No module named 'litellm'")
         return std_import_module(name, package)
 
     monkeypatch.setattr(module, "import_module", fail_import)
 
     with pytest.raises(RuntimeError) as err:
-        module.create_openai_client()
+        module.create_litellm_completion()
 
     message = str(err.value)
-    assert "uv sync --extra openai" in message
-    assert "pip install weakincentives[openai]" in message
+    assert "uv sync --extra litellm" in message
+    assert "pip install weakincentives[litellm]" in message
 
 
-def test_create_openai_client_returns_openai_instance(monkeypatch):
+def test_create_litellm_completion_wraps_kwargs(monkeypatch):
     module = _reload_module()
 
-    class DummyOpenAI:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
+    captured_kwargs: list[dict[str, object]] = []
 
-    dummy_module = cast(module._OpenAIModule, types.ModuleType("openai"))
-    dummy_module.OpenAI = DummyOpenAI
+    class DummyLiteLLM(types.SimpleNamespace):
+        def completion(self, **kwargs: object) -> DummyResponse:
+            captured_kwargs.append(dict(kwargs))
+            message = DummyMessage(content="Hello", tool_calls=None)
+            return DummyResponse([DummyChoice(message)])
 
-    monkeypatch.setitem(sys.modules, "openai", dummy_module)
+    dummy_module = cast(module._LiteLLMModule, DummyLiteLLM())
+    monkeypatch.setitem(sys.modules, "litellm", dummy_module)
 
-    client = module.create_openai_client(api_key="secret-key")
+    completion = module.create_litellm_completion(api_key="secret")
+    completion(model="gpt", messages=[{"role": "system", "content": "hi"}])
 
-    assert isinstance(client, DummyOpenAI)
-    assert client.kwargs == {"api_key": "secret-key"}
+    assert captured_kwargs == [
+        {
+            "api_key": "secret",
+            "model": "gpt",
+            "messages": [{"role": "system", "content": "hi"}],
+        }
+    ]
 
 
-def test_openai_adapter_constructs_client_when_not_provided(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_create_litellm_completion_returns_direct_callable(monkeypatch):
+    module = _reload_module()
+
+    class DummyLiteLLM(types.SimpleNamespace):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls: list[dict[str, object]] = []
+
+        def completion(self, **kwargs: object) -> DummyResponse:
+            self.calls.append(dict(kwargs))
+            message = DummyMessage(content="Hi", tool_calls=None)
+            return DummyResponse([DummyChoice(message)])
+
+    dummy_module = cast(module._LiteLLMModule, DummyLiteLLM())
+    monkeypatch.setitem(sys.modules, "litellm", dummy_module)
+
+    completion = module.create_litellm_completion()
+    result = completion(model="gpt", messages=[{"role": "system", "content": "hi"}])
+
+    assert isinstance(result, DummyResponse)
+    assert dummy_module.calls == [
+        {"model": "gpt", "messages": [{"role": "system", "content": "hi"}]}
+    ]
+
+
+def test_litellm_adapter_constructs_completion_when_not_provided(monkeypatch):
     module = _reload_module()
 
     prompt = Prompt(
-        key="openai-greeting",
+        key="litellm-greeting",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
@@ -124,20 +155,21 @@ def test_openai_adapter_constructs_client_when_not_provided(
         ],
     )
 
-    message = DummyMessage(content="Hello, Sam!", tool_calls=None)
-    response = DummyResponse([DummyChoice(message)])
-    client = DummyOpenAIClient([response])
+    response = DummyResponse(
+        [DummyChoice(DummyMessage(content="Hello!", tool_calls=None))]
+    )
+    completion = RecordingCompletion([response])
     captured_kwargs: list[dict[str, object]] = []
 
-    def fake_factory(**kwargs: object) -> DummyOpenAIClient:
+    def fake_factory(**kwargs: object) -> RecordingCompletion:
         captured_kwargs.append(dict(kwargs))
-        return client
+        return completion
 
-    monkeypatch.setattr(module, "create_openai_client", fake_factory)
+    monkeypatch.setattr(module, "create_litellm_completion", fake_factory)
 
-    adapter = module.OpenAIAdapter(
+    adapter = module.LiteLLMAdapter(
         model="gpt-test",
-        client_kwargs={"api_key": "secret-key"},
+        completion_kwargs={"api_key": "secret-key"},
     )
 
     result = adapter.evaluate(
@@ -146,15 +178,15 @@ def test_openai_adapter_constructs_client_when_not_provided(
         bus=NullEventBus(),
     )
 
-    assert result.text == "Hello, Sam!"
+    assert result.text == "Hello!"
     assert captured_kwargs == [{"api_key": "secret-key"}]
 
 
-def test_openai_adapter_supports_custom_client_factory() -> None:
+def test_litellm_adapter_supports_custom_completion_factory():
     module = _reload_module()
 
     prompt = Prompt(
-        key="openai-greeting",
+        key="litellm-greeting",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
@@ -164,18 +196,19 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
         ],
     )
 
-    message = DummyMessage(content="Hello again!", tool_calls=None)
-    response = DummyResponse([DummyChoice(message)])
+    response = DummyResponse(
+        [DummyChoice(DummyMessage(content="Hello again!", tool_calls=None))]
+    )
     captured_kwargs: list[dict[str, object]] = []
 
-    def fake_factory(**kwargs: object) -> DummyOpenAIClient:
+    def fake_factory(**kwargs: object) -> RecordingCompletion:
         captured_kwargs.append(dict(kwargs))
-        return DummyOpenAIClient([response])
+        return RecordingCompletion([response])
 
-    adapter = module.OpenAIAdapter(
+    adapter = module.LiteLLMAdapter(
         model="gpt-test",
-        client_factory=fake_factory,
-        client_kwargs={"api_key": "secret-key"},
+        completion_factory=fake_factory,
+        completion_kwargs={"api_key": "secret-key"},
     )
 
     result = adapter.evaluate(
@@ -188,35 +221,35 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
     assert captured_kwargs == [{"api_key": "secret-key"}]
 
 
-def test_openai_adapter_rejects_client_kwargs_with_explicit_client() -> None:
+def test_litellm_adapter_rejects_completion_kwargs_with_explicit_completion() -> None:
     module = _reload_module()
-    client = DummyOpenAIClient([])
+    completion = RecordingCompletion([])
 
     with pytest.raises(ValueError):
-        module.OpenAIAdapter(
+        module.LiteLLMAdapter(
             model="gpt-test",
-            client=client,
-            client_kwargs={"api_key": "secret"},
+            completion=completion,
+            completion_kwargs={"api_key": "secret"},
         )
 
 
-def test_openai_adapter_rejects_client_factory_with_explicit_client() -> None:
+def test_litellm_adapter_rejects_completion_factory_with_explicit_completion() -> None:
     module = _reload_module()
-    client = DummyOpenAIClient([])
+    completion = RecordingCompletion([])
 
     with pytest.raises(ValueError):
-        module.OpenAIAdapter(
+        module.LiteLLMAdapter(
             model="gpt-test",
-            client=client,
-            client_factory=lambda **_: client,
+            completion=completion,
+            completion_factory=lambda **_: completion,
         )
 
 
-def test_openai_adapter_returns_plain_text_response():
+def test_litellm_adapter_returns_plain_text_response():
     module = _reload_module()
 
     prompt = Prompt(
-        key="openai-plain",
+        key="litellm-plain",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
@@ -226,10 +259,11 @@ def test_openai_adapter_returns_plain_text_response():
         ],
     )
 
-    message = DummyMessage(content="Hello, Sam!", tool_calls=None)
-    response = DummyResponse([DummyChoice(message)])
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    response = DummyResponse(
+        [DummyChoice(DummyMessage(content="Hello, Sam!", tool_calls=None))]
+    )
+    completion = RecordingCompletion([response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     result = adapter.evaluate(
         prompt,
@@ -242,14 +276,14 @@ def test_openai_adapter_returns_plain_text_response():
     assert result.output is None
     assert result.tool_results == ()
 
-    request = cast(dict[str, Any], client.completions.requests[0])
+    request = completion.requests[0]
     messages = cast(list[dict[str, Any]], request["messages"])
     assert messages[0]["role"] == "system"
     assert str(messages[0]["content"]).startswith("## Greeting")
     assert "tools" not in request
 
 
-def test_openai_adapter_executes_tools_and_parses_output():
+def test_litellm_adapter_executes_tools_and_parses_output():
     module = _reload_module()
 
     calls: list[str] = []
@@ -266,7 +300,7 @@ def test_openai_adapter_executes_tools_and_parses_output():
     )
 
     prompt = Prompt[StructuredAnswer](
-        key="openai-structured-success",
+        key="litellm-structured-success",
         name="search",
         sections=[
             TextSection[ToolParams](
@@ -285,10 +319,12 @@ def test_openai_adapter_executes_tools_and_parses_output():
     first = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    second_message = DummyMessage(content=json.dumps({"answer": "Policy summary"}))
+    second_message = DummyMessage(
+        content=json.dumps({"answer": "Policy summary"}), tool_calls=None
+    )
     second = DummyResponse([DummyChoice(second_message)])
-    client = DummyOpenAIClient([first, second])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([first, second])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     result = adapter.evaluate(
         prompt,
@@ -298,20 +334,15 @@ def test_openai_adapter_executes_tools_and_parses_output():
 
     assert result.text is None
     assert result.output == StructuredAnswer(answer="Policy summary")
-    assert len(result.tool_results) == 1
-    record = result.tool_results[0]
-    assert record.name == "search_notes"
-    assert isinstance(record.result.payload, ToolPayload)
-    assert record.call_id == "call_1"
     assert calls == ["policies"]
 
-    first_request = cast(dict[str, Any], client.completions.requests[0])
+    first_request = completion.requests[0]
     tools = cast(list[dict[str, Any]], first_request["tools"])
     function_spec = cast(dict[str, Any], tools[0]["function"])
     assert function_spec["name"] == "search_notes"
     assert first_request.get("tool_choice") == "auto"
 
-    second_request = cast(dict[str, Any], client.completions.requests[1])
+    second_request = completion.requests[1]
     second_messages = cast(list[dict[str, Any]], second_request["messages"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
@@ -319,7 +350,7 @@ def test_openai_adapter_executes_tools_and_parses_output():
     assert "payload" not in tool_message
 
 
-def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
+def test_litellm_adapter_relaxes_forced_tool_choice_after_first_call():
     module = _reload_module()
 
     tool = Tool[ToolParams, ToolPayload](
@@ -329,7 +360,7 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
     )
 
     prompt = Prompt(
-        key="openai-tools-relaxed",
+        key="litellm-tools-relaxed",
         name="search",
         sections=[
             TextSection[ToolParams](
@@ -348,17 +379,17 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
     first = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    final_message = DummyMessage(content="All done")
+    final_message = DummyMessage(content="All done", tool_calls=None)
     second = DummyResponse([DummyChoice(final_message)])
-    client = DummyOpenAIClient([first, second])
+    completion = RecordingCompletion([first, second])
 
     forced_choice: Mapping[str, object] = {
         "type": "function",
         "function": {"name": tool.name},
     }
-    adapter = module.OpenAIAdapter(
+    adapter = module.LiteLLMAdapter(
         model="gpt-test",
-        client=client,
+        completion=completion,
         tool_choice=forced_choice,
     )
 
@@ -369,15 +400,59 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
     )
 
     assert result.text == "All done"
-
-    assert len(client.completions.requests) == 2
-    first_request = cast(dict[str, Any], client.completions.requests[0])
-    second_request = cast(dict[str, Any], client.completions.requests[1])
-    assert first_request.get("tool_choice") == forced_choice
-    assert second_request.get("tool_choice") == "auto"
+    assert len(completion.requests) == 2
+    assert completion.requests[0].get("tool_choice") == forced_choice
+    assert completion.requests[1].get("tool_choice") == "auto"
 
 
-def test_openai_adapter_emits_events_during_evaluation() -> None:
+def test_litellm_adapter_handles_tool_call_without_arguments() -> None:
+    module = _reload_module()
+
+    recorded: list[str] = []
+
+    def handler(params: OptionalParams) -> ToolResult[OptionalPayload]:
+        recorded.append(params.query)
+        payload = OptionalPayload(value=params.query)
+        return ToolResult(message="used default", payload=payload)
+
+    tool = Tool[OptionalParams, OptionalPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=handler,
+    )
+
+    prompt = Prompt(
+        key="litellm-tool-no-args",
+        name="search",
+        sections=[
+            TextSection[OptionalParams](
+                title="Task",
+                body="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = DummyToolCall(call_id="call_1", name="search_notes", arguments=None)
+    first = DummyResponse(
+        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
+    )
+    final_message = DummyMessage(content="All done", tool_calls=None)
+    second = DummyResponse([DummyChoice(final_message)])
+    completion = RecordingCompletion([first, second])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
+
+    result = adapter.evaluate(
+        prompt,
+        OptionalParams(),
+        bus=NullEventBus(),
+    )
+
+    assert result.text == "All done"
+    assert recorded == ["default"]
+
+
+def test_litellm_adapter_emits_events_during_evaluation() -> None:
     module = _reload_module()
 
     tool = Tool[ToolParams, ToolPayload](
@@ -387,7 +462,7 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     )
 
     prompt = Prompt[StructuredAnswer](
-        key="openai-structured-events",
+        key="litellm-structured-events",
         name="search",
         sections=[
             TextSection[ToolParams](
@@ -406,10 +481,12 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     first = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    second_message = DummyMessage(content=json.dumps({"answer": "Policy summary"}))
+    second_message = DummyMessage(
+        content=json.dumps({"answer": "Policy summary"}), tool_calls=None
+    )
     second = DummyResponse([DummyChoice(second_message)])
-    client = DummyOpenAIClient([first, second])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([first, second])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     bus = InProcessEventBus()
     tool_events: list[ToolInvoked] = []
@@ -425,7 +502,7 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     assert len(tool_events) == 1
     tool_event = tool_events[0]
     assert tool_event.prompt_name == "search"
-    assert tool_event.adapter == "openai"
+    assert tool_event.adapter == "litellm"
     assert tool_event.name == "search_notes"
     assert tool_event.call_id == "call_1"
     assert tool_event is result.tool_results[0]
@@ -433,11 +510,11 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     assert len(prompt_events) == 1
     prompt_event = prompt_events[0]
     assert prompt_event.prompt_name == "search"
-    assert prompt_event.adapter == "openai"
+    assert prompt_event.adapter == "litellm"
     assert prompt_event.response is result
 
 
-def test_openai_adapter_raises_when_tool_handler_missing():
+def test_litellm_adapter_raises_when_tool_handler_missing():
     module = _reload_module()
 
     tool = Tool[ToolParams, ToolPayload](
@@ -447,7 +524,7 @@ def test_openai_adapter_raises_when_tool_handler_missing():
     )
 
     prompt = Prompt(
-        key="openai-tools-missing-handler",
+        key="litellm-handler-missing",
         name="search",
         sections=[
             TextSection[ToolParams](
@@ -466,8 +543,8 @@ def test_openai_adapter_raises_when_tool_handler_missing():
     response = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(
@@ -480,95 +557,17 @@ def test_openai_adapter_raises_when_tool_handler_missing():
     assert err.value.stage == "tool"
 
 
-def test_openai_adapter_handles_tool_call_without_arguments():
+def test_litellm_adapter_raises_when_tool_not_registered():
     module = _reload_module()
-
-    def optional_handler(params: OptionalParams) -> ToolResult[OptionalPayload]:
-        return ToolResult(message="done", payload=OptionalPayload(value=params.query))
-
-    tool = Tool[OptionalParams, OptionalPayload](
-        name="optional_tool",
-        description="Uses defaults when args are missing.",
-        handler=optional_handler,
-    )
 
     prompt = Prompt(
-        key="openai-optional-tool",
-        name="optional",
-        sections=[
-            TextSection[OptionalParams](
-                title="Task",
-                body="Provide data",
-                tools=[tool],
-            )
-        ],
-    )
-
-    tool_call = DummyToolCall(
-        call_id="call_1",
-        name="optional_tool",
-        arguments=None,
-    )
-    response_with_tool = DummyResponse(
-        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
-    )
-    final_response = DummyResponse(
-        [DummyChoice(DummyMessage(content="All done", tool_calls=None))]
-    )
-    client = DummyOpenAIClient([response_with_tool, final_response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
-
-    result = adapter.evaluate(
-        prompt,
-        OptionalParams(),
-        bus=NullEventBus(),
-    )
-
-    assert result.text == "All done"
-    assert result.tool_results[0].params.query == "default"
-
-
-def test_openai_adapter_raises_when_structured_output_missing_json():
-    module = _reload_module()
-
-    prompt = Prompt[StructuredAnswer](
-        key="openai-structured-missing-json",
+        key="litellm-missing-tool",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
                 body="Look up ${query}",
-            )
-        ],
-    )
-
-    response = DummyResponse(
-        [DummyChoice(DummyMessage(content="no-json", tool_calls=None))]
-    )
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
-
-    with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(
-            prompt,
-            ToolParams(query="policies"),
-            bus=NullEventBus(),
-        )
-
-    assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.stage == "response"
-
-
-def test_openai_adapter_raises_for_unknown_tool():
-    module = _reload_module()
-
-    prompt = Prompt(
-        key="openai-unknown-tool",
-        name="search",
-        sections=[
-            TextSection[ToolParams](
-                title="Task",
-                body="Look up ${query}",
+                tools=[],
             )
         ],
     )
@@ -581,8 +580,8 @@ def test_openai_adapter_raises_for_unknown_tool():
     response = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(
@@ -595,7 +594,7 @@ def test_openai_adapter_raises_for_unknown_tool():
     assert err.value.stage == "tool"
 
 
-def test_openai_adapter_raises_when_tool_params_invalid():
+def test_litellm_adapter_raises_when_tool_params_invalid():
     module = _reload_module()
 
     tool = Tool[ToolParams, ToolPayload](
@@ -605,7 +604,7 @@ def test_openai_adapter_raises_when_tool_params_invalid():
     )
 
     prompt = Prompt(
-        key="openai-invalid-tool-params",
+        key="litellm-invalid-tool-params",
         name="search",
         sections=[
             TextSection[ToolParams](
@@ -624,8 +623,8 @@ def test_openai_adapter_raises_when_tool_params_invalid():
     response = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(
@@ -638,7 +637,7 @@ def test_openai_adapter_raises_when_tool_params_invalid():
     assert err.value.stage == "tool"
 
 
-def test_openai_adapter_raises_when_handler_fails():
+def test_litellm_adapter_raises_when_handler_fails():
     module = _reload_module()
 
     def failing_handler(params: ToolParams) -> ToolResult[ToolPayload]:
@@ -651,7 +650,7 @@ def test_openai_adapter_raises_when_handler_fails():
     )
 
     prompt = Prompt(
-        key="openai-handler-failure",
+        key="litellm-handler-failure",
         name="search",
         sections=[
             TextSection[ToolParams](
@@ -670,8 +669,8 @@ def test_openai_adapter_raises_when_handler_fails():
     response = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(
@@ -684,11 +683,11 @@ def test_openai_adapter_raises_when_handler_fails():
     assert err.value.stage == "tool"
 
 
-def test_openai_adapter_records_provider_payload_from_mapping():
+def test_litellm_adapter_records_provider_payload_from_mapping():
     module = _reload_module()
 
     prompt = Prompt(
-        key="openai-provider-payload",
+        key="litellm-provider-payload",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
@@ -701,8 +700,8 @@ def test_openai_adapter_records_provider_payload_from_mapping():
     mapping_response = MappingResponse(
         [DummyChoice(DummyMessage(content="Hello!", tool_calls=None))]
     )
-    client = DummyOpenAIClient([mapping_response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([mapping_response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     result = adapter.evaluate(
         prompt,
@@ -713,11 +712,11 @@ def test_openai_adapter_records_provider_payload_from_mapping():
     assert result.provider_payload == {"meta": "value"}
 
 
-def test_openai_adapter_ignores_non_mapping_model_dump():
+def test_litellm_adapter_ignores_non_mapping_model_dump():
     module = _reload_module()
 
     prompt = Prompt(
-        key="openai-weird-dump",
+        key="litellm-weird-dump",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
@@ -730,8 +729,8 @@ def test_openai_adapter_ignores_non_mapping_model_dump():
     response = WeirdResponse(
         [DummyChoice(DummyMessage(content="Hello!", tool_calls=None))]
     )
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     result = adapter.evaluate(
         prompt,
@@ -742,11 +741,11 @@ def test_openai_adapter_ignores_non_mapping_model_dump():
     assert result.provider_payload is None
 
 
-def test_openai_adapter_handles_response_without_model_dump():
+def test_litellm_adapter_handles_response_without_model_dump():
     module = _reload_module()
 
     prompt = Prompt(
-        key="openai-simple-response",
+        key="litellm-simple-response",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
@@ -759,8 +758,8 @@ def test_openai_adapter_handles_response_without_model_dump():
     response = SimpleResponse(
         [DummyChoice(DummyMessage(content="Hello!", tool_calls=None))]
     )
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     result = adapter.evaluate(
         prompt,
@@ -775,7 +774,7 @@ def test_openai_adapter_handles_response_without_model_dump():
     "arguments_json",
     ["{", json.dumps("not a dict")],
 )
-def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
+def test_litellm_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
     module = _reload_module()
 
     tool = Tool[ToolParams, ToolPayload](
@@ -785,7 +784,7 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
     )
 
     prompt = Prompt(
-        key="openai-bad-tool-arguments",
+        key="litellm-bad-tool-arguments",
         name="search",
         sections=[
             TextSection[ToolParams](
@@ -804,8 +803,8 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
     response = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    client = DummyOpenAIClient([response])
-    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    completion = RecordingCompletion([response])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(
@@ -816,3 +815,48 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "tool"
+
+
+def test_litellm_adapter_propagates_parse_errors_for_structured_output():
+    module = _reload_module()
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=simple_handler,
+    )
+
+    prompt = Prompt[StructuredAnswer](
+        key="litellm-structured-error",
+        name="search",
+        sections=[
+            TextSection[ToolParams](
+                title="Task",
+                body="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "policies"}),
+    )
+    first = DummyResponse(
+        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
+    )
+    final_message = DummyMessage(content="not json", tool_calls=None)
+    second = DummyResponse([DummyChoice(final_message)])
+    completion = RecordingCompletion([first, second])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
+
+    with pytest.raises(PromptEvaluationError) as err:
+        adapter.evaluate(
+            prompt,
+            ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
+
+    assert isinstance(err.value, PromptEvaluationError)
+    assert err.value.stage == "response"
