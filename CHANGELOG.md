@@ -4,6 +4,12 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Prompt
+
+- Renamed several prompt authoring primitives for clarity, including `MarkdownSection`,
+  `SectionNode`, `ToolResult.value`, and `parse_structured_output`, and consolidated
+  the `prompt/` module layout under a new top-level import surface.
+
 ### Integrations
 
 - Added a LiteLLM adapter behind the new `litellm` extra with full tool execution, structured output parsing, and telemetry parity with the existing OpenAI integration.
@@ -16,7 +22,7 @@ Release highlights for weakincentives.
 
 ### Highlights
 
-- Launched the prompt composition system with typed `Prompt`, `Section`, and `MarkdownSection` building blocks, structured rendering, and placeholder validation backed by comprehensive tests.
+- Launched the prompt composition system with typed `Prompt`, `Section`, and `TextSection` building blocks, structured rendering, and placeholder validation backed by comprehensive tests.
 - Added tool orchestration primitives including the `Tool` dataclass, shared dataclass handling, duplicate detection, and prompt-level aggregation utilities.
 - Delivered stdlib-only dataclass serde helpers (`parse`, `dump`, `clone`, `schema`) for lightweight validation and JSON serialization.
 
