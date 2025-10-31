@@ -94,6 +94,30 @@ def test_prompt_can_disable_response_format_injection() -> None:
     assert rendered.output_type is Summary
 
 
+def test_prompt_render_can_skip_response_format_temporarily() -> None:
+    prompt = _build_summary_prompt()
+
+    rendered = prompt.render(
+        Guidance(topic="Grace Hopper"),
+        inject_output_instructions=False,
+    )
+
+    assert "## Response Format" not in rendered.text
+    assert prompt.inject_output_instructions is True
+
+
+def test_prompt_render_can_force_response_format_temporarily() -> None:
+    prompt = _build_summary_prompt(inject_output_instructions=False)
+
+    rendered = prompt.render(
+        Guidance(topic="Grace Hopper"),
+        inject_output_instructions=True,
+    )
+
+    assert "## Response Format" in rendered.text
+    assert prompt.inject_output_instructions is False
+
+
 def test_prompt_specialization_requires_dataclass() -> None:
     with pytest.raises(PromptValidationError) as exc:
         Prompt[str](key="invalid-output", sections=[])
@@ -189,6 +213,46 @@ def test_parse_output_supports_array_container() -> None:
     assert parsed[0].score == pytest.approx(0.9)
     assert rendered.output_container == "array"
     assert "an array" in rendered.text
+
+
+def test_parse_output_requires_wrapped_array_key() -> None:
+    task_section = TextSection[Guidance](
+        title="Task",
+        body="Return search results.",
+    )
+    prompt = Prompt[list[ResultItem]](
+        key="search-array-missing-key",
+        name="search",
+        sections=[task_section],
+    )
+    rendered = prompt.render(Guidance(topic="Ada"))
+
+    reply = """```json\n{\n  \"results\": []\n}\n```"""
+
+    with pytest.raises(OutputParseError) as exc:
+        parse_output(reply, rendered)
+
+    assert "Expected top-level JSON array" in str(exc.value)
+
+
+def test_parse_output_requires_wrapped_array_list_value() -> None:
+    task_section = TextSection[Guidance](
+        title="Task",
+        body="Return search results.",
+    )
+    prompt = Prompt[list[ResultItem]](
+        key="search-array-non-list",
+        name="search",
+        sections=[task_section],
+    )
+    rendered = prompt.render(Guidance(topic="Ada"))
+
+    reply = """```json\n{\n  \"items\": {\"bad\": true}\n}\n```"""
+
+    with pytest.raises(OutputParseError) as exc:
+        parse_output(reply, rendered)
+
+    assert "Expected top-level JSON array" in str(exc.value)
 
 
 def test_parse_output_falls_back_to_embedded_json() -> None:

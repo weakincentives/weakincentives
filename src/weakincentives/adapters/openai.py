@@ -23,7 +23,10 @@ from typing import Any, Final, Literal, Protocol, cast
 from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..prompts._types import SupportsDataclass
 from ..prompts.prompt import Prompt, RenderedPrompt
-from ..prompts.structured import OutputParseError
+from ..prompts.structured import (
+    ARRAY_RESULT_KEY,
+    OutputParseError,
+)
 from ..prompts.structured import parse_output as parse_structured_output
 from ..prompts.tool import Tool, ToolResult
 from ..serde import parse, schema
@@ -109,6 +112,7 @@ class OpenAIAdapter:
         *,
         model: str,
         tool_choice: ToolChoice = "auto",
+        use_native_response_format: bool = True,
         client: _OpenAIProtocol | None = None,
         client_factory: _OpenAIClientFactory | None = None,
         client_kwargs: Mapping[str, object] | None = None,
@@ -129,6 +133,7 @@ class OpenAIAdapter:
         self._client = client
         self._model = model
         self._tool_choice: ToolChoice = tool_choice
+        self._use_native_response_format = use_native_response_format
 
     def evaluate[OutputT](
         self,
@@ -138,17 +143,37 @@ class OpenAIAdapter:
         bus: EventBus,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
-        rendered = prompt.render(*params)  # type: ignore[reportArgumentType]
+
+        has_structured_output = (
+            getattr(prompt, "_output_type", None) is not None
+            and getattr(prompt, "_output_container", None) is not None
+        )
+        should_disable_instructions = (
+            parse_output
+            and has_structured_output
+            and self._use_native_response_format
+            and getattr(prompt, "inject_output_instructions", False)
+        )
+
+        if should_disable_instructions:
+            rendered = prompt.render(
+                *params,
+                inject_output_instructions=False,
+            )  # type: ignore[reportArgumentType]
+        else:
+            rendered = prompt.render(*params)  # type: ignore[reportArgumentType]
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": rendered.text},
         ]
 
-        response_format = _build_response_format(rendered, prompt_name)
         should_parse_structured_output = (
             parse_output
             and rendered.output_type is not None
             and rendered.output_container is not None
         )
+        response_format: dict[str, Any] | None = None
+        if should_parse_structured_output and self._use_native_response_format:
+            response_format = _build_response_format(rendered, prompt_name)
 
         tools = list(rendered.tools)
         tool_specs = [_tool_to_openai_spec(tool) for tool in tools]
@@ -361,10 +386,21 @@ def _build_response_format(
     base_schema.pop("title", None)
 
     if container == "array":
-        schema_payload: dict[str, Any] = {
-            "type": "array",
-            "items": base_schema,
-        }
+        schema_payload = cast(
+            dict[str, Any],
+            {
+                "type": "object",
+                "properties": {
+                    ARRAY_RESULT_KEY: {
+                        "type": "array",
+                        "items": base_schema,
+                    }
+                },
+                "required": [ARRAY_RESULT_KEY],
+            },
+        )
+        if not allow_extra_keys:
+            schema_payload["additionalProperties"] = False
     else:
         schema_payload = base_schema
 
@@ -464,6 +500,10 @@ def _parse_provider_payload(payload: object, rendered: RenderedPrompt[Any]) -> o
         )
 
     if container == "array":
+        if isinstance(payload, Mapping):
+            if ARRAY_RESULT_KEY not in payload:
+                raise TypeError("Expected provider payload to be a JSON array.")
+            payload = cast(Mapping[str, object], payload)[ARRAY_RESULT_KEY]
         if not isinstance(payload, Sequence) or isinstance(
             payload, (str, bytes, bytearray)
         ):

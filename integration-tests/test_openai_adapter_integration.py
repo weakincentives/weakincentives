@@ -226,6 +226,36 @@ def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None
     assert response.text is None
 
 
+def test_openai_adapter_parses_structured_output_without_native_schema(
+    openai_model: str,
+) -> None:
+    prompt = _build_structured_prompt()
+    sample = ReviewParams(
+        text=(
+            "Customers praise the simplified dashboards and clearer metrics, "
+            "though a few still flag onboarding friction when importing legacy data."
+        ),
+    )
+
+    custom_adapter = OpenAIAdapter(
+        model=openai_model,
+        use_native_response_format=False,
+    )
+
+    response = custom_adapter.evaluate(
+        prompt,
+        sample,
+        bus=NullEventBus(),
+    )
+
+    assert response.prompt_name == "structured_review"
+    assert response.output is not None
+    assert isinstance(response.output, ReviewAnalysis)
+    assert response.output.summary
+    assert response.output.sentiment
+    assert response.text is None
+
+
 def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -> None:
     prompt = _build_structured_list_prompt()
     sample = ReviewParams(
