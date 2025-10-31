@@ -10,23 +10,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Integration adapters for optional third-party providers."""
-
-from .core import (
-    PromptEvaluationError,
-    PromptResponse,
-    ProviderAdapter,
-)
-from .litellm import LiteLLMAdapter, LiteLLMCompletion, create_litellm_completion
-from .openai import OpenAIAdapter, OpenAIProtocol
-
-__all__ = [
-    "ProviderAdapter",
-    "PromptResponse",
-    "PromptEvaluationError",
-    "LiteLLMAdapter",
-    "LiteLLMCompletion",
-    "create_litellm_completion",
-    "OpenAIAdapter",
-    "OpenAIProtocol",
-]
+"""Test suite package marker to enable relative imports."""

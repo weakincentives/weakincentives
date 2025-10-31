@@ -2,6 +2,16 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Integrations
+
+- Added a LiteLLM adapter behind the new `litellm` extra with full tool execution, structured output parsing, and telemetry parity with the existing OpenAI integration.
+
+### Documentation
+
+- Documented the LiteLLM optional dependency, updated installation instructions, and introduced a dedicated example script showcasing LiteLLM usage.
+
 ## v0.2.0 - 2025-10-29
 
 ### Highlights

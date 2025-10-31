@@ -1,7 +1,7 @@
 # Weak Incentives
 
 **Lean, typed building blocks for side-effect-free background agents.**
-Compose deterministic prompts, define typed tools, and get strict JSON back—without heavy dependencies. Optional adapters (OpenAI today) snap in when you need a provider.
+Compose deterministic prompts, define typed tools, and get strict JSON back—without heavy dependencies. Optional adapters (OpenAI, LiteLLM) snap in when you need a provider.
 
 ______________________________________________________________________
 
@@ -16,9 +16,10 @@ ______________________________________________________________________
 
 ```bash
 uv add weakincentives
-# optional: OpenAI helpers
-uv add "weakincentives[openai]"
-# (or, when cloning: uv sync --extra openai)
+# optional: provider adapters
+uv add "weakincentives[openai]"    # OpenAI SDK support
+uv add "weakincentives[litellm]"   # LiteLLM compatibility
+# (or, when cloning: uv sync --extra openai --extra litellm)
 ```
 
 ______________________________________________________________________
@@ -108,17 +109,33 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## Optional Adapter (OpenAI)
+## Optional Adapters
 
 ```python
-from weakincentives.adapters import OpenAIAdapter
+from weakincentives.adapters import (
+    LiteLLMAdapter,
+    OpenAIAdapter,
+)
 
-adapter = OpenAIAdapter(model="gpt-4o-mini", client_kwargs={"api_key": "sk-..."})
-# response = adapter.evaluate(prompt, ResearchGuidance(topic="..."), bus=...)
-# response.text or response.output (if you used Prompt[T])
+# OpenAI SDK (requires `uv add "weakincentives[openai]"`)
+openai_adapter = OpenAIAdapter(
+    model="gpt-4o-mini",
+    client_kwargs={"api_key": "sk-..."},
+)
+
+# LiteLLM shim (requires `uv add "weakincentives[litellm]"`)
+litellm_adapter = LiteLLMAdapter(
+    model="gpt-4o-mini",
+    completion_kwargs={"api_key": "sk-..."},
+)
+
+# response = openai_adapter.evaluate(prompt, ResearchGuidance(...), bus=...)
+# response = litellm_adapter.evaluate(prompt, ResearchGuidance(...), bus=...)
 ```
 
-If the dependency is missing, the adapter raises a clear runtime error with install guidance.
+Both adapters raise a clear runtime error with install guidance if the optional dependency is missing.
+
+See `openai_example.py` and `litellm_example.py` for runnable demos.
 
 ______________________________________________________________________
 
