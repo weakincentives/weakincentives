@@ -1941,7 +1941,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.44.6" },
+    { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.79.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.6.1" },
 ]
 

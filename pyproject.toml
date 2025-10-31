@@ -43,7 +43,7 @@ openai = [
     "openai>=2.6.1",
 ]
 litellm = [
-    "litellm>=1.44.6",
+    "litellm>=1.79.0",
 ]
 
 [build-system]
