@@ -3,9 +3,6 @@
 **Lean, typed building blocks for side-effect-free background agents.**
 Compose deterministic prompts, define typed tools, and get strict JSON back—without heavy dependencies. Optional adapters (OpenAI today) snap in when you need a provider.
 
-> **Why this library?**
-> ✅ Deterministic prompts • ✅ Typed tools • ✅ Strict JSON output • ✅ Minimal runtime deps
-
 ______________________________________________________________________
 
 ## Requirements
