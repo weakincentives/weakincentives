@@ -31,7 +31,7 @@ class TextSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         *,
         title: str,
         body: str,
-        key: str | None = None,
+        key: str,
         defaults: ParamsT | None = None,
         children: Sequence[object] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,

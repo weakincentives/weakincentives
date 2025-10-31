@@ -118,15 +118,20 @@ class Prompt[OutputT]:
     def __init__(
         self,
         *,
+        ns: str,
         key: str,
         name: str | None = None,
         sections: Sequence[Section[Any]] | None = None,
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
     ) -> None:
+        stripped_ns = ns.strip()
+        if not stripped_ns:
+            raise PromptValidationError("Prompt namespace must be a non-empty string.")
         stripped_key = key.strip()
         if not stripped_key:
             raise PromptValidationError("Prompt key must be a non-empty string.")
+        self.ns = stripped_ns
         self.key = stripped_key
         self.name = name
         base_sections: list[Section[SupportsDataclass]] = [
@@ -201,7 +206,11 @@ class Prompt[OutputT]:
 
         overrides: dict[SectionPath, str] = {}
         tool_overrides: dict[str, ToolOverride] = {}
-        if override is not None and override.prompt_key == descriptor.key:
+        if (
+            override is not None
+            and override.ns == descriptor.ns
+            and override.prompt_key == descriptor.key
+        ):
             descriptor_index = {
                 section.path: section.content_hash for section in descriptor.sections
             }

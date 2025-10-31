@@ -36,6 +36,7 @@ pytestmark = [
 
 _MODEL_ENV_VAR = "OPENAI_TEST_MODEL"
 _DEFAULT_MODEL = "gpt-4.1"
+_PROMPT_NS = "integration/openai"
 
 
 @pytest.fixture(scope="module")
@@ -102,9 +103,13 @@ def _build_greeting_prompt() -> Prompt:
         body=(
             "You are a concise assistant. Provide a short friendly greeting for ${audience}."
         ),
+        key="greeting",
     )
     return Prompt(
-        key="integration-greeting", name="greeting", sections=[greeting_section]
+        ns=_PROMPT_NS,
+        key="integration-greeting",
+        name="greeting",
+        sections=[greeting_section],
     )
 
 
@@ -132,8 +137,10 @@ def _build_tool_prompt(
             "observed, reply to the user summarizing the uppercase text."
         ),
         tools=(tool,),
+        key="instruction",
     )
     return Prompt(
+        ns=_PROMPT_NS,
         key="integration-uppercase",
         name="uppercase_workflow",
         sections=[instruction_section],
@@ -148,8 +155,10 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
             "Passage:\n${text}\n\n"
             "Use only the available response schema and keep strings short."
         ),
+        key="analysis-task",
     )
     return Prompt[ReviewAnalysis](
+        ns=_PROMPT_NS,
         key="integration-structured",
         name="structured_review",
         sections=[analysis_section],
@@ -163,8 +172,10 @@ def _build_structured_list_prompt() -> Prompt[list[ReviewFinding]]:
             "Review the provided passage and produce between one and two findings.\n"
             "Each finding must include a summary and sentiment label using the schema."
         ),
+        key="analysis-task",
     )
     return Prompt[list[ReviewFinding]](
+        ns=_PROMPT_NS,
         key="integration-structured-list",
         name="structured_review_list",
         sections=[analysis_section],

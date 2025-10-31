@@ -40,8 +40,13 @@ def test_prompt_render_rejects_unregistered_params_type() -> None:
     section = TextSection[RegisteredParams](
         title="Registered",
         body="Registered: ${value}",
+        key="registered",
     )
-    prompt = Prompt(key="edge-unregistered", sections=[section])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="edge-unregistered",
+        sections=[section],
+    )
 
     with pytest.raises(PromptValidationError) as exc:
         prompt.render(UnregisteredParams(value="bad"))
@@ -62,8 +67,13 @@ def test_prompt_render_detects_constructor_returning_none() -> None:
     section = TextSection[NullConstructedParams](
         title="Null",
         body="Null body",
+        key="null",
     )
-    prompt = Prompt(key="edge-constructor-none", sections=[section])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="edge-constructor-none",
+        sections=[section],
+    )
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render()
@@ -80,7 +90,7 @@ class BrokenParams:
 
 class BrokenSection(Section[BrokenParams]):
     def __init__(self) -> None:
-        super().__init__(title="Broken")
+        super().__init__(title="Broken", key="broken")
 
     def render(self, params: BrokenParams, depth: int) -> str:
         raise PromptRenderError("inner", placeholder="value")
@@ -88,7 +98,11 @@ class BrokenSection(Section[BrokenParams]):
 
 def test_prompt_render_wraps_prompt_errors_with_context() -> None:
     section = BrokenSection()
-    prompt = Prompt(key="edge-wrap-error", sections=[section])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="edge-wrap-error",
+        sections=[section],
+    )
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(BrokenParams(value="x"))
@@ -101,7 +115,7 @@ def test_prompt_render_wraps_prompt_errors_with_context() -> None:
 
 class InvalidParamsSection(Section[int]):  # type: ignore[arg-type]
     def __init__(self) -> None:
-        super().__init__(title="Invalid")
+        super().__init__(title="Invalid", key="invalid")
 
     def render(self, params: int, depth: int) -> str:  # pragma: no cover - defensive
         return "invalid"
@@ -111,7 +125,11 @@ def test_prompt_register_requires_dataclass_params() -> None:
     section = InvalidParamsSection()
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(key="edge-dataclass-required", sections=[section])
+        Prompt(
+            ns="tests/prompts",
+            key="edge-dataclass-required",
+            sections=[section],
+        )
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is int
@@ -128,10 +146,15 @@ def test_prompt_register_validates_defaults_type() -> None:
         title="Defaults",
         body="Defaults",
         defaults=cast(Any, DefaultsParams),
+        key="defaults",
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(key="edge-defaults-type", sections=[section])
+        Prompt(
+            ns="tests/prompts",
+            key="edge-defaults-type",
+            sections=[section],
+        )
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is DefaultsParams
@@ -153,10 +176,15 @@ def test_prompt_register_requires_defaults_type_match() -> None:
         title="Mismatch",
         body="Mismatch",
         defaults=cast(Any, OtherParams(value="x")),
+        key="mismatch",
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(key="edge-defaults-mismatch", sections=[section])
+        Prompt(
+            ns="tests/prompts",
+            key="edge-defaults-mismatch",
+            sections=[section],
+        )
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is DefaultsMismatchParams
@@ -170,7 +198,7 @@ class PlaceholderParams:
 
 class BareSection(Section[PlaceholderParams]):
     def __init__(self) -> None:
-        super().__init__(title="Bare")
+        super().__init__(title="Bare", key="bare")
 
     def render(self, params: PlaceholderParams, depth: int) -> str:
         return "bare"
@@ -191,6 +219,7 @@ def test_text_section_returns_heading_when_body_empty() -> None:
     section = TextSection[HeadingOnlyParams](
         title="Heading",
         body="\n",
+        key="heading",
     )
 
     output = section.render(HeadingOnlyParams(), depth=0)
@@ -208,6 +237,7 @@ def test_text_section_placeholder_names_cover_named_and_braced() -> None:
     section = TextSection[PlaceholderNamesParams](
         title="Placeholders",
         body="Value: $value and ${other}",
+        key="placeholders",
     )
 
     assert section.placeholder_names() == {"value", "other"}
@@ -220,7 +250,7 @@ class ContextParams:
 
 class ContextAwareSection(Section[ContextParams]):
     def __init__(self) -> None:
-        super().__init__(title="Context")
+        super().__init__(title="Context", key="context")
 
     def render(self, params: ContextParams, depth: int) -> str:
         raise PromptRenderError(
@@ -233,7 +263,11 @@ class ContextAwareSection(Section[ContextParams]):
 
 def test_prompt_render_propagates_errors_with_existing_context() -> None:
     section = ContextAwareSection()
-    prompt = Prompt(key="edge-preserve-context", sections=[section])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="edge-preserve-context",
+        sections=[section],
+    )
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ContextParams(value="x"))

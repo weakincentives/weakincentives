@@ -22,15 +22,9 @@ if TYPE_CHECKING:
 
 from ._types import SupportsDataclass
 
-_SLUG_PATTERN: Final[re.Pattern[str]] = re.compile(r"[^a-z0-9]+")
-
-
-def _slugify(value: str) -> str:
-    normalized = value.strip().lower()
-    slug = _SLUG_PATTERN.sub("-", normalized).strip("-")
-    if not slug:
-        return "section"
-    return slug
+_SECTION_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^[a-z0-9][a-z0-9._-]{0,63}$"
+)
 
 
 class Section[ParamsT: SupportsDataclass](ABC):
@@ -42,7 +36,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         self,
         *,
         title: str,
-        key: str | None = None,
+        key: str,
         defaults: ParamsT | None = None,
         children: Sequence[object] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
@@ -59,7 +53,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         self.params_type: type[ParamsT] = params_type
         self.params: type[ParamsT] = params_type
         self.title = title
-        self.key = key or _slugify(title)
+        self.key = self._normalize_key(key)
         self.defaults = defaults
 
         normalized_children: list[Section[SupportsDataclass]] = []
@@ -111,6 +105,15 @@ class Section[ParamsT: SupportsDataclass](ABC):
         _SpecializedSection.__module__ = cls.__module__
         _SpecializedSection._params_type = cast(type[SupportsDataclass], params_type)
         return _SpecializedSection  # type: ignore[return-value]
+
+    @staticmethod
+    def _normalize_key(key: str) -> str:
+        normalized = key.strip().lower()
+        if not normalized:
+            raise ValueError("Section key must be a non-empty string.")
+        if not _SECTION_KEY_PATTERN.match(normalized):
+            raise ValueError("Section key must match ^[a-z0-9][a-z0-9._-]{0,63}$.")
+        return normalized
 
     @staticmethod
     def _normalize_generic_argument(item: object) -> object:

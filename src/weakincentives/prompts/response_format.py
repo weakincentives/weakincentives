@@ -50,6 +50,7 @@ class ResponseFormatSection(TextSection[ResponseFormatParams]):
     ) -> None:
         super().__init__(
             title="Response Format",
+            key="response-format",
             body=_RESPONSE_FORMAT_BODY,
             defaults=params,
             enabled=enabled,

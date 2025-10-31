@@ -58,6 +58,7 @@ def test_prompt_tools_integration_example() -> None:
     tools_section = TextSection[ToolDescriptionParams](
         title="Available Tools",
         body="Invoke ${primary_tool} whenever you need fresh entity context.",
+        key="available-tools",
         tools=[lookup_tool],
         defaults=ToolDescriptionParams(),
     )
@@ -68,10 +69,16 @@ def test_prompt_tools_integration_example() -> None:
             "Use tools when you need up-to-date context. "
             "Prefer ${primary_tool} for critical lookups."
         ),
+        key="guidance",
         children=[tools_section],
     )
 
-    prompt = Prompt(key="tools-overview", name="tools_overview", sections=[guidance])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="tools-overview",
+        name="tools_overview",
+        sections=[guidance],
+    )
 
     rendered = prompt.render(GuidanceParams(primary_tool="lookup_entity"))
     markdown = rendered.text

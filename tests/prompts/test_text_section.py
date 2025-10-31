@@ -32,6 +32,7 @@ def test_text_section_renders_heading_and_body() -> None:
             Greeting:
             ${greeting}
         """,
+        key="greeting",
     )
 
     output = section.render(GreetingParams(greeting="hello"), depth=0)
@@ -47,6 +48,7 @@ def test_text_section_performs_strict_substitution() -> None:
     section = TextSection[PlaceholderParams](
         title="Placeholder Demo",
         body="Value: ${value}",
+        key="placeholder-demo",
     )
 
     output = section.render(PlaceholderParams(value="42"), depth=1)
@@ -62,6 +64,7 @@ def test_text_section_supports_slotted_dataclass_params() -> None:
     section = TextSection[SlottedParams](
         title="Slots",
         body="Slot value: ${value}",
+        key="slots",
     )
 
     output = section.render(SlottedParams(value="ok"), depth=0)
@@ -73,6 +76,7 @@ def test_text_section_rejects_non_dataclass_params() -> None:
     section = TextSection[SimpleNamespace](
         title="Reject",
         body="Value: ${value}",
+        key="reject",
     )
 
     with pytest.raises(PromptRenderError) as error_info:

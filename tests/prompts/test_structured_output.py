@@ -52,8 +52,10 @@ def _build_summary_prompt(
     task_section = TextSection[Guidance](
         title="Task",
         body="Summarize ${topic} and include view counts.",
+        key="task",
     )
     return Prompt[Summary](
+        ns="tests/prompts",
         key="summaries",
         name="summaries",
         sections=[task_section],
@@ -120,7 +122,7 @@ def test_prompt_render_can_force_response_format_temporarily() -> None:
 
 def test_prompt_specialization_requires_dataclass() -> None:
     with pytest.raises(PromptValidationError) as exc:
-        Prompt[str](key="invalid-output", sections=[])
+        Prompt[str](ns="tests/prompts", key="invalid-output", sections=[])
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is str
@@ -196,8 +198,10 @@ def test_parse_output_supports_array_container() -> None:
     task_section = TextSection[Guidance](
         title="Task",
         body="Return search results.",
+        key="task",
     )
     prompt = Prompt[list[ResultItem]](
+        ns="tests/prompts",
         key="search-array-support",
         name="search",
         sections=[task_section],
@@ -219,8 +223,10 @@ def test_parse_output_requires_wrapped_array_key() -> None:
     task_section = TextSection[Guidance](
         title="Task",
         body="Return search results.",
+        key="task",
     )
     prompt = Prompt[list[ResultItem]](
+        ns="tests/prompts",
         key="search-array-missing-key",
         name="search",
         sections=[task_section],
@@ -239,8 +245,10 @@ def test_parse_output_requires_wrapped_array_list_value() -> None:
     task_section = TextSection[Guidance](
         title="Task",
         body="Return search results.",
+        key="task",
     )
     prompt = Prompt[list[ResultItem]](
+        ns="tests/prompts",
         key="search-array-non-list",
         name="search",
         sections=[task_section],
@@ -270,8 +278,14 @@ def test_parse_output_requires_specialized_prompt() -> None:
     task_section = TextSection[Guidance](
         title="Task",
         body="Return guidance.",
+        key="task",
     )
-    prompt = Prompt(key="plain-guidance", name="plain", sections=[task_section])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="plain-guidance",
+        name="plain",
+        sections=[task_section],
+    )
     rendered = prompt.render(Guidance(topic="Ada"))
 
     with pytest.raises(OutputParseError):
@@ -282,8 +296,10 @@ def test_parse_output_array_requires_array_container() -> None:
     task_section = TextSection[Guidance](
         title="Task",
         body="Return search results.",
+        key="task",
     )
     prompt = Prompt[list[ResultItem]](
+        ns="tests/prompts",
         key="search-array",
         name="search",
         sections=[task_section],
@@ -299,8 +315,11 @@ def test_parse_output_array_requires_array_container() -> None:
 
 
 def test_parse_output_array_requires_object_items() -> None:
-    task_section = TextSection[Guidance](title="Task", body="Return search results.")
+    task_section = TextSection[Guidance](
+        title="Task", body="Return search results.", key="task"
+    )
     prompt = Prompt[list[ResultItem]](
+        ns="tests/prompts",
         key="search-array-items",
         name="search",
         sections=[task_section],
@@ -316,8 +335,11 @@ def test_parse_output_array_requires_object_items() -> None:
 
 
 def test_parse_output_array_reports_item_validation_error() -> None:
-    task_section = TextSection[Guidance](title="Task", body="Return search results.")
+    task_section = TextSection[Guidance](
+        title="Task", body="Return search results.", key="task"
+    )
     prompt = Prompt[list[ResultItem]](
+        ns="tests/prompts",
         key="search-array-validation",
         name="search",
         sections=[task_section],

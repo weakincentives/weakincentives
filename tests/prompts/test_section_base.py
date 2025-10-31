@@ -32,35 +32,40 @@ class ExampleSection(Section[ExampleParams]):
 
 
 def test_section_defaults_children_and_enabled():
-    section = ExampleSection(title="Demo")
+    section = ExampleSection(title="Demo", key="demo")
 
     assert section.children == ()
     assert section.is_enabled(ExampleParams()) is True
     assert section.params is ExampleParams
 
 
-def test_section_key_defaults_to_slug_and_fallback():
-    spaced = ExampleSection(title="Spacing Out")
-    blank = ExampleSection(title="   ")
+def test_section_key_normalization_and_validation():
+    section = ExampleSection(title="Spacing Out", key=" spacing.out ")
 
-    assert spaced.key == "spacing-out"
-    assert blank.key == "section"
+    assert section.key == "spacing.out"
+
+    with pytest.raises(ValueError):
+        ExampleSection(title="Invalid", key="")
+
+    with pytest.raises(ValueError):
+        ExampleSection(title="Bad", key="Invalid Key")
 
 
 def test_section_original_body_template_default_is_none():
-    section = ExampleSection(title="Has No Template")
+    section = ExampleSection(title="Has No Template", key="no-template")
 
     assert section.original_body_template() is None
 
 
 def test_section_allows_custom_children_and_enabled():
-    child = ExampleSection(title="Child")
+    child = ExampleSection(title="Child", key="child")
 
     def toggle(params: ExampleParams) -> bool:
         return params.value == "go"
 
     section = ExampleSection(
         title="Parent",
+        key="parent",
         children=[child],
         enabled=toggle,
     )
@@ -79,7 +84,7 @@ class PlainSection(Section):
 
 def test_section_requires_specialized_type_parameter() -> None:
     with pytest.raises(TypeError):
-        PlainSection(title="Plain")
+        PlainSection(title="Plain", key="plain")
 
 
 def test_section_rejects_multiple_type_arguments() -> None:

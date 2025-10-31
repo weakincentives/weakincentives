@@ -43,18 +43,26 @@ def test_prompt_initialization_flattens_sections_depth_first():
     child = TextSection[ChildParams](
         title="Child",
         body="Child: ${detail}",
+        key="child",
     )
     sibling = TextSection[SiblingParams](
         title="Sibling",
         body="Sibling: ${note}",
+        key="sibling",
     )
     root = TextSection[RootParams](
         title="Root",
         body="Root: ${title}",
+        key="root",
         children=[child, sibling],
     )
 
-    prompt = Prompt(key="prompt-init", name="demo", sections=[root])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="prompt-init",
+        name="demo",
+        sections=[root],
+    )
 
     titles = [node.section.title for node in prompt.sections]
     depths = [node.depth for node in prompt.sections]
@@ -72,25 +80,38 @@ def test_prompt_initialization_flattens_sections_depth_first():
 
 
 def test_prompt_requires_non_empty_key():
-    section = TextSection[RootParams](title="Root", body="Body: ${title}")
+    section = TextSection[RootParams](title="Root", body="Body: ${title}", key="root")
 
     with pytest.raises(PromptValidationError):
-        Prompt(key="   ", sections=[section])
+        Prompt(ns="tests/prompts", key="   ", sections=[section])
+
+
+def test_prompt_requires_non_empty_namespace():
+    section = TextSection[RootParams](title="Root", body="Body: ${title}", key="root")
+
+    with pytest.raises(PromptValidationError):
+        Prompt(ns="   ", key="prompt-ns", sections=[section])
 
 
 def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
     first = TextSection[DuplicateParams](
         title="First",
         body="First: ${value}",
+        key="first",
         defaults=DuplicateParams(value="alpha"),
     )
     second = TextSection[DuplicateParams](
         title="Second",
         body="Second: ${value}",
+        key="second",
         defaults=DuplicateParams(value="beta"),
     )
 
-    prompt = Prompt(key="duplicate-defaults", sections=[first, second])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="duplicate-defaults",
+        sections=[first, second],
+    )
 
     rendered = prompt.render()
 
@@ -103,13 +124,19 @@ def test_prompt_reuses_provided_params_for_duplicate_sections():
     first = TextSection[DuplicateParams](
         title="First",
         body="First: ${value}",
+        key="first",
     )
     second = TextSection[DuplicateParams](
         title="Second",
         body="Second: ${value}",
+        key="second",
     )
 
-    prompt = Prompt(key="duplicate-shared", sections=[first, second])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="duplicate-shared",
+        sections=[first, second],
+    )
 
     rendered = prompt.render(DuplicateParams(value="shared"))
 
@@ -121,14 +148,20 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
     first = TextSection[DuplicateParams](
         title="First",
         body="First: ${value}",
+        key="first",
         defaults=DuplicateParams(value="alpha"),
     )
     second = TextSection[DuplicateParams](
         title="Second",
         body="Second: ${value}",
+        key="second",
     )
 
-    prompt = Prompt(key="duplicate-type-default", sections=[first, second])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="duplicate-type-default",
+        sections=[first, second],
+    )
 
     rendered = prompt.render()
 
@@ -144,10 +177,11 @@ def test_prompt_validates_text_section_placeholders():
     section = TextSection[PlaceholderParams](
         title="Invalid",
         body="Missing ${oops}",
+        key="invalid",
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(key="invalid-placeholder", sections=[section])
+        Prompt(ns="tests/prompts", key="invalid-placeholder", sections=[section])
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.placeholder == "oops"
@@ -164,6 +198,7 @@ def test_text_section_rejects_non_section_children():
         TextSection[ParentParams](
             title="Parent",
             body="${value}",
+            key="parent",
             children=["not a section"],  # type: ignore[arg-type]
         )
 

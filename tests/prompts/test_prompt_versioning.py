@@ -41,12 +41,14 @@ class _StaticSection(Section[_GreetingParams]):
 
 def _build_prompt() -> Prompt:
     return Prompt(
+        ns="tests/versioning",
         key="versioned-greeting",
         name="greeting",
         sections=[
             TextSection[_GreetingParams](
                 title="Greeting",
                 body="Greet ${subject} warmly.",
+                key="greeting",
             )
         ],
     )
@@ -64,12 +66,14 @@ def _build_tool_prompt() -> tuple[Prompt, Tool[_GreetingParams, _LookupResult]]:
         handler=None,
     )
     prompt = Prompt(
+        ns="tests/versioning",
         key="versioned-greeting-tools",
         name="greeting-tools",
         sections=[
             TextSection[_GreetingParams](
                 title="Greeting",
                 body="Greet ${subject} warmly.",
+                key="greeting",
                 tools=[tool],
             )
         ],
@@ -82,6 +86,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
 
     descriptor = PromptDescriptor.from_prompt(prompt)
 
+    assert descriptor.ns == "tests/versioning"
     assert descriptor.key == "versioned-greeting"
     assert descriptor.sections == [
         SectionDescriptor(
@@ -98,11 +103,13 @@ def test_prompt_descriptor_includes_response_format_section() -> None:
         topic: str
 
     prompt = Prompt[Summary](
+        ns="tests/versioning",
         key="versioned-summary",
         sections=[
             TextSection[_GreetingParams](
                 title="Task",
                 body="Summarize ${subject} succinctly.",
+                key="task",
             )
         ],
     )
@@ -113,11 +120,16 @@ def test_prompt_descriptor_includes_response_format_section() -> None:
     assert ("task",) in paths
     assert ("response-format",) in paths
     assert descriptor.tools == []
+    assert descriptor.ns == "tests/versioning"
 
 
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
-    section = _StaticSection(title="Static")
-    prompt = Prompt(key="versioned-static", sections=[section])
+    section = _StaticSection(title="Static", key="static")
+    prompt = Prompt(
+        ns="tests/versioning",
+        key="versioned-static",
+        sections=[section],
+    )
 
     descriptor = PromptDescriptor.from_prompt(prompt)
 
@@ -164,6 +176,7 @@ def test_prompt_render_with_overrides_applies_matching_sections() -> None:
     path = descriptor.sections[0].path
 
     override = PromptOverride(
+        ns=descriptor.ns,
         prompt_key=descriptor.key,
         tag="experiment",
         overrides={path: "Cheer loudly for ${subject}."},
@@ -185,6 +198,7 @@ def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
     prompt = _build_prompt()
 
     override = PromptOverride(
+        ns="tests/versioning",
         prompt_key="other-prompt",
         tag="latest",
         overrides={("other",): "Ignore this."},
@@ -218,6 +232,7 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
     contract_hash = descriptor.tools[0].contract_hash
 
     override = PromptOverride(
+        ns=descriptor.ns,
         prompt_key=descriptor.key,
         tag="latest",
         overrides={},
@@ -250,6 +265,7 @@ def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
 
     override = PromptOverride(
+        ns=descriptor.ns,
         prompt_key=descriptor.key,
         tag="latest",
         overrides={},

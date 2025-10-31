@@ -89,12 +89,15 @@ def build_prompt() -> Prompt[AgentReply]:
         ).strip(),
         defaults=AgentGuidance(),
         tools=[note_tool],
+        key="assistant-guidance",
     )
     user_turn = TextSection[UserTurnParams](
         title="User Question",
         body="The user asked: ${question}",
+        key="user-question",
     )
     return Prompt[AgentReply](
+        ns="examples/litellm",
         key="litellm-demo-session",
         name="litellm_demo",
         sections=[guidance, user_turn],

@@ -223,6 +223,7 @@ def build_prompt() -> Prompt:
             """
         ).strip(),
         tools=tools,
+        key="available-tools",
     )
     guidance_section = TextSection[AgentGuidance](
         title="Agent Guidance",
@@ -234,6 +235,7 @@ def build_prompt() -> Prompt:
         ),
         defaults=AgentGuidance(),
         children=[tool_overview],
+        key="agent-guidance",
     )
     user_turn_section = TextSection[UserTurnParams](
         title="User Turn",
@@ -241,8 +243,10 @@ def build_prompt() -> Prompt:
             "The user has provided a new instruction. Use it to decide whether to "
             "call tools or respond directly.\n\nInstruction:\n${content}"
         ),
+        key="user-turn",
     )
     return Prompt(
+        ns="examples/openai",
         key="example-echo-agent",
         name="echo_agent",
         sections=[guidance_section, user_turn_section],
