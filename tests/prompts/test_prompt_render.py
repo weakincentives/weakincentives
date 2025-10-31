@@ -43,17 +43,24 @@ def build_prompt() -> Prompt:
     intro = TextSection[IntroParams](
         title="Intro",
         body="Intro: ${title}",
+        key="intro",
     )
     details = TextSection[DetailsParams](
         title="Details",
         body="Details: ${body}",
+        key="details",
     )
     outro = TextSection[OutroParams](
         title="Outro",
         body="Outro: ${footer}",
+        key="outro",
         defaults=OutroParams(footer="bye"),
     )
-    return Prompt(key="render-basic", sections=[intro, details, outro])
+    return Prompt(
+        ns="tests/prompts",
+        key="render-basic",
+        sections=[intro, details, outro],
+    )
 
 
 @dataclass
@@ -81,23 +88,31 @@ def build_nested_prompt() -> Prompt:
     leaf = TextSection[LeafParams](
         title="Leaf",
         body="Leaf: ${note}",
+        key="leaf",
     )
     child = TextSection[ChildNestedParams](
         title="Child",
         body="Child detail: ${detail}",
+        key="child",
         children=[leaf],
     )
     parent = TextSection[ParentToggleParams](
         title="Parent",
         body="Parent: ${heading}",
+        key="parent",
         children=[child],
         enabled=lambda params: params.include_children,
     )
     summary = TextSection[SummaryParams](
         title="Summary",
         body="Summary: ${summary}",
+        key="summary",
     )
-    return Prompt(key="render-nested", sections=[parent, summary])
+    return Prompt(
+        ns="tests/prompts",
+        key="render-nested",
+        sections=[parent, summary],
+    )
 
 
 def test_prompt_render_merges_defaults_and_overrides():
@@ -205,8 +220,9 @@ def test_prompt_render_wraps_template_errors_with_context():
     section = ExplodingSection(
         title="Explode",
         body="unused",
+        key="explode",
     )
-    prompt = Prompt(key="render-error", sections=[section])
+    prompt = Prompt(ns="tests/prompts", key="render-error", sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ErrorParams(value="x"))
@@ -227,9 +243,14 @@ def test_prompt_render_propagates_enabled_errors():
     section = TextSection[ToggleParams](
         title="Guard",
         body="Guard: ${flag}",
+        key="guard",
         enabled=raising_enabled,
     )
-    prompt = Prompt(key="render-enabled-error", sections=[section])
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="render-enabled-error",
+        sections=[section],
+    )
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ToggleParams(flag=True))

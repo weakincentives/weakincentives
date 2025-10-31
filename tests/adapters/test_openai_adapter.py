@@ -67,6 +67,7 @@ from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 from weakincentives.prompts.prompt import RenderedPrompt
 
 MODULE_PATH = "weakincentives.adapters.openai"
+PROMPT_NS = "tests/adapters/openai"
 
 
 def _reload_module():
@@ -115,11 +116,13 @@ def test_openai_adapter_constructs_client_when_not_provided(
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-greeting",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -155,11 +158,13 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-greeting",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -217,11 +222,13 @@ def test_openai_adapter_returns_plain_text_response():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-plain",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -267,11 +274,13 @@ def test_openai_adapter_executes_tools_and_parses_output():
     )
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="openai-structured-success",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -324,11 +333,13 @@ def test_openai_adapter_includes_response_format_for_array_outputs():
     module = _reload_module()
 
     prompt = Prompt[list[StructuredAnswer]](
+        ns=PROMPT_NS,
         key="openai-structured-schema-array",
         name="structured_list",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return a list of answers for ${query}.",
             )
         ],
@@ -373,11 +384,13 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-tools-relaxed",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -431,11 +444,13 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     )
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="openai-structured-events",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -491,11 +506,13 @@ def test_openai_adapter_raises_when_tool_handler_missing():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-tools-missing-handler",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -537,11 +554,13 @@ def test_openai_adapter_handles_tool_call_without_arguments():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-optional-tool",
         name="optional",
         sections=[
             TextSection[OptionalParams](
                 title="Task",
+                key="task",
                 body="Provide data",
                 tools=[tool],
             )
@@ -576,11 +595,13 @@ def test_openai_adapter_reads_output_json_content_blocks():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="openai-structured-json-block",
         name="structured",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return the structured result only.",
             )
         ],
@@ -614,11 +635,13 @@ def test_openai_adapter_raises_when_structured_output_missing_json():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="openai-structured-missing-json",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
             )
         ],
@@ -645,11 +668,13 @@ def test_openai_adapter_raises_on_invalid_parsed_payload():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="openai-structured-parsed-error",
         name="structured",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return the structured result only.",
             )
         ],
@@ -724,11 +749,13 @@ def test_openai_parse_provider_payload_unwraps_wrapped_array():
     module = _reload_module()
 
     prompt = Prompt[list[StructuredAnswer]](
+        ns=PROMPT_NS,
         key="openai-structured-schema-array-wrapped",
         name="structured_list",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return a list of answers for ${query}.",
             )
         ],
@@ -754,11 +781,13 @@ def test_openai_parse_provider_payload_handles_object_container():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="openai-structured-schema",
         name="structured",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Summarize ${query} as JSON.",
             )
         ],
@@ -778,11 +807,13 @@ def test_openai_build_response_format_returns_none_for_plain_prompt():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-plain",
         name="plain",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Say hello to ${query}.",
             )
         ],
@@ -813,11 +844,13 @@ def test_openai_parse_provider_payload_rejects_non_sequence_arrays():
     module = _reload_module()
 
     prompt = Prompt[list[StructuredAnswer]](
+        ns=PROMPT_NS,
         key="openai-structured-schema-array-non-seq",
         name="structured_list",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return a list of answers for ${query}.",
             )
         ],
@@ -847,11 +880,13 @@ def test_openai_adapter_raises_for_unknown_tool():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-unknown-tool",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
             )
         ],
@@ -889,11 +924,13 @@ def test_openai_adapter_raises_when_tool_params_invalid():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-invalid-tool-params",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -935,11 +972,13 @@ def test_openai_adapter_raises_when_handler_fails():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-handler-failure",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -972,11 +1011,13 @@ def test_openai_adapter_records_provider_payload_from_mapping():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-provider-payload",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -1001,11 +1042,13 @@ def test_openai_adapter_ignores_non_mapping_model_dump():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-weird-dump",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -1030,11 +1073,13 @@ def test_openai_adapter_handles_response_without_model_dump():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-simple-response",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -1069,11 +1114,13 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="openai-bad-tool-arguments",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )

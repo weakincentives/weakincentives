@@ -47,6 +47,7 @@ def build_compose_prompt() -> Prompt:
         body="""
         Target tone: ${tone}
         """,
+        key="tone",
     )
 
     content_section = TextSection[ContentParams](
@@ -55,6 +56,7 @@ def build_compose_prompt() -> Prompt:
         Include the following summary:
         ${summary}
         """,
+        key="content-guidance",
         enabled=lambda params: bool(params.summary.strip()),
     )
 
@@ -65,12 +67,13 @@ def build_compose_prompt() -> Prompt:
             To: ${recipient}
             Subject: ${subject}
             """,
+            key="message-routing",
             defaults=RoutingParams(subject="(optional subject)"),
             children=[tone_section, content_section],
         ),
     ]
 
-    return Prompt(key="compose-email", sections=sections)
+    return Prompt(ns="tests/prompts", key="compose-email", sections=sections)
 
 
 def test_prompt_integration_renders_expected_markdown():

@@ -220,3 +220,8 @@ ______________________________________________________________________
 
 **Summary**
 Declaring `Prompt[OutputT]` (or `Prompt[list[OutputT]]`) is all that's needed to require JSON-structured answers. The framework appends concise return instructions, exposes the output contract on `RenderedPrompt`, and supplies a single `parse_output` helper to validate and materialize typed results. Everything else in the prompt system--sections, tooling, error semantics--stays the same.
+**Section key**: This built-in section MUST use the stable key `response-format`
+so section paths are deterministic for versioning and overrides. For example:
+
+- `("response-format",)` when appended to a root prompt.
+- Nested path examples match the exact insertion point; however, the default insertion is root-level, so the path is typically `("response-format",)`.

@@ -54,6 +54,7 @@ class ToolDescriptor:
 class PromptDescriptor:
     """Stable metadata describing a prompt and its hash-aware sections."""
 
+    ns: str
     key: str
     sections: list[SectionDescriptor]
     tools: list[ToolDescriptor]
@@ -75,7 +76,7 @@ class PromptDescriptor:
                         contract_hash=_tool_contract_hash(tool),
                     )
                 )
-        return cls(prompt.key, sections, tools)
+        return cls(prompt.ns, prompt.key, sections, tools)
 
 
 @dataclass(slots=True)
@@ -94,6 +95,7 @@ class ToolOverride:
 class PromptOverride:
     """Runtime replacements for prompt sections validated by a version store."""
 
+    ns: str
     prompt_key: str
     tag: str
     overrides: dict[tuple[str, ...], str]

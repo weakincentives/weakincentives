@@ -85,25 +85,32 @@ def _build_prompt() -> tuple[
     primary_section = TextSection[PrimarySectionParams](
         title="Primary",
         body="",
+        key="primary",
         tools=[primary_tool],
         defaults=PrimarySectionParams(),
     )
     guidance = TextSection[GuidanceParams](
         title="Guidance",
         body="Use ${primary_tool} when available.",
+        key="guidance",
         enabled=lambda params: params.allow_tools,
         children=[primary_section],
     )
     secondary = TextSection[SecondaryToggleParams](
         title="Secondary",
         body="",
+        key="secondary",
         tools=[secondary_tool],
         defaults=SecondaryToggleParams(enabled=True),
         enabled=lambda params: params.enabled,
     )
 
     return (
-        Prompt(key="tools-basic", sections=[guidance, secondary]),
+        Prompt(
+            ns="tests/prompts",
+            key="tools-basic",
+            sections=[guidance, secondary],
+        ),
         primary_tool,
         secondary_tool,
     )
@@ -134,18 +141,24 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
     first_section = TextSection[PrimarySectionParams](
         title="First Tools",
         body="",
+        key="first-tools",
         tools=[_build_primary_tool()],
         defaults=PrimarySectionParams(),
     )
     second_section = TextSection[SecondaryToggleParams](
         title="Second Tools",
         body="",
+        key="second-tools",
         tools=[_build_primary_tool()],
         defaults=SecondaryToggleParams(),
     )
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(key="tools-duplicate", sections=[first_section, second_section])
+        Prompt(
+            ns="tests/prompts",
+            key="tools-duplicate",
+            sections=[first_section, second_section],
+        )
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("second-tools",)
@@ -163,18 +176,22 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
     first_section = TextSection[PrimarySectionParams](
         title="Primary",
         body="",
+        key="primary",
         tools=[primary_tool],
         defaults=PrimarySectionParams(),
     )
     second_section = TextSection[SecondaryToggleParams](
         title="Alternate",
         body="",
+        key="alternate",
         tools=[alternate_tool],
         defaults=SecondaryToggleParams(),
     )
 
     prompt = Prompt(
-        key="tools-duplicate-params", sections=[first_section, second_section]
+        ns="tests/prompts",
+        key="tools-duplicate-params",
+        sections=[first_section, second_section],
     )
 
     tools = prompt.render().tools
@@ -191,10 +208,14 @@ class _InvalidToolSection(Section[GuidanceParams]):
 
 
 def test_prompt_tools_requires_tool_instances() -> None:
-    invalid_section = _InvalidToolSection(title="Invalid")
+    invalid_section = _InvalidToolSection(title="Invalid", key="invalid")
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(key="tools-invalid-instance", sections=[invalid_section])
+        Prompt(
+            ns="tests/prompts",
+            key="tools-invalid-instance",
+            sections=[invalid_section],
+        )
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("invalid",)
@@ -208,12 +229,17 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     section = TextSection[PrimarySectionParams](
         title="Primary",
         body="",
+        key="primary",
         tools=[tool],
         defaults=PrimarySectionParams(),
     )
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(key="tools-bad-params-type", sections=[section])
+        Prompt(
+            ns="tests/prompts",
+            key="tools-bad-params-type",
+            sections=[section],
+        )
 
     error = cast(PromptValidationError, error_info.value)
     assert error.section_path == ("primary",)

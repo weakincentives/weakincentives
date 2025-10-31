@@ -30,23 +30,25 @@ reaches an LLM. The design should be simple enough to maintain but strict enough
 
 ## Design Overview
 
-A `Prompt` owns a name and an ordered tree of `Section` instances. Rendering walks this tree depth first and produces
-markdown where the heading level is `##` for roots and adds one `#` per level of depth (so depth one becomes `###`,
-depth two `####`, and so on). The implementation keeps `Section` as the abstract base class that defines the shared
-contract—metadata, parameter typing, optional defaults, `children`, and two core methods: `is_enabled(params)` to
-determine visibility and `render(params, depth)` to emit the markdown fragment (including the heading). Future
-variants can plug in alternative templating engines or emit structured output (markdown tables, CSV, JSON) without
-rewriting prompt logic, so long as they honor the heading pipeline. The default concrete subclass, `TextSection`, relies
-on `Template.substitute` to render its `body` string (missing placeholders raise immediately),
-applies `textwrap.dedent` and stripping before substitution,
-and emits normalized markdown. Concrete sections are instantiated by specializing the generic `Section[ParamsT]` base class (for example
-`TextSection[GuidanceParams](...)`). This pins the dataclass type to the section before any instance is created, and the
-base class rejects attempts to construct an unspecialized section or provide multiple type arguments. Each specialized
-section exposes the `params_type` metadata, accepts an optional `defaults` instance that pre-populates values, stores the
-raw `body` string interpreted by the concrete section class, wires optional child sections through the `children` collection,
-and supports an optional boolean `enabled` callable. The callable receives the effective dataclass instance (either the
-override passed to `render` or the fallback defaults) and lets authors skip entire subtrees dynamically while still staying
-inside the strict `Template` feature set.
+A `Prompt` owns a **namespace** (`ns`), an optional human-readable `name`, and an ordered tree of `Section`
+instances. Rendering walks this tree depth first and produces markdown where the heading level is `##` for roots
+and adds one `#` per level of depth (so depth one becomes `###`, depth two `####`, and so on). The namespace
+groups prompts by logical domain (for example `webapp/agents`, `backoffice/cron`, `infra/sweeper`) and participates
+in versioning plus override resolution to prevent collisions across applications. The implementation keeps
+`Section` as the abstract base class that defines the shared contract—metadata, parameter typing, optional defaults,
+`children`, and two core methods: `is_enabled(params)` to determine visibility and `render(params, depth)` to emit
+the markdown fragment (including the heading). Future variants can plug in alternative templating engines or emit
+structured output (markdown tables, CSV, JSON) without rewriting prompt logic, so long as they honor the heading
+pipeline. The default concrete subclass, `TextSection`, relies on `Template.substitute` to render its `body` string
+(missing placeholders raise immediately), applies `textwrap.dedent` and stripping before substitution, and emits
+normalized markdown. Concrete sections are instantiated by specializing the generic `Section[ParamsT]` base class
+(for example `TextSection[GuidanceParams](...)`). This pins the dataclass type to the section before any instance is
+created, and the base class rejects attempts to construct an unspecialized section or provide multiple type arguments.
+Each specialized section exposes the `params_type` metadata, accepts an optional `defaults` instance that pre-populates
+values, stores the raw `body` string interpreted by the concrete section class, wires optional child sections through
+the `children` collection, and supports an optional boolean `enabled` callable. The callable receives the effective
+dataclass instance (either the override passed to `render` or the fallback defaults) and lets authors skip entire
+subtrees dynamically while still staying inside the strict `Template` feature set.
 
 ## Construction Rules
 
@@ -59,6 +61,29 @@ every placeholder token, and verifies that each token corresponds to an attribut
 dataclass attributes are acceptable, but missing placeholders trigger `PromptValidationError` with enough context
 (section title, placeholder name) for developers to resolve the issue quickly. Default instances are optional; when
 absent we rely on the dataclass' own default field values by instantiating it with no arguments during rendering.
+
+### Prompt namespace (`ns`) — REQUIRED
+
+Prompts MUST declare a non-empty `ns: str`. The `(ns, key)` pair identifies a prompt
+family during versioning/overrides and avoids collisions across complex apps.
+
+### Section key (`key`) — REQUIRED
+
+All `Section` instances MUST declare a non-empty `key: str`. Keys MUST match:
+
+```
+^[a-z0-9][a-z0-9._-]{0,63}$
+```
+
+Rationale: stable machine identifiers that are safe for file names, JSON keys, and CLIs.
+The `key` becomes part of the **SectionPath** used by the versioning system.
+Relying on title slugs is no longer permitted.
+
+### Built-in Response Format section key
+
+When structured output is enabled, the framework appends a built-in
+`Response Format` section. Its **key is fixed** to `response-format` so
+SectionPaths are deterministic.
 
 ## Rendering Flow
 
@@ -118,6 +143,7 @@ tone_section = TextSection[ToneParams](
     body="""
     Target tone: ${tone}
     """,
+    key="tone",
 )
 
 content_section = TextSection[ContentParams](
@@ -126,10 +152,13 @@ content_section = TextSection[ContentParams](
     Include the following summary:
     ${summary}
     """,
+    key="content-guidance",
     enabled=lambda params: bool(params.summary.strip()),
 )
 
 compose_email = Prompt(
+    ns="demo",
+    key="compose-email",
     name="compose_email",
     sections=[
         TextSection[MessageRoutingParams](
@@ -138,6 +167,7 @@ compose_email = Prompt(
             To: ${recipient}
             Subject: ${subject}
             """,
+            key="routing",
             defaults=MessageRoutingParams(subject="(optional subject)"),
         ),
         TextSection[InstructionParams](
@@ -145,6 +175,7 @@ compose_email = Prompt(
             body="""
             Please craft the email below.
             """,
+            key="instruction",
             children=[tone_section, content_section],
         ),
     ],
@@ -155,4 +186,7 @@ rendered = compose_email.render(
     ToneParams(tone="warm"),
     ContentParams(summary="Top takeaways from yesterday's meeting."),
 )
+# Example SectionPaths now:
+# ("routing",), ("instruction",), ("instruction","tone"),
+# ("instruction","content-guidance"), ("response-format",)
 ```

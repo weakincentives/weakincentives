@@ -67,6 +67,7 @@ from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 from weakincentives.prompts.prompt import RenderedPrompt
 
 MODULE_PATH = "weakincentives.adapters.litellm"
+PROMPT_NS = "tests/adapters/litellm"
 
 
 def _reload_module():
@@ -146,11 +147,13 @@ def test_litellm_adapter_constructs_completion_when_not_provided(monkeypatch):
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-greeting",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -187,11 +190,13 @@ def test_litellm_adapter_supports_custom_completion_factory():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-greeting",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -250,11 +255,13 @@ def test_litellm_adapter_returns_plain_text_response():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-plain",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -301,11 +308,13 @@ def test_litellm_adapter_executes_tools_and_parses_output():
     )
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="litellm-structured-success",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -356,11 +365,13 @@ def test_litellm_adapter_uses_parsed_payload_when_available():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="litellm-structured-parsed",
         name="structured",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return the structured result only.",
             )
         ],
@@ -388,11 +399,13 @@ def test_litellm_adapter_includes_response_format_for_array_outputs():
     module = _reload_module()
 
     prompt = Prompt[list[StructuredAnswer]](
+        ns=PROMPT_NS,
         key="litellm-structured-schema-array",
         name="structured_list",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return a list of answers for ${query}.",
             )
         ],
@@ -437,11 +450,13 @@ def test_litellm_adapter_relaxes_forced_tool_choice_after_first_call():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-tools-relaxed",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -499,11 +514,13 @@ def test_litellm_adapter_handles_tool_call_without_arguments() -> None:
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-tool-no-args",
         name="search",
         sections=[
             TextSection[OptionalParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -533,11 +550,13 @@ def test_litellm_adapter_reads_output_json_content_blocks():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="litellm-structured-json-block",
         name="structured",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return the structured result only.",
             )
         ],
@@ -577,11 +596,13 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
     )
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="litellm-structured-events",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -639,11 +660,13 @@ def test_litellm_adapter_raises_when_tool_handler_missing():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-handler-missing",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -676,11 +699,13 @@ def test_litellm_adapter_raises_when_tool_not_registered():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-missing-tool",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[],
             )
@@ -719,11 +744,13 @@ def test_litellm_adapter_raises_when_tool_params_invalid():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-invalid-tool-params",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -765,11 +792,13 @@ def test_litellm_adapter_raises_when_handler_fails():
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-handler-failure",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -802,11 +831,13 @@ def test_litellm_adapter_records_provider_payload_from_mapping():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-provider-payload",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -831,11 +862,13 @@ def test_litellm_adapter_ignores_non_mapping_model_dump():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-weird-dump",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -860,11 +893,13 @@ def test_litellm_adapter_handles_response_without_model_dump():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-simple-response",
         name="greeting",
         sections=[
             TextSection[GreetingParams](
                 title="Greeting",
+                key="greeting",
                 body="Say hello to ${user}.",
             )
         ],
@@ -899,11 +934,13 @@ def test_litellm_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None
     )
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-bad-tool-arguments",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -942,11 +979,13 @@ def test_litellm_adapter_propagates_parse_errors_for_structured_output():
     )
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="litellm-structured-error",
         name="search",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Look up ${query}",
                 tools=[tool],
             )
@@ -981,11 +1020,13 @@ def test_litellm_adapter_raises_when_structured_output_missing():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="litellm-structured-missing",
         name="structured",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return the structured result only.",
             )
         ],
@@ -1013,11 +1054,13 @@ def test_litellm_adapter_raises_on_invalid_parsed_payload():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="litellm-structured-parsed-error",
         name="structured",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return the structured result only.",
             )
         ],
@@ -1092,11 +1135,13 @@ def test_litellm_parse_provider_payload_unwraps_wrapped_array():
     module = _reload_module()
 
     prompt = Prompt[list[StructuredAnswer]](
+        ns=PROMPT_NS,
         key="litellm-structured-schema-array-wrapped",
         name="structured_list",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return a list of answers for ${query}.",
             )
         ],
@@ -1122,11 +1167,13 @@ def test_litellm_parse_provider_payload_handles_object_container():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
         key="litellm-structured-schema",
         name="structured",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Summarize ${query} as JSON.",
             )
         ],
@@ -1146,11 +1193,13 @@ def test_litellm_build_response_format_returns_none_for_plain_prompt():
     module = _reload_module()
 
     prompt = Prompt(
+        ns=PROMPT_NS,
         key="litellm-plain",
         name="plain",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Say hello to ${query}.",
             )
         ],
@@ -1181,11 +1230,13 @@ def test_litellm_parse_provider_payload_rejects_non_sequence_arrays():
     module = _reload_module()
 
     prompt = Prompt[list[StructuredAnswer]](
+        ns=PROMPT_NS,
         key="litellm-structured-schema-array-non-seq",
         name="structured_list",
         sections=[
             TextSection[ToolParams](
                 title="Task",
+                key="task",
                 body="Return a list of answers for ${query}.",
             )
         ],

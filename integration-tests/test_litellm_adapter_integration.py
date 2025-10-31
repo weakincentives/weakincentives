@@ -38,6 +38,7 @@ pytestmark = [
 _MODEL_ENV_VAR = "LITELLM_TEST_MODEL"
 _DEFAULT_MODEL = "gpt-4o-mini"
 _ADDITIONAL_KWARGS_ENV = "LITELLM_COMPLETION_KWARGS"
+_PROMPT_NS = "integration/litellm"
 
 
 @pytest.fixture(scope="module")
@@ -120,8 +121,10 @@ def _build_greeting_prompt() -> Prompt:
         body=(
             "You are a concise assistant. Provide a short friendly greeting for ${audience}."
         ),
+        key="greeting",
     )
     return Prompt(
+        ns=_PROMPT_NS,
         key="litellm-integration-greeting",
         name="greeting",
         sections=[greeting_section],
@@ -152,8 +155,10 @@ def _build_tool_prompt(
             "observed, reply to the user summarizing the uppercase text."
         ),
         tools=(tool,),
+        key="instruction",
     )
     return Prompt(
+        ns=_PROMPT_NS,
         key="litellm-integration-uppercase",
         name="uppercase_workflow",
         sections=[instruction_section],
@@ -168,8 +173,10 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
             "Passage:\n${text}\n\n"
             "Use only the available response schema and keep strings short."
         ),
+        key="analysis-task",
     )
     return Prompt[ReviewAnalysis](
+        ns=_PROMPT_NS,
         key="litellm-integration-structured",
         name="structured_review",
         sections=[analysis_section],

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pytest
@@ -37,6 +38,15 @@ class ToolPayload:
 
 
 class _BareSection(Section[SectionParams]):
+    def __init__(
+        self,
+        *,
+        title: str,
+        key: str,
+        tools: Sequence[object] | None = None,
+    ) -> None:
+        super().__init__(title=title, key=key, tools=tools)
+
     def render(self, params: SectionParams, depth: int) -> str:
         return ""
 
@@ -54,20 +64,20 @@ def _build_tool(name: str) -> Tool[ToolParams, ToolPayload]:
 
 
 def test_sections_default_to_no_tools() -> None:
-    section = _BareSection(title="Base")
+    section = _BareSection(title="Base", key="base")
 
     assert section.tools() == ()
 
 
 def test_sections_reject_non_tool_entries() -> None:
     with pytest.raises(TypeError):
-        _BareSection(title="Invalid", tools=["oops"])  # type: ignore[arg-type]
+        _BareSection(title="Invalid", key="invalid", tools=["oops"])  # type: ignore[arg-type]
 
 
 def test_sections_expose_tools_in_order() -> None:
     first = _build_tool("first")
     second = _build_tool("second")
-    section = _BareSection(title="With Tools", tools=[first, second])
+    section = _BareSection(title="With Tools", key="with-tools", tools=[first, second])
 
     tools = section.tools()
 
@@ -81,6 +91,7 @@ def test_text_section_accepts_tools() -> None:
     section = TextSection[SectionParams](
         title="Paragraph",
         body="Hello",
+        key="paragraph",
         tools=[tool],
     )
 
