@@ -17,7 +17,7 @@ from typing import cast
 
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.events import InProcessEventBus, PromptExecuted, ToolInvoked
-from weakincentives.prompts.tool import ToolResult
+from weakincentives.prompt.tool import ToolResult
 from weakincentives.session import (
     DataEvent,
     Session,
@@ -48,7 +48,7 @@ class ExampleOutput:
 def make_tool_event(value: int) -> ToolInvoked:
     tool_result = cast(
         ToolResult[object],
-        ToolResult(message="ok", payload=ExamplePayload(value=value)),
+        ToolResult(message="ok", value=ExamplePayload(value=value)),
     )
     return ToolInvoked(
         prompt_name="example",
@@ -70,7 +70,7 @@ def make_prompt_event(output: object) -> PromptExecuted:
     return PromptExecuted(
         prompt_name="example",
         adapter="adapter",
-        response=response,
+        result=response,
     )
 
 
@@ -154,7 +154,7 @@ def test_non_dataclass_payloads_are_ignored() -> None:
         name="tool",
         params=ExampleParams(value=2),
         result=cast(
-            ToolResult[object], ToolResult(message="ok", payload="not a dataclass")
+            ToolResult[object], ToolResult(message="ok", value="not a dataclass")
         ),
     )
 

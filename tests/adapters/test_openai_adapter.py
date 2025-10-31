@@ -63,8 +63,8 @@ from weakincentives.events import (
     PromptExecuted,
     ToolInvoked,
 )
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
-from weakincentives.prompts.prompt import RenderedPrompt
+from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
+from weakincentives.prompt.prompt import RenderedPrompt
 
 MODULE_PATH = "weakincentives.adapters.openai"
 PROMPT_NS = "tests/adapters/openai"
@@ -120,10 +120,10 @@ def test_openai_adapter_constructs_client_when_not_provided(
         key="openai-greeting",
         name="greeting",
         sections=[
-            TextSection[GreetingParams](
+            MarkdownSection[GreetingParams](
                 title="Greeting",
                 key="greeting",
-                body="Say hello to ${user}.",
+                template="Say hello to ${user}.",
             )
         ],
     )
@@ -162,10 +162,10 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
         key="openai-greeting",
         name="greeting",
         sections=[
-            TextSection[GreetingParams](
+            MarkdownSection[GreetingParams](
                 title="Greeting",
                 key="greeting",
-                body="Say hello to ${user}.",
+                template="Say hello to ${user}.",
             )
         ],
     )
@@ -226,10 +226,10 @@ def test_openai_adapter_returns_plain_text_response():
         key="openai-plain",
         name="greeting",
         sections=[
-            TextSection[GreetingParams](
+            MarkdownSection[GreetingParams](
                 title="Greeting",
                 key="greeting",
-                body="Say hello to ${user}.",
+                template="Say hello to ${user}.",
             )
         ],
     )
@@ -265,7 +265,7 @@ def test_openai_adapter_executes_tools_and_parses_output():
     def handler(params: ToolParams) -> ToolResult[ToolPayload]:
         calls.append(params.query)
         payload = ToolPayload(answer=f"Result for {params.query}")
-        return ToolResult(message="completed", payload=payload)
+        return ToolResult(message="completed", value=payload)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -278,10 +278,10 @@ def test_openai_adapter_executes_tools_and_parses_output():
         key="openai-structured-success",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
                 tools=[tool],
             )
         ],
@@ -311,7 +311,7 @@ def test_openai_adapter_executes_tools_and_parses_output():
     assert len(result.tool_results) == 1
     record = result.tool_results[0]
     assert record.name == "search_notes"
-    assert isinstance(record.result.payload, ToolPayload)
+    assert isinstance(record.result.value, ToolPayload)
     assert record.call_id == "call_1"
     assert calls == ["policies"]
 
@@ -337,10 +337,10 @@ def test_openai_adapter_includes_response_format_for_array_outputs():
         key="openai-structured-schema-array",
         name="structured_list",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Return a list of answers for ${query}.",
+                template="Return a list of answers for ${query}.",
             )
         ],
     )
@@ -368,8 +368,8 @@ def test_openai_adapter_includes_response_format_for_array_outputs():
     json_schema = cast(dict[str, Any], response_format["json_schema"])
     schema_payload = cast(dict[str, Any], json_schema["schema"])
     properties = cast(dict[str, Any], schema_payload["properties"])
-    assert module.ARRAY_RESULT_KEY in properties
-    items_schema = cast(dict[str, Any], properties[module.ARRAY_RESULT_KEY])
+    assert module.ARRAY_WRAPPER_KEY in properties
+    items_schema = cast(dict[str, Any], properties[module.ARRAY_WRAPPER_KEY])
     assert items_schema.get("type") == "array"
     assert items_schema.get("items", {}).get("type") == "object"
 
@@ -388,10 +388,10 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
         key="openai-tools-relaxed",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
                 tools=[tool],
             )
         ],
@@ -448,10 +448,10 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
         key="openai-structured-events",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
                 tools=[tool],
             )
         ],
@@ -493,7 +493,7 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     prompt_event = prompt_events[0]
     assert prompt_event.prompt_name == "search"
     assert prompt_event.adapter == "openai"
-    assert prompt_event.response is result
+    assert prompt_event.result is result
 
 
 def test_openai_adapter_raises_when_tool_handler_missing():
@@ -510,10 +510,10 @@ def test_openai_adapter_raises_when_tool_handler_missing():
         key="openai-tools-missing-handler",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
                 tools=[tool],
             )
         ],
@@ -538,14 +538,14 @@ def test_openai_adapter_raises_when_tool_handler_missing():
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.stage == "tool"
+    assert err.value.phase == "tool"
 
 
 def test_openai_adapter_handles_tool_call_without_arguments():
     module = _reload_module()
 
     def optional_handler(params: OptionalParams) -> ToolResult[OptionalPayload]:
-        return ToolResult(message="done", payload=OptionalPayload(value=params.query))
+        return ToolResult(message="done", value=OptionalPayload(value=params.query))
 
     tool = Tool[OptionalParams, OptionalPayload](
         name="optional_tool",
@@ -558,10 +558,10 @@ def test_openai_adapter_handles_tool_call_without_arguments():
         key="openai-optional-tool",
         name="optional",
         sections=[
-            TextSection[OptionalParams](
+            MarkdownSection[OptionalParams](
                 title="Task",
                 key="task",
-                body="Provide data",
+                template="Provide data",
                 tools=[tool],
             )
         ],
@@ -599,10 +599,10 @@ def test_openai_adapter_reads_output_json_content_blocks():
         key="openai-structured-json-block",
         name="structured",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Return the structured result only.",
+                template="Return the structured result only.",
             )
         ],
     )
@@ -639,10 +639,10 @@ def test_openai_adapter_raises_when_structured_output_missing_json():
         key="openai-structured-missing-json",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
             )
         ],
     )
@@ -661,7 +661,7 @@ def test_openai_adapter_raises_when_structured_output_missing_json():
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.stage == "response"
+    assert err.value.phase == "response"
 
 
 def test_openai_adapter_raises_on_invalid_parsed_payload():
@@ -672,10 +672,10 @@ def test_openai_adapter_raises_on_invalid_parsed_payload():
         key="openai-structured-parsed-error",
         name="structured",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Return the structured result only.",
+                template="Return the structured result only.",
             )
         ],
     )
@@ -694,7 +694,7 @@ def test_openai_adapter_raises_on_invalid_parsed_payload():
 
     exc = err.value
     assert isinstance(exc, PromptEvaluationError)
-    assert exc.stage == "response"
+    assert exc.phase == "response"
 
 
 def test_openai_message_text_content_handles_structured_parts():
@@ -745,7 +745,7 @@ def test_openai_extract_parsed_content_handles_attribute_blocks():
     assert module._parsed_payload_from_part(OtherBlock()) is None
 
 
-def test_openai_parse_provider_payload_unwraps_wrapped_array():
+def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array():
     module = _reload_module()
 
     prompt = Prompt[list[StructuredAnswer]](
@@ -753,31 +753,31 @@ def test_openai_parse_provider_payload_unwraps_wrapped_array():
         key="openai-structured-schema-array-wrapped",
         name="structured_list",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Return a list of answers for ${query}.",
+                template="Return a list of answers for ${query}.",
             )
         ],
     )
 
     rendered = prompt.render(ToolParams(query="policies"))
 
-    payload = {module.ARRAY_RESULT_KEY: [{"answer": "Ready"}]}
+    payload = {module.ARRAY_WRAPPER_KEY: [{"answer": "Ready"}]}
 
-    parsed = module._parse_provider_payload(payload, rendered)
+    parsed = module._parse_schema_constrained_payload(payload, rendered)
 
     assert isinstance(parsed, list)
     assert parsed[0].answer == "Ready"
 
     with pytest.raises(TypeError):
-        module._parse_provider_payload({"wrong": []}, rendered)
+        module._parse_schema_constrained_payload({"wrong": []}, rendered)
 
     with pytest.raises(TypeError):
-        module._parse_provider_payload(["oops"], rendered)
+        module._parse_schema_constrained_payload(["oops"], rendered)
 
 
-def test_openai_parse_provider_payload_handles_object_container():
+def test_openai_parse_schema_constrained_payload_handles_object_container():
     module = _reload_module()
 
     prompt = Prompt[StructuredAnswer](
@@ -785,25 +785,25 @@ def test_openai_parse_provider_payload_handles_object_container():
         key="openai-structured-schema",
         name="structured",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Summarize ${query} as JSON.",
+                template="Summarize ${query} as JSON.",
             )
         ],
     )
 
     rendered = prompt.render(ToolParams(query="policies"))
 
-    parsed = module._parse_provider_payload({"answer": "Ready"}, rendered)
+    parsed = module._parse_schema_constrained_payload({"answer": "Ready"}, rendered)
 
     assert parsed.answer == "Ready"
 
     with pytest.raises(TypeError):
-        module._parse_provider_payload("oops", rendered)
+        module._parse_schema_constrained_payload("oops", rendered)
 
 
-def test_openai_build_response_format_returns_none_for_plain_prompt():
+def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt():
     module = _reload_module()
 
     prompt = Prompt(
@@ -811,36 +811,36 @@ def test_openai_build_response_format_returns_none_for_plain_prompt():
         key="openai-plain",
         name="plain",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Say hello to ${query}.",
+                template="Say hello to ${query}.",
             )
         ],
     )
 
     rendered = prompt.render(ToolParams(query="world"))
 
-    response_format = module._build_response_format(rendered, "plain")
+    response_format = module._build_json_schema_response_format(rendered, "plain")
 
     assert response_format is None
 
 
-def test_openai_parse_provider_payload_requires_structured_prompt():
+def test_openai_parse_schema_constrained_payload_requires_structured_prompt():
     module = _reload_module()
 
     rendered = RenderedPrompt(
         text="",
         output_type=None,
-        output_container=None,
+        container=None,
         allow_extra_keys=None,
     )
 
     with pytest.raises(TypeError):
-        module._parse_provider_payload({}, rendered)
+        module._parse_schema_constrained_payload({}, rendered)
 
 
-def test_openai_parse_provider_payload_rejects_non_sequence_arrays():
+def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays():
     module = _reload_module()
 
     prompt = Prompt[list[StructuredAnswer]](
@@ -848,10 +848,10 @@ def test_openai_parse_provider_payload_rejects_non_sequence_arrays():
         key="openai-structured-schema-array-non-seq",
         name="structured_list",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Return a list of answers for ${query}.",
+                template="Return a list of answers for ${query}.",
             )
         ],
     )
@@ -859,21 +859,21 @@ def test_openai_parse_provider_payload_rejects_non_sequence_arrays():
     rendered = prompt.render(ToolParams(query="policies"))
 
     with pytest.raises(TypeError):
-        module._parse_provider_payload("oops", rendered)
+        module._parse_schema_constrained_payload("oops", rendered)
 
 
-def test_openai_parse_provider_payload_rejects_unknown_container():
+def test_openai_parse_schema_constrained_payload_rejects_unknown_container():
     module = _reload_module()
 
     rendered = RenderedPrompt(
         text="",
         output_type=StructuredAnswer,
-        output_container="invalid",  # type: ignore[arg-type]
+        container="invalid",  # type: ignore[arg-type]
         allow_extra_keys=False,
     )
 
     with pytest.raises(TypeError):
-        module._parse_provider_payload({}, rendered)
+        module._parse_schema_constrained_payload({}, rendered)
 
 
 def test_openai_adapter_raises_for_unknown_tool():
@@ -884,10 +884,10 @@ def test_openai_adapter_raises_for_unknown_tool():
         key="openai-unknown-tool",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
             )
         ],
     )
@@ -911,7 +911,7 @@ def test_openai_adapter_raises_for_unknown_tool():
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.stage == "tool"
+    assert err.value.phase == "tool"
 
 
 def test_openai_adapter_raises_when_tool_params_invalid():
@@ -928,10 +928,10 @@ def test_openai_adapter_raises_when_tool_params_invalid():
         key="openai-invalid-tool-params",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
                 tools=[tool],
             )
         ],
@@ -956,7 +956,7 @@ def test_openai_adapter_raises_when_tool_params_invalid():
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.stage == "tool"
+    assert err.value.phase == "tool"
 
 
 def test_openai_adapter_raises_when_handler_fails():
@@ -976,10 +976,10 @@ def test_openai_adapter_raises_when_handler_fails():
         key="openai-handler-failure",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
                 tools=[tool],
             )
         ],
@@ -1004,7 +1004,7 @@ def test_openai_adapter_raises_when_handler_fails():
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.stage == "tool"
+    assert err.value.phase == "tool"
 
 
 def test_openai_adapter_records_provider_payload_from_mapping():
@@ -1015,10 +1015,10 @@ def test_openai_adapter_records_provider_payload_from_mapping():
         key="openai-provider-payload",
         name="greeting",
         sections=[
-            TextSection[GreetingParams](
+            MarkdownSection[GreetingParams](
                 title="Greeting",
                 key="greeting",
-                body="Say hello to ${user}.",
+                template="Say hello to ${user}.",
             )
         ],
     )
@@ -1046,10 +1046,10 @@ def test_openai_adapter_ignores_non_mapping_model_dump():
         key="openai-weird-dump",
         name="greeting",
         sections=[
-            TextSection[GreetingParams](
+            MarkdownSection[GreetingParams](
                 title="Greeting",
                 key="greeting",
-                body="Say hello to ${user}.",
+                template="Say hello to ${user}.",
             )
         ],
     )
@@ -1077,10 +1077,10 @@ def test_openai_adapter_handles_response_without_model_dump():
         key="openai-simple-response",
         name="greeting",
         sections=[
-            TextSection[GreetingParams](
+            MarkdownSection[GreetingParams](
                 title="Greeting",
                 key="greeting",
-                body="Say hello to ${user}.",
+                template="Say hello to ${user}.",
             )
         ],
     )
@@ -1118,10 +1118,10 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
         key="openai-bad-tool-arguments",
         name="search",
         sections=[
-            TextSection[ToolParams](
+            MarkdownSection[ToolParams](
                 title="Task",
                 key="task",
-                body="Look up ${query}",
+                template="Look up ${query}",
                 tools=[tool],
             )
         ],
@@ -1146,4 +1146,4 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.stage == "tool"
+    assert err.value.phase == "tool"

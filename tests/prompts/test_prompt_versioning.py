@@ -15,8 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 
-from weakincentives.prompts import Prompt, Section, TextSection, Tool
-from weakincentives.prompts.versioning import (
+from weakincentives.prompt import MarkdownSection, Prompt, Section, Tool
+from weakincentives.prompt.versioning import (
     PromptDescriptor,
     PromptOverride,
     PromptVersionStore,
@@ -45,9 +45,9 @@ def _build_prompt() -> Prompt:
         key="versioned-greeting",
         name="greeting",
         sections=[
-            TextSection[_GreetingParams](
+            MarkdownSection[_GreetingParams](
                 title="Greeting",
-                body="Greet ${subject} warmly.",
+                template="Greet ${subject} warmly.",
                 key="greeting",
             )
         ],
@@ -70,9 +70,9 @@ def _build_tool_prompt() -> tuple[Prompt, Tool[_GreetingParams, _LookupResult]]:
         key="versioned-greeting-tools",
         name="greeting-tools",
         sections=[
-            TextSection[_GreetingParams](
+            MarkdownSection[_GreetingParams](
                 title="Greeting",
-                body="Greet ${subject} warmly.",
+                template="Greet ${subject} warmly.",
                 key="greeting",
                 tools=[tool],
             )
@@ -106,9 +106,9 @@ def test_prompt_descriptor_includes_response_format_section() -> None:
         ns="tests/versioning",
         key="versioned-summary",
         sections=[
-            TextSection[_GreetingParams](
+            MarkdownSection[_GreetingParams](
                 title="Task",
-                body="Summarize ${subject} succinctly.",
+                template="Summarize ${subject} succinctly.",
                 key="task",
             )
         ],
@@ -163,10 +163,10 @@ class _RecordingStore(PromptVersionStore):
 
     def resolve(
         self,
-        description: PromptDescriptor,
+        descriptor: PromptDescriptor,
         tag: str = "latest",
     ) -> PromptOverride | None:
-        self.calls.append((description, tag))
+        self.calls.append((descriptor, tag))
         return self.override
 
 
@@ -191,7 +191,7 @@ def test_prompt_render_with_overrides_applies_matching_sections() -> None:
 
     assert "Cheer loudly for Operators." in rendered.text
     assert store.calls == [(descriptor, "experiment")]
-    assert rendered.tool_param_field_descriptions == {}
+    assert rendered.tool_param_descriptions == {}
 
 
 def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
@@ -241,7 +241,7 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
                 name=tool.name,
                 expected_contract_hash=contract_hash,
                 description="Offer a celebratory greeting for the subject.",
-                param_field_descriptions={"subject": "Name of the person to greet."},
+                param_descriptions={"subject": "Name of the person to greet."},
             )
         },
     )
@@ -255,7 +255,7 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
     assert (
         rendered.tools[0].description == "Offer a celebratory greeting for the subject."
     )
-    assert rendered.tool_param_field_descriptions == {
+    assert rendered.tool_param_descriptions == {
         tool.name: {"subject": "Name of the person to greet."}
     }
 
@@ -285,4 +285,4 @@ def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
     )
 
     assert rendered.tools[0].description == tool.description
-    assert rendered.tool_param_field_descriptions == {}
+    assert rendered.tool_param_descriptions == {}

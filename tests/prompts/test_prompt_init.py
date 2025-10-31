@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompts import Prompt, PromptValidationError, TextSection
+from weakincentives.prompt import MarkdownSection, Prompt, PromptValidationError
 
 
 @dataclass
@@ -40,19 +40,19 @@ class DuplicateParams:
 
 
 def test_prompt_initialization_flattens_sections_depth_first():
-    child = TextSection[ChildParams](
+    child = MarkdownSection[ChildParams](
         title="Child",
-        body="Child: ${detail}",
+        template="Child: ${detail}",
         key="child",
     )
-    sibling = TextSection[SiblingParams](
+    sibling = MarkdownSection[SiblingParams](
         title="Sibling",
-        body="Sibling: ${note}",
+        template="Sibling: ${note}",
         key="sibling",
     )
-    root = TextSection[RootParams](
+    root = MarkdownSection[RootParams](
         title="Root",
-        body="Root: ${title}",
+        template="Root: ${title}",
         key="root",
         children=[child, sibling],
     )
@@ -75,36 +75,40 @@ def test_prompt_initialization_flattens_sections_depth_first():
         ("root", "child"),
         ("root", "sibling"),
     ]
-    assert prompt.params_types == {RootParams, ChildParams, SiblingParams}
+    assert prompt.param_types == {RootParams, ChildParams, SiblingParams}
     assert prompt.name == "demo"
 
 
 def test_prompt_requires_non_empty_key():
-    section = TextSection[RootParams](title="Root", body="Body: ${title}", key="root")
+    section = MarkdownSection[RootParams](
+        title="Root", template="Body: ${title}", key="root"
+    )
 
     with pytest.raises(PromptValidationError):
         Prompt(ns="tests/prompts", key="   ", sections=[section])
 
 
 def test_prompt_requires_non_empty_namespace():
-    section = TextSection[RootParams](title="Root", body="Body: ${title}", key="root")
+    section = MarkdownSection[RootParams](
+        title="Root", template="Body: ${title}", key="root"
+    )
 
     with pytest.raises(PromptValidationError):
         Prompt(ns="   ", key="prompt-ns", sections=[section])
 
 
 def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
-    first = TextSection[DuplicateParams](
+    first = MarkdownSection[DuplicateParams](
         title="First",
-        body="First: ${value}",
+        template="First: ${value}",
         key="first",
-        defaults=DuplicateParams(value="alpha"),
+        default_params=DuplicateParams(value="alpha"),
     )
-    second = TextSection[DuplicateParams](
+    second = MarkdownSection[DuplicateParams](
         title="Second",
-        body="Second: ${value}",
+        template="Second: ${value}",
         key="second",
-        defaults=DuplicateParams(value="beta"),
+        default_params=DuplicateParams(value="beta"),
     )
 
     prompt = Prompt(
@@ -117,18 +121,18 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
 
     assert "First: alpha" in rendered.text
     assert "Second: beta" in rendered.text
-    assert prompt.params_types == {DuplicateParams}
+    assert prompt.param_types == {DuplicateParams}
 
 
 def test_prompt_reuses_provided_params_for_duplicate_sections():
-    first = TextSection[DuplicateParams](
+    first = MarkdownSection[DuplicateParams](
         title="First",
-        body="First: ${value}",
+        template="First: ${value}",
         key="first",
     )
-    second = TextSection[DuplicateParams](
+    second = MarkdownSection[DuplicateParams](
         title="Second",
-        body="Second: ${value}",
+        template="Second: ${value}",
         key="second",
     )
 
@@ -145,15 +149,15 @@ def test_prompt_reuses_provided_params_for_duplicate_sections():
 
 
 def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_default():
-    first = TextSection[DuplicateParams](
+    first = MarkdownSection[DuplicateParams](
         title="First",
-        body="First: ${value}",
+        template="First: ${value}",
         key="first",
-        defaults=DuplicateParams(value="alpha"),
+        default_params=DuplicateParams(value="alpha"),
     )
-    second = TextSection[DuplicateParams](
+    second = MarkdownSection[DuplicateParams](
         title="Second",
-        body="Second: ${value}",
+        template="Second: ${value}",
         key="second",
     )
 
@@ -174,9 +178,9 @@ def test_prompt_validates_text_section_placeholders():
     class PlaceholderParams:
         value: str
 
-    section = TextSection[PlaceholderParams](
+    section = MarkdownSection[PlaceholderParams](
         title="Invalid",
-        body="Missing ${oops}",
+        template="Missing ${oops}",
         key="invalid",
     )
 
@@ -195,9 +199,9 @@ def test_text_section_rejects_non_section_children():
         value: str
 
     with pytest.raises(TypeError) as exc:
-        TextSection[ParentParams](
+        MarkdownSection[ParentParams](
             title="Parent",
-            body="${value}",
+            template="${value}",
             key="parent",
             children=["not a section"],  # type: ignore[arg-type]
         )

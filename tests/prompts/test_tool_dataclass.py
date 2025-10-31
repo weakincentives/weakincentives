@@ -17,8 +17,8 @@ from typing import Annotated
 
 import pytest
 
-from weakincentives.prompts.errors import PromptValidationError
-from weakincentives.prompts.tool import Tool, ToolResult
+from weakincentives.prompt.errors import PromptValidationError
+from weakincentives.prompt.tool import Tool, ToolResult
 
 
 @dataclass
@@ -33,7 +33,7 @@ class ExampleResult:
 
 def _example_handler(params: ExampleParams) -> ToolResult[ExampleResult]:
     return ToolResult(
-        message=params.message, payload=ExampleResult(message=params.message)
+        message=params.message, value=ExampleResult(message=params.message)
     )
 
 
@@ -147,7 +147,7 @@ def test_tool_rejects_invalid_descriptions(bad_description: str) -> None:
 
 def test_tool_rejects_non_dataclass_params_generic() -> None:
     def handler(_: str) -> ToolResult[ExampleResult]:
-        return ToolResult(message="msg", payload=ExampleResult(message="msg"))
+        return ToolResult(message="msg", value=ExampleResult(message="msg"))
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[str, ExampleResult](  # type: ignore[type-var]
@@ -164,7 +164,7 @@ def test_tool_rejects_non_dataclass_params_generic() -> None:
 
 def test_tool_rejects_non_dataclass_result_generic() -> None:
     def handler(params: ExampleParams) -> ToolResult[str]:
-        return ToolResult(message=params.message, payload=params.message)
+        return ToolResult(message=params.message, value=params.message)
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, str](  # type: ignore[type-var]
@@ -195,7 +195,7 @@ def test_tool_rejects_handler_when_not_callable() -> None:
 def test_tool_rejects_handler_missing_param_annotation() -> None:
     def handler(params):  # type: ignore[no-untyped-def]
         return ToolResult(
-            message=params.message, payload=ExampleResult(message=params.message)
+            message=params.message, value=ExampleResult(message=params.message)
         )
 
     with pytest.raises(PromptValidationError) as error_info:
@@ -212,7 +212,7 @@ def test_tool_rejects_handler_missing_param_annotation() -> None:
 
 def test_tool_rejects_handler_with_wrong_param_annotation() -> None:
     def handler(params: str) -> ToolResult[ExampleResult]:
-        return ToolResult(message=params, payload=ExampleResult(message=params))
+        return ToolResult(message=params, value=ExampleResult(message=params))
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, ExampleResult](
@@ -231,7 +231,7 @@ def test_tool_rejects_handler_with_multiple_params() -> None:
         first: ExampleParams, second: ExampleParams
     ) -> ToolResult[ExampleResult]:  # pragma: no cover - signature invalid
         combined = first.message + second.message
-        return ToolResult(message=combined, payload=ExampleResult(message=combined))
+        return ToolResult(message=combined, value=ExampleResult(message=combined))
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, ExampleResult](
@@ -248,7 +248,7 @@ def test_tool_rejects_handler_with_multiple_params() -> None:
 def test_tool_rejects_handler_with_keyword_only_param() -> None:
     def handler(*, params: ExampleParams) -> ToolResult[ExampleResult]:
         return ToolResult(
-            message=params.message, payload=ExampleResult(message=params.message)
+            message=params.message, value=ExampleResult(message=params.message)
         )
 
     with pytest.raises(PromptValidationError) as error_info:
@@ -268,7 +268,7 @@ def test_tool_accepts_annotated_param_and_return() -> None:
         params: Annotated[ExampleParams, "meta"],
     ) -> Annotated[ToolResult[ExampleResult], "meta"]:
         return ToolResult(
-            message=params.message, payload=ExampleResult(message=params.message)
+            message=params.message, value=ExampleResult(message=params.message)
         )
 
     tool = Tool[ExampleParams, ExampleResult](
@@ -283,7 +283,7 @@ def test_tool_accepts_annotated_param_and_return() -> None:
 def test_tool_rejects_handler_missing_return_annotation() -> None:
     def handler(params: ExampleParams):  # type: ignore[no-untyped-def]
         return ToolResult(
-            message=params.message, payload=ExampleResult(message=params.message)
+            message=params.message, value=ExampleResult(message=params.message)
         )
 
     with pytest.raises(PromptValidationError) as error_info:
@@ -300,7 +300,7 @@ def test_tool_rejects_handler_missing_return_annotation() -> None:
 
 def test_tool_rejects_handler_with_wrong_return_annotation() -> None:
     def handler(params: ExampleParams) -> ToolResult[str]:
-        return ToolResult(message=params.message, payload=params.message)
+        return ToolResult(message=params.message, value=params.message)
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, ExampleResult](

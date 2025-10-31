@@ -16,7 +16,7 @@ Release highlights for weakincentives.
 
 ### Highlights
 
-- Launched the prompt composition system with typed `Prompt`, `Section`, and `TextSection` building blocks, structured rendering, and placeholder validation backed by comprehensive tests.
+- Launched the prompt composition system with typed `Prompt`, `Section`, and `MarkdownSection` building blocks, structured rendering, and placeholder validation backed by comprehensive tests.
 - Added tool orchestration primitives including the `Tool` dataclass, shared dataclass handling, duplicate detection, and prompt-level aggregation utilities.
 - Delivered stdlib-only dataclass serde helpers (`parse`, `dump`, `clone`, `schema`) for lightweight validation and JSON serialization.
 

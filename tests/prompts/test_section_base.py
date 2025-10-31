@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompts import Section
+from weakincentives.prompt import Section
 
 
 @dataclass
@@ -36,7 +36,7 @@ def test_section_defaults_children_and_enabled():
 
     assert section.children == ()
     assert section.is_enabled(ExampleParams()) is True
-    assert section.params is ExampleParams
+    assert section.param_type is ExampleParams
 
 
 def test_section_key_normalization_and_validation():

@@ -49,7 +49,7 @@ class ToolOverride:
     name: str
     expected_contract_hash: str
     description: str | None = None
-    param_field_descriptions: dict[str, str] = field(default_factory=dict)
+    param_descriptions: dict[str, str] = field(default_factory=dict)
 
 @dataclass(slots=True)
 class PromptOverride:
@@ -64,7 +64,7 @@ Override rules:
 1. Overrides are keyed by tool name inside `tool_overrides`.
 1. Apply an override only when `expected_contract_hash` matches the descriptor entry.
 1. `description` replaces the model-facing description without mutating the original tool object.
-1. `param_field_descriptions` map schema property names to replacement descriptions; adapters may opt in later.
+1. `param_descriptions` map schema property names to replacement descriptions; adapters may opt in later.
 
 ## Store Resolution
 
@@ -83,7 +83,7 @@ Stores that ignore `tool_overrides` remain valid.
 1. Build the prompt descriptor (now with tools) and resolve overrides.
 1. For each collected tool:
    - Copy it with a replacement description when provided.
-   - Capture `param_field_descriptions` for adapters (optional surface).
+   - Capture `param_descriptions` for adapters (optional surface).
 1. Return a `RenderedPrompt` whose `.tools` reflect the original order while carrying any re-described tools, plus an optional map of field description patches keyed by tool name.
 
 Adapters that already respect tool order and description require no changes for v1. Adapter support for field description patches is optional and may ship later.
@@ -101,4 +101,4 @@ Adapters that already respect tool order and description require no changes for 
 1. Extend descriptor construction to populate `tools`.
 1. Update the in-repo version store to persist `tool_overrides`.
 1. Update prompt rendering to apply tool overrides as described above.
-1. (Optional) Surface `_tool_param_field_descriptions` on `RenderedPrompt` and teach adapters to merge patches into provider schemas.
+1. (Optional) Surface `_tool_param_descriptions` on `RenderedPrompt` and teach adapters to merge patches into provider schemas.

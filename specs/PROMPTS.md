@@ -39,10 +39,10 @@ in versioning plus override resolution to prevent collisions across applications
 `children`, and two core methods: `is_enabled(params)` to determine visibility and `render(params, depth)` to emit
 the markdown fragment (including the heading). Future variants can plug in alternative templating engines or emit
 structured output (markdown tables, CSV, JSON) without rewriting prompt logic, so long as they honor the heading
-pipeline. The default concrete subclass, `TextSection`, relies on `Template.substitute` to render its `body` string
+pipeline. The default concrete subclass, `MarkdownSection`, relies on `Template.substitute` to render its `body` string
 (missing placeholders raise immediately), applies `textwrap.dedent` and stripping before substitution, and emits
 normalized markdown. Concrete sections are instantiated by specializing the generic `Section[ParamsT]` base class
-(for example `TextSection[GuidanceParams](...)`). This pins the dataclass type to the section before any instance is
+(for example `MarkdownSection[GuidanceParams](...)`). This pins the dataclass type to the section before any instance is
 created, and the base class rejects attempts to construct an unspecialized section or provide multiple type arguments.
 Each specialized section exposes the `params_type` metadata, accepts an optional `defaults` instance that pre-populates
 values, stores the raw `body` string interpreted by the concrete section class, wires optional child sections through
@@ -118,7 +118,7 @@ concerns placeholder presence and dataclass coverage; naming conventions are unc
 
 ```python
 from dataclasses import dataclass
-from weakincentives.prompts import Prompt, TextSection
+from weakincentives.prompt import Prompt, MarkdownSection
 
 @dataclass
 class MessageRoutingParams:
@@ -138,17 +138,17 @@ class ContentParams:
 class InstructionParams:
     pass
 
-tone_section = TextSection[ToneParams](
+tone_section = MarkdownSection[ToneParams](
     title="Tone",
-    body="""
+    template="""
     Target tone: ${tone}
     """,
     key="tone",
 )
 
-content_section = TextSection[ContentParams](
+content_section = MarkdownSection[ContentParams](
     title="Content Guidance",
-    body="""
+    template="""
     Include the following summary:
     ${summary}
     """,
@@ -161,18 +161,18 @@ compose_email = Prompt(
     key="compose-email",
     name="compose_email",
     sections=[
-        TextSection[MessageRoutingParams](
+        MarkdownSection[MessageRoutingParams](
             title="Message Routing",
-            body="""
+            template="""
             To: ${recipient}
             Subject: ${subject}
             """,
             key="routing",
-            defaults=MessageRoutingParams(subject="(optional subject)"),
+            default_params=MessageRoutingParams(subject="(optional subject)"),
         ),
-        TextSection[InstructionParams](
+        MarkdownSection[InstructionParams](
             title="Instruction",
-            body="""
+            template="""
             Please craft the email below.
             """,
             key="instruction",

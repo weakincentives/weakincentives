@@ -16,12 +16,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives import prompts
-from weakincentives.prompts import (
+from weakincentives import prompt
+from weakincentives.prompt import (
+    MarkdownSection,
     Prompt,
     PromptRenderError,
     PromptValidationError,
-    TextSection,
 )
 
 
@@ -42,17 +42,17 @@ class ContentParams:
 
 
 def build_compose_prompt() -> Prompt:
-    tone_section = TextSection[ToneParams](
+    tone_section = MarkdownSection[ToneParams](
         title="Tone",
-        body="""
+        template="""
         Target tone: ${tone}
         """,
         key="tone",
     )
 
-    content_section = TextSection[ContentParams](
+    content_section = MarkdownSection[ContentParams](
         title="Content Guidance",
-        body="""
+        template="""
         Include the following summary:
         ${summary}
         """,
@@ -61,14 +61,14 @@ def build_compose_prompt() -> Prompt:
     )
 
     sections = [
-        TextSection[RoutingParams](
+        MarkdownSection[RoutingParams](
             title="Message Routing",
-            body="""
+            template="""
             To: ${recipient}
             Subject: ${subject}
             """,
             key="message-routing",
-            defaults=RoutingParams(subject="(optional subject)"),
+            default_params=RoutingParams(subject="(optional subject)"),
             children=[tone_section, content_section],
         ),
     ]
@@ -122,8 +122,8 @@ def test_prompt_integration_propagates_render_errors():
 
 
 def test_prompt_module_public_exports():
-    for symbol in ("Prompt", "Section", "TextSection"):
-        assert hasattr(prompts, symbol), f"prompts module missing export: {symbol}"
-    assert "Prompt" in prompts.__all__
-    assert "Section" in prompts.__all__
-    assert "TextSection" in prompts.__all__
+    for symbol in ("Prompt", "Section", "MarkdownSection"):
+        assert hasattr(prompt, symbol), f"prompt module missing export: {symbol}"
+    assert "Prompt" in prompt.__all__
+    assert "Section" in prompt.__all__
+    assert "MarkdownSection" in prompt.__all__

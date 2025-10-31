@@ -25,7 +25,7 @@ def _tool_override_mapping_factory() -> dict[str, ToolOverride]:
     return {}
 
 
-def _field_description_mapping_factory() -> dict[str, str]:
+def _param_description_mapping_factory() -> dict[str, str]:
     return {}
 
 
@@ -86,8 +86,8 @@ class ToolOverride:
     name: str
     expected_contract_hash: str
     description: str | None = None
-    param_field_descriptions: dict[str, str] = field(
-        default_factory=_field_description_mapping_factory
+    param_descriptions: dict[str, str] = field(
+        default_factory=_param_description_mapping_factory
     )
 
 
@@ -109,7 +109,7 @@ class PromptVersionStore(Protocol):
 
     def resolve(
         self,
-        description: PromptDescriptor,
+        descriptor: PromptDescriptor,
         tag: str = "latest",
     ) -> PromptOverride | None: ...
 

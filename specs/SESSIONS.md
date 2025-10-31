@@ -107,7 +107,7 @@ These helpers delegate to `Session.select_all` and perform no caching.
 
 ## Event Handling Rules
 
-1. On `ToolInvoked`, ignore events without a dataclass `result.payload`.
+1. On `ToolInvoked`, ignore events without a dataclass `result.value`.
 1. On `PromptExecuted`, normalize structured dataclass outputs. If the output is a
    list of dataclasses, emit one `PromptData` per item.
 1. Every normalized `DataEvent[T]` is passed to the reducer chain for `T`. Each

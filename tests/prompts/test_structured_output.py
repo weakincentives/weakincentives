@@ -17,12 +17,12 @@ from typing import cast
 
 import pytest
 
-from weakincentives.prompts import (
+from weakincentives.prompt import (
+    MarkdownSection,
     OutputParseError,
     Prompt,
     PromptValidationError,
-    TextSection,
-    parse_output,
+    parse_structured_output,
 )
 
 
@@ -49,9 +49,9 @@ def _build_summary_prompt(
     inject_output_instructions: bool = True,
     allow_extra_keys: bool = False,
 ) -> Prompt[Summary]:
-    task_section = TextSection[Guidance](
+    task_section = MarkdownSection[Guidance](
         title="Task",
-        body="Summarize ${topic} and include view counts.",
+        template="Summarize ${topic} and include view counts.",
         key="task",
     )
     return Prompt[Summary](
@@ -70,7 +70,7 @@ def test_prompt_specialization_appends_response_format_block() -> None:
     rendered = prompt.render(Guidance(topic="Ada Lovelace"))
 
     assert rendered.output_type is Summary
-    assert rendered.output_container == "object"
+    assert rendered.container == "object"
     assert rendered.allow_extra_keys is False
     assert rendered.text.endswith(
         "\n".join(
@@ -128,13 +128,13 @@ def test_prompt_specialization_requires_dataclass() -> None:
     assert error.dataclass_type is str
 
 
-def test_parse_output_handles_json_code_block() -> None:
+def test_parse_structured_output_handles_json_code_block() -> None:
     prompt = _build_summary_prompt()
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = """All set.\n```json\n{\n  \"title\": \"Ada\",\n  \"views\": \"42\",\n  \"featured\": \"true\"\n}\n```"""
 
-    parsed = parse_output(reply, rendered)
+    parsed = parse_structured_output(reply, rendered)
 
     assert isinstance(parsed, Summary)
     assert parsed.title == "Ada"
@@ -142,25 +142,25 @@ def test_parse_output_handles_json_code_block() -> None:
     assert parsed.featured is True
 
 
-def test_parse_output_rejects_extra_keys_by_default() -> None:
+def test_parse_structured_output_rejects_extra_keys_by_default() -> None:
     prompt = _build_summary_prompt()
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = """```json\n{\n  \"title\": \"Ada\",\n  \"views\": 10,\n  \"notes\": \"extra\"\n}\n```"""
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output(reply, rendered)
+        parse_structured_output(reply, rendered)
 
     assert "Extra keys" in str(exc.value)
 
 
-def test_parse_output_allows_extra_keys_when_configured() -> None:
+def test_parse_structured_output_allows_extra_keys_when_configured() -> None:
     prompt = _build_summary_prompt(allow_extra_keys=True)
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = """```json\n{\n  \"title\": \"Ada\",\n  \"views\": 10,\n  \"notes\": \"extra\"\n}\n```"""
 
-    parsed = parse_output(reply, rendered)
+    parsed = parse_structured_output(reply, rendered)
 
     assert isinstance(parsed, Summary)
     assert parsed.title == "Ada"
@@ -182,22 +182,22 @@ def test_parse_output_allows_extra_keys_when_configured() -> None:
     )
 
 
-def test_parse_output_validates_container_type() -> None:
+def test_parse_structured_output_validates_container_type() -> None:
     prompt = _build_summary_prompt()
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = """```json\n[{\n  \"title\": \"Ada\",\n  \"views\": 10\n}]\n```"""
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output(reply, rendered)
+        parse_structured_output(reply, rendered)
 
     assert "Expected top-level JSON object" in str(exc.value)
 
 
-def test_parse_output_supports_array_container() -> None:
-    task_section = TextSection[Guidance](
+def test_parse_structured_output_supports_array_container() -> None:
+    task_section = MarkdownSection[Guidance](
         title="Task",
-        body="Return search results.",
+        template="Return search results.",
         key="task",
     )
     prompt = Prompt[list[ResultItem]](
@@ -210,19 +210,19 @@ def test_parse_output_supports_array_container() -> None:
 
     reply = """```json\n[{\n  \"title\": \"Ada\",\n  \"score\": \"0.9\"\n}]\n```"""
 
-    parsed = parse_output(reply, rendered)
+    parsed = parse_structured_output(reply, rendered)
 
     assert isinstance(parsed, list)
     assert parsed[0].title == "Ada"
     assert parsed[0].score == pytest.approx(0.9)
-    assert rendered.output_container == "array"
+    assert rendered.container == "array"
     assert "an array" in rendered.text
 
 
-def test_parse_output_requires_wrapped_array_key() -> None:
-    task_section = TextSection[Guidance](
+def test_parse_structured_output_requires_wrapped_array_key() -> None:
+    task_section = MarkdownSection[Guidance](
         title="Task",
-        body="Return search results.",
+        template="Return search results.",
         key="task",
     )
     prompt = Prompt[list[ResultItem]](
@@ -236,15 +236,15 @@ def test_parse_output_requires_wrapped_array_key() -> None:
     reply = """```json\n{\n  \"results\": []\n}\n```"""
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output(reply, rendered)
+        parse_structured_output(reply, rendered)
 
     assert "Expected top-level JSON array" in str(exc.value)
 
 
-def test_parse_output_requires_wrapped_array_list_value() -> None:
-    task_section = TextSection[Guidance](
+def test_parse_structured_output_requires_wrapped_array_list_value() -> None:
+    task_section = MarkdownSection[Guidance](
         title="Task",
-        body="Return search results.",
+        template="Return search results.",
         key="task",
     )
     prompt = Prompt[list[ResultItem]](
@@ -258,26 +258,26 @@ def test_parse_output_requires_wrapped_array_list_value() -> None:
     reply = """```json\n{\n  \"items\": {\"bad\": true}\n}\n```"""
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output(reply, rendered)
+        parse_structured_output(reply, rendered)
 
     assert "Expected top-level JSON array" in str(exc.value)
 
 
-def test_parse_output_falls_back_to_embedded_json() -> None:
+def test_parse_structured_output_falls_back_to_embedded_json() -> None:
     prompt = _build_summary_prompt()
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = 'The payload is {"title": "Ada", "views": 7}'
 
-    parsed = parse_output(reply, rendered)
+    parsed = parse_structured_output(reply, rendered)
 
     assert parsed.views == 7
 
 
-def test_parse_output_requires_specialized_prompt() -> None:
-    task_section = TextSection[Guidance](
+def test_parse_structured_output_requires_specialized_prompt() -> None:
+    task_section = MarkdownSection[Guidance](
         title="Task",
-        body="Return guidance.",
+        template="Return guidance.",
         key="task",
     )
     prompt = Prompt(
@@ -289,13 +289,13 @@ def test_parse_output_requires_specialized_prompt() -> None:
     rendered = prompt.render(Guidance(topic="Ada"))
 
     with pytest.raises(OutputParseError):
-        parse_output("{}", rendered)
+        parse_structured_output("{}", rendered)
 
 
-def test_parse_output_array_requires_array_container() -> None:
-    task_section = TextSection[Guidance](
+def test_parse_structured_output_array_requires_array_container() -> None:
+    task_section = MarkdownSection[Guidance](
         title="Task",
-        body="Return search results.",
+        template="Return search results.",
         key="task",
     )
     prompt = Prompt[list[ResultItem]](
@@ -309,14 +309,14 @@ def test_parse_output_array_requires_array_container() -> None:
     reply = """```json\n{\n  \"title\": \"Ada\"\n}\n```"""
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output(reply, rendered)
+        parse_structured_output(reply, rendered)
 
     assert "Expected top-level JSON array" in str(exc.value)
 
 
-def test_parse_output_array_requires_object_items() -> None:
-    task_section = TextSection[Guidance](
-        title="Task", body="Return search results.", key="task"
+def test_parse_structured_output_array_requires_object_items() -> None:
+    task_section = MarkdownSection[Guidance](
+        title="Task", template="Return search results.", key="task"
     )
     prompt = Prompt[list[ResultItem]](
         ns="tests/prompts",
@@ -329,14 +329,14 @@ def test_parse_output_array_requires_object_items() -> None:
     reply = """```json\n[\n  \"not an object\"\n]\n```"""
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output(reply, rendered)
+        parse_structured_output(reply, rendered)
 
     assert "Array item at index 0 is not an object." in str(exc.value)
 
 
-def test_parse_output_array_reports_item_validation_error() -> None:
-    task_section = TextSection[Guidance](
-        title="Task", body="Return search results.", key="task"
+def test_parse_structured_output_array_reports_item_validation_error() -> None:
+    task_section = MarkdownSection[Guidance](
+        title="Task", template="Return search results.", key="task"
     )
     prompt = Prompt[list[ResultItem]](
         ns="tests/prompts",
@@ -349,28 +349,28 @@ def test_parse_output_array_reports_item_validation_error() -> None:
     reply = """```json\n[{\n  \"title\": \"Ada\"\n}]\n```"""
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output(reply, rendered)
+        parse_structured_output(reply, rendered)
 
     assert "Missing required field" in str(exc.value)
 
 
-def test_parse_output_reports_invalid_fenced_block() -> None:
+def test_parse_structured_output_reports_invalid_fenced_block() -> None:
     prompt = _build_summary_prompt()
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = """```json\n{ invalid json }\n```"""
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output(reply, rendered)
+        parse_structured_output(reply, rendered)
 
     assert "Failed to decode JSON from fenced code block." in str(exc.value)
 
 
-def test_parse_output_requires_json_payload() -> None:
+def test_parse_structured_output_requires_json_payload() -> None:
     prompt = _build_summary_prompt()
     rendered = prompt.render(Guidance(topic="Ada"))
 
     with pytest.raises(OutputParseError) as exc:
-        parse_output("No structured data", rendered)
+        parse_structured_output("No structured data", rendered)
 
     assert "No JSON object or array" in str(exc.value)

@@ -17,9 +17,9 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompts.section import Section
-from weakincentives.prompts.text import TextSection
-from weakincentives.prompts.tool import Tool, ToolResult
+from weakincentives.prompt.markdown import MarkdownSection
+from weakincentives.prompt.section import Section
+from weakincentives.prompt.tool import Tool, ToolResult
 
 
 @dataclass
@@ -52,7 +52,7 @@ class _BareSection(Section[SectionParams]):
 
 
 def _handler(params: ToolParams) -> ToolResult[ToolPayload]:
-    return ToolResult(message=params.name, payload=ToolPayload(message=params.name))
+    return ToolResult(message=params.name, value=ToolPayload(message=params.name))
 
 
 def _build_tool(name: str) -> Tool[ToolParams, ToolPayload]:
@@ -88,9 +88,9 @@ def test_sections_expose_tools_in_order() -> None:
 
 def test_text_section_accepts_tools() -> None:
     tool = _build_tool("text")
-    section = TextSection[SectionParams](
+    section = MarkdownSection[SectionParams](
         title="Paragraph",
-        body="Hello",
+        template="Hello",
         key="paragraph",
         tools=[tool],
     )

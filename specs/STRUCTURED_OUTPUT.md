@@ -35,7 +35,7 @@ return **only** a single fenced JSON block with the required top-level container
 
 ## Response Format Section
 
-The framework exposes an internal `ResponseFormatSection`, a `TextSection[ResponseFormatParams]`, that renders the JSON
+The framework exposes an internal `ResponseFormatSection`, a `MarkdownSection[ResponseFormatParams]`, that renders the JSON
 return instructions. Authors never instantiate it directly; the prompt inserts the section automatically whenever
 structured output is requested and `inject_output_instructions=True`.
 
@@ -86,7 +86,7 @@ Those params feed the section at render time so the output instructions stay con
 
 ## Rendering Flow
 
-Rendering of sections is identical to the existing `Prompt` flow: depth-first traversal, deterministic headings, `TextSection` substitution, and skipping disabled subtrees. After the standard render:
+Rendering of sections is identical to the existing `Prompt` flow: depth-first traversal, deterministic headings, `MarkdownSection` substitution, and skipping disabled subtrees. After the standard render:
 
 1. Join rendered sections with a single blank line between fragments.
 
@@ -114,7 +114,7 @@ This keeps the final prompt readable and the output contract easy to discover pr
 
 - **Parsing**
 
-  - `parse_output(text, rendered)` raises `OutputParseError` when:
+  - `parse_structured_output(text, rendered)` raises `OutputParseError` when:
 
     - the prompt was not specialized,
     - the top-level JSON container is wrong,
@@ -153,8 +153,7 @@ This keeps the final prompt readable and the output contract easy to discover pr
 
 ```python
 from dataclasses import dataclass
-from weakincentives.prompts import Prompt, TextSection
-from weakincentives.prompts.structured import parse_output  # small helper
+from weakincentives import MarkdownSection, Prompt, parse_structured_output
 
 # 1) Declare the output type as a dataclass
 @dataclass
@@ -172,9 +171,9 @@ class Guidance:
 summarize = Prompt[Summary](
     name="summarize_entity",
     sections=[
-        TextSection[Guidance](
+        MarkdownSection[Guidance](
             title="Task",
-            body="""
+            template="""
             Write a brief summary of ${topic}. Include a canonical URL if known.
             """,
         ),
@@ -187,11 +186,11 @@ summarize = Prompt[Summary](
 # 4) Render as usual
 rendered = summarize.render(Guidance(topic="Ada Lovelace"))
 # rendered.text now ends with a "## Response Format" JSON-only block
-# rendered.output_type is Summary, rendered.output_container is "object"
+# rendered.output_type is Summary, rendered.container is "object"
 
 # 5) After the model replies, parse into the typed dataclass
 final_text = "... assistant message here ..."
-typed_summary: Summary = parse_output(final_text, rendered)
+typed_summary: Summary = parse_structured_output(final_text, rendered)
 
 # ---- Array output example ----
 
@@ -204,22 +203,22 @@ class SearchResult:
 search_prompt = Prompt[list[SearchResult]](
     name="search",
     sections=[
-        TextSection[Guidance](
+        MarkdownSection[Guidance](
             title="Task",
-            body="Return the top results for ${topic} with relevance scores.",
+            template="Return the top results for ${topic} with relevance scores.",
         )
     ],
 )
 
 search_rendered = search_prompt.render(Guidance(topic="discrete math"))
 # ...get assistant message...
-results: list[SearchResult] = parse_output("...model reply...", search_rendered)
+results: list[SearchResult] = parse_structured_output("...model reply...", search_rendered)
 ```
 
 ______________________________________________________________________
 
 **Summary**
-Declaring `Prompt[OutputT]` (or `Prompt[list[OutputT]]`) is all that's needed to require JSON-structured answers. The framework appends concise return instructions, exposes the output contract on `RenderedPrompt`, and supplies a single `parse_output` helper to validate and materialize typed results. Everything else in the prompt system--sections, tooling, error semantics--stays the same.
+Declaring `Prompt[OutputT]` (or `Prompt[list[OutputT]]`) is all that's needed to require JSON-structured answers. The framework appends concise return instructions, exposes the output contract on `RenderedPrompt`, and supplies a single `parse_structured_output` helper to validate and materialize typed results. Everything else in the prompt system--sections, tooling, error semantics--stays the same.
 **Section key**: This built-in section MUST use the stable key `response-format`
 so section paths are deterministic for versioning and overrides. For example:
 

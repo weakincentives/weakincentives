@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from weakincentives.prompts import ToolResult
+from weakincentives.prompt import ToolResult
 
 
 @dataclass
@@ -164,7 +164,7 @@ class OptionalPayload:
 
 
 def simple_handler(params: ToolParams) -> ToolResult[ToolPayload]:
-    return ToolResult(message="ok", payload=ToolPayload(answer=params.query))
+    return ToolResult(message="ok", value=ToolPayload(answer=params.query))
 
 
 class RecordingCompletion:

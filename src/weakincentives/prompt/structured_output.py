@@ -20,9 +20,9 @@ from typing import Any, Final, Literal, cast
 from ..serde.dataclass_serde import parse as parse_dataclass
 from .prompt import RenderedPrompt
 
-__all__ = ["ARRAY_RESULT_KEY", "OutputParseError", "parse_output"]
+__all__ = ["ARRAY_WRAPPER_KEY", "OutputParseError", "parse_structured_output"]
 
-ARRAY_RESULT_KEY: Final[str] = "items"
+ARRAY_WRAPPER_KEY: Final[str] = "items"
 
 _JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"```json\s*\n(.*?)```", re.IGNORECASE | re.DOTALL
@@ -43,13 +43,13 @@ class OutputParseError(Exception):
         self.dataclass_type = dataclass_type
 
 
-def parse_output[PayloadT](
+def parse_structured_output[PayloadT](
     output_text: str, rendered: RenderedPrompt[PayloadT]
 ) -> PayloadT:
     """Parse a model response into the structured output type declared by the prompt."""
 
     dataclass_type = rendered.output_type
-    container = rendered.output_container
+    container = rendered.container
     allow_extra_keys = rendered.allow_extra_keys
 
     if dataclass_type is None or container is None:
@@ -77,12 +77,12 @@ def parse_output[PayloadT](
 
     if container == "array":
         if isinstance(payload, Mapping):
-            if ARRAY_RESULT_KEY not in payload:
+            if ARRAY_WRAPPER_KEY not in payload:
                 raise OutputParseError(
                     "Expected top-level JSON array.",
                     dataclass_type=dataclass_type,
                 )
-            payload = cast(Mapping[str, object], payload)[ARRAY_RESULT_KEY]
+            payload = cast(Mapping[str, object], payload)[ARRAY_WRAPPER_KEY]
         if not isinstance(payload, list):
             raise OutputParseError(
                 "Expected top-level JSON array.",

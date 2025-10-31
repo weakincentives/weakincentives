@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Internal typing helpers for the prompts package."""
+"""Internal typing helpers for the :mod:`weakincentives.prompt` package."""
 
 from __future__ import annotations
 

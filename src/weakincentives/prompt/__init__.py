@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt module scaffolding."""
+"""Prompt authoring primitives exposed by :mod:`weakincentives.prompt`."""
 
 from __future__ import annotations
 
@@ -21,25 +21,28 @@ from .errors import (
     PromptValidationError,
     SectionPath,
 )
-from .prompt import Prompt, PromptSectionNode, RenderedPrompt
+from .markdown import MarkdownSection
+from .prompt import Prompt, RenderedPrompt, SectionNode
 from .section import Section
-from .structured import OutputParseError, parse_output
-from .text import TextSection
+from .structured_output import OutputParseError, parse_structured_output
 from .tool import Tool, ToolResult
+
+parse_structured = parse_structured_output
 
 __all__ = [
     "Prompt",
     "RenderedPrompt",
-    "PromptSectionNode",
+    "SectionNode",
     "PromptError",
     "PromptRenderError",
     "PromptValidationError",
     "Section",
     "SectionPath",
     "SupportsDataclass",
-    "TextSection",
+    "MarkdownSection",
     "Tool",
     "ToolResult",
     "OutputParseError",
-    "parse_output",
+    "parse_structured_output",
+    "parse_structured",
 ]

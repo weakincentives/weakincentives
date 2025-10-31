@@ -40,7 +40,7 @@ def _run_ty(snippet: str, directory: Path) -> subprocess.CompletedProcess[str]:
 def test_section_rejects_non_dataclass_specialization(tmp_path: Path) -> None:
     result = _run_ty(
         """
-        from weakincentives.prompts import Section
+        from weakincentives.prompt import Section
 
         Section[str]
         """,
@@ -54,7 +54,7 @@ def test_section_rejects_non_dataclass_specialization(tmp_path: Path) -> None:
 def test_tool_requires_dataclass_parameters(tmp_path: Path) -> None:
     result = _run_ty(
         """
-        from weakincentives.prompts import Tool
+        from weakincentives.prompt import Tool
 
         Tool[str, str]
         """,
@@ -70,7 +70,7 @@ def test_tool_accepts_dataclass_parameters(tmp_path: Path) -> None:
         """
         from dataclasses import dataclass
 
-        from weakincentives.prompts import Tool
+        from weakincentives.prompt import Tool
 
 
         @dataclass

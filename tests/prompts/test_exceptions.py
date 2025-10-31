@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompts import PromptRenderError, PromptValidationError
+from weakincentives.prompt import PromptRenderError, PromptValidationError
 
 
 @dataclass
