@@ -88,6 +88,14 @@ class ReviewAnalysis:
     sentiment: str
 
 
+@dataclass(slots=True)
+class ReviewFinding:
+    """Structured bullet point captured in array outputs."""
+
+    summary: str
+    sentiment: str
+
+
 def _build_greeting_prompt() -> Prompt:
     greeting_section = TextSection[GreetingParams](
         title="Greeting",
@@ -148,6 +156,21 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
     )
 
 
+def _build_structured_list_prompt() -> Prompt[list[ReviewFinding]]:
+    analysis_section = TextSection[ReviewParams](
+        title="Analysis Task",
+        body=(
+            "Review the provided passage and produce between one and two findings.\n"
+            "Each finding must include a summary and sentiment label using the schema."
+        ),
+    )
+    return Prompt[list[ReviewFinding]](
+        key="integration-structured-list",
+        name="structured_review_list",
+        sections=[analysis_section],
+    )
+
+
 def test_openai_adapter_returns_text(adapter: OpenAIAdapter) -> None:
     prompt = _build_greeting_prompt()
     params = GreetingParams(audience="integration tests")
@@ -201,3 +224,24 @@ def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None
     assert response.output.summary
     assert response.output.sentiment
     assert response.text is None
+
+
+def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -> None:
+    prompt = _build_structured_list_prompt()
+    sample = ReviewParams(
+        text=(
+            "Feedback mentions strong improvements to documentation and onboarding flow, "
+            "but some testers highlight occasional slow responses from the support channel."
+        ),
+    )
+
+    response = adapter.evaluate(prompt, sample, bus=NullEventBus())
+
+    assert response.prompt_name == "structured_review_list"
+    assert response.output is not None
+    assert isinstance(response.output, list)
+    assert response.output, "Expected at least one structured finding."
+    for finding in response.output:
+        assert isinstance(finding, ReviewFinding)
+        assert finding.summary
+        assert finding.sentiment
