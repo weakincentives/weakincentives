@@ -15,13 +15,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 
-from weakincentives.prompts import Prompt, Section, TextSection
+from weakincentives.prompts import Prompt, Section, TextSection, Tool
 from weakincentives.prompts.versioning import (
     PromptDescriptor,
     PromptOverride,
     PromptVersionStore,
     SectionDescriptor,
+    ToolDescriptor,
+    ToolOverride,
+    hash_json,
+    hash_text,
 )
+from weakincentives.serde.dataclass_serde import schema
 
 
 @dataclass
@@ -47,6 +52,31 @@ def _build_prompt() -> Prompt:
     )
 
 
+@dataclass
+class _LookupResult:
+    success: bool
+
+
+def _build_tool_prompt() -> tuple[Prompt, Tool[_GreetingParams, _LookupResult]]:
+    tool = Tool[_GreetingParams, _LookupResult](
+        name="greeter",
+        description="Greet the provided subject in a friendly way.",
+        handler=None,
+    )
+    prompt = Prompt(
+        key="versioned-greeting-tools",
+        name="greeting-tools",
+        sections=[
+            TextSection[_GreetingParams](
+                title="Greeting",
+                body="Greet ${subject} warmly.",
+                tools=[tool],
+            )
+        ],
+    )
+    return prompt, tool
+
+
 def test_prompt_descriptor_hashes_text_sections() -> None:
     prompt = _build_prompt()
 
@@ -59,6 +89,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
             content_hash=sha256(b"Greet ${subject} warmly.").hexdigest(),
         )
     ]
+    assert descriptor.tools == []
 
 
 def test_prompt_descriptor_includes_response_format_section() -> None:
@@ -81,6 +112,7 @@ def test_prompt_descriptor_includes_response_format_section() -> None:
 
     assert ("task",) in paths
     assert ("response-format",) in paths
+    assert descriptor.tools == []
 
 
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
@@ -90,6 +122,26 @@ def test_prompt_descriptor_ignores_non_hash_sections() -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
 
     assert descriptor.sections == []
+    assert descriptor.tools == []
+
+
+def test_prompt_descriptor_collects_tools() -> None:
+    prompt, tool = _build_tool_prompt()
+
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    description_hash = hash_text(tool.description)
+    params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
+    result_schema_hash = hash_json(schema(tool.result_type, extra="ignore"))
+    expected_contract = hash_text(
+        "::".join((description_hash, params_schema_hash, result_schema_hash))
+    )
+
+    assert descriptor.tools == [
+        ToolDescriptor(
+            path=("greeting",), name="greeter", contract_hash=expected_contract
+        )
+    ]
 
 
 class _RecordingStore(PromptVersionStore):
@@ -126,6 +178,7 @@ def test_prompt_render_with_overrides_applies_matching_sections() -> None:
 
     assert "Cheer loudly for Operators." in rendered.text
     assert store.calls == [(descriptor, "experiment")]
+    assert rendered.tool_param_field_descriptions == {}
 
 
 def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
@@ -157,3 +210,63 @@ def test_prompt_render_with_overrides_handles_missing_override() -> None:
 
     assert "Greet Operators warmly." in rendered.text
     assert store.calls[0][1] == "latest"
+
+
+def test_prompt_render_with_tool_overrides_updates_description() -> None:
+    prompt, tool = _build_tool_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    contract_hash = descriptor.tools[0].contract_hash
+
+    override = PromptOverride(
+        prompt_key=descriptor.key,
+        tag="latest",
+        overrides={},
+        tool_overrides={
+            tool.name: ToolOverride(
+                name=tool.name,
+                expected_contract_hash=contract_hash,
+                description="Offer a celebratory greeting for the subject.",
+                param_field_descriptions={"subject": "Name of the person to greet."},
+            )
+        },
+    )
+    store = _RecordingStore(override)
+
+    rendered = prompt.render_with_overrides(
+        _GreetingParams(subject="Operators"),
+        version_store=store,
+    )
+
+    assert (
+        rendered.tools[0].description == "Offer a celebratory greeting for the subject."
+    )
+    assert rendered.tool_param_field_descriptions == {
+        tool.name: {"subject": "Name of the person to greet."}
+    }
+
+
+def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
+    prompt, tool = _build_tool_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    override = PromptOverride(
+        prompt_key=descriptor.key,
+        tag="latest",
+        overrides={},
+        tool_overrides={
+            tool.name: ToolOverride(
+                name=tool.name,
+                expected_contract_hash="not-a-match",
+                description="This override should not apply.",
+            )
+        },
+    )
+    store = _RecordingStore(override)
+
+    rendered = prompt.render_with_overrides(
+        _GreetingParams(subject="Operators"),
+        version_store=store,
+    )
+
+    assert rendered.tools[0].description == tool.description
+    assert rendered.tool_param_field_descriptions == {}

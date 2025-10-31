@@ -12,9 +12,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any, Protocol
+
+from ..serde.dataclass_serde import schema
+from .tool import Tool
+
+
+def _tool_override_mapping_factory() -> dict[str, ToolOverride]:
+    return {}
+
+
+def _field_description_mapping_factory() -> dict[str, str]:
+    return {}
+
 
 if TYPE_CHECKING:
     from .prompt import Prompt
@@ -29,22 +42,52 @@ class SectionDescriptor:
 
 
 @dataclass(slots=True)
+class ToolDescriptor:
+    """Stable metadata describing a tool exposed by a prompt."""
+
+    path: tuple[str, ...]
+    name: str
+    contract_hash: str
+
+
+@dataclass(slots=True)
 class PromptDescriptor:
     """Stable metadata describing a prompt and its hash-aware sections."""
 
     key: str
     sections: list[SectionDescriptor]
+    tools: list[ToolDescriptor]
 
     @classmethod
     def from_prompt(cls, prompt: Prompt[Any]) -> PromptDescriptor:
         sections: list[SectionDescriptor] = []
+        tools: list[ToolDescriptor] = []
         for node in prompt.sections:
             template = node.section.original_body_template()
-            if template is None:
-                continue
-            content_hash = sha256(template.encode("utf-8")).hexdigest()
-            sections.append(SectionDescriptor(node.path, content_hash))
-        return cls(prompt.key, sections)
+            if template is not None:
+                content_hash = sha256(template.encode("utf-8")).hexdigest()
+                sections.append(SectionDescriptor(node.path, content_hash))
+            for tool in node.section.tools():
+                tools.append(
+                    ToolDescriptor(
+                        path=node.path,
+                        name=tool.name,
+                        contract_hash=_tool_contract_hash(tool),
+                    )
+                )
+        return cls(prompt.key, sections, tools)
+
+
+@dataclass(slots=True)
+class ToolOverride:
+    """Description overrides validated against a tool contract hash."""
+
+    name: str
+    expected_contract_hash: str
+    description: str | None = None
+    param_field_descriptions: dict[str, str] = field(
+        default_factory=_field_description_mapping_factory
+    )
 
 
 @dataclass(slots=True)
@@ -54,6 +97,9 @@ class PromptOverride:
     prompt_key: str
     tag: str
     overrides: dict[tuple[str, ...], str]
+    tool_overrides: dict[str, ToolOverride] = field(
+        default_factory=_tool_override_mapping_factory
+    )
 
 
 class PromptVersionStore(Protocol):
@@ -71,4 +117,26 @@ __all__ = [
     "PromptOverride",
     "PromptVersionStore",
     "SectionDescriptor",
+    "ToolDescriptor",
+    "ToolOverride",
 ]
+
+
+def _tool_contract_hash(tool: Tool[Any, Any]) -> str:
+    description_hash = hash_text(tool.description)
+    params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
+    result_schema_hash = hash_json(schema(tool.result_type, extra="ignore"))
+    return hash_text(
+        "::".join((description_hash, params_schema_hash, result_schema_hash))
+    )
+
+
+def hash_text(value: str) -> str:
+    return sha256(value.encode("utf-8")).hexdigest()
+
+
+def hash_json(value: object) -> str:
+    canonical = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    )
+    return hash_text(canonical)
