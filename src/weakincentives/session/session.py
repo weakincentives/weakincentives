@@ -20,7 +20,7 @@ from dataclasses import dataclass, is_dataclass
 from typing import Any, cast
 
 from ..events import EventBus, NullEventBus, PromptExecuted, ToolInvoked
-from ..prompts._types import SupportsDataclass
+from ..prompt._types import SupportsDataclass
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ class Session:
             self._handle_prompt_executed(event)
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
-        payload = event.result.payload
+        payload = event.result.value
         if not _is_dataclass_instance(payload):
             return
         dataclass_payload = cast(SupportsDataclass, payload)
@@ -112,7 +112,7 @@ class Session:
         self._dispatch_data_event(type(dataclass_payload), data)
 
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
-        output = event.response.output
+        output = event.result.output
         if _is_dataclass_instance(output):
             dataclass_output = cast(SupportsDataclass, output)
             data = PromptData(value=dataclass_output, source=event)

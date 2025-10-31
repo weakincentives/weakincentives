@@ -26,7 +26,7 @@ import pytest
 
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.events import EventBus, ToolInvoked
-from weakincentives.prompts import Prompt
+from weakincentives.prompt import Prompt
 
 
 def _load_openai_example() -> ModuleType:
@@ -77,7 +77,7 @@ def test_session_evaluate_routes_through_adapter(
 ) -> None:
     tool_result = example.ToolResult(
         message="Echoed text: HELLO",
-        payload=example.EchoToolResult(text="HELLO"),
+        value=example.EchoToolResult(text="HELLO"),
     )
     tool_event = ToolInvoked(
         prompt_name="echo_agent",

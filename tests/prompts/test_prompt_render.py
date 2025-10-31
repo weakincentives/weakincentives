@@ -16,11 +16,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompts import (
+from weakincentives.prompt import (
+    MarkdownSection,
     Prompt,
     PromptRenderError,
     PromptValidationError,
-    TextSection,
 )
 
 
@@ -40,21 +40,21 @@ class OutroParams:
 
 
 def build_prompt() -> Prompt:
-    intro = TextSection[IntroParams](
+    intro = MarkdownSection[IntroParams](
         title="Intro",
-        body="Intro: ${title}",
+        template="Intro: ${title}",
         key="intro",
     )
-    details = TextSection[DetailsParams](
+    details = MarkdownSection[DetailsParams](
         title="Details",
-        body="Details: ${body}",
+        template="Details: ${body}",
         key="details",
     )
-    outro = TextSection[OutroParams](
+    outro = MarkdownSection[OutroParams](
         title="Outro",
-        body="Outro: ${footer}",
+        template="Outro: ${footer}",
         key="outro",
-        defaults=OutroParams(footer="bye"),
+        default_params=OutroParams(footer="bye"),
     )
     return Prompt(
         ns="tests/prompts",
@@ -85,27 +85,27 @@ class SummaryParams:
 
 
 def build_nested_prompt() -> Prompt:
-    leaf = TextSection[LeafParams](
+    leaf = MarkdownSection[LeafParams](
         title="Leaf",
-        body="Leaf: ${note}",
+        template="Leaf: ${note}",
         key="leaf",
     )
-    child = TextSection[ChildNestedParams](
+    child = MarkdownSection[ChildNestedParams](
         title="Child",
-        body="Child detail: ${detail}",
+        template="Child detail: ${detail}",
         key="child",
         children=[leaf],
     )
-    parent = TextSection[ParentToggleParams](
+    parent = MarkdownSection[ParentToggleParams](
         title="Parent",
-        body="Parent: ${heading}",
+        template="Parent: ${heading}",
         key="parent",
         children=[child],
         enabled=lambda params: params.include_children,
     )
-    summary = TextSection[SummaryParams](
+    summary = MarkdownSection[SummaryParams](
         title="Summary",
-        body="Summary: ${summary}",
+        template="Summary: ${summary}",
         key="summary",
     )
     return Prompt(
@@ -213,13 +213,13 @@ def test_prompt_render_wraps_template_errors_with_context():
     class ErrorParams:
         value: str
 
-    class ExplodingSection(TextSection[ErrorParams]):
+    class ExplodingSection(MarkdownSection[ErrorParams]):
         def render(self, params: ErrorParams, depth: int) -> str:
             raise ValueError("boom")
 
     section = ExplodingSection(
         title="Explode",
-        body="unused",
+        template="unused",
         key="explode",
     )
     prompt = Prompt(ns="tests/prompts", key="render-error", sections=[section])
@@ -240,9 +240,9 @@ def test_prompt_render_propagates_enabled_errors():
     def raising_enabled(params: ToggleParams) -> bool:
         raise RuntimeError("enabled failure")
 
-    section = TextSection[ToggleParams](
+    section = MarkdownSection[ToggleParams](
         title="Guard",
-        body="Guard: ${flag}",
+        template="Guard: ${flag}",
         key="guard",
         enabled=raising_enabled,
     )

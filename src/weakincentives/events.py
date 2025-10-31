@@ -19,11 +19,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from .prompts._types import SupportsDataclass
+from .prompt._types import SupportsDataclass
 
 if TYPE_CHECKING:
     from .adapters.core import PromptResponse
-    from .prompts.tool import ToolResult
+    from .prompt.tool import ToolResult
 
 EventHandler = Callable[[object], None]
 
@@ -79,7 +79,7 @@ class PromptExecuted:
 
     prompt_name: str
     adapter: str
-    response: PromptResponse[object]
+    result: PromptResponse[object]
 
 
 @dataclass(slots=True, frozen=True)

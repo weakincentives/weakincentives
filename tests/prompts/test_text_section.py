@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from weakincentives.prompts import PromptRenderError, TextSection
+from weakincentives.prompt import MarkdownSection, PromptRenderError
 
 
 @dataclass
@@ -26,9 +26,9 @@ class GreetingParams:
 
 
 def test_text_section_renders_heading_and_body() -> None:
-    section = TextSection[GreetingParams](
+    section = MarkdownSection[GreetingParams](
         title="Greeting",
-        body="""
+        template="""
             Greeting:
             ${greeting}
         """,
@@ -45,9 +45,9 @@ def test_text_section_performs_strict_substitution() -> None:
     class PlaceholderParams:
         value: str
 
-    section = TextSection[PlaceholderParams](
+    section = MarkdownSection[PlaceholderParams](
         title="Placeholder Demo",
-        body="Value: ${value}",
+        template="Value: ${value}",
         key="placeholder-demo",
     )
 
@@ -61,9 +61,9 @@ def test_text_section_supports_slotted_dataclass_params() -> None:
     class SlottedParams:
         value: str
 
-    section = TextSection[SlottedParams](
+    section = MarkdownSection[SlottedParams](
         title="Slots",
-        body="Slot value: ${value}",
+        template="Slot value: ${value}",
         key="slots",
     )
 
@@ -73,9 +73,9 @@ def test_text_section_supports_slotted_dataclass_params() -> None:
 
 
 def test_text_section_rejects_non_dataclass_params() -> None:
-    section = TextSection[SimpleNamespace](
+    section = MarkdownSection[SimpleNamespace](
         title="Reject",
-        body="Value: ${value}",
+        template="Value: ${value}",
         key="reject",
     )
 

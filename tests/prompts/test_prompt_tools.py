@@ -17,9 +17,9 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompts import Prompt, Section, TextSection
-from weakincentives.prompts.errors import PromptValidationError
-from weakincentives.prompts.tool import Tool
+from weakincentives.prompt import MarkdownSection, Prompt, Section
+from weakincentives.prompt.errors import PromptValidationError
+from weakincentives.prompt.tool import Tool
 
 
 @dataclass
@@ -82,26 +82,26 @@ def _build_prompt() -> tuple[
     primary_tool = _build_primary_tool()
     secondary_tool = _build_secondary_tool()
 
-    primary_section = TextSection[PrimarySectionParams](
+    primary_section = MarkdownSection[PrimarySectionParams](
         title="Primary",
-        body="",
+        template="",
         key="primary",
         tools=[primary_tool],
-        defaults=PrimarySectionParams(),
+        default_params=PrimarySectionParams(),
     )
-    guidance = TextSection[GuidanceParams](
+    guidance = MarkdownSection[GuidanceParams](
         title="Guidance",
-        body="Use ${primary_tool} when available.",
+        template="Use ${primary_tool} when available.",
         key="guidance",
         enabled=lambda params: params.allow_tools,
         children=[primary_section],
     )
-    secondary = TextSection[SecondaryToggleParams](
+    secondary = MarkdownSection[SecondaryToggleParams](
         title="Secondary",
-        body="",
+        template="",
         key="secondary",
         tools=[secondary_tool],
-        defaults=SecondaryToggleParams(enabled=True),
+        default_params=SecondaryToggleParams(enabled=True),
         enabled=lambda params: params.enabled,
     )
 
@@ -138,19 +138,19 @@ def test_prompt_tools_depth_first_and_enablement() -> None:
 
 
 def test_prompt_tools_rejects_duplicate_tool_names() -> None:
-    first_section = TextSection[PrimarySectionParams](
+    first_section = MarkdownSection[PrimarySectionParams](
         title="First Tools",
-        body="",
+        template="",
         key="first-tools",
         tools=[_build_primary_tool()],
-        defaults=PrimarySectionParams(),
+        default_params=PrimarySectionParams(),
     )
-    second_section = TextSection[SecondaryToggleParams](
+    second_section = MarkdownSection[SecondaryToggleParams](
         title="Second Tools",
-        body="",
+        template="",
         key="second-tools",
         tools=[_build_primary_tool()],
-        defaults=SecondaryToggleParams(),
+        default_params=SecondaryToggleParams(),
     )
 
     with pytest.raises(PromptValidationError) as error_info:
@@ -173,19 +173,19 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
         handler=None,
     )
 
-    first_section = TextSection[PrimarySectionParams](
+    first_section = MarkdownSection[PrimarySectionParams](
         title="Primary",
-        body="",
+        template="",
         key="primary",
         tools=[primary_tool],
-        defaults=PrimarySectionParams(),
+        default_params=PrimarySectionParams(),
     )
-    second_section = TextSection[SecondaryToggleParams](
+    second_section = MarkdownSection[SecondaryToggleParams](
         title="Alternate",
-        body="",
+        template="",
         key="alternate",
         tools=[alternate_tool],
-        defaults=SecondaryToggleParams(),
+        default_params=SecondaryToggleParams(),
     )
 
     prompt = Prompt(
@@ -226,12 +226,12 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     tool = _build_primary_tool()
     tool.params_type = str  # type: ignore[assignment]
 
-    section = TextSection[PrimarySectionParams](
+    section = MarkdownSection[PrimarySectionParams](
         title="Primary",
-        body="",
+        template="",
         key="primary",
         tools=[tool],
-        defaults=PrimarySectionParams(),
+        default_params=PrimarySectionParams(),
     )
 
     with pytest.raises(PromptValidationError) as error_info:

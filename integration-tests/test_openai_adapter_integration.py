@@ -21,7 +21,7 @@ import pytest
 
 from weakincentives.adapters import OpenAIAdapter
 from weakincentives.events import NullEventBus
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
 
 pytest.importorskip("openai")
 
@@ -98,9 +98,9 @@ class ReviewFinding:
 
 
 def _build_greeting_prompt() -> Prompt:
-    greeting_section = TextSection[GreetingParams](
+    greeting_section = MarkdownSection[GreetingParams](
         title="Greeting",
-        body=(
+        template=(
             "You are a concise assistant. Provide a short friendly greeting for ${audience}."
         ),
         key="greeting",
@@ -117,7 +117,7 @@ def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
     def uppercase_tool(params: TransformRequest) -> ToolResult[TransformResult]:
         transformed = params.text.upper()
         message = f"Transformed '{params.text}' to uppercase."
-        return ToolResult(message=message, payload=TransformResult(text=transformed))
+        return ToolResult(message=message, value=TransformResult(text=transformed))
 
     return Tool[TransformRequest, TransformResult](
         name="uppercase_text",
@@ -129,9 +129,9 @@ def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
 def _build_tool_prompt(
     tool: Tool[TransformRequest, TransformResult],
 ) -> Prompt:
-    instruction_section = TextSection[TransformRequest](
+    instruction_section = MarkdownSection[TransformRequest](
         title="Instruction",
-        body=(
+        template=(
             "You must call the `uppercase_text` tool exactly once using the "
             'payload {"text": "${text}"}. After the tool response is '
             "observed, reply to the user summarizing the uppercase text."
@@ -148,9 +148,9 @@ def _build_tool_prompt(
 
 
 def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
-    analysis_section = TextSection[ReviewParams](
+    analysis_section = MarkdownSection[ReviewParams](
         title="Analysis Task",
-        body=(
+        template=(
             "Review the provided passage and produce a concise summary and sentiment label.\n"
             "Passage:\n${text}\n\n"
             "Use only the available response schema and keep strings short."
@@ -166,9 +166,9 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
 
 
 def _build_structured_list_prompt() -> Prompt[list[ReviewFinding]]:
-    analysis_section = TextSection[ReviewParams](
+    analysis_section = MarkdownSection[ReviewParams](
         title="Analysis Task",
-        body=(
+        template=(
             "Review the provided passage and produce between one and two findings.\n"
             "Each finding must include a summary and sentiment label using the schema."
         ),
@@ -211,7 +211,7 @@ def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
     first_call = response.tool_results[0]
     assert first_call.name == tool.name
     assert first_call.params.text
-    assert first_call.result.payload.text == first_call.params.text.upper()
+    assert first_call.result.value.text == first_call.params.text.upper()
     assert first_call.result.message
 
     assert response.text is not None and response.text.strip()

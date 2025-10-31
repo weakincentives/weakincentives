@@ -17,12 +17,12 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompts import (
+from weakincentives.prompt import (
+    MarkdownSection,
     Prompt,
     PromptRenderError,
     PromptValidationError,
     Section,
-    TextSection,
 )
 
 
@@ -37,9 +37,9 @@ class UnregisteredParams:
 
 
 def test_prompt_render_rejects_unregistered_params_type() -> None:
-    section = TextSection[RegisteredParams](
+    section = MarkdownSection[RegisteredParams](
         title="Registered",
-        body="Registered: ${value}",
+        template="Registered: ${value}",
         key="registered",
     )
     prompt = Prompt(
@@ -64,9 +64,9 @@ class NullConstructedParams:
 
 
 def test_prompt_render_detects_constructor_returning_none() -> None:
-    section = TextSection[NullConstructedParams](
+    section = MarkdownSection[NullConstructedParams](
         title="Null",
-        body="Null body",
+        template="Null body",
         key="null",
     )
     prompt = Prompt(
@@ -142,10 +142,10 @@ class DefaultsParams:
 
 
 def test_prompt_register_validates_defaults_type() -> None:
-    section = TextSection[DefaultsParams](
+    section = MarkdownSection[DefaultsParams](
         title="Defaults",
-        body="Defaults",
-        defaults=cast(Any, DefaultsParams),
+        template="Defaults",
+        default_params=cast(Any, DefaultsParams),
         key="defaults",
     )
 
@@ -172,10 +172,10 @@ class OtherParams:
 
 
 def test_prompt_register_requires_defaults_type_match() -> None:
-    section = TextSection[DefaultsMismatchParams](
+    section = MarkdownSection[DefaultsMismatchParams](
         title="Mismatch",
-        body="Mismatch",
-        defaults=cast(Any, OtherParams(value="x")),
+        template="Mismatch",
+        default_params=cast(Any, OtherParams(value="x")),
         key="mismatch",
     )
 
@@ -216,9 +216,9 @@ class HeadingOnlyParams:
 
 
 def test_text_section_returns_heading_when_body_empty() -> None:
-    section = TextSection[HeadingOnlyParams](
+    section = MarkdownSection[HeadingOnlyParams](
         title="Heading",
-        body="\n",
+        template="\n",
         key="heading",
     )
 
@@ -234,9 +234,9 @@ class PlaceholderNamesParams:
 
 
 def test_text_section_placeholder_names_cover_named_and_braced() -> None:
-    section = TextSection[PlaceholderNamesParams](
+    section = MarkdownSection[PlaceholderNamesParams](
         title="Placeholders",
-        body="Value: $value and ${other}",
+        template="Value: $value and ${other}",
         key="placeholders",
     )
 

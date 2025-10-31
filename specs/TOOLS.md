@@ -32,11 +32,11 @@ co-located while reusing the existing section hierarchy for ordering and enablem
 
 ### `ToolResult` Dataclass
 
-Tools return structured data that pairs a language-model-facing message with typed payload metadata. `ToolResult[PayloadT]`
+Tools return structured data that pairs a language-model-facing message with typed value metadata. `ToolResult[PayloadT]`
 instances capture that response tuple, and every tool handler returns one directly:
 
 - `message: str` – short textual reply returned to the LLM.
-- `payload: PayloadT` – strongly typed result produced by the tool's business logic. The payload type is declared on the
+- `value: PayloadT` – strongly typed result produced by the tool's business logic. The payload type is declared on the
   `Tool` so downstream adapters can reason about the schema without guessing.
 
 ### `Tool` Dataclass
@@ -59,7 +59,7 @@ dataclass *types* through their generic parameters—no redundant instance plumb
 `Section.__init__` accepts an optional `tools` sequence. Sections normalize the sequence into a tuple, validate each entry
 is a `Tool`, and expose the collection via `Section.tools()`. Because every section shares this capability, authors can:
 
-- Attach tools to existing `TextSection`s without creating new subclasses.
+- Attach tools to existing `MarkdownSection`s without creating new subclasses.
 - Associate tools with otherwise minimal sections that only emit headings or act as grouping nodes.
 - Allow child sections to contribute additional tooling while parent enablement gates the entire branch.
 
@@ -90,7 +90,7 @@ or call handlers directly.
 
 ```python
 from dataclasses import dataclass, field
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.prompt import Prompt, MarkdownSection, Tool, ToolResult
 
 @dataclass
 class LookupParams:
@@ -113,7 +113,7 @@ class ToolDescriptionParams:
 def lookup_handler(params: LookupParams) -> ToolResult[LookupResult]:
     result = LookupResult(entity_id=params.entity_id, document_url="https://example.com")
     message = f"Fetched entity {result.entity_id}."
-    return ToolResult(message=message, payload=result)
+    return ToolResult(message=message, value=result)
 
 lookup_tool = Tool[LookupParams, LookupResult](
     name="lookup_entity",
@@ -124,19 +124,19 @@ lookup_tool = Tool[LookupParams, LookupResult](
 tooling_overview = Prompt(
     name="tools_overview",
     sections=[
-        TextSection[GuidanceParams](
+        MarkdownSection[GuidanceParams](
             title="Guidance",
-            body="""
+            template="""
             Use tools when you need up-to-date context. Prefer ${primary_tool} for critical lookups.
             """,
             children=[
-                TextSection[ToolDescriptionParams](
+                MarkdownSection[ToolDescriptionParams](
                     title="Available Tools",
-                    body="""
+                    template="""
                     Invoke ${primary_tool} whenever you need fresh entity context.
                     """,
                     tools=[lookup_tool],
-                    defaults=ToolDescriptionParams(),
+                    default_params=ToolDescriptionParams(),
                 )
             ],
         )
@@ -152,7 +152,7 @@ tools = rendered.tools
 assert tools[0].name == "lookup_entity"
 ```
 
-In the example the nested `TextSection` documents the tooling guidance while registering the `lookup_entity` tool. Because
+In the example the nested `MarkdownSection` documents the tooling guidance while registering the `lookup_entity` tool. Because
 sections own their tool collections directly, no additional subclasses are needed to describe a toolbox.
 
 ## Validation and Error Handling

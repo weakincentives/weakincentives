@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar
 
 from ..events import EventBus, ToolInvoked
-from ..prompts._types import SupportsDataclass
-from ..prompts.prompt import Prompt
+from ..prompt._types import SupportsDataclass
+from ..prompt.prompt import Prompt
 
 OutputT = TypeVar("OutputT")
 
@@ -58,13 +58,13 @@ class PromptEvaluationError(RuntimeError):
         message: str,
         *,
         prompt_name: str,
-        stage: str,
+        phase: str,
         provider_payload: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.prompt_name = prompt_name
-        self.stage = stage
+        self.phase = phase
         self.provider_payload = provider_payload
 
 

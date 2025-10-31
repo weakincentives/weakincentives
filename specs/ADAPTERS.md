@@ -47,7 +47,7 @@ Implementations own the provider client and any serialization glue needed for th
 provided `Prompt` instance.
 
 - `params`: Positional dataclass instances forwarded to `prompt.render(*params)`; adapters must preserve type matching.
-- `parse_output`: When `True`, adapters call `parse_output` on the final message if the prompt declares structured
+- `parse_output`: When `True`, adapters call `parse_structured_output` on the final message if the prompt declares structured
   output; disable to keep only the raw text.
 - `bus`: Evaluation-scoped event dispatcher supplied by the caller. Pass `NullEventBus()` to discard telemetry or reuse a
   shared bus when coordinating multiple adapters within the same request.
@@ -86,7 +86,7 @@ that subscribe to `ToolInvoked` will receive the identical objects stored on the
 1. **Repeat** – Continue the call-tool-respond loop until the provider returns a final assistant message with no further
    tool invocations.
 1. **Assemble Response** – Populate `PromptResponse` with the final text. If `rendered.output_type` is present and
-   `parse_output` is `True`, call `parse_output(final_text, rendered)` to produce `output`; otherwise leave it as
+   `parse_output` is `True`, call `parse_structured_output(final_text, rendered)` to produce `output`; otherwise leave it as
    `None`.
 1. **Return** – Hand the fully populated `PromptResponse` back to the caller.
 
@@ -112,7 +112,7 @@ Raise `PromptEvaluationError` (new exception type in the adapters package) for:
 The exception should expose:
 
 - `prompt_name`
-- `stage` (`"request"`, `"tool"`, `"response"`, etc.)
+- `phase` (`"request"`, `"tool"`, `"response"`, etc.)
 - Provider-specific diagnostics (status code, request id)
 - The original exception or payload when relevant
 
@@ -130,7 +130,7 @@ from dataclasses import dataclass
 
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.events import InProcessEventBus
-from weakincentives.prompts import Prompt, TextSection
+from weakincentives.prompt import Prompt, MarkdownSection
 
 
 @dataclass
@@ -144,9 +144,9 @@ bus = InProcessEventBus()
 prompt = Prompt(
     name="draft_reply",
     sections=[
-        TextSection[MessageParams](
+        MarkdownSection[MessageParams](
             title="Task",
-            body="Please draft a reply to ${sender} about ${topic}.",
+            template="Please draft a reply to ${sender} about ${topic}.",
         )
     ],
 )
@@ -157,7 +157,7 @@ response = adapter.evaluate(
 )
 print(response.text or response.output)
 for call in response.tool_results:
-    print(call.name, call.result.payload)
+    print(call.name, call.result.value)
 ```
 
 The caller supplies the prompt and dataclass params, the adapter handles rendering, provider interaction, tool execution,

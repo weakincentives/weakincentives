@@ -25,11 +25,11 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_]{1,64}$")
 
 
 @dataclass(slots=True)
-class ToolResult[ResultPayloadT]:
+class ToolResult[ResultValueT]:
     """Structured response emitted by a tool handler."""
 
     message: str
-    payload: ResultPayloadT
+    value: ResultValueT
 
 
 @dataclass(slots=True)

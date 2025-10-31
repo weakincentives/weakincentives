@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from weakincentives import MarkdownSection, Prompt, Tool, ToolResult
 from weakincentives.adapters import OpenAIAdapter
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 from weakincentives.serde import dump
 from weakincentives.session import (
     DataEvent,
@@ -96,7 +96,7 @@ class ToolCallLog:
     name: str
     prompt_name: str
     message: str
-    payload: dict[str, Any]
+    value: dict[str, Any]
     call_id: str | None
 
 
@@ -126,7 +126,7 @@ KNOWLEDGE_BASE: dict[str, str] = {
 
 def echo_text_handler(params: EchoToolParams) -> ToolResult[EchoToolResult]:
     result = EchoToolResult(text=params.text.upper())
-    return ToolResult(message=f"Echoed text: {result.text}", payload=result)
+    return ToolResult(message=f"Echoed text: {result.text}", value=result)
 
 
 def _insecure_eval_math(expression: str) -> float:
@@ -140,10 +140,10 @@ def solve_math_handler(params: MathToolParams) -> ToolResult[MathToolResult]:
         value = _insecure_eval_math(params.expression)
     except Exception as error:
         message = f"Unable to evaluate expression: {error}"
-        return ToolResult(message=message, payload=MathToolResult(value=float("nan")))
+        return ToolResult(message=message, value=MathToolResult(value=float("nan")))
     return ToolResult(
         message=f"Computed result is {value}.",
-        payload=MathToolResult(value=value),
+        value=MathToolResult(value=value),
     )
 
 
@@ -161,7 +161,7 @@ def search_notes_handler(
         )
     return ToolResult(
         message="Knowledge search complete.",
-        payload=SearchNotesToolResult(matches=matches),
+        value=SearchNotesToolResult(matches=matches),
     )
 
 
@@ -181,7 +181,7 @@ def current_time_handler(
     message = f"Current time in {timezone_name} is {formatted}."
     return ToolResult(
         message=message,
-        payload=CurrentTimeToolResult(timestamp=formatted),
+        value=CurrentTimeToolResult(timestamp=formatted),
     )
 
 
@@ -211,9 +211,9 @@ def _build_tools() -> tuple[Tool[Any, Any], ...]:
 
 def build_prompt() -> Prompt:
     tools = _build_tools()
-    tool_overview = TextSection[AgentGuidance](
+    tool_overview = MarkdownSection[AgentGuidance](
         title="Available Tools",
-        body=textwrap.dedent(
+        template=textwrap.dedent(
             """
             You can interact with four tools during the conversation:
             - ${primary_tool}: uppercases any provided text.
@@ -225,21 +225,21 @@ def build_prompt() -> Prompt:
         tools=tools,
         key="available-tools",
     )
-    guidance_section = TextSection[AgentGuidance](
+    guidance_section = MarkdownSection[AgentGuidance](
         title="Agent Guidance",
-        body=(
+        template=(
             "You are a demo assistant that follows a Reason + Act pattern. When a user "
             "asks for help, think through the request, decide whether a tool is "
             "needed, call it, observe the result, and then reply with a concise "
             "answer grounded in those observations."
         ),
-        defaults=AgentGuidance(),
+        default_params=AgentGuidance(),
         children=[tool_overview],
         key="agent-guidance",
     )
-    user_turn_section = TextSection[UserTurnParams](
+    user_turn_section = MarkdownSection[UserTurnParams](
         title="User Turn",
-        body=(
+        template=(
             "The user has provided a new instruction. Use it to decide whether to "
             "call tools or respond directly.\n\nInstruction:\n${content}"
         ),
@@ -271,7 +271,7 @@ class OpenAIReActSession:
 
     def _display_tool_event(self, event: ToolInvoked) -> None:
         serialized_params = dump(event.params, exclude_none=True)
-        payload = dump(event.result.payload, exclude_none=True)
+        payload = dump(event.result.value, exclude_none=True)
         print(
             f"[tool] {event.name} called with {serialized_params}\n"
             f"       → {event.result.message}"
@@ -311,8 +311,8 @@ class OpenAIReActSession:
             )
             if record.call_id:
                 lines.append(f"   call_id: {record.call_id}")
-            if record.payload:
-                payload_dump = json.dumps(record.payload, ensure_ascii=False)
+            if record.value:
+                payload_dump = json.dumps(record.value, ensure_ascii=False)
                 lines.append(f"   payload: {payload_dump}")
         return "\n".join(lines)
 
@@ -344,7 +344,7 @@ class OpenAIReActSession:
             name=event.source.name,
             prompt_name=event.source.prompt_name,
             message=event.source.result.message,
-            payload=payload,
+            value=payload,
             call_id=event.source.call_id,
         )
         return slice_values + (record,)

@@ -28,7 +28,7 @@ from .section import Section
 from .tool import Tool
 from .versioning import PromptVersionStore, ToolOverride
 
-_EMPTY_TOOL_FIELD_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
+_EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,13 +37,13 @@ class RenderedPrompt[OutputT]:
 
     text: str
     output_type: type[Any] | None
-    output_container: Literal["object", "array"] | None
+    container: Literal["object", "array"] | None
     allow_extra_keys: bool | None
     _tools: tuple[Tool[SupportsDataclass, SupportsDataclass], ...] = field(
         default_factory=tuple
     )
-    _tool_param_field_descriptions: Mapping[str, Mapping[str, str]] = field(
-        default=_EMPTY_TOOL_FIELD_DESCRIPTIONS
+    _tool_param_descriptions: Mapping[str, Mapping[str, str]] = field(
+        default=_EMPTY_TOOL_PARAM_DESCRIPTIONS
     )
 
     def __str__(self) -> str:  # pragma: no cover - convenience for logging
@@ -56,12 +56,12 @@ class RenderedPrompt[OutputT]:
         return self._tools
 
     @property
-    def tool_param_field_descriptions(
+    def tool_param_descriptions(
         self,
     ) -> Mapping[str, Mapping[str, str]]:
         """Description patches keyed by tool name."""
 
-        return self._tool_param_field_descriptions
+        return self._tool_param_descriptions
 
 
 def _clone_dataclass(instance: SupportsDataclass) -> SupportsDataclass:
@@ -79,7 +79,7 @@ def _format_specialization_argument(argument: object | None) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class PromptSectionNode[ParamsT: SupportsDataclass]:
+class SectionNode[ParamsT: SupportsDataclass]:
     """Flattened view of a section within a prompt."""
 
     section: Section[ParamsT]
@@ -138,9 +138,9 @@ class Prompt[OutputT]:
             cast(Section[SupportsDataclass], section) for section in sections or ()
         ]
         self._sections: tuple[Section[SupportsDataclass], ...] = tuple(base_sections)
-        self._section_nodes: list[PromptSectionNode[SupportsDataclass]] = []
+        self._section_nodes: list[SectionNode[SupportsDataclass]] = []
         self._params_registry: dict[
-            type[SupportsDataclass], list[PromptSectionNode[SupportsDataclass]]
+            type[SupportsDataclass], list[SectionNode[SupportsDataclass]]
         ] = {}
         self._defaults_by_path: dict[SectionPath, SupportsDataclass] = {}
         self._defaults_by_type: dict[type[SupportsDataclass], SupportsDataclass] = {}
@@ -202,7 +202,7 @@ class Prompt[OutputT]:
         from .versioning import PromptDescriptor
 
         descriptor = PromptDescriptor.from_prompt(self)
-        override = version_store.resolve(descriptor, tag=tag)
+        override = version_store.resolve(descriptor=descriptor, tag=tag)
 
         overrides: dict[SectionPath, str] = {}
         tool_overrides: dict[str, ToolOverride] = {}
@@ -244,7 +244,7 @@ class Prompt[OutputT]:
         path: SectionPath,
         depth: int,
     ) -> None:
-        params_type = section.params
+        params_type = section.param_type
         if not is_dataclass(params_type):
             raise PromptValidationError(
                 "Section params must be a dataclass.",
@@ -252,14 +252,14 @@ class Prompt[OutputT]:
                 dataclass_type=params_type,
             )
 
-        node: PromptSectionNode[SupportsDataclass] = PromptSectionNode(
+        node: SectionNode[SupportsDataclass] = SectionNode(
             section=section, depth=depth, path=path
         )
         self._section_nodes.append(node)
         self._params_registry.setdefault(params_type, []).append(node)
 
-        if section.defaults is not None:
-            default_value = section.defaults
+        if section.default_params is not None:
+            default_value = section.default_params
             if isinstance(default_value, type) or not is_dataclass(default_value):
                 raise PromptValidationError(
                     "Section defaults must be dataclass instances.",
@@ -295,11 +295,11 @@ class Prompt[OutputT]:
             self._register_section(child, path=child_path, depth=depth + 1)
 
     @property
-    def sections(self) -> tuple[PromptSectionNode[SupportsDataclass], ...]:
+    def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
         return tuple(self._section_nodes)
 
     @property
-    def params_types(self) -> set[type[SupportsDataclass]]:
+    def param_types(self) -> set[type[SupportsDataclass]]:
         return set(self._params_registry.keys())
 
     def _resolve_output_spec(
@@ -410,9 +410,9 @@ class Prompt[OutputT]:
                             patched_tool = replace(
                                 tool, description=override.description
                             )
-                        if override.param_field_descriptions:
+                        if override.param_descriptions:
                             field_description_patches[tool.name] = dict(
-                                override.param_field_descriptions
+                                override.param_descriptions
                             )
                     collected_tools.append(patched_tool)
 
@@ -424,23 +424,23 @@ class Prompt[OutputT]:
         return RenderedPrompt(
             text=text,
             output_type=self._output_type,
-            output_container=self._output_container,
+            container=self._output_container,
             allow_extra_keys=self._allow_extra_keys,
             _tools=tuple(collected_tools),
-            _tool_param_field_descriptions=_freeze_tool_param_field_descriptions(
+            _tool_param_descriptions=_freeze_tool_param_descriptions(
                 field_description_patches
             ),
         )
 
     def _render_section(
         self,
-        node: PromptSectionNode[SupportsDataclass],
+        node: SectionNode[SupportsDataclass],
         section_params: SupportsDataclass,
         override_body: str | None,
     ) -> str:
-        params_type = node.section.params
+        params_type = node.section.param_type
         try:
-            render_override = getattr(node.section, "render_with_body", None)
+            render_override = getattr(node.section, "render_with_template", None)
             if override_body is not None and callable(render_override):
                 override_renderer = cast(
                     Callable[[str, SupportsDataclass, int], str],
@@ -469,10 +469,10 @@ class Prompt[OutputT]:
 
     def _resolve_section_params(
         self,
-        node: PromptSectionNode[SupportsDataclass],
+        node: SectionNode[SupportsDataclass],
         param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
     ) -> SupportsDataclass:
-        params_type = node.section.params
+        params_type = node.section.param_type
         section_params: SupportsDataclass | None = param_lookup.get(params_type)
 
         if section_params is None:
@@ -501,7 +501,7 @@ class Prompt[OutputT]:
         param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
         *,
         inject_output_instructions: bool | None = None,
-    ) -> Iterator[tuple[PromptSectionNode[SupportsDataclass], SupportsDataclass]]:
+    ) -> Iterator[tuple[SectionNode[SupportsDataclass], SupportsDataclass]]:
         skip_depth: int | None = None
 
         for node in self._section_nodes:
@@ -523,7 +523,7 @@ class Prompt[OutputT]:
                     raise PromptRenderError(
                         "Section enabled predicate failed.",
                         section_path=node.path,
-                        dataclass_type=node.section.params,
+                        dataclass_type=node.section.param_type,
                     ) from error
 
             if not enabled:
@@ -547,7 +547,7 @@ class Prompt[OutputT]:
                 raise PromptValidationError(
                     "Section tools() must return Tool instances.",
                     section_path=path,
-                    dataclass_type=section.params,
+                    dataclass_type=section.param_type,
                 )
             tool: Tool[SupportsDataclass, SupportsDataclass] = cast(
                 Tool[SupportsDataclass, SupportsDataclass], tool_candidate
@@ -576,10 +576,10 @@ class Prompt[OutputT]:
             self._tool_name_registry[tool.name] = path
 
 
-__all__ = ["Prompt", "PromptSectionNode", "RenderedPrompt"]
+__all__ = ["Prompt", "RenderedPrompt", "SectionNode"]
 
 
-def _freeze_tool_param_field_descriptions(
+def _freeze_tool_param_descriptions(
     descriptions: Mapping[str, dict[str, str]],
 ) -> Mapping[str, Mapping[str, str]]:
     if not descriptions:

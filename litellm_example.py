@@ -20,9 +20,9 @@ import textwrap
 from dataclasses import dataclass
 from typing import Any
 
+from weakincentives import MarkdownSection, Prompt, Tool, ToolResult
 from weakincentives.adapters import LiteLLMAdapter
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
 from weakincentives.serde import dump
 
 
@@ -63,10 +63,10 @@ def lookup_note(params: LookupParams) -> ToolResult[LookupResult]:
     note = NOTES.get(params.topic.lower())
     if note is None:
         message = "No note found. Try topics like 'pricing' or 'roadmap'."
-        return ToolResult(message=message, payload=LookupResult(note=""))
+        return ToolResult(message=message, value=LookupResult(note=""))
     return ToolResult(
         message=f"Note for {params.topic}: {note}",
-        payload=LookupResult(note=note),
+        value=LookupResult(note=note),
     )
 
 
@@ -76,9 +76,9 @@ def build_prompt() -> Prompt[AgentReply]:
         description="Retrieve a short note for well-known company topics.",
         handler=lookup_note,
     )
-    guidance = TextSection[AgentGuidance](
+    guidance = MarkdownSection[AgentGuidance](
         title="Assistant Guidance",
-        body=textwrap.dedent(
+        template=textwrap.dedent(
             """
             You are a concise assistant that relies on the `lookup_note` tool for
             company knowledge. When you answer questions:
@@ -87,13 +87,13 @@ def build_prompt() -> Prompt[AgentReply]:
             - Provide a JSON reply with your answer and cite any notes you used.
             """
         ).strip(),
-        defaults=AgentGuidance(),
+        default_params=AgentGuidance(),
         tools=[note_tool],
         key="assistant-guidance",
     )
-    user_turn = TextSection[UserTurnParams](
+    user_turn = MarkdownSection[UserTurnParams](
         title="User Question",
-        body="The user asked: ${question}",
+        template="The user asked: ${question}",
         key="user-question",
     )
     return Prompt[AgentReply](
@@ -124,7 +124,7 @@ class LiteLLMReActSession:
 
     def _display_tool_event(self, event: ToolInvoked) -> None:
         serialized_params = dump(event.params, exclude_none=True)
-        payload = dump(event.result.payload, exclude_none=True)
+        payload = dump(event.result.value, exclude_none=True)
         print(
             f"[tool] {event.name} called with {serialized_params}\n"
             f"       → {event.result.message}"

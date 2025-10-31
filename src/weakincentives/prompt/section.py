@@ -37,7 +37,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         *,
         title: str,
         key: str,
-        defaults: ParamsT | None = None,
+        default_params: ParamsT | None = None,
         children: Sequence[object] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
         tools: Sequence[object] | None = None,
@@ -51,10 +51,10 @@ class Section[ParamsT: SupportsDataclass](ABC):
             )
 
         self.params_type: type[ParamsT] = params_type
-        self.params: type[ParamsT] = params_type
+        self.param_type: type[ParamsT] = params_type
         self.title = title
         self.key = self._normalize_key(key)
-        self.defaults = defaults
+        self.default_params = default_params
 
         normalized_children: list[Section[SupportsDataclass]] = []
         for child in children or ():

@@ -28,7 +28,13 @@ ______________________________________________________________________
 
 ````python
 from dataclasses import dataclass
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult, parse_output
+from weakincentives import (
+    MarkdownSection,
+    Prompt,
+    Tool,
+    ToolResult,
+    parse_structured_output,
+)
 
 # ---- Inputs & outputs (dataclasses = your contract) ----
 @dataclass
@@ -52,7 +58,7 @@ class ResearchSummary:
 # ---- Local tool (typed params → typed result) ----
 def lookup_source(params: SourceLookup) -> ToolResult[SourceDetails]:
     details = SourceDetails(source_id=params.source_id, title="Ada Lovelace Archive")
-    return ToolResult(message=f"Loaded {details.title}", payload=details)
+    return ToolResult(message=f"Loaded {details.title}", value=details)
 
 catalog_tool = Tool[SourceLookup, SourceDetails](
     name="catalog_lookup",
@@ -61,9 +67,9 @@ catalog_tool = Tool[SourceLookup, SourceDetails](
 )
 
 # ---- Prompt with a tool and a typed JSON output ----
-research_section = TextSection[ResearchGuidance](
+research_section = MarkdownSection[ResearchGuidance](
     title="Task",
-    body=(
+    template=(
         "Research ${topic}. Use the `catalog_lookup` tool for citations and return "
         "a JSON summary with citations."
     ),
@@ -87,7 +93,7 @@ reply = """```json
   "citations": ["catalog_lookup:ada-archive"]
 }
 ```"""
-parsed = parse_output(reply, rendered)
+parsed = parse_structured_output(reply, rendered)
 print(parsed.summary)
 print(parsed.citations)
 ````
@@ -97,11 +103,11 @@ ______________________________________________________________________
 ## Key Ideas (at a glance)
 
 - **Typed prompts, deterministic renders**
-  `Prompt` + `TextSection` compose markdown with strict placeholder checks. Missing or unknown fields error early.
+  `Prompt` + `MarkdownSection` compose markdown with strict placeholder checks. Missing or unknown fields error early.
 - **Tools live where they’re documented**
   Attach `Tool[Params, Result]` to any section. Handlers run **locally**; models only see the short tool message.
 - **Strict JSON output**
-  Declare `Prompt[T]` or `Prompt[list[T]]` and get a built-in “Response Format” section plus a strict `parse_output(...)`.
+  Declare `Prompt[T]` or `Prompt[list[T]]` and get a built-in “Response Format” section plus a strict `parse_structured_output(...)` helper.
 - **Stdlib serde, zero heavy deps**
   `parse`, `dump`, `clone`, `schema` give Pydantic-like ergonomics with dataclasses only.
 - **Quiet, predictable runtime**
@@ -185,7 +191,7 @@ ______________________________________________________________________
 ### Project Layout
 
 - `src/weakincentives/` — package root
-- `src/weakincentives/prompts/` — prompt, section, tool primitives
+- `src/weakincentives/prompt/` — prompt, section, tool primitives
 - `src/weakincentives/adapters/` — optional provider integrations
 - `tests/` — coverage for prompts, tools, adapters
 - `specs/` — design docs (see `specs/PROMPTS.md` for prompt requirements)

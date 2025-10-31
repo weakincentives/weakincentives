@@ -9,7 +9,7 @@ External optimization services need a stable way to identify prompts and to over
 - **Namespace (`ns`)** – Required string that groups related prompts (e.g., `webapp/agents`). Namespaces partition override storage and lookup.
 - **Prompt key** – Required machine identifier for every `Prompt` within an `ns`. Distinct from the optional human-readable `name`.
 - **Section key** – Required machine identifier for every `Section`. Keys compose into ordered tuples (`SectionPath`) that uniquely identify a location inside a prompt.
-- **Hash-aware section** – A section type (currently `TextSection` and subclasses such as `ResponseFormatSection`) whose original body template participates in content hashing.
+- **Hash-aware section** – A section type (currently `MarkdownSection` and subclasses such as `ResponseFormatSection`) whose original body template participates in content hashing.
 - **Content hash** – Deterministic digest (SHA-256) of a hash-aware section’s original body template as written in source control. Runtime overrides never change the descriptor hash.
 - **Lookup key** – The quadruple `(ns, prompt_key, section_path, expected_hash)` used to decide whether an override still applies.
 - **Tag** – Free-form label (e.g., `latest`, `stable`, `experiment-a`) that callers use to request a specific family of overrides.
@@ -120,8 +120,8 @@ A convenience `render` method MAY delegate to `render_with_overrides` when no st
 ```python
 from dataclasses import dataclass
 
-from weakincentives.prompts import Prompt, TextSection
-from weakincentives.prompts.versioning import (
+from weakincentives.prompt import Prompt, MarkdownSection
+from weakincentives.prompt.versioning import (
     PromptDescriptor,
     PromptOverride,
     PromptVersionStore,
@@ -137,15 +137,15 @@ prompt = Prompt(
     ns="demo",
     key="welcome_prompt",
     sections=[
-        TextSection[GreetingParams](
+        MarkdownSection[GreetingParams](
             key="system",
             title="System",
-            body="You are a concise assistant. Greet ${audience} politely.",
+            template="You are a concise assistant. Greet ${audience} politely.",
         ),
-        TextSection[GreetingParams](
+        MarkdownSection[GreetingParams](
             key="closing",
             title="Closing",
-            body="Say goodbye to ${audience}.",
+            template="Say goodbye to ${audience}.",
         ),
     ],
 )
@@ -175,14 +175,14 @@ class MemoryStore(PromptVersionStore):
 
     def resolve(
         self,
-        description: PromptDescriptor,
+        descriptor: PromptDescriptor,
         tag: str = "latest",
     ) -> PromptOverride | None:
         overrides: dict[tuple[str, ...], str] = {}
-        for section in description.sections:
+        for section in descriptor.sections:
             lookup = (
-                description.ns,
-                description.key,
+                descriptor.ns,
+                descriptor.key,
                 section.path,
                 section.content_hash,
             )
@@ -204,7 +204,7 @@ store.register(
     section_path=descriptor.sections[0].path,
     expected_hash=descriptor.sections[0].content_hash,
     tag="stable",
-    body="You are an enthusiastic assistant. Welcome ${audience} with energy.",
+    template="You are an enthusiastic assistant. Welcome ${audience} with energy.",
 )
 
 rendered = prompt.render_with_overrides(

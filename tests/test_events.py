@@ -23,7 +23,7 @@ from weakincentives.events import (
     PromptExecuted,
     ToolInvoked,
 )
-from weakincentives.prompts.tool import ToolResult
+from weakincentives.prompt.tool import ToolResult
 
 
 def make_prompt_response(prompt_name: str) -> PromptResponse[object]:
@@ -45,7 +45,13 @@ def test_null_event_bus_is_noop() -> None:
     events: list[PromptExecuted] = []
 
     bus.subscribe(PromptExecuted, events.append)
-    bus.publish(PromptExecuted("demo", "test", make_prompt_response("demo")))
+    bus.publish(
+        PromptExecuted(
+            prompt_name="demo",
+            adapter="test",
+            result=make_prompt_response("demo"),
+        )
+    )
 
     assert events == []
 
@@ -63,7 +69,11 @@ def test_in_process_bus_delivers_in_order() -> None:
     bus.subscribe(PromptExecuted, first_handler)
     bus.subscribe(PromptExecuted, second_handler)
 
-    event = PromptExecuted("demo", "test", make_prompt_response("demo"))
+    event = PromptExecuted(
+        prompt_name="demo",
+        adapter="test",
+        result=make_prompt_response("demo"),
+    )
     bus.publish(event)
 
     assert delivered == [event, event]
@@ -82,7 +92,11 @@ def test_in_process_bus_isolates_handler_exceptions(caplog) -> None:
     bus.subscribe(PromptExecuted, bad_handler)
     bus.subscribe(PromptExecuted, good_handler)
 
-    event = PromptExecuted("demo", "test", make_prompt_response("demo"))
+    event = PromptExecuted(
+        prompt_name="demo",
+        adapter="test",
+        result=make_prompt_response("demo"),
+    )
     with caplog.at_level(logging.ERROR, logger="weakincentives.events"):
         bus.publish(event)
 
@@ -101,7 +115,7 @@ class _Payload:
 
 
 def test_tool_invoked_event_fields() -> None:
-    raw_result = ToolResult(message="ok", payload=_Payload(value="data"))
+    raw_result = ToolResult(message="ok", value=_Payload(value="data"))
     result = cast(ToolResult[object], raw_result)
     event = ToolInvoked(
         prompt_name="demo",

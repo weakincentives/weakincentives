@@ -21,11 +21,14 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast
 
 from ..events import EventBus, PromptExecuted, ToolInvoked
-from ..prompts._types import SupportsDataclass
-from ..prompts.prompt import Prompt, RenderedPrompt
-from ..prompts.structured import ARRAY_RESULT_KEY, OutputParseError
-from ..prompts.structured import parse_output as parse_structured_output
-from ..prompts.tool import Tool, ToolResult
+from ..prompt._types import SupportsDataclass
+from ..prompt.prompt import Prompt, RenderedPrompt
+from ..prompt.structured_output import (
+    ARRAY_WRAPPER_KEY,
+    OutputParseError,
+    parse_structured_output,
+)
+from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
 from .core import PromptEvaluationError, PromptResponse
 
@@ -109,6 +112,7 @@ def create_litellm_completion(**kwargs: object) -> LiteLLMCompletion:
 
 
 ToolChoice = Literal["auto"] | Mapping[str, Any] | None
+"""Supported tool choice directives for provider APIs."""
 
 
 class LiteLLMAdapter:
@@ -172,11 +176,11 @@ class LiteLLMAdapter:
         should_parse_structured_output = (
             parse_output
             and rendered.output_type is not None
-            and rendered.output_container is not None
+            and rendered.container is not None
         )
         response_format: dict[str, Any] | None = None
         if should_parse_structured_output:
-            response_format = _build_response_format(rendered, prompt_name)
+            response_format = _build_json_schema_response_format(rendered, prompt_name)
 
         tools = list(rendered.tools)
         tool_specs = [_tool_to_litellm_spec(tool) for tool in tools]
@@ -203,7 +207,7 @@ class LiteLLMAdapter:
                 raise PromptEvaluationError(
                     "LiteLLM request failed.",
                     prompt_name=prompt_name,
-                    stage="request",
+                    phase="request",
                 ) from error
 
             provider_payload = _extract_payload(response)
@@ -222,13 +226,15 @@ class LiteLLMAdapter:
                         try:
                             output = cast(
                                 OutputT,
-                                _parse_provider_payload(parsed_payload, rendered),
+                                _parse_schema_constrained_payload(
+                                    parsed_payload, rendered
+                                ),
                             )
                         except TypeError as error:
                             raise PromptEvaluationError(
                                 str(error),
                                 prompt_name=prompt_name,
-                                stage="response",
+                                phase="response",
                                 provider_payload=provider_payload,
                             ) from error
                     elif final_text:
@@ -238,14 +244,14 @@ class LiteLLMAdapter:
                             raise PromptEvaluationError(
                                 error.message,
                                 prompt_name=prompt_name,
-                                stage="response",
+                                phase="response",
                                 provider_payload=provider_payload,
                             ) from error
                     else:
                         raise PromptEvaluationError(
                             "Provider response did not include structured output.",
                             prompt_name=prompt_name,
-                            stage="response",
+                            phase="response",
                             provider_payload=provider_payload,
                         )
                     text_value = None
@@ -261,7 +267,7 @@ class LiteLLMAdapter:
                     PromptExecuted(
                         prompt_name=prompt_name,
                         adapter="litellm",
-                        response=cast(PromptResponse[object], response),
+                        result=cast(PromptResponse[object], response),
                     )
                 )
                 return response
@@ -283,14 +289,14 @@ class LiteLLMAdapter:
                     raise PromptEvaluationError(
                         f"Unknown tool '{tool_name}' requested by provider.",
                         prompt_name=prompt_name,
-                        stage="tool",
+                        phase="tool",
                         provider_payload=provider_payload,
                     )
                 if tool.handler is None:
                     raise PromptEvaluationError(
                         f"Tool '{tool_name}' does not have a registered handler.",
                         prompt_name=prompt_name,
-                        stage="tool",
+                        phase="tool",
                         provider_payload=provider_payload,
                     )
 
@@ -310,7 +316,7 @@ class LiteLLMAdapter:
                     raise PromptEvaluationError(
                         f"Failed to parse params for tool '{tool_name}'.",
                         prompt_name=prompt_name,
-                        stage="tool",
+                        phase="tool",
                         provider_payload=provider_payload,
                     ) from error
 
@@ -320,7 +326,7 @@ class LiteLLMAdapter:
                     raise PromptEvaluationError(
                         f"Tool '{tool_name}' raised an exception.",
                         prompt_name=prompt_name,
-                        stage="tool",
+                        phase="tool",
                         provider_payload=provider_payload,
                     ) from error
 
@@ -349,11 +355,11 @@ class LiteLLMAdapter:
                     next_tool_choice = "auto"
 
 
-def _build_response_format(
+def _build_json_schema_response_format(
     rendered: RenderedPrompt[Any], prompt_name: str
 ) -> dict[str, Any] | None:
     output_type = rendered.output_type
-    container = rendered.output_container
+    container = rendered.container
     allow_extra_keys = rendered.allow_extra_keys
 
     if output_type is None or container is None:
@@ -369,12 +375,12 @@ def _build_response_format(
             {
                 "type": "object",
                 "properties": {
-                    ARRAY_RESULT_KEY: {
+                    ARRAY_WRAPPER_KEY: {
                         "type": "array",
                         "items": base_schema,
                     }
                 },
-                "required": [ARRAY_RESULT_KEY],
+                "required": [ARRAY_WRAPPER_KEY],
             },
         )
         if not allow_extra_keys:
@@ -436,7 +442,7 @@ def _first_choice(
         raise PromptEvaluationError(
             "Provider response did not include any choices.",
             prompt_name=prompt_name,
-            stage="response",
+            phase="response",
         ) from error
 
 
@@ -466,14 +472,14 @@ def _parse_tool_arguments(
         raise PromptEvaluationError(
             "Failed to decode tool call arguments.",
             prompt_name=prompt_name,
-            stage="tool",
+            phase="tool",
             provider_payload=provider_payload,
         ) from error
     if not isinstance(parsed, Mapping):
         raise PromptEvaluationError(
             "Tool call arguments must be a JSON object.",
             prompt_name=prompt_name,
-            stage="tool",
+            phase="tool",
             provider_payload=provider_payload,
         )
     return dict(cast(Mapping[str, Any], parsed))
@@ -541,9 +547,11 @@ def _parsed_payload_from_part(part: object) -> object | None:
     return None
 
 
-def _parse_provider_payload(payload: object, rendered: RenderedPrompt[Any]) -> object:
+def _parse_schema_constrained_payload(
+    payload: object, rendered: RenderedPrompt[Any]
+) -> object:
     dataclass_type = rendered.output_type
-    container = rendered.output_container
+    container = rendered.container
     allow_extra_keys = rendered.allow_extra_keys
 
     if dataclass_type is None or container is None:
@@ -560,9 +568,9 @@ def _parse_provider_payload(payload: object, rendered: RenderedPrompt[Any]) -> o
 
     if container == "array":
         if isinstance(payload, Mapping):
-            if ARRAY_RESULT_KEY not in payload:
+            if ARRAY_WRAPPER_KEY not in payload:
                 raise TypeError("Expected provider payload to be a JSON array.")
-            payload = cast(Mapping[str, object], payload)[ARRAY_RESULT_KEY]
+            payload = cast(Mapping[str, object], payload)[ARRAY_WRAPPER_KEY]
         if not isinstance(payload, Sequence) or isinstance(
             payload, (str, bytes, bytearray)
         ):

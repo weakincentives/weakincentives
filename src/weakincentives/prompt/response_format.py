@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from .text import TextSection
+from .markdown import MarkdownSection
 
 __all__ = ["ResponseFormatParams", "ResponseFormatSection"]
 
@@ -39,7 +39,7 @@ The top-level JSON value MUST be ${article} ${container} that matches the fields
 of the expected schema${extra_clause}"""
 
 
-class ResponseFormatSection(TextSection[ResponseFormatParams]):
+class ResponseFormatSection(MarkdownSection[ResponseFormatParams]):
     """Internal section that appends JSON-only response instructions."""
 
     def __init__(
@@ -51,7 +51,7 @@ class ResponseFormatSection(TextSection[ResponseFormatParams]):
         super().__init__(
             title="Response Format",
             key="response-format",
-            body=_RESPONSE_FORMAT_BODY,
-            defaults=params,
+            template=_RESPONSE_FORMAT_BODY,
+            default_params=params,
             enabled=enabled,
         )

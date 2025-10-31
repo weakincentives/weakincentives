@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
 
 
 @dataclass
@@ -45,7 +45,7 @@ def _lookup_handler(params: LookupParams) -> ToolResult[LookupResult]:
         document_url="https://example.com",
     )
     message = f"Fetched entity {result.entity_id}."
-    return ToolResult(message=message, payload=result)
+    return ToolResult(message=message, value=result)
 
 
 def test_prompt_tools_integration_example() -> None:
@@ -55,17 +55,17 @@ def test_prompt_tools_integration_example() -> None:
         handler=_lookup_handler,
     )
 
-    tools_section = TextSection[ToolDescriptionParams](
+    tools_section = MarkdownSection[ToolDescriptionParams](
         title="Available Tools",
-        body="Invoke ${primary_tool} whenever you need fresh entity context.",
+        template="Invoke ${primary_tool} whenever you need fresh entity context.",
         key="available-tools",
         tools=[lookup_tool],
-        defaults=ToolDescriptionParams(),
+        default_params=ToolDescriptionParams(),
     )
 
-    guidance = TextSection[GuidanceParams](
+    guidance = MarkdownSection[GuidanceParams](
         title="Guidance",
-        body=(
+        template=(
             "Use tools when you need up-to-date context. "
             "Prefer ${primary_tool} for critical lookups."
         ),

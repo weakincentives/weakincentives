@@ -37,7 +37,7 @@ The OpenAI adapter already renders prompts into a `RenderedPrompt` object that c
 1. When OpenAI returns parsed content (e.g., via `message.parsed` or a content part typed as `output_json`), deserialize that payload directly into the target dataclass using the existing serde parsing helpers.
 1. Skip the fallback JSON extraction when the parsed payload succeeds.
 1. If the provider response lacks parsed data, continue using `parse_structured_output` on the assistant's text message.
-1. Propagate failures as `PromptEvaluationError` with the `"response"` stage to align with existing error handling.
+1. Propagate failures as `PromptEvaluationError` with the `"response"` phase to align with existing error handling.
 
 ## Prompt Instructions
 
