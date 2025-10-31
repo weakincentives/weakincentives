@@ -20,7 +20,9 @@ from typing import Any, Final, Literal, cast
 from ..serde.dataclass_serde import parse as parse_dataclass
 from .prompt import RenderedPrompt
 
-__all__ = ["OutputParseError", "parse_output"]
+__all__ = ["ARRAY_RESULT_KEY", "OutputParseError", "parse_output"]
+
+ARRAY_RESULT_KEY: Final[str] = "items"
 
 _JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"```json\s*\n(.*?)```", re.IGNORECASE | re.DOTALL
@@ -74,6 +76,13 @@ def parse_output[PayloadT](
         return cast(PayloadT, parsed)
 
     if container == "array":
+        if isinstance(payload, Mapping):
+            if ARRAY_RESULT_KEY not in payload:
+                raise OutputParseError(
+                    "Expected top-level JSON array.",
+                    dataclass_type=dataclass_type,
+                )
+            payload = cast(Mapping[str, object], payload)[ARRAY_RESULT_KEY]
         if not isinstance(payload, list):
             raise OutputParseError(
                 "Expected top-level JSON array.",

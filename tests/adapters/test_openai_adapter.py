@@ -29,6 +29,8 @@ from weakincentives.events import (
     ToolInvoked,
 )
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.prompts.prompt import RenderedPrompt
+from weakincentives.prompts.structured import ARRAY_RESULT_KEY
 
 MODULE_PATH = "weakincentives.adapters.openai"
 
@@ -208,16 +210,27 @@ class _DummyMessage:
     def __init__(
         self,
         *,
-        content: str | None,
+        content: str | Sequence[object] | None,
         tool_calls: Sequence[_DummyToolCall] | None = None,
+        parsed: object | None = None,
     ) -> None:
         self.content = content
         self.tool_calls = tuple(tool_calls) if tool_calls else None
+        self.parsed = parsed
 
     def model_dump(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"content": self.content}
+        if isinstance(self.content, Sequence) and not isinstance(
+            self.content, (str, bytes, bytearray)
+        ):
+            payload_content: object = list(self.content)
+        else:
+            payload_content = self.content
+
+        payload: dict[str, Any] = {"content": payload_content}
         if self.tool_calls is not None:
             payload["tool_calls"] = [call.model_dump() for call in self.tool_calls]
+        if self.parsed is not None:
+            payload["parsed"] = self.parsed
         return payload
 
 
@@ -417,6 +430,372 @@ def test_openai_adapter_executes_tools_and_parses_output():
     assert tool_message["role"] == "tool"
     assert tool_message["content"] == "completed"
     assert "payload" not in tool_message
+
+
+def test_openai_adapter_includes_response_format_for_structured_prompts():
+    module = _reload_module()
+
+    prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-schema",
+        name="structured",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Summarize ${query} as JSON.",
+            )
+        ],
+    )
+
+    message = _DummyMessage(
+        content=json.dumps({"answer": "Ready"}),
+        tool_calls=None,
+    )
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    assert result.output == _StructuredAnswer(answer="Ready")
+
+    request = cast(dict[str, Any], client.completions.requests[0])
+    assert "response_format" in request
+    response_format = cast(dict[str, Any], request["response_format"])
+    assert response_format["type"] == "json_schema"
+    json_schema = cast(dict[str, Any], response_format["json_schema"])
+    assert "name" in json_schema
+    schema_payload = cast(dict[str, Any], json_schema["schema"])
+    assert schema_payload.get("type") == "object"
+
+
+def test_openai_adapter_uses_parsed_payload_when_available():
+    module = _reload_module()
+
+    prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-parsed",
+        name="structured",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Return the structured result only.",
+            )
+        ],
+    )
+
+    message = _DummyMessage(
+        content=None,
+        tool_calls=None,
+        parsed={"answer": "Parsed"},
+    )
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    assert result.text is None
+    assert result.output == _StructuredAnswer(answer="Parsed")
+
+
+def test_openai_adapter_omits_response_instructions_with_native_schema():
+    module = _reload_module()
+
+    prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-native-instructions",
+        name="structured",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Summarize ${query} as JSON.",
+            )
+        ],
+    )
+
+    message = _DummyMessage(
+        content=json.dumps({"answer": "Ready"}),
+        tool_calls=None,
+    )
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    request = cast(dict[str, Any], client.completions.requests[0])
+    system_message = cast(dict[str, Any], request["messages"][0])
+    system_text = cast(str, system_message["content"])
+    assert "Response Format" not in system_text
+    assert "Return ONLY a single fenced JSON code block" not in system_text
+
+
+def test_openai_adapter_reads_output_json_content_blocks():
+    module = _reload_module()
+
+    prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-json-block",
+        name="structured",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Return the structured result only.",
+            )
+        ],
+    )
+
+    content_blocks = [
+        {"type": "output_json", "json": {"answer": "Block"}},
+    ]
+    message = _DummyMessage(
+        content=content_blocks,
+        tool_calls=None,
+    )
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    assert result.text is None
+    assert result.output == _StructuredAnswer(answer="Block")
+
+
+def test_openai_adapter_includes_response_format_for_array_outputs():
+    module = _reload_module()
+
+    prompt = Prompt[list[_StructuredAnswer]](
+        key="openai-structured-schema-array",
+        name="structured_list",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Return a list of answers for ${query}.",
+            )
+        ],
+    )
+
+    payload = [{"answer": "First"}, {"answer": "Second"}]
+    message = _DummyMessage(
+        content=json.dumps(payload),
+        tool_calls=None,
+    )
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    assert isinstance(result.output, list)
+    assert [item.answer for item in result.output] == ["First", "Second"]
+
+    request = cast(dict[str, Any], client.completions.requests[0])
+    response_format = cast(dict[str, Any], request["response_format"])
+    json_schema = cast(dict[str, Any], response_format["json_schema"])
+    schema_payload = cast(dict[str, Any], json_schema["schema"])
+    assert schema_payload.get("type") == "object"
+    properties = cast(dict[str, Any], schema_payload.get("properties"))
+    assert ARRAY_RESULT_KEY in properties
+    items_schema = cast(dict[str, Any], properties[ARRAY_RESULT_KEY])
+    assert items_schema.get("type") == "array"
+    assert items_schema.get("items", {}).get("type") == "object"
+
+
+def test_openai_adapter_skips_response_format_when_parse_output_disabled():
+    module = _reload_module()
+
+    prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-schema-disabled",
+        name="structured",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Summarize ${query} as JSON.",
+            )
+        ],
+    )
+
+    payload = {"answer": "Ready"}
+    message = _DummyMessage(
+        content=json.dumps(payload),
+        tool_calls=None,
+    )
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        parse_output=False,
+        bus=NullEventBus(),
+    )
+
+    assert result.output is None
+    assert result.text == json.dumps(payload)
+
+    request = cast(dict[str, Any], client.completions.requests[0])
+    assert "response_format" not in request
+
+
+def test_openai_adapter_supports_instruction_based_structured_output():
+    module = _reload_module()
+
+    prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-schema-instructions",
+        name="structured",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Summarize ${query} as JSON.",
+            )
+        ],
+    )
+
+    payload = {"answer": "Ready"}
+    message = _DummyMessage(
+        content=json.dumps(payload),
+        tool_calls=None,
+    )
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(
+        model="gpt-test", client=client, use_native_response_format=False
+    )
+
+    result = adapter.evaluate(
+        prompt,
+        _ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    assert result.output == _StructuredAnswer(answer="Ready")
+
+    request = cast(dict[str, Any], client.completions.requests[0])
+    assert "response_format" not in request
+    system_message = cast(dict[str, Any], request["messages"][0])
+    system_text = cast(str, system_message["content"])
+    assert "Response Format" in system_text
+    assert "Return ONLY a single fenced JSON code block" in system_text
+
+
+def test_openai_adapter_builds_response_format_only_for_structured_prompts():
+    module = _reload_module()
+
+    prompt = Prompt(
+        key="openai-plain",
+        name="plain",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Say hello to ${query}.",
+            )
+        ],
+    )
+
+    rendered = prompt.render(_ToolParams(query="world"))
+
+    response_format = module._build_response_format(rendered, "plain")
+
+    assert response_format is None
+
+
+def test_openai_adapter_parse_provider_payload_requires_wrapped_array_key():
+    module = _reload_module()
+
+    prompt = Prompt[list[_StructuredAnswer]](
+        key="openai-structured-schema-array-missing",
+        name="structured_list",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Return a list of answers for ${query}.",
+            )
+        ],
+    )
+
+    rendered = prompt.render(_ToolParams(query="policies"))
+
+    with pytest.raises(TypeError) as exc:
+        module._parse_provider_payload({"wrong": []}, rendered)
+
+    assert "Expected provider payload to be a JSON array." in str(exc.value)
+
+
+def test_openai_adapter_parse_provider_payload_unwraps_wrapped_array():
+    module = _reload_module()
+
+    prompt = Prompt[list[_StructuredAnswer]](
+        key="openai-structured-schema-array-wrapped",
+        name="structured_list",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Return a list of answers for ${query}.",
+            )
+        ],
+    )
+
+    rendered = prompt.render(_ToolParams(query="policies"))
+
+    payload = {"items": [{"answer": "Ready"}]}
+
+    parsed = module._parse_provider_payload(payload, rendered)
+
+    assert isinstance(parsed, list)
+    assert parsed[0].answer == "Ready"
+
+
+def test_openai_adapter_raises_on_invalid_parsed_payload():
+    module = _reload_module()
+
+    prompt = Prompt[_StructuredAnswer](
+        key="openai-structured-parsed-error",
+        name="structured",
+        sections=[
+            TextSection[_ToolParams](
+                title="Task",
+                body="Return the structured result only.",
+            )
+        ],
+    )
+
+    message = _DummyMessage(
+        content=None,
+        tool_calls=None,
+        parsed="not-a-mapping",
+    )
+    response = _DummyResponse([_DummyChoice(message)])
+    client = _DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    with pytest.raises(PromptEvaluationError) as err:
+        adapter.evaluate(
+            prompt,
+            _ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
+
+    assert isinstance(err.value, PromptEvaluationError)
+    assert err.value.stage == "response"
 
 
 def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
@@ -916,3 +1295,90 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "tool"
+
+
+def test_message_text_content_handles_structured_parts():
+    module = _reload_module()
+
+    mapping_parts = [{"type": "output_text", "text": "Hello"}]
+    assert module._message_text_content(mapping_parts) == "Hello"
+
+    class TextBlock:
+        def __init__(self, text: str) -> None:
+            self.type = "text"
+            self.text = text
+
+    assert module._message_text_content([TextBlock("World")]) == "World"
+    assert module._message_text_content(123) == "123"
+    assert module._content_part_text(None) == ""
+    assert module._content_part_text({"type": "output_text", "text": 123}) == ""
+
+    class BadTextBlock:
+        def __init__(self) -> None:
+            self.type = "text"
+            self.text = 123
+
+    assert module._content_part_text(BadTextBlock()) == ""
+
+
+def test_extract_parsed_content_handles_attribute_blocks():
+    module = _reload_module()
+
+    class JsonBlock:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.type = "output_json"
+            self.json = payload
+
+    block = JsonBlock({"answer": "attribute"})
+    message = _DummyMessage(content=[block], tool_calls=None)
+
+    parsed = module._extract_parsed_content(message)
+
+    assert parsed == {"answer": "attribute"}
+    assert module._parsed_payload_from_part({"type": "other"}) is None
+
+    class OtherBlock:
+        def __init__(self) -> None:
+            self.type = "other"
+            self.json = {"answer": "ignored"}
+
+    assert module._parsed_payload_from_part(OtherBlock()) is None
+
+
+def test_parse_provider_payload_handles_array_and_unknown_containers():
+    module = _reload_module()
+
+    rendered_array = RenderedPrompt[list[_StructuredAnswer]](
+        text="",
+        output_type=_StructuredAnswer,
+        output_container="array",
+        allow_extra_keys=False,
+    )
+    parsed = module._parse_provider_payload(
+        [{"answer": "First"}, {"answer": "Second"}],
+        rendered_array,
+    )
+    assert [item.answer for item in parsed] == ["First", "Second"]
+
+    with pytest.raises(TypeError):
+        module._parse_provider_payload("oops", rendered_array)
+    with pytest.raises(TypeError):
+        module._parse_provider_payload(["oops"], rendered_array)
+
+    rendered_invalid = RenderedPrompt[_StructuredAnswer](
+        text="",
+        output_type=_StructuredAnswer,
+        output_container="invalid",  # type: ignore[arg-type]
+        allow_extra_keys=False,
+    )
+    with pytest.raises(TypeError):
+        module._parse_provider_payload({"answer": "value"}, rendered_invalid)
+
+    rendered_missing = RenderedPrompt(
+        text="",
+        output_type=None,
+        output_container=None,
+        allow_extra_keys=None,
+    )
+    with pytest.raises(TypeError):
+        module._parse_provider_payload({}, rendered_missing)

@@ -168,17 +168,25 @@ class Prompt[OutputT]:
                 depth=0,
             )
 
-    def render(self, *params: SupportsDataclass) -> RenderedPrompt[OutputT]:
+    def render(
+        self,
+        *params: SupportsDataclass,
+        inject_output_instructions: bool | None = None,
+    ) -> RenderedPrompt[OutputT]:
         """Render the prompt using provided parameter dataclass instances."""
 
         param_lookup = self._collect_param_lookup(params)
-        return self._render_internal(param_lookup)
+        return self._render_internal(
+            param_lookup,
+            inject_output_instructions=inject_output_instructions,
+        )
 
     def render_with_overrides(
         self,
         *params: SupportsDataclass,
         version_store: PromptVersionStore,
         tag: str = "latest",
+        inject_output_instructions: bool | None = None,
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt using overrides supplied by a version store."""
 
@@ -197,7 +205,11 @@ class Prompt[OutputT]:
                     overrides[path] = body
 
         param_lookup = self._collect_param_lookup(params)
-        return self._render_internal(param_lookup, overrides)
+        return self._render_internal(
+            param_lookup,
+            overrides,
+            inject_output_instructions=inject_output_instructions,
+        )
 
     def _register_section(
         self,
@@ -342,12 +354,17 @@ class Prompt[OutputT]:
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
+        *,
+        inject_output_instructions: bool | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclass, SupportsDataclass]] = []
         override_lookup = dict(overrides or {})
 
-        for node, section_params in self._iter_enabled_sections(dict(param_lookup)):
+        for node, section_params in self._iter_enabled_sections(
+            dict(param_lookup),
+            inject_output_instructions=inject_output_instructions,
+        ):
             override_body = override_lookup.get(node.path)
             rendered = self._render_section(node, section_params, override_body)
 
@@ -435,6 +452,8 @@ class Prompt[OutputT]:
     def _iter_enabled_sections(
         self,
         param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+        *,
+        inject_output_instructions: bool | None = None,
     ) -> Iterator[tuple[PromptSectionNode[SupportsDataclass], SupportsDataclass]]:
         skip_depth: int | None = None
 
@@ -446,14 +465,19 @@ class Prompt[OutputT]:
 
             section_params = self._resolve_section_params(node, param_lookup)
 
-            try:
-                enabled = node.section.is_enabled(section_params)
-            except Exception as error:  # pragma: no cover - defensive guard
-                raise PromptRenderError(
-                    "Section enabled predicate failed.",
-                    section_path=node.path,
-                    dataclass_type=node.section.params,
-                ) from error
+            if node.section is self._response_section and (
+                inject_output_instructions is not None
+            ):
+                enabled = inject_output_instructions
+            else:
+                try:
+                    enabled = node.section.is_enabled(section_params)
+                except Exception as error:  # pragma: no cover - defensive guard
+                    raise PromptRenderError(
+                        "Section enabled predicate failed.",
+                        section_path=node.path,
+                        dataclass_type=node.section.params,
+                    ) from error
 
             if not enabled:
                 skip_depth = node.depth
