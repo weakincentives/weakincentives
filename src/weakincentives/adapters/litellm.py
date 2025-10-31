@@ -15,14 +15,15 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast
 
 from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..prompts._types import SupportsDataclass
-from ..prompts.prompt import Prompt
-from ..prompts.structured import OutputParseError
+from ..prompts.prompt import Prompt, RenderedPrompt
+from ..prompts.structured import ARRAY_RESULT_KEY, OutputParseError
 from ..prompts.structured import parse_output as parse_structured_output
 from ..prompts.tool import Tool, ToolResult
 from ..serde import parse, schema
@@ -55,7 +56,7 @@ class _ToolCall(Protocol):
 
 
 class _Message(Protocol):
-    content: str | None
+    content: str | Sequence[object] | None
     tool_calls: Sequence[_ToolCall] | None
 
 
@@ -147,10 +148,35 @@ class LiteLLMAdapter:
         bus: EventBus,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
-        rendered = prompt.render(*params)  # type: ignore[reportArgumentType]
+        has_structured_output = (
+            getattr(prompt, "_output_type", None) is not None
+            and getattr(prompt, "_output_container", None) is not None
+        )
+        should_disable_instructions = (
+            parse_output
+            and has_structured_output
+            and getattr(prompt, "inject_output_instructions", False)
+        )
+
+        if should_disable_instructions:
+            rendered = prompt.render(
+                *params,
+                inject_output_instructions=False,
+            )  # type: ignore[reportArgumentType]
+        else:
+            rendered = prompt.render(*params)  # type: ignore[reportArgumentType]
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": rendered.text},
         ]
+
+        should_parse_structured_output = (
+            parse_output
+            and rendered.output_type is not None
+            and rendered.output_container is not None
+        )
+        response_format: dict[str, Any] | None = None
+        if should_parse_structured_output:
+            response_format = _build_response_format(rendered, prompt_name)
 
         tools = list(rendered.tools)
         tool_specs = [_tool_to_litellm_spec(tool) for tool in tools]
@@ -168,6 +194,8 @@ class LiteLLMAdapter:
                 request_payload["tools"] = tool_specs
                 if next_tool_choice is not None:
                     request_payload["tool_choice"] = next_tool_choice
+            if response_format is not None:
+                request_payload["response_format"] = response_format
 
             try:
                 response = self._completion(**request_payload)
@@ -184,24 +212,42 @@ class LiteLLMAdapter:
             tool_calls = list(message.tool_calls or [])
 
             if not tool_calls:
-                final_text = message.content or ""
+                final_text = _message_text_content(message.content)
                 output: OutputT | None = None
                 text_value: str | None = final_text or None
 
-                if (
-                    parse_output
-                    and rendered.output_type is not None
-                    and rendered.output_container is not None
-                ):
-                    try:
-                        output = parse_structured_output(final_text, rendered)
-                    except OutputParseError as error:
+                if should_parse_structured_output:
+                    parsed_payload = _extract_parsed_content(message)
+                    if parsed_payload is not None:
+                        try:
+                            output = cast(
+                                OutputT,
+                                _parse_provider_payload(parsed_payload, rendered),
+                            )
+                        except TypeError as error:
+                            raise PromptEvaluationError(
+                                str(error),
+                                prompt_name=prompt_name,
+                                stage="response",
+                                provider_payload=provider_payload,
+                            ) from error
+                    elif final_text:
+                        try:
+                            output = parse_structured_output(final_text, rendered)
+                        except OutputParseError as error:
+                            raise PromptEvaluationError(
+                                error.message,
+                                prompt_name=prompt_name,
+                                stage="response",
+                                provider_payload=provider_payload,
+                            ) from error
+                    else:
                         raise PromptEvaluationError(
-                            error.message,
+                            "Provider response did not include structured output.",
                             prompt_name=prompt_name,
                             stage="response",
                             provider_payload=provider_payload,
-                        ) from error
+                        )
                     text_value = None
 
                 response = PromptResponse(
@@ -303,6 +349,55 @@ class LiteLLMAdapter:
                     next_tool_choice = "auto"
 
 
+def _build_response_format(
+    rendered: RenderedPrompt[Any], prompt_name: str
+) -> dict[str, Any] | None:
+    output_type = rendered.output_type
+    container = rendered.output_container
+    allow_extra_keys = rendered.allow_extra_keys
+
+    if output_type is None or container is None:
+        return None
+
+    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
+    base_schema = schema(output_type, extra=extra_mode)
+    base_schema.pop("title", None)
+
+    if container == "array":
+        schema_payload = cast(
+            dict[str, Any],
+            {
+                "type": "object",
+                "properties": {
+                    ARRAY_RESULT_KEY: {
+                        "type": "array",
+                        "items": base_schema,
+                    }
+                },
+                "required": [ARRAY_RESULT_KEY],
+            },
+        )
+        if not allow_extra_keys:
+            schema_payload["additionalProperties"] = False
+    else:
+        schema_payload = base_schema
+
+    schema_name = _schema_name(prompt_name)
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": schema_name,
+            "schema": schema_payload,
+        },
+    }
+
+
+def _schema_name(prompt_name: str) -> str:
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]+", "_", prompt_name.strip())
+    cleaned = sanitized.strip("_") or "prompt"
+    return f"{cleaned}_schema"
+
+
 def _tool_to_litellm_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
     parameters_schema = schema(tool.params_type, extra="forbid")
     parameters_schema.pop("title", None)
@@ -382,6 +477,110 @@ def _parse_tool_arguments(
             provider_payload=provider_payload,
         )
     return dict(cast(Mapping[str, Any], parsed))
+
+
+def _message_text_content(content: object) -> str:
+    if isinstance(content, str) or content is None:
+        return content or ""
+    if isinstance(content, Sequence) and not isinstance(
+        content, (str, bytes, bytearray)
+    ):
+        fragments: list[str] = []
+        sequence_content = cast(Sequence[object], content)  # pyright: ignore[reportUnnecessaryCast]
+        for part in sequence_content:
+            fragments.append(_content_part_text(part))
+        return "".join(fragments)
+    return str(content)
+
+
+def _content_part_text(part: object) -> str:
+    if part is None:
+        return ""
+    if isinstance(part, Mapping):
+        mapping_part = cast(Mapping[str, object], part)
+        part_type = mapping_part.get("type")
+        if part_type in {"output_text", "text"}:
+            text_value = mapping_part.get("text")
+            if isinstance(text_value, str):
+                return text_value
+        return ""
+    part_type = getattr(part, "type", None)
+    if part_type in {"output_text", "text"}:
+        text_value = getattr(part, "text", None)
+        if isinstance(text_value, str):
+            return text_value
+    return ""
+
+
+def _extract_parsed_content(message: _Message) -> object | None:
+    parsed = getattr(message, "parsed", None)
+    if parsed is not None:
+        return parsed
+
+    content = message.content
+    if isinstance(content, Sequence) and not isinstance(
+        content, (str, bytes, bytearray)
+    ):
+        sequence_content = cast(Sequence[object], content)  # pyright: ignore[reportUnnecessaryCast]
+        for part in sequence_content:
+            payload = _parsed_payload_from_part(part)
+            if payload is not None:
+                return payload
+    return None
+
+
+def _parsed_payload_from_part(part: object) -> object | None:
+    if isinstance(part, Mapping):
+        mapping_part = cast(Mapping[str, object], part)
+        if mapping_part.get("type") == "output_json":
+            return mapping_part.get("json")
+        return None
+    part_type = getattr(part, "type", None)
+    if part_type == "output_json":
+        return getattr(part, "json", None)
+    return None
+
+
+def _parse_provider_payload(payload: object, rendered: RenderedPrompt[Any]) -> object:
+    dataclass_type = rendered.output_type
+    container = rendered.output_container
+    allow_extra_keys = rendered.allow_extra_keys
+
+    if dataclass_type is None or container is None:
+        raise TypeError("Prompt does not declare structured output.")
+
+    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
+
+    if container == "object":
+        if not isinstance(payload, Mapping):
+            raise TypeError("Expected provider payload to be a JSON object.")
+        return parse(
+            dataclass_type, cast(Mapping[str, object], payload), extra=extra_mode
+        )
+
+    if container == "array":
+        if isinstance(payload, Mapping):
+            if ARRAY_RESULT_KEY not in payload:
+                raise TypeError("Expected provider payload to be a JSON array.")
+            payload = cast(Mapping[str, object], payload)[ARRAY_RESULT_KEY]
+        if not isinstance(payload, Sequence) or isinstance(
+            payload, (str, bytes, bytearray)
+        ):
+            raise TypeError("Expected provider payload to be a JSON array.")
+        parsed_items: list[object] = []
+        sequence_payload = cast(Sequence[object], payload)  # pyright: ignore[reportUnnecessaryCast]
+        for index, item in enumerate(sequence_payload):
+            if not isinstance(item, Mapping):
+                raise TypeError(f"Array item at index {index} is not an object.")
+            parsed_item = parse(
+                dataclass_type,
+                cast(Mapping[str, object], item),
+                extra=extra_mode,
+            )
+            parsed_items.append(parsed_item)
+        return parsed_items
+
+    raise TypeError("Unknown output container declared.")
 
 
 __all__ = ["LiteLLMAdapter", "LiteLLMCompletion", "create_litellm_completion"]

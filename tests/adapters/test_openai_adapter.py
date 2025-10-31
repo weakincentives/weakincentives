@@ -64,6 +64,7 @@ from weakincentives.events import (
     ToolInvoked,
 )
 from weakincentives.prompts import Prompt, TextSection, Tool, ToolResult
+from weakincentives.prompts.prompt import RenderedPrompt
 
 MODULE_PATH = "weakincentives.adapters.openai"
 
@@ -319,6 +320,49 @@ def test_openai_adapter_executes_tools_and_parses_output():
     assert "payload" not in tool_message
 
 
+def test_openai_adapter_includes_response_format_for_array_outputs():
+    module = _reload_module()
+
+    prompt = Prompt[list[StructuredAnswer]](
+        key="openai-structured-schema-array",
+        name="structured_list",
+        sections=[
+            TextSection[ToolParams](
+                title="Task",
+                body="Return a list of answers for ${query}.",
+            )
+        ],
+    )
+
+    payload = [{"answer": "First"}, {"answer": "Second"}]
+    message = DummyMessage(
+        content=json.dumps(payload),
+        tool_calls=None,
+    )
+    response = DummyResponse([DummyChoice(message)])
+    client = DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = adapter.evaluate(
+        prompt,
+        ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    assert isinstance(result.output, list)
+    assert [item.answer for item in result.output] == ["First", "Second"]
+
+    request = cast(dict[str, Any], client.completions.requests[0])
+    response_format = cast(dict[str, Any], request["response_format"])
+    json_schema = cast(dict[str, Any], response_format["json_schema"])
+    schema_payload = cast(dict[str, Any], json_schema["schema"])
+    properties = cast(dict[str, Any], schema_payload["properties"])
+    assert module.ARRAY_RESULT_KEY in properties
+    items_schema = cast(dict[str, Any], properties[module.ARRAY_RESULT_KEY])
+    assert items_schema.get("type") == "array"
+    assert items_schema.get("items", {}).get("type") == "object"
+
+
 def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
     module = _reload_module()
 
@@ -528,6 +572,44 @@ def test_openai_adapter_handles_tool_call_without_arguments():
     assert result.tool_results[0].params.query == "default"
 
 
+def test_openai_adapter_reads_output_json_content_blocks():
+    module = _reload_module()
+
+    prompt = Prompt[StructuredAnswer](
+        key="openai-structured-json-block",
+        name="structured",
+        sections=[
+            TextSection[ToolParams](
+                title="Task",
+                body="Return the structured result only.",
+            )
+        ],
+    )
+
+    class JsonBlock:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.type = "output_json"
+            self.json = payload
+
+    content_blocks = [
+        {"type": "output_json", "json": {"answer": "Block"}},
+        JsonBlock({"answer": "Attribute"}),
+    ]
+    message = DummyMessage(content=content_blocks, tool_calls=None)
+    response = DummyResponse([DummyChoice(message)])
+    client = DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = adapter.evaluate(
+        prompt,
+        ToolParams(query="policies"),
+        bus=NullEventBus(),
+    )
+
+    assert result.text is None
+    assert result.output == StructuredAnswer(answer="Block")
+
+
 def test_openai_adapter_raises_when_structured_output_missing_json():
     module = _reload_module()
 
@@ -557,6 +639,208 @@ def test_openai_adapter_raises_when_structured_output_missing_json():
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.stage == "response"
+
+
+def test_openai_adapter_raises_on_invalid_parsed_payload():
+    module = _reload_module()
+
+    prompt = Prompt[StructuredAnswer](
+        key="openai-structured-parsed-error",
+        name="structured",
+        sections=[
+            TextSection[ToolParams](
+                title="Task",
+                body="Return the structured result only.",
+            )
+        ],
+    )
+
+    message = DummyMessage(content=None, tool_calls=None, parsed="not-a-mapping")
+    response = DummyResponse([DummyChoice(message)])
+    client = DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    with pytest.raises(PromptEvaluationError) as err:
+        adapter.evaluate(
+            prompt,
+            ToolParams(query="policies"),
+            bus=NullEventBus(),
+        )
+
+    exc = err.value
+    assert isinstance(exc, PromptEvaluationError)
+    assert exc.stage == "response"
+
+
+def test_openai_message_text_content_handles_structured_parts():
+    module = _reload_module()
+
+    mapping_parts = [{"type": "output_text", "text": "Hello"}]
+    assert module._message_text_content(mapping_parts) == "Hello"
+
+    class TextBlock:
+        def __init__(self, text: str) -> None:
+            self.type = "text"
+            self.text = text
+
+    assert module._message_text_content([TextBlock("World")]) == "World"
+    assert module._message_text_content(123) == "123"
+    assert module._content_part_text(None) == ""
+    assert module._content_part_text({"type": "output_text", "text": 123}) == ""
+
+    class BadTextBlock:
+        def __init__(self) -> None:
+            self.type = "text"
+            self.text = 123
+
+    assert module._content_part_text(BadTextBlock()) == ""
+
+
+def test_openai_extract_parsed_content_handles_attribute_blocks():
+    module = _reload_module()
+
+    class JsonBlock:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.type = "output_json"
+            self.json = payload
+
+    block = JsonBlock({"answer": "attribute"})
+    message = DummyMessage(content=[block], tool_calls=None)
+
+    parsed = module._extract_parsed_content(message)
+
+    assert parsed == {"answer": "attribute"}
+    assert module._parsed_payload_from_part({"type": "other"}) is None
+
+    class OtherBlock:
+        def __init__(self) -> None:
+            self.type = "other"
+            self.json = {"answer": "ignored"}
+
+    assert module._parsed_payload_from_part(OtherBlock()) is None
+
+
+def test_openai_parse_provider_payload_unwraps_wrapped_array():
+    module = _reload_module()
+
+    prompt = Prompt[list[StructuredAnswer]](
+        key="openai-structured-schema-array-wrapped",
+        name="structured_list",
+        sections=[
+            TextSection[ToolParams](
+                title="Task",
+                body="Return a list of answers for ${query}.",
+            )
+        ],
+    )
+
+    rendered = prompt.render(ToolParams(query="policies"))
+
+    payload = {module.ARRAY_RESULT_KEY: [{"answer": "Ready"}]}
+
+    parsed = module._parse_provider_payload(payload, rendered)
+
+    assert isinstance(parsed, list)
+    assert parsed[0].answer == "Ready"
+
+    with pytest.raises(TypeError):
+        module._parse_provider_payload({"wrong": []}, rendered)
+
+    with pytest.raises(TypeError):
+        module._parse_provider_payload(["oops"], rendered)
+
+
+def test_openai_parse_provider_payload_handles_object_container():
+    module = _reload_module()
+
+    prompt = Prompt[StructuredAnswer](
+        key="openai-structured-schema",
+        name="structured",
+        sections=[
+            TextSection[ToolParams](
+                title="Task",
+                body="Summarize ${query} as JSON.",
+            )
+        ],
+    )
+
+    rendered = prompt.render(ToolParams(query="policies"))
+
+    parsed = module._parse_provider_payload({"answer": "Ready"}, rendered)
+
+    assert parsed.answer == "Ready"
+
+    with pytest.raises(TypeError):
+        module._parse_provider_payload("oops", rendered)
+
+
+def test_openai_build_response_format_returns_none_for_plain_prompt():
+    module = _reload_module()
+
+    prompt = Prompt(
+        key="openai-plain",
+        name="plain",
+        sections=[
+            TextSection[ToolParams](
+                title="Task",
+                body="Say hello to ${query}.",
+            )
+        ],
+    )
+
+    rendered = prompt.render(ToolParams(query="world"))
+
+    response_format = module._build_response_format(rendered, "plain")
+
+    assert response_format is None
+
+
+def test_openai_parse_provider_payload_requires_structured_prompt():
+    module = _reload_module()
+
+    rendered = RenderedPrompt(
+        text="",
+        output_type=None,
+        output_container=None,
+        allow_extra_keys=None,
+    )
+
+    with pytest.raises(TypeError):
+        module._parse_provider_payload({}, rendered)
+
+
+def test_openai_parse_provider_payload_rejects_non_sequence_arrays():
+    module = _reload_module()
+
+    prompt = Prompt[list[StructuredAnswer]](
+        key="openai-structured-schema-array-non-seq",
+        name="structured_list",
+        sections=[
+            TextSection[ToolParams](
+                title="Task",
+                body="Return a list of answers for ${query}.",
+            )
+        ],
+    )
+
+    rendered = prompt.render(ToolParams(query="policies"))
+
+    with pytest.raises(TypeError):
+        module._parse_provider_payload("oops", rendered)
+
+
+def test_openai_parse_provider_payload_rejects_unknown_container():
+    module = _reload_module()
+
+    rendered = RenderedPrompt(
+        text="",
+        output_type=StructuredAnswer,
+        output_container="invalid",  # type: ignore[arg-type]
+        allow_extra_keys=False,
+    )
+
+    with pytest.raises(TypeError):
+        module._parse_provider_payload({}, rendered)
 
 
 def test_openai_adapter_raises_for_unknown_tool():

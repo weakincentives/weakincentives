@@ -52,16 +52,27 @@ class DummyMessage:
     def __init__(
         self,
         *,
-        content: str | None,
+        content: str | Sequence[object] | None,
         tool_calls: Sequence[DummyToolCall] | None = None,
+        parsed: object | None = None,
     ) -> None:
         self.content = content
-        self.tool_calls = list(tool_calls) if tool_calls is not None else None
+        self.tool_calls = tuple(tool_calls) if tool_calls is not None else None
+        self.parsed = parsed
 
     def model_dump(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"content": self.content}
+        if isinstance(self.content, Sequence) and not isinstance(
+            self.content, (str, bytes, bytearray)
+        ):
+            payload_content: object = list(self.content)
+        else:
+            payload_content = self.content
+
+        payload: dict[str, Any] = {"content": payload_content}
         if self.tool_calls is not None:
             payload["tool_calls"] = [call.model_dump() for call in self.tool_calls]
+        if self.parsed is not None:
+            payload["parsed"] = self.parsed
         return payload
 
 

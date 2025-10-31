@@ -65,7 +65,7 @@ def lookup_note(params: LookupParams) -> ToolResult[LookupResult]:
         message = "No note found. Try topics like 'pricing' or 'roadmap'."
         return ToolResult(message=message, payload=LookupResult(note=""))
     return ToolResult(
-        message=f"Located note for {params.topic}.",
+        message=f"Note for {params.topic}: {note}",
         payload=LookupResult(note=note),
     )
 
