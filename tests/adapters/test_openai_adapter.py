@@ -65,6 +65,7 @@ from weakincentives.events import (
 )
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.openai"
 PROMPT_NS = "tests/adapters/openai"
@@ -327,6 +328,76 @@ def test_openai_adapter_executes_tools_and_parses_output():
     assert tool_message["role"] == "tool"
     assert tool_message["content"] == "completed"
     assert "payload" not in tool_message
+
+
+def test_openai_adapter_surfaces_tool_validation_errors():
+    module = _reload_module()
+
+    def handler(_: ToolParams) -> ToolResult[ToolPayload]:
+        raise ToolValidationError("invalid query")
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=handler,
+    )
+
+    prompt = Prompt(
+        ns=PROMPT_NS,
+        key="openai-tool-validation",
+        name="search-validation",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "invalid"}),
+    )
+    first = DummyResponse(
+        [DummyChoice(DummyMessage(content="", tool_calls=[tool_call]))]
+    )
+    second = DummyResponse(
+        [DummyChoice(DummyMessage(content="Please provide a different query."))]
+    )
+    client = DummyOpenAIClient([first, second])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
+    bus.subscribe(ToolInvoked, tool_events.append)
+
+    result = adapter.evaluate(
+        prompt,
+        ToolParams(query="invalid"),
+        bus=bus,
+    )
+
+    assert result.text == "Please provide a different query."
+    assert result.output is None
+    assert len(tool_events) == 1
+    event = tool_events[0]
+    assert event.name == "search_notes"
+    assert event.result.message == "Tool validation failed: invalid query"
+    assert event.result.value == ToolParams(query="invalid")
+    assert event.call_id == "call_1"
+
+    first_request = cast(dict[str, Any], client.completions.requests[0])
+    first_messages = cast(list[dict[str, Any]], first_request["messages"])
+    assert first_messages[0]["role"] == "system"
+
+    second_request = cast(dict[str, Any], client.completions.requests[1])
+    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    tool_message = second_messages[-1]
+    assert tool_message["role"] == "tool"
+    assert tool_message["content"] == "Tool validation failed: invalid query"
 
 
 def test_openai_adapter_includes_response_format_for_array_outputs():

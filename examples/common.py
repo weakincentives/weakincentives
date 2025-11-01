@@ -40,6 +40,7 @@ from weakincentives.session import (
     select_all,
     select_latest,
 )
+from weakincentives.tools import PlanningToolsSection
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAX_OUTPUT_CHARS = 4000
@@ -430,7 +431,7 @@ def build_tools() -> tuple[Tool[Any, Any], ...]:
     )
 
 
-def build_code_review_prompt() -> Prompt[ReviewResponse]:
+def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
     tools = build_tools()
     guidance_section = MarkdownSection[ReviewGuidance](
         title="Code Review Brief",
@@ -450,6 +451,10 @@ def build_code_review_prompt() -> Prompt[ReviewResponse]:
             If the task requires information beyond these capabilities, ask the
             user for clarification rather than guessing.
 
+            Maintain a concise working plan for multi-step investigations. Use the
+            planning tools to capture the current objective, record step details
+            as you gather evidence, and mark tasks complete when finished.
+
             Always provide a JSON response with the following keys:
             - summary: Single paragraph capturing the overall state of the changes.
             - issues: List of concrete problems, risks, or follow-up questions tied
@@ -462,6 +467,7 @@ def build_code_review_prompt() -> Prompt[ReviewResponse]:
         tools=tools,
         key="code-review-brief",
     )
+    planning_section = PlanningToolsSection(session=session)
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
@@ -471,7 +477,7 @@ def build_code_review_prompt() -> Prompt[ReviewResponse]:
         ns="examples/code-review",
         key="code-review-session",
         name="code_review_agent",
-        sections=[guidance_section, user_turn_section],
+        sections=[guidance_section, planning_section, user_turn_section],
     )
 
 
@@ -484,7 +490,7 @@ class CodeReviewSession:
         self._adapter = adapter
         self._bus = bus or InProcessEventBus()
         self._session = Session(bus=self._bus)
-        self._prompt = build_code_review_prompt()
+        self._prompt = build_code_review_prompt(self._session)
         self._bus.subscribe(ToolInvoked, self._display_tool_event)
         self._register_tool_history()
 

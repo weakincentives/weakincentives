@@ -33,7 +33,7 @@ def main() -> None:
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
 
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    model = os.getenv("OPENAI_MODEL", "gpt-5")
     session = CodeReviewSession(OpenAIAdapter(model=model))
     print("Type 'exit' or 'quit' to stop the conversation.")
     print("Type 'history' to display the recorded tool call summary.")

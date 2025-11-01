@@ -112,6 +112,10 @@ ______________________________________________________________________
   `parse`, `dump`, `clone`, `schema` give Pydantic-like ergonomics with dataclasses only.
 - **Quiet, predictable runtime**
   Minimal imports; adapters use a **blocking single-turn** API and emit in-process telemetry events.
+- **Session-scoped planning tools**
+  Drop `PlanningToolsSection` into a prompt to expose plan setup, edits, and
+  status tracking for the active `Session`. Read the
+  [planning tool spec](specs/PLANNING_TOOL.md) for details.
 
 ______________________________________________________________________
 
