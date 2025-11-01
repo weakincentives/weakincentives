@@ -4,52 +4,61 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-### Prompt
+### Prompt & Rendering
 
-- Renamed several prompt authoring primitives for clarity, including `MarkdownSection`,
-  `SectionNode`, `ToolResult.value`, and `parse_structured_output`, and consolidated
-  the `prompt/` module layout under a new top-level import surface.
-- Added required prompt namespaces and explicit section keys so overrides map cleanly to
-  rendered content and response formats.
-- Extended prompt descriptors with tool metadata hashing and override support to track
-  tool changes across versions.
+- Renamed and reorganized the prompt authoring primitives (`MarkdownSection`,
+  `SectionNode`, `Tool`, `ToolResult`, `parse_structured_output`, …) under the
+  consolidated `weakincentives.prompt` surface.
+- Prompts now require namespaces and explicit section keys so overrides line up with
+  rendered content and structured response formats.
+- Added tool-aware prompt version metadata and the `PromptVersionStore` override
+  workflow to track section edits and tool changes across revisions.
 
-### Events
+### Session & State
 
-- Implemented the event emission spec with typed prompt and tool lifecycle events and
-  wired the adapters and examples to publish them.
+- Introduced the `Session` container with typed reducers/selectors that capture prompt
+  outputs and tool payloads directly from emitted events.
+- Added helper reducers (`append`, `replace_latest`, `upsert_by`) and selectors
+  (`select_latest`, `select_where`) to simplify downstream state management.
 
-### Session
+### Built-in Tools
 
-- Introduced a session state container that collects emitted event payloads and exposes
-  built-in reducers and selectors for downstream agents.
+- Shipped the planning tool suite (`PlanningToolsSection` plus typed plan dataclasses)
+  for creating, updating, and tracking multi-step execution plans inside a session.
+- Added the virtual filesystem tool suite (`VfsToolsSection`) with host-mount
+  materialization, ASCII write limits, and reducers that maintain a versioned snapshot.
 
-### Integrations
+### Events & Telemetry
 
-- Added a LiteLLM adapter behind the new `litellm` extra with full tool execution, structured output parsing, and telemetry parity with the existing OpenAI integration.
-- Updated the OpenAI adapter to attach native JSON schema response formats, prefer parsed
-  structured outputs, tighten `tool_choice` typing, and avoid echoing tool payloads in tool
-  role messages.
+- Implemented the event bus with `ToolInvoked` and `PromptExecuted` payloads and wired
+  adapters/examples to publish them for sessions or external observers.
+
+### Adapters
+
+- Added a LiteLLM adapter behind the `litellm` extra with tool execution parity and
+  structured output parsing.
+- Updated the OpenAI adapter to emit native JSON schema response formats, tighten
+  `tool_choice` handling, avoid echoing tool payloads, and surface richer telemetry.
 
 ### Examples
 
-- Rebuilt the OpenAI and LiteLLM demos as CLI entry points backed by a shared repository-
-  aware code review agent scaffold.
+- Rebuilt the OpenAI and LiteLLM demos as shared CLI entry points powered by the new
+  code review agent scaffold, complete with planning and virtual filesystem sections.
 
-### Packaging
+### Tooling & Packaging
 
-- Lowered the supported Python baseline to 3.12 and curated package exports to match the
-  new module layout.
-
-### Dependencies
-
+- Lowered the supported Python baseline to 3.12 (the repository now pins 3.14 for
+  development) and curated package exports to match the reorganized modules.
+- Added OpenAI integration tests and stabilized the tool execution loop used by the
+  adapters.
 - Raised the optional `litellm` extra to require the latest upstream release.
 
 ### Documentation
 
-- Documented the LiteLLM optional dependency, updated installation instructions, and introduced a dedicated example script showcasing LiteLLM usage.
-- Refreshed the README messaging to highlight the new prompt workflow, minimum Python
-  version, and example entry points.
+- Documented the planning and virtual filesystem tool suites, optional provider extras,
+  and updated installation guidance.
+- Refreshed the README and supporting docs to highlight the new prompt workflow,
+  adapters, and development tooling expectations.
 
 ## v0.2.0 - 2025-10-29
 
