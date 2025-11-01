@@ -32,53 +32,41 @@ uv add "weakincentives[litellm]"
 # cloning the repo? use: uv sync --extra openai --extra litellm
 ```
 
-## Tutorial: Build a Code-Reviewing Agent
 
-This tutorial walks through building a production-ready, stateful code-reviewing
-agent that reads pull requests, drafts comments, and records rationale. The
-workflow uses the same primitives as the
-[`code_reviewer_example.py`](code_reviewer_example.py) script but goes well beyond
-it:
+## Tutorial: Build a Stateful Code-Reviewing Agent
 
-- **Deterministic prompts** keep every model call reproducible without juggling
-  ad-hoc f-strings.
-- **Session-backed state** lets you coordinate multiple model rounds in a single
-  review, something that requires custom middleware in LangGraph’s edge-based
-  planner.
-- **Optimizable prompt overrides** wire directly into DSPy-style optimizers,
-  giving you pragmatic hooks for experimentation without forking the agent.
+Use Weak Incentives to assemble a reproducible reviewer that tracks every
+decision, stages file edits in a sandbox, and evaluates quick calculations when
+the diff raises questions. Compared to LangGraph you do not need to bolt on a
+custom state store—the `Session` captures prompt and tool telemetry out of the
+box. Unlike DSPy, prompt sections already expose versioning and override hooks
+so optimizers can swap instructions without rewriting the runtime.
 
-> **Why Weak Incentives instead of LangGraph or DSPy?**
->
-> - LangGraph focuses on graph orchestration; you still have to invent a custom
->   state store to keep review history coherent. Weak Incentives ships a typed
->   `Session` with reducers, selectors, and an event bus so every prompt render
->   and tool execution is automatically captured.
-> - DSPy’s strength is prompt optimization, but its Modules assume you’ll wire
->   the prompting and state plumbing yourself. Here, prompt sections embed rich
->   metadata, so an optimizer can override just the Markdown template or tool
->   policy without rewriting the rest of the agent.
+### 1. Model review data and tool contracts
 
-### 1. Define review types and telemetry
-
-Start by modeling the structured inputs, tool payloads, and agent outputs. The
-library’s serde helpers guarantee that model replies match these dataclasses.
+Typed dataclasses keep inputs, tool payloads, and outputs honest. Tools return
+`ToolResult` objects so the adapter can emit consistent telemetry.
 
 ```python
 from dataclasses import dataclass
-from weakincentives import ToolResult
+from weakincentives import Tool, ToolResult
 
 
 @dataclass
-class PullRequestSummary:
+class PullRequestContext:
     repository: str
     title: str
     body: str
-    files: list[str]
+    files_summary: str
 
 
 @dataclass
-class FileDiff:
+class FileDiffRequest:
+    path: str
+
+
+@dataclass
+class FileDiffSnapshot:
     path: str
     patch: str
 
@@ -94,202 +82,283 @@ class ReviewComment:
 
 @dataclass
 class ReviewBundle:
-    comments: list[ReviewComment]
+    comments: tuple[ReviewComment, ...]
     overall_assessment: str
 
 
-def fetch_diff(diff: FileDiff) -> ToolResult[FileDiff]:
-    # In production you would hydrate from the provider API.
-    return ToolResult(
-        message=f"Loaded diff for {diff.path}",
-        value=diff,
-        telemetry={"bytes": len(diff.patch)},
-    )
-```
+def fetch_diff(params: FileDiffRequest) -> ToolResult[FileDiffSnapshot]:
+    # Replace this stub with a Git provider lookup in production.
+    diff = FileDiffSnapshot(path=params.path, patch="@@ -1 +1 @@ ...")
+    return ToolResult(message=f"Loaded diff for {params.path}", value=diff)
 
-Here we also return telemetry metadata from the tool handler. The event bus will
-log that alongside the prompt render, giving you reproducible audit trails.
 
-### 2. Compose review prompt sections
-
-Break the agent prompt into sections so optimizers can swap one piece at a time.
-Every section is namespaced and versioned, which is how Weak Incentives keeps
-state consistent without the edge-level bookkeeping LangGraph requires.
-
-```python
-from weakincentives import MarkdownSection, Prompt, Tool
-
-summary_section = MarkdownSection[PullRequestSummary](
-    title="Repository Overview",
-    template=(
-        "You are a senior reviewer.",
-        "Repository: ${repository}",
-        "PR Title: ${title}",
-        "PR Body:\n${body}",
-        "Files touched: ${', '.join(files)}",
-    ),
-    key="review.summary",
-)
-
-diff_tool = Tool[FileDiff, FileDiff](
+diff_tool = Tool[FileDiffRequest, FileDiffSnapshot](
     name="fetch_diff",
-    description="Retrieve the unified diff for a file to analyze context",
+    description="Retrieve the unified diff for a repository path.",
     handler=fetch_diff,
 )
-
-analysis_section = MarkdownSection[PullRequestSummary](
-    title="Diff Analysis",
-    template=(
-        "Review each file. Call `fetch_diff` when you need the patch.",
-        "Propose comments in JSON with fields: file_path, line, severity, summary, rationale.",
-        "Flag risky refactors, data races, or missing tests.",
-    ),
-    key="review.analysis",
-    tools=[diff_tool],
-)
-
-prompt = Prompt[ReviewBundle](
-    ns="tutorial/code_review",
-    key="review.generate",
-    name="code_review_prompt",
-    sections=[summary_section, analysis_section],
-)
 ```
 
-Because each section is independently versioned, you can roll back just the
-analysis template if an optimizer explores a bad variant.
+### 2. Create a session and surface built-in tool suites
 
-### 3. Persist state with a session and event bus
-
-Sessions capture every render and tool call so later steps can reference prior
-actions. Unlike DSPy, you do not need custom callback plumbing—events are
-broadcast automatically.
+Planning, virtual filesystem, and Python-evaluation sections register reducers on
+the provided session. Introducing them early keeps every evaluation capable of
+multi-step plans, staged edits, and quick calculations.
 
 ```python
 from weakincentives.events import InProcessEventBus, PromptExecuted
-from weakincentives.session import Session, select_latest
+from weakincentives.session import Session
+from weakincentives.tools import AstevalSection, PlanningToolsSection, VfsToolsSection
+
 
 bus = InProcessEventBus()
 session = Session(bus=bus)
 
 
-@bus.subscribe
-def on_prompt_executed(event: PromptExecuted) -> None:
-    print(f"Rendered {event.prompt.key} with tools {event.tools}")
+planning_section = PlanningToolsSection(session=session)
+vfs_section = VfsToolsSection(session=session)
+asteval_section = AstevalSection(session=session)
 
 
-rendered = prompt.render(
-    PullRequestSummary(
-        repository="octo/widgets",
-        title="Add caching layer",
-        body="Refactors the data loader with memoization",
-        files=["loader.py", "cache.py"],
-    ),
-    session=session,
-)
+def log_prompt(event: PromptExecuted) -> None:
+    print(
+        f"Prompt {event.prompt_name} completed with "
+        f"{len(event.result.tool_results)} tool calls"
+    )
 
-print(rendered.text)
-print(session.select_all(PromptExecuted))
+
+bus.subscribe(PromptExecuted, log_prompt)
 ```
 
-The session now contains structured history that you can query with selectors or
-persist to your own store. LangGraph workflows typically require mutating a
-global dict—here the state container enforces types and isolation.
+### 3. Compose the prompt with deterministic sections
 
-### 4. Run the agent with an adapter
+Sections rely on `string.Template`, so prepare readable placeholders up front.
+Combine your review instructions with the built-in tool suites to publish a
+single, auditable prompt tree.
 
-Adapters handle the transport. Once you have the rendered prompt, evaluate it
-through your model provider. The adapter emits events so your session stays in
-sync.
+```python
+from weakincentives import MarkdownSection, Prompt
+
+
+@dataclass
+class ReviewGuidance:
+    severity_scale: str = "minor | major | critical"
+    output_schema: str = "ReviewBundle with comments[] and overall_assessment"
+    focus_areas: str = (
+        "Security regressions, concurrency bugs, test coverage gaps, and"
+        " ambiguous logic should be escalated."
+    )
+
+
+overview_section = MarkdownSection[PullRequestContext](
+    title="Repository Overview",
+    key="review.overview",
+    template="""
+    You are a principal engineer reviewing a pull request.
+    Repository: ${repository}
+    Title: ${title}
+
+    Pull request summary:
+    ${body}
+
+    Files touched: ${files_summary}
+    """,
+)
+
+
+analysis_section = MarkdownSection[ReviewGuidance](
+    title="Review Directives",
+    key="review.directives",
+    template="""
+    - Classify findings using this severity scale: ${severity_scale}.
+    - Emit output that matches ${output_schema}; missing fields fail the run.
+    - Investigation focus:
+      ${focus_areas}
+    - Call `fetch_diff` before commenting on any unfamiliar hunk.
+    """,
+    default_params=ReviewGuidance(),
+    tools=(diff_tool,),
+)
+
+
+review_prompt = Prompt[ReviewBundle](
+    ns="tutorial/code_review",
+    key="review.generate",
+    name="code_review_agent",
+    sections=(
+        overview_section,
+        planning_section,
+        vfs_section,
+        asteval_section,
+        analysis_section,
+    ),
+)
+
+
+rendered = review_prompt.render(
+    PullRequestContext(
+        repository="octo/widgets",
+        title="Add caching layer",
+        body="Introduces memoization to reduce redundant IO while preserving correctness.",
+        files_summary="loader.py, cache.py",
+    ),
+)
+
+
+print(rendered.text)
+print([tool.name for tool in rendered.tools])
+```
+
+### 4. Evaluate the prompt with an adapter
+
+Adapters send the rendered prompt to a provider and publish telemetry to the
+event bus. The session subscribed above automatically ingests each
+`PromptExecuted` and `ToolInvoked` event.
 
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter
+
 
 adapter = OpenAIAdapter(
     model="gpt-4o-mini",
     client_kwargs={"api_key": "sk-..."},
 )
 
+
 response = adapter.evaluate(
-    prompt=prompt,
-    params=PullRequestSummary(
+    review_prompt,
+    PullRequestContext(
         repository="octo/widgets",
         title="Add caching layer",
-        body="Refactors the data loader with memoization",
-        files=["loader.py", "cache.py"],
+        body="Introduces memoization to reduce redundant IO while preserving correctness.",
+        files_summary="loader.py, cache.py",
     ),
-    session=session,
     bus=bus,
 )
 
-review_bundle = response.value
-for comment in review_bundle.comments:
-    print(f"{comment.file_path}:{comment.line} — {comment.summary}")
+
+bundle = response.output
+if bundle is None:
+    raise RuntimeError("Structured parsing failed")
+
+
+for comment in bundle.comments:
+    print(f"{comment.file_path}:{comment.line} → {comment.summary}")
 ```
 
-Your `ReviewBundle` is fully typed. If the model forgets a field, the structured
-parser raises immediately, giving you deterministic failure modes.
+If the model omits a required field, `OpenAIAdapter` raises `PromptEvaluationError`
+with provider context rather than silently degrading.
 
-### 5. Layer in optimizer-driven overrides
+### 5. Mine session state for downstream automation
 
-Weak Incentives exposes prompt sections as plain objects, so you can experiment
-with DSPy-style optimizers while keeping the deterministic runtime. For example:
+Built-in selectors expose the data collected by reducers that each tool suite
+registered. This gives you ready-to-ship audit logs without building LangGraph
+callbacks or DSPy side channels.
 
 ```python
-from weakincentives import clone
+from weakincentives.session import select_all, select_latest
+from weakincentives.tools import Plan, VirtualFileSystem
 
 
-def strengthen_defect_language(section: MarkdownSection[PullRequestSummary]) -> MarkdownSection[PullRequestSummary]:
-    updated = clone(section)
-    updated.template = (*section.template, "Always cite the specific diff hunk.")
-    updated.version = section.version.increment(minor=1)
-    return updated
+plan_history = select_all(session, Plan)
+latest_plan = select_latest(session, Plan)
+vfs_snapshot = select_latest(session, VirtualFileSystem)
 
 
-optimized_prompt = clone(prompt)
-optimized_prompt.sections = [
-    summary_section,
-    strengthen_defect_language(analysis_section),
-]
+print(f"Plan steps recorded: {len(plan_history)}")
+if latest_plan:
+    for step in latest_plan.steps:
+        print(f"- [{step.status}] {step.title}")
+
+
+if vfs_snapshot:
+    for file in vfs_snapshot.files:
+        print(f"Staged file {file.path.segments} (version {file.version})")
 ```
 
-Because sections carry versions, you can store optimizer trials alongside their
-metadata, diff them, and roll back without retraining a graph. Try that in
-LangGraph without a pile of custom tracking code!
+### 6. Override sections with a version store
 
-### 6. Extend with planning and a virtual filesystem
-
-The review agent can coordinate multi-step workflows (draft → refine → approve)
-by layering in the built-in planning tools. These reducers store plans inside the
-session so the next evaluator call has the full conversation context.
+DSPy-style optimizers can persist improved instructions and let the runtime swap
+them in without re-deploying code. Implement the `PromptVersionStore` protocol to
+serve overrides by namespace, key, and tag.
 
 ```python
-from weakincentives.tools import PlanningToolsSection, Plan
+from dataclasses import dataclass
+from weakincentives.prompt.versioning import (
+    PromptDescriptor,
+    PromptOverride,
+    PromptVersionStore,
+)
 
-planning_section = PlanningToolsSection(session=session)
 
-prompt.sections.append(planning_section)
+@dataclass
+class StaticVersionStore(PromptVersionStore):
+    override: PromptOverride | None = None
 
-# Later, inspect the evolving plan:
-active_plan = select_latest(session, Plan)
-print(active_plan.steps if active_plan else "No plan yet")
+
+    def resolve(
+        self,
+        descriptor: PromptDescriptor,
+        tag: str = "latest",
+    ) -> PromptOverride | None:
+        if (
+            self.override
+            and self.override.ns == descriptor.ns
+            and self.override.prompt_key == descriptor.key
+            and self.override.tag == tag
+        ):
+            return self.override
+        return None
+
+
+overrides = PromptOverride(
+    ns=review_prompt.ns,
+    prompt_key=review_prompt.key,
+    tag="assertive-feedback",
+    overrides={
+        ("review.directives",): """
+        - Classify findings using this severity scale: minor | major | critical.
+        - Always cite the exact diff hunk when raising a major or critical issue.
+        - Respond with ReviewBundle JSON. Missing fields terminate the run.
+        """,
+    },
+)
+
+
+store = StaticVersionStore(override=overrides)
+rendered_with_override = review_prompt.render_with_overrides(
+    PullRequestContext(
+        repository="octo/widgets",
+        title="Add caching layer",
+        body="Introduces memoization to reduce redundant IO while preserving correctness.",
+        files_summary="loader.py, cache.py",
+    ),
+    version_store=store,
+    tag="assertive-feedback",
+)
+
+
+print(rendered_with_override.text)
 ```
 
-The planning reducer will emit consistent plan states across retries, something
-graph-based frameworks often leave to the user.
+Because sections expose stable `(ns, key, path)` identifiers, overrides stay scoped
+to the intended content. That means optimizers can explore new directives without
+risking accidental prompt drift elsewhere in the tree.
 
 ### 7. Ship it
 
-At this point you have:
+You now have a deterministic reviewer that:
 
-1. Reproducible prompt renders with structured sections and tool metadata.
-2. Stateful reviews captured in a type-safe session.
-3. Hooks for DSPy-style optimizers to propose new templates without touching the
-   rest of the agent.
+1. Enforces typed contracts for inputs, tools, and outputs.
+2. Persists multi-step plans, VFS edits, and evaluation transcripts inside a
+   session without custom plumbing.
+3. Supports optimizer-driven overrides that slot cleanly into CI, evaluation
+   harnesses, or on-call tuning workflows.
 
-Whether you host it in a background worker or a Slack bot, the deterministic
-architecture keeps reviews explainable—and your future self can replay every
-step when something looks off.
+Drop the agent into a queue worker, Slack bot, or scheduled job. Every evaluation
+is replayable thanks to the captured session state, so postmortems start with
+facts—not speculation.
+
 
 ## Sessions and Built-in Tools
 
