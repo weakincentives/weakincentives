@@ -35,7 +35,7 @@ def main() -> None:
     if api_key is None:
         raise SystemExit("Set LITELLM_API_KEY before running this example.")
 
-    model = os.getenv("LITELLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LITELLM_MODEL", "gpt-5")
     base_url = os.getenv("LITELLM_BASE_URL")
     completion_kwargs: dict[str, Any] = {"api_key": api_key}
     if base_url:

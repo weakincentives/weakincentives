@@ -62,12 +62,12 @@ def test_planning_end_to_end_flow() -> None:
     section = PlanningToolsSection(session=session)
     tools = {tool.name: tool for tool in section.tools()}
 
-    setup_tool = tools["planning.setup_plan"]
-    add_tool = tools["planning.add_step"]
-    update_tool = tools["planning.update_step"]
-    mark_tool = tools["planning.mark_step"]
-    read_tool = tools["planning.read_plan"]
-    clear_tool = tools["planning.clear_plan"]
+    setup_tool = tools["planning_setup_plan"]
+    add_tool = tools["planning_add_step"]
+    update_tool = tools["planning_update_step"]
+    mark_tool = tools["planning_mark_step"]
+    read_tool = tools["planning_read_plan"]
+    clear_tool = tools["planning_clear_plan"]
 
     _invoke(
         bus,

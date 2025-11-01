@@ -30,6 +30,7 @@ from ..prompt.structured_output import (
 )
 from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
+from ..tools.errors import ToolValidationError
 from .core import PromptEvaluationError, PromptResponse
 
 _ERROR_MESSAGE: Final[str] = (
@@ -311,6 +312,11 @@ class OpenAIAdapter:
 
                 try:
                     tool_result = tool.handler(tool_params)
+                except ToolValidationError as error:
+                    tool_result = ToolResult(
+                        message=f"Tool validation failed: {error}",
+                        value=tool_params,
+                    )
                 except Exception as error:  # pragma: no cover - handler bug
                     raise PromptEvaluationError(
                         f"Tool '{tool_name}' raised an exception.",

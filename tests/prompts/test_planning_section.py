@@ -27,17 +27,17 @@ def test_planning_section_renders_instructions() -> None:
 
     body = section.render(params, depth=0)
 
-    assert "planning.setup_plan" in body
-    assert "planning.read_plan" in body
+    assert "planning_setup_plan" in body
+    assert "planning_read_plan" in body
     assert "Stay brief" in body
     assert "multi-step" in body
 
     tool_names = tuple(tool.name for tool in section.tools())
     assert tool_names == (
-        "planning.setup_plan",
-        "planning.add_step",
-        "planning.update_step",
-        "planning.mark_step",
-        "planning.clear_plan",
-        "planning.read_plan",
+        "planning_setup_plan",
+        "planning_add_step",
+        "planning_update_step",
+        "planning_mark_step",
+        "planning_clear_plan",
+        "planning_read_plan",
     )
