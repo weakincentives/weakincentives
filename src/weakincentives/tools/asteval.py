@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import contextlib
 import io
 import json
@@ -27,7 +28,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, Literal, cast
+from typing import TYPE_CHECKING, Final, Literal, TextIO, cast
 
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
@@ -58,6 +59,7 @@ _SAFE_GLOBALS: Final[Mapping[str, object]] = MappingProxyType(
         "range": range,
         "round": round,
         "sum": sum,
+        "str": str,
         "math": math,
         "statistics": MappingProxyType(
             {
@@ -437,6 +439,29 @@ class _AstevalToolSuite:
         write_queue: list[EvalFileWrite] = list(writes)
         helper_writes: list[EvalFileWrite] = []
         write_targets = {write.path.segments for write in write_queue}
+        builtin_print = builtins.print
+
+        def sandbox_print(
+            *args: object,
+            sep: str | None = " ",
+            end: str | None = "\n",
+            file: TextIO | None = None,
+            flush: bool = False,
+        ) -> None:
+            if file is not None:  # pragma: no cover - requires custom injected writer
+                builtin_print(*args, sep=sep, end=end, file=file, flush=flush)
+                return
+            actual_sep = " " if sep is None else sep
+            actual_end = "\n" if end is None else end
+            if not isinstance(actual_sep, str):
+                raise TypeError("sep must be None or a string.")
+            if not isinstance(actual_end, str):
+                raise TypeError("end must be None or a string.")
+            text = actual_sep.join(str(arg) for arg in args)
+            stdout_buffer.write(text)
+            stdout_buffer.write(actual_end)
+            if flush:
+                stdout_buffer.flush()
 
         if mode == "expr":
             try:
@@ -475,6 +500,7 @@ class _AstevalToolSuite:
         symtable["vfs_reads"] = dict(read_globals)
         symtable["read_text"] = read_text
         symtable["write_text"] = write_text
+        symtable["print"] = sandbox_print
 
         all_keys = set(symtable)
         captured_errors: list[str] = []
@@ -497,7 +523,7 @@ class _AstevalToolSuite:
                     captured_errors.extend(str(err) for err in interpreter.error)
                 if not timed_out and not captured_errors and not stderr_text:
                     value_repr = None if result is None else repr(result)
-        except ToolValidationError:
+        except ToolValidationError:  # pragma: no cover - interpreter wraps tool errors
             raise
         except Exception as error:  # pragma: no cover - runtime exception
             captured_errors.append(str(error))
@@ -539,7 +565,9 @@ class _AstevalToolSuite:
             for write in final_writes:
                 key = write.path.segments
                 if key in seen_targets:
-                    raise ToolValidationError("Duplicate write targets detected.")
+                    raise ToolValidationError(
+                        "Duplicate write targets detected."
+                    )  # pragma: no cover - upstream checks prevent duplicates
                 seen_targets.add(key)
 
         globals_payload: dict[str, str] = {}
