@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 from ..prompt import MarkdownSection, Prompt
 from ..session import Session
-from ..tools import PlanningToolsSection
+from ..tools import PlanningToolsSection, VfsToolsSection
 from .code_review_tools import build_tools
 
 
@@ -69,6 +69,13 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
             - `show_git_tags` lists tags that match specified filters.
             - `show_current_time` reports the present time (default UTC or a
               requested timezone).
+            - `vfs_list_directory` lists directories and files staged in the virtual
+              filesystem snapshot.
+            - `vfs_read_file` reads staged file contents.
+            - `vfs_write_file` stages ASCII edits before applying them to the host
+              workspace.
+            - `vfs_delete_entry` removes staged files or directories that are no
+              longer needed.
             If the task requires information beyond these capabilities, ask the
             user for clarification rather than guessing.
 
@@ -89,6 +96,7 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
         key="code-review-brief",
     )
     planning_section = PlanningToolsSection(session=session)
+    vfs_section = VfsToolsSection(session=session)
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
@@ -98,7 +106,7 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
         ns="examples/code-review",
         key="code-review-session",
         name="code_review_agent",
-        sections=[guidance_section, planning_section, user_turn_section],
+        sections=[guidance_section, planning_section, vfs_section, user_turn_section],
     )
 
 

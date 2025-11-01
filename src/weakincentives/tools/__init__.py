@@ -29,6 +29,18 @@ from .planning import (
     StepStatus,
     UpdateStep,
 )
+from .vfs import (
+    DeleteEntry,
+    HostMount,
+    ListDirectory,
+    ListDirectoryResult,
+    ReadFile,
+    VfsFile,
+    VfsPath,
+    VfsToolsSection,
+    VirtualFileSystem,
+    WriteFile,
+)
 
 __all__ = [
     "ToolValidationError",
@@ -44,4 +56,14 @@ __all__ = [
     "ClearPlan",
     "ReadPlan",
     "PlanningToolsSection",
+    "VirtualFileSystem",
+    "VfsFile",
+    "VfsPath",
+    "HostMount",
+    "ListDirectory",
+    "ListDirectoryResult",
+    "ReadFile",
+    "WriteFile",
+    "DeleteEntry",
+    "VfsToolsSection",
 ]
