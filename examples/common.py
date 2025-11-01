@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import subprocess
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -51,15 +51,66 @@ def _truncate(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> str:
 class GitLogParams:
     """Parameters for querying git log history."""
 
-    revision_range: str | None = None
-    path: str | None = None
-    max_count: int | None = 20
-    skip: int | None = None
-    author: str | None = None
-    since: str | None = None
-    until: str | None = None
-    grep: str | None = None
-    additional_args: tuple[str, ...] = ()
+    revision_range: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Commit range spec passed to `git log` (for example 'main..HEAD')."
+            )
+        },
+    )
+    path: str | None = field(
+        default=None,
+        metadata={
+            "description": "Restrict history to a specific file or directory.",
+        },
+    )
+    max_count: int | None = field(
+        default=20,
+        metadata={"description": "Maximum number of commits to return."},
+    )
+    skip: int | None = field(
+        default=None,
+        metadata={
+            "description": "Number of commits to skip from the top of the result.",
+        },
+    )
+    author: str | None = field(
+        default=None,
+        metadata={
+            "description": ("Filter commits to those authored by the provided string."),
+        },
+    )
+    since: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Only include commits after this date/time (forwarded to git)."
+            ),
+        },
+    )
+    until: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Only include commits up to this date/time (forwarded to git)."
+            ),
+        },
+    )
+    grep: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Include commits whose messages match this regular expression."
+            ),
+        },
+    )
+    additional_args: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": "Extra raw arguments forwarded to `git log`.",
+        },
+    )
 
 
 @dataclass
@@ -71,7 +122,14 @@ class GitLogResult:
 class TimeQueryParams:
     """Parameters for requesting the current time."""
 
-    timezone: str | None = None
+    timezone: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "IANA timezone identifier to convert the current time. Defaults to UTC."
+            ),
+        },
+    )
 
 
 @dataclass
@@ -82,16 +140,83 @@ class TimeQueryResult:
 
 
 @dataclass
+class BranchListParams:
+    """Parameters for listing git branches."""
+
+    include_remote: bool = field(
+        default=False,
+        metadata={
+            "description": "Include remote branches when set to true (uses --all).",
+        },
+    )
+    pattern: str | None = field(
+        default=None,
+        metadata={
+            "description": "Optional glob to filter branch names (passed to git).",
+        },
+    )
+    contains: str | None = field(
+        default=None,
+        metadata={
+            "description": "Only branches containing this commit (uses --contains).",
+        },
+    )
+
+
+@dataclass
+class BranchListResult:
+    branches: list[str]
+
+
+@dataclass
+class TagListParams:
+    """Parameters for listing git tags."""
+
+    pattern: str | None = field(
+        default=None,
+        metadata={
+            "description": "Optional glob to filter tags (passed to git).",
+        },
+    )
+    sort: str | None = field(
+        default=None,
+        metadata={
+            "description": "Sort directive forwarded to git tag --sort (for example '-version:refname').",
+        },
+    )
+    contains: str | None = field(
+        default=None,
+        metadata={
+            "description": "Only tags containing this commit (uses --contains).",
+        },
+    )
+
+
+@dataclass
+class TagListResult:
+    tags: list[str]
+
+
+@dataclass
 class ReviewGuidance:
-    focus: str = (
-        "Identify potential issues, risks, and follow-up questions for the changes "
-        "under review."
+    focus: str = field(
+        default=(
+            "Identify potential issues, risks, and follow-up questions for the changes "
+            "under review."
+        ),
+        metadata={
+            "description": "Default framing instructions for the review assistant.",
+        },
     )
 
 
 @dataclass
 class ReviewTurnParams:
-    request: str
+    request: str = field(
+        metadata={
+            "description": "User-provided review task or question to address.",
+        }
+    )
 
 
 @dataclass
@@ -201,6 +326,69 @@ def current_time_handler(params: TimeQueryParams) -> ToolResult[TimeQueryResult]
     )
 
 
+def branch_list_handler(params: BranchListParams) -> ToolResult[BranchListResult]:
+    args = ["git", "branch", "--list"]
+    if params.include_remote:
+        args.append("--all")
+    if params.contains:
+        args.extend(["--contains", params.contains])
+    if params.pattern:
+        args.append(params.pattern)
+
+    result = subprocess.run(
+        args,
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        message = f"git branch failed: {result.stderr.strip()}"
+        return ToolResult(message=message, value=BranchListResult(branches=[]))
+
+    branches = [line.strip().lstrip("* ") for line in result.stdout.splitlines()]
+    branches = [branch for branch in branches if branch]
+    if not branches:
+        message = "No branches matched the query."
+    else:
+        message = (
+            f"Returned {len(branches)} branch entr{'y' if len(branches) == 1 else 'ies'}:\n"
+            f"{_truncate('\n'.join(branches))}"
+        )
+    return ToolResult(message=message, value=BranchListResult(branches=branches))
+
+
+def tag_list_handler(params: TagListParams) -> ToolResult[TagListResult]:
+    args = ["git", "tag", "--list"]
+    if params.contains:
+        args.extend(["--contains", params.contains])
+    if params.sort:
+        args.extend(["--sort", params.sort])
+    if params.pattern:
+        args.append(params.pattern)
+
+    result = subprocess.run(
+        args,
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        message = f"git tag failed: {result.stderr.strip()}"
+        return ToolResult(message=message, value=TagListResult(tags=[]))
+
+    tags = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if not tags:
+        message = "No tags matched the query."
+    else:
+        message = (
+            f"Returned {len(tags)} tag entr{'y' if len(tags) == 1 else 'ies'}:\n"
+            f"{_truncate('\n'.join(tags))}"
+        )
+    return ToolResult(message=message, value=TagListResult(tags=tags))
+
+
 def build_tools() -> tuple[Tool[Any, Any], ...]:
     git_log_tool = Tool[GitLogParams, GitLogResult](
         name="show_git_log",
@@ -215,7 +403,26 @@ def build_tools() -> tuple[Tool[Any, Any], ...]:
         description="Fetch the current time in UTC or a provided timezone using zoneinfo.",
         handler=current_time_handler,
     )
-    return (git_log_tool, current_time_tool)
+    branch_list_tool = Tool[BranchListParams, BranchListResult](
+        name="show_git_branches",
+        description=(
+            "List local or remote branches with optional glob filters and commit containment checks."
+        ),
+        handler=branch_list_handler,
+    )
+    tag_list_tool = Tool[TagListParams, TagListResult](
+        name="show_git_tags",
+        description=(
+            "List repository tags with optional glob filters, sorting, and commit containment checks."
+        ),
+        handler=tag_list_handler,
+    )
+    return (
+        git_log_tool,
+        current_time_tool,
+        branch_list_tool,
+        tag_list_tool,
+    )
 
 
 def build_code_review_prompt() -> Prompt[ReviewResponse]:
@@ -231,6 +438,8 @@ def build_code_review_prompt() -> Prompt[ReviewResponse]:
 
             Use the available tools to stay grounded:
             - `show_git_log` retrieves commit history relevant to the task.
+            - `show_git_branches` lists branches that match specified filters.
+            - `show_git_tags` lists tags that match specified filters.
             - `show_current_time` reports the present time (default UTC or a
               requested timezone).
             If the task requires information beyond these capabilities, ask the
@@ -326,7 +535,12 @@ class CodeReviewSession:
             print(f"       (session recorded this call as #{count})")
 
     def _register_tool_history(self) -> None:
-        for result_type in (GitLogResult, TimeQueryResult):
+        for result_type in (
+            GitLogResult,
+            TimeQueryResult,
+            BranchListResult,
+            TagListResult,
+        ):
             self._session.register_reducer(
                 result_type,
                 self._record_tool_call,
