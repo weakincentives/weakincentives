@@ -2,11 +2,17 @@
 
 ## Near-Term Initiatives
 
-### Built-In Planning & Virtual Filesystem Tools
+### Agentic Reasoning Loop
 
-- Provide first-class tool definitions for planning/todo workflows and virtual filesystem operations for agents.
-- Establish section templates that ensure tools render consistently in prompts and downstream telemetry.
-- Ship representative examples and regression tests demonstrating safe defaults and extensibility points.
+- Design an orchestrator that coordinates system prompts, user turns, tool routing, and session state updates.
+- Integrate entity resolvers and named-entity policies to normalize inputs before tool calls and responses.
+- Document the execution phases (think, act, observe) with diagrams and tests that enforce correct transitions.
+
+### Tracing & Observability
+
+- Capture structured trace data from agent runs, including tool calls and message content classification.
+- Export telemetry to persistent storage with configurable redaction for sensitive fields and PII.
+- Provide replay and visualization utilities that allow developers to inspect state transitions and timing.
 
 ### Single Turn Prompt Optimizations
 
@@ -25,18 +31,6 @@
 - Provide hardened sandboxes so agents can run generated code with strict CPU, memory, filesystem, and network guardrails.
 - Surface sandbox lifecycle APIs that expose logs, artifacts, and exit metadata without leaking host resources.
 - Add validation suites and stress tests that assert isolation boundaries hold across supported runtimes.
-
-### Agentic Reasoning Loop
-
-- Design an orchestrator that coordinates system prompts, user turns, tool routing, and session state updates.
-- Integrate entity resolvers and named-entity policies to normalize inputs before tool calls and responses.
-- Document the execution phases (think, act, observe) with diagrams and tests that enforce correct transitions.
-
-### Tracing & Observability
-
-- Capture structured trace data from agent runs, including tool calls and message content classification.
-- Export telemetry to persistent storage with configurable redaction for sensitive fields and PII.
-- Provide replay and visualization utilities that allow developers to inspect state transitions and timing.
 
 ### Subagents & Parallel Execution
 

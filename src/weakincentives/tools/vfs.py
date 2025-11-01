@@ -229,9 +229,7 @@ class _VfsToolSuite:
         file = _find_file(snapshot.files, path)
         if file is None:
             raise ToolValidationError("File does not exist in the virtual filesystem.")
-        message = (
-            f"Read {file.size_bytes} bytes from {'/'.join(file.path.segments) or '.'}."
-        )
+        message = _format_read_file_message(file)
         return ToolResult(message=message, value=file)
 
     def write_file(self, params: WriteFile) -> ToolResult[WriteFile]:
@@ -247,22 +245,22 @@ class _VfsToolSuite:
         if mode in {"overwrite", "append"} and existing is None:
             raise ToolValidationError("File does not exist for the requested mode.")
         normalized = WriteFile(path=path, content=content, mode=mode)
-        action = {
-            "create": "created",
-            "overwrite": "overwritten",
-            "append": "appended",
-        }[mode]
-        message = f"File {'/'.join(path.segments) or '.'} {action}."
+        message = _format_write_file_message(path, content, mode)
         return ToolResult(message=message, value=normalized)
 
     def delete_entry(self, params: DeleteEntry) -> ToolResult[DeleteEntry]:
         path = _normalize_path(params.path)
         snapshot = self._latest_snapshot()
-        deleted_count = _count_matching(snapshot.files, path)
+        matches = tuple(
+            file
+            for file in snapshot.files
+            if _is_path_prefix(file.path.segments, path.segments)
+        )
+        deleted_count = len(matches)
         if deleted_count == 0:
             raise ToolValidationError("No files matched the provided path.")
         normalized = DeleteEntry(path=path)
-        message = f"Deleted {deleted_count} entr{'ies' if deleted_count != 1 else 'y'}."
+        message = _format_delete_message(path, matches)
         return ToolResult(message=message, value=normalized)
 
     def _latest_snapshot(self) -> VirtualFileSystem:
@@ -352,22 +350,47 @@ def _is_path_prefix(path: Sequence[str], prefix: Sequence[str]) -> bool:
     return all(path[index] == prefix[index] for index in range(len(prefix)))
 
 
-def _count_matching(files: Iterable[VfsFile], path: VfsPath) -> int:
-    target = path.segments
-    return sum(1 for file in files if _is_path_prefix(file.path.segments, target))
-
-
 def _format_directory_message(
     path: VfsPath, directories: tuple[str, ...], files: tuple[str, ...]
 ) -> str:
-    prefix = "/".join(path.segments) or "."
-    directory_count = len(directories)
-    file_count = len(files)
-    return (
-        f"Directory {prefix} contains {directory_count} subdirector"
-        f"{'ies' if directory_count != 1 else 'y'} and {file_count} file"
-        f"{'s' if file_count != 1 else ''}."
+    prefix = _format_path(path)
+    directory_list = ", ".join(directories) if directories else "(none)"
+    file_list = ", ".join(files) if files else "(none)"
+    return f"Directory {prefix}\nsubdirectories: {directory_list}\nfiles: {file_list}"
+
+
+def _format_read_file_message(file: VfsFile) -> str:
+    path_label = _format_path(file.path)
+    header = (
+        f"Read file {path_label} (version {file.version}, {file.size_bytes} bytes)."
     )
+    body = file.content if file.content else "(empty file)"
+    return f"{header}\n{body}"
+
+
+def _format_write_file_message(path: VfsPath, content: str, mode: WriteMode) -> str:
+    path_label = _format_path(path)
+    action = {
+        "create": "create",
+        "overwrite": "overwrite",
+        "append": "append",
+    }[mode]
+    header = f"Staged {action} for {path_label} ({len(content)} characters)."
+    body = content if content else "(empty content)"
+    return f"{header}\n{body}"
+
+
+def _format_delete_message(path: VfsPath, files: Sequence[VfsFile]) -> str:
+    path_label = _format_path(path)
+    deleted_paths = ", ".join(_format_path(file.path) for file in files)
+    return (
+        f"Deleted {len(files)} entr{'ies' if len(files) != 1 else 'y'} under {path_label}:"
+        f" {deleted_paths}"
+    )
+
+
+def _format_path(path: VfsPath) -> str:
+    return "/".join(path.segments) or "."
 
 
 def _normalize_root(path: os.PathLike[str] | str) -> Path:
