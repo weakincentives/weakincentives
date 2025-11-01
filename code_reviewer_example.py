@@ -35,6 +35,7 @@ from weakincentives.examples.code_review_session import (
 from weakincentives.prompt import MarkdownSection, Prompt
 from weakincentives.serde import dump
 from weakincentives.session import Session, select_latest
+from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import Plan, PlanningToolsSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
@@ -82,6 +83,8 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
               plan updated as you explore.
             - VFS tools list directories, read files, and stage edits. Mounted
               files are read-only; use writes to stage new snapshots.
+            - Python evaluation tools run short scripts with access to staged VFS
+              reads and writes for quick experiments.
 
             Respond with JSON containing:
             - summary: One paragraph describing your findings so far.
@@ -106,6 +109,7 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         ),
         allowed_host_roots=(TEST_REPOSITORIES_ROOT,),
     )
+    asteval_section = AstevalSection(session=session)
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
@@ -115,7 +119,13 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         ns="examples/code-review",
         key="code-review-session",
         name="sunfish_code_review_agent",
-        sections=(guidance_section, planning_section, vfs_section, user_turn_section),
+        sections=(
+            guidance_section,
+            planning_section,
+            vfs_section,
+            asteval_section,
+            user_turn_section,
+        ),
     )
 
 
@@ -226,6 +236,7 @@ def main() -> None:
         "- Available commands: 'history' (tool log), 'plan' (current plan),"
         " 'exit' to quit."
     )
+    print("- Python evaluation tool enabled for quick calculations and scripts.")
 
     session = SunfishReviewSession(build_adapter())
     print("Type a review prompt to begin.")
