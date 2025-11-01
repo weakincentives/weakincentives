@@ -75,6 +75,7 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+extend-exclude = ["test-repositories"]
 
 [tool.ruff.lint]
 extend-select = ["I", "UP", "B", "SIM", "C4", "ANN", "RET", "RSE", "PTH", "ISC", "CPY"]
@@ -105,6 +106,7 @@ markers = [
     "integration: marks tests that exercise live provider integrations.",
     "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
 ]
+norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

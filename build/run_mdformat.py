@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+EXCLUDED_PARTS = {"test-repositories"}
+
 
 def _collect_markdown_files(root: Path) -> list[Path]:
     result = subprocess.run(
@@ -32,7 +34,17 @@ def _collect_markdown_files(root: Path) -> list[Path]:
         message = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(f"git ls-files failed: {message}")
 
-    files = [root / line for line in result.stdout.splitlines() if line]
+    files: list[Path] = []
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+
+        path = Path(line)
+        if EXCLUDED_PARTS.intersection(path.parts):
+            continue
+
+        files.append(root / path)
+
     return sorted(files)
 
 

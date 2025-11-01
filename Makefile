@@ -34,9 +34,9 @@ markdown-check:
 
 # Run type checkers
 typecheck:
-	@uv run --all-extras ty check --error-on-warning -qq . || \
+	@uv run --all-extras ty check --error-on-warning -qq --exclude 'test-repositories/**' . || \
                 (echo "ty check failed; rerunning with verbose output..." >&2; \
-                uv run --all-extras ty check --error-on-warning .)
+                uv run --all-extras ty check --error-on-warning --exclude 'test-repositories/**' .)
 	@uv run --all-extras pyright --project pyproject.toml || \
 		(echo "pyright failed; rerunning with verbose output..." >&2; \
 		uv run --all-extras pyright --project pyproject.toml --verbose)
