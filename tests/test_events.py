@@ -16,6 +16,8 @@ import logging
 from dataclasses import dataclass
 from typing import cast
 
+import pytest
+
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.events import (
     InProcessEventBus,
@@ -44,7 +46,11 @@ def test_null_event_bus_is_noop() -> None:
 
     events: list[PromptExecuted] = []
 
-    bus.subscribe(PromptExecuted, events.append)
+    def record_event(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
+        events.append(event)
+
+    bus.subscribe(PromptExecuted, record_event)
     bus.publish(
         PromptExecuted(
             prompt_name="demo",
@@ -60,10 +66,12 @@ def test_in_process_bus_delivers_in_order() -> None:
     bus = InProcessEventBus()
     delivered: list[PromptExecuted] = []
 
-    def first_handler(event: PromptExecuted) -> None:
+    def first_handler(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
         delivered.append(event)
 
-    def second_handler(event: PromptExecuted) -> None:
+    def second_handler(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
         delivered.append(event)
 
     bus.subscribe(PromptExecuted, first_handler)
@@ -79,14 +87,18 @@ def test_in_process_bus_delivers_in_order() -> None:
     assert delivered == [event, event]
 
 
-def test_in_process_bus_isolates_handler_exceptions(caplog) -> None:
+def test_in_process_bus_isolates_handler_exceptions(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     bus = InProcessEventBus()
     received: list[PromptExecuted] = []
 
-    def bad_handler(event: PromptExecuted) -> None:
+    def bad_handler(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
         raise RuntimeError("boom")
 
-    def good_handler(event: PromptExecuted) -> None:
+    def good_handler(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
         received.append(event)
 
     bus.subscribe(PromptExecuted, bad_handler)

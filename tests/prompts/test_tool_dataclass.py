@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import pytest
 
@@ -35,6 +35,17 @@ def _example_handler(params: ExampleParams) -> ToolResult[ExampleResult]:
     return ToolResult(
         message=params.message, value=ExampleResult(message=params.message)
     )
+
+
+def test_tool_infers_param_and_result_types() -> None:
+    tool = Tool[ExampleParams, ExampleResult](
+        name="echo",
+        description="Echo the provided message.",
+        handler=_example_handler,
+    )
+
+    assert tool.params_type is ExampleParams
+    assert tool.result_type is ExampleResult
 
 
 def test_tool_initialises_with_clean_name_and_description() -> None:
@@ -193,7 +204,7 @@ def test_tool_rejects_handler_when_not_callable() -> None:
 
 
 def test_tool_rejects_handler_missing_param_annotation() -> None:
-    def handler(params):  # type: ignore[no-untyped-def]
+    def handler(params):  # type: ignore[no-untyped-def]  # noqa: ANN001,ANN202
         return ToolResult(
             message=params.message, value=ExampleResult(message=params.message)
         )
@@ -229,9 +240,11 @@ def test_tool_rejects_handler_with_wrong_param_annotation() -> None:
 def test_tool_rejects_handler_with_multiple_params() -> None:
     def handler(
         first: ExampleParams, second: ExampleParams
-    ) -> ToolResult[ExampleResult]:  # pragma: no cover - signature invalid
+    ) -> ToolResult[ExampleResult]:
         combined = first.message + second.message
         return ToolResult(message=combined, value=ExampleResult(message=combined))
+
+    handler(ExampleParams(message="a"), ExampleParams(message="b"))
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, ExampleResult](
@@ -281,7 +294,7 @@ def test_tool_accepts_annotated_param_and_return() -> None:
 
 
 def test_tool_rejects_handler_missing_return_annotation() -> None:
-    def handler(params: ExampleParams):  # type: ignore[no-untyped-def]
+    def handler(params: ExampleParams):  # type: ignore[no-untyped-def]  # noqa: ANN202
         return ToolResult(
             message=params.message, value=ExampleResult(message=params.message)
         )
@@ -296,6 +309,26 @@ def test_tool_rejects_handler_missing_return_annotation() -> None:
     error = error_info.value
     assert isinstance(error, PromptValidationError)
     assert error.placeholder == "return"
+
+
+def test_tool_handler_type_hint_fallback_handles_name_errors() -> None:
+    if TYPE_CHECKING:
+
+        class MissingType: ...
+
+    def handler(params: MissingType) -> ToolResult[ExampleResult]:  # type: ignore[name-defined]
+        return ToolResult(message="oops", value=ExampleResult(message="oops"))
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, ExampleResult](
+            name="lookup_entity",
+            description="Fetch info",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "handler"
 
 
 def test_tool_rejects_handler_with_wrong_return_annotation() -> None:

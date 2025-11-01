@@ -59,7 +59,11 @@ def test_prompt_render_rejects_unregistered_params_type() -> None:
 class NullConstructedParams:
     value: str = "unused"
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(
+        cls,
+        *args: object,
+        **kwargs: object,
+    ) -> NullConstructedParams | None:
         return None
 
 
@@ -117,8 +121,13 @@ class InvalidParamsSection(Section[int]):  # type: ignore[arg-type]
     def __init__(self) -> None:
         super().__init__(title="Invalid", key="invalid")
 
-    def render(self, params: int, depth: int) -> str:  # pragma: no cover - defensive
+    def render(self, params: int, depth: int) -> str:
         return "invalid"
+
+
+def test_invalid_params_section_render_stub() -> None:
+    section = InvalidParamsSection()
+    assert section.render(0, depth=1) == "invalid"
 
 
 def test_prompt_register_requires_dataclass_params() -> None:

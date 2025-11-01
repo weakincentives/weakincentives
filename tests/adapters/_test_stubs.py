@@ -92,7 +92,7 @@ class DummyResponse:
         return {"choices": [choice.model_dump() for choice in self.choices]}
 
 
-class MappingResponse(dict):
+class MappingResponse(dict[str, object]):
     def __init__(self, choices: Sequence[DummyChoice]) -> None:
         super().__init__({"meta": "value"})
         self.choices = list(choices)

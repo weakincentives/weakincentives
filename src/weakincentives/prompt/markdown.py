@@ -59,7 +59,7 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         try:
             normalized_params = self._normalize_params(params)
             rendered_body = template.substitute(normalized_params)
-        except KeyError as error:  # pragma: no cover - handled at prompt level
+        except KeyError as error:
             missing = error.args[0]
             raise PromptRenderError(
                 "Missing placeholder during render.",

@@ -110,7 +110,7 @@ def parse_structured_output[PayloadT](
             parsed_items.append(parsed_item)
         return cast(PayloadT, parsed_items)
 
-    raise OutputParseError(  # pragma: no cover - defensive guard
+    raise OutputParseError(
         "Unknown output container declared.",
         dataclass_type=dataclass_type,
     )
@@ -141,7 +141,7 @@ def _extract_json_payload(text: str, dataclass_type: type[Any]) -> object:
             continue
         try:
             payload, _ = decoder.raw_decode(text, index)
-        except json.JSONDecodeError:  # pragma: no cover - defensive fallback
+        except json.JSONDecodeError:
             continue
         return payload
 

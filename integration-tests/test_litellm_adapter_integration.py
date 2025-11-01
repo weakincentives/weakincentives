@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
@@ -64,7 +65,7 @@ def completion_kwargs() -> dict[str, object]:
         payload = json.loads(extra_kwargs)
         if not isinstance(payload, dict):  # pragma: no cover - defensive
             raise TypeError(f"{_ADDITIONAL_KWARGS_ENV} must contain a JSON object.")
-        kwargs.update(payload)
+        kwargs.update(cast(dict[str, object], payload))
 
     return kwargs
 
@@ -115,7 +116,7 @@ class ReviewAnalysis:
     sentiment: str
 
 
-def _build_greeting_prompt() -> Prompt:
+def _build_greeting_prompt() -> Prompt[object]:
     greeting_section = MarkdownSection[GreetingParams](
         title="Greeting",
         template=(
@@ -146,7 +147,7 @@ def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
 
 def _build_tool_prompt(
     tool: Tool[TransformRequest, TransformResult],
-) -> Prompt:
+) -> Prompt[object]:
     instruction_section = MarkdownSection[TransformRequest](
         title="Instruction",
         template=(

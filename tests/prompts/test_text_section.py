@@ -73,7 +73,7 @@ def test_text_section_supports_slotted_dataclass_params() -> None:
 
 
 def test_text_section_rejects_non_dataclass_params() -> None:
-    section = MarkdownSection[SimpleNamespace](
+    section = MarkdownSection[SimpleNamespace](  # type: ignore[type-abstract]
         title="Reject",
         template="Value: ${value}",
         key="reject",

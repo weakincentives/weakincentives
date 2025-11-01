@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
@@ -97,7 +98,7 @@ class ReviewFinding:
     sentiment: str
 
 
-def _build_greeting_prompt() -> Prompt:
+def _build_greeting_prompt() -> Prompt[object]:
     greeting_section = MarkdownSection[GreetingParams](
         title="Greeting",
         template=(
@@ -128,7 +129,7 @@ def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
 
 def _build_tool_prompt(
     tool: Tool[TransformRequest, TransformResult],
-) -> Prompt:
+) -> Prompt[object]:
     instruction_section = MarkdownSection[TransformRequest](
         title="Instruction",
         template=(
@@ -210,8 +211,10 @@ def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
 
     first_call = response.tool_results[0]
     assert first_call.name == tool.name
-    assert first_call.params.text
-    assert first_call.result.value.text == first_call.params.text.upper()
+    call_params = cast(TransformRequest, first_call.params)
+    call_result = cast(TransformResult, first_call.result.value)
+    assert call_params.text
+    assert call_result.text == call_params.text.upper()
     assert first_call.result.message
 
     assert response.text is not None and response.text.strip()

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
@@ -22,6 +23,7 @@ from weakincentives.prompt import (
     Prompt,
     PromptRenderError,
     PromptValidationError,
+    SupportsDataclass,
 )
 
 
@@ -76,7 +78,7 @@ def build_compose_prompt() -> Prompt:
     return Prompt(ns="tests/prompts", key="compose-email", sections=sections)
 
 
-def test_prompt_integration_renders_expected_markdown():
+def test_prompt_integration_renders_expected_markdown() -> None:
     prompt = build_compose_prompt()
 
     rendered = prompt.render(
@@ -94,7 +96,7 @@ def test_prompt_integration_renders_expected_markdown():
     )
 
 
-def test_prompt_integration_handles_disabled_sections():
+def test_prompt_integration_handles_disabled_sections() -> None:
     prompt = build_compose_prompt()
 
     rendered = prompt.render(
@@ -107,21 +109,21 @@ def test_prompt_integration_handles_disabled_sections():
     assert "Target tone: direct" in rendered.text
 
 
-def test_prompt_integration_rejects_mismatched_types():
+def test_prompt_integration_rejects_mismatched_types() -> None:
     prompt = build_compose_prompt()
 
     with pytest.raises(PromptValidationError):
-        prompt.render(RoutingParams)
+        prompt.render(cast(SupportsDataclass, RoutingParams))
 
 
-def test_prompt_integration_propagates_render_errors():
+def test_prompt_integration_propagates_render_errors() -> None:
     prompt = build_compose_prompt()
 
     with pytest.raises(PromptRenderError):
         prompt.render(RoutingParams(recipient="Kim"))
 
 
-def test_prompt_module_public_exports():
+def test_prompt_module_public_exports() -> None:
     for symbol in ("Prompt", "Section", "MarkdownSection"):
         assert hasattr(prompt, symbol), f"prompt module missing export: {symbol}"
     assert "Prompt" in prompt.__all__

@@ -18,7 +18,7 @@ from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 import pytest
@@ -471,7 +471,7 @@ def test_parse_metadata_validator_errors() -> None:
     ],
 )
 def test_parse_converter_and_validator_exception_wrapping(
-    model_cls, payload, expected_message
+    model_cls: type[Any], payload: dict[str, object], expected_message: str
 ) -> None:
     with pytest.raises(Exception) as exc:
         parse(model_cls, payload)
@@ -556,7 +556,7 @@ def test_parse_extra_policies() -> None:
     assert str(exc.value) == "Extra keys not permitted: ['nickname']"
 
     slotted = parse(Slotted, {"name": "Ada", "nickname": "Ace"}, extra="allow")
-    assert slotted.__extras__ == {"nickname": "Ace"}
+    assert getattr(slotted, "__extras__", None) == {"nickname": "Ace"}
 
 
 def test_parse_model_validator_runs() -> None:
@@ -650,7 +650,7 @@ def test_clone_preserves_extras_and_revalidates() -> None:
 
     slotted = parse(Slotted, {"name": "Ada", "nickname": "Ace"}, extra="allow")
     cloned_slotted = clone(slotted)
-    assert cloned_slotted.__extras__ == {"nickname": "Ace"}
+    assert getattr(cloned_slotted, "__extras__", None) == {"nickname": "Ace"}
 
     with pytest.raises(ValueError):
         clone(user, age=10)
@@ -888,11 +888,11 @@ def test_parse_numeric_model_exclusive_bounds() -> None:
 def test_internal_helpers_and_extras_descriptor() -> None:
     slotted = parse(Slotted, {"name": "Ada", "nickname": "Ace"}, extra="allow")
     assert getattr(Slotted, "__extras__", None) is None  # descriptor access on class
-    assert slotted.__extras__ == {"nickname": "Ace"}
+    assert getattr(slotted, "__extras__", None) == {"nickname": "Ace"}
 
     descriptor = _SLOTTED_EXTRAS[Slotted]
     descriptor.__set__(slotted, None)
-    assert slotted.__extras__ is None
+    assert getattr(slotted, "__extras__", None) is None
 
     unordered = {"a", 1}
     assert _ordered_values(unordered) == sorted(unordered, key=repr)
@@ -952,9 +952,7 @@ def test_string_normalization_for_membership_constraints() -> None:
 def test_compiled_regex_and_converter_errors() -> None:
     @dataclass
     class CodeModel:
-        code: Annotated[
-            str, {"pattern": re.compile(r"^[A-Z]{3}$")}
-        ]  # pragma: no cover - alias evaluated
+        code: Annotated[str, {"pattern": re.compile(r"^[A-Z]{3}$")}]
 
     assert parse(CodeModel, {"code": "ABC"}).code == "ABC"
     with pytest.raises(ValueError):

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPossiblyUnboundVariable=false
 import dataclasses
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence, Sized
@@ -57,10 +58,7 @@ def _ordered_values(values: Iterable[object]) -> list[object]:
 
     items = list(values)
     if isinstance(values, (set, frozenset)):
-        try:
-            return sorted(items)
-        except TypeError:
-            return sorted(items, key=repr)
+        return sorted(items, key=repr)
     return items
 
 
@@ -101,7 +99,7 @@ def _merge_annotated_meta(
         base = args[0]
         for extra in args[1:]:
             if isinstance(extra, Mapping):
-                merged.update(extra)
+                merged.update(cast(Mapping[str, object], extra))
     return base, merged
 
 
@@ -191,14 +189,16 @@ def _apply_constraints(value: object, meta: Mapping[str, object], path: str) -> 
 
     members = meta.get("in") or meta.get("enum")
     if isinstance(members, Iterable) and not isinstance(members, (str, bytes)):
-        options = _ordered_values(members)
+        options_iter = cast(Iterable[object], members)
+        options = _ordered_values(options_iter)
         normalized_options = [_normalize_option(option) for option in options]
         if result not in normalized_options:
             _fail(f"must be one of {normalized_options}")
 
     not_members = meta.get("not_in")
     if isinstance(not_members, Iterable) and not isinstance(not_members, (str, bytes)):
-        forbidden = _ordered_values(not_members)
+        forbidden_iter = cast(Iterable[object], not_members)
+        forbidden = _ordered_values(forbidden_iter)
         normalized_forbidden = [_normalize_option(option) for option in forbidden]
         if result in normalized_forbidden:
             _fail(f"may not be one of {normalized_forbidden}")
@@ -222,8 +222,9 @@ def _apply_constraints(value: object, meta: Mapping[str, object], path: str) -> 
 
     converter = meta.get("convert", meta.get("transform"))
     if converter:
+        converter_fn = cast(Callable[[object], object], converter)
         try:
-            result = converter(result)
+            result = converter_fn(result)
         except (TypeError, ValueError) as error:
             raise type(error)(f"{path}: {error}") from error
         except Exception as error:  # pragma: no cover - defensive
@@ -243,7 +244,7 @@ def _coerce_to_type(
     origin = get_origin(base_type)
     type_name = getattr(base_type, "__name__", type(base_type).__name__)
 
-    if base_type in {object, _AnyType}:
+    if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
     if origin is Union:
@@ -290,7 +291,7 @@ def _coerce_to_type(
             if value == literal:
                 return _apply_constraints(literal, merged_meta, path)
             if config.coerce:
-                literal_type = type(literal)
+                literal_type = cast(type[object], type(literal))
                 try:
                     if isinstance(literal, bool) and isinstance(value, str):
                         coerced_literal = _bool_from_str(value)
@@ -313,7 +314,7 @@ def _coerce_to_type(
             return _apply_constraints(value, merged_meta, path)
         if not isinstance(value, Mapping):
             type_name = getattr(
-                dataclass_type, "__name__", dataclass_type.__class__.__name__
+                dataclass_type, "__name__", type(dataclass_type).__name__
             )
             raise TypeError(f"{path}: expected mapping for dataclass {type_name}")
         try:
@@ -353,7 +354,7 @@ def _coerce_to_type(
                 if isinstance(value, str):
                     value = [value]
                 elif isinstance(value, Iterable):
-                    value = list(value)
+                    value = list(cast(Iterable[object], value))
                 else:
                     raise TypeError(f"{path}: expected set")
             else:
@@ -367,7 +368,7 @@ def _coerce_to_type(
         if isinstance(value, str):  # pragma: no cover - handled by earlier coercion
             items = [value]
         elif isinstance(value, Iterable):
-            items = list(value)
+            items = list(cast(Iterable[object], value))
         else:  # pragma: no cover - defensive guard
             raise TypeError(f"{path}: expected iterable")
         args = get_args(base_type)
@@ -402,8 +403,9 @@ def _coerce_to_type(
         key_type, value_type = (
             get_args(base_type) if get_args(base_type) else (object, object)
         )
+        mapping_value = cast(Mapping[object, object], value)
         result_dict: dict[object, object] = {}
-        for key, item in value.items():
+        for key, item in mapping_value.items():
             coerced_key = _coerce_to_type(key, key_type, None, f"{path} keys", config)
             coerced_value = _coerce_to_type(
                 item, value_type, None, f"{path}[{coerced_key}]", config

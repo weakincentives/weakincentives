@@ -12,6 +12,23 @@
 
 """Smoke tests to verify the test harness is wired correctly."""
 
+import weakincentives
+from weakincentives import adapters
 
-def test_example():
+
+def test_example() -> None:
     assert 1 + 1 == 2
+
+
+def test_package_dir_lists_public_symbols() -> None:
+    symbols = weakincentives.__dir__()
+
+    assert "Prompt" in symbols
+    assert "tools" in symbols
+
+
+def test_adapters_dir_lists_public_symbols() -> None:
+    symbols = adapters.__dir__()
+
+    assert "OpenAIAdapter" in symbols
+    assert "LiteLLMAdapter" in symbols

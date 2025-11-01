@@ -25,13 +25,18 @@ class ExampleParams:
 
 
 class ExampleSection(Section[ExampleParams]):
-    def render(
-        self, params: ExampleParams, depth: int
-    ) -> str:  # pragma: no cover - abstract behavior exercised elsewhere
+    def render(self, params: ExampleParams, depth: int) -> str:
         return f"Rendered {params.value} at depth {depth}"
 
 
-def test_section_defaults_children_and_enabled():
+def test_example_section_render_outputs_value() -> None:
+    section = ExampleSection(title="Demo", key="demo")
+    rendered = section.render(ExampleParams(value="hi"), depth=2)
+
+    assert rendered == "Rendered hi at depth 2"
+
+
+def test_section_defaults_children_and_enabled() -> None:
     section = ExampleSection(title="Demo", key="demo")
 
     assert section.children == ()
@@ -39,7 +44,7 @@ def test_section_defaults_children_and_enabled():
     assert section.param_type is ExampleParams
 
 
-def test_section_key_normalization_and_validation():
+def test_section_key_normalization_and_validation() -> None:
     section = ExampleSection(title="Spacing Out", key=" spacing.out ")
 
     assert section.key == "spacing.out"
@@ -51,13 +56,13 @@ def test_section_key_normalization_and_validation():
         ExampleSection(title="Bad", key="Invalid Key")
 
 
-def test_section_original_body_template_default_is_none():
+def test_section_original_body_template_default_is_none() -> None:
     section = ExampleSection(title="Has No Template", key="no-template")
 
     assert section.original_body_template() is None
 
 
-def test_section_allows_custom_children_and_enabled():
+def test_section_allows_custom_children_and_enabled() -> None:
     child = ExampleSection(title="Child", key="child")
 
     def toggle(params: ExampleParams) -> bool:
@@ -76,10 +81,13 @@ def test_section_allows_custom_children_and_enabled():
 
 
 class PlainSection(Section):
-    def render(
-        self, params: object, depth: int
-    ) -> str:  # pragma: no cover - exercise instantiation guard
+    def render(self, params: object, depth: int) -> str:
         return ""
+
+
+def test_plain_section_render_stubs_result() -> None:
+    instance = PlainSection.__new__(PlainSection)
+    assert PlainSection.render(instance, object(), 0) == ""
 
 
 def test_section_requires_specialized_type_parameter() -> None:

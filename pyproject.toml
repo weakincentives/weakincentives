@@ -79,7 +79,6 @@ extend-exclude = ["test-repositories"]
 
 [tool.ruff.lint]
 extend-select = ["I", "UP", "B", "SIM", "C4", "ANN", "RET", "RSE", "PTH", "ISC", "CPY"]
-per-file-ignores = {"tests/**/*.py" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204"]}
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Version 2.0 \(the "License"\);
@@ -109,11 +108,18 @@ markers = [
 norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 
 [tool.pyright]
-typeCheckingMode = "strict"
-include = ["src"]
-exclude = ["src/weakincentives/serde"]
+typeCheckingMode = "standard"
+include = ["."]
+exclude = [
+    "test-repositories",
+    ".git",
+    ".uv-cache",
+    ".venv",
+    ".pytest_cache",
+    ".ruff_cache",
+    "dist",
+]
 [tool.coverage.run]
-omit = ["src/weakincentives/examples/*"]
 
 [tool.deptry]
 

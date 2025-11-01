@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
@@ -21,6 +22,11 @@ from weakincentives.prompt import (
     Prompt,
     PromptRenderError,
     PromptValidationError,
+    SupportsDataclass,
+)
+from weakincentives.prompt.prompt import (
+    RenderedPrompt,
+    _format_specialization_argument,
 )
 
 
@@ -115,7 +121,7 @@ def build_nested_prompt() -> Prompt:
     )
 
 
-def test_prompt_render_merges_defaults_and_overrides():
+def test_prompt_render_merges_defaults_and_overrides() -> None:
     prompt = build_prompt()
 
     rendered = prompt.render(
@@ -132,7 +138,7 @@ def test_prompt_render_merges_defaults_and_overrides():
     )
 
 
-def test_prompt_render_accepts_unordered_inputs():
+def test_prompt_render_accepts_unordered_inputs() -> None:
     prompt = build_prompt()
 
     rendered = prompt.render(
@@ -144,7 +150,7 @@ def test_prompt_render_accepts_unordered_inputs():
     assert "unordered" in rendered.text
 
 
-def test_prompt_render_requires_parameter_values():
+def test_prompt_render_requires_parameter_values() -> None:
     prompt = build_prompt()
 
     with pytest.raises(PromptRenderError) as exc:
@@ -154,17 +160,17 @@ def test_prompt_render_requires_parameter_values():
     assert exc.value.dataclass_type is DetailsParams
 
 
-def test_prompt_render_requires_dataclass_instances():
+def test_prompt_render_requires_dataclass_instances() -> None:
     prompt = build_prompt()
 
     with pytest.raises(PromptValidationError) as exc:
-        prompt.render(IntroParams)
+        prompt.render(cast(SupportsDataclass, IntroParams))
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.dataclass_type is IntroParams
 
 
-def test_prompt_render_rejects_duplicate_param_instances():
+def test_prompt_render_rejects_duplicate_param_instances() -> None:
     prompt = build_prompt()
 
     with pytest.raises(PromptValidationError) as exc:
@@ -174,7 +180,7 @@ def test_prompt_render_rejects_duplicate_param_instances():
     assert exc.value.dataclass_type is IntroParams
 
 
-def test_prompt_render_renders_nested_sections_and_depth():
+def test_prompt_render_renders_nested_sections_and_depth() -> None:
     prompt = build_nested_prompt()
 
     rendered = prompt.render(
@@ -194,7 +200,7 @@ def test_prompt_render_renders_nested_sections_and_depth():
     )
 
 
-def test_prompt_render_skips_disabled_parent_and_children():
+def test_prompt_render_skips_disabled_parent_and_children() -> None:
     prompt = build_nested_prompt()
 
     rendered = prompt.render(
@@ -208,7 +214,7 @@ def test_prompt_render_skips_disabled_parent_and_children():
     assert "Leaf" not in rendered.text
 
 
-def test_prompt_render_wraps_template_errors_with_context():
+def test_prompt_render_wraps_template_errors_with_context() -> None:
     @dataclass
     class ErrorParams:
         value: str
@@ -232,7 +238,7 @@ def test_prompt_render_wraps_template_errors_with_context():
     assert exc.value.dataclass_type is ErrorParams
 
 
-def test_prompt_render_propagates_enabled_errors():
+def test_prompt_render_propagates_enabled_errors() -> None:
     @dataclass
     class ToggleParams:
         flag: bool
@@ -258,3 +264,45 @@ def test_prompt_render_propagates_enabled_errors():
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.section_path == ("guard",)
     assert exc.value.dataclass_type is ToggleParams
+
+
+def test_rendered_prompt_str_returns_text() -> None:
+    rendered = RenderedPrompt(
+        text="Rendered output",
+        output_type=None,
+        container=None,
+        allow_extra_keys=None,
+    )
+
+    assert str(rendered) == "Rendered output"
+
+
+def test_format_specialization_argument_variants() -> None:
+    assert _format_specialization_argument(None) == "?"
+    assert _format_specialization_argument(int) == "int"
+    assert _format_specialization_argument({"id": 1}) == "{'id': 1}"
+
+
+def test_prompt_build_response_format_requires_output_container() -> None:
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="response-format",
+        sections=[],
+    )
+
+    with pytest.raises(RuntimeError):
+        prompt._build_response_format_params()
+
+
+def test_markdown_section_missing_placeholder_raises_prompt_error() -> None:
+    section = MarkdownSection[IntroParams](
+        title="Intro",
+        template="Hello ${name}",
+        key="intro",
+    )
+
+    with pytest.raises(PromptRenderError) as exc:
+        section.render(IntroParams(title="ignored"), depth=0)
+
+    assert isinstance(exc.value, PromptRenderError)
+    assert exc.value.placeholder == "name"

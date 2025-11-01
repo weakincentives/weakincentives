@@ -71,14 +71,16 @@ MODULE_PATH = "weakincentives.adapters.openai"
 PROMPT_NS = "tests/adapters/openai"
 
 
-def _reload_module():
+def _reload_module() -> types.ModuleType:
     return importlib.reload(std_import_module(MODULE_PATH))
 
 
-def test_create_openai_client_requires_optional_dependency(monkeypatch):
-    module = _reload_module()
+def test_create_openai_client_requires_optional_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
 
-    def fail_import(name: str, package: str | None = None):
+    def fail_import(name: str, package: str | None = None) -> types.ModuleType:
         if name == "openai":
             raise ModuleNotFoundError("No module named 'openai'")
         return std_import_module(name, package)
@@ -93,14 +95,16 @@ def test_create_openai_client_requires_optional_dependency(monkeypatch):
     assert "pip install weakincentives[openai]" in message
 
 
-def test_create_openai_client_returns_openai_instance(monkeypatch):
-    module = _reload_module()
+def test_create_openai_client_returns_openai_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
 
     class DummyOpenAI:
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: object) -> None:
             self.kwargs = kwargs
 
-    dummy_module = cast(module._OpenAIModule, types.ModuleType("openai"))
+    dummy_module = cast(Any, types.ModuleType("openai"))
     dummy_module.OpenAI = DummyOpenAI
 
     monkeypatch.setitem(sys.modules, "openai", dummy_module)
@@ -114,7 +118,7 @@ def test_create_openai_client_returns_openai_instance(monkeypatch):
 def test_openai_adapter_constructs_client_when_not_provided(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -156,7 +160,7 @@ def test_openai_adapter_constructs_client_when_not_provided(
 
 
 def test_openai_adapter_supports_custom_client_factory() -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -196,7 +200,7 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
 
 
 def test_openai_adapter_rejects_client_kwargs_with_explicit_client() -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
     client = DummyOpenAIClient([])
 
     with pytest.raises(ValueError):
@@ -208,7 +212,7 @@ def test_openai_adapter_rejects_client_kwargs_with_explicit_client() -> None:
 
 
 def test_openai_adapter_rejects_client_factory_with_explicit_client() -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
     client = DummyOpenAIClient([])
 
     with pytest.raises(ValueError):
@@ -219,8 +223,8 @@ def test_openai_adapter_rejects_client_factory_with_explicit_client() -> None:
         )
 
 
-def test_openai_adapter_returns_plain_text_response():
-    module = _reload_module()
+def test_openai_adapter_returns_plain_text_response() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -258,8 +262,8 @@ def test_openai_adapter_returns_plain_text_response():
     assert "tools" not in request
 
 
-def test_openai_adapter_executes_tools_and_parses_output():
-    module = _reload_module()
+def test_openai_adapter_executes_tools_and_parses_output() -> None:
+    module = cast(Any, _reload_module())
 
     calls: list[str] = []
 
@@ -330,8 +334,8 @@ def test_openai_adapter_executes_tools_and_parses_output():
     assert "payload" not in tool_message
 
 
-def test_openai_adapter_surfaces_tool_validation_errors():
-    module = _reload_module()
+def test_openai_adapter_surfaces_tool_validation_errors() -> None:
+    module = cast(Any, _reload_module())
 
     def handler(_: ToolParams) -> ToolResult[ToolPayload]:
         raise ToolValidationError("invalid query")
@@ -372,7 +376,12 @@ def test_openai_adapter_surfaces_tool_validation_errors():
 
     bus = InProcessEventBus()
     tool_events: list[ToolInvoked] = []
-    bus.subscribe(ToolInvoked, tool_events.append)
+
+    def record_tool_event(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        tool_events.append(event)
+
+    bus.subscribe(ToolInvoked, record_tool_event)
 
     result = adapter.evaluate(
         prompt,
@@ -400,8 +409,8 @@ def test_openai_adapter_surfaces_tool_validation_errors():
     assert tool_message["content"] == "Tool validation failed: invalid query"
 
 
-def test_openai_adapter_includes_response_format_for_array_outputs():
-    module = _reload_module()
+def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -445,8 +454,8 @@ def test_openai_adapter_includes_response_format_for_array_outputs():
     assert items_schema.get("items", {}).get("type") == "object"
 
 
-def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
-    module = _reload_module()
+def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -506,7 +515,7 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call():
 
 
 def test_openai_adapter_emits_events_during_evaluation() -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -544,8 +553,17 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     bus = InProcessEventBus()
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
-    bus.subscribe(ToolInvoked, tool_events.append)
-    bus.subscribe(PromptExecuted, prompt_events.append)
+
+    def record_tool_event(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        tool_events.append(event)
+
+    def record_prompt_event(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
+        prompt_events.append(event)
+
+    bus.subscribe(ToolInvoked, record_tool_event)
+    bus.subscribe(PromptExecuted, record_prompt_event)
     result = adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
@@ -567,8 +585,8 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     assert prompt_event.result is result
 
 
-def test_openai_adapter_raises_when_tool_handler_missing():
-    module = _reload_module()
+def test_openai_adapter_raises_when_tool_handler_missing() -> None:
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -612,8 +630,8 @@ def test_openai_adapter_raises_when_tool_handler_missing():
     assert err.value.phase == "tool"
 
 
-def test_openai_adapter_handles_tool_call_without_arguments():
-    module = _reload_module()
+def test_openai_adapter_handles_tool_call_without_arguments() -> None:
+    module = cast(Any, _reload_module())
 
     def optional_handler(params: OptionalParams) -> ToolResult[OptionalPayload]:
         return ToolResult(message="done", value=OptionalPayload(value=params.query))
@@ -662,8 +680,8 @@ def test_openai_adapter_handles_tool_call_without_arguments():
     assert result.tool_results[0].params.query == "default"
 
 
-def test_openai_adapter_reads_output_json_content_blocks():
-    module = _reload_module()
+def test_openai_adapter_reads_output_json_content_blocks() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -702,8 +720,8 @@ def test_openai_adapter_reads_output_json_content_blocks():
     assert result.output == StructuredAnswer(answer="Block")
 
 
-def test_openai_adapter_raises_when_structured_output_missing_json():
-    module = _reload_module()
+def test_openai_adapter_raises_when_structured_output_missing_json() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -735,8 +753,8 @@ def test_openai_adapter_raises_when_structured_output_missing_json():
     assert err.value.phase == "response"
 
 
-def test_openai_adapter_raises_on_invalid_parsed_payload():
-    module = _reload_module()
+def test_openai_adapter_raises_on_invalid_parsed_payload() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -768,8 +786,8 @@ def test_openai_adapter_raises_on_invalid_parsed_payload():
     assert exc.phase == "response"
 
 
-def test_openai_message_text_content_handles_structured_parts():
-    module = _reload_module()
+def test_openai_message_text_content_handles_structured_parts() -> None:
+    module = cast(Any, _reload_module())
 
     mapping_parts = [{"type": "output_text", "text": "Hello"}]
     assert module._message_text_content(mapping_parts) == "Hello"
@@ -792,8 +810,8 @@ def test_openai_message_text_content_handles_structured_parts():
     assert module._content_part_text(BadTextBlock()) == ""
 
 
-def test_openai_extract_parsed_content_handles_attribute_blocks():
-    module = _reload_module()
+def test_openai_extract_parsed_content_handles_attribute_blocks() -> None:
+    module = cast(Any, _reload_module())
 
     class JsonBlock:
         def __init__(self, payload: dict[str, object]) -> None:
@@ -816,8 +834,8 @@ def test_openai_extract_parsed_content_handles_attribute_blocks():
     assert module._parsed_payload_from_part(OtherBlock()) is None
 
 
-def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array():
-    module = _reload_module()
+def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -848,8 +866,8 @@ def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array():
         module._parse_schema_constrained_payload(["oops"], rendered)
 
 
-def test_openai_parse_schema_constrained_payload_handles_object_container():
-    module = _reload_module()
+def test_openai_parse_schema_constrained_payload_handles_object_container() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -874,8 +892,10 @@ def test_openai_parse_schema_constrained_payload_handles_object_container():
         module._parse_schema_constrained_payload("oops", rendered)
 
 
-def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt():
-    module = _reload_module()
+def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt() -> (
+    None
+):
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -897,8 +917,8 @@ def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt(
     assert response_format is None
 
 
-def test_openai_parse_schema_constrained_payload_requires_structured_prompt():
-    module = _reload_module()
+def test_openai_parse_schema_constrained_payload_requires_structured_prompt() -> None:
+    module = cast(Any, _reload_module())
 
     rendered = RenderedPrompt(
         text="",
@@ -911,8 +931,8 @@ def test_openai_parse_schema_constrained_payload_requires_structured_prompt():
         module._parse_schema_constrained_payload({}, rendered)
 
 
-def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays():
-    module = _reload_module()
+def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -933,8 +953,8 @@ def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays():
         module._parse_schema_constrained_payload("oops", rendered)
 
 
-def test_openai_parse_schema_constrained_payload_rejects_unknown_container():
-    module = _reload_module()
+def test_openai_parse_schema_constrained_payload_rejects_unknown_container() -> None:
+    module = cast(Any, _reload_module())
 
     rendered = RenderedPrompt(
         text="",
@@ -947,8 +967,8 @@ def test_openai_parse_schema_constrained_payload_rejects_unknown_container():
         module._parse_schema_constrained_payload({}, rendered)
 
 
-def test_openai_adapter_raises_for_unknown_tool():
-    module = _reload_module()
+def test_openai_adapter_raises_for_unknown_tool() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -985,8 +1005,8 @@ def test_openai_adapter_raises_for_unknown_tool():
     assert err.value.phase == "tool"
 
 
-def test_openai_adapter_raises_when_tool_params_invalid():
-    module = _reload_module()
+def test_openai_adapter_raises_when_tool_params_invalid() -> None:
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -1030,8 +1050,8 @@ def test_openai_adapter_raises_when_tool_params_invalid():
     assert err.value.phase == "tool"
 
 
-def test_openai_adapter_raises_when_handler_fails():
-    module = _reload_module()
+def test_openai_adapter_raises_when_handler_fails() -> None:
+    module = cast(Any, _reload_module())
 
     def failing_handler(params: ToolParams) -> ToolResult[ToolPayload]:
         raise RuntimeError("boom")
@@ -1078,8 +1098,8 @@ def test_openai_adapter_raises_when_handler_fails():
     assert err.value.phase == "tool"
 
 
-def test_openai_adapter_records_provider_payload_from_mapping():
-    module = _reload_module()
+def test_openai_adapter_records_provider_payload_from_mapping() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -1109,8 +1129,8 @@ def test_openai_adapter_records_provider_payload_from_mapping():
     assert result.provider_payload == {"meta": "value"}
 
 
-def test_openai_adapter_ignores_non_mapping_model_dump():
-    module = _reload_module()
+def test_openai_adapter_ignores_non_mapping_model_dump() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -1140,8 +1160,8 @@ def test_openai_adapter_ignores_non_mapping_model_dump():
     assert result.provider_payload is None
 
 
-def test_openai_adapter_handles_response_without_model_dump():
-    module = _reload_module()
+def test_openai_adapter_handles_response_without_model_dump() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -1176,7 +1196,7 @@ def test_openai_adapter_handles_response_without_model_dump():
     ["{", json.dumps("not a dict")],
 )
 def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",

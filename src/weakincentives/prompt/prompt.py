@@ -46,7 +46,7 @@ class RenderedPrompt[OutputT]:
         default=_EMPTY_TOOL_PARAM_DESCRIPTIONS
     )
 
-    def __str__(self) -> str:  # pragma: no cover - convenience for logging
+    def __str__(self) -> str:
         return self.text
 
     @property
@@ -71,11 +71,11 @@ def _clone_dataclass(instance: SupportsDataclass) -> SupportsDataclass:
 
 
 def _format_specialization_argument(argument: object | None) -> str:
-    if argument is None:  # pragma: no cover - defensive formatting
+    if argument is None:
         return "?"
     if isinstance(argument, type):
         return argument.__name__
-    return repr(argument)  # pragma: no cover - fallback for debugging
+    return repr(argument)
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,7 +314,7 @@ class Prompt[OutputT]:
         if candidate is None or container is None:
             return None, None, None
 
-        if not isinstance(candidate, type):  # pragma: no cover - defensive guard
+        if not isinstance(candidate, type):
             candidate_type = cast(type[Any], type(candidate))
             raise PromptValidationError(
                 "Prompt output type must be a dataclass.",
@@ -333,7 +333,7 @@ class Prompt[OutputT]:
 
     def _build_response_format_params(self) -> ResponseFormatParams:
         container = self._output_container
-        if container is None:  # pragma: no cover - defensive guard
+        if container is None:
             raise RuntimeError(
                 "Output container missing during response format construction."
             )
@@ -458,7 +458,7 @@ class Prompt[OutputT]:
                 dataclass_type=params_type,
                 placeholder=error.placeholder,
             ) from error
-        except Exception as error:  # pragma: no cover - defensive guard
+        except Exception as error:
             raise PromptRenderError(
                 "Section rendering failed.",
                 section_path=node.path,
@@ -519,7 +519,7 @@ class Prompt[OutputT]:
             else:
                 try:
                     enabled = node.section.is_enabled(section_params)
-                except Exception as error:  # pragma: no cover - defensive guard
+                except Exception as error:
                     raise PromptRenderError(
                         "Section enabled predicate failed.",
                         section_path=node.path,

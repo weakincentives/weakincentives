@@ -18,6 +18,7 @@ import ast
 import importlib
 import sys
 from collections.abc import Callable
+from typing import cast
 
 BanditMain = Callable[[], int | None]
 
@@ -46,7 +47,7 @@ def _load_bandit_main() -> BanditMain:
     main_attr = module.main
     if not callable(main_attr):  # pragma: no cover - defensive guard
         raise TypeError("bandit.__main__.main is not callable")
-    return main_attr
+    return cast(BanditMain, main_attr)
 
 
 def main() -> int:

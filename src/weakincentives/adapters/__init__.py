@@ -27,5 +27,6 @@ __all__ = [
 ]
 
 
-def __dir__() -> list[str]:  # pragma: no cover - convenience for REPL
-    return sorted({*globals().keys(), *(__all__)})
+def __dir__() -> list[str]:
+    extra_exports = {"LiteLLMAdapter", "OpenAIAdapter"}
+    return sorted({*globals().keys(), *(__all__), *extra_exports})

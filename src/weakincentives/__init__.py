@@ -35,5 +35,5 @@ __all__ = [
 ]
 
 
-def __dir__() -> list[str]:  # pragma: no cover - convenience for REPL
+def __dir__() -> list[str]:
     return sorted({*globals().keys(), *__all__})

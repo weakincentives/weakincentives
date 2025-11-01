@@ -70,14 +70,16 @@ MODULE_PATH = "weakincentives.adapters.litellm"
 PROMPT_NS = "tests/adapters/litellm"
 
 
-def _reload_module():
+def _reload_module() -> types.ModuleType:
     return importlib.reload(std_import_module(MODULE_PATH))
 
 
-def test_create_litellm_completion_requires_optional_dependency(monkeypatch):
-    module = _reload_module()
+def test_create_litellm_completion_requires_optional_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
 
-    def fail_import(name: str, package: str | None = None):
+    def fail_import(name: str, package: str | None = None) -> types.ModuleType:
         if name == "litellm":
             raise ModuleNotFoundError("No module named 'litellm'")
         return std_import_module(name, package)
@@ -92,8 +94,10 @@ def test_create_litellm_completion_requires_optional_dependency(monkeypatch):
     assert "pip install weakincentives[litellm]" in message
 
 
-def test_create_litellm_completion_wraps_kwargs(monkeypatch):
-    module = _reload_module()
+def test_create_litellm_completion_wraps_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
 
     captured_kwargs: list[dict[str, object]] = []
 
@@ -103,7 +107,7 @@ def test_create_litellm_completion_wraps_kwargs(monkeypatch):
             message = DummyMessage(content="Hello", tool_calls=None)
             return DummyResponse([DummyChoice(message)])
 
-    dummy_module = cast(module._LiteLLMModule, DummyLiteLLM())
+    dummy_module = cast(Any, DummyLiteLLM())
     monkeypatch.setitem(sys.modules, "litellm", dummy_module)
 
     completion = module.create_litellm_completion(api_key="secret")
@@ -118,8 +122,10 @@ def test_create_litellm_completion_wraps_kwargs(monkeypatch):
     ]
 
 
-def test_create_litellm_completion_returns_direct_callable(monkeypatch):
-    module = _reload_module()
+def test_create_litellm_completion_returns_direct_callable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
 
     class DummyLiteLLM(types.SimpleNamespace):
         def __init__(self) -> None:
@@ -131,7 +137,7 @@ def test_create_litellm_completion_returns_direct_callable(monkeypatch):
             message = DummyMessage(content="Hi", tool_calls=None)
             return DummyResponse([DummyChoice(message)])
 
-    dummy_module = cast(module._LiteLLMModule, DummyLiteLLM())
+    dummy_module = cast(Any, DummyLiteLLM())
     monkeypatch.setitem(sys.modules, "litellm", dummy_module)
 
     completion = module.create_litellm_completion()
@@ -143,8 +149,10 @@ def test_create_litellm_completion_returns_direct_callable(monkeypatch):
     ]
 
 
-def test_litellm_adapter_constructs_completion_when_not_provided(monkeypatch):
-    module = _reload_module()
+def test_litellm_adapter_constructs_completion_when_not_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -186,8 +194,8 @@ def test_litellm_adapter_constructs_completion_when_not_provided(monkeypatch):
     assert captured_kwargs == [{"api_key": "secret-key"}]
 
 
-def test_litellm_adapter_supports_custom_completion_factory():
-    module = _reload_module()
+def test_litellm_adapter_supports_custom_completion_factory() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -228,7 +236,7 @@ def test_litellm_adapter_supports_custom_completion_factory():
 
 
 def test_litellm_adapter_rejects_completion_kwargs_with_explicit_completion() -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
     completion = RecordingCompletion([])
 
     with pytest.raises(ValueError):
@@ -240,7 +248,7 @@ def test_litellm_adapter_rejects_completion_kwargs_with_explicit_completion() ->
 
 
 def test_litellm_adapter_rejects_completion_factory_with_explicit_completion() -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
     completion = RecordingCompletion([])
 
     with pytest.raises(ValueError):
@@ -251,8 +259,8 @@ def test_litellm_adapter_rejects_completion_factory_with_explicit_completion() -
         )
 
 
-def test_litellm_adapter_returns_plain_text_response():
-    module = _reload_module()
+def test_litellm_adapter_returns_plain_text_response() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -291,8 +299,8 @@ def test_litellm_adapter_returns_plain_text_response():
     assert "tools" not in request
 
 
-def test_litellm_adapter_executes_tools_and_parses_output():
-    module = _reload_module()
+def test_litellm_adapter_executes_tools_and_parses_output() -> None:
+    module = cast(Any, _reload_module())
 
     calls: list[str] = []
 
@@ -361,8 +369,8 @@ def test_litellm_adapter_executes_tools_and_parses_output():
     assert "payload" not in tool_message
 
 
-def test_litellm_adapter_uses_parsed_payload_when_available():
-    module = _reload_module()
+def test_litellm_adapter_uses_parsed_payload_when_available() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -395,8 +403,8 @@ def test_litellm_adapter_uses_parsed_payload_when_available():
     assert "response_format" in request
 
 
-def test_litellm_adapter_includes_response_format_for_array_outputs():
-    module = _reload_module()
+def test_litellm_adapter_includes_response_format_for_array_outputs() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -440,8 +448,8 @@ def test_litellm_adapter_includes_response_format_for_array_outputs():
     assert items_schema.get("items", {}).get("type") == "object"
 
 
-def test_litellm_adapter_relaxes_forced_tool_choice_after_first_call():
-    module = _reload_module()
+def test_litellm_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -498,7 +506,7 @@ def test_litellm_adapter_relaxes_forced_tool_choice_after_first_call():
 
 
 def test_litellm_adapter_handles_tool_call_without_arguments() -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
 
     recorded: list[str] = []
 
@@ -546,8 +554,8 @@ def test_litellm_adapter_handles_tool_call_without_arguments() -> None:
     assert recorded == ["default"]
 
 
-def test_litellm_adapter_reads_output_json_content_blocks():
-    module = _reload_module()
+def test_litellm_adapter_reads_output_json_content_blocks() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -587,7 +595,7 @@ def test_litellm_adapter_reads_output_json_content_blocks():
 
 
 def test_litellm_adapter_emits_events_during_evaluation() -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -627,8 +635,17 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
     bus = InProcessEventBus()
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
-    bus.subscribe(ToolInvoked, tool_events.append)
-    bus.subscribe(PromptExecuted, prompt_events.append)
+
+    def record_tool_event(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        tool_events.append(event)
+
+    def record_prompt_event(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
+        prompt_events.append(event)
+
+    bus.subscribe(ToolInvoked, record_tool_event)
+    bus.subscribe(PromptExecuted, record_prompt_event)
     result = adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
@@ -650,8 +667,8 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
     assert prompt_event.result is result
 
 
-def test_litellm_adapter_raises_when_tool_handler_missing():
-    module = _reload_module()
+def test_litellm_adapter_raises_when_tool_handler_missing() -> None:
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -695,8 +712,8 @@ def test_litellm_adapter_raises_when_tool_handler_missing():
     assert err.value.phase == "tool"
 
 
-def test_litellm_adapter_raises_when_tool_not_registered():
-    module = _reload_module()
+def test_litellm_adapter_raises_when_tool_not_registered() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -734,8 +751,8 @@ def test_litellm_adapter_raises_when_tool_not_registered():
     assert err.value.phase == "tool"
 
 
-def test_litellm_adapter_raises_when_tool_params_invalid():
-    module = _reload_module()
+def test_litellm_adapter_raises_when_tool_params_invalid() -> None:
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -779,8 +796,8 @@ def test_litellm_adapter_raises_when_tool_params_invalid():
     assert err.value.phase == "tool"
 
 
-def test_litellm_adapter_raises_when_handler_fails():
-    module = _reload_module()
+def test_litellm_adapter_raises_when_handler_fails() -> None:
+    module = cast(Any, _reload_module())
 
     def failing_handler(params: ToolParams) -> ToolResult[ToolPayload]:
         raise RuntimeError("boom")
@@ -827,8 +844,8 @@ def test_litellm_adapter_raises_when_handler_fails():
     assert err.value.phase == "tool"
 
 
-def test_litellm_adapter_records_provider_payload_from_mapping():
-    module = _reload_module()
+def test_litellm_adapter_records_provider_payload_from_mapping() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -858,8 +875,8 @@ def test_litellm_adapter_records_provider_payload_from_mapping():
     assert result.provider_payload == {"meta": "value"}
 
 
-def test_litellm_adapter_ignores_non_mapping_model_dump():
-    module = _reload_module()
+def test_litellm_adapter_ignores_non_mapping_model_dump() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -889,8 +906,8 @@ def test_litellm_adapter_ignores_non_mapping_model_dump():
     assert result.provider_payload is None
 
 
-def test_litellm_adapter_handles_response_without_model_dump():
-    module = _reload_module()
+def test_litellm_adapter_handles_response_without_model_dump() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -925,7 +942,7 @@ def test_litellm_adapter_handles_response_without_model_dump():
     ["{", json.dumps("not a dict")],
 )
 def test_litellm_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
-    module = _reload_module()
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -969,8 +986,8 @@ def test_litellm_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None
     assert err.value.phase == "tool"
 
 
-def test_litellm_adapter_propagates_parse_errors_for_structured_output():
-    module = _reload_module()
+def test_litellm_adapter_propagates_parse_errors_for_structured_output() -> None:
+    module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -1016,8 +1033,8 @@ def test_litellm_adapter_propagates_parse_errors_for_structured_output():
     assert err.value.phase == "response"
 
 
-def test_litellm_adapter_raises_when_structured_output_missing():
-    module = _reload_module()
+def test_litellm_adapter_raises_when_structured_output_missing() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -1050,8 +1067,8 @@ def test_litellm_adapter_raises_when_structured_output_missing():
     assert "structured output" in str(exc)
 
 
-def test_litellm_adapter_raises_on_invalid_parsed_payload():
-    module = _reload_module()
+def test_litellm_adapter_raises_on_invalid_parsed_payload() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -1083,8 +1100,8 @@ def test_litellm_adapter_raises_on_invalid_parsed_payload():
     assert exc.phase == "response"
 
 
-def test_litellm_message_text_content_handles_structured_parts():
-    module = _reload_module()
+def test_litellm_message_text_content_handles_structured_parts() -> None:
+    module = cast(Any, _reload_module())
 
     mapping_parts = [{"type": "output_text", "text": "Hello"}]
     assert module._message_text_content(mapping_parts) == "Hello"
@@ -1107,8 +1124,8 @@ def test_litellm_message_text_content_handles_structured_parts():
     assert module._content_part_text(BadTextBlock()) == ""
 
 
-def test_litellm_extract_parsed_content_handles_attribute_blocks():
-    module = _reload_module()
+def test_litellm_extract_parsed_content_handles_attribute_blocks() -> None:
+    module = cast(Any, _reload_module())
 
     class JsonBlock:
         def __init__(self, payload: dict[str, object]) -> None:
@@ -1131,8 +1148,8 @@ def test_litellm_extract_parsed_content_handles_attribute_blocks():
     assert module._parsed_payload_from_part(OtherBlock()) is None
 
 
-def test_litellm_parse_schema_constrained_payload_unwraps_wrapped_array():
-    module = _reload_module()
+def test_litellm_parse_schema_constrained_payload_unwraps_wrapped_array() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -1163,8 +1180,8 @@ def test_litellm_parse_schema_constrained_payload_unwraps_wrapped_array():
         module._parse_schema_constrained_payload(["oops"], rendered)
 
 
-def test_litellm_parse_schema_constrained_payload_handles_object_container():
-    module = _reload_module()
+def test_litellm_parse_schema_constrained_payload_handles_object_container() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[StructuredAnswer](
         ns=PROMPT_NS,
@@ -1189,8 +1206,10 @@ def test_litellm_parse_schema_constrained_payload_handles_object_container():
         module._parse_schema_constrained_payload("oops", rendered)
 
 
-def test_litellm_build_json_schema_response_format_returns_none_for_plain_prompt():
-    module = _reload_module()
+def test_litellm_build_json_schema_response_format_returns_none_for_plain_prompt() -> (
+    None
+):
+    module = cast(Any, _reload_module())
 
     prompt = Prompt(
         ns=PROMPT_NS,
@@ -1212,8 +1231,8 @@ def test_litellm_build_json_schema_response_format_returns_none_for_plain_prompt
     assert response_format is None
 
 
-def test_litellm_parse_schema_constrained_payload_requires_structured_prompt():
-    module = _reload_module()
+def test_litellm_parse_schema_constrained_payload_requires_structured_prompt() -> None:
+    module = cast(Any, _reload_module())
 
     rendered = RenderedPrompt(
         text="",
@@ -1226,8 +1245,8 @@ def test_litellm_parse_schema_constrained_payload_requires_structured_prompt():
         module._parse_schema_constrained_payload({}, rendered)
 
 
-def test_litellm_parse_schema_constrained_payload_rejects_non_sequence_arrays():
-    module = _reload_module()
+def test_litellm_parse_schema_constrained_payload_rejects_non_sequence_arrays() -> None:
+    module = cast(Any, _reload_module())
 
     prompt = Prompt[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -1248,8 +1267,8 @@ def test_litellm_parse_schema_constrained_payload_rejects_non_sequence_arrays():
         module._parse_schema_constrained_payload("oops", rendered)
 
 
-def test_litellm_parse_schema_constrained_payload_rejects_unknown_container():
-    module = _reload_module()
+def test_litellm_parse_schema_constrained_payload_rejects_unknown_container() -> None:
+    module = cast(Any, _reload_module())
 
     rendered = RenderedPrompt(
         text="",

@@ -51,7 +51,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
         )
         if params_type is None or result_type is None:
             origin = getattr(self, "__orig_class__", None)
-            if origin is not None:  # pragma: no cover - defensive fallback
+            if origin is not None:  # pragma: no cover - interpreter-specific path
                 args = get_args(origin)
                 if len(args) == 2 and all(isinstance(arg, type) for arg in args):
                     params_type = cast(type[SupportsDataclass], args[0])
@@ -161,7 +161,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
 
         try:
             hints = get_type_hints(handler, include_extras=True)
-        except Exception:  # pragma: no cover - fallback for invalid hints
+        except Exception:
             hints = {}
 
         annotation = hints.get(parameter.name, parameter.annotation)

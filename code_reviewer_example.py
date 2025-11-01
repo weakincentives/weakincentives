@@ -187,12 +187,11 @@ class SunfishReviewSession:
         if payload:
             print(f"       payload: {payload}")
 
-        value = payload if isinstance(payload, dict) else {}
         record = ToolCallLog(
             name=event.name,
             prompt_name=event.prompt_name,
             message=event.result.message,
-            value=value,
+            value=payload,
             call_id=event.call_id,
         )
         self._history.append(record)

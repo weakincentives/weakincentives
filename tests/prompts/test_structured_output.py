@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import Literal, cast
 
 import pytest
 
@@ -24,6 +24,7 @@ from weakincentives.prompt import (
     PromptValidationError,
     parse_structured_output,
 )
+from weakincentives.prompt.prompt import RenderedPrompt
 
 
 @dataclass
@@ -123,6 +124,18 @@ def test_prompt_render_can_force_response_format_temporarily() -> None:
 def test_prompt_specialization_requires_dataclass() -> None:
     with pytest.raises(PromptValidationError) as exc:
         Prompt[str](ns="tests/prompts", key="invalid-output", sections=[])
+
+    error = cast(PromptValidationError, exc.value)
+    assert error.dataclass_type is str
+
+
+def test_prompt_resolve_output_spec_requires_dataclass_type() -> None:
+    class InvalidOutputPrompt(Prompt):
+        _output_dataclass_candidate = "oops"
+        _output_container_spec = "object"
+
+    with pytest.raises(PromptValidationError) as exc:
+        InvalidOutputPrompt(ns="tests/prompts", key="invalid-output", sections=())
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is str
@@ -274,6 +287,18 @@ def test_parse_structured_output_falls_back_to_embedded_json() -> None:
     assert parsed.views == 7
 
 
+def test_parse_structured_output_skips_invalid_prefix_chars() -> None:
+    prompt = _build_summary_prompt()
+    rendered = prompt.render(Guidance(topic="Ada"))
+
+    reply = '[oops]{"title": "Ada", "views": 11}'
+
+    parsed = parse_structured_output(reply, rendered)
+
+    assert parsed.title == "Ada"
+    assert parsed.views == 11
+
+
 def test_parse_structured_output_requires_specialized_prompt() -> None:
     task_section = MarkdownSection[Guidance](
         title="Task",
@@ -374,3 +399,17 @@ def test_parse_structured_output_requires_json_payload() -> None:
         parse_structured_output("No structured data", rendered)
 
     assert "No JSON object or array" in str(exc.value)
+
+
+def test_parse_structured_output_rejects_unknown_container() -> None:
+    rendered = RenderedPrompt[Summary](
+        text="",
+        output_type=Summary,
+        container=cast(Literal["object", "array"], "invalid"),
+        allow_extra_keys=None,
+    )
+
+    with pytest.raises(OutputParseError) as exc:
+        parse_structured_output("{}", rendered)
+
+    assert "Unknown output container" in str(exc.value)

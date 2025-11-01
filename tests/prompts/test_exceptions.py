@@ -25,7 +25,9 @@ class FakeParams:
 
 
 @pytest.mark.parametrize("exception_cls", [PromptValidationError, PromptRenderError])
-def test_prompt_exceptions_capture_context(exception_cls):
+def test_prompt_exceptions_capture_context(
+    exception_cls: type[PromptValidationError | PromptRenderError],
+) -> None:
     context = {
         "section_path": ("root", "child"),
         "dataclass_type": FakeParams,
@@ -42,7 +44,7 @@ def test_prompt_exceptions_capture_context(exception_cls):
     assert exc.placeholder == "value"
 
 
-def test_prompt_exceptions_default_context_optional():
+def test_prompt_exceptions_default_context_optional() -> None:
     exc = PromptValidationError(
         "missing", section_path=None, dataclass_type=None, placeholder=None
     )

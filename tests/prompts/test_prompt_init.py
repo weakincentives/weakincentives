@@ -39,7 +39,7 @@ class DuplicateParams:
     value: str
 
 
-def test_prompt_initialization_flattens_sections_depth_first():
+def test_prompt_initialization_flattens_sections_depth_first() -> None:
     child = MarkdownSection[ChildParams](
         title="Child",
         template="Child: ${detail}",
@@ -79,7 +79,7 @@ def test_prompt_initialization_flattens_sections_depth_first():
     assert prompt.name == "demo"
 
 
-def test_prompt_requires_non_empty_key():
+def test_prompt_requires_non_empty_key() -> None:
     section = MarkdownSection[RootParams](
         title="Root", template="Body: ${title}", key="root"
     )
@@ -88,7 +88,7 @@ def test_prompt_requires_non_empty_key():
         Prompt(ns="tests/prompts", key="   ", sections=[section])
 
 
-def test_prompt_requires_non_empty_namespace():
+def test_prompt_requires_non_empty_namespace() -> None:
     section = MarkdownSection[RootParams](
         title="Root", template="Body: ${title}", key="root"
     )
@@ -97,7 +97,7 @@ def test_prompt_requires_non_empty_namespace():
         Prompt(ns="   ", key="prompt-ns", sections=[section])
 
 
-def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
+def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
     first = MarkdownSection[DuplicateParams](
         title="First",
         template="First: ${value}",
@@ -124,7 +124,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params():
     assert prompt.param_types == {DuplicateParams}
 
 
-def test_prompt_reuses_provided_params_for_duplicate_sections():
+def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
     first = MarkdownSection[DuplicateParams](
         title="First",
         template="First: ${value}",
@@ -148,7 +148,9 @@ def test_prompt_reuses_provided_params_for_duplicate_sections():
     assert "Second: shared" in rendered.text
 
 
-def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_default():
+def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_default() -> (
+    None
+):
     first = MarkdownSection[DuplicateParams](
         title="First",
         template="First: ${value}",
@@ -173,7 +175,7 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
     assert "Second: alpha" in rendered.text
 
 
-def test_prompt_validates_text_section_placeholders():
+def test_prompt_validates_text_section_placeholders() -> None:
     @dataclass
     class PlaceholderParams:
         value: str
@@ -193,7 +195,7 @@ def test_prompt_validates_text_section_placeholders():
     assert exc.value.dataclass_type is PlaceholderParams
 
 
-def test_text_section_rejects_non_section_children():
+def test_text_section_rejects_non_section_children() -> None:
     @dataclass
     class ParentParams:
         value: str

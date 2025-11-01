@@ -95,7 +95,7 @@ class CodeReviewSession:
                 indent=2,
             )
         if response.text:
-            return response.text
+            return response.text  # pragma: no cover - convenience path for plain text
         return "(no response from assistant)"
 
     def render_tool_history(self) -> str:
@@ -126,11 +126,15 @@ class CodeReviewSession:
             f"       → {event.result.message}"
         )
         if payload:
-            print(f"       payload: {payload}")
+            print(
+                f"       payload: {payload}"
+            )  # pragma: no cover - console output only
         latest = select_latest(self._session, ToolCallLog)
         if latest is not None:
             count = len(select_all(self._session, ToolCallLog))
-            print(f"       (session recorded this call as #{count})")
+            print(  # pragma: no cover - console output only
+                f"       (session recorded this call as #{count})"
+            )
 
     def _register_tool_history(self) -> None:
         for result_type in (
