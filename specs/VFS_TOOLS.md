@@ -114,7 +114,7 @@ Implementation detail notes:
 - The suite enforces size and path guards:
   - Maximum content length per write: 48_000 characters.
   - Maximum path depth: 16 segments; maximum segment length: 80 characters.
-  - Only ASCII text is accepted; handlers decode or raise a validation error before reducer invocation.
+  - File content must be valid UTF-8 text; path segments remain ASCII-only.
 - Each `HostMount` requires an ASCII `host_path`, resolves it against an allow-listed root configured by the
   orchestrator, normalises it to an absolute path, and rejects traversal outside the approved surface. Included files
   are streamed into memory, decoded as UTF-8, filtered through the glob include/exclude lists, and mounted under
@@ -149,7 +149,7 @@ Every tool validates its parameters and raises `ToolValidationError` on failure.
    output volume.
 1. Fetch file contents with `vfs.read_file` when context is needed, and operate on the returned version to avoid stale
    edits.
-1. Apply edits with `vfs.write_file`, keeping updates concise and ASCII-only; prefer overwriting complete files instead
+1. Apply edits with `vfs.write_file`, keeping updates concise and UTF-8-only; prefer overwriting complete files instead
    of issuing multiple appends unless streaming logs.
 1. Clean up obsolete files or directories via `vfs.delete_entry` once work completes to keep the snapshot tight.
 1. Avoid mirroring large repositories or binary assets; orchestrated host mounts should stay focused, and the enforced

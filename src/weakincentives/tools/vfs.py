@@ -44,14 +44,14 @@ _VFS_SECTION_TEMPLATE: Final[str] = (
     " specific files; keep listings focused to reduce output.\n"
     "2. Fetch file contents with `vfs_read_file` and work from the returned version"
     " to avoid conflicts.\n"
-    "3. Create or update files with `vfs_write_file`; supply ASCII content up to"
+    "3. Create or update files with `vfs_write_file`; supply UTF-8 content up to"
     " 48k characters and prefer overwriting full files unless streaming append"
     " updates.\n"
     "4. Remove obsolete files or directories with `vfs_delete_entry` to keep the"
     " snapshot tidy.\n"
     "5. Host mounts are session-initialization only; agents cannot mount additional"
     " directories later.\n"
-    "6. Avoid mirroring large repositories or binary assets—only ASCII text is"
+    "6. Avoid mirroring large repositories or binary assets—only UTF-8 text is"
     " accepted and host mounts remain constrained by their configuration."
 )
 
@@ -277,7 +277,6 @@ def _normalize_content(content: str) -> str:
         raise ToolValidationError(
             "Content exceeds maximum length of 48,000 characters."
         )
-    _ensure_ascii(content, "content")
     return content
 
 
@@ -448,7 +447,6 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
             content = path.read_text(encoding=_DEFAULT_ENCODING)
         except UnicodeDecodeError as error:  # pragma: no cover - defensive guard
             raise ToolValidationError("Mounted file must be valid UTF-8.") from error
-        _ensure_ascii(content, "mounted file content")
         size = len(content.encode(_DEFAULT_ENCODING))
         if mount.max_bytes is not None and consumed_bytes + size > mount.max_bytes:
             raise ToolValidationError("Host mount exceeded the configured byte budget.")

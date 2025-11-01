@@ -72,7 +72,7 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
             - `vfs_list_directory` lists directories and files staged in the virtual
               filesystem snapshot.
             - `vfs_read_file` reads staged file contents.
-            - `vfs_write_file` stages ASCII edits before applying them to the host
+            - `vfs_write_file` stages UTF-8 edits before applying them to the host
               workspace.
             - `vfs_delete_entry` removes staged files or directories that are no
               longer needed.

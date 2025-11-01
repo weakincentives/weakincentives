@@ -417,6 +417,30 @@ def test_write_file_rejects_non_utf8_encoding(monkeypatch: pytest.MonkeyPatch) -
         )
 
 
+def test_write_file_allows_utf8_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = _find_tool(section, "vfs_write_file")
+    read_tool = _find_tool(section, "vfs_read_file")
+
+    content = "café ☕"
+    _invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("README.md",)), content=content),
+    )
+
+    result = cast(
+        ToolResult[VfsFile],
+        _invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("README.md",)))),
+    )
+    assert result.value.content == content
+
+
 def test_write_file_duplicate_create(monkeypatch: pytest.MonkeyPatch) -> None:
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
@@ -751,6 +775,35 @@ def test_host_mount_handles_file_targets(
         ),
     )
     assert result.value.content == "hello"
+
+
+def test_host_mount_preserves_utf8_content(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    root = tmp_path_factory.mktemp("workspace")
+    content = "naïve résumé"
+    (root / "notes.txt").write_text(content, encoding="utf-8")
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(
+        session=session,
+        mounts=(HostMount(host_path="notes.txt"),),
+        allowed_host_roots=(root,),
+    )
+    read_tool = _find_tool(section, "vfs_read_file")
+    result = cast(
+        ToolResult[VfsFile],
+        _invoke_tool(
+            bus,
+            read_tool,
+            ReadFile(path=VfsPath(("notes.txt",))),
+        ),
+    )
+    assert result.value.content == content
 
 
 def test_host_mount_missing_path(
