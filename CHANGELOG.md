@@ -4,7 +4,11 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- No changes yet.
+- Added an `asteval`-powered Python evaluation tool section that bridges the
+  sandbox with the virtual filesystem, including timeout handling, templated
+  writes, and captured stdout/stderr telemetry.
+- Declared the `asteval` runtime dependency to support the new evaluation
+  tooling.
 
 ## v0.3.0 - 2025-11-01
 

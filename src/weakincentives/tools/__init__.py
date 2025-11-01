@@ -14,6 +14,13 @@
 
 from __future__ import annotations
 
+from .asteval import (
+    AstevalSection,
+    EvalFileRead,
+    EvalFileWrite,
+    EvalParams,
+    EvalResult,
+)
 from .errors import ToolValidationError
 from .planning import (
     AddStep,
@@ -44,6 +51,11 @@ from .vfs import (
 
 __all__ = [
     "ToolValidationError",
+    "AstevalSection",
+    "EvalParams",
+    "EvalResult",
+    "EvalFileRead",
+    "EvalFileWrite",
     "Plan",
     "PlanStep",
     "PlanStatus",
