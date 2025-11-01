@@ -14,14 +14,14 @@ state update fails.
    validation errors (e.g., argument schema mismatches, enum violations) or
    structured output parsing failures. Transport errors, timeouts, or runtime
    exceptions fall outside this scope.
-2. **Deterministic retries** – Retry decisions are deterministic functions of the
+1. **Deterministic retries** – Retry decisions are deterministic functions of the
    current attempt count, the validation failure metadata, and explicit
    configuration. Hidden random backoff is prohibited unless seeded and
    reproducible.
-3. **Prompt-level observability** – Every retry reason and corrective feedback
+1. **Prompt-level observability** – Every retry reason and corrective feedback
    must surface through the session state so prompts can reflect on their last
    attempt before producing a follow-up tool invocation.
-4. **Reducer integrity** – Session reducers are the single source of truth for
+1. **Reducer integrity** – Session reducers are the single source of truth for
    error-aware state transitions. They must not mutate external state and should
    communicate issues synchronously.
 
@@ -72,13 +72,13 @@ before the next attempt.
 
 1. **Tool invocation** – When the LLM proposes arguments, the tool adapter
    validates them. On success, continue normally.
-2. **Validation failure** – If validation fails with a retryable exception, the
+1. **Validation failure** – If validation fails with a retryable exception, the
    policy increments the attempt count. The inference loop consults the backoff
    strategy, emits structured feedback, and resubmits the tool call if attempts
    remain.
-3. **Structured output parsing** – After a prompt returns, parse the structured
+1. **Structured output parsing** – After a prompt returns, parse the structured
    output. Failures follow the same retry flow as tool validations.
-4. **Retry exhaustion** – When `max_attempts` is reached, surface a terminal
+1. **Retry exhaustion** – When `max_attempts` is reached, surface a terminal
    `RetryExhaustedError` that contains the history of attempts and reasons. The
    planner decides whether to abort or fall back to a different action.
 
@@ -110,15 +110,19 @@ update:
 
 1. Capture the exception and wrap it in a `ReducerError` dataclass containing the
    reducer identifier, the offending payload, and the error message.
-2. Publish the `ReducerError` back into the session state via a dedicated slice
+1. Publish the `ReducerError` back into the session state via a dedicated slice
    so downstream prompts can detect it.
-3. Notify the inference loop immediately through a callback interface
-   (`Session.on_reducer_error`). The loop halts further tool retries for the
-   current action and prompts the LLM with the reducer feedback instead.
+1. Notify the inference loop immediately through a callback interface
+   (`Session.on_reducer_error`). The loop MUST override the current
+   `ToolResult` payload with a synthetic failure record derived from the
+   reducer feedback and feed it back through the existing validation retry
+   machinery. This keeps reducer-triggered errors aligned with validation
+   failures—no additional prompts are created, and the same retry counters,
+   backoff, and feedback surfaces apply.
 
 Reducers must not swallow errors silently. Every caught exception becomes either
 retryable feedback (if the policy allows) or a terminal failure that surfaces to
-operators.
+operators via the overridden `ToolResult`.
 
 ## Observability & Instrumentation
 
