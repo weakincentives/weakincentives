@@ -4,6 +4,10 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+- No changes yet.
+
+## v0.3.0 - 2025-11-01
+
 ### Prompt & Rendering
 
 - Renamed and reorganized the prompt authoring primitives (`MarkdownSection`,
