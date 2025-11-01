@@ -15,10 +15,53 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 from weakincentives.adapters import OpenAIAdapter
 
-from .common import CodeReviewSession
+_SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def _remove_script_dir_from_path() -> None:
+    script_dir = _SCRIPT_DIR
+    script_dir_parent = script_dir.parent
+    resolved_script_dir = script_dir.resolve()
+    for index in range(len(sys.path) - 1, -1, -1):
+        entry = sys.path[index]
+        if not entry:
+            try:
+                cwd = Path.cwd().resolve()
+            except (OSError, RuntimeError):
+                continue
+            if cwd == resolved_script_dir:
+                sys.path[index] = str(script_dir_parent)
+            continue
+        try:
+            entry_path = Path(entry).resolve()
+        except (OSError, RuntimeError):
+            continue
+        if entry_path == resolved_script_dir:
+            del sys.path[index]
+
+
+if __package__ is None:  # pragma: no cover - script execution path
+    _PROJECT_ROOT = _SCRIPT_DIR.parent
+    _PROJECT_ROOT_STR = str(_PROJECT_ROOT)
+    _INSERTED = False
+    if _PROJECT_ROOT_STR not in sys.path:
+        sys.path.insert(0, _PROJECT_ROOT_STR)
+        _INSERTED = True
+    try:
+        from examples.common import CodeReviewSession  # type: ignore[import]
+    finally:
+        if _INSERTED:
+            sys.path.pop(0)
+else:
+    from .common import CodeReviewSession
+
+
+_remove_script_dir_from_path()
 
 
 def main() -> None:
