@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Final, Literal, cast
 
 from ..prompt import SupportsDataclass
-from ..prompt.section import Section
+from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
 from ..session import Session, replace_latest, select_latest
 from ..session.session import DataEvent
@@ -99,8 +99,24 @@ _MAX_TITLE_LENGTH: Final[int] = 160
 _MAX_DETAIL_LENGTH: Final[int] = 512
 _STEP_ID_PREFIX: Final[str] = "S"
 
+_PLANNING_SECTION_TEMPLATE: Final[str] = (
+    "Use planning tools for multi-step or stateful work that requires an"
+    " execution plan.\n"
+    "- Start with `planning_setup_plan` to set an objective (<=240 ASCII"
+    " characters) and optional initial steps.\n"
+    "- Keep steps concise (<=160 ASCII characters for titles, <=512 for"
+    " details).\n"
+    "- Extend plans with `planning_add_step` and refine steps with"
+    " `planning_update_step`.\n"
+    "- Track progress via `planning_mark_step` (pending, in_progress,"
+    " blocked, done).\n"
+    "- Inspect the latest plan using `planning_read_plan`.\n"
+    "- Use `planning_clear_plan` only when abandoning the objective.\n"
+    "Stay brief, ASCII-only, and skip planning for trivial single-step tasks."
+)
 
-class PlanningToolsSection(Section[_PlanningSectionParams]):
+
+class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
     """Prompt section exposing the planning tool suite."""
 
     def __init__(self, *, session: Session) -> None:
@@ -116,27 +132,9 @@ class PlanningToolsSection(Section[_PlanningSectionParams]):
         super().__init__(
             title="Planning Tools",
             key="planning.tools",
+            template=_PLANNING_SECTION_TEMPLATE,
             default_params=_PlanningSectionParams(),
             tools=tools,
-        )
-
-    def render(self, params: _PlanningSectionParams, depth: int) -> str:
-        del params, depth
-        return (
-            "Use planning tools for multi-step or stateful work that requires an "
-            "execution plan.\n"
-            "- Start with `planning.setup_plan` to set an objective (<=240 ASCII "
-            "characters) and optional initial steps.\n"
-            "- Keep steps concise (<=160 ASCII characters for titles, <=512 for "
-            "details).\n"
-            "- Extend plans with `planning.add_step` and refine steps with "
-            "`planning.update_step`.\n"
-            "- Track progress via `planning.mark_step` (pending, in_progress, "
-            "blocked, done).\n"
-            "- Inspect the latest plan using `planning.read_plan`.\n"
-            "- Use `planning.clear_plan` only when abandoning the objective.\n"
-            "Stay brief, ASCII-only, and skip planning for trivial single-step "
-            "tasks."
         )
 
 
@@ -146,32 +144,32 @@ def _build_tools(
     suite = _PlanningToolSuite(session)
     return (
         Tool[SetupPlan, SetupPlan](
-            name="planning.setup_plan",
+            name="planning_setup_plan",
             description="Create or replace the session plan.",
             handler=suite.setup_plan,
         ),
         Tool[AddStep, AddStep](
-            name="planning.add_step",
+            name="planning_add_step",
             description="Append one or more steps to the active plan.",
             handler=suite.add_step,
         ),
         Tool[UpdateStep, UpdateStep](
-            name="planning.update_step",
+            name="planning_update_step",
             description="Edit the title or details for an existing step.",
             handler=suite.update_step,
         ),
         Tool[MarkStep, MarkStep](
-            name="planning.mark_step",
+            name="planning_mark_step",
             description="Update step status and optionally record a note.",
             handler=suite.mark_step,
         ),
         Tool[ClearPlan, ClearPlan](
-            name="planning.clear_plan",
+            name="planning_clear_plan",
             description="Mark the current plan as abandoned.",
             handler=suite.clear_plan,
         ),
         Tool[ReadPlan, Plan](
-            name="planning.read_plan",
+            name="planning_read_plan",
             description="Return the latest plan snapshot.",
             handler=suite.read_plan,
         ),

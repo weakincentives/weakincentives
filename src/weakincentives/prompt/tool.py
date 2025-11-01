@@ -21,7 +21,7 @@ from typing import Annotated, Any, Final, cast, get_args, get_origin, get_type_h
 from ._types import SupportsDataclass
 from .errors import PromptValidationError
 
-_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_.]{1,64}$")
+_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 
 @dataclass(slots=True)
@@ -91,13 +91,13 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
         name_clean = raw_name
         if not name_clean:
             raise PromptValidationError(
-                "Tool name must be non-empty lowercase ASCII up to 64 characters.",
+                "Tool name must match the OpenAI function name constraints (1-64 lowercase ASCII letters, digits, underscores, or hyphens).",
                 dataclass_type=params_type,
                 placeholder=stripped_name,
             )
         if len(name_clean) > 64 or not _NAME_PATTERN.fullmatch(name_clean):
             raise PromptValidationError(
-                "Tool name must use lowercase ASCII letters, digits, underscores, or dots.",
+                "Tool name must match the OpenAI function name constraints (pattern: ^[a-z0-9_-]{1,64}$).",
                 dataclass_type=params_type,
                 placeholder=name_clean,
             )

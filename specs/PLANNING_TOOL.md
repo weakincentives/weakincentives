@@ -119,22 +119,22 @@ the session reducer pipeline.
 
 | Tool | Summary | Parameters | Result | Behaviour highlights |
 | ---- | ------- | ---------- | ------ | -------------------- |
-| `planning.setup_plan` | Create or replace the session plan | `SetupPlan` | `SetupPlan` | Emits validated setup payload; reducer replaces any existing plan, seeds sequential `step_id`s (`S001`, `S002`, …), sets status to `active`. |
-| `planning.add_step` | Append one or more steps | `AddStep` | `AddStep` | Fails if no plan or plan not active, appends validated steps in order when reducer applies the update. |
-| `planning.update_step` | Edit an existing step description | `UpdateStep` | `UpdateStep` | Rejects empty updates, trims strings; reducer mutates the target step before persisting snapshot. |
-| `planning.mark_step` | Change a step status | `MarkStep` | `MarkStep` | Validates step/status, attaches optional note; reducer auto-completes plan when all steps done. |
-| `planning.clear_plan` | Abandon the current plan | `ClearPlan` | `ClearPlan` | Signals abandonment; reducer marks status `abandoned` and resets to an empty step list. |
-| `planning.read_plan` | Retrieve current plan state | `ReadPlan` | `Plan` | Returns the latest reducer-managed plan or raises when the plan has never been initialised. |
+| `planning_setup_plan` | Create or replace the session plan | `SetupPlan` | `SetupPlan` | Emits validated setup payload; reducer replaces any existing plan, seeds sequential `step_id`s (`S001`, `S002`, …), sets status to `active`. |
+| `planning_add_step` | Append one or more steps | `AddStep` | `AddStep` | Fails if no plan or plan not active, appends validated steps in order when reducer applies the update. |
+| `planning_update_step` | Edit an existing step description | `UpdateStep` | `UpdateStep` | Rejects empty updates, trims strings; reducer mutates the target step before persisting snapshot. |
+| `planning_mark_step` | Change a step status | `MarkStep` | `MarkStep` | Validates step/status, attaches optional note; reducer auto-completes plan when all steps done. |
+| `planning_clear_plan` | Abandon the current plan | `ClearPlan` | `ClearPlan` | Signals abandonment; reducer marks status `abandoned` and resets to an empty step list. |
+| `planning_read_plan` | Retrieve current plan state | `ReadPlan` | `Plan` | Returns the latest reducer-managed plan or raises when the plan has never been initialised. |
 
 ## Prompt Template Guidance
 
 `PlanningToolsSection` emits markdown that must:
 
 1. Explain when to engage planning (multi-step or stateful work) versus responding directly.
-1. Describe how to initialise the plan with `planning.setup_plan` and keep the objective concise.
-1. Document how to expand and refine the plan (`planning.add_step`, `planning.update_step`).
-1. Outline status tracking with `planning.mark_step` and how to inspect progress with `planning.read_plan`.
-1. Warn that `planning.clear_plan` discards the current plan and should be used sparingly.
+1. Describe how to initialise the plan with `planning_setup_plan` and keep the objective concise.
+1. Document how to expand and refine the plan (`planning_add_step`, `planning_update_step`).
+1. Outline status tracking with `planning_mark_step` and how to inspect progress with `planning_read_plan`.
+1. Warn that `planning_clear_plan` discards the current plan and should be used sparingly.
 1. Remind agents to stay brief, ASCII-only, and avoid planning trivial single-step tasks.
 
 The section follows the standard prompt system rules (see `specs/PROMPTS.md`) and contributes tool definitions so
@@ -191,6 +191,6 @@ No custom telemetry is required. The planning tools rely solely on the default `
 
 ## Documentation Tasks
 
-- Add `examples/planning_tools_demo.py` demonstrating the typical flow using the openai adapter.
+- Add `examples/openai_runner.py` demonstrating the typical flow using the openai adapter.
 - Update the README to reference the planning suite and link to this specification.
 - Generate API reference entries for all dataclasses and tool functions in `weakincentives.tools.planning`.
