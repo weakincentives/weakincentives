@@ -12,16 +12,8 @@
 
 """Public package surface for weakincentives."""
 
-from .adapters import (
-    LiteLLMAdapter,
-    LiteLLMCompletion,
-    OpenAIAdapter,
-    OpenAIProtocol,
-    PromptEvaluationError,
-    PromptResponse,
-    ProviderAdapter,
-    create_litellm_completion,
-)
+from __future__ import annotations
+
 from .prompt import (
     MarkdownSection,
     OutputParseError,
@@ -70,14 +62,6 @@ __all__ = [
     "SupportsDataclass",
     "parse_structured_output",
     "parse_structured",
-    "OpenAIAdapter",
-    "OpenAIProtocol",
-    "LiteLLMAdapter",
-    "LiteLLMCompletion",
-    "ProviderAdapter",
-    "PromptEvaluationError",
-    "PromptResponse",
-    "create_litellm_completion",
     "Session",
     "DataEvent",
     "ToolData",
@@ -90,3 +74,7 @@ __all__ = [
     "select_latest",
     "select_where",
 ]
+
+
+def __dir__() -> list[str]:  # pragma: no cover - convenience for REPL
+    return sorted({*globals().keys(), *__all__})
