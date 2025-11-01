@@ -154,7 +154,7 @@ directly; no asynchronous facade is provided.
 
 ### Execution Flow
 
-1. Validate parameters, including code length, ASCII check, deduplicated paths,
+1. Validate parameters, including code length, UTF-8 check, deduplicated paths,
    and disallowing overlapping read/write targets.
 1. Load requested `reads` from the VFS snapshot (see below) and insert each file
    under its POSIX path key in the globals mapping.
@@ -193,7 +193,7 @@ The tool operates against the session's `VirtualFileSystem` snapshot:
 - Writes execute through the existing reducer from `VfsToolsSection`. The
   handler enqueues `WriteFile` operations and dispatches them via
   `session.reduce(replace_latest, VirtualFileSystem, updated_snapshot)`.
-- Writes obey the same guards as native VFS tools: ASCII-only, max 48_000
+- Writes obey the same guards as native VFS tools: UTF-8 text only, max 48_000
   characters, depth ≤ 16, segment length ≤ 80.
 - When `write_text` helper is used inside code, it reuses the same queueing path
   to ensure atomic updates after evaluation completes.

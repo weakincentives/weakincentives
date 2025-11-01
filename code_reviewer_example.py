@@ -58,7 +58,6 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
     "**/*.pickle",
     "**/*.png",
     "**/*.bmp",
-    "README.md",
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
 
