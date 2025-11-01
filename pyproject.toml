@@ -108,8 +108,10 @@ markers = [
 
 [tool.pyright]
 typeCheckingMode = "strict"
-include = ["src", "examples"]
+include = ["src"]
 exclude = ["src/weakincentives/serde"]
+[tool.coverage.run]
+omit = ["src/weakincentives/examples/*"]
 
 [tool.deptry]
 

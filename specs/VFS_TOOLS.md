@@ -221,7 +221,7 @@ instrumentation.
 
 ## Documentation Tasks
 
-- Add `examples/vfs_tools_demo.py` showing typical usage alongside the planning tools.
+- Add `vfs_tools_example.py` showing typical usage alongside the planning tools.
 - Update `README.md` to mention the virtual filesystem capabilities and link to this specification.
 - Generate API reference entries for `VirtualFileSystem`, tool dataclasses, and the handlers in
   `weakincentives.tools.vfs`.

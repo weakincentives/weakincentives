@@ -145,7 +145,7 @@ litellm_adapter = LiteLLMAdapter(
 
 Both adapters raise a clear runtime error with install guidance if the optional dependency is missing.
 
-See `examples/openai_runner.py` and `examples/litellm_runner.py` for runnable demos.
+See `openai_example.py` and `litellm_example.py` for runnable demos.
 
 ______________________________________________________________________
 

@@ -10,4 +10,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Example scripts for the weakincentives project."""
+from __future__ import annotations
+
+from weakincentives.examples.code_review_prompt import build_code_review_prompt
+from weakincentives.session import Session
+from weakincentives.tools import PlanningToolsSection
+
+
+def test_build_code_review_prompt_includes_planning_section() -> None:
+    prompt = build_code_review_prompt(Session())
+
+    assert prompt.ns == "examples/code-review"
+    assert any(
+        isinstance(node.section, PlanningToolsSection) for node in prompt.sections
+    )
