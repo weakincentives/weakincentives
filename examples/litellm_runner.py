@@ -17,7 +17,16 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from examples.common import CodeReviewSession
+if __package__ in {None, ""}:  # pragma: no cover - script execution path
+    import sys
+    from pathlib import Path
+
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    if str(_PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(_PROJECT_ROOT))
+    from examples.common import CodeReviewSession  # type: ignore[import]
+else:
+    from .common import CodeReviewSession
 from weakincentives.adapters import LiteLLMAdapter
 
 
