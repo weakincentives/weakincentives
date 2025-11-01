@@ -2,17 +2,11 @@
 
 ## Near-Term Initiatives
 
-### Session State Container
+### Built-In Planning & Virtual Filesystem Tools
 
-- Formalize a `Session` abstraction that captures conversation state, tool outputs, and transient metadata.
-- Define serialization hooks so sessions can persist across process restarts without leaking sensitive data.
-- Thread the session object through existing prompt and tool layers, backed by integration tests that assert idempotent replay.
-
-### Notes System Retrospectives
-
-- Establish a notes pattern that captures retrospectives for individual prompt invocations and entire sessions.
-- Model notes as entities that can attach to `Section` objects and `Tool` objects to preserve context.
-- Outline lifecycle and storage expectations so notes integrate cleanly with existing session state abstractions.
+- Provide first-class tool definitions for planning/todo workflows and virtual filesystem operations for agents.
+- Establish section templates that ensure tools render consistently in prompts and downstream telemetry.
+- Ship representative examples and regression tests demonstrating safe defaults and extensibility points.
 
 ### Single Turn Prompt Optimizations
 
@@ -25,12 +19,6 @@
 - Introduce utilities for detecting and tagging named entities across inputs.
 - Preserve, normalize, or obfuscate entities in outputs according to privacy and compliance guidelines.
 - Validate the pipeline with targeted tests that cover multilingual and domain-specific vocabularies.
-
-### Built-In Planning & Virtual Filesystem Tools
-
-- Provide first-class tool definitions for planning/todo workflows and virtual filesystem operations for agents.
-- Establish section templates that ensure tools render consistently in prompts and downstream telemetry.
-- Ship representative examples and regression tests demonstrating safe defaults and extensibility points.
 
 ### Sandboxed Code Execution
 
