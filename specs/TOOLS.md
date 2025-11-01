@@ -155,6 +155,14 @@ assert tools[0].name == "lookup_entity"
 In the example the nested `MarkdownSection` documents the tooling guidance while registering the `lookup_entity` tool. Because
 sections own their tool collections directly, no additional subclasses are needed to describe a toolbox.
 
+### Reference Implementations
+
+- `weakincentives.tools.asteval.AstevalSection` exposes a sandboxed Python
+  evaluation tool that captures stdout/stderr, parses JSON-provided globals, and
+  applies resolved VFS writes in a single tool invocation. The module
+  demonstrates integrating helper functions (`read_text`, `write_text`) and
+  templated write content with the shared `VirtualFileSystem` reducers.
+
 ## Validation and Error Handling
 
 - Construction failures raise `PromptValidationError` with contextual data (`section path`, `tool.name`, parameter

@@ -160,6 +160,30 @@ def test_delete_directory_removes_nested(monkeypatch: pytest.MonkeyPatch) -> Non
     assert snapshot.files == ()
 
 
+def test_mount_snapshot_persisted_in_session(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    sunfish = root / "sunfish"
+    sunfish.mkdir()
+    readme = sunfish / "README.md"
+    readme.write_text("hello mount", encoding="utf-8")
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    mount = HostMount(host_path="sunfish", mount_path=VfsPath(("sunfish",)))
+    VfsToolsSection(
+        session=session,
+        mounts=(mount,),
+        allowed_host_roots=(root,),
+    )
+
+    snapshot = select_latest(session, VirtualFileSystem)
+    assert snapshot is not None
+    files_by_path = {file.path.segments: file for file in snapshot.files}
+    assert ("sunfish", "README.md") in files_by_path
+    assert files_by_path[("sunfish", "README.md")].content == "hello mount"
+
+
 def test_list_directory_shows_children(monkeypatch: pytest.MonkeyPatch) -> None:
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)

@@ -140,18 +140,19 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
         session.register_reducer(VirtualFileSystem, replace_latest)
         mount_snapshot = _materialize_mounts(mounts, allowed_roots)
+        session.seed_slice(VirtualFileSystem, (mount_snapshot,))
         session.register_reducer(
             WriteFile,
-            _make_write_reducer(mount_snapshot),
+            _make_write_reducer(),
             slice_type=VirtualFileSystem,
         )
         session.register_reducer(
             DeleteEntry,
-            _make_delete_reducer(mount_snapshot),
+            _make_delete_reducer(),
             slice_type=VirtualFileSystem,
         )
 
-        tools = _build_tools(session=session, mount_snapshot=mount_snapshot)
+        tools = _build_tools(session=session)
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
@@ -162,9 +163,9 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 
 
 def _build_tools(
-    *, session: Session, mount_snapshot: VirtualFileSystem
+    *, session: Session
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
-    suite = _VfsToolSuite(session=session, mount_snapshot=mount_snapshot)
+    suite = _VfsToolSuite(session=session)
     return (
         Tool[ListDirectory, ListDirectoryResult](
             name="vfs_list_directory",
@@ -192,9 +193,8 @@ def _build_tools(
 class _VfsToolSuite:
     """Collection of VFS handlers bound to a session instance."""
 
-    def __init__(self, *, session: Session, mount_snapshot: VirtualFileSystem) -> None:
+    def __init__(self, *, session: Session) -> None:
         self._session = session
-        self._mount_snapshot = mount_snapshot
 
     def list_directory(self, params: ListDirectory) -> ToolResult[ListDirectoryResult]:
         target = _normalize_optional_path(params.path)
@@ -265,11 +265,7 @@ class _VfsToolSuite:
 
     def _latest_snapshot(self) -> VirtualFileSystem:
         snapshot = select_latest(self._session, VirtualFileSystem)
-        if snapshot is not None:
-            return snapshot
-        return (
-            self._mount_snapshot if self._mount_snapshot.files else VirtualFileSystem()
-        )
+        return snapshot or VirtualFileSystem()
 
 
 def _normalize_content(content: str) -> str:
@@ -502,15 +498,13 @@ def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
             yield current / name
 
 
-def _make_write_reducer(
-    mount_snapshot: VirtualFileSystem,
-) -> Callable[
+def _make_write_reducer() -> Callable[
     [tuple[VirtualFileSystem, ...], DataEvent], tuple[VirtualFileSystem, ...]
 ]:
     def reducer(
         slice_values: tuple[VirtualFileSystem, ...], event: DataEvent
     ) -> tuple[VirtualFileSystem, ...]:
-        previous = _latest_virtual_filesystem(slice_values, mount_snapshot)
+        previous = slice_values[-1] if slice_values else VirtualFileSystem()
         params = cast(WriteFile, event.value)
         timestamp = _now()
         files = list(previous.files)
@@ -548,15 +542,13 @@ def _make_write_reducer(
     return reducer
 
 
-def _make_delete_reducer(
-    mount_snapshot: VirtualFileSystem,
-) -> Callable[
+def _make_delete_reducer() -> Callable[
     [tuple[VirtualFileSystem, ...], DataEvent], tuple[VirtualFileSystem, ...]
 ]:
     def reducer(
         slice_values: tuple[VirtualFileSystem, ...], event: DataEvent
     ) -> tuple[VirtualFileSystem, ...]:
-        previous = _latest_virtual_filesystem(slice_values, mount_snapshot)
+        previous = slice_values[-1] if slice_values else VirtualFileSystem()
         params = cast(DeleteEntry, event.value)
         target = params.path.segments
         files = [
@@ -569,16 +561,6 @@ def _make_delete_reducer(
         return (snapshot,)
 
     return reducer
-
-
-def _latest_virtual_filesystem(
-    values: tuple[VirtualFileSystem, ...], mount_snapshot: VirtualFileSystem
-) -> VirtualFileSystem:
-    if values:
-        return values[-1]
-    if mount_snapshot.files:
-        return mount_snapshot
-    return VirtualFileSystem()
 
 
 def _index_of(files: list[VfsFile], path: VfsPath) -> int | None:
