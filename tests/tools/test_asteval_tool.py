@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Protocol, TypeVar, cast
 
 import pytest
@@ -30,6 +31,7 @@ from weakincentives.tools import (
     EvalFileWrite,
     EvalParams,
     EvalResult,
+    HostMount,
     ToolValidationError,
     VfsPath,
     VfsToolsSection,
@@ -551,6 +553,35 @@ def test_message_summarizes_multiple_writes() -> None:
     assert snapshot is not None
     paths = sorted(file.path.segments for file in snapshot.files)
     assert paths == [("output", f"file{i}.txt") for i in range(4)]
+
+
+def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    sunfish = root / "sunfish"
+    sunfish.mkdir()
+    readme = sunfish / "README.md"
+    readme.write_text("hello mount", encoding="utf-8")
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    VfsToolsSection(
+        session=session,
+        mounts=(HostMount(host_path="sunfish", mount_path=VfsPath(("sunfish",))),),
+        allowed_host_roots=(root,),
+    )
+    section = AstevalSection(session=session)
+    tool = cast(Tool[EvalParams, EvalResult], _find_tool(section, "evaluate_python"))
+
+    result = _invoke_tool(
+        bus,
+        tool,
+        EvalParams(code="read_text('sunfish/README.md')", mode="expr"),
+    )
+
+    assert result.message.startswith("Evaluation succeeded.")
+    payload = result.value
+    assert payload.value_repr == "'hello mount'"
 
 
 def test_write_text_rejects_empty_path() -> None:

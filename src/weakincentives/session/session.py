@@ -95,6 +95,11 @@ class Session:
 
         return cast(tuple[S, ...], self._state.get(slice_type, ()))
 
+    def seed_slice[S](self, slice_type: type[S], values: Iterable[S]) -> None:
+        """Initialize or replace the stored tuple for the provided type."""
+
+        self._state[slice_type] = tuple(values)
+
     def _on_tool_invoked(self, event: object) -> None:
         if isinstance(event, ToolInvoked):
             self._handle_tool_invoked(event)
