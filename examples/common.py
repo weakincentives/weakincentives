@@ -308,7 +308,10 @@ class CodeReviewSession:
                 lines.append(f"   payload: {payload_dump}")
         return "\n".join(lines)
 
-    def _display_tool_event(self, event: ToolInvoked) -> None:
+    def _display_tool_event(self, event: object) -> None:
+        if not isinstance(event, ToolInvoked):
+            return
+
         serialized_params = dump(event.params, exclude_none=True)
         payload = dump(event.result.value, exclude_none=True)
         print(
