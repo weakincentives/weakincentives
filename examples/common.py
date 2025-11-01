@@ -23,10 +23,15 @@ from pathlib import Path
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from weakincentives import MarkdownSection, Prompt, Tool, ToolResult
-from weakincentives.adapters.core import PromptResponse
+from weakincentives import (
+    MarkdownSection,
+    Prompt,
+    PromptResponse,
+    SupportsDataclass,
+    Tool,
+    ToolResult,
+)
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.serde import dump
 from weakincentives.session import (
     DataEvent,

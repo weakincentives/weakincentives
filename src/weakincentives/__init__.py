@@ -10,69 +10,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Public package surface for weakincentives."""
+"""Curated public surface for :mod:`weakincentives`."""
 
 from __future__ import annotations
 
+from .adapters import PromptResponse
 from .prompt import (
     MarkdownSection,
-    OutputParseError,
     Prompt,
-    PromptError,
-    PromptRenderError,
-    PromptValidationError,
-    RenderedPrompt,
-    Section,
-    SectionNode,
-    SectionPath,
     SupportsDataclass,
     Tool,
     ToolResult,
     parse_structured_output,
 )
-from .session import (
-    DataEvent,
-    PromptData,
-    Session,
-    ToolData,
-    TypedReducer,
-    append,
-    replace_latest,
-    select_all,
-    select_latest,
-    select_where,
-    upsert_by,
-)
-
-parse_structured = parse_structured_output
 
 __all__ = [
     "Prompt",
-    "RenderedPrompt",
-    "Section",
-    "SectionNode",
-    "SectionPath",
     "MarkdownSection",
     "Tool",
     "ToolResult",
-    "PromptError",
-    "PromptRenderError",
-    "PromptValidationError",
-    "OutputParseError",
+    "PromptResponse",
     "SupportsDataclass",
     "parse_structured_output",
-    "parse_structured",
-    "Session",
-    "DataEvent",
-    "ToolData",
-    "PromptData",
-    "TypedReducer",
-    "append",
-    "replace_latest",
-    "upsert_by",
-    "select_all",
-    "select_latest",
-    "select_where",
 ]
 
 

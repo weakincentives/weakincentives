@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.adapters import LiteLLMAdapter
+from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.events import NullEventBus
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
 

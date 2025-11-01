@@ -26,7 +26,7 @@ if __package__ in {None, ""}:  # pragma: no cover - script execution path
     from examples.common import CodeReviewSession  # type: ignore[import]
 else:
     from .common import CodeReviewSession
-from weakincentives.adapters import OpenAIAdapter
+from weakincentives.adapters.openai import OpenAIAdapter
 
 
 def main() -> None:

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.adapters import OpenAIAdapter
+from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.events import NullEventBus
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
 
