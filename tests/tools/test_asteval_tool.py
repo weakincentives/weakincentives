@@ -93,7 +93,10 @@ def test_expression_mode_success() -> None:
 
     result = _invoke_tool(bus, tool, EvalParams(code="1 + 2"))
 
-    assert result.message == "Evaluation completed successfully."
+    assert result.message.startswith("Evaluation succeeded.")
+    assert "value=3" in result.message
+    assert "stdout=empty" in result.message
+    assert "writes=none" in result.message
     payload = result.value
     assert payload.value_repr == "3"
     assert payload.stdout == ""
@@ -250,7 +253,8 @@ def test_print_invalid_sep_reports_error() -> None:
 
     result = _invoke_tool(bus, tool, params)
 
-    assert result.message == "Evaluation failed. See stderr for details."
+    assert result.message.startswith("Evaluation failed.")
+    assert "error=sep must be None or a string" in result.message
     payload = result.value
     assert "sep must be None or a string." in payload.stderr
 
@@ -262,7 +266,8 @@ def test_print_invalid_end_reports_error() -> None:
 
     result = _invoke_tool(bus, tool, params)
 
-    assert result.message == "Evaluation failed. See stderr for details."
+    assert result.message.startswith("Evaluation failed.")
+    assert "error=end must be None or a string" in result.message
     payload = result.value
     assert "end must be None or a string." in payload.stderr
 
@@ -464,7 +469,7 @@ def test_create_mode_rejects_existing_file() -> None:
         ),
     )
 
-    assert result.message == "Evaluation completed successfully."
+    assert result.message.startswith("Evaluation succeeded.")
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
@@ -489,7 +494,7 @@ def test_append_requires_existing_file() -> None:
         ),
     )
 
-    assert result.message == "Evaluation completed successfully."
+    assert result.message.startswith("Evaluation succeeded.")
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is None or not snapshot.files
 
@@ -516,11 +521,36 @@ def test_overwrite_updates_existing_file() -> None:
         ),
     )
 
-    assert result.message == "Evaluation completed successfully."
+    assert result.message.startswith("Evaluation succeeded.")
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
     assert files[path.segments] == "updated"
+
+
+def test_message_summarizes_multiple_writes() -> None:
+    session, bus, _vfs_section, tool = _setup_sections()
+
+    writes = tuple(
+        EvalFileWrite(path=VfsPath(("output", f"file{i}.txt")), content="x")
+        for i in range(4)
+    )
+
+    result = _invoke_tool(
+        bus,
+        tool,
+        EvalParams(code="0", mode="statements", writes=writes),
+    )
+
+    assert result.message.startswith("Evaluation succeeded.")
+    assert (
+        "writes=4 file(s): output/file0.txt, output/file1.txt, output/file2.txt, +1 more"
+        in result.message
+    )
+    snapshot = select_latest(session, VirtualFileSystem)
+    assert snapshot is not None
+    paths = sorted(file.path.segments for file in snapshot.files)
+    assert paths == [("output", f"file{i}.txt") for i in range(4)]
 
 
 def test_write_text_rejects_empty_path() -> None:
@@ -532,7 +562,8 @@ def test_write_text_rejects_empty_path() -> None:
         EvalParams(code="write_text('', 'data')", mode="statements"),
     )
 
-    assert result.message == "Evaluation failed. See stderr for details."
+    assert result.message.startswith("Evaluation failed.")
+    assert "error=Path must be non-empty" in result.message
     assert "Path must be non-empty." in result.value.stderr
 
 
@@ -572,7 +603,9 @@ def test_interpreter_error_surfaces_in_stderr() -> None:
         EvalParams(code="unknown_name + 1", mode="statements"),
     )
 
-    assert result.message == "Evaluation failed. See stderr for details."
+    assert result.message.startswith("Evaluation failed.")
+    assert "error=" in result.message
+    assert "unknown_name" in result.message
     payload = result.value
     assert "unknown_name" in payload.stderr
 
@@ -593,7 +626,11 @@ def test_write_text_conflict_with_read_path() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-    assert result.message == "Evaluation failed. See stderr for details."
+    assert result.message.startswith("Evaluation failed.")
+    assert (
+        "error=Writes queued during execution must not target read paths"
+        in result.message
+    )
     assert (
         "Writes queued during execution must not target read paths."
         in result.value.stderr
@@ -609,7 +646,8 @@ def test_write_text_duplicate_targets() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-    assert result.message == "Evaluation failed. See stderr for details."
+    assert result.message.startswith("Evaluation failed.")
+    assert "error=Duplicate write targets detected" in result.message
     assert "Duplicate write targets detected." in result.value.stderr
 
 
@@ -646,7 +684,8 @@ def test_duplicate_final_writes_detected() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-    assert result.message == "Evaluation failed. See stderr for details."
+    assert result.message.startswith("Evaluation failed.")
+    assert "error=Duplicate write targets detected" in result.message
     assert "Duplicate write targets detected." in result.value.stderr
 
 
@@ -666,7 +705,7 @@ def test_overwrite_requires_existing_file() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-    assert result.message == "Evaluation completed successfully."
+    assert result.message.startswith("Evaluation succeeded.")
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is None or not snapshot.files
 

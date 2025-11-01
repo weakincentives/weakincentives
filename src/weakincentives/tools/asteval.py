@@ -138,6 +138,27 @@ def _truncate_stream(text: str) -> str:
     return f"{text[:keep]}{suffix}"
 
 
+def _format_preview(value: str | None, *, empty: str, limit: int = 160) -> str:
+    if not value:
+        return empty
+    normalized = value.replace("\n", "\\n")
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3]}..."
+
+
+def _extract_error_reason(stderr: str) -> str | None:
+    text = stderr.strip()
+    if not text:  # pragma: no cover - defensive fallback
+        return None
+    if ": " in text:
+        candidate = text.split(": ")[-1].strip()
+        if candidate:
+            trimmed = candidate.rstrip(").")
+            return trimmed or candidate
+    return text
+
+
 def _ensure_ascii(value: str, label: str) -> None:
     try:
         value.encode(_ASCII)
@@ -534,11 +555,23 @@ class _AstevalToolSuite:
         stderr = _truncate_stream(stderr_raw)
 
         param_writes = tuple(write_queue)
+        pending_writes = bool(write_queue or helper_writes)
+        value_preview = _format_preview(value_repr, empty="none")
+        stdout_preview = _format_preview(stdout, empty="empty")
+        stderr_preview = _format_preview(stderr, empty="empty")
         if stderr and not value_repr:
-            message = "Evaluation failed. See stderr for details."
             final_writes: tuple[EvalFileWrite, ...] = ()
+            writes_summary = "discarded" if pending_writes else "none"
+            error_reason = _format_preview(
+                _extract_error_reason(stderr), empty="unknown"
+            )
+            message = (
+                "Evaluation failed. "
+                f"value={value_preview}; stdout={stdout_preview}; "
+                f"stderr={stderr_preview}; error={error_reason}; "
+                f"writes={writes_summary}."
+            )
         else:
-            message = "Evaluation completed successfully."
             format_context = {
                 key: value for key, value in symtable.items() if not key.startswith("_")
             }
@@ -569,6 +602,18 @@ class _AstevalToolSuite:
                         "Duplicate write targets detected."
                     )  # pragma: no cover - upstream checks prevent duplicates
                 seen_targets.add(key)
+            if final_writes:
+                aliases = ["/".join(write.path.segments) for write in final_writes[:3]]
+                if len(final_writes) > 3:
+                    aliases.append(f"+{len(final_writes) - 3} more")
+                writes_summary = f"{len(final_writes)} file(s): {', '.join(aliases)}"
+            else:
+                writes_summary = "none"
+            message = (
+                "Evaluation succeeded. "
+                f"value={value_preview}; stdout={stdout_preview}; "
+                f"stderr={stderr_preview}; writes={writes_summary}."
+            )
 
         globals_payload: dict[str, str] = {}
         visible_keys = {
