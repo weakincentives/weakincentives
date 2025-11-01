@@ -21,7 +21,7 @@ from typing import Annotated, Any, Final, cast, get_args, get_origin, get_type_h
 from ._types import SupportsDataclass
 from .errors import PromptValidationError
 
-_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_]{1,64}$")
+_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_.]{1,64}$")
 
 
 @dataclass(slots=True)
@@ -97,7 +97,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
             )
         if len(name_clean) > 64 or not _NAME_PATTERN.fullmatch(name_clean):
             raise PromptValidationError(
-                "Tool name must use lowercase ASCII letters, digits, or underscores.",
+                "Tool name must use lowercase ASCII letters, digits, underscores, or dots.",
                 dataclass_type=params_type,
                 placeholder=name_clean,
             )

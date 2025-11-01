@@ -112,6 +112,10 @@ ______________________________________________________________________
   `parse`, `dump`, `clone`, `schema` give Pydantic-like ergonomics with dataclasses only.
 - **Quiet, predictable runtime**
   Minimal imports; adapters use a **blocking single-turn** API and emit in-process telemetry events.
+- **Session-scoped planning tools**
+  Drop `PlanningToolsSection` into a prompt to expose plan setup, edits, and
+  status tracking for the active `Session`. Read the
+  [planning tool spec](specs/PLANNING_TOOL.md) for details.
 
 ______________________________________________________________________
 
@@ -141,7 +145,7 @@ litellm_adapter = LiteLLMAdapter(
 
 Both adapters raise a clear runtime error with install guidance if the optional dependency is missing.
 
-See `examples/openai_runner.py` and `examples/litellm_runner.py` for runnable demos.
+See `examples/openai_runner.py`, `examples/litellm_runner.py`, and `examples/planning_tools_demo.py` for runnable demos.
 
 ______________________________________________________________________
 
