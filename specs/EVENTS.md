@@ -41,7 +41,7 @@ Emitted exactly once per successful adapter evaluation, after all tool invocatio
 
 - `prompt_name: str` – logical name taken from the `Prompt` instance.
 - `adapter: str` – identifier for the adapter emitting the event (e.g. `openai`, `anthropic`).
-- `response: PromptResponse[Any]` – the structured result returned to the caller.
+- `result: PromptResponse[Any]` – the structured result returned to the caller.
 
 Adapters SHOULD reuse the `PromptResponse` object they already produce to avoid redundant allocations. Provider-specific
 metadata is intentionally excluded from this minimal event until we have a concrete, typed schema to expose.
