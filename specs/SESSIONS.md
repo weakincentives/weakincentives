@@ -9,8 +9,9 @@ all state transitions are pure functions driven by the event stream.
 
 ## Minimal Requirements
 
-1. **Typed routing** – Only dataclass payloads/outputs participate in state. Tool
-   payload types and prompt output types map 1:1 to slices of the Session state.
+1. **Typed routing** – Dataclass payloads/outputs map 1:1 to dedicated slices, while
+   every tool invocation is also recorded in the generic `ToolData` slice even when
+   the handler fails and returns `value=None`.
 1. **Pure reducers** – State transitions are pure `(tuple[T, ...], DataEvent[T]) -> tuple[T, ...]`
    functions. Reducers run synchronously on the publisher thread.
 1. **Event bus integration** – Sessions subscribe to `ToolInvoked` and `PromptExecuted`
@@ -32,9 +33,11 @@ all state transitions are pure functions driven by the event stream.
 ## Data Model
 
 ```python
+from weakincentives.prompt._types import SupportsDataclass
+
 @dataclass(slots=True, frozen=True)
-class ToolData(Generic[T]):
-    value: T
+class ToolData:
+    value: SupportsDataclass | None
     source: ToolInvoked
 
 @dataclass(slots=True, frozen=True)
@@ -42,9 +45,9 @@ class PromptData(Generic[T]):
     value: T
     source: PromptExecuted
 
-DataEvent[T] = ToolData[T] | PromptData[T]
+DataEvent = ToolData | PromptData[SupportsDataclass]
 
-TypedReducer[T, S] = Callable[[tuple[S, ...], DataEvent[T]], tuple[S, ...]]
+TypedReducer[S] = Callable[[tuple[S, ...], DataEvent], tuple[S, ...]]
 ```
 
 Session state is an immutable mapping from a **slice type** to a tuple of dataclass
@@ -107,12 +110,14 @@ These helpers delegate to `Session.select_all` and perform no caching.
 
 ## Event Handling Rules
 
-1. On `ToolInvoked`, ignore events without a dataclass `result.value`.
+1. On `ToolInvoked`, record the `ToolData` event regardless of success. When
+   `result.value` is a dataclass, also dispatch the same `ToolData` to the payload's
+   concrete type.
 1. On `PromptExecuted`, normalize structured dataclass outputs. If the output is a
    list of dataclasses, emit one `PromptData` per item.
-1. Every normalized `DataEvent[T]` is passed to the reducer chain for `T`. Each
-   reducer operates on the tuple registered for its `slice_type`. If no reducer
-   exists, use the default append reducer.
+1. Every normalized `DataEvent` is passed to the reducer chain registered for its
+   target type. Each reducer operates on the tuple registered for its `slice_type`.
+   If no reducer exists, use the default append reducer.
 1. Reducer failures are caught and logged; the slice stays unchanged.
 
 ## Testing Checklist
@@ -120,7 +125,8 @@ These helpers delegate to `Session.select_all` and perform no caching.
 - Publishing `ToolInvoked` / `PromptExecuted` populates the correct slice exactly once.
 - Reducer registration order is respected, and absence of reducers falls back to the
   default append implementation.
-- Non-dataclass payloads are ignored without raising.
+- Non-dataclass payloads populate the generic `ToolData` slice while leaving
+  dataclass-specific slices untouched.
 - Reducers may register a distinct `slice_type` and still receive the correct tuple.
 
 ## Usage Sketch

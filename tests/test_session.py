@@ -26,6 +26,7 @@ from weakincentives.session import (
     Snapshot,
     SnapshotRestoreError,
     SnapshotSerializationError,
+    ToolData,
     append,
     replace_latest,
     select_all,
@@ -33,6 +34,7 @@ from weakincentives.session import (
     select_where,
     upsert_by,
 )
+from weakincentives.session.session import PromptData, _append_tool_data
 
 
 @dataclass(slots=True, frozen=True)
@@ -195,6 +197,40 @@ def test_replace_latest_keeps_only_newest_value() -> None:
     bus.publish(make_tool_event(2))
 
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=2),)
+
+
+def test_tool_data_slice_records_failures() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    bus.publish(make_tool_event(1))
+
+    failure = cast(
+        ToolResult[object],
+        ToolResult(message="failed", value=None, success=False),
+    )
+    failure_event = ToolInvoked(
+        prompt_name="example",
+        adapter="adapter",
+        name="tool",
+        params=ExampleParams(value=2),
+        result=failure,
+    )
+    bus.publish(failure_event)
+
+    tool_events = session.select_all(ToolData)
+    assert len(tool_events) == 2
+    assert tool_events[0].value == ExamplePayload(value=1)
+    assert tool_events[1].value is None
+    assert tool_events[1].source.result.success is False
+
+
+def test_append_tool_data_ignores_prompt_data() -> None:
+    prompt_event = make_prompt_event(ExampleOutput(text="hello"))
+    prompt_data = PromptData(value=ExampleOutput(text="hello"), source=prompt_event)
+
+    appended = _append_tool_data((), cast(DataEvent, prompt_data))
+    assert appended == ()
 
 
 def test_selector_helpers_delegate_to_session() -> None:

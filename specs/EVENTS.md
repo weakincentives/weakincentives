@@ -58,8 +58,8 @@ Emitted every time an adapter executes a tool handler. The dataclass mirrors the
 - `result: ToolResult[Any]` – structured return value from the handler.
 - `call_id: str | None` – provider-specific correlation identifier when available.
 
-Adapters SHOULD publish `ToolInvoked` immediately after the handler returns. If a handler raises, adapters MAY emit a
-separate error event in the future; error semantics are out of scope for this minimal spec.
+Adapters SHOULD publish `ToolInvoked` immediately after the handler returns. A failure is signalled via
+`result.success=False`, and in that case `result.value` MAY be `None`.
 
 ## Delivery Semantics
 

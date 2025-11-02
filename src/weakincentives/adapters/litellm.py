@@ -15,8 +15,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast
 
@@ -30,6 +31,7 @@ from ..prompt.structured_output import (
 )
 from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
+from ..tools.errors import ToolValidationError
 from .core import PromptEvaluationError, PromptResponse
 
 _ERROR_MESSAGE: Final[str] = (
@@ -109,6 +111,9 @@ def create_litellm_completion(**kwargs: object) -> LiteLLMCompletion:
         return module.completion(*args, **merged)
 
     return _wrapped_completion
+
+
+logger = logging.getLogger(__name__)
 
 
 ToolChoice = Literal["auto"] | Mapping[str, Any] | None
@@ -320,15 +325,27 @@ class LiteLLMAdapter:
                         provider_payload=provider_payload,
                     ) from error
 
+                handler = cast(
+                    Callable[[SupportsDataclass], ToolResult[SupportsDataclass]],
+                    tool.handler,
+                )
                 try:
-                    tool_result = tool.handler(tool_params)
+                    tool_result = handler(tool_params)
+                except ToolValidationError as error:
+                    tool_result = ToolResult(
+                        message=f"Tool validation failed: {error}",
+                        value=None,
+                        success=False,
+                    )
                 except Exception as error:  # pragma: no cover - handler bug
-                    raise PromptEvaluationError(
-                        f"Tool '{tool_name}' raised an exception.",
-                        prompt_name=prompt_name,
-                        phase="tool",
-                        provider_payload=provider_payload,
-                    ) from error
+                    logger.exception(
+                        "Tool '%s' raised an unexpected exception.", tool_name
+                    )
+                    tool_result = ToolResult(
+                        message=f"Tool '{tool_name}' execution failed: {error}",
+                        value=None,
+                        success=False,
+                    )
 
                 invocation = ToolInvoked(
                     prompt_name=prompt_name,

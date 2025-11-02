@@ -95,7 +95,10 @@ that subscribe to `ToolInvoked` will receive the identical objects stored on the
 - Match tool calls by exact `Tool.name`. Missing handlers raise `PromptEvaluationError` immediately.
 - Arguments must deserialize into the declared params dataclass. Validation failures bubble as
   `PromptEvaluationError` with the offending payload attached.
-- Handlers run synchronously and must return `ToolResult[...]`.
+- Handlers run synchronously and must return `ToolResult[...]`, setting `success=False` and `value=None` (or a structured
+  error payload) when they cannot fulfill the request.
+- Adapters wrap handler exceptions and convert them into `ToolResult(success=False, value=None, message="…")` instances,
+  publish the `ToolInvoked` event, and continue the evaluation instead of surfacing a `PromptEvaluationError`.
 - The `ToolResult.message` is the only content echoed back to the provider; the structured payload stays local and is
   captured in the `ToolInvoked` event/response entry.
 
@@ -106,8 +109,9 @@ Raise `PromptEvaluationError` (new exception type in the adapters package) for:
 - Provider failures (non-2xx responses, SDK errors).
 - Unknown tool names or missing handlers when the model requests a tool.
 - Parameter deserialization errors.
-- Tool handler exceptions (include the original exception as context).
 - Structured output parsing failures when `parse_output=True`.
+
+Adapters should log handler exceptions but treat them as tool failures, returning `ToolResult(success=False, value=None, message="…")` to the provider so the LLM can react without aborting evaluation.
 
 The exception should expose:
 

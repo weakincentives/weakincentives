@@ -29,7 +29,8 @@ class ToolResult[ResultValueT]:
     """Structured response emitted by a tool handler."""
 
     message: str
-    value: ResultValueT
+    value: ResultValueT | None
+    success: bool = True
 
 
 @dataclass(slots=True)

@@ -375,6 +375,7 @@ def test_list_directory_defaults_to_root(monkeypatch: pytest.MonkeyPatch) -> Non
         ToolResult[ListDirectoryResult],
         _invoke_tool(bus, list_tool, ListDirectory()),
     )
+    assert result.value is not None
     assert result.value.path == VfsPath(())
     assert result.value.files == ("notes.md",)
 
@@ -401,6 +402,7 @@ def test_list_directory_ignores_unrelated_paths(
         ToolResult[ListDirectoryResult],
         _invoke_tool(bus, list_tool, ListDirectory(path=VfsPath(("docs",)))),
     )
+    assert result.value is not None
     assert result.value.directories == ()
     assert result.value.files == ()
 
@@ -462,6 +464,7 @@ def test_write_file_allows_utf8_content(monkeypatch: pytest.MonkeyPatch) -> None
         ToolResult[VfsFile],
         _invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("README.md",)))),
     )
+    assert result.value is not None
     assert result.value.content == content
 
 
@@ -770,6 +773,7 @@ def test_host_mount_trims_blank_globs(
             ReadFile(path=VfsPath(("docs", "guide.md"))),
         ),
     )
+    assert result.value is not None
     assert result.value.content == "guide"
 
 
@@ -798,6 +802,7 @@ def test_host_mount_handles_file_targets(
             ReadFile(path=VfsPath(("docs", "README.md"))),
         ),
     )
+    assert result.value is not None
     assert result.value.content == "hello"
 
 
@@ -827,6 +832,7 @@ def test_host_mount_preserves_utf8_content(
             ReadFile(path=VfsPath(("notes.txt",))),
         ),
     )
+    assert result.value is not None
     assert result.value.content == content
 
 

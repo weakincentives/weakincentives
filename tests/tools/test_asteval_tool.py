@@ -99,6 +99,7 @@ def test_expression_mode_success() -> None:
     assert "value=3" in result.message
     assert "stdout=empty" in result.message
     assert "writes=none" in result.message
+    assert result.value is not None
     payload = result.value
     assert payload.value_repr == "3"
     assert payload.stdout == ""
@@ -144,6 +145,7 @@ def test_statements_mode_reads_and_writes() -> None:
 
     result = _invoke_tool(bus, tool, params)
 
+    assert result.value is not None
     payload = result.value
     assert payload.value_repr == "'hello:11'"
     assert payload.stdout == "SAMPLE TEXT\n"
@@ -181,6 +183,7 @@ def test_helper_write_appends() -> None:
 
     result = _invoke_tool(bus, tool, params_append)
 
+    assert result.value is not None
     payload = result.value
     assert payload.value_repr == "'done'"
     assert payload.stderr == ""
@@ -223,6 +226,7 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
 
     result = _invoke_tool(bus, tool, params)
 
+    assert result.value is not None
     payload = result.value
     assert payload.value_repr is None
     assert payload.stderr == "Execution timed out."
@@ -242,7 +246,7 @@ def test_stdout_truncation_and_flush() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-
+    assert result.value is not None
     payload = result.value
     assert payload.stdout.endswith("...")
     assert len(payload.stdout) == asteval_module._MAX_STREAM_LENGTH
@@ -257,6 +261,7 @@ def test_print_invalid_sep_reports_error() -> None:
 
     assert result.message.startswith("Evaluation failed.")
     assert "error=sep must be None or a string" in result.message
+    assert result.value is not None
     payload = result.value
     assert "sep must be None or a string." in payload.stderr
 
@@ -270,6 +275,7 @@ def test_print_invalid_end_reports_error() -> None:
 
     assert result.message.startswith("Evaluation failed.")
     assert "error=end must be None or a string" in result.message
+    assert result.value is not None
     payload = result.value
     assert "end must be None or a string." in payload.stderr
 
@@ -580,6 +586,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     )
 
     assert result.message.startswith("Evaluation succeeded.")
+    assert result.value is not None
     payload = result.value
     assert payload.value_repr == "'hello mount'"
 
@@ -595,6 +602,7 @@ def test_write_text_rejects_empty_path() -> None:
 
     assert result.message.startswith("Evaluation failed.")
     assert "error=Path must be non-empty" in result.message
+    assert result.value is not None
     assert "Path must be non-empty." in result.value.stderr
 
 
@@ -616,6 +624,7 @@ def test_globals_formatting_covers_primitives() -> None:
         EvalParams(code=code, mode="statements"),
     )
 
+    assert result.value is not None
     payload = result.value
     assert payload.globals["text"] == "hello"
     assert payload.globals["number"] == "7"
@@ -637,6 +646,7 @@ def test_interpreter_error_surfaces_in_stderr() -> None:
     assert result.message.startswith("Evaluation failed.")
     assert "error=" in result.message
     assert "unknown_name" in result.message
+    assert result.value is not None
     payload = result.value
     assert "unknown_name" in payload.stderr
 
@@ -662,6 +672,7 @@ def test_write_text_conflict_with_read_path() -> None:
         "error=Writes queued during execution must not target read paths"
         in result.message
     )
+    assert result.value is not None
     assert (
         "Writes queued during execution must not target read paths."
         in result.value.stderr
@@ -679,6 +690,7 @@ def test_write_text_duplicate_targets() -> None:
     result = _invoke_tool(bus, tool, params)
     assert result.message.startswith("Evaluation failed.")
     assert "error=Duplicate write targets detected" in result.message
+    assert result.value is not None
     assert "Duplicate write targets detected." in result.value.stderr
 
 
@@ -717,6 +729,7 @@ def test_duplicate_final_writes_detected() -> None:
     result = _invoke_tool(bus, tool, params)
     assert result.message.startswith("Evaluation failed.")
     assert "error=Duplicate write targets detected" in result.message
+    assert result.value is not None
     assert "Duplicate write targets detected." in result.value.stderr
 
 

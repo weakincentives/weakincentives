@@ -188,7 +188,15 @@ class SunfishReviewSession:
             return
 
         serialized_params = dump(event.params, exclude_none=True)
-        payload = dump(event.result.value, exclude_none=True)
+        raw_value = event.result.value
+        payload: dict[str, object] | None
+        if raw_value is None:
+            payload = None
+        else:
+            try:
+                payload = dump(raw_value, exclude_none=True)
+            except TypeError:
+                payload = {"value": raw_value}
         print(
             f"[tool] {event.name} called with {serialized_params}\n"
             f"       → {event.result.message}"

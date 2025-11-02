@@ -84,6 +84,7 @@ def test_git_log_handler_success(monkeypatch: pytest.MonkeyPatch) -> None:
         "--",
         "src",
     ]
+    assert result.value is not None
     assert result.value.entries == ["abc123 Added feature"]
     assert "Returned 1 git log entry" in result.message
 
@@ -97,7 +98,7 @@ def test_git_log_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     result = code_review_tools.git_log_handler(
         code_review_tools.GitLogParams(revision_range="bad")
     )
-
+    assert result.value is not None
     assert result.value.entries == []
     assert result.message == "git log failed: fatal: bad revision"
 
@@ -125,6 +126,7 @@ def test_branch_list_handler(monkeypatch: pytest.MonkeyPatch) -> None:
         "abc123",
         "feature*",
     ]
+    assert result.value is not None
     assert result.value.branches == ["main", "feature/one"]
     assert "Returned 2 branch entries" in result.message
 
@@ -136,7 +138,7 @@ def test_branch_list_handler_no_matches(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
     result = code_review_tools.branch_list_handler(code_review_tools.BranchListParams())
-
+    assert result.value is not None
     assert result.value.branches == []
     assert result.message == "No branches matched the query."
 
@@ -150,7 +152,7 @@ def test_tag_list_handler_no_matches(monkeypatch: pytest.MonkeyPatch) -> None:
     result = code_review_tools.tag_list_handler(
         code_review_tools.TagListParams(sort="-version:refname")
     )
-
+    assert result.value is not None
     assert result.value.tags == []
     assert result.message == "No tags matched the query."
 
@@ -159,7 +161,7 @@ def test_current_time_handler_valid_timezone() -> None:
     result = code_review_tools.current_time_handler(
         code_review_tools.TimeQueryParams(timezone="UTC")
     )
-
+    assert result.value is not None
     assert result.value.timezone == "UTC"
     assert "Current time in UTC" in result.message
 
@@ -168,7 +170,7 @@ def test_current_time_handler_invalid_timezone() -> None:
     result = code_review_tools.current_time_handler(
         code_review_tools.TimeQueryParams(timezone="Mars/Colony")
     )
-
+    assert result.value is not None
     assert result.value.timezone == "UTC"
     assert result.value.source == "fallback"
     assert "Timezone 'Mars/Colony' not found." in result.message
@@ -181,7 +183,7 @@ def test_branch_list_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
     result = code_review_tools.branch_list_handler(code_review_tools.BranchListParams())
-
+    assert result.value is not None
     assert result.value.branches == []
     assert result.message == "git branch failed: fatal: not a git repository"
 
@@ -195,7 +197,7 @@ def test_tag_list_handler_success(monkeypatch: pytest.MonkeyPatch) -> None:
     result = code_review_tools.tag_list_handler(
         code_review_tools.TagListParams(pattern="v*", contains="HEAD")
     )
-
+    assert result.value is not None
     assert result.value.tags == ["v1.0.0", "v1.1.0"]
     assert "Returned 2 tag entries" in result.message
 
@@ -207,7 +209,7 @@ def test_tag_list_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
     result = code_review_tools.tag_list_handler(code_review_tools.TagListParams())
-
+    assert result.value is not None
     assert result.value.tags == []
     assert result.message == "git tag failed: fatal: bad pattern"
 
@@ -230,8 +232,8 @@ def test_git_log_handler_no_matching_entries(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
     result = code_review_tools.git_log_handler(code_review_tools.GitLogParams())
-
     assert result.message == "No git log entries matched the query."
+    assert result.value is not None
     assert result.value.entries == []
 
 

@@ -33,11 +33,19 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True, frozen=True)
-class ToolData[T: SupportsDataclass]:
+class ToolData:
     """Wrapper containing tool payloads and their originating event."""
 
-    value: T
+    value: SupportsDataclass | None
     source: ToolInvoked
+
+
+def _append_tool_data(
+    slice_values: tuple[ToolData, ...], event: DataEvent
+) -> tuple[ToolData, ...]:
+    if not isinstance(event, ToolData):
+        return slice_values
+    return (*slice_values, event)
 
 
 @dataclass(slots=True, frozen=True)
@@ -48,7 +56,7 @@ class PromptData[T: SupportsDataclass]:
     source: PromptExecuted
 
 
-type DataEvent = ToolData[SupportsDataclass] | PromptData[SupportsDataclass]
+type DataEvent = ToolData | PromptData[SupportsDataclass]
 
 type TypedReducer[S] = Callable[[tuple[S, ...], DataEvent], tuple[S, ...]]
 
@@ -158,11 +166,15 @@ class Session:
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
         payload = event.result.value
-        if not _is_dataclass_instance(payload):
-            return
-        dataclass_payload = cast(SupportsDataclass, payload)
+        dataclass_payload: SupportsDataclass | None = None
+        if _is_dataclass_instance(payload):
+            dataclass_payload = cast(SupportsDataclass, payload)
+
         data = ToolData(value=dataclass_payload, source=event)
-        self._dispatch_data_event(type(dataclass_payload), data)
+        self._dispatch_data_event(ToolData, data)
+
+        if dataclass_payload is not None:
+            self._dispatch_data_event(type(dataclass_payload), data)
 
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
         output = event.result.output
@@ -183,14 +195,22 @@ class Session:
     ) -> None:
         registrations = self._reducers.get(data_type)
         if not registrations:
-            from .reducers import append
+            if data_type is ToolData:
+                registrations = [
+                    _ReducerRegistration(
+                        reducer=cast(TypedReducer[Any], _append_tool_data),
+                        slice_type=ToolData,
+                    )
+                ]
+            else:
+                from .reducers import append
 
-            registrations = [
-                _ReducerRegistration(
-                    reducer=cast(TypedReducer[Any], append),
-                    slice_type=data_type,
-                )
-            ]
+                registrations = [
+                    _ReducerRegistration(
+                        reducer=cast(TypedReducer[Any], append),
+                        slice_type=data_type,
+                    )
+                ]
 
         for registration in registrations:
             slice_type = registration.slice_type

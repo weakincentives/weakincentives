@@ -65,6 +65,7 @@ from weakincentives.events import (
 )
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.litellm"
 PROMPT_NS = "tests/adapters/litellm"
@@ -554,6 +555,83 @@ def test_litellm_adapter_handles_tool_call_without_arguments() -> None:
     assert recorded == ["default"]
 
 
+def test_litellm_adapter_surfaces_tool_validation_errors() -> None:
+    module = cast(Any, _reload_module())
+
+    def handler(_: ToolParams) -> ToolResult[ToolPayload]:
+        raise ToolValidationError("invalid query")
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=handler,
+    )
+
+    prompt = Prompt(
+        ns=PROMPT_NS,
+        key="litellm-tool-validation",
+        name="search-validation",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "invalid"}),
+    )
+    first = DummyResponse(
+        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
+    )
+    second = DummyResponse(
+        [
+            DummyChoice(
+                DummyMessage(
+                    content="Please provide a different query.", tool_calls=None
+                )
+            )
+        ]
+    )
+    completion = RecordingCompletion([first, second])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
+
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
+
+    def record(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        tool_events.append(event)
+
+    bus.subscribe(ToolInvoked, record)
+
+    result = adapter.evaluate(
+        prompt,
+        ToolParams(query="invalid"),
+        bus=bus,
+    )
+
+    assert result.text == "Please provide a different query."
+    assert result.output is None
+    assert len(tool_events) == 1
+    event = tool_events[0]
+    assert event.result.message == "Tool validation failed: invalid query"
+    assert event.result.success is False
+    assert event.result.value is None
+    assert event.call_id == "call_1"
+
+    second_request = completion.requests[1]
+    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    tool_message = second_messages[-1]
+    assert tool_message["role"] == "tool"
+    assert tool_message["content"] == "Tool validation failed: invalid query"
+
+
 def test_litellm_adapter_reads_output_json_content_blocks() -> None:
     module = cast(Any, _reload_module())
 
@@ -796,7 +874,7 @@ def test_litellm_adapter_raises_when_tool_params_invalid() -> None:
     assert err.value.phase == "tool"
 
 
-def test_litellm_adapter_raises_when_handler_fails() -> None:
+def test_litellm_adapter_records_handler_failures() -> None:
     module = cast(Any, _reload_module())
 
     def failing_handler(params: ToolParams) -> ToolResult[ToolPayload]:
@@ -827,21 +905,49 @@ def test_litellm_adapter_raises_when_handler_fails() -> None:
         name="search_notes",
         arguments=json.dumps({"query": "policies"}),
     )
-    response = DummyResponse(
+    first = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    completion = RecordingCompletion([response])
+    second = DummyResponse(
+        [
+            DummyChoice(
+                DummyMessage(
+                    content="Please provide a different approach.", tool_calls=None
+                )
+            )
+        ]
+    )
+    completion = RecordingCompletion([first, second])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(
-            prompt,
-            ToolParams(query="policies"),
-            bus=NullEventBus(),
-        )
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
 
-    assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    def record(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        tool_events.append(event)
+
+    bus.subscribe(ToolInvoked, record)
+
+    result = adapter.evaluate(
+        prompt,
+        ToolParams(query="policies"),
+        bus=bus,
+    )
+
+    assert result.text == "Please provide a different approach."
+    assert result.output is None
+    assert len(tool_events) == 1
+    event = tool_events[0]
+    assert event.result.success is False
+    assert event.result.value is None
+    assert "execution failed: boom" in event.result.message
+
+    second_request = completion.requests[1]
+    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    tool_message = second_messages[-1]
+    assert tool_message["role"] == "tool"
+    assert "execution failed: boom" in tool_message["content"]
 
 
 def test_litellm_adapter_records_provider_payload_from_mapping() -> None:

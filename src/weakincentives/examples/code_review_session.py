@@ -49,7 +49,7 @@ class ToolCallLog:
     name: str
     prompt_name: str
     message: str
-    value: dict[str, Any]
+    value: dict[str, Any] | None
     call_id: str | None
 
 
@@ -120,7 +120,11 @@ class CodeReviewSession:
             return
 
         serialized_params = dump(event.params, exclude_none=True)
-        payload = dump(event.result.value, exclude_none=True)
+        payload = (
+            dump(event.result.value, exclude_none=True)
+            if event.result.value is not None
+            else None
+        )
         print(
             f"[tool] {event.name} called with {serialized_params}\n"
             f"       → {event.result.message}"
@@ -157,7 +161,9 @@ class CodeReviewSession:
         if not isinstance(event, ToolData):
             return slice_values
 
-        payload = dump(event.value, exclude_none=True)
+        payload = (
+            dump(event.value, exclude_none=True) if event.value is not None else None
+        )
         record = ToolCallLog(
             name=event.source.name,
             prompt_name=event.source.prompt_name,

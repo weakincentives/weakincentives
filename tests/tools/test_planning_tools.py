@@ -77,7 +77,7 @@ def _invoke_tool(
     return result
 
 
-def _make_tool_data(name: str, value: SupportsDataclass) -> ToolData[SupportsDataclass]:
+def _make_tool_data(name: str, value: SupportsDataclass) -> ToolData:
     result = ToolResult(message="ok", value=value)
     event = ToolInvoked(
         prompt_name="test",

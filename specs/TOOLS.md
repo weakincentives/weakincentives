@@ -36,8 +36,10 @@ Tools return structured data that pairs a language-model-facing message with typ
 instances capture that response tuple, and every tool handler returns one directly:
 
 - `message: str` – short textual reply returned to the LLM.
-- `value: PayloadT` – strongly typed result produced by the tool's business logic. The payload type is declared on the
-  `Tool` so downstream adapters can reason about the schema without guessing.
+- `value: PayloadT | None` – strongly typed result produced by the tool's business logic. Successful handlers should
+  populate the documented dataclass; failures must set this to `None` unless they expose a structured error payload.
+- `success: bool` – flag indicating whether the handler completed normally. Downstream adapters rely on this field (not
+  payload shape) to detect failures.
 
 ### `Tool` Dataclass
 
@@ -84,9 +86,9 @@ and tool metadata.
 
 Sections only document callable capabilities. Higher-level orchestration code is responsible for invoking the appropriate
 handler when an LLM emits a tool call, passing the params dataclass instance as the sole argument. Handlers return a
-`ToolResult[result_type]` directly. The prompt layer remains side effect free—it surfaces handlers and `result_type`
-metadata without executing them. The package provides no sync/async bridging helpers; orchestrators decide when to `await`
-or call handlers directly.
+`ToolResult[result_type]` directly, setting `success=False` and `value=None` when they cannot satisfy the contract. The
+prompt layer remains side effect free—it surfaces handlers and `result_type` metadata without executing them. The package
+provides no sync/async bridging helpers; orchestrators decide when to `await` or call handlers directly.
 
 ## Example
 

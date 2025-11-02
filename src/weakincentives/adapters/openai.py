@@ -15,8 +15,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib import import_module
 from typing import Any, Final, Literal, Protocol, cast
 
@@ -100,6 +101,9 @@ def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
 
     openai_module = _load_openai_module()
     return openai_module.OpenAI(**kwargs)
+
+
+logger = logging.getLogger(__name__)
 
 
 ToolChoice = Literal["auto"] | Mapping[str, Any] | None
@@ -310,20 +314,27 @@ class OpenAIAdapter:
                         provider_payload=provider_payload,
                     ) from error
 
+                handler = cast(
+                    Callable[[SupportsDataclass], ToolResult[SupportsDataclass]],
+                    tool.handler,
+                )
                 try:
-                    tool_result = tool.handler(tool_params)
+                    tool_result = handler(tool_params)
                 except ToolValidationError as error:
                     tool_result = ToolResult(
                         message=f"Tool validation failed: {error}",
-                        value=tool_params,
+                        value=None,
+                        success=False,
                     )
                 except Exception as error:  # pragma: no cover - handler bug
-                    raise PromptEvaluationError(
-                        f"Tool '{tool_name}' raised an exception.",
-                        prompt_name=prompt_name,
-                        phase="tool",
-                        provider_payload=provider_payload,
-                    ) from error
+                    logger.exception(
+                        "Tool '%s' raised an unexpected exception.", tool_name
+                    )
+                    tool_result = ToolResult(
+                        message=f"Tool '{tool_name}' execution failed: {error}",
+                        value=None,
+                        success=False,
+                    )
 
                 invocation = ToolInvoked(
                     prompt_name=prompt_name,

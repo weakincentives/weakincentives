@@ -395,7 +395,8 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     event = tool_events[0]
     assert event.name == "search_notes"
     assert event.result.message == "Tool validation failed: invalid query"
-    assert event.result.value == ToolParams(query="invalid")
+    assert event.result.success is False
+    assert event.result.value is None
     assert event.call_id == "call_1"
 
     first_request = cast(dict[str, Any], client.completions.requests[0])
@@ -1050,7 +1051,7 @@ def test_openai_adapter_raises_when_tool_params_invalid() -> None:
     assert err.value.phase == "tool"
 
 
-def test_openai_adapter_raises_when_handler_fails() -> None:
+def test_openai_adapter_records_handler_failures() -> None:
     module = cast(Any, _reload_module())
 
     def failing_handler(params: ToolParams) -> ToolResult[ToolPayload]:
@@ -1081,21 +1082,49 @@ def test_openai_adapter_raises_when_handler_fails() -> None:
         name="search_notes",
         arguments=json.dumps({"query": "policies"}),
     )
-    response = DummyResponse(
+    first = DummyResponse(
         [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
     )
-    client = DummyOpenAIClient([response])
+    second = DummyResponse(
+        [
+            DummyChoice(
+                DummyMessage(
+                    content="Please provide a different approach.", tool_calls=None
+                )
+            )
+        ]
+    )
+    client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    with pytest.raises(PromptEvaluationError) as err:
-        adapter.evaluate(
-            prompt,
-            ToolParams(query="policies"),
-            bus=NullEventBus(),
-        )
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
 
-    assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    def record(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        tool_events.append(event)
+
+    bus.subscribe(ToolInvoked, record)
+
+    result = adapter.evaluate(
+        prompt,
+        ToolParams(query="policies"),
+        bus=bus,
+    )
+
+    assert result.text == "Please provide a different approach."
+    assert result.output is None
+    assert len(tool_events) == 1
+    event = tool_events[0]
+    assert event.result.success is False
+    assert event.result.value is None
+    assert "execution failed: boom" in event.result.message
+
+    second_request = cast(dict[str, Any], client.completions.requests[1])
+    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    tool_message = second_messages[-1]
+    assert tool_message["role"] == "tool"
+    assert "execution failed: boom" in tool_message["content"]
 
 
 def test_openai_adapter_records_provider_payload_from_mapping() -> None:
