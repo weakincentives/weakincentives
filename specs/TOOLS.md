@@ -65,8 +65,8 @@ is a `Tool`, and expose the collection via `Section.tools()`. Because every sect
 
 ## Prompt Integration
 
-`Prompt` continues to accept an ordered tree of sections. During initialization it walks the tree depth-first, validating
-all tools contributed by each section:
+`Prompt` continues to accept an ordered tree of sections alongside its required `ns` and `key` identifiers. During
+initialization it walks the tree depth-first, validating all tools contributed by each section:
 
 1. Validation enforces unique tool names across the entire prompt; composite prompts must coordinate naming themselves
    until hierarchical namespaces are introduced.
@@ -75,8 +75,10 @@ all tools contributed by each section:
 
 `Prompt.render(...)` still returns the rendered markdown string, accepting dataclass overrides exactly as before. The
 resulting `RenderedPrompt` now exposes a `.tools` property that surfaces an ordered tuple of `Tool` objects contributed by
-enabled sections, honoring section-level defaults and enablement rules. Callers no longer re-traverse the prompt tree to
-resolve tooling; they rely on the rendered instance for both markdown and tool metadata.
+enabled sections, honoring section-level defaults and enablement rules. The object also exposes
+`.tool_param_descriptions`, a mapping of tool name to field description overrides sourced from the override system.
+Callers no longer re-traverse the prompt tree to resolve tooling; they rely on the rendered instance for both markdown
+and tool metadata.
 
 ## Runtime Execution
 
@@ -122,6 +124,8 @@ lookup_tool = Tool[LookupParams, LookupResult](
 )
 
 tooling_overview = Prompt(
+    ns="examples/tooling",
+    key="tools_overview",
     name="tools_overview",
     sections=[
         MarkdownSection[GuidanceParams](

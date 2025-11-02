@@ -15,6 +15,8 @@ Extend prompt versioning so tools become describable, hashable artifacts. Optimi
 Augment the prompt descriptor produced today:
 
 ```python
+from dataclasses import dataclass, field
+
 @dataclass(slots=True)
 class ToolDescriptor:
     path: tuple[str, ...]
@@ -23,6 +25,7 @@ class ToolDescriptor:
 
 @dataclass(slots=True)
 class PromptDescriptor:
+    ns: str
     key: str
     sections: list[SectionDescriptor]
     tools: list[ToolDescriptor]
@@ -53,6 +56,7 @@ class ToolOverride:
 
 @dataclass(slots=True)
 class PromptOverride:
+    ns: str
     prompt_key: str
     tag: str
     overrides: dict[tuple[str, ...], str]
@@ -70,7 +74,7 @@ Override rules:
 
 `PromptOverridesStore.resolve` already receives a descriptor and tag. Update implementations to:
 
-1. Match tool overrides by `(prompt_key, tool_name)`.
+1. Match tool overrides by `(ns, prompt_key, tool_name)`.
 1. Drop overrides whose contract hash does not match.
 1. Return `None` when no section or tool overrides survive filtering.
 
@@ -84,7 +88,7 @@ Stores that ignore `tool_overrides` remain valid.
 1. For each collected tool:
    - Copy it with a replacement description when provided.
    - Capture `param_descriptions` for adapters (optional surface).
-1. Return a `RenderedPrompt` whose `.tools` reflect the original order while carrying any re-described tools, plus an optional map of field description patches keyed by tool name.
+1. Return a `RenderedPrompt` whose `.tools` reflect the original order while carrying any re-described tools, plus an optional map of field description patches keyed by tool name via `.tool_param_descriptions`.
 
 Adapters that already respect tool order and description require no changes for v1. Adapter support for field description patches is optional and may ship later.
 
@@ -101,4 +105,4 @@ Adapters that already respect tool order and description require no changes for 
 1. Extend descriptor construction to populate `tools`.
 1. Update the in-repo overrides store to persist `tool_overrides`.
 1. Update prompt rendering to apply tool overrides as described above.
-1. (Optional) Surface `_tool_param_descriptions` on `RenderedPrompt` and teach adapters to merge patches into provider schemas.
+1. (Optional) Surface `.tool_param_descriptions` on `RenderedPrompt` and teach adapters to merge patches into provider schemas.
