@@ -26,7 +26,7 @@ from .errors import (
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
 from .tool import Tool
-from .versioning import PromptVersionStore, ToolOverride
+from .versioning import PromptOverridesStore, ToolOverride
 
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
 
@@ -193,16 +193,16 @@ class Prompt[OutputT]:
     def render_with_overrides(
         self,
         *params: SupportsDataclass,
-        version_store: PromptVersionStore,
+        overrides_store: PromptOverridesStore,
         tag: str = "latest",
         inject_output_instructions: bool | None = None,
     ) -> RenderedPrompt[OutputT]:
-        """Render the prompt using overrides supplied by a version store."""
+        """Render the prompt using overrides supplied by an overrides store."""
 
         from .versioning import PromptDescriptor
 
         descriptor = PromptDescriptor.from_prompt(self)
-        override = version_store.resolve(descriptor=descriptor, tag=tag)
+        override = overrides_store.resolve(descriptor=descriptor, tag=tag)
 
         overrides: dict[SectionPath, str] = {}
         tool_overrides: dict[str, ToolOverride] = {}

@@ -93,7 +93,7 @@ class ToolOverride:
 
 @dataclass(slots=True)
 class PromptOverride:
-    """Runtime replacements for prompt sections validated by a version store."""
+    """Runtime replacements for prompt sections validated by an overrides store."""
 
     ns: str
     prompt_key: str
@@ -104,7 +104,7 @@ class PromptOverride:
     )
 
 
-class PromptVersionStore(Protocol):
+class PromptOverridesStore(Protocol):
     """Lookup interface for resolving prompt overrides at render time."""
 
     def resolve(
@@ -117,7 +117,7 @@ class PromptVersionStore(Protocol):
 __all__ = [
     "PromptDescriptor",
     "PromptOverride",
-    "PromptVersionStore",
+    "PromptOverridesStore",
     "SectionDescriptor",
     "ToolDescriptor",
     "ToolOverride",

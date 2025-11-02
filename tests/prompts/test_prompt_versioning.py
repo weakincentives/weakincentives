@@ -19,7 +19,7 @@ from weakincentives.prompt import MarkdownSection, Prompt, Section, Tool
 from weakincentives.prompt.versioning import (
     PromptDescriptor,
     PromptOverride,
-    PromptVersionStore,
+    PromptOverridesStore,
     SectionDescriptor,
     ToolDescriptor,
     ToolOverride,
@@ -156,7 +156,7 @@ def test_prompt_descriptor_collects_tools() -> None:
     ]
 
 
-class _RecordingStore(PromptVersionStore):
+class _RecordingOverridesStore(PromptOverridesStore):
     def __init__(self, override: PromptOverride | None) -> None:
         self.override = override
         self.calls: list[tuple[PromptDescriptor, str]] = []
@@ -181,11 +181,11 @@ def test_prompt_render_with_overrides_applies_matching_sections() -> None:
         tag="experiment",
         overrides={path: "Cheer loudly for ${subject}."},
     )
-    store = _RecordingStore(override)
+    store = _RecordingOverridesStore(override)
 
     rendered = prompt.render_with_overrides(
         _GreetingParams(subject="Operators"),
-        version_store=store,
+        overrides_store=store,
         tag="experiment",
     )
 
@@ -203,11 +203,11 @@ def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
         tag="latest",
         overrides={("other",): "Ignore this."},
     )
-    store = _RecordingStore(override)
+    store = _RecordingOverridesStore(override)
 
     rendered = prompt.render_with_overrides(
         _GreetingParams(subject="Operators"),
-        version_store=store,
+        overrides_store=store,
     )
 
     assert "Greet Operators warmly." in rendered.text
@@ -215,11 +215,11 @@ def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
 
 def test_prompt_render_with_overrides_handles_missing_override() -> None:
     prompt = _build_prompt()
-    store = _RecordingStore(None)
+    store = _RecordingOverridesStore(None)
 
     rendered = prompt.render_with_overrides(
         _GreetingParams(subject="Operators"),
-        version_store=store,
+        overrides_store=store,
     )
 
     assert "Greet Operators warmly." in rendered.text
@@ -245,11 +245,11 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
             )
         },
     )
-    store = _RecordingStore(override)
+    store = _RecordingOverridesStore(override)
 
     rendered = prompt.render_with_overrides(
         _GreetingParams(subject="Operators"),
-        version_store=store,
+        overrides_store=store,
     )
 
     assert (
@@ -277,11 +277,11 @@ def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
             )
         },
     )
-    store = _RecordingStore(override)
+    store = _RecordingOverridesStore(override)
 
     rendered = prompt.render_with_overrides(
         _GreetingParams(subject="Operators"),
-        version_store=store,
+        overrides_store=store,
     )
 
     assert rendered.tools[0].description == tool.description

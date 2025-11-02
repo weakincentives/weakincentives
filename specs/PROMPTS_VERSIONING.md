@@ -66,10 +66,10 @@ class PromptOverride:
 - Each dict entry represents the new body template to use when the lookup key matches.
 - The replacement template may hash to any value after application; descriptors continue to publish the in-code hash.
 
-Define a `PromptVersionStore` protocol:
+Define a `PromptOverridesStore` protocol:
 
 ```python
-class PromptVersionStore(Protocol):
+class PromptOverridesStore(Protocol):
     def resolve(
         self,
         description: PromptDescriptor,
@@ -93,7 +93,7 @@ class Prompt:
     def render_with_overrides(
         self,
         *params: SupportsDataclass,
-        version_store: PromptVersionStore,
+        overrides_store: PromptOverridesStore,
         tag: str = "latest",
     ) -> RenderedPrompt:
         ...
@@ -112,7 +112,7 @@ A convenience `render` method MAY delegate to `render_with_overrides` when no st
 ## Operational Flow
 
 1. **Bootstrap** – Enumerate descriptors for all prompts and publish them to the optimization service. The service stores overrides keyed by `(ns, prompt_key, section_path, expected_hash)` and tagged as desired.
-1. **Runtime** – Call `prompt.render_with_overrides(..., version_store=store, tag=...)`. Overrides whose lookup key matches replace the in-code bodies; the rest are ignored.
+1. **Runtime** – Call `prompt.render_with_overrides(..., overrides_store=store, tag=...)`. Overrides whose lookup key matches replace the in-code bodies; the rest are ignored.
 1. **Author workflow** – Developers edit prompt bodies in source control. Any change produces a new hash, invalidating stale overrides automatically because the lookup key no longer matches.
 
 ## Usage Example
@@ -124,7 +124,7 @@ from weakincentives.prompt import Prompt, MarkdownSection
 from weakincentives.prompt.versioning import (
     PromptDescriptor,
     PromptOverride,
-    PromptVersionStore,
+    PromptOverridesStore,
 )
 
 
@@ -153,7 +153,7 @@ prompt = Prompt(
 descriptor = PromptDescriptor.from_prompt(prompt)
 
 
-class MemoryStore(PromptVersionStore):
+class MemoryOverridesStore(PromptOverridesStore):
     def __init__(self) -> None:
         self._data: dict[
             tuple[str, str, tuple[str, ...], str],
@@ -194,10 +194,10 @@ class MemoryStore(PromptVersionStore):
                 overrides[section.path] = body
         if not overrides:
             return None
-        return PromptOverride(description.ns, description.key, tag, overrides)
+        return PromptOverride(descriptor.ns, descriptor.key, tag, overrides)
 
 
-store = MemoryStore()
+store = MemoryOverridesStore()
 store.register(
     ns=descriptor.ns,
     prompt_key=descriptor.key,
@@ -209,7 +209,7 @@ store.register(
 
 rendered = prompt.render_with_overrides(
     GreetingParams(audience="Operators"),
-    version_store=store,
+    overrides_store=store,
     tag="stable",
 )
 ```
