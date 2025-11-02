@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping, Sequence
 from importlib import import_module
 from typing import Any, Final, Literal, Protocol, cast
 
-from ..events import EventBus, PromptExecuted, ToolInvoked
+from ..events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.structured_output import (
@@ -31,6 +31,7 @@ from ..prompt.structured_output import (
 )
 from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
+from ..session import Session
 from ..tools.errors import ToolValidationError
 from .core import PromptEvaluationError, PromptResponse
 
@@ -79,6 +80,22 @@ class _OpenAIProtocol(Protocol):
 
 class _OpenAIClientFactory(Protocol):
     def __call__(self, **kwargs: object) -> _OpenAIProtocol: ...
+
+
+def _format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
+    messages: list[str] = []
+    for failure in failures:
+        error = failure.error
+        message = str(error).strip()
+        if not message:
+            message = error.__class__.__name__
+        messages.append(message)
+
+    if not messages:
+        return "Reducer errors prevented applying tool result."
+
+    joined = "; ".join(messages)
+    return f"Reducer errors prevented applying tool result: {joined}"
 
 
 OpenAIProtocol = _OpenAIProtocol
@@ -147,6 +164,7 @@ class OpenAIAdapter:
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
+        session: Session | None = None,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
 
@@ -257,7 +275,7 @@ class OpenAIAdapter:
                     tool_results=tuple(tool_events),
                     provider_payload=provider_payload,
                 )
-                bus.publish(
+                _ = bus.publish(
                     PromptExecuted(
                         prompt_name=prompt_name,
                         adapter="openai",
@@ -336,6 +354,7 @@ class OpenAIAdapter:
                         success=False,
                     )
 
+                snapshot = session.snapshot() if session is not None else None
                 invocation = ToolInvoked(
                     prompt_name=prompt_name,
                     adapter="openai",
@@ -345,7 +364,14 @@ class OpenAIAdapter:
                     call_id=getattr(tool_call, "id", None),
                 )
                 tool_events.append(invocation)
-                bus.publish(invocation)
+                publish_result = bus.publish(invocation)
+
+                if not publish_result.ok:
+                    if snapshot is not None and session is not None:
+                        session.rollback(snapshot)
+                    tool_result.message = _format_publish_failures(
+                        publish_result.errors
+                    )
 
                 messages.append(
                     {

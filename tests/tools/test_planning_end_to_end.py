@@ -44,7 +44,7 @@ def _invoke(
     handler = tool.handler
     assert handler is not None
     result = handler(params)
-    bus.publish(
+    publish_result = bus.publish(
         ToolInvoked(
             prompt_name="test",
             adapter="adapter",
@@ -53,6 +53,7 @@ def _invoke(
             result=cast(ToolResult[object], result),
         )
     )
+    assert publish_result.ok
     return result
 
 

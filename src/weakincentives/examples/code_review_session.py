@@ -62,6 +62,7 @@ class SupportsReviewEvaluate(Protocol):
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
+        session: Session | None = None,
     ) -> PromptResponse[ReviewResponse]: ...
 
 
@@ -86,6 +87,7 @@ class CodeReviewSession:
             self._prompt,
             ReviewTurnParams(request=request),
             bus=self._bus,
+            session=self._session,
         )
         if response.output is not None:
             rendered_output = dump(response.output, exclude_none=True)

@@ -27,7 +27,7 @@ from weakincentives.examples.code_review_tools import (
 )
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.tool import ToolResult
-from weakincentives.session import PromptData, ToolData
+from weakincentives.session import PromptData, Session, ToolData
 
 
 class _StubAdapter:
@@ -39,6 +39,7 @@ class _StubAdapter:
                 tuple[SupportsDataclass, ...],
                 bool,
                 EventBus,
+                Session | None,
             ]
         ] = []
 
@@ -48,8 +49,9 @@ class _StubAdapter:
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
+        session: Session | None = None,
     ) -> PromptResponse[ReviewResponse]:
-        self.calls.append((prompt, params, parse_output, bus))
+        self.calls.append((prompt, params, parse_output, bus, session))
         return self.response
 
 
@@ -75,12 +77,13 @@ def test_code_review_session_evaluate_serializes_output() -> None:
         "issues": ["Missing test coverage"],
         "next_steps": ["Add tests"],
     }
-    ((prompt, params, parse_output, bus),) = adapter.calls
+    ((prompt, params, parse_output, bus, captured_session),) = adapter.calls
     assert prompt.name == "code_review_agent"
     assert isinstance(params[0], ReviewTurnParams)
     assert params[0].request == "Review the PR"
     assert parse_output is True
     assert bus is not None
+    assert captured_session is not None
 
 
 def test_code_review_session_tool_history(
@@ -121,7 +124,8 @@ def test_code_review_session_tool_history(
         ),
     )
 
-    session._bus.publish(event)
+    publish_result = session._bus.publish(event)
+    assert publish_result.ok
     captured = capsys.readouterr()
     assert "[tool] show_git_branches called with" in captured.out
 

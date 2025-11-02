@@ -73,7 +73,8 @@ def _invoke_tool(
         params=params,
         result=cast(ToolResult[object], result),
     )
-    bus.publish(event)
+    publish_result = bus.publish(event)
+    assert publish_result.ok
     return result
 
 
