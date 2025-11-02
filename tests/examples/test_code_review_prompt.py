@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from weakincentives.examples.code_review_prompt import build_code_review_prompt
 from weakincentives.session import Session
-from weakincentives.tools import PlanningToolsSection, VfsToolsSection
+from weakincentives.tools import AstevalSection, PlanningToolsSection, VfsToolsSection
 
 
 def test_build_code_review_prompt_includes_planning_section() -> None:
@@ -25,3 +25,4 @@ def test_build_code_review_prompt_includes_planning_section() -> None:
         isinstance(node.section, PlanningToolsSection) for node in prompt.sections
     )
     assert any(isinstance(node.section, VfsToolsSection) for node in prompt.sections)
+    assert any(isinstance(node.section, AstevalSection) for node in prompt.sections)
