@@ -322,3 +322,17 @@ def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
 
     assert rendered.tools[0].description == tool.description
     assert rendered.tool_param_descriptions == {}
+
+
+def test_prompt_override_tool_default_factory_is_isolated() -> None:
+    baseline = PromptOverride(ns="ns", prompt_key="key", tag="latest")
+    successor = PromptOverride(ns="ns", prompt_key="key", tag="next")
+
+    assert baseline.tool_overrides == {}
+    assert successor.tool_overrides == {}
+    successor.tool_overrides["example"] = ToolOverride(
+        name="example",
+        expected_contract_hash="hash",
+    )
+
+    assert "example" not in baseline.tool_overrides
