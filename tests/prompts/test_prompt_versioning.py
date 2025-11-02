@@ -21,6 +21,7 @@ from weakincentives.prompt.versioning import (
     PromptOverride,
     PromptOverridesStore,
     SectionDescriptor,
+    SectionOverride,
     ToolDescriptor,
     ToolOverride,
     hash_json,
@@ -169,17 +170,47 @@ class _RecordingOverridesStore(PromptOverridesStore):
         self.calls.append((descriptor, tag))
         return self.override
 
+    def upsert(
+        self,
+        descriptor: PromptDescriptor,
+        override: PromptOverride,
+    ) -> PromptOverride:
+        raise NotImplementedError
+
+    def delete(
+        self,
+        *,
+        ns: str,
+        prompt_key: str,
+        tag: str,
+    ) -> None:
+        raise NotImplementedError
+
+    def seed_if_necessary(
+        self,
+        prompt: Prompt,
+        *,
+        tag: str = "latest",
+    ) -> PromptOverride:
+        raise NotImplementedError
+
 
 def test_prompt_render_with_overrides_applies_matching_sections() -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
-    path = descriptor.sections[0].path
+    section = descriptor.sections[0]
+    path = section.path
 
     override = PromptOverride(
         ns=descriptor.ns,
         prompt_key=descriptor.key,
         tag="experiment",
-        overrides={path: "Cheer loudly for ${subject}."},
+        sections={
+            path: SectionOverride(
+                expected_hash=section.content_hash,
+                body="Cheer loudly for ${subject}.",
+            )
+        },
     )
     store = _RecordingOverridesStore(override)
 
@@ -201,7 +232,12 @@ def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
         ns="tests/versioning",
         prompt_key="other-prompt",
         tag="latest",
-        overrides={("other",): "Ignore this."},
+        sections={
+            ("other",): SectionOverride(
+                expected_hash="deadbeef",
+                body="Ignore this.",
+            )
+        },
     )
     store = _RecordingOverridesStore(override)
 
@@ -235,7 +271,7 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
         ns=descriptor.ns,
         prompt_key=descriptor.key,
         tag="latest",
-        overrides={},
+        sections={},
         tool_overrides={
             tool.name: ToolOverride(
                 name=tool.name,
@@ -268,7 +304,7 @@ def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
         ns=descriptor.ns,
         prompt_key=descriptor.key,
         tag="latest",
-        overrides={},
+        sections={},
         tool_overrides={
             tool.name: ToolOverride(
                 name=tool.name,

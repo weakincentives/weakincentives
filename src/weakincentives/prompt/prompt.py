@@ -214,9 +214,13 @@ class Prompt[OutputT]:
             descriptor_index = {
                 section.path: section.content_hash for section in descriptor.sections
             }
-            for path, body in override.overrides.items():
-                if path in descriptor_index:
-                    overrides[path] = body
+            for path, section_override in override.sections.items():
+                descriptor_hash = descriptor_index.get(path)
+                if (
+                    descriptor_hash is not None
+                    and section_override.expected_hash == descriptor_hash
+                ):
+                    overrides[path] = section_override.body
             if override.tool_overrides:
                 descriptor_tool_index = {
                     tool.name: tool.contract_hash for tool in descriptor.tools
