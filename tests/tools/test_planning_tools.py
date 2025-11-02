@@ -455,7 +455,7 @@ def test_read_plan_returns_snapshot() -> None:
 
     result = _invoke_tool(bus, read_tool, ReadPlan())
     assert isinstance(result.value, Plan)
-    assert "Status: active" in result.message
+    assert result.message == "Retrieved the current plan with 2 steps."
 
 
 def test_read_plan_requires_existing_plan() -> None:
@@ -482,7 +482,7 @@ def test_read_plan_reports_empty_steps() -> None:
     _invoke_tool(bus, clear_tool, ClearPlan())
 
     result = _invoke_tool(bus, read_tool, ReadPlan())
-    assert "no steps recorded" in result.message
+    assert result.message == "Retrieved the current plan (no steps recorded)."
 
 
 def test_reducers_ignore_events_without_plan() -> None:

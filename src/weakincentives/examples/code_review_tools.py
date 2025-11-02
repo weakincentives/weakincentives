@@ -25,14 +25,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from ..prompt import Tool, ToolResult
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MAX_OUTPUT_CHARS = 4000
-
-
-def _truncate(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> str:
-    if len(text) <= max_chars:
-        return text
-    truncated = text[: max_chars - 20]
-    return f"{truncated}\n... (truncated {len(text) - len(truncated)} characters)"
 
 
 def _run_git_command(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -229,10 +221,9 @@ def git_log_handler(params: GitLogParams) -> ToolResult[GitLogResult]:
     if not entries:
         message = "No git log entries matched the query."
     else:
-        joined_entries = "\n".join(entries)
         message = (
-            f"Returned {len(entries)} git log entr{'y' if len(entries) == 1 else 'ies'}:\n"
-            f"{_truncate(joined_entries)}"
+            f"Returned {len(entries)} git log entr"
+            f"{'y' if len(entries) == 1 else 'ies'}."
         )
     return ToolResult(message=message, value=GitLogResult(entries=entries))
 
@@ -251,12 +242,9 @@ def current_time_handler(params: TimeQueryParams) -> ToolResult[TimeQueryResult]
     now = datetime.now(tzinfo)
     iso_timestamp = now.isoformat()
     if source == "fallback" and requested_timezone != "UTC":
-        message = (
-            f"Timezone '{requested_timezone}' not found. "
-            f"Using UTC instead.\nCurrent time (UTC): {iso_timestamp}"
-        )
+        message = f"Timezone '{requested_timezone}' not found. Using UTC instead."
     else:
-        message = f"Current time in {timezone_name}: {iso_timestamp}"
+        message = f"Returned current time for {timezone_name}."
 
     return ToolResult(
         message=message,
@@ -288,8 +276,8 @@ def branch_list_handler(params: BranchListParams) -> ToolResult[BranchListResult
         message = "No branches matched the query."
     else:
         message = (
-            f"Returned {len(branches)} branch entr{'y' if len(branches) == 1 else 'ies'}:\n"
-            f"{_truncate('\n'.join(branches))}"
+            f"Returned {len(branches)} branch entr"
+            f"{'y' if len(branches) == 1 else 'ies'}."
         )
     return ToolResult(message=message, value=BranchListResult(branches=branches))
 
@@ -312,10 +300,7 @@ def tag_list_handler(params: TagListParams) -> ToolResult[TagListResult]:
     if not tags:
         message = "No tags matched the query."
     else:
-        message = (
-            f"Returned {len(tags)} tag entr{'y' if len(tags) == 1 else 'ies'}:\n"
-            f"{_truncate('\n'.join(tags))}"
-        )
+        message = f"Returned {len(tags)} tag entr{'y' if len(tags) == 1 else 'ies'}."
     return ToolResult(message=message, value=TagListResult(tags=tags))
 
 
@@ -357,7 +342,6 @@ def build_tools() -> tuple[Tool[Any, Any], ...]:
 
 __all__ = [
     "REPO_ROOT",
-    "MAX_OUTPUT_CHARS",
     "GitLogParams",
     "GitLogResult",
     "TimeQueryParams",
@@ -372,5 +356,4 @@ __all__ = [
     "tag_list_handler",
     "build_tools",
     "_run_git_command",
-    "_truncate",
 ]

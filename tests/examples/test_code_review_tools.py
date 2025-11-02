@@ -86,7 +86,7 @@ def test_git_log_handler_success(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     assert result.value is not None
     assert result.value.entries == ["abc123 Added feature"]
-    assert "Returned 1 git log entry" in result.message
+    assert result.message == "Returned 1 git log entry."
 
 
 def test_git_log_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,7 +128,7 @@ def test_branch_list_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     assert result.value is not None
     assert result.value.branches == ["main", "feature/one"]
-    assert "Returned 2 branch entries" in result.message
+    assert result.message == "Returned 2 branch entries."
 
 
 def test_branch_list_handler_no_matches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,7 +163,7 @@ def test_current_time_handler_valid_timezone() -> None:
     )
     assert result.value is not None
     assert result.value.timezone == "UTC"
-    assert "Current time in UTC" in result.message
+    assert result.message == "Returned current time for UTC."
 
 
 def test_current_time_handler_invalid_timezone() -> None:
@@ -199,7 +199,7 @@ def test_tag_list_handler_success(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert result.value is not None
     assert result.value.tags == ["v1.0.0", "v1.1.0"]
-    assert "Returned 2 tag entries" in result.message
+    assert result.message == "Returned 2 tag entries."
 
 
 def test_tag_list_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -212,17 +212,6 @@ def test_tag_list_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.value is not None
     assert result.value.tags == []
     assert result.message == "git tag failed: fatal: bad pattern"
-
-
-def test_truncate_returns_original_when_short() -> None:
-    assert code_review_tools._truncate("short text") == "short text"
-
-
-def test_truncate_truncates_long_text() -> None:
-    long_text = "x" * (code_review_tools.MAX_OUTPUT_CHARS + 10)
-    truncated = code_review_tools._truncate(long_text)
-
-    assert "truncated" in truncated
 
 
 def test_git_log_handler_no_matching_entries(monkeypatch: pytest.MonkeyPatch) -> None:

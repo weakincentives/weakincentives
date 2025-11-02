@@ -33,6 +33,7 @@ from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
 from ..session import Session
 from ..tools.errors import ToolValidationError
+from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse
 
 _ERROR_MESSAGE: Final[str] = (
@@ -377,7 +378,7 @@ class OpenAIAdapter:
                     {
                         "role": "tool",
                         "tool_call_id": getattr(tool_call, "id", None),
-                        "content": tool_result.message,
+                        "content": serialize_tool_message(tool_result),
                     }
                 )
 
