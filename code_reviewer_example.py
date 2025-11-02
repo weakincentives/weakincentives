@@ -18,7 +18,7 @@ import json
 import os
 import textwrap
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
@@ -32,7 +32,12 @@ from weakincentives.examples.code_review_session import (
     SupportsReviewEvaluate,
     ToolCallLog,
 )
-from weakincentives.prompt import MarkdownSection, Prompt
+from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
+from weakincentives.prompt.local_prompt_overrides_store import (
+    LocalPromptOverridesStore,
+)
+from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.prompt.versioning import PromptOverridesError
 from weakincentives.serde import dump
 from weakincentives.session import Session, select_latest
 from weakincentives.tools.asteval import AstevalSection
@@ -41,6 +46,8 @@ from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
+PROMPT_OVERRIDES_TAG_ENV = "CODE_REVIEW_PROMPT_TAG"
+_DEFAULT_OVERRIDE_TAG = "latest"
 SUNFISH_MOUNT_INCLUDE_GLOBS: tuple[str, ...] = (
     "*.md",
     "*.py",
@@ -61,6 +68,55 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
     "**/*.bmp",
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
+
+
+class _PromptWithOverrides:
+    """Proxy prompt that renders through an overrides store."""
+
+    def __init__(
+        self,
+        prompt: Prompt[Any],
+        *,
+        overrides_store: LocalPromptOverridesStore,
+        tag: str,
+    ) -> None:
+        self._prompt = prompt
+        self._overrides_store = overrides_store
+        self._tag = tag
+
+    @property
+    def tag(self) -> str:
+        """Tag used when resolving overrides for renders."""
+
+        return self._tag
+
+    def update_tag(self, tag: str) -> None:
+        """Update the override tag for subsequent renders."""
+
+        self._tag = tag
+
+    def render(
+        self,
+        *params: SupportsDataclass,
+        inject_output_instructions: bool | None = None,
+    ) -> RenderedPrompt[Any]:
+        return self._prompt.render_with_overrides(
+            *params,
+            overrides_store=self._overrides_store,
+            tag=self._tag,
+            inject_output_instructions=inject_output_instructions,
+        )
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._prompt, name)
+
+
+def _resolve_override_tag(tag: str | None = None) -> str:
+    """Normalize the override tag used for prompt renders."""
+
+    candidate = tag or os.getenv(PROMPT_OVERRIDES_TAG_ENV, _DEFAULT_OVERRIDE_TAG)
+    normalized = candidate.strip()
+    return normalized or _DEFAULT_OVERRIDE_TAG
 
 
 def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
@@ -132,11 +188,34 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
 class SunfishReviewSession:
     """Interactive session that records tool calls and plan snapshots."""
 
-    def __init__(self, adapter: SupportsReviewEvaluate) -> None:
+    def __init__(
+        self,
+        adapter: SupportsReviewEvaluate,
+        *,
+        overrides_store: LocalPromptOverridesStore | None = None,
+        override_tag: str | None = None,
+    ) -> None:
         self._adapter = adapter
         self._bus = InProcessEventBus()
         self._session = Session(bus=self._bus)
-        self._prompt = build_sunfish_prompt(self._session)
+        base_prompt = build_sunfish_prompt(self._session)
+        self._overrides_store = overrides_store or LocalPromptOverridesStore()
+        self._override_tag = _resolve_override_tag(override_tag)
+        try:
+            self._overrides_store.seed_if_necessary(
+                base_prompt,
+                tag=self._override_tag,
+            )
+        except PromptOverridesError as exc:
+            raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
+        self._prompt = cast(
+            Prompt[ReviewResponse],
+            _PromptWithOverrides(
+                base_prompt,
+                overrides_store=self._overrides_store,
+                tag=self._override_tag,
+            ),
+        )
         self._history: list[ToolCallLog] = []
         self._bus.subscribe(ToolInvoked, self._on_tool_invoked)
 
@@ -246,7 +325,17 @@ def main() -> None:
     )
     print("- Python evaluation tool enabled for quick calculations and scripts.")
 
-    session = SunfishReviewSession(build_adapter())
+    override_tag = _resolve_override_tag()
+    print(
+        "- Prompt overrides load from '.weakincentives/prompts/overrides' "
+        f"with tag '{override_tag}'."
+    )
+    print(f"- Set {PROMPT_OVERRIDES_TAG_ENV} to switch override tags at runtime.")
+
+    session = SunfishReviewSession(
+        build_adapter(),
+        override_tag=override_tag,
+    )
     print("Type a review prompt to begin.")
     while True:
         try:

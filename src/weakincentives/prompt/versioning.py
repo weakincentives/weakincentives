@@ -21,6 +21,10 @@ from ..serde.dataclass_serde import schema
 from .tool import Tool
 
 
+def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:
+    return {}
+
+
 def _tool_override_mapping_factory() -> dict[str, ToolOverride]:
     return {}
 
@@ -80,6 +84,14 @@ class PromptDescriptor:
 
 
 @dataclass(slots=True)
+class SectionOverride:
+    """Override payload for a prompt section validated by hash."""
+
+    expected_hash: str
+    body: str
+
+
+@dataclass(slots=True)
 class ToolOverride:
     """Description overrides validated against a tool contract hash."""
 
@@ -98,10 +110,16 @@ class PromptOverride:
     ns: str
     prompt_key: str
     tag: str
-    overrides: dict[tuple[str, ...], str]
+    sections: dict[tuple[str, ...], SectionOverride] = field(
+        default_factory=_section_override_mapping_factory
+    )
     tool_overrides: dict[str, ToolOverride] = field(
         default_factory=_tool_override_mapping_factory
     )
+
+
+class PromptOverridesError(Exception):
+    """Raised when prompt overrides fail validation or persistence."""
 
 
 class PromptOverridesStore(Protocol):
@@ -113,12 +131,35 @@ class PromptOverridesStore(Protocol):
         tag: str = "latest",
     ) -> PromptOverride | None: ...
 
+    def upsert(
+        self,
+        descriptor: PromptDescriptor,
+        override: PromptOverride,
+    ) -> PromptOverride: ...
+
+    def delete(
+        self,
+        *,
+        ns: str,
+        prompt_key: str,
+        tag: str,
+    ) -> None: ...
+
+    def seed_if_necessary(
+        self,
+        prompt: Prompt[Any],
+        *,
+        tag: str = "latest",
+    ) -> PromptOverride: ...
+
 
 __all__ = [
+    "PromptOverridesError",
     "PromptDescriptor",
     "PromptOverride",
     "PromptOverridesStore",
     "SectionDescriptor",
+    "SectionOverride",
     "ToolDescriptor",
     "ToolOverride",
 ]
