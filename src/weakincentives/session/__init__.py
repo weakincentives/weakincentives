@@ -15,6 +15,11 @@
 from .reducers import append, replace_latest, upsert_by
 from .selectors import select_all, select_latest, select_where
 from .session import DataEvent, PromptData, Session, ToolData, TypedReducer
+from .snapshots import (
+    Snapshot,
+    SnapshotRestoreError,
+    SnapshotSerializationError,
+)
 
 __all__ = [
     "Session",
@@ -28,4 +33,7 @@ __all__ = [
     "select_all",
     "select_latest",
     "select_where",
+    "Snapshot",
+    "SnapshotSerializationError",
+    "SnapshotRestoreError",
 ]

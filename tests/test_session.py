@@ -15,12 +15,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+import pytest
+
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.events import InProcessEventBus, PromptExecuted, ToolInvoked
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.session import (
     DataEvent,
     Session,
+    Snapshot,
+    SnapshotRestoreError,
+    SnapshotSerializationError,
     append,
     replace_latest,
     select_all,
@@ -232,3 +237,79 @@ def test_reducer_failure_leaves_previous_slice_unchanged() -> None:
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
+
+
+def test_snapshot_round_trip_restores_state() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+
+    original_state = session.select_all(ExampleOutput)
+
+    snapshot = session.snapshot()
+    raw = snapshot.to_json()
+    restored = Snapshot.from_json(raw)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="third")))
+    assert session.select_all(ExampleOutput) != original_state
+
+    session.rollback(restored)
+
+    assert session.select_all(ExampleOutput) == original_state
+
+
+def test_snapshot_preserves_custom_reducer_behavior() -> None:
+    @dataclass(slots=True, frozen=True)
+    class Summary:
+        entries: tuple[str, ...]
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    def aggregate(
+        slice_values: tuple[Summary, ...], event: DataEvent
+    ) -> tuple[Summary, ...]:
+        value = cast(ExampleOutput, event.value)
+        entries = slice_values[-1].entries if slice_values else ()
+        return (Summary(entries + (value.text,)),)
+
+    session.register_reducer(ExampleOutput, aggregate, slice_type=Summary)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="start")))
+    snapshot = session.snapshot()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="after")))
+    assert session.select_all(Summary)[0].entries == ("start", "after")
+
+    session.rollback(snapshot)
+
+    assert session.select_all(Summary)[0].entries == ("start",)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="again")))
+
+    assert session.select_all(Summary)[0].entries == ("start", "again")
+
+
+def test_snapshot_rollback_requires_registered_slices() -> None:
+    bus = InProcessEventBus()
+    source = Session(bus=bus)
+    bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+
+    snapshot = source.snapshot()
+
+    target = Session()
+
+    with pytest.raises(SnapshotRestoreError):
+        target.rollback(snapshot)
+
+    assert target.select_all(ExampleOutput) == ()
+
+
+def test_snapshot_rejects_non_dataclass_values() -> None:
+    session = Session()
+    session.seed_slice(str, ("value",))
+
+    with pytest.raises(SnapshotSerializationError):
+        session.snapshot()

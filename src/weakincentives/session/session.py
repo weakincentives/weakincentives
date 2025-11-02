@@ -15,12 +15,19 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, is_dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from ..events import EventBus, NullEventBus, PromptExecuted, ToolInvoked
 from ..prompt._types import SupportsDataclass
+from .snapshots import (
+    Snapshot,
+    SnapshotRestoreError,
+    SnapshotSerializationError,
+    normalize_snapshot_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +106,47 @@ class Session:
         """Initialize or replace the stored tuple for the provided type."""
 
         self._state[slice_type] = tuple(values)
+
+    def snapshot(self) -> Snapshot:
+        """Capture an immutable snapshot of the current session state."""
+
+        try:
+            normalized: Mapping[type[Any], tuple[Any, ...]] = normalize_snapshot_state(
+                self._state
+            )
+        except ValueError as error:
+            msg = "Unable to serialize session slices"
+            raise SnapshotSerializationError(msg) from error
+
+        created_at = datetime.now(UTC)
+        return Snapshot(created_at=created_at, slices=normalized)
+
+    def rollback(self, snapshot: Snapshot) -> None:
+        """Restore session slices from the provided snapshot."""
+
+        registered_slices = self._registered_slice_types()
+        missing = [
+            slice_type
+            for slice_type in snapshot.slices
+            if slice_type not in registered_slices
+        ]
+        if missing:
+            missing_names = ", ".join(sorted(cls.__qualname__ for cls in missing))
+            msg = f"Slice types not registered: {missing_names}"
+            raise SnapshotRestoreError(msg)
+
+        new_state: dict[type[Any], tuple[Any, ...]] = dict(self._state)
+        for slice_type in registered_slices:
+            new_state[slice_type] = snapshot.slices.get(slice_type, ())
+
+        self._state = new_state
+
+    def _registered_slice_types(self) -> set[type[Any]]:
+        types: set[type[Any]] = set(self._state)
+        for registrations in self._reducers.values():
+            for registration in registrations:
+                types.add(registration.slice_type)
+        return types
 
     def _on_tool_invoked(self, event: object) -> None:
         if isinstance(event, ToolInvoked):
