@@ -119,7 +119,7 @@ class PromptOverridesStore(Protocol):
         tag: str,
     ) -> None: ...
 
-    def seed(
+    def seed_if_necessary(
         self,
         prompt: Prompt,
         *,
@@ -133,7 +133,7 @@ class PromptOverridesStore(Protocol):
   errors.
 - Both methods raise `PromptOverridesError` when validation fails (e.g. hash
   mismatches, invalid identifiers, or serialization issues).
-- `seed` materializes a pristine override by inspecting the concrete `Prompt`
+- `seed_if_necessary` materializes a pristine override by inspecting the concrete `Prompt`
   instance so the rendered section bodies and tool descriptions are captured,
   even though the descriptor only tracks hashes. The method returns the
   persisted override so CLI tooling can surface it to the user immediately.
@@ -165,7 +165,7 @@ Future optimizers will call `upsert` after computing new section bodies.
    `os.replace` the final `{tag}.json`.
 3. Directory creation should be idempotent; intermediate folders are created with
    `exist_ok=True` semantics.
-4. `seed` wraps `upsert` to bootstrap overrides:
+4. `seed_if_necessary` wraps `upsert` to bootstrap overrides:
    - Derive the `PromptDescriptor` from the provided `Prompt` (e.g. via
      `PromptDescriptor.from_prompt(prompt)`), ensuring the hashes correspond to
      the concrete prompt body that supplied the data.
@@ -175,9 +175,11 @@ Future optimizers will call `upsert` after computing new section bodies.
    - Include every tool descriptor with the tool descriptions and parameter
      descriptions sourced from the `Prompt`, paired with the descriptor's
      contract hash.
-   - Fail with `PromptOverridesError` if an override already exists for the
-     `(ns, prompt_key, tag)` tuple so tooling can prompt the user before
-     overwriting. Future enhancements may add an `overwrite=True` flag.
+   - If an override already exists for the `(ns, prompt_key, tag)` tuple,
+     return the persisted override unchanged without touching the filesystem.
+     This makes the "seed" semantics explicit—no data is overwritten unless the
+     caller performs a subsequent `upsert`. Future enhancements may add an
+     `overwrite=True` flag if clobbering becomes desirable.
 
 ## Error Handling and Logging
 
@@ -196,7 +198,7 @@ Future optimizers will call `upsert` after computing new section bodies.
   - `upsert` validation failures (invalid keys, unknown sections, hash drift).
   - Atomic write behavior using temporary directories.
   - `delete` idempotence.
-  - `seed` generating a complete override snapshot and refusing to clobber
+  - `seed_if_necessary` generating a complete override snapshot and refusing to clobber
     existing files, including a case where the prompt body differs from cached
     descriptor state to prove the method reads from the `Prompt` instance.
 - Integration test wiring the store into `Prompt.render_with_overrides` to ensure
