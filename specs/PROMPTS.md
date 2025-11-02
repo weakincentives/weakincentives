@@ -30,9 +30,10 @@ reaches an LLM. The design should be simple enough to maintain but strict enough
 
 ## Design Overview
 
-A `Prompt` owns a **namespace** (`ns`), an optional human-readable `name`, and an ordered tree of `Section`
-instances. Rendering walks this tree depth first and produces markdown where the heading level is `##` for roots
-and adds one `#` per level of depth (so depth one becomes `###`, depth two `####`, and so on). The namespace
+A `Prompt` owns a **namespace** (`ns`), a required machine-readable `key`, an optional human-readable `name`, and
+an ordered tree of `Section` instances. Rendering walks this tree depth first and produces markdown where the
+heading level is `##` for roots and adds one `#` per level of depth (so depth one becomes `###`, depth two `####`,
+and so on). The namespace
 groups prompts by logical domain (for example `webapp/agents`, `backoffice/cron`, `infra/sweeper`) and participates
 in versioning plus override resolution to prevent collisions across applications. The implementation keeps
 `Section` as the abstract base class that defines the shared contract—metadata, parameter typing, optional defaults,
@@ -44,11 +45,12 @@ pipeline. The default concrete subclass, `MarkdownSection`, relies on `Template.
 normalized markdown. Concrete sections are instantiated by specializing the generic `Section[ParamsT]` base class
 (for example `MarkdownSection[GuidanceParams](...)`). This pins the dataclass type to the section before any instance is
 created, and the base class rejects attempts to construct an unspecialized section or provide multiple type arguments.
-Each specialized section exposes the `params_type` metadata, accepts an optional `defaults` instance that pre-populates
-values, stores the raw `body` string interpreted by the concrete section class, wires optional child sections through
-the `children` collection, and supports an optional boolean `enabled` callable. The callable receives the effective
-dataclass instance (either the override passed to `render` or the fallback defaults) and lets authors skip entire
-subtrees dynamically while still staying inside the strict `Template` feature set.
+Each specialized section exposes the `params_type` metadata, accepts an optional `default_params` instance that
+pre-populates values, stores the raw `body` string interpreted by the concrete section class, wires optional child
+sections through the `children` collection, optionally contributes prompt tools through the `tools` sequence, and
+supports an optional boolean `enabled` callable. The callable receives the effective dataclass instance (either the
+override passed to `render` or the fallback defaults) and lets authors skip entire subtrees dynamically while still
+staying inside the strict `Template` feature set.
 
 ## Construction Rules
 
@@ -66,6 +68,11 @@ absent we rely on the dataclass' own default field values by instantiating it wi
 
 Prompts MUST declare a non-empty `ns: str`. The `(ns, key)` pair identifies a prompt
 family during versioning/overrides and avoids collisions across complex apps.
+
+### Prompt key (`key`) — REQUIRED
+
+Prompts MUST declare a non-empty `key: str`. Keys scope prompt instances within a namespace and participate in
+hashing, override lookup, and tool descriptor construction.
 
 ### Section key (`key`) — REQUIRED
 
@@ -95,7 +102,15 @@ surface `PromptRenderError`. Once parameters are in place we call
 `section.is_enabled(params)`; disabled sections short-circuit the traversal, meaning their children do not render and
 their defaults are ignored. Active sections invoke `section.render(params, depth)`, which always emits a markdown
 heading at the appropriate depth followed by the body content. Text bodies are dedented, stripped, and separated by a
-single blank line so the final document is readable and deterministic.
+single blank line so the final document is readable and deterministic. Enabled sections contribute any registered
+`Tool` instances to the rendered prompt; tools from disabled sections never appear in the result.
+
+Rendering returns a `RenderedPrompt` dataclass. Besides the markdown string (`.text`) and structured output metadata,
+the object surfaces:
+
+- `.tools` – ordered tuple of tools contributed by enabled sections.
+- `.tool_param_descriptions` – optional mapping of tool name → field description overrides supplied by the
+  override system.
 
 ## Validation and Error Handling
 

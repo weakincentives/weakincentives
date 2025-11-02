@@ -97,7 +97,7 @@ Rendering of sections is identical to the existing `Prompt` flow: depth-first tr
 1. Return a `RenderedPrompt` that also exposes:
 
    - `output_type: type[Any] | None`
-   - `output_container: Literal["object","array"] | None`
+   - `container: Literal["object","array"] | None`
    - `allow_extra_keys: bool | None`
 
 This keeps the final prompt readable and the output contract easy to discover programmatically.
@@ -169,6 +169,8 @@ class Guidance:
 
 # 3) Build a prompt specialized with the output type
 summarize = Prompt[Summary](
+    ns="examples/structured-output",
+    key="summarize_entity",
     name="summarize_entity",
     sections=[
         MarkdownSection[Guidance](
@@ -201,6 +203,8 @@ class SearchResult:
     score: float
 
 search_prompt = Prompt[list[SearchResult]](
+    ns="examples/structured-output",
+    key="search_results",
     name="search",
     sections=[
         MarkdownSection[Guidance](

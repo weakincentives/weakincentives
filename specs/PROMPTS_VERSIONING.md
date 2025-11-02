@@ -23,31 +23,47 @@ External optimization services need a stable way to identify prompts and to over
 1. A prompt descriptor enumerates only hash-aware sections. Each entry includes:
    - `path: SectionPath`
    - `content_hash: str` (SHA-256 of the original body template)
+1. A prompt descriptor also records every tool exposed by the prompt so overrides can patch descriptions without
+   changing code. Each tool entry captures the originating section path, tool name, and a contract hash derived from
+   the tool description plus its parameter and result schemas.
 1. Hash-aware sections must expose their original body template string so the hashing utility can operate without rendering parameters.
 
 ## Hashing Rules
 
 1. Compute hashes solely from the original body template text. Ignore defaults, enable predicates, tools, children, and runtime params.
 1. The lookup key `(ns, prompt_key, section_path, expected_hash)` is authoritative. An override is valid only when its stored `expected_hash` equals the descriptor value for the matching path.
+1. Tool contract hashes derive from the tool description plus canonical JSON schemas for the parameter (`extra="forbid"`) and
+   result (`extra="ignore"`) dataclasses so that overrides become invalid after any schema or description change.
 
 ## Descriptor Contract
 
 Expose `PromptDescriptor` with:
 
 ```python
+from dataclasses import dataclass, field
+
 @dataclass(slots=True)
 class SectionDescriptor:
     path: tuple[str, ...]
     content_hash: str
 
 @dataclass(slots=True)
+class ToolDescriptor:
+    path: tuple[str, ...]
+    name: str
+    contract_hash: str
+
+@dataclass(slots=True)
 class PromptDescriptor:
     ns: str
     key: str
     sections: list[SectionDescriptor]  # ordered depth-first
+    tools: list[ToolDescriptor]
 ```
 
 - `PromptDescriptor.from_prompt(prompt: Prompt) -> PromptDescriptor` walks the section tree, gathers all hash-aware sections, and computes hashes.
+- During traversal the descriptor also collects tool descriptors with contract hashes computed from the tool
+  description plus its parameter/result schemas.
 - The descriptor omits sections that lack hashes but callers can still traverse the prompt tree if needed via other APIs.
 
 ## Override Contract
@@ -56,15 +72,25 @@ Introduce:
 
 ```python
 @dataclass(slots=True)
+class ToolOverride:
+    name: str
+    expected_contract_hash: str
+    description: str | None = None
+    param_descriptions: dict[str, str] = field(default_factory=dict)
+
+@dataclass(slots=True)
 class PromptOverride:
     ns: str
     prompt_key: str
     tag: str
     overrides: dict[tuple[str, ...], str]  # SectionPath -> replacement body template
+    tool_overrides: dict[str, ToolOverride] = field(default_factory=dict)
 ```
 
 - Each dict entry represents the new body template to use when the lookup key matches.
 - The replacement template may hash to any value after application; descriptors continue to publish the in-code hash.
+- Tool overrides are keyed by tool name. They apply only when the stored contract hash matches the descriptor value and
+  allow callers to replace the model-facing description and optionally patch per-field parameter descriptions.
 
 Define a `PromptOverridesStore` protocol:
 
@@ -81,7 +107,8 @@ Responsibilities:
 
 1. Receive the descriptor and optional tag.
 1. Examine available overrides keyed by `(ns, prompt_key, section_path, expected_hash)`.
-1. Return a `PromptOverride` containing only the overrides whose expected hash matches the descriptor. Return `None` when nothing applies.
+1. Return a `PromptOverride` containing only the overrides whose expected hash matches the descriptor. Tool overrides
+   must also survive contract-hash verification before inclusion. Return `None` when nothing applies.
 1. Tags are advisory; stores decide which strings they honor.
 
 ## Rendering API
@@ -105,6 +132,8 @@ Behavior:
 1. Ask the store for overrides using the descriptor and tag.
 1. For each section path in the override, confirm `expected_hash == descriptor` before substituting the new body template.
 1. Render the prompt using the modified bodies, falling back to defaults for sections without overrides or mismatched hashes.
+1. Apply surviving tool overrides by replacing model-facing descriptions and capturing parameter description patches for
+   adapters.
 1. Return the same `RenderedPrompt` structure used by `Prompt.render`.
 
 A convenience `render` method MAY delegate to `render_with_overrides` when no store is provided.
