@@ -31,6 +31,7 @@ class ToolResult[ResultValueT]:
     message: str
     value: ResultValueT | None
     success: bool = True
+    exclude_value_from_context: bool = False
 
 
 @dataclass(slots=True)

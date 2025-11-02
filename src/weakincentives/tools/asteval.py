@@ -24,7 +24,7 @@ import math
 import statistics
 import sys
 import threading
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -253,6 +253,20 @@ def _merge_globals(
     return merged
 
 
+def _summarize_writes(writes: Sequence[EvalFileWrite]) -> str | None:
+    if not writes:
+        return None
+
+    total = len(writes)
+    preview_count = min(3, total)
+    preview_paths = ", ".join(
+        _alias_for_path(write.path) for write in writes[:preview_count]
+    )
+    if total > preview_count:
+        preview_paths = f"{preview_paths}, +{total - preview_count} more"
+    return f"writes={total} file(s): {preview_paths}"
+
+
 def _apply_writes(
     snapshot: VirtualFileSystem, writes: Iterable[EvalFileWrite]
 ) -> VirtualFileSystem:
@@ -440,6 +454,7 @@ class _AstevalToolSuite:
         helper_writes: list[EvalFileWrite] = []
         write_targets = {write.path.segments for write in write_queue}
         builtin_print = builtins.print
+        pending_write_attempted = bool(write_queue)
 
         def sandbox_print(
             *args: object,
@@ -477,6 +492,8 @@ class _AstevalToolSuite:
             return file.content
 
         def write_text(path: str, content: str, mode: str = "create") -> None:
+            nonlocal pending_write_attempted
+            pending_write_attempted = True
             normalized_path = _normalize_vfs_path(_parse_string_path(path))
             helper_write = _normalize_write(
                 EvalFileWrite(
@@ -534,7 +551,7 @@ class _AstevalToolSuite:
         stderr = _truncate_stream(stderr_raw)
 
         param_writes = tuple(write_queue)
-        pending_writes = bool(write_queue or helper_writes)
+        pending_writes = pending_write_attempted or bool(helper_writes)
         if stderr and not value_repr:
             final_writes: tuple[EvalFileWrite, ...] = ()
             if pending_writes:
@@ -583,6 +600,14 @@ class _AstevalToolSuite:
                 )
             else:
                 message = "Evaluation succeeded without pending file writes."
+
+        helper_writes_tuple = tuple(helper_writes)
+        pending_sources: Sequence[EvalFileWrite] = (
+            final_writes or param_writes + helper_writes_tuple
+        )
+        summary = _summarize_writes(pending_sources)
+        if pending_writes and summary:
+            message = f"{message} {summary}"
 
         globals_payload: dict[str, str] = {}
         visible_keys = {

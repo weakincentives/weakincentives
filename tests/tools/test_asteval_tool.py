@@ -87,7 +87,7 @@ def _assert_success_message(result: ToolResult[EvalResult]) -> None:
         expected = (
             f"Evaluation succeeded with {write_count} pending file write{suffix}."
         )
-    assert result.message == expected
+    assert result.message.startswith(expected)
 
 
 def _assert_failure_message(
@@ -100,7 +100,7 @@ def _assert_failure_message(
         )
     else:
         expected = "Evaluation failed; review stderr details in the payload."
-    assert result.message == expected
+    assert result.message.startswith(expected)
 
 
 def _setup_sections() -> tuple[

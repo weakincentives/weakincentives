@@ -204,6 +204,9 @@ class OpenAIAdapter:
         tool_specs = [_tool_to_openai_spec(tool) for tool in tools]
         tool_registry = {tool.name: tool for tool in tools}
         tool_events: list[ToolInvoked] = []
+        tool_message_records: list[
+            tuple[ToolResult[SupportsDataclass], dict[str, Any]]
+        ] = []
         provider_payload: dict[str, Any] | None = None
         # Allow forcing a specific tool once, then fall back to provider defaults.
         next_tool_choice: ToolChoice = self._tool_choice
@@ -268,6 +271,16 @@ class OpenAIAdapter:
                             ) from error
                     if output is not None:
                         text_value = None
+
+                if (
+                    output is not None
+                    and tool_message_records
+                    and tool_message_records[-1][0].success
+                ):
+                    last_result, last_message = tool_message_records[-1]
+                    last_message["content"] = serialize_tool_message(
+                        last_result, payload=output
+                    )
 
                 response = PromptResponse(
                     prompt_name=prompt_name,
@@ -374,13 +387,13 @@ class OpenAIAdapter:
                         publish_result.errors
                     )
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": getattr(tool_call, "id", None),
-                        "content": serialize_tool_message(tool_result),
-                    }
-                )
+                tool_message = {
+                    "role": "tool",
+                    "tool_call_id": getattr(tool_call, "id", None),
+                    "content": serialize_tool_message(tool_result),
+                }
+                messages.append(tool_message)
+                tool_message_records.append((tool_result, tool_message))
 
             if isinstance(next_tool_choice, Mapping):
                 tool_choice_mapping = cast(Mapping[str, object], next_tool_choice)

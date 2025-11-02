@@ -15,26 +15,33 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
+from typing import Final
 
 from ..prompt._types import SupportsDataclass
 from ..prompt.tool import ToolResult
 from ..serde import dump
 
+_UNSET: Final = object()
 
-def serialize_tool_message(result: ToolResult[SupportsDataclass]) -> str:
+
+def serialize_tool_message(
+    result: ToolResult[SupportsDataclass], *, payload: object = _UNSET
+) -> str:
     """Return a JSON string summarising a tool invocation for provider APIs."""
 
-    payload: dict[str, object] = {
+    message_payload: dict[str, object] = {
         "message": result.message,
         "success": result.success,
     }
 
-    value = result.value
-    if value is not None:
-        payload["payload"] = _serialize_value(value)
+    if not result.exclude_value_from_context:
+        value = result.value if payload is _UNSET else payload
+        if value is not None:
+            message_payload["payload"] = _serialize_value(value)
 
-    return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(message_payload, ensure_ascii=False)
 
 
 def _serialize_value(value: object) -> object:
@@ -42,6 +49,13 @@ def _serialize_value(value: object) -> object:
 
     if is_dataclass(value):
         return dump(value, exclude_none=True)
+
+    if isinstance(value, Mapping):
+        return {key: _serialize_value(item) for key, item in value.items()}
+
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_serialize_value(item) for item in value]
+
     return value
 
 
