@@ -36,6 +36,14 @@ from .planning import (
     StepStatus,
     UpdateStep,
 )
+from .prompt_subagent import (
+    DispatchSubagent,
+    DispatchSubagentError,
+    DispatchSubagentResult,
+    PromptSubagentToolsSection,
+    SubagentMode,
+    SubagentRunner,
+)
 from .vfs import (
     DeleteEntry,
     HostMount,
@@ -68,6 +76,12 @@ __all__ = [
     "ClearPlan",
     "ReadPlan",
     "PlanningToolsSection",
+    "SubagentMode",
+    "DispatchSubagent",
+    "DispatchSubagentResult",
+    "DispatchSubagentError",
+    "PromptSubagentToolsSection",
+    "SubagentRunner",
     "VirtualFileSystem",
     "VfsFile",
     "VfsPath",
