@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping, Sequence
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast
 
-from ..events import EventBus, PromptExecuted, ToolInvoked
+from ..events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.structured_output import (
@@ -31,6 +31,7 @@ from ..prompt.structured_output import (
 )
 from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
+from ..session import Session
 from ..tools.errors import ToolValidationError
 from .core import PromptEvaluationError, PromptResponse
 
@@ -86,6 +87,22 @@ class _LiteLLMCompletionFactory(Protocol):
 
 
 LiteLLMCompletion = _CompletionCallable
+
+
+def _format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
+    messages: list[str] = []
+    for failure in failures:
+        error = failure.error
+        message = str(error).strip()
+        if not message:
+            message = error.__class__.__name__
+        messages.append(message)
+
+    if not messages:
+        return "Reducer errors prevented applying tool result."
+
+    joined = "; ".join(messages)
+    return f"Reducer errors prevented applying tool result: {joined}"
 
 
 def _load_litellm_module() -> _LiteLLMModule:
@@ -155,6 +172,7 @@ class LiteLLMAdapter:
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
+        session: Session | None = None,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
         has_structured_output = (
@@ -347,6 +365,7 @@ class LiteLLMAdapter:
                         success=False,
                     )
 
+                snapshot = session.snapshot() if session is not None else None
                 invocation = ToolInvoked(
                     prompt_name=prompt_name,
                     adapter="litellm",
@@ -356,7 +375,14 @@ class LiteLLMAdapter:
                     call_id=getattr(tool_call, "id", None),
                 )
                 tool_events.append(invocation)
-                _ = bus.publish(invocation)
+                publish_result = bus.publish(invocation)
+
+                if not publish_result.ok:
+                    if snapshot is not None and session is not None:
+                        session.rollback(snapshot)
+                    tool_result.message = _format_publish_failures(
+                        publish_result.errors
+                    )
 
                 messages.append(
                     {

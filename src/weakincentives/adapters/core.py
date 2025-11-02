@@ -15,11 +15,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from ..events import EventBus, ToolInvoked
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
+
+if TYPE_CHECKING:
+    from ..session import Session
 
 OutputT = TypeVar("OutputT")
 
@@ -33,6 +36,7 @@ class ProviderAdapter(Protocol[OutputT]):
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
+        session: Session | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response."""
 

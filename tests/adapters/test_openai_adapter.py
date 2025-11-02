@@ -16,6 +16,7 @@ import sys
 import types
 from collections.abc import Mapping
 from importlib import import_module as std_import_module
+from types import MethodType
 from typing import Any, cast
 
 import pytest
@@ -58,13 +59,21 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     )
 from weakincentives.adapters import PromptEvaluationError
 from weakincentives.events import (
+    HandlerFailure,
     InProcessEventBus,
     NullEventBus,
     PromptExecuted,
     ToolInvoked,
 )
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    SupportsDataclass,
+    Tool,
+    ToolResult,
+)
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.session import DataEvent, Session, replace_latest, select_latest
 from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.openai"
@@ -332,6 +341,95 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     assert tool_message["role"] == "tool"
     assert tool_message["content"] == "completed"
     assert "payload" not in tool_message
+
+
+def test_openai_adapter_rolls_back_session_on_publish_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=simple_handler,
+    )
+
+    prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
+        key="openai-session-rollback",
+        name="search",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "policies"}),
+    )
+    first = DummyResponse(
+        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
+    )
+    second_message = DummyMessage(content=json.dumps({"answer": "Policy summary"}))
+    second = DummyResponse([DummyChoice(second_message)])
+    client = DummyOpenAIClient([first, second])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.register_reducer(ToolPayload, replace_latest)
+    session.seed_slice(ToolPayload, (ToolPayload(answer="baseline"),))
+
+    original_dispatch = session._dispatch_data_event
+
+    def failing_dispatch(
+        self: Session,
+        data_type: type[SupportsDataclass],
+        event: DataEvent,
+    ) -> None:
+        original_dispatch(data_type, event)
+        raise RuntimeError("Reducer crashed")
+
+    monkeypatch.setattr(
+        session,
+        "_dispatch_data_event",
+        MethodType(failing_dispatch, session),
+    )
+
+    result = adapter.evaluate(
+        prompt,
+        ToolParams(query="policies"),
+        bus=bus,
+        session=session,
+    )
+
+    tool_event = result.tool_results[0]
+    assert tool_event.result.message.startswith(
+        "Reducer errors prevented applying tool result:"
+    )
+    assert "Reducer crashed" in tool_event.result.message
+
+    latest_payload = select_latest(session, ToolPayload)
+    assert latest_payload == ToolPayload(answer="baseline")
+    assert result.output == StructuredAnswer(answer="Policy summary")
+
+
+def test_openai_format_publish_failures_handles_defaults() -> None:
+    module = cast(Any, _reload_module())
+
+    failure = HandlerFailure(handler=lambda _: None, error=RuntimeError(""))
+    message = module._format_publish_failures((failure,))
+    assert message == "Reducer errors prevented applying tool result: RuntimeError"
+    assert (
+        module._format_publish_failures(())
+        == "Reducer errors prevented applying tool result."
+    )
 
 
 def test_openai_adapter_surfaces_tool_validation_errors() -> None:
