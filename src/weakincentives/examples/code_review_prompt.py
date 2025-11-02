@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 from ..prompt import MarkdownSection, Prompt
 from ..session import Session
-from ..tools import PlanningToolsSection, VfsToolsSection
+from ..tools import AstevalSection, PlanningToolsSection, VfsToolsSection
 from .code_review_tools import build_tools
 
 
@@ -76,6 +76,8 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
               workspace.
             - `vfs_delete_entry` removes staged files or directories that are no
               longer needed.
+            - `evaluate_python` runs Python snippets inside a sandbox with
+              optional staged file reads and writes.
             If the task requires information beyond these capabilities, ask the
             user for clarification rather than guessing.
 
@@ -97,6 +99,7 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
     )
     planning_section = PlanningToolsSection(session=session)
     vfs_section = VfsToolsSection(session=session)
+    asteval_section = AstevalSection(session=session)
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
@@ -106,7 +109,13 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
         ns="examples/code-review",
         key="code-review-session",
         name="code_review_agent",
-        sections=[guidance_section, planning_section, vfs_section, user_turn_section],
+        sections=[
+            guidance_section,
+            planning_section,
+            vfs_section,
+            asteval_section,
+            user_turn_section,
+        ],
     )
 
 
