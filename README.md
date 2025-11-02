@@ -38,7 +38,6 @@ uv add "weakincentives[litellm]"
 # cloning the repo? use: uv sync --extra openai --extra litellm
 ```
 
-
 ## Tutorial: Build a Stateful Code-Reviewing Agent
 
 Use Weak Incentives to assemble a reproducible reviewer that tracks every
@@ -357,15 +356,14 @@ risking accidental prompt drift elsewhere in the tree.
 You now have a deterministic reviewer that:
 
 1. Enforces typed contracts for inputs, tools, and outputs.
-2. Persists multi-step plans, VFS edits, and evaluation transcripts inside a
+1. Persists multi-step plans, VFS edits, and evaluation transcripts inside a
    session without custom plumbing.
-3. Supports optimizer-driven overrides that slot cleanly into CI, evaluation
+1. Supports optimizer-driven overrides that slot cleanly into CI, evaluation
    harnesses, or on-call tuning workflows.
 
 Drop the agent into a queue worker, Slack bot, or scheduled job. Every evaluation
 is replayable thanks to the captured session state, so postmortems start with
 facts—not speculation.
-
 
 ## Sessions and Built-in Tools
 

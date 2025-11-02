@@ -4,11 +4,44 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- Added an `asteval`-powered Python evaluation tool section that bridges the
-  sandbox with the virtual filesystem, including timeout handling, templated
-  writes, and captured stdout/stderr telemetry.
-- Declared the `asteval` runtime dependency to support the new evaluation
-  tooling.
+- No changes yet.
+
+## v0.4.0 - 2025-11-01
+
+### Evaluation Tools
+
+- Added `AstevalSection` to expose an `evaluate_python` tool that runs inside
+  the sandbox, bridges the virtual filesystem, captures stdout/stderr,
+  templates writes, and enforces timeouts.
+- Declared `asteval>=1.0.6` as a runtime dependency and documented the
+  synchronous handler contract in the ASTEval spec.
+
+### Virtual Filesystem
+
+- Extended the VFS to accept UTF-8 content for writes and host mounts,
+  refreshed prompt guidance, and mounted the sunfish README to demonstrate
+  multibyte data.
+
+### Examples
+
+- Added a code review agent example that exercises the VFS helpers safely and
+  surfaces tool call history through the console session scaffold.
+- Wired the ASTEval section into the code review prompt example so agents can
+  invoke the `evaluate_python` tool during reviews.
+
+### Typing & Tests
+
+- Expanded type annotations across prompts, adapters, and examples, removed
+  Ruff annotation ignores, and broadened the pytest suite to cover new
+  behaviors and VFS regression cases while updating coverage configuration.
+
+### Documentation
+
+- Replaced the README quickstart with a step-by-step code review tutorial that
+  contrasts Weak Incentives with LangGraph and DSPy.
+- Expanded the ASTEval specification with the section entry point, full-VFS
+  access guidance, and updated timeout expectations.
+- Removed the legacy `docs/` pages now superseded by `specs/`.
 
 ## v0.3.0 - 2025-11-01
 
