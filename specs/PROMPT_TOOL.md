@@ -32,13 +32,10 @@ class DispatchSubagent:
     instructions: str
     expected_artifacts: tuple[str, ...] = field(default_factory=tuple)
     plan_step_id: str | None = None
-    snapshot_version: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
 class DispatchSubagentResult:
-    prompt_ns: str
-    prompt_key: str
     message_summary: str
     artifacts: tuple[str, ...] = field(default_factory=tuple)
     tools_used: tuple[str, ...] = field(default_factory=tuple)
@@ -50,7 +47,7 @@ Key validation rules:
 - `instructions` is trimmed ASCII (1–2,000 characters).
 - `expected_artifacts` elements are ASCII ≤160 characters.
 - When `mode == "plan_step"`, callers must provide `plan_step_id` so planning results can reconcile.
-- `snapshot_version` mirrors the serializer version returned by `Session.snapshot()`.
+- Snapshot capture and hydration are implementation details; callers never provide serializer metadata.
 
 ## Tool Definition
 
