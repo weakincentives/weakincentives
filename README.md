@@ -85,7 +85,9 @@ Planning, virtual filesystem, and Python-evaluation sections register reducers o
 the provided session. Introducing them early keeps every evaluation capable of
 multi-step plans, staged edits, and quick calculations. Host mounts feed the
 reviewer precomputed diffs before the run begins so it can read them through the
-virtual filesystem tools without calling back to your orchestrator.
+virtual filesystem tools without calling back to your orchestrator. Because each
+tool suite records its activity on the session, selectors later in the tutorial
+can recover audit logs without extra plumbing.
 
 ```python
 from pathlib import Path
@@ -136,7 +138,88 @@ host mount resolves `octo_widgets/cache-layer.diff` relative to that directory
 and exposes it to the agent as `diffs/cache-layer.diff` inside the virtual
 filesystem snapshot.
 
-### 3. Compose the prompt with deterministic sections
+### 3. Define a symbol search helper tool
+
+Weak Incentives tools are typed functions that return structured results. Use
+them to expose deterministic helpers alongside the built-in suites. A reviewer
+benefits from a lightweight code-search utility that surfaces the context around
+symbols referenced in a diff. Mount a checkout of the repository under
+`/srv/agent-repo` before launching the run so the tool can read from it.
+
+```python
+from dataclasses import dataclass
+from pathlib import Path
+
+from weakincentives.prompt.tool import Tool, ToolResult
+
+
+@dataclass
+class SymbolSearchRequest:
+    query: str
+    file_glob: str = "*.py"
+    max_results: int = 5
+
+
+@dataclass
+class SymbolMatch:
+    file_path: str
+    line: int
+    snippet: str
+
+
+@dataclass
+class SymbolSearchResult:
+    matches: tuple[SymbolMatch, ...]
+
+
+repo_root = Path("/srv/agent-repo")
+
+
+def find_symbol(params: SymbolSearchRequest) -> ToolResult[SymbolSearchResult]:
+    if not repo_root.exists():
+        raise FileNotFoundError(
+            "Mount a repository checkout at /srv/agent-repo before running the agent."
+        )
+
+    matches: list[SymbolMatch] = []
+    for file_path in repo_root.rglob(params.file_glob):
+        if not file_path.is_file():
+            continue
+        with file_path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if params.query in line:
+                    matches.append(
+                        SymbolMatch(
+                            file_path=str(file_path.relative_to(repo_root)),
+                            line=line_number,
+                            snippet=line.strip(),
+                        )
+                    )
+                    if len(matches) >= params.max_results:
+                        break
+        if len(matches) >= params.max_results:
+            break
+
+    return ToolResult(
+        message=f"Found {len(matches)} matching snippets.",
+        value=SymbolSearchResult(matches=tuple(matches)),
+    )
+
+
+symbol_search_tool = Tool[SymbolSearchRequest, SymbolSearchResult](
+    name="symbol_search",
+    description=(
+        "Search the repository checkout for a symbol and return file snippets."
+    ),
+    handler=find_symbol,
+)
+```
+
+Attach custom tools to sections (next step) so the adapter can call them and
+record their outputs on the session alongside built-in reducers. The prompt can
+now chase suspicious references without delegating work back to the orchestrator.
+
+### 4. Compose the prompt with deterministic sections
 
 Sections rely on `string.Template`, so prepare readable placeholders up front.
 Combine your review instructions with the built-in tool suites to publish a
@@ -182,7 +265,10 @@ analysis_section = MarkdownSection[ReviewGuidance](
       ${focus_areas}
     - Inspect mounted diffs under `diffs/` with `vfs_read_file` before
       commenting on unfamiliar hunks.
+    - Reach for `symbol_search` when you need surrounding context from the
+      repository checkout.
     """,
+    tools=(symbol_search_tool,),
     default_params=ReviewGuidance(),
 )
 
@@ -215,7 +301,7 @@ print(rendered.text)
 print([tool.name for tool in rendered.tools])
 ```
 
-### 4. Evaluate the prompt with an adapter
+### 5. Evaluate the prompt with an adapter
 
 Adapters send the rendered prompt to a provider and publish telemetry to the
 event bus. The session subscribed above automatically ingests each
@@ -255,7 +341,7 @@ for comment in bundle.comments:
 If the model omits a required field, `OpenAIAdapter` raises `PromptEvaluationError`
 with provider context rather than silently degrading.
 
-### 5. Mine session state for downstream automation
+### 6. Mine session state for downstream automation
 
 Built-in selectors expose the data collected by reducers that each tool suite
 registered. This gives you ready-to-ship audit logs without building LangGraph
@@ -282,7 +368,7 @@ if vfs_snapshot:
         print(f"Staged file {file.path.segments} (version {file.version})")
 ```
 
-### 6. Override sections with an overrides store
+### 7. Override sections with an overrides store
 
 DSPy-style optimizers can persist improved instructions and let the runtime swap
 them in without re-deploying code. Implement the `PromptOverridesStore` protocol
@@ -351,7 +437,7 @@ Because sections expose stable `(ns, key, path)` identifiers, overrides stay sco
 to the intended content. That means optimizers can explore new directives without
 risking accidental prompt drift elsewhere in the tree.
 
-### 7. Ship it
+### 8. Ship it
 
 You now have a deterministic reviewer that:
 
@@ -364,67 +450,6 @@ You now have a deterministic reviewer that:
 Drop the agent into a queue worker, Slack bot, or scheduled job. Every evaluation
 is replayable thanks to the captured session state, so postmortems start with
 facts—not speculation.
-
-## Sessions and Built-in Tools
-
-Session state turns prompt output and tool calls into durable data. Built-in planning
-and virtual filesystem sections register reducers on the provided session.
-
-```python
-from weakincentives.session import Session, select_latest
-from weakincentives.tools import (
-    PlanningToolsSection,
-    Plan,
-    VfsToolsSection,
-    VirtualFileSystem,
-)
-
-session = Session()
-planning_section = PlanningToolsSection(session=session)
-vfs_section = VfsToolsSection(session=session)
-
-prompt = Prompt[ResearchSummary](
-    ns="examples/research",
-    key="research.session",
-    sections=[task_section, planning_section, vfs_section],
-)
-
-active_plan = select_latest(session, Plan)
-vfs_snapshot = select_latest(session, VirtualFileSystem)
-```
-
-Use `session.select_all(...)` or the helpers in `weakincentives.session` to drive UI
-state, persistence, or audits after each adapter run.
-
-## Adapter Integrations
-
-Adapters stay optional and only load their dependencies when you import them.
-
-```python
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.events import InProcessEventBus
-from weakincentives.session import Session
-from weakincentives.tools import Plan
-
-bus = InProcessEventBus()
-session = Session(bus=bus)
-
-adapter = OpenAIAdapter(
-    model="gpt-4o-mini",
-    client_kwargs={"api_key": "sk-..."},
-)
-
-response = adapter.evaluate(
-    prompt,
-    ResearchGuidance(topic="Ada Lovelace"),
-    bus=bus,
-)
-
-plan_history = session.select_all(Plan)
-```
-
-`InProcessEventBus` publishes `ToolInvoked` and `PromptExecuted` events for the
-session (or any other subscriber) to consume.
 
 ## Development Setup
 
