@@ -393,56 +393,62 @@ if vfs_snapshot:
 ### 7. Override sections with an overrides store
 
 DSPy-style optimizers can persist improved instructions and let the runtime swap
-them in without re-deploying code. Implement the `PromptOverridesStore` protocol
-to serve overrides by namespace, key, and tag. The [Prompt Versioning &
-Persistence](specs/PROMPTS_VERSIONING.md) and [Local Prompt Overrides Store
-Specification](specs/LOCAL_PROMPT_OVERRIDES_STORE.md) walk through descriptor
-hashing and the filesystem layout these overrides depend on.
+them in without redeploying code. For most projects the
+`LocalPromptOverridesStore` is the recommended implementation—it discovers the
+workspace root, enforces descriptor metadata, and reads JSON overrides from the
+`.weakincentives/prompts/overrides/` tree described in the
+[Local Prompt Overrides Store Specification](specs/LOCAL_PROMPT_OVERRIDES_STORE.md).
+Pair it with the [Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md)
+guidance to understand how namespace, prompt key, and tag hashing keep overrides
+pinned to the right sections and tools.
 
 ```python
-from dataclasses import dataclass
-from weakincentives.prompt.versioning import (
-    PromptDescriptor,
-    PromptOverride,
-    PromptOverridesStore,
+import json
+from pathlib import Path
+
+from weakincentives.prompt.local_prompt_overrides_store import (
+    LocalPromptOverridesStore,
+)
+from weakincentives.prompt.versioning import PromptDescriptor
+
+
+workspace_root = Path("/srv/agent-workspace")
+overrides_store = LocalPromptOverridesStore(root_path=workspace_root)
+
+descriptor = PromptDescriptor.from_prompt(review_prompt)
+overrides_store.seed_if_necessary(review_prompt, tag="assertive-feedback")
+
+override_path = (
+    workspace_root
+    / ".weakincentives"
+    / "prompts"
+    / "overrides"
+    / descriptor.ns
+    / descriptor.key
+    / "assertive-feedback.json"
 )
 
-
-@dataclass
-class StaticOverridesStore(PromptOverridesStore):
-    override: PromptOverride | None = None
-
-
-    def resolve(
-        self,
-        descriptor: PromptDescriptor,
-        tag: str = "latest",
-    ) -> PromptOverride | None:
-        if (
-            self.override
-            and self.override.ns == descriptor.ns
-            and self.override.prompt_key == descriptor.key
-            and self.override.tag == tag
-        ):
-            return self.override
-        return None
-
-
-overrides = PromptOverride(
-    ns=review_prompt.ns,
-    prompt_key=review_prompt.key,
-    tag="assertive-feedback",
-    overrides={
-        ("review.directives",): """
-        - Classify findings using this severity scale: minor | major | critical.
-        - Always cite the exact diff hunk when raising a major or critical issue.
-        - Respond with ReviewBundle JSON. Missing fields terminate the run.
-        """,
-    },
+override_path.parent.mkdir(parents=True, exist_ok=True)
+override_path.write_text(
+    json.dumps(
+        {
+            "version": 1,
+            "ns": descriptor.ns,
+            "prompt_key": descriptor.key,
+            "tag": "assertive-feedback",
+            "sections": {
+                "review.directives": [
+                    "- Classify findings using this severity scale: minor | major | critical.",
+                    "- Always cite the exact diff hunk when raising a major or critical issue.",
+                    "- Respond with ReviewBundle JSON. Missing fields terminate the run.",
+                ]
+            },
+        },
+        indent=2,
+    ),
+    encoding="utf-8",
 )
 
-
-overrides_store = StaticOverridesStore(override=overrides)
 rendered_with_override = review_prompt.render_with_overrides(
     PullRequestContext(
         repository="octo/widgets",
@@ -458,9 +464,11 @@ rendered_with_override = review_prompt.render_with_overrides(
 print(rendered_with_override.text)
 ```
 
-Because sections expose stable `(ns, key, path)` identifiers, overrides stay scoped
-to the intended content. That means optimizers can explore new directives without
-risking accidental prompt drift elsewhere in the tree.
+The filesystem layout means optimizers and prompt engineers can drop override
+files locally—checked into source control or generated during evaluations—without
+subclassing `PromptOverridesStore`. Because sections expose stable `(ns, key,
+path)` identifiers, overrides stay scoped to the intended content so teams can
+iterate on directives without risking accidental drift elsewhere in the tree.
 
 ### 8. Ship it
 
