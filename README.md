@@ -48,14 +48,13 @@ custom state store—the `Session` captures prompt and tool telemetry out of the
 box. Unlike DSPy, prompt sections already expose versioning and override hooks
 so optimizers can swap instructions without rewriting the runtime.
 
-### 1. Model review data and tool contracts
+### 1. Model review data and expected outputs
 
-Typed dataclasses keep inputs, tool payloads, and outputs honest. Tools return
-`ToolResult` objects so the adapter can emit consistent telemetry.
+Typed dataclasses keep inputs and outputs honest so adapters can emit consistent
+telemetry and structured responses stay predictable.
 
 ```python
 from dataclasses import dataclass
-from weakincentives import Tool, ToolResult
 
 
 @dataclass
@@ -64,17 +63,6 @@ class PullRequestContext:
     title: str
     body: str
     files_summary: str
-
-
-@dataclass
-class FileDiffRequest:
-    path: str
-
-
-@dataclass
-class FileDiffSnapshot:
-    path: str
-    patch: str
 
 
 @dataclass
@@ -90,39 +78,47 @@ class ReviewComment:
 class ReviewBundle:
     comments: tuple[ReviewComment, ...]
     overall_assessment: str
-
-
-def fetch_diff(params: FileDiffRequest) -> ToolResult[FileDiffSnapshot]:
-    # Replace this stub with a Git provider lookup in production.
-    diff = FileDiffSnapshot(path=params.path, patch="@@ -1 +1 @@ ...")
-    return ToolResult(message=f"Loaded diff for {params.path}", value=diff)
-
-
-diff_tool = Tool[FileDiffRequest, FileDiffSnapshot](
-    name="fetch_diff",
-    description="Retrieve the unified diff for a repository path.",
-    handler=fetch_diff,
-)
 ```
 
-### 2. Create a session and surface built-in tool suites
+### 2. Create a session, surface built-in tool suites, and mount diffs
 
 Planning, virtual filesystem, and Python-evaluation sections register reducers on
 the provided session. Introducing them early keeps every evaluation capable of
-multi-step plans, staged edits, and quick calculations.
+multi-step plans, staged edits, and quick calculations. Host mounts feed the
+reviewer precomputed diffs before the run begins so it can read them through the
+virtual filesystem tools without calling back to your orchestrator.
 
 ```python
+from pathlib import Path
+
 from weakincentives.events import InProcessEventBus, PromptExecuted
 from weakincentives.session import Session
-from weakincentives.tools import AstevalSection, PlanningToolsSection, VfsToolsSection
+from weakincentives.tools import (
+    AstevalSection,
+    HostMount,
+    PlanningToolsSection,
+    VfsPath,
+    VfsToolsSection,
+)
 
 
 bus = InProcessEventBus()
 session = Session(bus=bus)
 
 
+diff_root = Path("/srv/agent-mounts")
+diff_root.mkdir(parents=True, exist_ok=True)
+vfs_section = VfsToolsSection(
+    session=session,
+    allowed_host_roots=(diff_root,),
+    mounts=(
+        HostMount(
+            host_path="octo_widgets/cache-layer.diff",
+            mount_path=VfsPath(("diffs", "cache-layer.diff")),
+        ),
+    ),
+)
 planning_section = PlanningToolsSection(session=session)
-vfs_section = VfsToolsSection(session=session)
 asteval_section = AstevalSection(session=session)
 
 
@@ -135,6 +131,11 @@ def log_prompt(event: PromptExecuted) -> None:
 
 bus.subscribe(PromptExecuted, log_prompt)
 ```
+
+Copy unified diff files into `/srv/agent-mounts` before launching the run. The
+host mount resolves `octo_widgets/cache-layer.diff` relative to that directory
+and exposes it to the agent as `diffs/cache-layer.diff` inside the virtual
+filesystem snapshot.
 
 ### 3. Compose the prompt with deterministic sections
 
@@ -180,10 +181,10 @@ analysis_section = MarkdownSection[ReviewGuidance](
     - Emit output that matches ${output_schema}; missing fields fail the run.
     - Investigation focus:
       ${focus_areas}
-    - Call `fetch_diff` before commenting on any unfamiliar hunk.
+    - Inspect mounted diffs under `diffs/` with `vfs_read_file` before
+      commenting on unfamiliar hunks.
     """,
     default_params=ReviewGuidance(),
-    tools=(diff_tool,),
 )
 
 
