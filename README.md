@@ -294,6 +294,7 @@ rendered = review_prompt.render(
         body="Introduces memoization to reduce redundant IO while preserving correctness.",
         files_summary="loader.py, cache.py",
     ),
+    ReviewGuidance(),
 )
 
 
