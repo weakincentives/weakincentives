@@ -1,5 +1,9 @@
 # Weak Incentives
 
+This library was built out of frustration with LangGraph and DSPy to explore
+better ways to do state and context management when building apps with LLMs
+while allowing the prompts to be automatically optimized.
+
 **Lean, typed building blocks for side-effect-free background agents.**
 Compose deterministic prompts, run typed tools, and parse strict JSON replies without
 heavy dependencies. Optional adapters snap in when you need a model provider.
