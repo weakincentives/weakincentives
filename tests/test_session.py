@@ -86,9 +86,11 @@ def test_tool_invoked_appends_payload_once() -> None:
     session = Session(bus=bus)
 
     event = make_tool_event(1)
-    bus.publish(event)
-    bus.publish(event)
+    first_result = bus.publish(event)
+    second_result = bus.publish(event)
 
+    assert first_result.ok
+    assert second_result.ok
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
 
 
@@ -98,8 +100,9 @@ def test_prompt_executed_emits_multiple_dataclasses() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
 
-    bus.publish(make_prompt_event(outputs))
+    result = bus.publish(make_prompt_event(outputs))
 
+    assert result.ok
     assert session.select_all(ExampleOutput) == tuple(outputs)
 
 
@@ -134,19 +137,21 @@ def test_reducers_run_in_registration_order() -> None:
     session.register_reducer(ExampleOutput, first, slice_type=FirstSlice)
     session.register_reducer(ExampleOutput, second, slice_type=SecondSlice)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
     assert call_order == ["first", "second"]
     assert session.select_all(FirstSlice) == (FirstSlice("hello"),)
     assert session.select_all(SecondSlice) == (SecondSlice("hello"),)
+    assert result.ok
 
 
 def test_default_append_used_when_no_custom_reducer() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
+    assert result.ok
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="hello"),)
 
 
@@ -165,9 +170,11 @@ def test_non_dataclass_payloads_are_ignored() -> None:
         ),
     )
 
-    bus.publish(event)
-    bus.publish(non_dataclass_event)
+    first_result = bus.publish(event)
+    second_result = bus.publish(non_dataclass_event)
 
+    assert first_result.ok
+    assert second_result.ok
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
 
 
@@ -177,10 +184,13 @@ def test_upsert_by_replaces_matching_keys() -> None:
 
     session.register_reducer(ExamplePayload, upsert_by(lambda payload: payload.value))
 
-    bus.publish(make_tool_event(1))
-    bus.publish(make_tool_event(1))
-    bus.publish(make_tool_event(2))
+    first_result = bus.publish(make_tool_event(1))
+    second_result = bus.publish(make_tool_event(1))
+    third_result = bus.publish(make_tool_event(2))
 
+    assert first_result.ok
+    assert second_result.ok
+    assert third_result.ok
     assert session.select_all(ExamplePayload) == (
         ExamplePayload(value=1),
         ExamplePayload(value=2),
@@ -193,9 +203,11 @@ def test_replace_latest_keeps_only_newest_value() -> None:
 
     session.register_reducer(ExamplePayload, replace_latest)
 
-    bus.publish(make_tool_event(1))
-    bus.publish(make_tool_event(2))
+    first_result = bus.publish(make_tool_event(1))
+    second_result = bus.publish(make_tool_event(2))
 
+    assert first_result.ok
+    assert second_result.ok
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=2),)
 
 
@@ -239,9 +251,11 @@ def test_selector_helpers_delegate_to_session() -> None:
 
     assert select_latest(session, ExampleOutput) is None
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
+    assert first_result.ok
+    assert second_result.ok
     assert select_all(session, ExampleOutput) == (
         ExampleOutput(text="first"),
         ExampleOutput(text="second"),
@@ -265,13 +279,15 @@ def test_reducer_failure_leaves_previous_slice_unchanged() -> None:
 
     session.register_reducer(ExampleOutput, faulty)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
+    assert first_result.handled_count == 1
 
     # Second publish should leave slice unchanged due to faulty reducer
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    second_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
+    assert second_result.handled_count == 1
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
 
 
@@ -279,17 +295,20 @@ def test_snapshot_round_trip_restores_state() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
+    assert first_result.ok
+    assert second_result.ok
     original_state = session.select_all(ExampleOutput)
 
     snapshot = session.snapshot()
     raw = snapshot.to_json()
     restored = Snapshot.from_json(raw)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="third")))
+    third_result = bus.publish(make_prompt_event(ExampleOutput(text="third")))
     assert session.select_all(ExampleOutput) != original_state
+    assert third_result.ok
 
     session.rollback(restored)
 
@@ -313,26 +332,30 @@ def test_snapshot_preserves_custom_reducer_behavior() -> None:
 
     session.register_reducer(ExampleOutput, aggregate, slice_type=Summary)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="start")))
+    first_result = bus.publish(make_prompt_event(ExampleOutput(text="start")))
     snapshot = session.snapshot()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="after")))
+    second_result = bus.publish(make_prompt_event(ExampleOutput(text="after")))
     assert session.select_all(Summary)[0].entries == ("start", "after")
 
     session.rollback(snapshot)
 
     assert session.select_all(Summary)[0].entries == ("start",)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="again")))
+    third_result = bus.publish(make_prompt_event(ExampleOutput(text="again")))
 
     assert session.select_all(Summary)[0].entries == ("start", "again")
+    assert first_result.ok
+    assert second_result.ok
+    assert third_result.ok
 
 
 def test_snapshot_rollback_requires_registered_slices() -> None:
     bus = InProcessEventBus()
     source = Session(bus=bus)
-    bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
+    assert result.ok
     snapshot = source.snapshot()
 
     target = Session()

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol, cast
 
 from .prompt._types import SupportsDataclass
 
@@ -35,9 +35,11 @@ class EventBus(Protocol):
 
     def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
         """Register a handler for the given event type."""
+        ...
 
-    def publish(self, event: object) -> None:
+    def publish(self, event: object) -> PublishResult:
         """Publish an event instance to subscribers."""
+        ...
 
 
 class NullEventBus:
@@ -46,8 +48,14 @@ class NullEventBus:
     def subscribe(self, event_type: type[object], handler: EventHandler) -> None:  # noqa: D401
         """No-op subscription hook."""
 
-    def publish(self, event: object) -> None:  # noqa: D401
+    def publish(self, event: object) -> PublishResult:  # noqa: D401
         """Drop the provided event instance."""
+
+        return PublishResult(
+            event=event,
+            handlers_invoked=(),
+            errors=(),
+        )
 
 
 class InProcessEventBus:
@@ -60,17 +68,70 @@ class InProcessEventBus:
         handlers = self._handlers.setdefault(event_type, [])
         handlers.append(handler)
 
-    def publish(self, event: object) -> None:
+    def publish(self, event: object) -> PublishResult:
         handlers = tuple(self._handlers.get(type(event), ()))
+        invoked: list[EventHandler] = []
+        failures: list[HandlerFailure] = []
         for handler in handlers:
+            invoked.append(handler)
             try:
                 handler(event)
-            except Exception:  # noqa: BLE001
+            except Exception as error:  # noqa: BLE001
                 logger.exception(
                     "Error delivering event %s to handler %r",
                     type(event).__name__,
                     handler,
                 )
+                failures.append(HandlerFailure(handler=handler, error=error))
+
+        return PublishResult(
+            event=event,
+            handlers_invoked=tuple(invoked),
+            errors=tuple(failures),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class HandlerFailure:
+    """Container describing a handler error captured during publish."""
+
+    handler: EventHandler
+    error: BaseException
+
+    def __str__(self) -> str:
+        return f"{self.handler!r} -> {self.error!r}"
+
+
+@dataclass(slots=True, frozen=True)
+class PublishResult:
+    """Summary of an event publish invocation."""
+
+    event: object
+    handlers_invoked: tuple[EventHandler, ...]
+    errors: tuple[HandlerFailure, ...]
+    handled_count: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "handled_count", len(self.handlers_invoked))
+
+    @property
+    def ok(self) -> bool:
+        """Return ``True`` when no handler failures were recorded."""
+
+        return not self.errors
+
+    def raise_if_errors(self) -> None:
+        """Raise an ``ExceptionGroup`` if any handlers failed."""
+
+        if not self.errors:
+            return
+
+        failures = ", ".join(str(failure) for failure in self.errors)
+        message = f"Errors while publishing {type(self.event).__name__}: {failures}"
+        raise ExceptionGroup(
+            message,
+            tuple(cast(Exception, failure.error) for failure in self.errors),
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -96,8 +157,10 @@ class ToolInvoked:
 
 __all__ = [
     "EventBus",
+    "HandlerFailure",
     "InProcessEventBus",
     "NullEventBus",
+    "PublishResult",
     "PromptExecuted",
     "ToolInvoked",
 ]

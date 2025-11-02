@@ -268,7 +268,7 @@ class LiteLLMAdapter:
                     tool_results=tuple(tool_events),
                     provider_payload=provider_payload,
                 )
-                bus.publish(
+                _ = bus.publish(
                     PromptExecuted(
                         prompt_name=prompt_name,
                         adapter="litellm",
@@ -356,7 +356,7 @@ class LiteLLMAdapter:
                     call_id=getattr(tool_call, "id", None),
                 )
                 tool_events.append(invocation)
-                bus.publish(invocation)
+                _ = bus.publish(invocation)
 
                 messages.append(
                     {

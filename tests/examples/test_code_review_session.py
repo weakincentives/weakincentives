@@ -121,7 +121,8 @@ def test_code_review_session_tool_history(
         ),
     )
 
-    session._bus.publish(event)
+    publish_result = session._bus.publish(event)
+    assert publish_result.ok
     captured = capsys.readouterr()
     assert "[tool] show_git_branches called with" in captured.out
 
