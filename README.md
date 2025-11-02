@@ -282,23 +282,23 @@ if vfs_snapshot:
         print(f"Staged file {file.path.segments} (version {file.version})")
 ```
 
-### 6. Override sections with a version store
+### 6. Override sections with an overrides store
 
 DSPy-style optimizers can persist improved instructions and let the runtime swap
-them in without re-deploying code. Implement the `PromptVersionStore` protocol to
-serve overrides by namespace, key, and tag.
+them in without re-deploying code. Implement the `PromptOverridesStore` protocol
+to serve overrides by namespace, key, and tag.
 
 ```python
 from dataclasses import dataclass
 from weakincentives.prompt.versioning import (
     PromptDescriptor,
     PromptOverride,
-    PromptVersionStore,
+    PromptOverridesStore,
 )
 
 
 @dataclass
-class StaticVersionStore(PromptVersionStore):
+class StaticOverridesStore(PromptOverridesStore):
     override: PromptOverride | None = None
 
 
@@ -331,7 +331,7 @@ overrides = PromptOverride(
 )
 
 
-store = StaticVersionStore(override=overrides)
+overrides_store = StaticOverridesStore(override=overrides)
 rendered_with_override = review_prompt.render_with_overrides(
     PullRequestContext(
         repository="octo/widgets",
@@ -339,7 +339,7 @@ rendered_with_override = review_prompt.render_with_overrides(
         body="Introduces memoization to reduce redundant IO while preserving correctness.",
         files_summary="loader.py, cache.py",
     ),
-    version_store=store,
+    overrides_store=overrides_store,
     tag="assertive-feedback",
 )
 

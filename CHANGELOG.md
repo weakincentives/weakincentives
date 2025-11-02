@@ -52,8 +52,8 @@ Release highlights for weakincentives.
   consolidated `weakincentives.prompt` surface.
 - Prompts now require namespaces and explicit section keys so overrides line up with
   rendered content and structured response formats.
-- Added tool-aware prompt version metadata and the `PromptVersionStore` override
-  workflow to track section edits and tool changes across revisions.
+- Added tool-aware prompt version metadata and the `PromptOverridesStore`
+  override workflow to track section edits and tool changes across revisions.
 
 ### Session & State
 

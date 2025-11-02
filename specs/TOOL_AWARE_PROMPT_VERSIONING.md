@@ -68,7 +68,7 @@ Override rules:
 
 ## Store Resolution
 
-`PromptVersionStore.resolve` already receives a descriptor and tag. Update implementations to:
+`PromptOverridesStore.resolve` already receives a descriptor and tag. Update implementations to:
 
 1. Match tool overrides by `(prompt_key, tool_name)`.
 1. Drop overrides whose contract hash does not match.
@@ -99,6 +99,6 @@ Adapters that already respect tool order and description require no changes for 
 
 1. Implement the new dataclasses and hashing helpers alongside the existing descriptor code.
 1. Extend descriptor construction to populate `tools`.
-1. Update the in-repo version store to persist `tool_overrides`.
+1. Update the in-repo overrides store to persist `tool_overrides`.
 1. Update prompt rendering to apply tool overrides as described above.
 1. (Optional) Surface `_tool_param_descriptions` on `RenderedPrompt` and teach adapters to merge patches into provider schemas.
