@@ -122,7 +122,7 @@ def test_planning_end_to_end_flow() -> None:
     assert plan.steps[0].notes == ("triage complete",)
 
     result = _invoke(bus, read_tool, ReadPlan())
-    assert "Status: completed" in result.message
+    assert result.message == "Retrieved the current plan with 3 steps."
 
     _invoke(bus, clear_tool, ClearPlan())
 

@@ -77,6 +77,32 @@ def _invoke_tool(
     return result
 
 
+def _assert_success_message(result: ToolResult[EvalResult]) -> None:
+    assert result.value is not None
+    write_count = len(result.value.writes)
+    if write_count == 0:
+        expected = "Evaluation succeeded without pending file writes."
+    else:
+        suffix = "s" if write_count != 1 else ""
+        expected = (
+            f"Evaluation succeeded with {write_count} pending file write{suffix}."
+        )
+    assert result.message.startswith(expected)
+
+
+def _assert_failure_message(
+    result: ToolResult[EvalResult], *, had_pending_writes: bool
+) -> None:
+    if had_pending_writes:
+        expected = (
+            "Evaluation failed; pending file writes were discarded. "
+            "Review stderr details in the payload."
+        )
+    else:
+        expected = "Evaluation failed; review stderr details in the payload."
+    assert result.message.startswith(expected)
+
+
 def _setup_sections() -> tuple[
     Session,
     InProcessEventBus,
@@ -96,10 +122,7 @@ def test_expression_mode_success() -> None:
 
     result = _invoke_tool(bus, tool, EvalParams(code="1 + 2"))
 
-    assert result.message.startswith("Evaluation succeeded.")
-    assert "value=3" in result.message
-    assert "stdout=empty" in result.message
-    assert "writes=none" in result.message
+    _assert_success_message(result)
     assert result.value is not None
     payload = result.value
     assert payload.value_repr == "3"
@@ -260,8 +283,7 @@ def test_print_invalid_sep_reports_error() -> None:
 
     result = _invoke_tool(bus, tool, params)
 
-    assert result.message.startswith("Evaluation failed.")
-    assert "error=sep must be None or a string" in result.message
+    assert result.message == "Evaluation failed; review stderr details in the payload."
     assert result.value is not None
     payload = result.value
     assert "sep must be None or a string." in payload.stderr
@@ -274,8 +296,7 @@ def test_print_invalid_end_reports_error() -> None:
 
     result = _invoke_tool(bus, tool, params)
 
-    assert result.message.startswith("Evaluation failed.")
-    assert "error=end must be None or a string" in result.message
+    assert result.message == "Evaluation failed; review stderr details in the payload."
     assert result.value is not None
     payload = result.value
     assert "end must be None or a string." in payload.stderr
@@ -478,7 +499,7 @@ def test_create_mode_rejects_existing_file() -> None:
         ),
     )
 
-    assert result.message.startswith("Evaluation succeeded.")
+    _assert_success_message(result)
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
@@ -503,7 +524,7 @@ def test_append_requires_existing_file() -> None:
         ),
     )
 
-    assert result.message.startswith("Evaluation succeeded.")
+    _assert_success_message(result)
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is None or not snapshot.files
 
@@ -530,7 +551,7 @@ def test_overwrite_updates_existing_file() -> None:
         ),
     )
 
-    assert result.message.startswith("Evaluation succeeded.")
+    _assert_success_message(result)
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
@@ -551,7 +572,7 @@ def test_message_summarizes_multiple_writes() -> None:
         EvalParams(code="0", mode="statements", writes=writes),
     )
 
-    assert result.message.startswith("Evaluation succeeded.")
+    _assert_success_message(result)
     assert (
         "writes=4 file(s): output/file0.txt, output/file1.txt, output/file2.txt, +1 more"
         in result.message
@@ -586,7 +607,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
         EvalParams(code="read_text('sunfish/README.md')", mode="expr"),
     )
 
-    assert result.message.startswith("Evaluation succeeded.")
+    _assert_success_message(result)
     assert result.value is not None
     payload = result.value
     assert payload.value_repr == "'hello mount'"
@@ -601,8 +622,7 @@ def test_write_text_rejects_empty_path() -> None:
         EvalParams(code="write_text('', 'data')", mode="statements"),
     )
 
-    assert result.message.startswith("Evaluation failed.")
-    assert "error=Path must be non-empty" in result.message
+    _assert_failure_message(result, had_pending_writes=True)
     assert result.value is not None
     assert "Path must be non-empty." in result.value.stderr
 
@@ -644,9 +664,7 @@ def test_interpreter_error_surfaces_in_stderr() -> None:
         EvalParams(code="unknown_name + 1", mode="statements"),
     )
 
-    assert result.message.startswith("Evaluation failed.")
-    assert "error=" in result.message
-    assert "unknown_name" in result.message
+    _assert_failure_message(result, had_pending_writes=False)
     assert result.value is not None
     payload = result.value
     assert "unknown_name" in payload.stderr
@@ -668,11 +686,7 @@ def test_write_text_conflict_with_read_path() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-    assert result.message.startswith("Evaluation failed.")
-    assert (
-        "error=Writes queued during execution must not target read paths"
-        in result.message
-    )
+    _assert_failure_message(result, had_pending_writes=True)
     assert result.value is not None
     assert (
         "Writes queued during execution must not target read paths."
@@ -689,8 +703,7 @@ def test_write_text_duplicate_targets() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-    assert result.message.startswith("Evaluation failed.")
-    assert "error=Duplicate write targets detected" in result.message
+    _assert_failure_message(result, had_pending_writes=True)
     assert result.value is not None
     assert "Duplicate write targets detected." in result.value.stderr
 
@@ -728,8 +741,7 @@ def test_duplicate_final_writes_detected() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-    assert result.message.startswith("Evaluation failed.")
-    assert "error=Duplicate write targets detected" in result.message
+    _assert_failure_message(result, had_pending_writes=True)
     assert result.value is not None
     assert "Duplicate write targets detected." in result.value.stderr
 
@@ -750,7 +762,7 @@ def test_overwrite_requires_existing_file() -> None:
     )
 
     result = _invoke_tool(bus, tool, params)
-    assert result.message.startswith("Evaluation succeeded.")
+    _assert_success_message(result)
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is None or not snapshot.files
 

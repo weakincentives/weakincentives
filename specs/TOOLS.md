@@ -40,6 +40,9 @@ instances capture that response tuple, and every tool handler returns one direct
   populate the documented dataclass; failures must set this to `None` unless they expose a structured error payload.
 - `success: bool` – flag indicating whether the handler completed normally. Downstream adapters rely on this field (not
   payload shape) to detect failures.
+- `exclude_value_from_context: bool` – when true, adapters omit the `value` payload from the provider-facing tool message.
+  This helps keep large or sensitive payloads out of the token context while still returning them to orchestrators through
+  the `ToolResult`. Handlers should enable this when the payload is only needed for local bookkeeping.
 
 ### `Tool` Dataclass
 

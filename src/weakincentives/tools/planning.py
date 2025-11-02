@@ -278,10 +278,14 @@ class _PlanningToolSuite:
         plan = select_latest(self._session, Plan)
         if plan is None:
             raise ToolValidationError("No plan is currently initialised.")
-        step_summary = _summarize_steps(plan.steps)
-        message = (
-            f"Objective: {plan.objective}\nStatus: {plan.status}\nSteps: {step_summary}"
-        )
+        step_count = len(plan.steps)
+        if step_count == 0:
+            message = "Retrieved the current plan (no steps recorded)."
+        else:
+            message = (
+                "Retrieved the current plan "
+                f"with {step_count} step{'s' if step_count != 1 else ''}."
+            )
         return ToolResult(message=message, value=plan)
 
 
@@ -513,13 +517,6 @@ def _ensure_active(plan: Plan, action: str) -> None:
 def _ensure_step_exists(plan: Plan, step_id: str) -> None:
     if not any(step.step_id == step_id for step in plan.steps):
         raise ToolValidationError(f"Step {step_id} does not exist.")
-
-
-def _summarize_steps(steps: Sequence[PlanStep]) -> str:
-    if not steps:
-        return "no steps recorded"
-    summaries = [f"{step.step_id}:{step.status}" for step in steps]
-    return ", ".join(summaries)
 
 
 __all__ = [

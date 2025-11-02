@@ -24,7 +24,6 @@ from .code_review_session import (
     ToolCallLog,
 )
 from .code_review_tools import (
-    MAX_OUTPUT_CHARS,
     REPO_ROOT,
     BranchListParams,
     BranchListResult,
@@ -42,7 +41,6 @@ from .code_review_tools import (
 )
 
 __all__ = [
-    "MAX_OUTPUT_CHARS",
     "REPO_ROOT",
     "BranchListParams",
     "BranchListResult",

@@ -339,8 +339,10 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     second_messages = cast(list[dict[str, Any]], second_request["messages"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
-    assert tool_message["content"] == "completed"
-    assert "payload" not in tool_message
+    serialized = json.loads(tool_message["content"])
+    assert serialized["message"] == "completed"
+    assert serialized["success"] is True
+    assert serialized["payload"] == {"answer": "Policy summary"}
 
 
 def test_openai_adapter_rolls_back_session_on_publish_failure(
@@ -505,7 +507,10 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     second_messages = cast(list[dict[str, Any]], second_request["messages"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
-    assert tool_message["content"] == "Tool validation failed: invalid query"
+    serialized = json.loads(tool_message["content"])
+    assert serialized["message"] == "Tool validation failed: invalid query"
+    assert serialized["success"] is False
+    assert "payload" not in serialized
 
 
 def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
@@ -1222,7 +1227,9 @@ def test_openai_adapter_records_handler_failures() -> None:
     second_messages = cast(list[dict[str, Any]], second_request["messages"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
-    assert "execution failed: boom" in tool_message["content"]
+    serialized = json.loads(tool_message["content"])
+    assert serialized["success"] is False
+    assert serialized["message"].endswith("execution failed: boom")
 
 
 def test_openai_adapter_records_provider_payload_from_mapping() -> None:

@@ -24,7 +24,7 @@ import math
 import statistics
 import sys
 import threading
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -136,27 +136,6 @@ def _truncate_stream(text: str) -> str:
     suffix = "..."
     keep = _MAX_STREAM_LENGTH - len(suffix)
     return f"{text[:keep]}{suffix}"
-
-
-def _format_preview(value: str | None, *, empty: str, limit: int = 160) -> str:
-    if not value:
-        return empty
-    normalized = value.replace("\n", "\\n")
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[: limit - 3]}..."
-
-
-def _extract_error_reason(stderr: str) -> str | None:
-    text = stderr.strip()
-    if not text:  # pragma: no cover - defensive fallback
-        return None
-    if ": " in text:
-        candidate = text.split(": ")[-1].strip()
-        if candidate:
-            trimmed = candidate.rstrip(").")
-            return trimmed or candidate
-    return text
 
 
 def _ensure_ascii(value: str, label: str) -> None:
@@ -272,6 +251,20 @@ def _merge_globals(
     merged = dict(initial)
     merged.update(updates)
     return merged
+
+
+def _summarize_writes(writes: Sequence[EvalFileWrite]) -> str | None:
+    if not writes:
+        return None
+
+    total = len(writes)
+    preview_count = min(3, total)
+    preview_paths = ", ".join(
+        _alias_for_path(write.path) for write in writes[:preview_count]
+    )
+    if total > preview_count:
+        preview_paths = f"{preview_paths}, +{total - preview_count} more"
+    return f"writes={total} file(s): {preview_paths}"
 
 
 def _apply_writes(
@@ -461,6 +454,7 @@ class _AstevalToolSuite:
         helper_writes: list[EvalFileWrite] = []
         write_targets = {write.path.segments for write in write_queue}
         builtin_print = builtins.print
+        pending_write_attempted = bool(write_queue)
 
         def sandbox_print(
             *args: object,
@@ -498,6 +492,8 @@ class _AstevalToolSuite:
             return file.content
 
         def write_text(path: str, content: str, mode: str = "create") -> None:
+            nonlocal pending_write_attempted
+            pending_write_attempted = True
             normalized_path = _normalize_vfs_path(_parse_string_path(path))
             helper_write = _normalize_write(
                 EvalFileWrite(
@@ -555,22 +551,16 @@ class _AstevalToolSuite:
         stderr = _truncate_stream(stderr_raw)
 
         param_writes = tuple(write_queue)
-        pending_writes = bool(write_queue or helper_writes)
-        value_preview = _format_preview(value_repr, empty="none")
-        stdout_preview = _format_preview(stdout, empty="empty")
-        stderr_preview = _format_preview(stderr, empty="empty")
+        pending_writes = pending_write_attempted or bool(helper_writes)
         if stderr and not value_repr:
             final_writes: tuple[EvalFileWrite, ...] = ()
-            writes_summary = "discarded" if pending_writes else "none"
-            error_reason = _format_preview(
-                _extract_error_reason(stderr), empty="unknown"
-            )
-            message = (
-                "Evaluation failed. "
-                f"value={value_preview}; stdout={stdout_preview}; "
-                f"stderr={stderr_preview}; error={error_reason}; "
-                f"writes={writes_summary}."
-            )
+            if pending_writes:
+                message = (
+                    "Evaluation failed; pending file writes were discarded. "
+                    "Review stderr details in the payload."
+                )
+            else:
+                message = "Evaluation failed; review stderr details in the payload."
         else:
             format_context = {
                 key: value for key, value in symtable.items() if not key.startswith("_")
@@ -603,17 +593,21 @@ class _AstevalToolSuite:
                     )  # pragma: no cover - upstream checks prevent duplicates
                 seen_targets.add(key)
             if final_writes:
-                aliases = ["/".join(write.path.segments) for write in final_writes[:3]]
-                if len(final_writes) > 3:
-                    aliases.append(f"+{len(final_writes) - 3} more")
-                writes_summary = f"{len(final_writes)} file(s): {', '.join(aliases)}"
+                message = (
+                    "Evaluation succeeded with "
+                    f"{len(final_writes)} pending file write"
+                    f"{'s' if len(final_writes) != 1 else ''}."
+                )
             else:
-                writes_summary = "none"
-            message = (
-                "Evaluation succeeded. "
-                f"value={value_preview}; stdout={stdout_preview}; "
-                f"stderr={stderr_preview}; writes={writes_summary}."
-            )
+                message = "Evaluation succeeded without pending file writes."
+
+        helper_writes_tuple = tuple(helper_writes)
+        pending_sources: Sequence[EvalFileWrite] = (
+            final_writes or param_writes + helper_writes_tuple
+        )
+        summary = _summarize_writes(pending_sources)
+        if pending_writes and summary:
+            message = f"{message} {summary}"
 
         globals_payload: dict[str, str] = {}
         visible_keys = {

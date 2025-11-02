@@ -349,39 +349,33 @@ def _format_directory_message(
     path: VfsPath, directories: tuple[str, ...], files: tuple[str, ...]
 ) -> str:
     prefix = _format_path(path)
-    directory_list = ", ".join(directories) if directories else "(none)"
-    file_list = ", ".join(files) if files else "(none)"
-    return f"Directory {prefix}\nsubdirectories: {directory_list}\nfiles: {file_list}"
+    subdir_label = "subdir" if len(directories) == 1 else "subdirs"
+    file_label = "file" if len(files) == 1 else "files"
+    return (
+        f"Listed directory {prefix} "
+        f"({len(directories)} {subdir_label}, {len(files)} {file_label})."
+    )
 
 
 def _format_read_file_message(file: VfsFile) -> str:
     path_label = _format_path(file.path)
-    header = (
-        f"Read file {path_label} (version {file.version}, {file.size_bytes} bytes)."
-    )
-    body = file.content if file.content else "(empty file)"
-    return f"{header}\n{body}"
+    return f"Read file {path_label}."
 
 
-def _format_write_file_message(path: VfsPath, content: str, mode: WriteMode) -> str:
+def _format_write_file_message(path: VfsPath, _content: str, mode: WriteMode) -> str:
     path_label = _format_path(path)
     action = {
         "create": "create",
         "overwrite": "overwrite",
         "append": "append",
     }[mode]
-    header = f"Staged {action} for {path_label} ({len(content)} characters)."
-    body = content if content else "(empty content)"
-    return f"{header}\n{body}"
+    return f"Staged {action} for {path_label}."
 
 
 def _format_delete_message(path: VfsPath, files: Sequence[VfsFile]) -> str:
     path_label = _format_path(path)
-    deleted_paths = ", ".join(_format_path(file.path) for file in files)
-    return (
-        f"Deleted {len(files)} entr{'ies' if len(files) != 1 else 'y'} under {path_label}:"
-        f" {deleted_paths}"
-    )
+    entry_label = "entry" if len(files) == 1 else "entries"
+    return f"Deleted {len(files)} {entry_label} under {path_label}."
 
 
 def _format_path(path: VfsPath) -> str:
