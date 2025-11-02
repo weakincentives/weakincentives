@@ -21,25 +21,25 @@ binary diff tooling for override files.
 ## Project Root Detection
 
 1. The store must locate the project root automatically.
-2. Root discovery should obey the following precedence order:
+1. Root discovery should obey the following precedence order:
    1. If the caller provides an explicit `root_path` argument, use it (after
       resolving to an absolute path) and skip auto-detection.
-   2. Otherwise, walk upward from the current working directory until a Git
+   1. Otherwise, walk upward from the current working directory until a Git
       repository boundary is found. The detection MUST succeed when invoked from
       any path inside the repository.
       - Prefer `git rev-parse --show-toplevel` for speed when Git is available.
       - Fall back to manually traversing parents until a `.git` directory or
         file is encountered. Treat the directory containing `.git` as the root.
-   3. If the traversal reaches the filesystem root without finding a Git
+   1. If the traversal reaches the filesystem root without finding a Git
       repository, raise `PromptOverridesError` with guidance to pass `root_path`
       explicitly.
-3. The default overrides directory resolves to
+1. The default overrides directory resolves to
    `<project-root>/.weakincentives/prompts/overrides`.
-4. The store must create the directory tree lazily on first write.
+1. The store must create the directory tree lazily on first write.
 
 ## On-Disk Layout
 
--```
+```
 .weakincentives/
   prompts/
     overrides/
@@ -143,14 +143,14 @@ Future optimizers will call `upsert` after computing new section bodies.
 ## Read Path Behavior
 
 1. When `resolve` is invoked, load the `{tag}.json` file for the descriptor.
-2. If the file is missing, return `None`.
-3. Validate the payload before constructing `PromptOverride`:
+1. If the file is missing, return `None`.
+1. Validate the payload before constructing `PromptOverride`:
    - `ns`, `prompt_key`, and `tag` must match the descriptor inputs.
    - Every section override must include `expected_hash` matching the current
      descriptor section hash. Stale overrides are ignored with a log message, and
      the store should continue processing other sections.
    - Tool overrides follow the same hash validation logic.
-4. Return `None` if no valid sections or tools remain after filtering.
+1. Return `None` if no valid sections or tools remain after filtering.
 
 ## Write Path Behavior
 
@@ -161,11 +161,11 @@ Future optimizers will call `upsert` after computing new section bodies.
      stored `expected_hash` values match the descriptor's current hashes.
    - Confirm that each tool override references a known tool descriptor and that
      `expected_contract_hash` aligns with the descriptor's hash.
-2. Writes are atomic: persist to a temporary file within the target directory and
+1. Writes are atomic: persist to a temporary file within the target directory and
    `os.replace` the final `{tag}.json`.
-3. Directory creation should be idempotent; intermediate folders are created with
+1. Directory creation should be idempotent; intermediate folders are created with
    `exist_ok=True` semantics.
-4. `seed_if_necessary` wraps `upsert` to bootstrap overrides:
+1. `seed_if_necessary` wraps `upsert` to bootstrap overrides:
    - Derive the `PromptDescriptor` from the provided `Prompt` (e.g. via
      `PromptDescriptor.from_prompt(prompt)`), ensuring the hashes correspond to
      the concrete prompt body that supplied the data.

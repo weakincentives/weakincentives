@@ -93,4 +93,3 @@ Round-tripping `Snapshot -> json -> Snapshot` must preserve equality.
 - **Error surfaces** – Attempting to snapshot unsupported slice contents or
   restoring with invalid data raises the documented exceptions and preserves
   current state.
-
