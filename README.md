@@ -50,7 +50,10 @@ so optimizers can swap instructions without rewriting the runtime.
 ### 1. Model review data and expected outputs
 
 Typed dataclasses keep inputs and outputs honest so adapters can emit consistent
-telemetry and structured responses stay predictable.
+telemetry and structured responses stay predictable. Dive into the
+[Dataclass Serde Utilities](specs/DATACLASS_SERDE.md) and [Structured Output via
+`Prompt[OutputT]`](specs/STRUCTURED_OUTPUT.md) specs for the validation rules and
+JSON-return guarantees that back this example.
 
 ```python
 from dataclasses import dataclass
@@ -87,7 +90,11 @@ multi-step plans, staged edits, and quick calculations. Host mounts feed the
 reviewer precomputed diffs before the run begins so it can read them through the
 virtual filesystem tools without calling back to your orchestrator. Because each
 tool suite records its activity on the session, selectors later in the tutorial
-can recover audit logs without extra plumbing.
+can recover audit logs without extra plumbing. See the [Session State
+Specification](specs/SESSIONS.md), [Prompt Event Emission](specs/EVENTS.md),
+[Virtual Filesystem Tool Suite](specs/VFS_TOOLS.md), [Planning Tool
+Suite](specs/PLANNING_TOOL.md), and [Asteval Integration](specs/ASTEVAL.md) for
+the reducer contracts and tool capabilities these snippets rely on.
 
 ```python
 from pathlib import Path
@@ -144,7 +151,10 @@ Weak Incentives tools are typed functions that return structured results. Use
 them to expose deterministic helpers alongside the built-in suites. A reviewer
 benefits from a lightweight code-search utility that surfaces the context around
 symbols referenced in a diff. Mount a checkout of the repository under
-`/srv/agent-repo` before launching the run so the tool can read from it.
+`/srv/agent-repo` before launching the run so the tool can read from it. Refer to
+the [Tool Registration Specification](specs/TOOLS.md) and [Error Handling
+Revamp](specs/TOOL_ERROR_HANDLING.md) to mirror the expected handler contract and
+`ToolResult` semantics.
 
 ```python
 from dataclasses import dataclass
@@ -223,7 +233,9 @@ now chase suspicious references without delegating work back to the orchestrator
 
 Sections rely on `string.Template`, so prepare readable placeholders up front.
 Combine your review instructions with the built-in tool suites to publish a
-single, auditable prompt tree.
+single, auditable prompt tree. The [Prompt Class Specification](specs/PROMPTS.md)
+and [Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md) detail the
+rendering rules and hashing metadata that keep this structure stable.
 
 ```python
 from weakincentives import MarkdownSection, Prompt
@@ -306,7 +318,10 @@ print([tool.name for tool in rendered.tools])
 
 Adapters send the rendered prompt to a provider and publish telemetry to the
 event bus. The session subscribed above automatically ingests each
-`PromptExecuted` and `ToolInvoked` event.
+`PromptExecuted` and `ToolInvoked` event. Review the [Adapter Evaluation
+Specification](specs/ADAPTERS.md) and [Native OpenAI Structured
+Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md) for provider payload
+expectations and parsing guarantees.
 
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter
@@ -348,7 +363,10 @@ Built-in selectors expose the data collected by reducers that each tool suite
 registered. This gives you ready-to-ship audit logs without building LangGraph
 callbacks or DSPy side channels. Planning reducers keep only the latest `Plan`
 snapshot; register your own reducer before instantiating `PlanningToolsSection`
-if you need to retain a historical ledger alongside the current state.
+if you need to retain a historical ledger alongside the current state. Consult
+the [Session State Specification](specs/SESSIONS.md) and [Session Snapshots
+Specification](specs/SESSION_SNAPSHOTS.md) to understand how selectors and
+rollbacks behave in production runs.
 
 ```python
 from weakincentives.session import select_latest
@@ -376,7 +394,10 @@ if vfs_snapshot:
 
 DSPy-style optimizers can persist improved instructions and let the runtime swap
 them in without re-deploying code. Implement the `PromptOverridesStore` protocol
-to serve overrides by namespace, key, and tag.
+to serve overrides by namespace, key, and tag. The [Prompt Versioning &
+Persistence](specs/PROMPTS_VERSIONING.md) and [Local Prompt Overrides Store
+Specification](specs/LOCAL_PROMPT_OVERRIDES_STORE.md) walk through descriptor
+hashing and the filesystem layout these overrides depend on.
 
 ```python
 from dataclasses import dataclass
@@ -453,7 +474,9 @@ You now have a deterministic reviewer that:
 
 Drop the agent into a queue worker, Slack bot, or scheduled job. Every evaluation
 is replayable thanks to the captured session state, so postmortems start with
-facts—not speculation.
+facts—not speculation. For long-lived deployments, pair these patterns with the
+[Tool-Aware Prompt Versioning](specs/TOOL_AWARE_PROMPT_VERSIONING.md) guidance to
+keep overrides and tooling descriptions aligned as the code evolves.
 
 ## Development Setup
 
