@@ -61,13 +61,12 @@ Round-tripping `Snapshot -> json -> Snapshot` must preserve equality.
 
 ## State Capture Semantics
 
-1. `snapshot()` acquires a read lock on the Session's internal state, clones the
-   immutable mappings, and releases the lock before performing serialization.
-   Session state stays immutable so snapshots can reuse existing tuples without
-   copying.
+1. `snapshot()` reads the Session's immutable slice mapping and packages it into
+   a new `Snapshot`. Because slices are already stored as tuples, capturing a
+   snapshot does not require copying or synchronization.
 1. Active reducers finish before the snapshot captures state; new events received
    afterward are not part of the snapshot. Document that callers should snapshot
-   only after their own dispatch completes to avoid missing concurrent events.
+   only after their own dispatch completes to avoid missing in-flight updates.
 1. Rollbacks replace the current slice mapping with the snapshot payload. Reducer
    registrations are not serialized; the Session keeps existing reducers and
    simply replaces the tuple values they manage. Slices present in the Session
@@ -94,8 +93,6 @@ Round-tripping `Snapshot -> json -> Snapshot` must preserve equality.
 - **Error surfaces** – Attempting to snapshot unsupported slice contents or
   restoring with invalid data raises the documented exceptions and preserves
   current state.
-- **Concurrency guard** – Simulated concurrent `snapshot()` calls do not corrupt
-  state and return independent `Snapshot` values.
 
 ## Open Questions
 
