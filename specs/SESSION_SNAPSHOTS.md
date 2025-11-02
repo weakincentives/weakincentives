@@ -94,9 +94,3 @@ Round-tripping `Snapshot -> json -> Snapshot` must preserve equality.
   restoring with invalid data raises the documented exceptions and preserves
   current state.
 
-## Open Questions
-
-- Should snapshots optionally prune specific slices to reduce payload size?
-- Do we need delta snapshots to optimize large histories, or is full capture
-  acceptable for near-term workloads?
-- Should rollback emit diagnostics or events for observability tooling?
