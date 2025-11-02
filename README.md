@@ -345,22 +345,25 @@ with provider context rather than silently degrading.
 
 Built-in selectors expose the data collected by reducers that each tool suite
 registered. This gives you ready-to-ship audit logs without building LangGraph
-callbacks or DSPy side channels.
+callbacks or DSPy side channels. Planning reducers keep only the latest `Plan`
+snapshot; register your own reducer before instantiating `PlanningToolsSection`
+if you need to retain a historical ledger alongside the current state.
 
 ```python
-from weakincentives.session import select_all, select_latest
+from weakincentives.session import select_latest
 from weakincentives.tools import Plan, VirtualFileSystem
 
 
-plan_history = select_all(session, Plan)
 latest_plan = select_latest(session, Plan)
 vfs_snapshot = select_latest(session, VirtualFileSystem)
 
 
-print(f"Plan steps recorded: {len(plan_history)}")
 if latest_plan:
+    print(f"Plan objective: {latest_plan.objective}")
     for step in latest_plan.steps:
         print(f"- [{step.status}] {step.title}")
+else:
+    print("No plan recorded yet.")
 
 
 if vfs_snapshot:
