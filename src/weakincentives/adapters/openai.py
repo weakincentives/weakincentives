@@ -14,12 +14,12 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping, Sequence
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from ..events import EventBus
+from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 from . import shared as _shared
@@ -107,7 +107,7 @@ def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
     return openai_module.OpenAI(**kwargs)
 
 
-logger = logging.getLogger(__name__)
+logger: StructuredLogger = get_logger(__name__, context={"component": "adapter.openai"})
 
 
 class OpenAIAdapter:

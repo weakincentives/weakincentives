@@ -14,13 +14,13 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
 from ..events import EventBus, NullEventBus, PromptExecuted, ToolInvoked
+from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ._types import ReducerEvent, TypedReducer
 from .snapshots import (
@@ -30,7 +30,7 @@ from .snapshots import (
     normalize_snapshot_state,
 )
 
-logger = logging.getLogger(__name__)
+logger: StructuredLogger = get_logger(__name__, context={"component": "session"})
 
 
 @dataclass(slots=True, frozen=True)
@@ -250,10 +250,17 @@ class Session:
             try:
                 result = registration.reducer(previous, event)
             except Exception:  # log and continue
+                reducer_name = getattr(
+                    registration.reducer, "__qualname__", repr(registration.reducer)
+                )
                 logger.exception(
-                    "Reducer %r failed for data type %s",
-                    registration.reducer,
-                    data_type,
+                    "Reducer application failed.",
+                    event="session_reducer_failed",
+                    context={
+                        "reducer": reducer_name,
+                        "data_type": data_type.__qualname__,
+                        "slice_type": slice_type.__qualname__,
+                    },
                 )
                 continue
             normalized = tuple(result)
