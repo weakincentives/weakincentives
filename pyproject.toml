@@ -109,9 +109,16 @@ markers = [
 ]
 norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 
+[tool.coverage.run]
+
+[tool.deptry]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["litellm", "asteval", "openai"]
+
 [tool.pyright]
-typeCheckingMode = "standard"
-include = ["."]
+typeCheckingMode = "strict"
+include = ["src"]
 exclude = [
     "test-repositories",
     ".git",
@@ -121,9 +128,9 @@ exclude = [
     ".ruff_cache",
     "dist",
 ]
-[tool.coverage.run]
 
-[tool.deptry]
+[tool.pyright.reportUnreachableCode]
+severity = "error"
 
-[tool.deptry.per_rule_ignores]
-DEP002 = ["litellm"]
+[tool.pyright.reportUnnecessaryCode]
+severity = "error"

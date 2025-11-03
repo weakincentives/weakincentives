@@ -17,11 +17,14 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
-from typing import Final
+from typing import Final, cast
 
 from ..prompt._types import SupportsDataclass
 from ..prompt.tool import ToolResult
 from ..serde import dump
+
+type JsonPrimitive = str | int | float | bool | None
+type JsonValue = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
 
 _UNSET: Final = object()
 
@@ -31,7 +34,7 @@ def serialize_tool_message(
 ) -> str:
     """Return a JSON string summarising a tool invocation for provider APIs."""
 
-    message_payload: dict[str, object] = {
+    message_payload: dict[str, JsonValue | bool | str] = {
         "message": result.message,
         "success": result.success,
     }
@@ -44,19 +47,34 @@ def serialize_tool_message(
     return json.dumps(message_payload, ensure_ascii=False)
 
 
-def _serialize_value(value: object) -> object:
+def _serialize_value(value: object) -> JsonValue:
     """Convert tool result payloads to JSON-compatible structures."""
 
     if is_dataclass(value):
-        return dump(value, exclude_none=True)
+        return _serialize_str_mapping(dump(value, exclude_none=True))
 
     if isinstance(value, Mapping):
-        return {key: _serialize_value(item) for key, item in value.items()}
+        return _serialize_mapping(cast(Mapping[object, object], value))
 
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_serialize_value(item) for item in value]
+        sequence_items = cast(Sequence[object], value)
+        return [_serialize_value(item) for item in sequence_items]
 
-    return value
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+
+    return str(value)
+
+
+def _serialize_mapping(mapping: Mapping[object, object]) -> dict[str, JsonValue]:
+    serialized: dict[str, JsonValue] = {}
+    for key, item in mapping.items():
+        serialized[str(key)] = _serialize_value(item)
+    return serialized
+
+
+def _serialize_str_mapping(mapping: Mapping[str, object]) -> dict[str, JsonValue]:
+    return {key: _serialize_value(item) for key, item in mapping.items()}
 
 
 __all__ = ["serialize_tool_message"]

@@ -77,3 +77,19 @@ def test_serialize_tool_message_skips_override_payload_when_excluded() -> None:
         )
     )
     assert decoded == {"message": "ok", "success": True}
+
+
+def test_serialize_tool_message_falls_back_to_stringification() -> None:
+    class UnknownPayload:
+        def __str__(self) -> str:
+            return "payload"
+
+    result = ToolResult(message="ok", value=None)
+
+    decoded = json.loads(
+        serialize_tool_message(
+            cast(ToolResult[SupportsDataclass], result),
+            payload=UnknownPayload(),
+        )
+    )
+    assert decoded["payload"] == "payload"

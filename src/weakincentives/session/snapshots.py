@@ -20,8 +20,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from importlib import import_module
-from typing import Any
+from typing import Any, TypeGuard, cast
 
+from ..prompt._types import SupportsDataclass
 from ..serde import dump, parse
 
 SNAPSHOT_SCHEMA_VERSION = "1"
@@ -36,31 +37,31 @@ class SnapshotRestoreError(RuntimeError):
 
 
 def normalize_snapshot_state(
-    state: Mapping[type[Any], tuple[Any, ...]],
-) -> Mapping[type[Any], tuple[Any, ...]]:
+    state: Mapping[object, tuple[object, ...]],
+) -> Mapping[type[SupportsDataclass], tuple[SupportsDataclass, ...]]:
     """Validate snapshot state and return an immutable copy."""
 
-    normalized: dict[type[Any], tuple[Any, ...]] = {}
-    for slice_type, values in state.items():
-        if not isinstance(slice_type, type):
-            raise ValueError("Slice keys must be types")
+    normalized: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = {}
+    for slice_key, values in state.items():
+        if not _is_dataclass_type(slice_key):
+            raise ValueError("Slice keys must be dataclass types")
 
-        if not is_dataclass(slice_type):
-            raise ValueError(f"Slice type {slice_type!r} is not a dataclass")
+        slice_type = cast(type[SupportsDataclass], slice_key)  # pyright: ignore[reportUnnecessaryCast]
 
-        items: list[Any] = []
+        items: list[SupportsDataclass] = []
         for value in values:
-            if not is_dataclass(value) or isinstance(value, type):
+            if not _is_dataclass_instance(value):
                 raise ValueError(
                     f"Slice {slice_type.__qualname__} contains non-dataclass value"
                 )
+            dataclass_value = cast(SupportsDataclass, value)  # pyright: ignore[reportUnnecessaryCast]
             try:
-                dump(value)
+                dump(dataclass_value)
             except Exception as error:  # noqa: BLE001
                 raise ValueError(
                     f"Slice {slice_type.__qualname__} cannot be serialized"
                 ) from error
-            items.append(value)
+            items.append(dataclass_value)
 
         normalized[slice_type] = tuple(items)
 
@@ -95,9 +96,12 @@ def _ensure_timezone(dt: datetime) -> datetime:
     return dt
 
 
-def _infer_item_type(slice_type: type[Any], values: tuple[Any, ...]) -> type[Any]:
+def _infer_item_type(
+    slice_type: type[SupportsDataclass], values: tuple[SupportsDataclass, ...]
+) -> type[SupportsDataclass]:
     if values:
-        first_type = type(values[0])
+        first_value = values[0]
+        first_type = type(first_value)
         for value in values:
             if type(value) is not first_type:  # noqa: E721 - intentional identity check
                 msg = (
@@ -109,17 +113,28 @@ def _infer_item_type(slice_type: type[Any], values: tuple[Any, ...]) -> type[Any
     return slice_type
 
 
+def _is_dataclass_type(value: object) -> TypeGuard[type[SupportsDataclass]]:
+    return isinstance(value, type) and is_dataclass(value)
+
+
+def _is_dataclass_instance(value: object) -> TypeGuard[SupportsDataclass]:
+    return is_dataclass(value) and not isinstance(value, type)
+
+
 @dataclass(slots=True, frozen=True)
 class Snapshot:
     """Frozen value object representing session slice state."""
 
     created_at: datetime
-    slices: Mapping[type[Any], tuple[Any, ...]] = field(
-        default_factory=lambda: types.MappingProxyType({})
+    slices: Mapping[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = field(
+        default_factory=lambda: cast(
+            Mapping[type[SupportsDataclass], tuple[SupportsDataclass, ...]],
+            types.MappingProxyType({}),
+        )
     )
 
     def __post_init__(self) -> None:
-        normalized = {
+        normalized: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = {
             slice_type: tuple(values) for slice_type, values in self.slices.items()
         }
         object.__setattr__(self, "created_at", _ensure_timezone(self.created_at))
@@ -137,7 +152,7 @@ class Snapshot:
     def to_json(self) -> str:
         """Serialize the snapshot to a JSON string."""
 
-        payload_slices = []
+        payload_slices: list[dict[str, object]] = []
         for slice_type, values in sorted(
             self.slices.items(), key=lambda item: _type_identifier(item[0])
         ):
@@ -156,7 +171,7 @@ class Snapshot:
                 }
             )
 
-        payload = {
+        payload: dict[str, object] = {
             "version": SNAPSHOT_SCHEMA_VERSION,
             "created_at": self.created_at.isoformat(),
             "slices": payload_slices,
@@ -175,7 +190,9 @@ class Snapshot:
         if not isinstance(payload, dict):
             raise SnapshotRestoreError("Snapshot payload must be an object")
 
-        version = payload.get("version")
+        payload_mapping = cast(dict[str, object], payload)
+
+        version = payload_mapping.get("version")
         if version != SNAPSHOT_SCHEMA_VERSION:
             msg = (
                 "Snapshot schema version mismatch: "
@@ -183,7 +200,7 @@ class Snapshot:
             )
             raise SnapshotRestoreError(msg)
 
-        created_at_raw = payload.get("created_at")
+        created_at_raw = payload_mapping.get("created_at")
         if not isinstance(created_at_raw, str):
             raise SnapshotRestoreError("Snapshot created_at must be a string")
         try:
@@ -191,40 +208,58 @@ class Snapshot:
         except ValueError as error:
             raise SnapshotRestoreError("Invalid created_at timestamp") from error
 
-        slices_payload = payload.get("slices", [])
-        if not isinstance(slices_payload, list):
+        slices_payload_raw = payload_mapping.get("slices", [])
+        if not isinstance(slices_payload_raw, list):
             raise SnapshotRestoreError("Snapshot slices must be a list")
 
-        restored: dict[type[Any], tuple[Any, ...]] = {}
-        for entry in slices_payload:
-            if not isinstance(entry, dict):
+        slices_payload = cast(list[object], slices_payload_raw)
+
+        restored: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = {}
+        for entry_obj in slices_payload:
+            if not isinstance(entry_obj, Mapping):
                 raise SnapshotRestoreError("Slice entry must be an object")
+
+            entry = cast(Mapping[str, object], entry_obj)
 
             slice_identifier = entry.get("slice_type")
             item_identifier = entry.get("item_type")
-            items_payload = entry.get("items", [])
 
             if not isinstance(slice_identifier, str) or not isinstance(
                 item_identifier, str
             ):
                 raise SnapshotRestoreError("Slice type identifiers must be strings")
 
-            slice_type = _resolve_type(slice_identifier)
-            item_type = _resolve_type(item_identifier)
+            slice_type_candidate = _resolve_type(slice_identifier)
+            item_type_candidate = _resolve_type(item_identifier)
 
-            if not is_dataclass(slice_type) or not is_dataclass(item_type):
+            if not _is_dataclass_type(slice_type_candidate) or not _is_dataclass_type(
+                item_type_candidate
+            ):
                 raise SnapshotRestoreError("Snapshot types must be dataclasses")
 
-            if not isinstance(items_payload, list):
+            slice_type = slice_type_candidate
+            item_type = item_type_candidate
+
+            items_payload_obj = entry.get("items", [])
+
+            if not isinstance(items_payload_obj, list):
                 raise SnapshotRestoreError("Slice items must be a list")
 
-            try:
-                restored_items = tuple(parse(item_type, item) for item in items_payload)
-            except Exception as error:  # noqa: BLE001
-                raise SnapshotRestoreError(
-                    f"Failed to restore slice {slice_type.__qualname__}"
-                ) from error
+            items_payload = cast(list[object], items_payload_obj)
 
-            restored[slice_type] = restored_items
+            restored_items: list[SupportsDataclass] = []
+            for item_obj in items_payload:
+                if not isinstance(item_obj, Mapping):
+                    raise SnapshotRestoreError("Slice items must be objects")
+                item_mapping = cast(Mapping[str, object], item_obj)
+                try:
+                    restored_item = parse(item_type, item_mapping)
+                except Exception as error:  # noqa: BLE001
+                    raise SnapshotRestoreError(
+                        f"Failed to restore slice {slice_type.__qualname__}"
+                    ) from error
+                restored_items.append(restored_item)
+
+            restored[slice_type] = tuple(restored_items)
 
         return cls(created_at=_ensure_timezone(created_at), slices=restored)

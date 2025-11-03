@@ -120,7 +120,7 @@ class Session:
 
         try:
             normalized: Mapping[type[Any], tuple[Any, ...]] = normalize_snapshot_state(
-                self._state
+                cast(Mapping[object, tuple[object, ...]], self._state)
             )
         except ValueError as error:
             msg = "Unable to serialize session slices"

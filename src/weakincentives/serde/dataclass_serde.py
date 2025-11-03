@@ -632,7 +632,7 @@ def parse[T](
     for field in dataclasses.fields(cls):
         if not field.init:
             continue
-        field_meta = dict(field.metadata) if field.metadata is not None else {}
+        field_meta = dict(field.metadata)
         field_alias = None
         if aliases and field.name in aliases:
             field_alias = aliases[field.name]
@@ -670,9 +670,6 @@ def parse[T](
             else:
                 _set_extras(instance, extras)
 
-    if extra == "allow" and not extras:
-        pass
-
     validator = getattr(instance, "__validate__", None)
     if callable(validator):
         validator()
@@ -708,7 +705,7 @@ def dump(
 
     result: dict[str, object] = {}
     for field in dataclasses.fields(obj):
-        field_meta = dict(field.metadata) if field.metadata is not None else {}
+        field_meta = dict(field.metadata)
         key = field.name
         if by_alias:
             alias = field_meta.get("alias")
@@ -820,7 +817,7 @@ def _schema_for_type(
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
     origin = get_origin(base_type)
 
-    if base_type in {object, _AnyType}:
+    if base_type is object or base_type is _AnyType:
         schema_data: dict[str, object] = {}
     elif dataclasses.is_dataclass(base_type):
         dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
@@ -976,7 +973,7 @@ def schema(
     for field in dataclasses.fields(cls):
         if not field.init:
             continue
-        field_meta = dict(field.metadata) if field.metadata is not None else {}
+        field_meta = dict(field.metadata)
         alias = field_meta.get("alias")
         if alias_generator is not None and not alias:
             alias = alias_generator(field.name)
@@ -988,7 +985,7 @@ def schema(
         if field.default is MISSING and field.default_factory is MISSING:
             required.append(property_name)
 
-    schema_dict = {
+    schema_dict: dict[str, object] = {
         "title": cls.__name__,
         "type": "object",
         "properties": properties,

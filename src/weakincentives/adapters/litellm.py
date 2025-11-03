@@ -18,7 +18,7 @@ import logging
 import re
 from collections.abc import Mapping, Sequence
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast
+from typing import Any, Final, Literal, Protocol, cast
 
 from ..events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
 from ..prompt._types import SupportsDataclass
@@ -39,16 +39,6 @@ _ERROR_MESSAGE: Final[str] = (
     "LiteLLM support requires the optional 'litellm' dependency. "
     "Install it with `uv sync --extra litellm` or `pip install weakincentives[litellm]`."
 )
-
-try:  # pragma: no cover - optional dependency import for tooling
-    import litellm as _optional_litellm  # type: ignore[import]
-except ModuleNotFoundError:  # pragma: no cover - handled lazily in loader
-    _optional_litellm = None  # type: ignore[assignment]
-
-if TYPE_CHECKING:  # pragma: no cover - optional dependency for typing only
-    import litellm
-
-    _ = litellm.__name__
 
 
 class _CompletionFunctionCall(Protocol):

@@ -193,6 +193,13 @@ def test_snapshot_from_json_error_branches() -> None:
     with pytest.raises(SnapshotRestoreError):
         Snapshot.from_json(json.dumps(payload))
 
+    payload = make_snapshot_payload()
+    slices = cast(list[object], payload["slices"])
+    bad_entry = cast(dict[str, object], slices[0])
+    bad_entry["items"] = ["not-a-mapping"]
+    with pytest.raises(SnapshotRestoreError):
+        Snapshot.from_json(json.dumps(payload))
+
 
 def test_snapshot_from_json_success_sets_timezone() -> None:
     payload = make_snapshot_payload()
