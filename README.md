@@ -12,16 +12,18 @@ while allowing the prompts to be automatically optimized.
 
 ## Highlights
 
-- Namespaced prompt trees with deterministic Markdown renders, placeholder
-  verification, and tool-aware versioning metadata.
-- Stdlib-only dataclass serde (`parse`, `dump`, `clone`, `schema`) keeps request and
-  response types honest end-to-end.
-- Session state container and event bus collect prompt and tool telemetry for
-  downstream automation.
-- Built-in planning and virtual filesystem tool suites give agents durable plans and
-  sandboxed edits backed by reducers and selectors.
-- Optional OpenAI and LiteLLM adapters integrate structured output parsing, tool
-  orchestration, and telemetry hooks.
+- Prompt objects compose trees of dataclass-backed sections, render deterministic
+  Markdown with validated placeholders, and automatically surface tool contracts.
+- Prompt definitions ship with hash-based descriptors plus on-disk overrides that
+  stay in sync through schema validation and Git-root discovery.
+- Provider adapters share a conversation loop that negotiates tool calls, applies
+  JSON-schema response formats, and normalizes structured payloads.
+- An in-process event bus publishes `ToolInvoked` and `PromptExecuted` events while
+  the session aggregates typed payloads, supports reducers, and enables rollback.
+- Built-in planning, virtual filesystem, and Python-eval sections register their
+  own reducers, enforce domain-specific validation, and expose guided Markdown.
+- The code-review example ties it together with override-aware prompts, session
+  telemetry, and replayable tooling for deterministic agent runs.
 
 ## Requirements
 
