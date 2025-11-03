@@ -44,49 +44,56 @@ If you are new to agents or to this library, start with
 [`code_reviewer_example.py`](code_reviewer_example.py). The file implements a
 single-player "pair review" session: you paste a code snippet, the agent drafts
 feedback, and you can inspect every prompt, plan, and tool invocation it uses
-along the way. Treat the script as an annotated tour of the core abstractions:
+along the way.
 
-- **Session orchestration** keeps track of user turns, plan state, and tool
-  outputs.
-- **Prompt composition** defines what the model sees—including instructions,
-  planning helpers, and virtual filesystem mounts.
-- **Model adapters** translate between provider SDKs and the strongly typed
-  prompts/results used by Weak Incentives.
+To keep things approachable, the script is now heavily commented with numbered
+section headers. Skim them in order—each block mirrors a topic in this tutorial
+and links to the supporting specs so you know where to dig deeper next:
 
-The snippets below highlight the main building blocks so you can follow along
-directly in the source before running it yourself.
+| Step | What it covers | Why it matters |
+| --- | --- | --- |
+| 0 | Project paths and prompt override tagging | Mounts the `sunfish` repo and explains how Markdown overrides load from disk (see [Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md)). |
+| 1 | `_PromptWithOverrides` proxy | Shows how prompt renders pick up local Markdown edits without patching Python code. |
+| 2 | `build_sunfish_prompt` factory | Walks through the prompt tree, planning tools, VFS mounts, and Python evaluation helpers (see [Prompt Class](specs/PROMPTS.md), [Planning Tools](specs/PLANNING_TOOL.md), and [Virtual Filesystem Tools](specs/VFS_TOOLS.md)). |
+| 3 | `SunfishReviewSession` orchestration | Demonstrates session state, telemetry collection, and helper renderers (see [Session State](specs/SESSIONS.md) and [Session Snapshots](specs/SESSION_SNAPSHOTS.md)). |
+| 4 | `build_adapter` provider selection | Explains how to switch between OpenAI and LiteLLM adapters, validate API keys, and pass through model names (see [Adapter Evaluation](specs/ADAPTERS.md) and [Native OpenAI Structured Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md)). |
+| 5 | `main` REPL loop | Ties everything together in a friendly command-line interface. |
 
-### 1. Start the interactive session
+The snippets below correspond to those sections so you can orient yourself in
+the source while reading.
 
-The example introduces a `SunfishReviewSession` helper that wires the entire
-runtime together. Even if you have never built an agent loop before, you can
-read the constructor to see which pieces matter: an adapter ("how do we talk to
-the model?"), an override tag ("which prompt edits should be applied?"), and the
-session state that records every interaction (see
-[Session State](specs/SESSIONS.md) and [Prompt Event Emission](specs/EVENTS.md)).
+> **Heads-up:** Step 0 sits at the top of the file and does not have its own
+> snippet below. It simply defines mount paths, glob filters, and the
+> `CODE_REVIEW_PROMPT_TAG` default so the later steps stay focused on logic.
+
+### Step 1: Manage prompt overrides
+
+Before any model call happens, the script wraps the base prompt with a
+`LocalPromptOverridesStore`. That proxy ensures prompt renders pick up Markdown
+edits from `.weakincentives/prompts/overrides/<tag>/...`—handy when you want to
+tweak instructions without redeploying code.
 
 ```python
-session = SunfishReviewSession(
-    build_adapter(),
-    override_tag=_resolve_override_tag(),
+self._prompt = cast(
+    Prompt[ReviewResponse],
+    _PromptWithOverrides(
+        base_prompt,
+        overrides_store=self._overrides_store,
+        tag=self._override_tag,
+    ),
 )
 ```
 
-Inside the class, `_PromptWithOverrides` wraps the base prompt in a
-`LocalPromptOverridesStore`. That store watches the filesystem for Markdown
-edits, so you can tweak instructions without editing Python code (outlined in
-[Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md)).
+Call `_resolve_override_tag()` to swap override tags at runtime. The helper
+normalizes values read from the `CODE_REVIEW_PROMPT_TAG` environment variable so
+typos fall back to the `latest` tag gracefully.
 
-### 2. Compose prompts and tooling
+### Step 2: Compose prompts and tooling
 
-Next, the `build_sunfish_prompt` function assembles the actual conversation
-guide. Think of a prompt here as a namespaced tree of Markdown sections. Each
-section can inject guidance or register tools; the library renders them into a
-deterministic string before every model call. Even if you have never used
-planning or VFS tools, skimming the factory shows how they are wired in (see the
-specs for the [Prompt Class](specs/PROMPTS.md),
-[Planning Tools](specs/PLANNING_TOOL.md), and
-[Virtual Filesystem Tools](specs/VFS_TOOLS.md)).
+Next, `build_sunfish_prompt` assembles the conversation guide. Think of a prompt
+as a namespaced tree of Markdown sections. Each section injects guidance or
+registers tools; the library renders them into a deterministic string before
+every model call.
 
 ```python
 vfs_section = VfsToolsSection(
@@ -117,14 +124,12 @@ return Prompt[ReviewResponse](
 )
 ```
 
-### 3. Inspect telemetry and plans
+### Step 3: Inspect telemetry and plans
 
-Agent tooling becomes much easier to debug once you can see what happened. The
-session captures every tool invocation, stores the latest plan, and exposes
-helper methods like `render_tool_history` and `render_plan_snapshot` that turn
-the raw state into readable summaries (described in
-[Session Snapshots](specs/SESSION_SNAPSHOTS.md)). When you call `history` inside
-the running script, it executes code like this:
+`SunfishReviewSession` wires the adapter, session state, and event bus together.
+As tool invocations stream in, the event handler records each call so you can
+replay it with `history`. Plans get similar treatment—the helper uses
+`select_latest` to snapshot the most recent `Plan` dataclass.
 
 ```python
 for index, record in enumerate(self._history, start=1):
@@ -137,14 +142,11 @@ if plan is None:
     return 'No active plan.'
 ```
 
-### 4. Choose a provider and run it
+### Step 4: Choose a provider and run it
 
-Finally, `build_adapter` selects which model API to call. The logic is ordinary
-Python conditionals, so you can follow it even if you have never touched an SDK
-before: check an environment variable, ensure the right API key is present, and
-instantiate an adapter. The example defaults to OpenAI, but LiteLLM is available
-too (see [Adapter Evaluation](specs/ADAPTERS.md) and
-[Native OpenAI Structured Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md)).
+`build_adapter` selects which model API to call. The logic is ordinary Python
+conditionals: check the `CODE_REVIEW_EXAMPLE_PROVIDER` environment variable,
+ensure the right API key is present, and instantiate the adapter.
 
 ```python
 if provider == 'openai':
@@ -154,7 +156,7 @@ if provider == 'openai':
     return OpenAIAdapter(model=model)
 ```
 
-### Try it locally
+### Step 5: Try it locally
 
 With the structure in mind, invite yourself to poke around: sync dependencies
 (`uv sync --extra openai`), ensure the `test-repositories/sunfish` fixture is in

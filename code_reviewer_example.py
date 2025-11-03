@@ -10,7 +10,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Interactive example that mounts the sunfish repo for agent exploration."""
+"""Interactive walkthrough for the Sunfish code review demo.
+
+The tutorial in :mod:`README.md` references the numbered section headers below so
+first-time readers can line up prose explanations with runnable code. Skim the
+comments as you explore—each block calls out the supporting specs and points at
+the knobs you are most likely to customize in your own project.
+"""
 
 from __future__ import annotations
 
@@ -44,6 +50,16 @@ from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import Plan, PlanningToolsSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
+# ---------------------------------------------------------------------------
+# Step 0: Establish project paths and prompt override settings.
+# ---------------------------------------------------------------------------
+#
+# The virtual filesystem mounts ``test-repositories/sunfish`` so readers can
+# explore a real repository without leaving the example. Prompt overrides live
+# under ``.weakincentives/prompts/overrides``—adjust the tag to switch between
+# alternate Markdown edits while the script is running. See
+# :doc:`specs/PROMPTS_VERSIONING` for the full override flow.
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
 PROMPT_OVERRIDES_TAG_ENV = "CODE_REVIEW_PROMPT_TAG"
@@ -68,6 +84,16 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
     "**/*.bmp",
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
+
+
+# ---------------------------------------------------------------------------
+# Step 1: Wrap the prompt so Markdown overrides can be applied at runtime.
+# ---------------------------------------------------------------------------
+#
+# ``_PromptWithOverrides`` is a lightweight proxy that delegates renders to the
+# real prompt but threads the :class:`LocalPromptOverridesStore`. The tutorial
+# highlights this section when it explains how edits made on disk show up in the
+# running session.
 
 
 class _PromptWithOverrides:
@@ -119,7 +145,18 @@ def _resolve_override_tag(tag: str | None = None) -> str:
     return normalized or _DEFAULT_OVERRIDE_TAG
 
 
+# ---------------------------------------------------------------------------
+# Step 2: Compose the prompt tree and register tooling.
+# ---------------------------------------------------------------------------
+#
+# ``build_sunfish_prompt`` stitches together Markdown guidance with the planning,
+# virtual filesystem, and Python evaluation tool suites. Each section maps to the
+# specs referenced throughout the README tutorial so readers can see how the
+# abstractions fit together in code.
+
+
 def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
+    """Create the Sunfish review prompt scoped to the provided session."""
     if not TEST_REPOSITORIES_ROOT.exists():
         raise SystemExit(
             f"Expected test repositories under {TEST_REPOSITORIES_ROOT!s},"
@@ -183,6 +220,17 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
             user_turn_section,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Run an interactive session that captures telemetry.
+# ---------------------------------------------------------------------------
+#
+# ``SunfishReviewSession`` wires together the adapter, session state, event bus,
+# and helper renderers. The class methods surface plan snapshots and tool
+# history, mirroring the walkthrough in the README. This keeps the script easy to
+# extend—swap in different adapters or add new debug printouts without touching
+# the prompt builder.
 
 
 class SunfishReviewSession:
@@ -293,7 +341,18 @@ class SunfishReviewSession:
         self._history.append(record)
 
 
+# ---------------------------------------------------------------------------
+# Step 4: Select a model provider adapter.
+# ---------------------------------------------------------------------------
+#
+# The README points first-time readers here so they can see how a provider is
+# chosen. The logic is deliberately ordinary Python branching—set an environment
+# variable, ensure the right API key is present, then instantiate the adapter.
+# Add new providers by extending this function and updating the tutorial list.
+
+
 def build_adapter() -> SupportsReviewEvaluate:
+    """Instantiate the adapter specified by ``CODE_REVIEW_EXAMPLE_PROVIDER``."""
     provider = os.getenv("CODE_REVIEW_EXAMPLE_PROVIDER", "openai").strip().lower()
     if provider == "openai":
         if "OPENAI_API_KEY" not in os.environ:
@@ -316,7 +375,19 @@ def build_adapter() -> SupportsReviewEvaluate:
     )
 
 
+# ---------------------------------------------------------------------------
+# Step 5: Launch a simple REPL for manual exploration.
+# ---------------------------------------------------------------------------
+#
+# ``main`` glues everything together. The prompts printed at startup mirror the
+# tutorial instructions: try a review prompt, inspect the plan, and replay tool
+# history. Keeping the loop small encourages readers to copy the structure into
+# their own scripts once they grasp how sessions, prompts, and adapters fit
+# together.
+
+
 def main() -> None:
+    """Entry point for the interactive Sunfish demo."""
     print("Launching sunfish code review session with planning and VFS tooling...")
     print("- test-repositories/sunfish mounted under virtual path 'sunfish/'.")
     print(
