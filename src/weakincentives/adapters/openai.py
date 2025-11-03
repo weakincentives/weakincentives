@@ -15,25 +15,32 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Mapping, Sequence
 from importlib import import_module
-from typing import Any, Final, Literal, Protocol, cast
+from typing import Any, Final, Protocol, cast
 
-from ..events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
+from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..prompt._types import SupportsDataclass
-from ..prompt.prompt import Prompt, RenderedPrompt
-from ..prompt.structured_output import (
-    ARRAY_WRAPPER_KEY,
-    OutputParseError,
-    parse_structured_output,
-)
-from ..prompt.tool import Tool, ToolResult
-from ..serde import parse, schema
+from ..prompt.prompt import Prompt
+from ..prompt.structured_output import OutputParseError, parse_structured_output
+from ..prompt.tool import ToolResult
 from ..session import Session
 from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse
-from .shared import execute_tool_call, parse_tool_arguments
+from .shared import (
+    ToolChoice,
+    build_json_schema_response_format,
+    execute_tool_call,
+    extract_parsed_content,
+    extract_payload,
+    first_choice,
+    format_publish_failures,
+    message_text_content,
+    parse_schema_constrained_payload,
+    parse_tool_arguments,
+    serialize_tool_call,
+    tool_to_spec,
+)
 
 _ERROR_MESSAGE: Final[str] = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -82,22 +89,6 @@ class _OpenAIClientFactory(Protocol):
     def __call__(self, **kwargs: object) -> _OpenAIProtocol: ...
 
 
-def _format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
-    messages: list[str] = []
-    for failure in failures:
-        error = failure.error
-        message = str(error).strip()
-        if not message:
-            message = error.__class__.__name__
-        messages.append(message)
-
-    if not messages:
-        return "Reducer errors prevented applying tool result."
-
-    joined = "; ".join(messages)
-    return f"Reducer errors prevented applying tool result: {joined}"
-
-
 OpenAIProtocol = _OpenAIProtocol
 
 
@@ -121,10 +112,6 @@ def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
 
 
 logger = logging.getLogger(__name__)
-
-
-ToolChoice = Literal["auto"] | Mapping[str, Any] | None
-"""Supported tool choice directives for provider APIs."""
 
 
 class OpenAIAdapter:
@@ -197,10 +184,10 @@ class OpenAIAdapter:
         )
         response_format: dict[str, Any] | None = None
         if should_parse_structured_output and self._use_native_response_format:
-            response_format = _build_json_schema_response_format(rendered, prompt_name)
+            response_format = build_json_schema_response_format(rendered, prompt_name)
 
         tools = list(rendered.tools)
-        tool_specs = [_tool_to_openai_spec(tool) for tool in tools]
+        tool_specs = [tool_to_spec(tool) for tool in tools]
         tool_registry = {tool.name: tool for tool in tools}
         tool_events: list[ToolInvoked] = []
         tool_message_records: list[
@@ -231,23 +218,25 @@ class OpenAIAdapter:
                     phase="request",
                 ) from error
 
-            provider_payload = _extract_payload(response)
-            choice = _first_choice(response, prompt_name=prompt_name)
+            provider_payload = extract_payload(response)
+            choice = cast(
+                _CompletionChoice, first_choice(response, prompt_name=prompt_name)
+            )
             message = choice.message
             tool_calls = list(message.tool_calls or [])
 
             if not tool_calls:
-                final_text = _message_text_content(message.content)
+                final_text = message_text_content(message.content)
                 output: OutputT | None = None
                 text_value: str | None = final_text or None
 
                 if should_parse_structured_output:
-                    parsed_payload = _extract_parsed_content(message)
+                    parsed_payload = extract_parsed_content(message)
                     if parsed_payload is not None:
                         try:
                             output = cast(
                                 OutputT,
-                                _parse_schema_constrained_payload(
+                                parse_schema_constrained_payload(
                                     parsed_payload, rendered
                                 ),
                             )
@@ -297,7 +286,7 @@ class OpenAIAdapter:
                 )
                 return response
 
-            assistant_tool_calls = [_serialize_tool_call(call) for call in tool_calls]
+            assistant_tool_calls = [serialize_tool_call(call) for call in tool_calls]
             messages.append(
                 {
                     "role": "assistant",
@@ -315,7 +304,7 @@ class OpenAIAdapter:
                     session=session,
                     prompt_name=prompt_name,
                     provider_payload=provider_payload,
-                    format_publish_failures=_format_publish_failures,
+                    format_publish_failures=format_publish_failures,
                     parse_arguments=parse_tool_arguments,
                     logger_override=logger,
                 )
@@ -334,215 +323,6 @@ class OpenAIAdapter:
                 if tool_choice_mapping.get("type") == "function":
                     # Relax forced single-function choice after the first call.
                     next_tool_choice = "auto"
-
-
-def _tool_to_openai_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
-    parameters_schema = schema(tool.params_type, extra="forbid")
-    parameters_schema.pop("title", None)
-    return {
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": parameters_schema,
-        },
-    }
-
-
-def _extract_payload(response: _CompletionResponse) -> dict[str, Any] | None:
-    model_dump = getattr(response, "model_dump", None)
-    if callable(model_dump):
-        try:
-            payload = model_dump()
-        except Exception:  # pragma: no cover - defensive
-            return None
-        if isinstance(payload, Mapping):
-            mapping_payload = cast(Mapping[str, Any], payload)
-            return dict(mapping_payload)
-        return None
-    if isinstance(response, Mapping):  # pragma: no cover - defensive
-        return dict(response)
-    return None
-
-
-def _build_json_schema_response_format(
-    rendered: RenderedPrompt[Any], prompt_name: str
-) -> dict[str, Any] | None:
-    output_type = rendered.output_type
-    container = rendered.container
-    allow_extra_keys = rendered.allow_extra_keys
-
-    if output_type is None or container is None:
-        return None
-
-    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
-    base_schema = schema(output_type, extra=extra_mode)
-    base_schema.pop("title", None)
-
-    if container == "array":
-        schema_payload = cast(
-            dict[str, Any],
-            {
-                "type": "object",
-                "properties": {
-                    ARRAY_WRAPPER_KEY: {
-                        "type": "array",
-                        "items": base_schema,
-                    }
-                },
-                "required": [ARRAY_WRAPPER_KEY],
-            },
-        )
-        if not allow_extra_keys:
-            schema_payload["additionalProperties"] = False
-    else:
-        schema_payload = base_schema
-
-    schema_name = _schema_name(prompt_name)
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": schema_name,
-            "schema": schema_payload,
-        },
-    }
-
-
-def _schema_name(prompt_name: str) -> str:
-    sanitized = re.sub(r"[^a-zA-Z0-9_-]+", "_", prompt_name.strip())
-    cleaned = sanitized.strip("_") or "prompt"
-    return f"{cleaned}_schema"
-
-
-def _message_text_content(content: object) -> str:
-    if isinstance(content, str) or content is None:
-        return content or ""
-    if isinstance(content, Sequence) and not isinstance(
-        content, (str, bytes, bytearray)
-    ):
-        fragments: list[str] = []
-        sequence_content = cast(Sequence[object], content)  # pyright: ignore[reportUnnecessaryCast]
-        for part in sequence_content:
-            fragments.append(_content_part_text(part))
-        return "".join(fragments)
-    return str(content)
-
-
-def _content_part_text(part: object) -> str:
-    if part is None:
-        return ""
-    if isinstance(part, Mapping):
-        mapping_part = cast(Mapping[str, object], part)
-        part_type = mapping_part.get("type")
-        if part_type in {"output_text", "text"}:
-            text_value = mapping_part.get("text")
-            if isinstance(text_value, str):
-                return text_value
-        return ""
-    part_type = getattr(part, "type", None)
-    if part_type in {"output_text", "text"}:
-        text_value = getattr(part, "text", None)
-        if isinstance(text_value, str):
-            return text_value
-    return ""
-
-
-def _extract_parsed_content(message: _Message) -> object | None:
-    parsed = getattr(message, "parsed", None)
-    if parsed is not None:
-        return parsed
-
-    content = message.content
-    if isinstance(content, Sequence) and not isinstance(
-        content, (str, bytes, bytearray)
-    ):
-        sequence_content = cast(Sequence[object], content)  # pyright: ignore[reportUnnecessaryCast]
-        for part in sequence_content:
-            payload = _parsed_payload_from_part(part)
-            if payload is not None:
-                return payload
-    return None
-
-
-def _parsed_payload_from_part(part: object) -> object | None:
-    if isinstance(part, Mapping):
-        mapping_part = cast(Mapping[str, object], part)
-        if mapping_part.get("type") == "output_json":
-            return mapping_part.get("json")
-        return None
-    part_type = getattr(part, "type", None)
-    if part_type == "output_json":
-        return getattr(part, "json", None)
-    return None
-
-
-def _parse_schema_constrained_payload(
-    payload: object, rendered: RenderedPrompt[Any]
-) -> object:
-    dataclass_type = rendered.output_type
-    container = rendered.container
-    allow_extra_keys = rendered.allow_extra_keys
-
-    if dataclass_type is None or container is None:
-        raise TypeError("Prompt does not declare structured output.")
-
-    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
-
-    if container == "object":
-        if not isinstance(payload, Mapping):
-            raise TypeError("Expected provider payload to be a JSON object.")
-        return parse(
-            dataclass_type, cast(Mapping[str, object], payload), extra=extra_mode
-        )
-
-    if container == "array":
-        if isinstance(payload, Mapping):
-            if ARRAY_WRAPPER_KEY not in payload:
-                raise TypeError("Expected provider payload to be a JSON array.")
-            payload = cast(Mapping[str, object], payload)[ARRAY_WRAPPER_KEY]
-        if not isinstance(payload, Sequence) or isinstance(
-            payload, (str, bytes, bytearray)
-        ):
-            raise TypeError("Expected provider payload to be a JSON array.")
-        parsed_items: list[object] = []
-        sequence_payload = cast(Sequence[object], payload)  # pyright: ignore[reportUnnecessaryCast]
-        for index, item in enumerate(sequence_payload):
-            if not isinstance(item, Mapping):
-                raise TypeError(f"Array item at index {index} is not an object.")
-            parsed_item = parse(
-                dataclass_type,
-                cast(Mapping[str, object], item),
-                extra=extra_mode,
-            )
-            parsed_items.append(parsed_item)
-        return parsed_items
-
-    raise TypeError("Unknown output container declared.")
-
-
-def _first_choice(
-    response: _CompletionResponse, *, prompt_name: str
-) -> _CompletionChoice:
-    try:
-        return response.choices[0]
-    except (AttributeError, IndexError) as error:  # pragma: no cover - defensive
-        raise PromptEvaluationError(
-            "Provider response did not include any choices.",
-            prompt_name=prompt_name,
-            phase="response",
-        ) from error
-
-
-def _serialize_tool_call(tool_call: _ToolCall) -> dict[str, Any]:
-    function = tool_call.function
-    return {
-        "id": getattr(tool_call, "id", None),
-        "type": "function",
-        "function": {
-            "name": function.name,
-            "arguments": function.arguments or "{}",
-        },
-    }
 
 
 __all__ = ["OpenAIAdapter", "OpenAIProtocol"]

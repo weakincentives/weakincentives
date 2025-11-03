@@ -10,19 +10,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared adapter helpers."""
+"""Shared helpers for provider adapters."""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from ..events import EventBus, HandlerFailure, ToolInvoked
 from ..prompt._types import SupportsDataclass
+from ..prompt.prompt import RenderedPrompt
+from ..prompt.structured_output import ARRAY_WRAPPER_KEY
 from ..prompt.tool import Tool, ToolResult
-from ..serde import parse
+from ..serde import parse, schema
 from ..session import Session
 from ..tools.errors import ToolValidationError
 from .core import PromptEvaluationError
@@ -50,13 +53,100 @@ class ToolArgumentsParser(Protocol):
     ) -> dict[str, Any]: ...
 
 
+ToolChoice = Literal["auto"] | Mapping[str, Any] | None
+"""Supported tool choice directives for provider APIs."""
+
+
+def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
+    """Summarize publish failures encountered while applying tool results."""
+
+    messages: list[str] = []
+    for failure in failures:
+        error = failure.error
+        message = str(error).strip()
+        if not message:
+            message = error.__class__.__name__
+        messages.append(message)
+
+    if not messages:
+        return "Reducer errors prevented applying tool result."
+
+    joined = "; ".join(messages)
+    return f"Reducer errors prevented applying tool result: {joined}"
+
+
+def tool_to_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
+    """Return a provider-agnostic tool specification payload."""
+
+    parameters_schema = schema(tool.params_type, extra="forbid")
+    parameters_schema.pop("title", None)
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": parameters_schema,
+        },
+    }
+
+
+def extract_payload(response: object) -> dict[str, Any] | None:
+    """Return a provider payload from an SDK response when available."""
+
+    model_dump = getattr(response, "model_dump", None)
+    if callable(model_dump):
+        try:
+            payload = model_dump()
+        except Exception:  # pragma: no cover - defensive
+            return None
+        if isinstance(payload, Mapping):
+            mapping_payload = cast(Mapping[str, Any], payload)
+            return dict(mapping_payload)
+        return None
+    if isinstance(response, Mapping):  # pragma: no cover - defensive
+        return dict(response)
+    return None
+
+
+def first_choice(response: object, *, prompt_name: str) -> object:
+    """Return the first choice in a provider response or raise consistently."""
+
+    try:
+        choices = response.choices  # type: ignore[attr-defined]
+        return choices[0]
+    except (
+        AttributeError,
+        IndexError,
+        TypeError,
+    ) as error:  # pragma: no cover - defensive
+        raise PromptEvaluationError(
+            "Provider response did not include any choices.",
+            prompt_name=prompt_name,
+            phase="response",
+        ) from error
+
+
+def serialize_tool_call(tool_call: object) -> dict[str, Any]:
+    """Serialize a provider tool call into the assistant message payload."""
+
+    function = tool_call.function  # type: ignore[attr-defined]
+    return {
+        "id": getattr(tool_call, "id", None),
+        "type": "function",
+        "function": {
+            "name": getattr(function, "name", None),
+            "arguments": getattr(function, "arguments", None) or "{}",
+        },
+    }
+
+
 def parse_tool_arguments(
     arguments_json: str | None,
     *,
     prompt_name: str,
     provider_payload: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Parse tool call arguments from a provider payload."""
+    """Decode tool call arguments from provider payloads."""
 
     if not arguments_json:
         return {}
@@ -164,4 +254,185 @@ def execute_tool_call(
     return invocation, tool_result
 
 
-__all__ = ["execute_tool_call", "parse_tool_arguments", "ProviderToolCall"]
+def build_json_schema_response_format(
+    rendered: RenderedPrompt[Any], prompt_name: str
+) -> dict[str, Any] | None:
+    """Construct a JSON schema response format for structured outputs."""
+
+    output_type = rendered.output_type
+    container = rendered.container
+    allow_extra_keys = rendered.allow_extra_keys
+
+    if output_type is None or container is None:
+        return None
+
+    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
+    base_schema = schema(output_type, extra=extra_mode)
+    base_schema.pop("title", None)
+
+    if container == "array":
+        schema_payload = cast(
+            dict[str, Any],
+            {
+                "type": "object",
+                "properties": {
+                    ARRAY_WRAPPER_KEY: {
+                        "type": "array",
+                        "items": base_schema,
+                    }
+                },
+                "required": [ARRAY_WRAPPER_KEY],
+            },
+        )
+        if not allow_extra_keys:
+            schema_payload["additionalProperties"] = False
+    else:
+        schema_payload = base_schema
+
+    schema_name = _schema_name(prompt_name)
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": schema_name,
+            "schema": schema_payload,
+        },
+    }
+
+
+def parse_schema_constrained_payload(
+    payload: object, rendered: RenderedPrompt[Any]
+) -> object:
+    """Parse structured provider payloads constrained by prompt schema."""
+
+    dataclass_type = rendered.output_type
+    container = rendered.container
+    allow_extra_keys = rendered.allow_extra_keys
+
+    if dataclass_type is None or container is None:
+        raise TypeError("Prompt does not declare structured output.")
+
+    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
+
+    if container == "object":
+        if not isinstance(payload, Mapping):
+            raise TypeError("Expected provider payload to be a JSON object.")
+        return parse(
+            dataclass_type, cast(Mapping[str, object], payload), extra=extra_mode
+        )
+
+    if container == "array":
+        if isinstance(payload, Mapping):
+            if ARRAY_WRAPPER_KEY not in payload:
+                raise TypeError("Expected provider payload to be a JSON array.")
+            payload = cast(Mapping[str, object], payload)[ARRAY_WRAPPER_KEY]
+        if not isinstance(payload, Sequence) or isinstance(
+            payload, (str, bytes, bytearray)
+        ):
+            raise TypeError("Expected provider payload to be a JSON array.")
+        parsed_items: list[object] = []
+        sequence_payload = cast(Sequence[object], payload)  # pyright: ignore[reportUnnecessaryCast]
+        for index, item in enumerate(sequence_payload):
+            if not isinstance(item, Mapping):
+                raise TypeError(f"Array item at index {index} is not an object.")
+            parsed_item = parse(
+                dataclass_type,
+                cast(Mapping[str, object], item),
+                extra=extra_mode,
+            )
+            parsed_items.append(parsed_item)
+        return parsed_items
+
+    raise TypeError("Unknown output container declared.")
+
+
+def message_text_content(content: object) -> str:
+    """Extract text content from provider message payloads."""
+
+    if isinstance(content, str) or content is None:
+        return content or ""
+    if isinstance(content, Sequence) and not isinstance(
+        content, (str, bytes, bytearray)
+    ):
+        fragments: list[str] = []
+        sequence_content = cast(Sequence[object], content)  # pyright: ignore[reportUnnecessaryCast]
+        for part in sequence_content:
+            fragments.append(_content_part_text(part))
+        return "".join(fragments)
+    return str(content)
+
+
+def extract_parsed_content(message: object) -> object | None:
+    """Extract structured payloads surfaced directly by the provider."""
+
+    parsed = getattr(message, "parsed", None)
+    if parsed is not None:
+        return parsed
+
+    content = getattr(message, "content", None)
+    if isinstance(content, Sequence) and not isinstance(
+        content, (str, bytes, bytearray)
+    ):
+        sequence_content = cast(Sequence[object], content)  # pyright: ignore[reportUnnecessaryCast]
+        for part in sequence_content:
+            payload = _parsed_payload_from_part(part)
+            if payload is not None:
+                return payload
+    return None
+
+
+def _schema_name(prompt_name: str) -> str:
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]+", "_", prompt_name.strip())
+    cleaned = sanitized.strip("_") or "prompt"
+    return f"{cleaned}_schema"
+
+
+def _content_part_text(part: object) -> str:
+    if part is None:
+        return ""
+    if isinstance(part, Mapping):
+        mapping_part = cast(Mapping[str, object], part)
+        part_type = mapping_part.get("type")
+        if part_type in {"output_text", "text"}:
+            text_value = mapping_part.get("text")
+            if isinstance(text_value, str):
+                return text_value
+        return ""
+    part_type = getattr(part, "type", None)
+    if part_type in {"output_text", "text"}:
+        text_value = getattr(part, "text", None)
+        if isinstance(text_value, str):
+            return text_value
+    return ""
+
+
+def _parsed_payload_from_part(part: object) -> object | None:
+    if isinstance(part, Mapping):
+        mapping_part = cast(Mapping[str, object], part)
+        if mapping_part.get("type") == "output_json":
+            return mapping_part.get("json")
+        return None
+    part_type = getattr(part, "type", None)
+    if part_type == "output_json":
+        return getattr(part, "json", None)
+    return None
+
+
+__all__ = [
+    "ProviderFunctionCall",
+    "ProviderToolCall",
+    "ToolArgumentsParser",
+    "ToolChoice",
+    "build_json_schema_response_format",
+    "execute_tool_call",
+    "extract_parsed_content",
+    "extract_payload",
+    "first_choice",
+    "format_publish_failures",
+    "message_text_content",
+    "parse_schema_constrained_payload",
+    "parse_tool_arguments",
+    "serialize_tool_call",
+    "tool_to_spec",
+    "_content_part_text",
+    "_parsed_payload_from_part",
+]
