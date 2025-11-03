@@ -60,7 +60,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         WeirdResponse,
         simple_handler,
     )
-from weakincentives.adapters import PromptEvaluationError
+from weakincentives.adapters import PromptEvaluationError, PromptResponse
 from weakincentives.events import (
     HandlerFailure,
     InProcessEventBus,
@@ -1375,3 +1375,82 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
 
     assert isinstance(err.value, PromptEvaluationError)
     assert err.value.phase == "tool"
+
+
+def test_openai_adapter_delegates_to_shared_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
+
+    prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
+        key="openai-shared-runner",
+        name="shared-runner",
+        sections=[
+            MarkdownSection[GreetingParams](
+                title="Greeting",
+                key="greeting",
+                template="Say hello to ${user}.",
+            )
+        ],
+    )
+
+    sentinel = PromptResponse(
+        prompt_name="shared-runner",
+        text="sentinel",
+        output=None,
+        tool_results=(),
+        provider_payload=None,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def fake_run_conversation(**kwargs: object) -> PromptResponse[StructuredAnswer]:
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(module, "run_conversation", fake_run_conversation)
+
+    message = DummyMessage(content="hi")
+    client = DummyOpenAIClient([DummyResponse([DummyChoice(message)])])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    params = GreetingParams(user="Ari")
+    result = adapter.evaluate(prompt, params, bus=NullEventBus())
+
+    assert result is sentinel
+    assert captured["adapter_name"] == "openai"
+    assert captured["prompt_name"] == "shared-runner"
+
+    expected_rendered = prompt.render(params, inject_output_instructions=False)
+    assert captured["rendered"] == expected_rendered
+    assert captured["initial_messages"] == [
+        {"role": "system", "content": expected_rendered.text}
+    ]
+
+    expected_response_format = module.build_json_schema_response_format(
+        expected_rendered, "shared-runner"
+    )
+    assert captured["response_format"] == expected_response_format
+    assert captured["require_structured_output_text"] is False
+    assert captured["serialize_tool_message_fn"] is module.serialize_tool_message
+
+    call_provider = captured["call_provider"]
+    select_choice = captured["select_choice"]
+    assert callable(call_provider)
+    assert callable(select_choice)
+
+    response = call_provider(
+        [{"role": "system", "content": "hi"}],
+        [],
+        None,
+        expected_response_format,
+    )
+    request_payload = cast(dict[str, Any], client.completions.requests[-1])
+    assert request_payload["model"] == "gpt-test"
+    messages = cast(list[dict[str, Any]], request_payload["messages"])
+    assert messages[0]["content"] == "hi"
+    assert request_payload["response_format"] == expected_response_format
+
+    choice = select_choice(response)
+    assert choice.message is message
