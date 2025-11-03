@@ -147,3 +147,28 @@ exclude = [
 ]
 reportUnreachable = "error"
 reportUnusedExpression = "error"
+
+[tool.ty]
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.rules]
+ambiguous-protocol-member = "error"
+deprecated = "error"
+division-by-zero = "error"
+invalid-ignore-comment = "error"
+possibly-missing-import = "error"
+possibly-unresolved-reference = "error"
+redundant-cast = "error"
+undefined-reveal = "error"
+unresolved-global = "error"
+unsupported-base = "error"
+unused-ignore-comment = "error"
+useless-overload-body = "error"
+
+[[tool.ty.overrides]]
+include = ["tests/**"]
+
+[tool.ty.overrides.rules]
+unused-ignore-comment = "ignore"

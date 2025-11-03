@@ -74,7 +74,7 @@ def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
         if descriptor is None:
             descriptor = _ExtrasDescriptor()
             _SLOTTED_EXTRAS[cls] = descriptor
-            cls.__extras__ = descriptor  # type: ignore[attr-defined]
+            cast(_AnyType, cls).__extras__ = descriptor  # pyright: ignore[reportAttributeAccessIssue]
         descriptor.__set__(instance, extras_dict)
 
 
@@ -418,10 +418,10 @@ def _coerce_to_type(
             enum_value = value
         elif config.coerce:
             try:
-                enum_value = base_type[value]  # type: ignore[index]
+                enum_value = base_type[value]
             except KeyError:
                 try:
-                    enum_value = base_type(value)  # type: ignore[call-arg]
+                    enum_value = base_type(value)
                 except ValueError as error:
                     raise ValueError(f"{path}: invalid enum value {value!r}") from error
             except TypeError:
@@ -451,6 +451,7 @@ def _coerce_to_type(
             return _apply_constraints(value, merged_meta, path)
         if not config.coerce:
             raise TypeError(f"{path}: expected {type_name}")
+        coerced_value: object | None = None
         try:
             if base_type is int:
                 coerced_value = int(value)
@@ -474,10 +475,14 @@ def _coerce_to_type(
             raise TypeError(
                 f"{path}: unable to coerce {value!r} to {type_name}"
             ) from error
+        if (
+            coerced_value is None
+        ):  # pragma: no cover - impossible when branches exhaust types
+            raise AssertionError("Unhandled literal type coercion")
         return _apply_constraints(coerced_value, merged_meta, path)
 
     try:
-        coerced = base_type(value)  # type: ignore[call-arg]
+        coerced = base_type(value)
     except Exception as error:
         raise type(error)(str(error)) from error
     return _apply_constraints(coerced, merged_meta, path)
@@ -726,7 +731,10 @@ def dump(
         result[key] = serialized
 
     if computed and hasattr(obj.__class__, "__computed__"):
-        for name in getattr(obj.__class__, "__computed__", ()):  # type: ignore[attr-defined]
+        computed_fields = cast(
+            Sequence[str], getattr(obj.__class__, "__computed__", ())
+        )
+        for name in computed_fields:
             value = getattr(obj, name)
             serialized = _serialize(
                 value,

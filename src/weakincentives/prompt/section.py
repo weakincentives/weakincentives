@@ -96,15 +96,15 @@ class Section[ParamsT: SupportsDataclass](ABC):
     @classmethod
     def __class_getitem__(cls, item: object) -> type[Section[SupportsDataclass]]:
         params_type = cls._normalize_generic_argument(item)
-
-        class _SpecializedSection(cls):  # type: ignore[misc]
-            pass
-
-        _SpecializedSection.__name__ = cls.__name__
-        _SpecializedSection.__qualname__ = cls.__qualname__
-        _SpecializedSection.__module__ = cls.__module__
-        _SpecializedSection._params_type = cast(type[SupportsDataclass], params_type)
-        return _SpecializedSection  # type: ignore[return-value]
+        specialized = cast(
+            "type[Section[SupportsDataclass]]",
+            type(cls.__name__, (cls,), {}),
+        )
+        specialized.__name__ = cls.__name__
+        specialized.__qualname__ = cls.__qualname__
+        specialized.__module__ = cls.__module__
+        specialized._params_type = cast(type[SupportsDataclass], params_type)
+        return specialized
 
     @staticmethod
     def _normalize_key(key: str) -> str:
