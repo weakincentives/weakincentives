@@ -475,7 +475,9 @@ def _coerce_to_type(
             raise TypeError(
                 f"{path}: unable to coerce {value!r} to {type_name}"
             ) from error
-        if coerced_value is None:
+        if (
+            coerced_value is None
+        ):  # pragma: no cover - impossible when branches exhaust types
             raise AssertionError("Unhandled literal type coercion")
         return _apply_constraints(coerced_value, merged_meta, path)
 

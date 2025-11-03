@@ -234,7 +234,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
         _SpecializedTool.__qualname__ = cls.__qualname__
         _SpecializedTool.__module__ = cls.__module__
         return cast(
-            type[Tool[SupportsDataclass, SupportsDataclass]],
+            "type[Tool[SupportsDataclass, SupportsDataclass]]",
             _SpecializedTool,
         )
 

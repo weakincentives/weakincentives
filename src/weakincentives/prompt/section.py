@@ -97,7 +97,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
     def __class_getitem__(cls, item: object) -> type[Section[SupportsDataclass]]:
         params_type = cls._normalize_generic_argument(item)
         specialized = cast(
-            type[Section[SupportsDataclass]],
+            "type[Section[SupportsDataclass]]",
             type(cls.__name__, (cls,), {}),
         )
         specialized.__name__ = cls.__name__

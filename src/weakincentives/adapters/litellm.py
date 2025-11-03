@@ -47,11 +47,6 @@ _ERROR_MESSAGE: Final[str] = (
     "Install it with `uv sync --extra litellm` or `pip install weakincentives[litellm]`."
 )
 
-try:  # pragma: no cover - optional dependency import for tooling
-    import litellm as _optional_litellm  # type: ignore[import]
-except ModuleNotFoundError:  # pragma: no cover - handled lazily in loader
-    _optional_litellm = None  # type: ignore[assignment]
-
 if TYPE_CHECKING:  # pragma: no cover - optional dependency for typing only
     import litellm
 
