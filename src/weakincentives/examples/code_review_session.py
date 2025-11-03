@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from ..adapters import PromptResponse
 from ..events import EventBus, InProcessEventBus, ToolInvoked
@@ -119,17 +119,16 @@ class CodeReviewSession:
         return "\n".join(lines)
 
     def _display_tool_event(self, event: object) -> None:
-        if not isinstance(event, ToolInvoked):
-            return
+        tool_event = cast(ToolInvoked, event)
 
-        serialized_params = dump(event.params, exclude_none=True)
+        serialized_params = dump(tool_event.params, exclude_none=True)
         payload = (
-            dump(event.result.value, exclude_none=True)
-            if event.result.value is not None
+            dump(tool_event.result.value, exclude_none=True)
+            if tool_event.result.value is not None
             else None
         )
         print(
-            f"[tool] {event.name} called with {serialized_params}\n       → {event.result.message}"
+            f"[tool] {tool_event.name} called with {serialized_params}\n       → {tool_event.result.message}"
         )
         if payload:
             print(
@@ -160,18 +159,19 @@ class CodeReviewSession:
         slice_values: tuple[ToolCallLog, ...],
         event: ReducerEvent,
     ) -> tuple[ToolCallLog, ...]:
-        if not isinstance(event, ToolData):
-            return slice_values
+        tool_event = cast(ToolData, event)
 
         payload = (
-            dump(event.value, exclude_none=True) if event.value is not None else None
+            dump(tool_event.value, exclude_none=True)
+            if tool_event.value is not None
+            else None
         )
         record = ToolCallLog(
-            name=event.source.name,
-            prompt_name=event.source.prompt_name,
-            message=event.source.result.message,
+            name=tool_event.source.name,
+            prompt_name=tool_event.source.prompt_name,
+            message=tool_event.source.result.message,
             value=payload,
-            call_id=event.source.call_id,
+            call_id=tool_event.source.call_id,
         )
         return (*slice_values, record)
 
