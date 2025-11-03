@@ -14,14 +14,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, cast
 
 import pytest
 
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult, registry
+from weakincentives.prompt import Tool, ToolResult
 from weakincentives.session import (
     Session,
     SnapshotRestoreError,
@@ -49,32 +48,6 @@ class SampleRecord:
     value: str
 
 
-@dataclass(slots=True, frozen=True)
-class ChildPromptParams:
-    instructions: str
-    expected_artifacts: tuple[str, ...] = ()
-
-
-@pytest.fixture(autouse=True)
-def _clear_prompt_registry() -> Iterator[None]:
-    registry.clear()
-    yield
-    registry.clear()
-
-
-def _register_child_prompt(ns: str = "tests/subagent", key: str = "child") -> None:
-    def factory(*, session: Session) -> Prompt[Any]:
-        section = MarkdownSection[ChildPromptParams](
-            title="Child Guidance",
-            template="""${instructions}\nExpected: ${expected_artifacts}""",
-            key="child-guidance",
-            default_params=ChildPromptParams(instructions=""),
-        )
-        return Prompt(ns=ns, key=key, sections=[section])
-
-    registry.register(ns, key, factory)
-
-
 class RecordingRunner:
     """Test helper that records runner invocations."""
 
@@ -85,25 +58,17 @@ class RecordingRunner:
     def __call__(
         self,
         *,
-        prompt: Prompt[Any],
         session: Session,
         bus: EventBus,
-        instructions: str,
-        expected_artifacts: tuple[str, ...],
-        mode: SubagentMode,
-        plan_step_id: str | None,
+        params: DispatchSubagent,
     ) -> DispatchSubagentResult:
         self.calls.append(
             {
-                "prompt": prompt,
                 "session": session,
-                "instructions": instructions,
-                "expected_artifacts": expected_artifacts,
-                "mode": mode,
-                "plan_step_id": plan_step_id,
+                "params": params,
             }
         )
-        assert mode == self.expected_mode
+        assert params.mode == self.expected_mode
         assert select_all(session, SampleRecord) == (SampleRecord("parent"),)
 
         payload = SampleRecord("child")
@@ -113,7 +78,7 @@ class RecordingRunner:
         )
         bus.publish(
             ToolInvoked(
-                prompt_name="tests/subagent/child",
+                prompt_name=f"{params.prompt_ns}/{params.prompt_key}",
                 adapter="test",
                 name="child_tool",
                 params=payload,
@@ -121,7 +86,7 @@ class RecordingRunner:
             )
         )
         return DispatchSubagentResult(
-            message_summary=f"done: {instructions}",
+            message_summary=f"done: {params.instructions}",
             artifacts=("draft.md",),
         )
 
@@ -141,7 +106,6 @@ def _get_dispatch_tool(section: PromptSubagentToolsSection) -> Tool[Any, Any]:
 
 
 def test_dispatch_subagent_runs_child_prompt_and_records_tools() -> None:
-    _register_child_prompt()
     bus = InProcessEventBus()
     parent_session = Session(bus=bus)
     parent_session.seed_slice(SampleRecord, (SampleRecord("parent"),))
@@ -167,41 +131,20 @@ def test_dispatch_subagent_runs_child_prompt_and_records_tools() -> None:
     assert value.message_summary == result.message
     assert value.artifacts == ("draft.md",)
     assert value.tools_used == ("child_tool",)
-
     assert len(runner.calls) == 1
     call = runner.calls[0]
-    assert call["instructions"] == "summarize progress"
-    assert call["expected_artifacts"] == ("report.md",)
-    assert isinstance(call["prompt"], Prompt)
+    params = call["params"]
+    assert params.instructions == "summarize progress"
+    assert params.expected_artifacts == ("report.md",)
+    assert params.prompt_ns == "tests/subagent"
+    assert params.prompt_key == "child"
     assert call["session"] is not parent_session
 
     # Parent session state remains unchanged.
     assert select_all(parent_session, SampleRecord) == (SampleRecord("parent"),)
 
 
-def test_dispatch_subagent_requires_registered_prompt() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    runner = RecordingRunner(expected_mode="ad_hoc")
-    section = _build_tool(session, runner)
-    tool = _get_dispatch_tool(section)
-
-    handler = tool.handler
-    assert handler is not None
-
-    with pytest.raises(ToolValidationError):
-        handler(
-            DispatchSubagent(
-                mode="ad_hoc",
-                prompt_ns="missing",
-                prompt_key="prompt",
-                instructions="do work",
-            )
-        )
-
-
 def test_dispatch_subagent_validates_inputs() -> None:
-    _register_child_prompt()
     session = Session(bus=InProcessEventBus())
     runner = RecordingRunner(expected_mode="ad_hoc")
     section = _build_tool(session, runner)
@@ -242,18 +185,13 @@ def test_dispatch_subagent_validates_inputs() -> None:
 
 
 def test_dispatch_subagent_handles_runtime_errors() -> None:
-    _register_child_prompt()
     session = Session(bus=InProcessEventBus())
 
     def failing_runner(
         *,
-        prompt: Prompt[Any],
         session: Session,
         bus: EventBus,
-        instructions: str,
-        expected_artifacts: tuple[str, ...],
-        mode: SubagentMode,
-        plan_step_id: str | None,
+        params: DispatchSubagent,
     ) -> DispatchSubagentResult:
         raise DispatchSubagentError("adapter failed")
 
@@ -277,18 +215,13 @@ def test_dispatch_subagent_handles_runtime_errors() -> None:
 
 
 def test_dispatch_subagent_handles_unexpected_runner_exceptions() -> None:
-    _register_child_prompt()
     session = Session(bus=InProcessEventBus())
 
     def crashing_runner(
         *,
-        prompt: Prompt[Any],
         session: Session,
         bus: EventBus,
-        instructions: str,
-        expected_artifacts: tuple[str, ...],
-        mode: SubagentMode,
-        plan_step_id: str | None,
+        params: DispatchSubagent,
     ) -> DispatchSubagentResult:
         raise RuntimeError("boom")
 
@@ -314,7 +247,6 @@ def test_dispatch_subagent_handles_unexpected_runner_exceptions() -> None:
 def test_dispatch_subagent_handles_snapshot_serialization_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _register_child_prompt()
     session = Session(bus=InProcessEventBus())
     runner = RecordingRunner(expected_mode="ad_hoc")
     section = _build_tool(session, runner)
@@ -340,35 +272,9 @@ def test_dispatch_subagent_handles_snapshot_serialization_error(
     assert "Unable to capture parent session state." in str(excinfo.value)
 
 
-def test_dispatch_subagent_handles_prompt_factory_failure() -> None:
-    def failing_factory(*, session: Session) -> Prompt[Any]:
-        raise RuntimeError("factory boom")
-
-    registry.register("tests/subagent", "child", failing_factory)
-    session = Session(bus=InProcessEventBus())
-    runner = RecordingRunner(expected_mode="ad_hoc")
-    section = _build_tool(session, runner)
-    tool = _get_dispatch_tool(section)
-    handler = tool.handler
-    assert handler is not None
-
-    with pytest.raises(ToolValidationError) as excinfo:
-        handler(
-            DispatchSubagent(
-                mode="ad_hoc",
-                prompt_ns="tests/subagent",
-                prompt_key="child",
-                instructions="ok",
-            )
-        )
-
-    assert "Failed to build subagent prompt" in str(excinfo.value)
-
-
 def test_dispatch_subagent_handles_snapshot_restore_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _register_child_prompt()
     session = Session(bus=InProcessEventBus())
     runner = RecordingRunner(expected_mode="ad_hoc")
     section = _build_tool(session, runner)
@@ -395,18 +301,13 @@ def test_dispatch_subagent_handles_snapshot_restore_error(
 
 
 def test_dispatch_subagent_propagates_tool_validation_error() -> None:
-    _register_child_prompt()
     session = Session(bus=InProcessEventBus())
 
     def rejecting_runner(
         *,
-        prompt: Prompt[Any],
         session: Session,
         bus: EventBus,
-        instructions: str,
-        expected_artifacts: tuple[str, ...],
-        mode: SubagentMode,
-        plan_step_id: str | None,
+        params: DispatchSubagent,
     ) -> DispatchSubagentResult:
         raise ToolValidationError("invalid runner input")
 
@@ -427,18 +328,13 @@ def test_dispatch_subagent_propagates_tool_validation_error() -> None:
 
 
 def test_dispatch_subagent_rejects_invalid_runner_result() -> None:
-    _register_child_prompt()
     session = Session(bus=InProcessEventBus())
 
     def invalid_runner(
         *,
-        prompt: Prompt[Any],
         session: Session,
         bus: EventBus,
-        instructions: str,
-        expected_artifacts: tuple[str, ...],
-        mode: SubagentMode,
-        plan_step_id: str | None,
+        params: DispatchSubagent,
     ) -> DispatchSubagentResult:
         return cast(DispatchSubagentResult, object())
 

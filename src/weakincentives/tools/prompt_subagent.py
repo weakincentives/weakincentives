@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Literal, Protocol
 
 from ..events import EventBus, InProcessEventBus, ToolInvoked
-from ..prompt import MarkdownSection, Prompt, Tool, ToolResult, registry
+from ..prompt import MarkdownSection, Tool, ToolResult
 from ..session import Session, SnapshotRestoreError, SnapshotSerializationError
 from .errors import ToolValidationError
 
@@ -65,9 +65,10 @@ class _PromptSubagentSectionParams:
 _PROMPT_SECTION_TEMPLATE: Final[str] = (
     "Spawn a focused subagent when work requires deep research or a detailed draft,"
     " or to execute a specific plan step.\n"
-    "- Choose a prompt registered in the requested namespace/key.\n"
     "- Provide concise ASCII instructions (<=2000 chars) describing the desired"
     " outcome.\n"
+    "- Label the delegated task with a namespace/key so downstream tooling can"
+    " categorize the run.\n"
     "- Enumerate any expected artifacts so the subagent can confirm delivery.\n"
     "- The child session inherits every tool available to this prompt but runs in"
     " isolation.\n"
@@ -81,13 +82,9 @@ class SubagentRunner(Protocol):
     def __call__(
         self,
         *,
-        prompt: Prompt[Any],
         session: Session,
         bus: EventBus,
-        instructions: str,
-        expected_artifacts: tuple[str, ...],
-        mode: SubagentMode,
-        plan_step_id: str | None,
+        params: DispatchSubagent,
     ) -> DispatchSubagentResult: ...
 
 
@@ -134,14 +131,14 @@ class _PromptSubagentToolSuite:
         self, params: DispatchSubagent
     ) -> ToolResult[DispatchSubagentResult]:
         normalized = _normalize_params(params)
-
-        factory = registry.resolve(normalized.prompt_ns, normalized.prompt_key)
-        if factory is None:
-            msg = (
-                "Unknown prompt requested for subagent dispatch: "
-                f"{normalized.prompt_ns}/{normalized.prompt_key}"
-            )
-            raise ToolValidationError(msg)
+        normalized_params = DispatchSubagent(
+            mode=normalized.mode,
+            prompt_ns=normalized.prompt_ns,
+            prompt_key=normalized.prompt_key,
+            instructions=normalized.instructions,
+            expected_artifacts=normalized.expected_artifacts,
+            plan_step_id=normalized.plan_step_id,
+        )
 
         try:
             snapshot = self._session.snapshot()
@@ -159,15 +156,6 @@ class _PromptSubagentToolSuite:
         _clone_session_structure(self._session, child_session)
 
         try:
-            child_prompt = factory(session=child_session)
-        except Exception as error:  # noqa: BLE001
-            msg = (
-                "Failed to build subagent prompt "
-                f"{normalized.prompt_ns}/{normalized.prompt_key}."
-            )
-            raise ToolValidationError(msg) from error
-
-        try:
             child_session.rollback(snapshot)
         except SnapshotRestoreError as error:
             raise ToolValidationError(
@@ -179,13 +167,9 @@ class _PromptSubagentToolSuite:
 
         try:
             result = self._runner(
-                prompt=child_prompt,
                 session=child_session,
                 bus=child_bus,
-                instructions=normalized.instructions,
-                expected_artifacts=normalized.expected_artifacts,
-                mode=normalized.mode,
-                plan_step_id=normalized.plan_step_id,
+                params=normalized_params,
             )
         except ToolValidationError:
             raise

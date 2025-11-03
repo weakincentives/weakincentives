@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-from . import registry
 from ._types import SupportsDataclass
 from .errors import (
     PromptError,
@@ -41,5 +40,4 @@ __all__ = [
     "ToolResult",
     "OutputParseError",
     "parse_structured_output",
-    "registry",
 ]

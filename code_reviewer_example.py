@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -33,7 +34,7 @@ from weakincentives.examples.code_review_session import (
     SupportsReviewEvaluate,
     ToolCallLog,
 )
-from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass, registry
+from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.local_prompt_overrides_store import (
     LocalPromptOverridesStore,
 )
@@ -44,6 +45,7 @@ from weakincentives.session import Session, select_latest
 from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import Plan, PlanningToolsSection
 from weakincentives.tools.prompt_subagent import (
+    DispatchSubagent,
     DispatchSubagentError,
     DispatchSubagentResult,
     PromptSubagentToolsSection,
@@ -78,18 +80,6 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
 SUNFISH_MOUNT_MAX_BYTES = 600_000
 
 
-def _ensure_prompt_registered() -> None:
-    """Register the sunfish prompt for subagent lookups if needed."""
-
-    if registry.resolve("examples/code-review", "code-review-session") is not None:
-        return
-
-    def factory(*, session: Session) -> Prompt[Any]:
-        return build_sunfish_prompt(session)
-
-    registry.register("examples/code-review", "code-review-session", factory)
-
-
 def _format_subagent_request(
     instructions: str,
     mode: SubagentMode,
@@ -100,42 +90,81 @@ def _format_subagent_request(
     return instructions
 
 
-def _extract_subagent_summary(response: PromptResponse[ReviewResponse]) -> str:
-    output = getattr(response, "output", None)
-    if output is not None:
-        summary = getattr(output, "summary", None)
-        if isinstance(summary, str) and summary.strip():
-            return summary.strip()
-
+def _extract_subagent_summary(response: PromptResponse[Any]) -> str:
     text = getattr(response, "text", None)
-    if isinstance(text, str) and text.strip():
-        return text.strip()
+    if isinstance(text, str):
+        summary = text.strip()
+        if summary:
+            return summary
+
+    output = getattr(response, "output", None)
+    if isinstance(output, str):
+        summary = output.strip()
+        if summary:
+            return summary
 
     raise DispatchSubagentError("Subagent prompt did not return a summary message.")
 
 
+_SUBAGENT_TASK_TEMPLATE = textwrap.dedent(
+    """
+    You are a delegated subagent executing a focused task on behalf of the
+    parent session.
+
+    Parent prompt: ${prompt_ns}/${prompt_key}
+    Mode: ${mode}
+    Plan step: ${plan_step_id}
+    Expected artifacts: ${expected_artifacts}
+
+    Follow the instructions below exactly and produce a concise summary of the
+    work you perform. Reference any artifacts you return.
+
+    Instructions:
+    ${instructions}
+    """
+).strip()
+
+
 def _build_subagent_runner(adapter: SupportsReviewEvaluate) -> SubagentRunner:
+    def _build_prompt(
+        *, session: Session, params: DispatchSubagent
+    ) -> tuple[Prompt[Any], DispatchSubagent]:
+        render_params = replace(
+            params,
+            instructions=_format_subagent_request(
+                params.instructions,
+                params.mode,
+                params.plan_step_id,
+            ),
+        )
+
+        task_section = MarkdownSection[DispatchSubagent](
+            title="Delegated Task",
+            template=_SUBAGENT_TASK_TEMPLATE,
+            key="delegated-task",
+            default_params=render_params,
+        )
+        planning_section = PlanningToolsSection(session=session)
+        vfs_section = VfsToolsSection(session=session)
+        asteval_section = AstevalSection(session=session)
+        prompt = Prompt(
+            ns=params.prompt_ns,
+            key=params.prompt_key,
+            name=f"{params.prompt_ns}/{params.prompt_key}-subagent",
+            sections=(task_section, planning_section, vfs_section, asteval_section),
+        )
+        return prompt, render_params
+
     def run_subagent(
         *,
-        prompt: Prompt[Any],
         session: Session,
         bus: EventBus,
-        instructions: str,
-        expected_artifacts: tuple[str, ...],
-        mode: SubagentMode,
-        plan_step_id: str | None,
+        params: DispatchSubagent,
     ) -> DispatchSubagentResult:
-        request = _format_subagent_request(instructions, mode, plan_step_id)
-
-        if prompt.ns == "examples/code-review" and prompt.key == "code-review-session":
-            params = (ReviewTurnParams(request=request),)
-        else:
-            msg = f"Subagent prompt not supported: {prompt.ns}/{prompt.key}"
-            raise DispatchSubagentError(msg)
-
+        prompt, render_params = _build_prompt(session=session, params=params)
         response = adapter.evaluate(
             prompt,
-            *params,
+            render_params,
             bus=bus,
             session=session,
         )
@@ -143,7 +172,7 @@ def _build_subagent_runner(adapter: SupportsReviewEvaluate) -> SubagentRunner:
 
         return DispatchSubagentResult(
             message_summary=summary,
-            artifacts=expected_artifacts,
+            artifacts=params.expected_artifacts,
         )
 
     return run_subagent
@@ -290,7 +319,6 @@ class SunfishReviewSession:
         self._adapter = adapter
         self._bus = InProcessEventBus()
         self._session = Session(bus=self._bus)
-        _ensure_prompt_registered()
         subagent_runner = _build_subagent_runner(self._adapter)
         base_prompt = build_sunfish_prompt(
             self._session,
