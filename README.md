@@ -40,17 +40,29 @@ uv add "weakincentives[litellm]"
 
 ## Tutorial: Explore the Code Review Example
 
-Instead of a separate walkthrough, the tutorial now orients you around
-[`code_reviewer_example.py`](code_reviewer_example.py). That script wires the
-session, prompt, and adapters together so you can inspect every moving part in
-one place. Drop into the file, skim the highlighted snippets below, and then run
-it locally—an OpenAI API key is all you need to talk to the default provider.
+If you are new to agents or to this library, start with
+[`code_reviewer_example.py`](code_reviewer_example.py). The file implements a
+single-player "pair review" session: you paste a code snippet, the agent drafts
+feedback, and you can inspect every prompt, plan, and tool invocation it uses
+along the way. Treat the script as an annotated tour of the core abstractions:
+
+- **Session orchestration** keeps track of user turns, plan state, and tool
+  outputs.
+- **Prompt composition** defines what the model sees—including instructions,
+  planning helpers, and virtual filesystem mounts.
+- **Model adapters** translate between provider SDKs and the strongly typed
+  prompts/results used by Weak Incentives.
+
+The snippets below highlight the main building blocks so you can follow along
+directly in the source before running it yourself.
 
 ### 1. Start the interactive session
 
-`SunfishReviewSession` glues together the adapter, session state, overrides
-store, and tool logging. The constructor seeds prompt overrides and subscribes
-to tool events so you can replay activity during a run (see
+The example introduces a `SunfishReviewSession` helper that wires the entire
+runtime together. Even if you have never built an agent loop before, you can
+read the constructor to see which pieces matter: an adapter ("how do we talk to
+the model?"), an override tag ("which prompt edits should be applied?"), and the
+session state that records every interaction (see
 [Session State](specs/SESSIONS.md) and [Prompt Event Emission](specs/EVENTS.md)).
 
 ```python
@@ -60,17 +72,19 @@ session = SunfishReviewSession(
 )
 ```
 
-Inside the class, `_PromptWithOverrides` wraps the base prompt to render through
-`LocalPromptOverridesStore`, giving you hot-swappable sections without touching
-code ([Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md)).
+Inside the class, `_PromptWithOverrides` wraps the base prompt in a
+`LocalPromptOverridesStore`. That store watches the filesystem for Markdown
+edits, so you can tweak instructions without editing Python code (outlined in
+[Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md)).
 
 ### 2. Compose prompts and tooling
 
-`build_sunfish_prompt` shows how Markdown sections and built-in tool suites are
-assembled into one deterministic prompt tree. Planning, VFS, and Python
-evaluation tools are registered on the session so subsequent renders automatically
-expose them to the model (review the specs for
-[Prompt Class](specs/PROMPTS.md),
+Next, the `build_sunfish_prompt` function assembles the actual conversation
+guide. Think of a prompt here as a namespaced tree of Markdown sections. Each
+section can inject guidance or register tools; the library renders them into a
+deterministic string before every model call. Even if you have never used
+planning or VFS tools, skimming the factory shows how they are wired in (see the
+specs for the [Prompt Class](specs/PROMPTS.md),
 [Planning Tools](specs/PLANNING_TOOL.md), and
 [Virtual Filesystem Tools](specs/VFS_TOOLS.md)).
 
@@ -105,10 +119,12 @@ return Prompt[ReviewResponse](
 
 ### 3. Inspect telemetry and plans
 
-The session captures every tool invocation and the latest plan snapshot. The
-helper methods `render_tool_history` and `render_plan_snapshot` turn that state
-into readable summaries, making it easy to debug an interaction without digging
-into logs ([Session Snapshots](specs/SESSION_SNAPSHOTS.md)).
+Agent tooling becomes much easier to debug once you can see what happened. The
+session captures every tool invocation, stores the latest plan, and exposes
+helper methods like `render_tool_history` and `render_plan_snapshot` that turn
+the raw state into readable summaries (described in
+[Session Snapshots](specs/SESSION_SNAPSHOTS.md)). When you call `history` inside
+the running script, it executes code like this:
 
 ```python
 for index, record in enumerate(self._history, start=1):
@@ -123,11 +139,12 @@ if plan is None:
 
 ### 4. Choose a provider and run it
 
-`build_adapter` picks between the OpenAI and LiteLLM adapters based on
-environment variables (see [Adapter Evaluation](specs/ADAPTERS.md) and
+Finally, `build_adapter` selects which model API to call. The logic is ordinary
+Python conditionals, so you can follow it even if you have never touched an SDK
+before: check an environment variable, ensure the right API key is present, and
+instantiate an adapter. The example defaults to OpenAI, but LiteLLM is available
+too (see [Adapter Evaluation](specs/ADAPTERS.md) and
 [Native OpenAI Structured Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md)).
-With no extra configuration, providing `OPENAI_API_KEY` is enough to evaluate the
-prompt end to end.
 
 ```python
 if provider == 'openai':
@@ -139,17 +156,18 @@ if provider == 'openai':
 
 ### Try it locally
 
-Once your environment is synced (`uv sync --extra openai`) and the
-`test-repositories/sunfish` fixture is present, launch the example:
+With the structure in mind, invite yourself to poke around: sync dependencies
+(`uv sync --extra openai`), ensure the `test-repositories/sunfish` fixture is in
+place, and launch the script with your OpenAI API key:
 
 ```bash
 OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 ```
 
-Type review prompts, inspect the plan with `plan`, or replay tool usage with
-`history`. When you are ready to customize behavior, edit
-`code_reviewer_example.py` directly—the script is intentionally compact so you
-can lift pieces into your own agent workflow.
+Inside the REPL, type your own code review prompt, inspect the evolving plan
+with `plan`, or replay tool usage with `history`. When something looks worth
+customizing, edit `code_reviewer_example.py` directly—the file is compact on
+purpose so you can copy patterns into your own project.
 
 ## Development Setup
 
