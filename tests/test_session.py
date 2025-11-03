@@ -372,3 +372,50 @@ def test_snapshot_rejects_non_dataclass_values() -> None:
 
     with pytest.raises(SnapshotSerializationError):
         session.snapshot()
+
+
+def test_clone_preserves_state_and_reducer_registration() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus, session_id="source", created_at="now")
+
+    session.register_reducer(ExampleOutput, replace_latest)
+
+    result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    assert result.ok
+
+    clone = session.clone()
+
+    assert clone.session_id == "source"
+    assert clone.created_at == "now"
+    assert clone.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
+    assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
+    assert clone._reducers.keys() == session._reducers.keys()
+
+    # Clone stays unsubscribed until a bus is provided.
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+
+    assert clone.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
+    assert session.select_all(ExampleOutput) == (ExampleOutput(text="second"),)
+
+
+def test_clone_attaches_to_new_bus_when_provided() -> None:
+    source_bus = InProcessEventBus()
+    session = Session(bus=source_bus)
+
+    source_bus.publish(make_prompt_event(ExampleOutput(text="first")))
+
+    target_bus = InProcessEventBus()
+    clone = session.clone(bus=target_bus, session_id="clone", created_at="later")
+
+    assert clone.session_id == "clone"
+    assert clone.created_at == "later"
+    assert clone.select_all(ExampleOutput) == session.select_all(ExampleOutput)
+
+    target_bus.publish(make_prompt_event(ExampleOutput(text="from clone")))
+
+    assert clone.select_all(ExampleOutput)[-1] == ExampleOutput(text="from clone")
+    assert session.select_all(ExampleOutput)[-1] == ExampleOutput(text="first")
+
+    source_bus.publish(make_prompt_event(ExampleOutput(text="original")))
+
+    assert session.select_all(ExampleOutput)[-1] == ExampleOutput(text="original")

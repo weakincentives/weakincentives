@@ -82,13 +82,43 @@ class Session:
         super().__init__()
         self.session_id = session_id
         self.created_at = created_at
-        self._bus = bus or NullEventBus()
+        self._bus: EventBus = NullEventBus()
         self._reducers: dict[type[SupportsDataclass], list[_ReducerRegistration]] = {}
         self._state: dict[type[Any], tuple[Any, ...]] = {}
 
         if bus is not None:
-            bus.subscribe(ToolInvoked, self._on_tool_invoked)
-            bus.subscribe(PromptExecuted, self._on_prompt_executed)
+            self._attach_to_bus(bus)
+
+    def clone(
+        self,
+        *,
+        bus: EventBus | None = None,
+        session_id: str | None = None,
+        created_at: str | None = None,
+    ) -> Session:
+        """Return a new session that mirrors the current state and reducers."""
+
+        clone = Session(
+            bus=None,
+            session_id=session_id if session_id is not None else self.session_id,
+            created_at=created_at if created_at is not None else self.created_at,
+        )
+
+        for data_type, registrations in self._reducers.items():
+            for registration in registrations:
+                clone.register_reducer(
+                    data_type,
+                    registration.reducer,
+                    slice_type=registration.slice_type,
+                )
+
+        clone._state = dict(self._state)
+
+        clone._bus = self._bus if bus is None else bus
+        if bus is not None:
+            clone._attach_to_bus(bus)
+
+        return clone
 
     def register_reducer[S](
         self,
@@ -229,6 +259,11 @@ class Session:
                 continue
             normalized = tuple(result)
             self._state[slice_type] = normalized
+
+    def _attach_to_bus(self, bus: EventBus) -> None:
+        self._bus = bus
+        bus.subscribe(ToolInvoked, self._on_tool_invoked)
+        bus.subscribe(PromptExecuted, self._on_prompt_executed)
 
 
 def _is_dataclass_instance(value: object) -> bool:
