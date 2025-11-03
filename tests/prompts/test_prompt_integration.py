@@ -10,21 +10,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Integration tests for cross-section prompt composition.
+
+Validation and error-path coverage resides in ``tests/prompts/test_prompt_render.py``.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
-
-import pytest
 
 from weakincentives import prompt
-from weakincentives.prompt import (
-    MarkdownSection,
-    Prompt,
-    PromptRenderError,
-    PromptValidationError,
-    SupportsDataclass,
-)
+from weakincentives.prompt import MarkdownSection, Prompt
 
 
 @dataclass
@@ -107,20 +103,6 @@ def test_prompt_integration_handles_disabled_sections() -> None:
 
     assert "Content Guidance" not in rendered.text
     assert "Target tone: direct" in rendered.text
-
-
-def test_prompt_integration_rejects_mismatched_types() -> None:
-    prompt = build_compose_prompt()
-
-    with pytest.raises(PromptValidationError):
-        prompt.render(cast(SupportsDataclass, RoutingParams))
-
-
-def test_prompt_integration_propagates_render_errors() -> None:
-    prompt = build_compose_prompt()
-
-    with pytest.raises(PromptRenderError):
-        prompt.render(RoutingParams(recipient="Kim"))
 
 
 def test_prompt_module_public_exports() -> None:
