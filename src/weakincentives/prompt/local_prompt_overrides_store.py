@@ -20,7 +20,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Any, cast, override
+from typing import Any, Literal, cast, overload, override
 
 from ._types import SupportsDataclass
 from .tool import Tool
@@ -332,6 +332,161 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "Override file metadata does not match descriptor inputs."
             )
 
+    def _section_descriptor_index(
+        self, descriptor: PromptDescriptor
+    ) -> dict[tuple[str, ...], SectionDescriptor]:
+        return {section.path: section for section in descriptor.sections}
+
+    def _tool_descriptor_index(
+        self, descriptor: PromptDescriptor
+    ) -> dict[str, ToolDescriptor]:
+        return {tool.name: tool for tool in descriptor.tools}
+
+    @overload
+    def _normalize_section_override(
+        self,
+        *,
+        path: tuple[str, ...],
+        descriptor_section: SectionDescriptor | None,
+        expected_hash: object,
+        body: object,
+        strict: Literal[True],
+        path_display: str,
+        body_error_message: str,
+    ) -> SectionOverride: ...
+
+    @overload
+    def _normalize_section_override(
+        self,
+        *,
+        path: tuple[str, ...],
+        descriptor_section: SectionDescriptor | None,
+        expected_hash: object,
+        body: object,
+        strict: Literal[False],
+        path_display: str,
+        body_error_message: str,
+    ) -> SectionOverride | None: ...
+
+    def _normalize_section_override(
+        self,
+        *,
+        path: tuple[str, ...],
+        descriptor_section: SectionDescriptor | None,
+        expected_hash: object,
+        body: object,
+        strict: bool,
+        path_display: str,
+        body_error_message: str,
+    ) -> SectionOverride | None:
+        if descriptor_section is None:
+            if strict:
+                raise PromptOverridesError(
+                    f"Unknown section path for override: {path_display}"
+                )
+            _LOGGER.debug("Skipping unknown override section path: %s", path_display)
+            return None
+        if not isinstance(expected_hash, str):
+            raise PromptOverridesError("Section expected_hash must be a string.")
+        if expected_hash != descriptor_section.content_hash:
+            if strict:
+                raise PromptOverridesError(f"Hash mismatch for section {path_display}.")
+            _LOGGER.debug(
+                "Skipping stale override for %s (expected %s, found %s)",
+                path_display,
+                descriptor_section.content_hash,
+                expected_hash,
+            )
+            return None
+        if not isinstance(body, str):
+            raise PromptOverridesError(body_error_message)
+        return SectionOverride(
+            expected_hash=expected_hash,
+            body=body,
+        )
+
+    @overload
+    def _normalize_tool_override(
+        self,
+        *,
+        name: str,
+        descriptor_tool: ToolDescriptor | None,
+        expected_hash: object,
+        description: object,
+        param_descriptions: object,
+        strict: Literal[True],
+        description_error_message: str,
+        param_mapping_error_message: str,
+        param_entry_error_message: str,
+    ) -> ToolOverride: ...
+
+    @overload
+    def _normalize_tool_override(
+        self,
+        *,
+        name: str,
+        descriptor_tool: ToolDescriptor | None,
+        expected_hash: object,
+        description: object,
+        param_descriptions: object,
+        strict: Literal[False],
+        description_error_message: str,
+        param_mapping_error_message: str,
+        param_entry_error_message: str,
+    ) -> ToolOverride | None: ...
+
+    def _normalize_tool_override(
+        self,
+        *,
+        name: str,
+        descriptor_tool: ToolDescriptor | None,
+        expected_hash: object,
+        description: object,
+        param_descriptions: object,
+        strict: bool,
+        description_error_message: str,
+        param_mapping_error_message: str,
+        param_entry_error_message: str,
+    ) -> ToolOverride | None:
+        if descriptor_tool is None:
+            if strict:
+                raise PromptOverridesError(f"Unknown tool override: {name}")
+            _LOGGER.debug("Skipping unknown tool override: %s", name)
+            return None
+        if not isinstance(expected_hash, str):
+            raise PromptOverridesError("Tool expected_contract_hash must be a string.")
+        if expected_hash != descriptor_tool.contract_hash:
+            if strict:
+                raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
+            _LOGGER.debug(
+                "Skipping stale tool override for %s (expected %s, found %s)",
+                name,
+                descriptor_tool.contract_hash,
+                expected_hash,
+            )
+            return None
+        if description is not None and not isinstance(description, str):
+            raise PromptOverridesError(description_error_message)
+        if param_descriptions is None:
+            param_descriptions = {}
+        if not isinstance(param_descriptions, Mapping):
+            raise PromptOverridesError(param_mapping_error_message)
+        normalized_params: dict[str, str] = {}
+        for key, value in cast(Mapping[object, object], param_descriptions).items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise PromptOverridesError(param_entry_error_message)
+            normalized_params[key] = value
+        if description is None:
+            normalized_description: str | None = None
+        else:
+            normalized_description = description
+        return ToolOverride(
+            name=name,
+            expected_contract_hash=expected_hash,
+            description=normalized_description,
+            param_descriptions=normalized_params,
+        )
+
     def _load_sections(
         self,
         payload: object | None,
@@ -344,40 +499,31 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         if not payload:
             return {}
         mapping_payload = cast(Mapping[object, object], payload)
-        descriptor_index: dict[tuple[str, ...], SectionDescriptor] = {
-            section.path: section for section in descriptor.sections
-        }
+        descriptor_index = self._section_descriptor_index(descriptor)
         overrides: dict[tuple[str, ...], SectionOverride] = {}
         for path_key_obj, section_payload_raw in mapping_payload.items():
             if not isinstance(path_key_obj, str):
                 raise PromptOverridesError("Section keys must be strings.")
             path_key = path_key_obj
             path = tuple(part for part in path_key.split("/") if part)
-            descriptor_section = descriptor_index.get(path)
-            if descriptor_section is None:
-                _LOGGER.debug("Skipping unknown override section path: %s", path_key)
-                continue
             if not isinstance(section_payload_raw, Mapping):
                 raise PromptOverridesError("Section payload must be an object.")
             section_payload = cast(Mapping[str, object], section_payload_raw)
             expected_hash = section_payload.get("expected_hash")
             if not isinstance(expected_hash, str):
                 raise PromptOverridesError("Section expected_hash must be a string.")
-            if expected_hash != descriptor_section.content_hash:
-                _LOGGER.debug(
-                    "Skipping stale override for %s (expected %s, found %s)",
-                    path_key,
-                    descriptor_section.content_hash,
-                    expected_hash,
-                )
-                continue
             body = section_payload.get("body")
-            if not isinstance(body, str):
-                raise PromptOverridesError("Section body must be a string.")
-            overrides[path] = SectionOverride(
+            section_override = self._normalize_section_override(
+                path=path,
+                descriptor_section=descriptor_index.get(path),
                 expected_hash=expected_hash,
                 body=body,
+                strict=False,
+                path_display=path_key,
+                body_error_message="Section body must be a string.",
             )
+            if section_override is not None:
+                overrides[path] = section_override
         return overrides
 
     def _load_tools(
@@ -392,18 +538,12 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         if not payload:
             return {}
         mapping_payload = cast(Mapping[object, object], payload)
-        descriptor_index: dict[str, ToolDescriptor] = {
-            tool.name: tool for tool in descriptor.tools
-        }
+        descriptor_index = self._tool_descriptor_index(descriptor)
         overrides: dict[str, ToolOverride] = {}
         for tool_name_obj, tool_payload_raw in mapping_payload.items():
             if not isinstance(tool_name_obj, str):
                 raise PromptOverridesError("Tool names must be strings.")
             tool_name = tool_name_obj
-            descriptor_tool = descriptor_index.get(tool_name)
-            if descriptor_tool is None:
-                _LOGGER.debug("Skipping unknown tool override: %s", tool_name)
-                continue
             if not isinstance(tool_payload_raw, Mapping):
                 raise PromptOverridesError("Tool payload must be an object.")
             tool_payload = cast(Mapping[str, object], tool_payload_raw)
@@ -412,43 +552,21 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 raise PromptOverridesError(
                     "Tool expected_contract_hash must be a string."
                 )
-            if expected_hash != descriptor_tool.contract_hash:
-                _LOGGER.debug(
-                    "Skipping stale tool override for %s (expected %s, found %s)",
-                    tool_name,
-                    descriptor_tool.contract_hash,
-                    expected_hash,
-                )
-                continue
             description = tool_payload.get("description")
-            if description is not None and not isinstance(description, str):
-                raise PromptOverridesError(
-                    "Tool description must be a string when set."
-                )
-            param_payload = tool_payload.get("param_descriptions", {})
-            if param_payload is None:
-                param_payload = {}
-            if not isinstance(param_payload, Mapping):
-                raise PromptOverridesError(
-                    "Tool param_descriptions must be a mapping when provided."
-                )
-            param_descriptions: dict[str, str] = {}
-            for field_name_obj, field_description in cast(
-                Mapping[object, object], param_payload
-            ).items():
-                if not isinstance(field_name_obj, str) or not isinstance(
-                    field_description, str
-                ):
-                    raise PromptOverridesError(
-                        "Tool param description entries must be strings."
-                    )
-                param_descriptions[field_name_obj] = field_description
-            overrides[tool_name] = ToolOverride(
+            param_payload = tool_payload.get("param_descriptions")
+            tool_override = self._normalize_tool_override(
                 name=tool_name,
-                expected_contract_hash=expected_hash,
+                descriptor_tool=descriptor_index.get(tool_name),
+                expected_hash=expected_hash,
                 description=description,
-                param_descriptions=param_descriptions,
+                param_descriptions=param_payload,
+                strict=False,
+                description_error_message="Tool description must be a string when set.",
+                param_mapping_error_message="Tool param_descriptions must be a mapping when provided.",
+                param_entry_error_message="Tool param description entries must be strings.",
             )
+            if tool_override is not None:
+                overrides[tool_name] = tool_override
         return overrides
 
     def _validate_sections_for_write(
@@ -456,29 +574,20 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         sections: Mapping[tuple[str, ...], SectionOverride],
         descriptor: PromptDescriptor,
     ) -> dict[tuple[str, ...], SectionOverride]:
-        descriptor_index: dict[tuple[str, ...], SectionDescriptor] = {
-            section.path: section for section in descriptor.sections
-        }
+        descriptor_index = self._section_descriptor_index(descriptor)
         validated: dict[tuple[str, ...], SectionOverride] = {}
         for path, section_override in sections.items():
-            descriptor_section = descriptor_index.get(path)
-            if descriptor_section is None:
-                raise PromptOverridesError(
-                    f"Unknown section path for override: {'/'.join(path)}"
-                )
-            if section_override.expected_hash != descriptor_section.content_hash:
-                raise PromptOverridesError(
-                    f"Hash mismatch for section {'/'.join(path)}."
-                )
-            body_value = cast(Any, section_override).body
-            if not isinstance(body_value, str):
-                raise PromptOverridesError(
-                    f"Section override body must be a string for {'/'.join(path)}."
-                )
-            validated[path] = SectionOverride(
-                expected_hash=section_override.expected_hash,
-                body=body_value,
+            path_display = "/".join(path)
+            normalized_section = self._normalize_section_override(
+                path=path,
+                descriptor_section=descriptor_index.get(path),
+                expected_hash=cast(Any, section_override).expected_hash,
+                body=cast(Any, section_override).body,
+                strict=True,
+                path_display=path_display,
+                body_error_message=f"Section override body must be a string for {path_display}.",
             )
+            validated[path] = normalized_section
         return validated
 
     def _validate_tools_for_write(
@@ -488,42 +597,21 @@ class LocalPromptOverridesStore(PromptOverridesStore):
     ) -> dict[str, ToolOverride]:
         if not tools:
             return {}
-        descriptor_index: dict[str, ToolDescriptor] = {
-            tool.name: tool for tool in descriptor.tools
-        }
+        descriptor_index = self._tool_descriptor_index(descriptor)
         validated: dict[str, ToolOverride] = {}
         for name, tool_override in tools.items():
-            descriptor_tool = descriptor_index.get(name)
-            if descriptor_tool is None:
-                raise PromptOverridesError(f"Unknown tool override: {name}")
-            if tool_override.expected_contract_hash != descriptor_tool.contract_hash:
-                raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
-            description_value = cast(Any, tool_override).description
-            if description_value is not None and not isinstance(description_value, str):
-                raise PromptOverridesError(
-                    f"Tool description override must be a string for {name}."
-                )
-            param_descriptions_value = cast(Any, tool_override).param_descriptions
-            if not isinstance(param_descriptions_value, Mapping):
-                raise PromptOverridesError(
-                    f"Tool parameter descriptions must be a mapping for {name}."
-                )
-            raw_param_descriptions = cast(
-                Mapping[object, object], param_descriptions_value
-            )
-            param_descriptions: dict[str, str] = {}
-            for key, value in raw_param_descriptions.items():
-                if not isinstance(key, str) or not isinstance(value, str):
-                    raise PromptOverridesError(
-                        f"Tool parameter descriptions must map strings to strings for {name}."
-                    )
-                param_descriptions[key] = value
-            validated[name] = ToolOverride(
+            normalized_tool = self._normalize_tool_override(
                 name=name,
-                expected_contract_hash=tool_override.expected_contract_hash,
-                description=description_value,
-                param_descriptions=param_descriptions,
+                descriptor_tool=descriptor_index.get(name),
+                expected_hash=cast(Any, tool_override).expected_contract_hash,
+                description=cast(Any, tool_override).description,
+                param_descriptions=cast(Any, tool_override).param_descriptions,
+                strict=True,
+                description_error_message=f"Tool description override must be a string for {name}.",
+                param_mapping_error_message=f"Tool parameter descriptions must be a mapping for {name}.",
+                param_entry_error_message=f"Tool parameter descriptions must map strings to strings for {name}.",
             )
+            validated[name] = normalized_tool
         return validated
 
     def _serialize_sections(
