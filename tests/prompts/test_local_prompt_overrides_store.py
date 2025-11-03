@@ -537,6 +537,94 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         store.upsert(descriptor, override)
 
 
+def test_upsert_rejects_non_string_section_hash(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+    section = descriptor.sections[0]
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                expected_hash=cast(str, 123),
+                body="Body",
+            )
+        },
+        tool_overrides={},
+    )
+
+    with pytest.raises(PromptOverridesError):
+        store.upsert(descriptor, override)
+
+
+def test_upsert_rejects_non_string_tool_hash(tmp_path: Path) -> None:
+    prompt = _build_prompt_with_tool()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+    section = descriptor.sections[0]
+    tool = descriptor.tools[0]
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                expected_hash=section.content_hash,
+                body="Body",
+            )
+        },
+        tool_overrides={
+            tool.name: ToolOverride(
+                name=tool.name,
+                expected_contract_hash=cast(str, 123),
+                param_descriptions={},
+            )
+        },
+    )
+
+    with pytest.raises(PromptOverridesError):
+        store.upsert(descriptor, override)
+
+
+def test_upsert_allows_none_tool_description(tmp_path: Path) -> None:
+    prompt = _build_prompt_with_tool()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+    section = descriptor.sections[0]
+    tool = descriptor.tools[0]
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                expected_hash=section.content_hash,
+                body="Body",
+            )
+        },
+        tool_overrides={
+            tool.name: ToolOverride(
+                name=tool.name,
+                expected_contract_hash=tool.contract_hash,
+                description=None,
+                param_descriptions={},
+            )
+        },
+    )
+
+    persisted = store.upsert(descriptor, override)
+    assert persisted.tool_overrides[tool.name].description is None
+
+    resolved = store.resolve(descriptor)
+    assert resolved is not None
+    assert resolved.tool_overrides[tool.name].description is None
+
+
 def test_seed_if_necessary_preserves_existing_override(tmp_path: Path) -> None:
     prompt = _build_prompt()
     store = LocalPromptOverridesStore(root_path=tmp_path)
