@@ -30,5 +30,8 @@ def test_package_dir_lists_public_symbols() -> None:
 def test_adapters_dir_lists_public_symbols() -> None:
     symbols = adapters.__dir__()
 
-    assert "OpenAIAdapter" in symbols
-    assert "LiteLLMAdapter" in symbols
+    assert "PromptEvaluationError" in symbols
+    assert "PromptResponse" in symbols
+    assert "ProviderAdapter" in symbols
+    assert "OpenAIAdapter" not in symbols
+    assert "LiteLLMAdapter" not in symbols
