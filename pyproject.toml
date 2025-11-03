@@ -135,6 +135,7 @@ DEP002 = ["litellm", "asteval", "openai"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
+pythonVersion = "3.12"
 include = ["src"]
 exclude = [
     "test-repositories",
@@ -145,7 +146,17 @@ exclude = [
     ".ruff_cache",
     "dist",
 ]
+deprecateTypingAliases = true
+reportCallInDefaultInitializer = "error"
+reportImplicitOverride = "error"
+reportImplicitStringConcatenation = "error"
+reportImportCycles = "error"
+reportMissingSuperCall = "error"
+reportPropertyTypeMismatch = "error"
+reportUninitializedInstanceVariable = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
 reportUnreachable = "error"
+reportUnusedCallResult = "error"
 reportUnusedExpression = "error"
 
 [tool.ty]

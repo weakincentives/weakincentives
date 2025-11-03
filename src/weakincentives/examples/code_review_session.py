@@ -23,7 +23,7 @@ from ..events import EventBus, InProcessEventBus, ToolInvoked
 from ..prompt import Prompt, SupportsDataclass
 from ..serde import dump
 from ..session import (
-    DataEvent,
+    ReducerEvent,
     Session,
     ToolData,
     select_all,
@@ -75,6 +75,7 @@ class CodeReviewSession:
         *,
         bus: EventBus | None = None,
     ) -> None:
+        super().__init__()
         self._adapter = adapter
         self._bus = bus or InProcessEventBus()
         self._session = Session(bus=self._bus)
@@ -128,8 +129,7 @@ class CodeReviewSession:
             else None
         )
         print(
-            f"[tool] {event.name} called with {serialized_params}\n"
-            f"       → {event.result.message}"
+            f"[tool] {event.name} called with {serialized_params}\n       → {event.result.message}"
         )
         if payload:
             print(
@@ -158,7 +158,7 @@ class CodeReviewSession:
     def _record_tool_call(
         self,
         slice_values: tuple[ToolCallLog, ...],
-        event: DataEvent,
+        event: ReducerEvent,
     ) -> tuple[ToolCallLog, ...]:
         if not isinstance(event, ToolData):
             return slice_values

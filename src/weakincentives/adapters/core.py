@@ -14,17 +14,46 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
-from ..events import EventBus, ToolInvoked
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 
-if TYPE_CHECKING:
-    from ..session import Session
-
 OutputT = TypeVar("OutputT")
+
+
+class EventBusProtocol(Protocol):
+    def subscribe(
+        self, event_type: type[object], handler: Callable[[object], None]
+    ) -> None: ...
+
+    def publish(self, event: object) -> object: ...
+
+
+class SessionProtocol(Protocol):
+    def rollback(self, snapshot: object) -> None: ...
+
+
+class ToolInvocationProtocol(Protocol):
+    @property
+    def prompt_name(self) -> str: ...
+
+    @property
+    def adapter(self) -> str: ...
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def params(self) -> SupportsDataclass: ...
+
+    @property
+    def result(self) -> object: ...
+
+    @property
+    def call_id(self) -> str | None: ...
 
 
 class ProviderAdapter(Protocol[OutputT]):
@@ -35,8 +64,8 @@ class ProviderAdapter(Protocol[OutputT]):
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,
         parse_output: bool = True,
-        bus: EventBus,
-        session: Session | None = None,
+        bus: EventBusProtocol,
+        session: SessionProtocol | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response."""
 
@@ -50,7 +79,7 @@ class PromptResponse[OutputT]:
     prompt_name: str
     text: str | None
     output: OutputT | None
-    tool_results: tuple[ToolInvoked, ...]
+    tool_results: tuple[ToolInvocationProtocol, ...]
     provider_payload: dict[str, Any] | None = None
 
 

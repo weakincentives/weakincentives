@@ -23,16 +23,18 @@ from enum import Enum
 from pathlib import Path
 from re import Pattern
 from typing import Any as _AnyType
-from typing import Final, Literal, Union, cast, get_args, get_origin, get_type_hints
+from typing import Final, Literal, cast, get_args, get_origin, get_type_hints
 from uuid import UUID
 
 MISSING_SENTINEL: Final[object] = object()
+_UNION_TYPE = type(int | str)
 
 
 class _ExtrasDescriptor:
     """Descriptor storing extras for slotted dataclasses."""
 
     def __init__(self) -> None:
+        super().__init__()
         self._store: dict[int, dict[str, object]] = {}
 
     def __get__(
@@ -45,7 +47,7 @@ class _ExtrasDescriptor:
     def __set__(self, instance: object, value: dict[str, object] | None) -> None:
         key = id(instance)
         if value is None:
-            self._store.pop(key, None)
+            _ = self._store.pop(key, None)
         else:
             self._store[key] = dict(value)
 
@@ -74,7 +76,7 @@ def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
         if descriptor is None:
             descriptor = _ExtrasDescriptor()
             _SLOTTED_EXTRAS[cls] = descriptor
-            cast(_AnyType, cls).__extras__ = descriptor  # pyright: ignore[reportAttributeAccessIssue]
+            cls.__extras__ = descriptor  # type: ignore[attr-defined]
         descriptor.__set__(instance, extras_dict)
 
 
@@ -247,7 +249,7 @@ def _coerce_to_type(
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
-    if origin is Union:
+    if origin is _UNION_TYPE:
         if (
             config.coerce
             and isinstance(value, str)
@@ -502,7 +504,7 @@ def _find_key(
     lowered_map: dict[str, str] = {}
     for key in data:
         if isinstance(key, str):
-            lowered_map.setdefault(key.lower(), key)
+            _ = lowered_map.setdefault(key.lower(), key)
     for candidate in candidates:
         if candidate is None or not isinstance(candidate, str):
             continue
@@ -678,10 +680,10 @@ def parse[T](
 
     validator = getattr(instance, "__validate__", None)
     if callable(validator):
-        validator()
+        _ = validator()
     post_validator = getattr(instance, "__post_validate__", None)
     if callable(post_validator):
-        post_validator()
+        _ = post_validator()
 
     return instance
 
@@ -777,10 +779,10 @@ def clone[T](obj: T, **updates: object) -> T:
 
     validator = getattr(cloned, "__validate__", None)
     if callable(validator):
-        validator()
+        _ = validator()
     post_validator = getattr(cloned, "__post_validate__", None)
     if callable(post_validator):
-        post_validator()
+        _ = post_validator()
     return cloned
 
 
@@ -807,7 +809,7 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, object]:
             schema_meta[target] = meta[key]
     members = meta.get("enum") or meta.get("in")
     if isinstance(members, Iterable) and not isinstance(members, (str, bytes)):
-        schema_meta.setdefault("enum", _ordered_values(members))
+        _ = schema_meta.setdefault("enum", _ordered_values(members))
     not_members = meta.get("not_in")
     if (
         isinstance(not_members, Iterable)
@@ -917,7 +919,7 @@ def _schema_for_type(
             "type": "object",
             "additionalProperties": _schema_for_type(value_type, None, alias_generator),
         }
-    elif origin is Union:
+    elif origin is _UNION_TYPE:
         subschemas = []
         includes_null = False
         base_schema_ref: Mapping[str, object] | None = None
@@ -952,10 +954,10 @@ def _schema_for_type(
         if len(subschemas) == 1 and base_schema_ref is None:
             title = subschemas[0].get("title")
             if isinstance(title, str):  # pragma: no cover - not triggered in tests
-                schema_data.setdefault("title", title)
+                _ = schema_data.setdefault("title", title)
             required = subschemas[0].get("required")
             if isinstance(required, (list, tuple)):  # pragma: no cover - defensive
-                schema_data.setdefault("required", list(required))
+                _ = schema_data.setdefault("required", list(required))
     else:
         schema_data = {}
 
@@ -1003,7 +1005,7 @@ def schema(
     if required:
         schema_dict["required"] = required
     if not required:
-        schema_dict.pop("required", None)
+        _ = schema_dict.pop("required", None)
     return schema_dict
 
 

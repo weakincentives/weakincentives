@@ -17,14 +17,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from importlib import import_module
-from typing import Any, Final, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 from ..prompt.structured_output import OutputParseError, parse_structured_output
 from ..prompt.tool import ToolResult
-from ..session import Session
 from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse
 from .shared import (
@@ -41,6 +40,9 @@ from .shared import (
     serialize_tool_call,
     tool_to_spec,
 )
+
+if TYPE_CHECKING:
+    from ..session.session import Session
 
 _ERROR_MESSAGE: Final[str] = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -127,6 +129,7 @@ class OpenAIAdapter:
         client_factory: _OpenAIClientFactory | None = None,
         client_kwargs: Mapping[str, object] | None = None,
     ) -> None:
+        super().__init__()
         if client is not None:
             if client_factory is not None:
                 raise ValueError(

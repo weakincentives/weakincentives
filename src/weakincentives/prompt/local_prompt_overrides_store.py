@@ -20,13 +20,13 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, override
 
 from ._types import SupportsDataclass
-from .prompt import Prompt
 from .tool import Tool
 from .versioning import (
     PromptDescriptor,
+    PromptLike,
     PromptOverride,
     PromptOverridesError,
     PromptOverridesStore,
@@ -51,10 +51,12 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         root_path: str | Path | None = None,
         overrides_relative_path: str | Path = _DEFAULT_RELATIVE_PATH,
     ) -> None:
+        super().__init__()
         self._explicit_root = Path(root_path).resolve() if root_path else None
         self._root: Path | None = None
         self._overrides_relative_path = Path(overrides_relative_path)
 
+    @override
     def resolve(
         self,
         descriptor: PromptDescriptor,
@@ -114,6 +116,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         )
         return override
 
+    @override
     def upsert(
         self,
         descriptor: PromptDescriptor,
@@ -166,6 +169,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         )
         return persisted
 
+    @override
     def delete(
         self,
         *,
@@ -189,9 +193,10 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 normalized_tag,
             )
 
+    @override
     def seed_if_necessary(
         self,
-        prompt: Prompt[Any],
+        prompt: PromptLike,
         *,
         tag: str = "latest",
     ) -> PromptOverride:
@@ -455,23 +460,23 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             section.path: section for section in descriptor.sections
         }
         validated: dict[tuple[str, ...], SectionOverride] = {}
-        for path, override in sections.items():
+        for path, section_override in sections.items():
             descriptor_section = descriptor_index.get(path)
             if descriptor_section is None:
                 raise PromptOverridesError(
                     f"Unknown section path for override: {'/'.join(path)}"
                 )
-            if override.expected_hash != descriptor_section.content_hash:
+            if section_override.expected_hash != descriptor_section.content_hash:
                 raise PromptOverridesError(
                     f"Hash mismatch for section {'/'.join(path)}."
                 )
-            body_value = cast(Any, override).body
+            body_value = cast(Any, section_override).body
             if not isinstance(body_value, str):
                 raise PromptOverridesError(
                     f"Section override body must be a string for {'/'.join(path)}."
                 )
             validated[path] = SectionOverride(
-                expected_hash=override.expected_hash,
+                expected_hash=section_override.expected_hash,
                 body=body_value,
             )
         return validated
@@ -487,18 +492,18 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             tool.name: tool for tool in descriptor.tools
         }
         validated: dict[str, ToolOverride] = {}
-        for name, override in tools.items():
+        for name, tool_override in tools.items():
             descriptor_tool = descriptor_index.get(name)
             if descriptor_tool is None:
                 raise PromptOverridesError(f"Unknown tool override: {name}")
-            if override.expected_contract_hash != descriptor_tool.contract_hash:
+            if tool_override.expected_contract_hash != descriptor_tool.contract_hash:
                 raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
-            description_value = cast(Any, override).description
+            description_value = cast(Any, tool_override).description
             if description_value is not None and not isinstance(description_value, str):
                 raise PromptOverridesError(
                     f"Tool description override must be a string for {name}."
                 )
-            param_descriptions_value = cast(Any, override).param_descriptions
+            param_descriptions_value = cast(Any, tool_override).param_descriptions
             if not isinstance(param_descriptions_value, Mapping):
                 raise PromptOverridesError(
                     f"Tool parameter descriptions must be a mapping for {name}."
@@ -515,7 +520,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 param_descriptions[key] = value
             validated[name] = ToolOverride(
                 name=name,
-                expected_contract_hash=override.expected_contract_hash,
+                expected_contract_hash=tool_override.expected_contract_hash,
                 description=description_value,
                 param_descriptions=param_descriptions,
             )
@@ -526,11 +531,11 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         sections: Mapping[tuple[str, ...], SectionOverride],
     ) -> dict[str, dict[str, str]]:
         serialized: dict[str, dict[str, str]] = {}
-        for path, override in sections.items():
+        for path, section_override in sections.items():
             key = "/".join(path)
             serialized[key] = {
-                "expected_hash": override.expected_hash,
-                "body": override.body,
+                "expected_hash": section_override.expected_hash,
+                "body": section_override.body,
             }
         return serialized
 
@@ -539,11 +544,11 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         tools: Mapping[str, ToolOverride],
     ) -> dict[str, dict[str, Any]]:
         serialized: dict[str, dict[str, Any]] = {}
-        for name, override in tools.items():
+        for name, tool_override in tools.items():
             serialized[name] = {
-                "expected_contract_hash": override.expected_contract_hash,
-                "description": override.description,
-                "param_descriptions": dict(override.param_descriptions),
+                "expected_contract_hash": tool_override.expected_contract_hash,
+                "description": tool_override.description,
+                "param_descriptions": dict(tool_override.param_descriptions),
             }
         return serialized
 
@@ -554,18 +559,16 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             "w", dir=directory, delete=False, encoding="utf-8"
         ) as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
+            _ = handle.write("\n")
             temp_name = Path(handle.name)
-        Path(temp_name).replace(file_path)
+        _ = Path(temp_name).replace(file_path)
 
     def _seed_sections(
         self,
-        prompt: Prompt[Any],
+        prompt: PromptLike,
         descriptor: PromptDescriptor,
     ) -> dict[tuple[str, ...], SectionOverride]:
-        section_lookup = {
-            node.path: node.section for node in getattr(prompt, "_section_nodes", [])
-        }
+        section_lookup = {node.path: node.section for node in prompt.sections}
         seeded: dict[tuple[str, ...], SectionOverride] = {}
         for section in descriptor.sections:
             section_obj = section_lookup.get(section.path)
@@ -586,13 +589,13 @@ class LocalPromptOverridesStore(PromptOverridesStore):
 
     def _seed_tools(
         self,
-        prompt: Prompt[Any],
+        prompt: PromptLike,
         descriptor: PromptDescriptor,
     ) -> dict[str, ToolOverride]:
         if not descriptor.tools:
             return {}
         tool_lookup: dict[str, Tool[SupportsDataclass, SupportsDataclass]] = {}
-        for node in getattr(prompt, "_section_nodes", []):
+        for node in prompt.sections:
             for tool in node.section.tools():
                 tool_lookup[tool.name] = tool
         seeded: dict[str, ToolOverride] = {}

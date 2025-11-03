@@ -15,9 +15,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
 from ..serde.dataclass_serde import schema
+from ._types import SupportsDataclass
 from .tool import Tool
 
 
@@ -33,8 +34,23 @@ def _param_description_mapping_factory() -> dict[str, str]:
     return {}
 
 
-if TYPE_CHECKING:
-    from .prompt import Prompt
+class SectionLike(Protocol):
+    def original_body_template(self) -> str | None: ...
+
+    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]: ...
+
+
+class SectionNodeLike(Protocol):
+    path: tuple[str, ...]
+    section: SectionLike
+
+
+class PromptLike(Protocol):
+    ns: str
+    key: str
+
+    @property
+    def sections(self) -> tuple[SectionNodeLike, ...]: ...
 
 
 @dataclass(slots=True)
@@ -64,7 +80,7 @@ class PromptDescriptor:
     tools: list[ToolDescriptor]
 
     @classmethod
-    def from_prompt(cls, prompt: Prompt[Any]) -> PromptDescriptor:
+    def from_prompt(cls, prompt: PromptLike) -> PromptDescriptor:
         sections: list[SectionDescriptor] = []
         tools: list[ToolDescriptor] = []
         for node in prompt.sections:
@@ -148,7 +164,7 @@ class PromptOverridesStore(Protocol):
 
     def seed_if_necessary(
         self,
-        prompt: Prompt[Any],
+        prompt: PromptLike,
         *,
         tag: str = "latest",
     ) -> PromptOverride: ...

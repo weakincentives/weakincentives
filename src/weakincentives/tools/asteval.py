@@ -34,8 +34,7 @@ from typing import Final, Literal, Protocol, TextIO, cast
 
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
-from ..session import Session, select_latest
-from ..session.session import DataEvent
+from ..session import ReducerEvent, Session, select_latest
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
@@ -179,7 +178,7 @@ def _truncate_stream(text: str) -> str:
 
 def _ensure_ascii(value: str, label: str) -> None:
     try:
-        value.encode(_ASCII)
+        _ = value.encode(_ASCII)
     except UnicodeEncodeError as error:  # pragma: no cover - defensive guard
         raise ToolValidationError(f"{label} must be ASCII text.") from error
 
@@ -344,7 +343,7 @@ def _apply_writes(
             updated_at=timestamp,
         )
         if existing_index is not None:
-            files.pop(existing_index)
+            _ = files.pop(existing_index)
         files.append(updated)
     files.sort(key=lambda file: file.path.segments)
     return VirtualFileSystem(files=tuple(files))
@@ -397,12 +396,12 @@ def _sanitize_interpreter(interpreter: InterpreterProtocol) -> None:
     module = _load_asteval_module()
 
     for name in getattr(module, "ALL_DISALLOWED", ()):  # pragma: no cover - defensive
-        interpreter.symtable.pop(name, None)
+        _ = interpreter.symtable.pop(name, None)
     node_handlers = getattr(interpreter, "node_handlers", None)
     if isinstance(node_handlers, MutableMapping):
         handlers = cast(MutableMapping[str, object], node_handlers)
         for key in ("Eval", "Exec", "Import", "ImportFrom"):
-            handlers.pop(key, None)
+            _ = handlers.pop(key, None)
 
 
 def _create_interpreter() -> InterpreterProtocol:
@@ -435,7 +434,7 @@ def _execute_with_timeout(
             raise TimeoutError
 
         previous = signal.signal(signal.SIGALRM, handler)
-        signal.setitimer(signal.ITIMER_REAL, _TIMEOUT_SECONDS)
+        _ = signal.setitimer(signal.ITIMER_REAL, _TIMEOUT_SECONDS)
         try:
             value = func()
         except TimeoutError:
@@ -443,8 +442,8 @@ def _execute_with_timeout(
         else:
             return False, value, ""
         finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous)
+            _ = signal.setitimer(signal.ITIMER_REAL, 0)
+            _ = signal.signal(signal.SIGALRM, previous)
 
     result_container: dict[str, object | None] = {}
     error_container: dict[str, str] = {"message": ""}
@@ -462,7 +461,7 @@ def _execute_with_timeout(
 
     thread = threading.Thread(target=runner, daemon=True)
     thread.start()
-    completed.wait(_TIMEOUT_SECONDS)
+    _ = completed.wait(_TIMEOUT_SECONDS)
     if not completed.is_set():
         return True, None, timeout_message
     if "error" in result_container:
@@ -473,6 +472,7 @@ def _execute_with_timeout(
 
 class _AstevalToolSuite:
     def __init__(self, *, session: Session) -> None:
+        super().__init__()
         self._session = session
 
     def run(self, params: EvalParams) -> ToolResult[EvalResult]:
@@ -521,14 +521,14 @@ class _AstevalToolSuite:
                 )
                 return
             text = actual_sep.join(str(arg) for arg in args)
-            stdout_buffer.write(text)
-            stdout_buffer.write(actual_end)
+            _ = stdout_buffer.write(text)
+            _ = stdout_buffer.write(actual_end)
             if flush:
-                stdout_buffer.flush()
+                _ = stdout_buffer.flush()
 
         if mode == "expr":
             try:
-                ast.parse(code, mode="eval")
+                _ = ast.parse(code, mode="eval")
             except SyntaxError as error:
                 raise ToolValidationError(
                     "Expression mode requires a single expression."
@@ -693,10 +693,10 @@ class _AstevalToolSuite:
 
 
 def _make_eval_result_reducer() -> Callable[
-    [tuple[VirtualFileSystem, ...], DataEvent], tuple[VirtualFileSystem, ...]
+    [tuple[VirtualFileSystem, ...], ReducerEvent], tuple[VirtualFileSystem, ...]
 ]:
     def reducer(
-        slice_values: tuple[VirtualFileSystem, ...], event: DataEvent
+        slice_values: tuple[VirtualFileSystem, ...], event: ReducerEvent
     ) -> tuple[VirtualFileSystem, ...]:
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
         value = cast(EvalResult, event.value)

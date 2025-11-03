@@ -24,7 +24,6 @@ from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 from ..prompt.structured_output import OutputParseError, parse_structured_output
 from ..prompt.tool import ToolResult
-from ..session import Session
 from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse
 from .shared import (
@@ -42,15 +41,13 @@ from .shared import (
     tool_to_spec,
 )
 
+if TYPE_CHECKING:
+    from ..session.session import Session
+
 _ERROR_MESSAGE: Final[str] = (
     "LiteLLM support requires the optional 'litellm' dependency. "
     "Install it with `uv sync --extra litellm` or `pip install weakincentives[litellm]`."
 )
-
-if TYPE_CHECKING:  # pragma: no cover - optional dependency for typing only
-    import litellm
-
-    _ = litellm.__name__
 
 
 class _CompletionFunctionCall(Protocol):
@@ -131,6 +128,7 @@ class LiteLLMAdapter:
         completion_factory: _LiteLLMCompletionFactory | None = None,
         completion_kwargs: Mapping[str, object] | None = None,
     ) -> None:
+        super().__init__()
         if completion is not None:
             if completion_factory is not None:
                 raise ValueError(

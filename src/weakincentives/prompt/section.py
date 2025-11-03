@@ -42,6 +42,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         enabled: Callable[[ParamsT], bool] | None = None,
         tools: Sequence[object] | None = None,
     ) -> None:
+        super().__init__()
         params_type = cast(
             type[ParamsT] | None, getattr(self.__class__, "_params_type", None)
         )
