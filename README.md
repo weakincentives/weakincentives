@@ -13,15 +13,25 @@ while allowing the prompts to be automatically optimized.
 ## Highlights
 
 - Namespaced prompt trees with deterministic Markdown renders, placeholder
-  verification, and tool-aware versioning metadata.
+  verification, and tool-aware versioning metadata. Read the [Prompt
+  Composition](specs/PROMPTS.md) and [Tool-Aware Prompt
+  Versioning](specs/TOOL_AWARE_PROMPT_VERSIONING.md) specs for the full
+  lifecycle.
 - Stdlib-only dataclass serde (`parse`, `dump`, `clone`, `schema`) keeps request and
-  response types honest end-to-end.
+  response types honest end-to-end. The [Dataclass Serde
+  Utilities](specs/DATACLASS_SERDE.md) spec outlines the validation contract.
 - Session state container and event bus collect prompt and tool telemetry for
-  downstream automation.
+  downstream automation. See the [Session State](specs/SESSIONS.md) and [Prompt
+  Event Emission](specs/EVENTS.md) specs for reducer flows and emitted payloads.
 - Built-in planning and virtual filesystem tool suites give agents durable plans and
-  sandboxed edits backed by reducers and selectors.
+  sandboxed edits backed by reducers and selectors. Their capabilities are
+  captured in the [Planning Tool Suite](specs/PLANNING_TOOL.md) and [Virtual
+  Filesystem Tool Suite](specs/VFS_TOOLS.md) specs.
 - Optional OpenAI and LiteLLM adapters integrate structured output parsing, tool
-  orchestration, and telemetry hooks.
+  orchestration, and telemetry hooks, detailed in the [Provider Adapters
+  Overview](specs/ADAPTERS.md), [Native OpenAI Structured
+  Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md), and [LiteLLM
+  Adapter](specs/LITE_LLM_ADAPTER.md) specs.
 
 ## Requirements
 
