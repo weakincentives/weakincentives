@@ -20,9 +20,10 @@ import textwrap
 from pathlib import Path
 from typing import Any, cast
 
+from weakincentives.adapters.core import PromptResponse
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.events import InProcessEventBus, ToolInvoked
+from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.examples.code_review_prompt import (
     ReviewGuidance,
     ReviewResponse,
@@ -32,7 +33,7 @@ from weakincentives.examples.code_review_session import (
     SupportsReviewEvaluate,
     ToolCallLog,
 )
-from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
+from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass, registry
 from weakincentives.prompt.local_prompt_overrides_store import (
     LocalPromptOverridesStore,
 )
@@ -42,6 +43,13 @@ from weakincentives.serde import dump
 from weakincentives.session import Session, select_latest
 from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import Plan, PlanningToolsSection
+from weakincentives.tools.prompt_subagent import (
+    DispatchSubagentError,
+    DispatchSubagentResult,
+    PromptSubagentToolsSection,
+    SubagentMode,
+    SubagentRunner,
+)
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -68,6 +76,77 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
     "**/*.bmp",
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
+
+
+def _ensure_prompt_registered() -> None:
+    """Register the sunfish prompt for subagent lookups if needed."""
+
+    if registry.resolve("examples/code-review", "code-review-session") is not None:
+        return
+
+    def factory(*, session: Session) -> Prompt[Any]:
+        return build_sunfish_prompt(session)
+
+    registry.register("examples/code-review", "code-review-session", factory)
+
+
+def _format_subagent_request(
+    instructions: str,
+    mode: SubagentMode,
+    plan_step_id: str | None,
+) -> str:
+    if mode == "plan_step" and plan_step_id:
+        return f"[plan step {plan_step_id}]\n{instructions}"
+    return instructions
+
+
+def _extract_subagent_summary(response: PromptResponse[ReviewResponse]) -> str:
+    output = getattr(response, "output", None)
+    if output is not None:
+        summary = getattr(output, "summary", None)
+        if isinstance(summary, str) and summary.strip():
+            return summary.strip()
+
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
+    raise DispatchSubagentError("Subagent prompt did not return a summary message.")
+
+
+def _build_subagent_runner(adapter: SupportsReviewEvaluate) -> SubagentRunner:
+    def run_subagent(
+        *,
+        prompt: Prompt[Any],
+        session: Session,
+        bus: EventBus,
+        instructions: str,
+        expected_artifacts: tuple[str, ...],
+        mode: SubagentMode,
+        plan_step_id: str | None,
+    ) -> DispatchSubagentResult:
+        request = _format_subagent_request(instructions, mode, plan_step_id)
+
+        if prompt.ns == "examples/code-review" and prompt.key == "code-review-session":
+            params = (ReviewTurnParams(request=request),)
+        else:
+            msg = f"Subagent prompt not supported: {prompt.ns}/{prompt.key}"
+            raise DispatchSubagentError(msg)
+
+        response = adapter.evaluate(
+            prompt,
+            *params,
+            bus=bus,
+            session=session,
+        )
+        summary = _extract_subagent_summary(response)
+
+        return DispatchSubagentResult(
+            message_summary=summary,
+            artifacts=expected_artifacts,
+        )
+
+    return run_subagent
 
 
 class _PromptWithOverrides:
@@ -119,7 +198,11 @@ def _resolve_override_tag(tag: str | None = None) -> str:
     return normalized or _DEFAULT_OVERRIDE_TAG
 
 
-def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
+def build_sunfish_prompt(
+    session: Session,
+    *,
+    subagent_runner: SubagentRunner | None = None,
+) -> Prompt[ReviewResponse]:
     if not TEST_REPOSITORIES_ROOT.exists():
         raise SystemExit(
             f"Expected test repositories under {TEST_REPOSITORIES_ROOT!s},"
@@ -171,17 +254,26 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         template="${request}",
         key="review-request",
     )
+    sections: list[Any] = [
+        guidance_section,
+        planning_section,
+    ]
+    if subagent_runner is not None:
+        sections.append(
+            PromptSubagentToolsSection(session=session, runner=subagent_runner)
+        )
+    sections.extend(
+        [
+            vfs_section,
+            asteval_section,
+            user_turn_section,
+        ]
+    )
     return Prompt[ReviewResponse](
         ns="examples/code-review",
         key="code-review-session",
         name="sunfish_code_review_agent",
-        sections=(
-            guidance_section,
-            planning_section,
-            vfs_section,
-            asteval_section,
-            user_turn_section,
-        ),
+        sections=tuple(sections),
     )
 
 
@@ -198,7 +290,12 @@ class SunfishReviewSession:
         self._adapter = adapter
         self._bus = InProcessEventBus()
         self._session = Session(bus=self._bus)
-        base_prompt = build_sunfish_prompt(self._session)
+        _ensure_prompt_registered()
+        subagent_runner = _build_subagent_runner(self._adapter)
+        base_prompt = build_sunfish_prompt(
+            self._session,
+            subagent_runner=subagent_runner,
+        )
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = _resolve_override_tag(override_tag)
         try:

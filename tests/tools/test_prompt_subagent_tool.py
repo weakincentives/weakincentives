@@ -22,14 +22,26 @@ import pytest
 
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult, registry
-from weakincentives.session import Session, select_all
+from weakincentives.session import (
+    Session,
+    SnapshotRestoreError,
+    SnapshotSerializationError,
+    select_all,
+)
 from weakincentives.tools import (
     DispatchSubagent,
     DispatchSubagentError,
     PromptSubagentToolsSection,
     ToolValidationError,
 )
-from weakincentives.tools.prompt_subagent import DispatchSubagentResult, SubagentMode
+from weakincentives.tools.prompt_subagent import (
+    DispatchSubagentResult,
+    SubagentMode,
+    _clone_session_structure,
+    _normalize_params,
+    _normalize_text,
+    _ToolUsageRecorder,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -297,3 +309,217 @@ def test_dispatch_subagent_handles_unexpected_runner_exceptions() -> None:
     assert result.success is False
     assert result.value is None
     assert "Subagent execution failed" in result.message
+
+
+def test_dispatch_subagent_handles_snapshot_serialization_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _register_child_prompt()
+    session = Session(bus=InProcessEventBus())
+    runner = RecordingRunner(expected_mode="ad_hoc")
+    section = _build_tool(session, runner)
+    tool = _get_dispatch_tool(section)
+    handler = tool.handler
+    assert handler is not None
+
+    def broken_snapshot(self: Session) -> None:
+        raise SnapshotSerializationError("broken")
+
+    monkeypatch.setattr(Session, "snapshot", broken_snapshot)
+
+    with pytest.raises(ToolValidationError) as excinfo:
+        handler(
+            DispatchSubagent(
+                mode="ad_hoc",
+                prompt_ns="tests/subagent",
+                prompt_key="child",
+                instructions="ok",
+            )
+        )
+
+    assert "Unable to capture parent session state." in str(excinfo.value)
+
+
+def test_dispatch_subagent_handles_prompt_factory_failure() -> None:
+    def failing_factory(*, session: Session) -> Prompt[Any]:
+        raise RuntimeError("factory boom")
+
+    registry.register("tests/subagent", "child", failing_factory)
+    session = Session(bus=InProcessEventBus())
+    runner = RecordingRunner(expected_mode="ad_hoc")
+    section = _build_tool(session, runner)
+    tool = _get_dispatch_tool(section)
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError) as excinfo:
+        handler(
+            DispatchSubagent(
+                mode="ad_hoc",
+                prompt_ns="tests/subagent",
+                prompt_key="child",
+                instructions="ok",
+            )
+        )
+
+    assert "Failed to build subagent prompt" in str(excinfo.value)
+
+
+def test_dispatch_subagent_handles_snapshot_restore_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _register_child_prompt()
+    session = Session(bus=InProcessEventBus())
+    runner = RecordingRunner(expected_mode="ad_hoc")
+    section = _build_tool(session, runner)
+    tool = _get_dispatch_tool(section)
+    handler = tool.handler
+    assert handler is not None
+
+    def broken_rollback(self: Session, snapshot: object) -> None:
+        raise SnapshotRestoreError("hydrate failed")
+
+    monkeypatch.setattr(Session, "rollback", broken_rollback)
+
+    with pytest.raises(ToolValidationError) as excinfo:
+        handler(
+            DispatchSubagent(
+                mode="ad_hoc",
+                prompt_ns="tests/subagent",
+                prompt_key="child",
+                instructions="ok",
+            )
+        )
+
+    assert "Unable to hydrate child session from snapshot." in str(excinfo.value)
+
+
+def test_dispatch_subagent_propagates_tool_validation_error() -> None:
+    _register_child_prompt()
+    session = Session(bus=InProcessEventBus())
+
+    def rejecting_runner(
+        *,
+        prompt: Prompt[Any],
+        session: Session,
+        bus: EventBus,
+        instructions: str,
+        expected_artifacts: tuple[str, ...],
+        mode: SubagentMode,
+        plan_step_id: str | None,
+    ) -> DispatchSubagentResult:
+        raise ToolValidationError("invalid runner input")
+
+    section = PromptSubagentToolsSection(session=session, runner=rejecting_runner)
+    tool = _get_dispatch_tool(section)
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            DispatchSubagent(
+                mode="ad_hoc",
+                prompt_ns="tests/subagent",
+                prompt_key="child",
+                instructions="ok",
+            )
+        )
+
+
+def test_dispatch_subagent_rejects_invalid_runner_result() -> None:
+    _register_child_prompt()
+    session = Session(bus=InProcessEventBus())
+
+    def invalid_runner(
+        *,
+        prompt: Prompt[Any],
+        session: Session,
+        bus: EventBus,
+        instructions: str,
+        expected_artifacts: tuple[str, ...],
+        mode: SubagentMode,
+        plan_step_id: str | None,
+    ) -> DispatchSubagentResult:
+        return cast(DispatchSubagentResult, object())
+
+    section = PromptSubagentToolsSection(session=session, runner=invalid_runner)
+    tool = _get_dispatch_tool(section)
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        DispatchSubagent(
+            mode="ad_hoc",
+            prompt_ns="tests/subagent",
+            prompt_key="child",
+            instructions="ok",
+        )
+    )
+
+    assert result.success is False
+    assert result.value is None
+    assert "invalid result payload" in result.message
+
+
+def test_tool_usage_recorder_deduplicates_names() -> None:
+    recorder = _ToolUsageRecorder()
+    event = ToolInvoked(
+        prompt_name="tests/subagent/child",
+        adapter="tests",
+        name="child_tool",
+        params=SampleRecord("payload"),
+        result=ToolResult(message="ok", value=None),
+    )
+    recorder.handle(event)
+    recorder.handle(event)
+    recorder.handle(
+        ToolInvoked(
+            prompt_name="tests/subagent/child",
+            adapter="tests",
+            name="secondary_tool",
+            params=SampleRecord("payload"),
+            result=ToolResult(message="ok", value=None),
+        )
+    )
+    assert recorder.observed() == ("child_tool", "secondary_tool")
+
+
+def test_normalize_params_trims_plan_step_id() -> None:
+    normalized = _normalize_params(
+        DispatchSubagent(
+            mode="plan_step",
+            prompt_ns="tests/subagent",
+            prompt_key="child",
+            instructions="do work",
+            plan_step_id="  step-42  ",
+        )
+    )
+
+    assert normalized.plan_step_id == "step-42"
+
+
+def test_normalize_text_rejects_non_ascii() -> None:
+    with pytest.raises(ToolValidationError):
+        _normalize_text("résumé", field_name="instructions")
+
+
+def test_clone_session_structure_copies_custom_slice() -> None:
+    parent = Session(bus=InProcessEventBus())
+    child = Session(bus=InProcessEventBus())
+
+    def reducer(previous: tuple[str, ...], event: object) -> tuple[str, ...]:
+        return previous + (str(event),)
+
+    parent.register_reducer(SampleRecord, reducer, slice_type=str)
+    parent.seed_slice(int, (1,))
+
+    _clone_session_structure(parent, child)
+
+    reducers = child._reducers
+    registrations = reducers[SampleRecord]
+    assert len(registrations) == 1
+    assert registrations[0].slice_type is str
+
+    state = child._state
+    assert str in state
+    assert int in state
