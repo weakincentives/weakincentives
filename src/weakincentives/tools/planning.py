@@ -142,38 +142,41 @@ def _build_tools(
     session: Session,
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
     suite = _PlanningToolSuite(session)
-    return (
-        Tool[SetupPlan, SetupPlan](
-            name="planning_setup_plan",
-            description="Create or replace the session plan.",
-            handler=suite.setup_plan,
+    return cast(
+        tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
+        (
+            Tool[SetupPlan, SetupPlan](
+                name="planning_setup_plan",
+                description="Create or replace the session plan.",
+                handler=suite.setup_plan,
+            ),
+            Tool[AddStep, AddStep](
+                name="planning_add_step",
+                description="Append one or more steps to the active plan.",
+                handler=suite.add_step,
+            ),
+            Tool[UpdateStep, UpdateStep](
+                name="planning_update_step",
+                description="Edit the title or details for an existing step.",
+                handler=suite.update_step,
+            ),
+            Tool[MarkStep, MarkStep](
+                name="planning_mark_step",
+                description="Update step status and optionally record a note.",
+                handler=suite.mark_step,
+            ),
+            Tool[ClearPlan, ClearPlan](
+                name="planning_clear_plan",
+                description="Mark the current plan as abandoned.",
+                handler=suite.clear_plan,
+            ),
+            Tool[ReadPlan, Plan](
+                name="planning_read_plan",
+                description="Return the latest plan snapshot.",
+                handler=suite.read_plan,
+            ),
         ),
-        Tool[AddStep, AddStep](
-            name="planning_add_step",
-            description="Append one or more steps to the active plan.",
-            handler=suite.add_step,
-        ),
-        Tool[UpdateStep, UpdateStep](
-            name="planning_update_step",
-            description="Edit the title or details for an existing step.",
-            handler=suite.update_step,
-        ),
-        Tool[MarkStep, MarkStep](
-            name="planning_mark_step",
-            description="Update step status and optionally record a note.",
-            handler=suite.mark_step,
-        ),
-        Tool[ClearPlan, ClearPlan](
-            name="planning_clear_plan",
-            description="Mark the current plan as abandoned.",
-            handler=suite.clear_plan,
-        ),
-        Tool[ReadPlan, Plan](
-            name="planning_read_plan",
-            description="Return the latest plan snapshot.",
-            handler=suite.read_plan,
-        ),
-    )  # type: ignore[return-value]
+    )
 
 
 class _PlanningToolSuite:

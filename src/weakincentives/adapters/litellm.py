@@ -176,9 +176,9 @@ class LiteLLMAdapter:
             rendered = prompt.render(
                 *params,
                 inject_output_instructions=False,
-            )  # type: ignore[reportArgumentType]
+            )
         else:
-            rendered = prompt.render(*params)  # type: ignore[reportArgumentType]
+            rendered = prompt.render(*params)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": rendered.text},
         ]

@@ -224,16 +224,19 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
         params_type = cast(type[SupportsDataclass], params_candidate)
         result_type = cast(type[SupportsDataclass], result_candidate)
 
-        class _SpecializedTool(cls):  # type: ignore[misc]
-            def __post_init__(self) -> None:  # type: ignore[override]
+        class _SpecializedTool(cls):
+            def __post_init__(self) -> None:
                 self.params_type = params_type
                 self.result_type = result_type
-                super().__post_init__()
+                Tool.__post_init__(cast("Tool[Any, Any]", self))  # pyright: ignore[reportUnknownMemberType]
 
         _SpecializedTool.__name__ = cls.__name__
         _SpecializedTool.__qualname__ = cls.__qualname__
         _SpecializedTool.__module__ = cls.__module__
-        return _SpecializedTool  # type: ignore[return-value]
+        return cast(
+            type[Tool[SupportsDataclass, SupportsDataclass]],
+            _SpecializedTool,
+        )
 
 
 __all__ = ["Tool", "ToolResult"]

@@ -166,28 +166,31 @@ def _build_tools(
     *, session: Session
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
     suite = _VfsToolSuite(session=session)
-    return (
-        Tool[ListDirectory, ListDirectoryResult](
-            name="vfs_list_directory",
-            description="Enumerate files and directories at a path.",
-            handler=suite.list_directory,
+    return cast(
+        tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
+        (
+            Tool[ListDirectory, ListDirectoryResult](
+                name="vfs_list_directory",
+                description="Enumerate files and directories at a path.",
+                handler=suite.list_directory,
+            ),
+            Tool[ReadFile, VfsFile](
+                name="vfs_read_file",
+                description="Read file contents and metadata.",
+                handler=suite.read_file,
+            ),
+            Tool[WriteFile, WriteFile](
+                name="vfs_write_file",
+                description="Create or update a file in the virtual filesystem.",
+                handler=suite.write_file,
+            ),
+            Tool[DeleteEntry, DeleteEntry](
+                name="vfs_delete_entry",
+                description="Delete a file or directory subtree.",
+                handler=suite.delete_entry,
+            ),
         ),
-        Tool[ReadFile, VfsFile](
-            name="vfs_read_file",
-            description="Read file contents and metadata.",
-            handler=suite.read_file,
-        ),
-        Tool[WriteFile, WriteFile](
-            name="vfs_write_file",
-            description="Create or update a file in the virtual filesystem.",
-            handler=suite.write_file,
-        ),
-        Tool[DeleteEntry, DeleteEntry](
-            name="vfs_delete_entry",
-            description="Delete a file or directory subtree.",
-            handler=suite.delete_entry,
-        ),
-    )  # type: ignore[return-value]
+    )
 
 
 class _VfsToolSuite:
