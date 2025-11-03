@@ -19,10 +19,11 @@ specification keeps the wrapper minimal and prescriptive so delegation stays tra
 A subagent prompt MUST follow the structure below:
 
 1. `# Delegation Summary`
-1. `## Response Format`
+1. `## Response Format` (only when fallback instructions are required)
 1. `## Parent Prompt (Verbatim)`
 
-Only these sections are required. Additional sections are forbidden until a future revision explicitly introduces them.
+Only these sections may appear. Skip the `Response Format` block when fallback instructions are unnecessary, and never add
+extra sections unless a future revision explicitly introduces them.
 
 ### Delegation Summary
 
@@ -35,16 +36,31 @@ Provide lightweight context to the subagent before showing the parent prompt. In
 
 Each field should appear as a bullet item in the order listed above. Do not include extra prose, tables, or subsections.
 
-### Response Format
+### Response Format (Conditional)
 
-Describe the exact shape of the subagent's reply. The section MUST:
+Most adapters natively request structured outputs. When that support exists, omit this section entirely—the parent prompt
+already controls formatting. Only insert the section when the active adapter cannot express the structure through native
+API features and the parent expects a schema.
 
-- Declare the structured schema the parent expects (for example JSON keys, markdown tables, or ordered lists).
-- Reproduce any field-level descriptions or validation rules the parent requires.
-- Note whether the subagent should include explanatory prose outside the structured output.
+When present, the section MUST:
 
-When the parent prompt already defines the response contract, copy it verbatim into this section so the subagent sees it
-without scanning the entire parent prompt. If the parent did not provide a format, state `Follow free-form response from parent prompt.` so the subagent knows no structured output is required.
+- Use the default fallback instructions produced by the core renderer. Reproduce the following body without modifications so
+  the wrapper matches the behavior of `ResponseFormatSection`:
+
+  ```
+  ## Response Format
+  Return ONLY a single fenced JSON code block. Do not include any text before or after the block.
+
+  The top-level JSON value MUST be ${article} ${container} that matches the fields of the expected schema${extra_clause}
+  ```
+
+- Substitute the `${article}`, `${container}`, and `${extra_clause}` placeholders exactly as the renderer would (for example,
+  "an object" with any additional schema notes in `${extra_clause}`).
+
+- Include any field-level descriptions or validation rules that the parent prompt provided so the schema remains clear.
+
+If the parent did not require structured output, do not add this section; the subagent will default to the inherited free-form
+instructions.
 
 ### Parent Prompt (Verbatim)
 
