@@ -1,34 +1,73 @@
 # Weak Incentives
 
-**Lean, typed building blocks for side-effect-free background agents.**
-Compose deterministic prompts, run typed tools, and parse strict JSON replies without
-heavy dependencies. Optional adapters snap in when you need a model provider.
+**Lean, typed building blocks for side-effect-free background agents.**  
+Compose deterministic prompts, run typed tools, and parse strict JSON replies without heavy dependencies. Optional adapters snap in when you need a model provider.
+
+- **Homepage:** https://weakincentives.com
+- **License:** Apache-2.0
+- **Status:** Alpha (APIs may change between releases)
+
+---
+
+## Quickstart (5 minutes)
+
+Run the included code-reviewer example end-to-end:
+
+```bash
+# 0) Clone and enter the repo
+git clone https://github.com/weakincentives/weakincentives.git
+cd weakincentives
+
+# 1) Create a local environment with the OpenAI adapter extra
+uv sync --extra openai
+
+# 2) Provide a model key (example: OpenAI)
+export OPENAI_API_KEY=sk-...
+
+# 3) Run the example
+uv run python code_reviewer_example.py
+```
+
+**More examples**
+
+```bash
+# Native OpenAI structured outputs example
+uv run python openai_example.py
+
+# LiteLLM adapter example
+uv sync --extra litellm
+uv run python litellm_example.py
+```
+
+---
 
 ## Why now?
 
-This library was built out of frustration with LangGraph and DSPy to explore
-better ways to do state and context management when building apps with LLMs
-while allowing the prompts to be automatically optimized.
+This library was built out of frustration with LangGraph and DSPy to explore better patterns for state and context management when building apps with LLMs—while still allowing prompts to be automatically optimized.
+
+---
 
 ## Highlights
 
-- Namespaced prompt trees with deterministic Markdown renders, placeholder
-  verification, and tool-aware versioning metadata.
-- Stdlib-only dataclass serde (`parse`, `dump`, `clone`, `schema`) keeps request and
-  response types honest end-to-end.
-- Session state container and event bus collect prompt and tool telemetry for
-  downstream automation.
-- Built-in planning and virtual filesystem tool suites give agents durable plans and
-  sandboxed edits backed by reducers and selectors.
-- Optional OpenAI and LiteLLM adapters integrate structured output parsing, tool
-  orchestration, and telemetry hooks.
+* **Deterministic prompt trees**
+  Namespaced sections, Markdown rendering, placeholder verification, and **tool-aware versioning metadata**.
+* **Stdlib-only dataclass serde**
+  `parse`, `dump`, `clone`, `schema` keep request/response types honest across model calls.
+* **Session state + event bus**
+  Collect prompt and tool telemetry for downstream automation (no separate state store).
+* **Built-in tool suites**
+  Planning and Virtual Filesystem tools provide durable plans and sandboxed edits backed by reducers/selectors.
+* **Provider adapters**
+  Optional OpenAI and LiteLLM adapters integrate structured output parsing, tool orchestration, and telemetry hooks.
+
+---
 
 ## Requirements
 
-- Python 3.12+ (the repository pins 3.14 in `.python-version` for development)
-- [`uv`](https://github.com/astral-sh/uv) CLI
+* Python **3.12+** (repo pins **3.14** in `.python-version` for development)
+* [`uv`](https://github.com/astral-sh/uv) CLI
 
-## Install
+## Install (as a dependency)
 
 ```bash
 uv add weakincentives
@@ -38,26 +77,18 @@ uv add "weakincentives[litellm]"
 # cloning the repo? use: uv sync --extra openai --extra litellm
 ```
 
+---
+
 ## Tutorial: Build a Stateful Code-Reviewing Agent
 
-Use Weak Incentives to assemble a reproducible reviewer that tracks every
-decision, stages file edits in a sandbox, and evaluates quick calculations when
-the diff raises questions. Compared to LangGraph you do not need to bolt on a
-custom state store—the `Session` captures prompt and tool telemetry out of the
-box. Unlike DSPy, prompt sections already expose versioning and override hooks
-so optimizers can swap instructions without rewriting the runtime.
+Use Weak Incentives to assemble a reproducible reviewer that tracks every decision, stages file edits in a sandbox, and evaluates quick calculations when the diff raises questions. Compared to LangGraph you don’t need to bolt on a state store—the `Session` captures prompt/tool telemetry. Unlike DSPy, sections expose versioning and override hooks so optimizers can swap instructions without touching the runtime.
 
-### 1. Model review data and expected outputs
+### 1) Model the review input and the structured output
 
-Typed dataclasses keep inputs and outputs honest so adapters can emit consistent
-telemetry and structured responses stay predictable. Dive into the
-[Dataclass Serde Utilities](specs/DATACLASS_SERDE.md) and [Structured Output via
-`Prompt[OutputT]`](specs/STRUCTURED_OUTPUT.md) specs for the validation rules and
-JSON-return guarantees that back this example.
+Typed dataclasses make adapters’ structured parsing predictable.
 
 ```python
 from dataclasses import dataclass
-
 
 @dataclass
 class PullRequestContext:
@@ -65,7 +96,6 @@ class PullRequestContext:
     title: str
     body: str
     files_summary: str
-
 
 @dataclass
 class ReviewComment:
@@ -75,26 +105,15 @@ class ReviewComment:
     summary: str
     rationale: str
 
-
 @dataclass
 class ReviewBundle:
     comments: tuple[ReviewComment, ...]
     overall_assessment: str
 ```
 
-### 2. Create a session, surface built-in tool suites, and mount diffs
+### 2) Create a session, enable built-in tools, and mount diffs
 
-Planning, virtual filesystem, and Python-evaluation sections register reducers on
-the provided session. Introducing them early keeps every evaluation capable of
-multi-step plans, staged edits, and quick calculations. Host mounts feed the
-reviewer precomputed diffs before the run begins so it can read them through the
-virtual filesystem tools without calling back to your orchestrator. Because each
-tool suite records its activity on the session, selectors later in the tutorial
-can recover audit logs without extra plumbing. See the [Session State
-Specification](specs/SESSIONS.md), [Prompt Event Emission](specs/EVENTS.md),
-[Virtual Filesystem Tool Suite](specs/VFS_TOOLS.md), [Planning Tool
-Suite](specs/PLANNING_TOOL.md), and [Asteval Integration](specs/ASTEVAL.md) for
-the reducer contracts and tool capabilities these snippets rely on.
+Planning, virtual filesystem, and Python-evaluation sections register reducers on the session so every run can plan, stage edits, and compute. Copy your unified diff files into `/srv/agent-mounts` before running.
 
 ```python
 from pathlib import Path
@@ -109,13 +128,12 @@ from weakincentives.tools import (
     VfsToolsSection,
 )
 
-
 bus = InProcessEventBus()
 session = Session(bus=bus)
 
-
 diff_root = Path("/srv/agent-mounts")
 diff_root.mkdir(parents=True, exist_ok=True)
+
 vfs_section = VfsToolsSection(
     session=session,
     allowed_host_roots=(diff_root,),
@@ -126,9 +144,9 @@ vfs_section = VfsToolsSection(
         ),
     ),
 )
+
 planning_section = PlanningToolsSection(session=session)
 asteval_section = AstevalSection(session=session)
-
 
 def log_prompt(event: PromptExecuted) -> None:
     print(
@@ -136,25 +154,14 @@ def log_prompt(event: PromptExecuted) -> None:
         f"{len(event.result.tool_results)} tool calls"
     )
 
-
 bus.subscribe(PromptExecuted, log_prompt)
 ```
 
-Copy unified diff files into `/srv/agent-mounts` before launching the run. The
-host mount resolves `octo_widgets/cache-layer.diff` relative to that directory
-and exposes it to the agent as `diffs/cache-layer.diff` inside the virtual
-filesystem snapshot.
+> The host mount resolves `octo_widgets/cache-layer.diff` relative to `/srv/agent-mounts` and exposes it to the agent as `diffs/cache-layer.diff` through the VFS snapshot.
 
-### 3. Define a symbol search helper tool
+### 3) Add a small helper tool (symbol search)
 
-Weak Incentives tools are typed functions that return structured results. Use
-them to expose deterministic helpers alongside the built-in suites. A reviewer
-benefits from a lightweight code-search utility that surfaces the context around
-symbols referenced in a diff. Mount a checkout of the repository under
-`/srv/agent-repo` before launching the run so the tool can read from it. Refer to
-the [Tool Registration Specification](specs/TOOLS.md) and [Error Handling
-Revamp](specs/TOOL_ERROR_HANDLING.md) to mirror the expected handler contract and
-`ToolResult` semantics.
+Custom tools are typed functions that return structured results. This one scans a repo checkout you mount at `/srv/agent-repo`.
 
 ```python
 from dataclasses import dataclass
@@ -162,13 +169,11 @@ from pathlib import Path
 
 from weakincentives.prompt.tool import Tool, ToolResult
 
-
 @dataclass
 class SymbolSearchRequest:
     query: str
     file_glob: str = "*.py"
     max_results: int = 5
-
 
 @dataclass
 class SymbolMatch:
@@ -176,14 +181,11 @@ class SymbolMatch:
     line: int
     snippet: str
 
-
 @dataclass
 class SymbolSearchResult:
     matches: tuple[SymbolMatch, ...]
 
-
 repo_root = Path("/srv/agent-repo")
-
 
 def find_symbol(params: SymbolSearchRequest) -> ToolResult[SymbolSearchResult]:
     if not repo_root.exists():
@@ -215,31 +217,20 @@ def find_symbol(params: SymbolSearchRequest) -> ToolResult[SymbolSearchResult]:
         value=SymbolSearchResult(matches=tuple(matches)),
     )
 
-
 symbol_search_tool = Tool[SymbolSearchRequest, SymbolSearchResult](
     name="symbol_search",
-    description=(
-        "Search the repository checkout for a symbol and return file snippets."
-    ),
+    description="Search the repository checkout for a symbol and return file snippets.",
     handler=find_symbol,
 )
 ```
 
-Attach custom tools to sections (next step) so the adapter can call them and
-record their outputs on the session alongside built-in reducers. The prompt can
-now chase suspicious references without delegating work back to the orchestrator.
+### 4) Compose a deterministic prompt from sections
 
-### 4. Compose the prompt with deterministic sections
-
-Sections rely on `string.Template`, so prepare readable placeholders up front.
-Combine your review instructions with the built-in tool suites to publish a
-single, auditable prompt tree. The [Prompt Class Specification](specs/PROMPTS.md)
-and [Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md) detail the
-rendering rules and hashing metadata that keep this structure stable.
+Sections use `string.Template` placeholders. The prompt tree is auditable and versioned.
 
 ```python
+from dataclasses import dataclass
 from weakincentives import MarkdownSection, Prompt
-
 
 @dataclass
 class ReviewGuidance:
@@ -249,7 +240,6 @@ class ReviewGuidance:
         "Security regressions, concurrency bugs, test coverage gaps, and"
         " ambiguous logic should be escalated."
     )
-
 
 overview_section = MarkdownSection[PullRequestContext](
     title="Repository Overview",
@@ -265,7 +255,6 @@ overview_section = MarkdownSection[PullRequestContext](
     Files touched: ${files_summary}
     """,
 )
-
 
 analysis_section = MarkdownSection[ReviewGuidance](
     title="Review Directives",
@@ -284,7 +273,6 @@ analysis_section = MarkdownSection[ReviewGuidance](
     default_params=ReviewGuidance(),
 )
 
-
 review_prompt = Prompt[ReviewBundle](
     ns="tutorial/code_review",
     key="review.generate",
@@ -298,7 +286,6 @@ review_prompt = Prompt[ReviewBundle](
     ),
 )
 
-
 rendered = review_prompt.render(
     PullRequestContext(
         repository="octo/widgets",
@@ -309,29 +296,21 @@ rendered = review_prompt.render(
     ReviewGuidance(),
 )
 
-
 print(rendered.text)
 print([tool.name for tool in rendered.tools])
 ```
 
-### 5. Evaluate the prompt with an adapter
+### 5) Evaluate the prompt with an adapter
 
-Adapters send the rendered prompt to a provider and publish telemetry to the
-event bus. The session subscribed above automatically ingests each
-`PromptExecuted` and `ToolInvoked` event. Review the [Adapter Evaluation
-Specification](specs/ADAPTERS.md) and [Native OpenAI Structured
-Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md) for provider payload
-expectations and parsing guarantees.
+Use the OpenAI adapter (or the LiteLLM adapter if that’s your stack).
 
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter
-
 
 adapter = OpenAIAdapter(
     model="gpt-4o-mini",
     client_kwargs={"api_key": "sk-..."},
 )
-
 
 response = adapter.evaluate(
     review_prompt,
@@ -341,41 +320,29 @@ response = adapter.evaluate(
         body="Introduces memoization to reduce redundant IO while preserving correctness.",
         files_summary="loader.py, cache.py",
     ),
-    bus=bus,
+    bus=bus,  # publishes PromptExecuted / ToolInvoked events
 )
-
 
 bundle = response.output
 if bundle is None:
     raise RuntimeError("Structured parsing failed")
 
-
 for comment in bundle.comments:
     print(f"{comment.file_path}:{comment.line} → {comment.summary}")
 ```
 
-If the model omits a required field, `OpenAIAdapter` raises `PromptEvaluationError`
-with provider context rather than silently degrading.
+> If a required field is missing, `OpenAIAdapter` raises a `PromptEvaluationError` with provider context rather than silently degrading.
 
-### 6. Mine session state for downstream automation
+### 6) Mine session state for automation & audit
 
-Built-in selectors expose the data collected by reducers that each tool suite
-registered. This gives you ready-to-ship audit logs without building LangGraph
-callbacks or DSPy side channels. Planning reducers keep only the latest `Plan`
-snapshot; register your own reducer before instantiating `PlanningToolsSection`
-if you need to retain a historical ledger alongside the current state. Consult
-the [Session State Specification](specs/SESSIONS.md) and [Session Snapshots
-Specification](specs/SESSION_SNAPSHOTS.md) to understand how selectors and
-rollbacks behave in production runs.
+Reducers from the built-in suites record their data on the session. Selectors recover the latest snapshots.
 
 ```python
 from weakincentives.session import select_latest
 from weakincentives.tools import Plan, VirtualFileSystem
 
-
 latest_plan = select_latest(session, Plan)
 vfs_snapshot = select_latest(session, VirtualFileSystem)
-
 
 if latest_plan:
     print(f"Plan objective: {latest_plan.objective}")
@@ -384,51 +351,28 @@ if latest_plan:
 else:
     print("No plan recorded yet.")
 
-
 if vfs_snapshot:
     for file in vfs_snapshot.files:
         print(f"Staged file {file.path.segments} (version {file.version})")
 ```
 
-### 7. Override sections with an overrides store
+### 7) Override sections via a local overrides store
 
-DSPy-style optimizers can persist improved instructions and let the runtime swap
-them in without redeploying code. For most projects the
-`LocalPromptOverridesStore` is the recommended implementation—it discovers the
-workspace root, enforces descriptor metadata, and reads JSON overrides from the
-`.weakincentives/prompts/overrides/` tree described in the
-[Local Prompt Overrides Store Specification](specs/LOCAL_PROMPT_OVERRIDES_STORE.md).
-Pair it with the [Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md)
-guidance to understand how namespace, prompt key, and tag hashing keep overrides
-pinned to the right sections and tools.
+Persist optimizer-tuned instructions and have the runtime pick them up without redeploying.
 
 ```python
 from pathlib import Path
-
-from weakincentives.prompt.local_prompt_overrides_store import (
-    LocalPromptOverridesStore,
-)
-from weakincentives.prompt.versioning import (
-    PromptDescriptor,
-    PromptOverride,
-    SectionOverride,
-)
-
+from weakincentives.prompt.local_prompt_overrides_store import LocalPromptOverridesStore
+from weakincentives.prompt.versioning import PromptDescriptor, PromptOverride, SectionOverride
 
 workspace_root = Path("/srv/agent-workspace")
 overrides_store = LocalPromptOverridesStore(root_path=workspace_root)
 
 descriptor = PromptDescriptor.from_prompt(review_prompt)
-seed_override = overrides_store.seed_if_necessary(
-    review_prompt, tag="assertive-feedback"
-)
+seed_override = overrides_store.seed_if_necessary(review_prompt, tag="assertive-feedback")
 
 section_path = ("review", "directives")
-section_descriptor = next(
-    section
-    for section in descriptor.sections
-    if section.path == section_path
-)
+section_descriptor = next(s for s in descriptor.sections if s.path == section_path)
 
 custom_override = PromptOverride(
     ns=descriptor.ns,
@@ -438,13 +382,11 @@ custom_override = PromptOverride(
         **seed_override.sections,
         section_path: SectionOverride(
             expected_hash=section_descriptor.content_hash,
-            body="\n".join(
-                (
-                    "- Classify findings using this severity scale: minor | major | critical.",
-                    "- Always cite the exact diff hunk when raising a major or critical issue.",
-                    "- Respond with ReviewBundle JSON. Missing fields terminate the run.",
-                )
-            ),
+            body="\n".join((
+                "- Classify findings using this severity scale: minor | major | critical.",
+                "- Always cite the exact diff hunk when raising a major or critical issue.",
+                "- Respond with ReviewBundle JSON. Missing fields terminate the run.",
+            )),
         ),
     },
     tool_overrides=seed_override.tool_overrides,
@@ -463,62 +405,76 @@ rendered_with_override = review_prompt.render_with_overrides(
     tag=persisted_override.tag,
 )
 
-
 print(rendered_with_override.text)
 ```
 
-The overrides store writes atomically to
-`.weakincentives/prompts/overrides/{ns}/{prompt_key}/{tag}.json` inside the
-workspace described in the
-[Local Prompt Overrides Store Specification](specs/LOCAL_PROMPT_OVERRIDES_STORE.md).
-Optimizers and prompt engineers can still drop JSON overrides into that tree by
-hand—checked into source control or generated during evaluations—without
-subclassing `PromptOverridesStore`. Because sections expose stable `(ns, key, path)` identifiers, overrides stay scoped to the intended content so teams can
-iterate on directives without risking accidental drift elsewhere in the tree.
+> The store writes to `.weakincentives/prompts/overrides/{ns}/{prompt_key}/{tag}.json` under the workspace root.
 
-### 8. Ship it
+### 8) Ship it
 
 You now have a deterministic reviewer that:
 
 1. Enforces typed contracts for inputs, tools, and outputs.
-1. Persists multi-step plans, VFS edits, and evaluation transcripts inside a
-   session without custom plumbing.
-1. Supports optimizer-driven overrides that slot cleanly into CI, evaluation
-   harnesses, or on-call tuning workflows.
+2. Persists multi-step plans, VFS edits, and evaluation transcripts inside a session.
+3. Supports optimizer-driven overrides for CI, evaluation harnesses, or on-call tuning.
 
-Drop the agent into a queue worker, Slack bot, or scheduled job. Every evaluation
-is replayable thanks to the captured session state, so postmortems start with
-facts—not speculation. For long-lived deployments, pair these patterns with the
-[Tool-Aware Prompt Versioning](specs/TOOL_AWARE_PROMPT_VERSIONING.md) guidance to
-keep overrides and tooling descriptions aligned as the code evolves.
+For long-lived deployments, pair this with **tool-aware prompt versioning** to keep overrides and tool descriptions aligned as code evolves.
+
+---
+
+## Troubleshooting
+
+* **“Structured parsing failed.”**
+  The model didn’t return valid `ReviewBundle` JSON. Tighten the `analysis_section` guidance or enforce schema reminders via the overrides store.
+* **Tool can’t read diffs.**
+  Ensure unified diff files exist under `/srv/agent-mounts` and `HostMount.host_path` is relative to that directory.
+* **OpenAI auth errors.**
+  Confirm `OPENAI_API_KEY` is set and that the `openai` extra is installed (`uv sync --extra openai` or `uv add "weakincentives[openai]"`).
+
+---
 
 ## Development Setup
 
-1. Install Python 3.14 (for example with `pyenv install 3.14.0`).
+1. Install Python **3.14** (e.g., `pyenv install 3.14.0`).
 
-1. Install `uv`, then bootstrap the environment and hooks:
+2. Install `uv`, then bootstrap the environment and hooks:
 
    ```bash
    uv sync
    ./install-hooks.sh
    ```
 
-1. Run checks with `uv run` so everything shares the managed virtualenv:
+3. Run checks via the managed virtualenv:
 
-   - `make format` / `make format-check`
-   - `make lint` / `make lint-fix`
-   - `make typecheck` (Ty + Pyright, warnings fail the build)
-   - `make test` (pytest via `build/run_pytest.py`, 100% coverage enforced)
-   - `make check` (aggregates the quiet checks above plus Bandit, Deptry, pip-audit,
-     and markdown linting)
+   * `make format` / `make format-check`
+   * `make lint` / `make lint-fix`
+   * `make typecheck` (Ty + Pyright; warnings fail the build)
+   * `make test` (pytest via `build/run_pytest.py`, **100% coverage enforced**)
+   * `make check` (aggregates the above plus Bandit, Deptry, pip-audit, Markdown lint)
+
+---
 
 ## Documentation
 
-- `AGENTS.md` — operational handbook and contributor workflow.
-- `specs/` — design docs for prompts, planning tools, and adapters.
-- `ROADMAP.md` — upcoming feature sketches.
-- `docs/api/` — API reference material.
+* `AGENTS.md` — operational handbook & contributor workflow
+* `specs/` — design docs for prompts, planning tools, adapters, and overrides
+* `ROADMAP.md` — upcoming feature sketches
+* `docs/api/` — API reference
+
+---
 
 ## License
 
-Apache 2.0 • Status: Alpha (APIs may change between releases)
+Apache 2.0 • Status: Alpha
+
+```
+
+---
+
+### Notes on alignment with `main` (for maintainers)
+
+- The examples referenced above (`code_reviewer_example.py`, `openai_example.py`, `litellm_example.py`) and the extras instructions are present on the repository’s **main** branch. 
+- The imports, class names, and paths used in the tutorial (e.g., `weakincentives.adapters.openai.OpenAIAdapter`, `weakincentives.tools.*`, and `specs/*` docs) match what’s published in the README and tree on **main**. 
+
+If you want me to convert this into a PR body (including commit message + diff preview), say the word and I’ll prepare the patch text.
+```
