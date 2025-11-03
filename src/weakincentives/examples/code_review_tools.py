@@ -15,11 +15,11 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..prompt import Tool, ToolResult
@@ -37,6 +37,31 @@ def _run_git_command(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
+
+
+T = TypeVar("T")
+
+
+def _run_git_tool(
+    args: Sequence[str],
+    *,
+    command_name: str,
+    failure_value_factory: Callable[[], T],
+    success_parser: Callable[[str], tuple[str, T]],
+) -> ToolResult[T]:
+    """Execute a git command and convert the result into a ``ToolResult``."""
+
+    result = _run_git_command(args)
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if stderr:
+            message = f"{command_name} failed: {stderr}"
+        else:
+            message = f"{command_name} failed with exit code {result.returncode}."
+        return ToolResult(message=message, value=failure_value_factory())
+
+    message, value = success_parser(result.stdout)
+    return ToolResult(message=message, value=value)
 
 
 @dataclass
@@ -212,20 +237,20 @@ def git_log_handler(params: GitLogParams) -> ToolResult[GitLogResult]:
     if params.path:
         args.extend(["--", params.path])
 
-    result = _run_git_command(args)
-    if result.returncode != 0:
-        message = f"git log failed: {result.stderr.strip()}"
-        return ToolResult(message=message, value=GitLogResult(entries=[]))
+    def parse(stdout: str) -> tuple[str, GitLogResult]:
+        entries = [line.strip() for line in stdout.splitlines() if line.strip()]
+        if not entries:
+            message = "No git log entries matched the query."
+        else:
+            message = f"Returned {len(entries)} git log entr{'y' if len(entries) == 1 else 'ies'}."
+        return message, GitLogResult(entries=entries)
 
-    entries = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    if not entries:
-        message = "No git log entries matched the query."
-    else:
-        message = (
-            f"Returned {len(entries)} git log entr"
-            f"{'y' if len(entries) == 1 else 'ies'}."
-        )
-    return ToolResult(message=message, value=GitLogResult(entries=entries))
+    return _run_git_tool(
+        args,
+        command_name="git log",
+        failure_value_factory=lambda: GitLogResult(entries=[]),
+        success_parser=parse,
+    )
 
 
 def current_time_handler(params: TimeQueryParams) -> ToolResult[TimeQueryResult]:
@@ -265,21 +290,21 @@ def branch_list_handler(params: BranchListParams) -> ToolResult[BranchListResult
     if params.pattern:
         args.append(params.pattern)
 
-    result = _run_git_command(args)
-    if result.returncode != 0:
-        message = f"git branch failed: {result.stderr.strip()}"
-        return ToolResult(message=message, value=BranchListResult(branches=[]))
+    def parse(stdout: str) -> tuple[str, BranchListResult]:
+        branches = [line.strip().lstrip("* ") for line in stdout.splitlines()]
+        branches = [branch for branch in branches if branch]
+        if not branches:
+            message = "No branches matched the query."
+        else:
+            message = f"Returned {len(branches)} branch entr{'y' if len(branches) == 1 else 'ies'}."
+        return message, BranchListResult(branches=branches)
 
-    branches = [line.strip().lstrip("* ") for line in result.stdout.splitlines()]
-    branches = [branch for branch in branches if branch]
-    if not branches:
-        message = "No branches matched the query."
-    else:
-        message = (
-            f"Returned {len(branches)} branch entr"
-            f"{'y' if len(branches) == 1 else 'ies'}."
-        )
-    return ToolResult(message=message, value=BranchListResult(branches=branches))
+    return _run_git_tool(
+        args,
+        command_name="git branch",
+        failure_value_factory=lambda: BranchListResult(branches=[]),
+        success_parser=parse,
+    )
 
 
 def tag_list_handler(params: TagListParams) -> ToolResult[TagListResult]:
@@ -291,17 +316,22 @@ def tag_list_handler(params: TagListParams) -> ToolResult[TagListResult]:
     if params.pattern:
         args.append(params.pattern)
 
-    result = _run_git_command(args)
-    if result.returncode != 0:
-        message = f"git tag failed: {result.stderr.strip()}"
-        return ToolResult(message=message, value=TagListResult(tags=[]))
+    def parse(stdout: str) -> tuple[str, TagListResult]:
+        tags = [line.strip() for line in stdout.splitlines() if line.strip()]
+        if not tags:
+            message = "No tags matched the query."
+        else:
+            message = (
+                f"Returned {len(tags)} tag entr{'y' if len(tags) == 1 else 'ies'}."
+            )
+        return message, TagListResult(tags=tags)
 
-    tags = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    if not tags:
-        message = "No tags matched the query."
-    else:
-        message = f"Returned {len(tags)} tag entr{'y' if len(tags) == 1 else 'ies'}."
-    return ToolResult(message=message, value=TagListResult(tags=tags))
+    return _run_git_tool(
+        args,
+        command_name="git tag",
+        failure_value_factory=lambda: TagListResult(tags=[]),
+        success_parser=parse,
+    )
 
 
 def build_tools() -> tuple[Tool[Any, Any], ...]:
@@ -351,6 +381,7 @@ __all__ = [
     "TimeQueryParams",
     "TimeQueryResult",
     "_run_git_command",
+    "_run_git_tool",
     "branch_list_handler",
     "build_tools",
     "current_time_handler",
