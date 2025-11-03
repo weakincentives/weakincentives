@@ -40,6 +40,30 @@ uv add "weakincentives[litellm]"
 # cloning the repo? use: uv sync --extra openai --extra litellm
 ```
 
+## Logging
+
+Weak Incentives ships a structured logging adapter so hosts can add contextual
+metadata to every record without manual dictionary plumbing. Call
+`configure_logging()` during startup to install the default handler and then
+bind logger instances wherever you need telemetry:
+
+```python
+from weakincentives.logging import configure_logging, get_logger
+
+configure_logging(json_mode=True)
+logger = get_logger("demo").bind(component="cli")
+logger.info("boot", event="demo.start", context={"attempt": 1})
+```
+
+The helper respects any existing root handlers—omit `force=True` if your
+application already configures logging and you only want Weak Incentives to
+honor the selected level. When you do want to take over the pipeline, call
+`configure_logging(..., force=True)` and then customize the root handler list
+with additional sinks (for example, forwarding records to Cloud Logging or a
+structured log shipper). Each emitted record contains an `event` field plus a
+`context` mapping, so downstream processors can make routing decisions without
+parsing raw message strings.
+
 ## Tutorial: Build a Stateful Code-Reviewing Agent
 
 Use Weak Incentives to assemble a reproducible reviewer that tracks every
