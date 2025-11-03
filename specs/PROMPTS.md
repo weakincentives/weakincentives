@@ -50,7 +50,10 @@ pre-populates values, stores the raw `body` string interpreted by the concrete s
 sections through the `children` collection, optionally contributes prompt tools through the `tools` sequence, and
 supports an optional boolean `enabled` callable. The callable receives the effective dataclass instance (either the
 override passed to `render` or the fallback defaults) and lets authors skip entire subtrees dynamically while still
-staying inside the strict `Template` feature set.
+staying inside the strict `Template` feature set. Sections also declare an `accepts_overrides: bool` flag that defaults
+to `True`. When false, the section is excluded from prompt descriptors and the override system ignores any supplied
+replacement bodies. Built-in sections provided by the framework (including the generated response format section)
+set this flag to `False` so automatic optimization infrastructure leaves them untouched.
 
 ## Construction Rules
 

@@ -54,4 +54,5 @@ class ResponseFormatSection(MarkdownSection[ResponseFormatParams]):
             template=_RESPONSE_FORMAT_BODY,
             default_params=params,
             enabled=enabled,
+            accepts_overrides=False,
         )

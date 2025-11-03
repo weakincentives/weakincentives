@@ -60,11 +60,14 @@ class _LookupResult:
     success: bool
 
 
-def _build_tool_prompt() -> tuple[Prompt, Tool[_GreetingParams, _LookupResult]]:
+def _build_tool_prompt(
+    *, accepts_overrides: bool = True
+) -> tuple[Prompt, Tool[_GreetingParams, _LookupResult]]:
     tool = Tool[_GreetingParams, _LookupResult](
         name="greeter",
         description="Greet the provided subject in a friendly way.",
         handler=None,
+        accepts_overrides=accepts_overrides,
     )
     prompt = Prompt(
         ns="tests/versioning",
@@ -98,7 +101,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
     assert descriptor.tools == []
 
 
-def test_prompt_descriptor_includes_response_format_section() -> None:
+def test_prompt_descriptor_excludes_response_format_section() -> None:
     @dataclass
     class Summary:
         topic: str
@@ -119,7 +122,7 @@ def test_prompt_descriptor_includes_response_format_section() -> None:
     paths = [section.path for section in descriptor.sections]
 
     assert ("task",) in paths
-    assert ("response-format",) in paths
+    assert ("response-format",) not in paths
     assert descriptor.tools == []
     assert descriptor.ns == "tests/versioning"
 
@@ -155,6 +158,14 @@ def test_prompt_descriptor_collects_tools() -> None:
             path=("greeting",), name="greeter", contract_hash=expected_contract
         )
     ]
+
+
+def test_prompt_descriptor_skips_tools_without_override_acceptance() -> None:
+    prompt, _ = _build_tool_prompt(accepts_overrides=False)
+
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    assert descriptor.tools == []
 
 
 class _RecordingOverridesStore(PromptOverridesStore):
@@ -223,6 +234,36 @@ def test_prompt_render_with_overrides_applies_matching_sections() -> None:
     assert "Cheer loudly for Operators." in rendered.text
     assert store.calls == [(descriptor, "experiment")]
     assert rendered.tool_param_descriptions == {}
+
+
+def test_prompt_render_with_overrides_respects_section_acceptance() -> None:
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    section = descriptor.sections[0]
+    path = section.path
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="experiment",
+        sections={
+            path: SectionOverride(
+                expected_hash=section.content_hash,
+                body="Cheer loudly for ${subject}.",
+            )
+        },
+    )
+    store = _RecordingOverridesStore(override)
+
+    prompt.sections[0].section.accepts_overrides = False  # type: ignore[misc]
+
+    rendered = prompt.render_with_overrides(
+        _GreetingParams(subject="Operators"),
+        overrides_store=store,
+        tag="experiment",
+    )
+
+    assert "Greet Operators warmly." in rendered.text
 
 
 def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
@@ -294,6 +335,36 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
     assert rendered.tool_param_descriptions == {
         tool.name: {"subject": "Name of the person to greet."}
     }
+
+
+def test_prompt_render_with_tool_overrides_respects_acceptance() -> None:
+    prompt, tool = _build_tool_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    contract_hash = descriptor.tools[0].contract_hash
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={},
+        tool_overrides={
+            tool.name: ToolOverride(
+                name=tool.name,
+                expected_contract_hash=contract_hash,
+                description="Offer a celebratory greeting for the subject.",
+            )
+        },
+    )
+    store = _RecordingOverridesStore(override)
+
+    prompt.sections[0].section.tools()[0].accepts_overrides = False  # type: ignore[misc]
+
+    rendered = prompt.render_with_overrides(
+        _GreetingParams(subject="Operators"),
+        overrides_store=store,
+    )
+
+    assert rendered.tools[0].description == tool.description
 
 
 def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:

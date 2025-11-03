@@ -158,6 +158,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             template=_VFS_SECTION_TEMPLATE,
             default_params=_VfsSectionParams(),
             tools=tools,
+            accepts_overrides=False,
         )
 
 
@@ -172,21 +173,25 @@ def _build_tools(
                 name="vfs_list_directory",
                 description="Enumerate files and directories at a path.",
                 handler=suite.list_directory,
+                accepts_overrides=False,
             ),
             Tool[ReadFile, VfsFile](
                 name="vfs_read_file",
                 description="Read file contents and metadata.",
                 handler=suite.read_file,
+                accepts_overrides=False,
             ),
             Tool[WriteFile, WriteFile](
                 name="vfs_write_file",
                 description="Create or update a file in the virtual filesystem.",
                 handler=suite.write_file,
+                accepts_overrides=False,
             ),
             Tool[DeleteEntry, DeleteEntry](
                 name="vfs_delete_entry",
                 description="Delete a file or directory subtree.",
                 handler=suite.delete_entry,
+                accepts_overrides=False,
             ),
         ),
     )

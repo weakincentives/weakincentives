@@ -134,6 +134,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             template=_PLANNING_SECTION_TEMPLATE,
             default_params=_PlanningSectionParams(),
             tools=tools,
+            accepts_overrides=False,
         )
 
 
@@ -148,31 +149,37 @@ def _build_tools(
                 name="planning_setup_plan",
                 description="Create or replace the session plan.",
                 handler=suite.setup_plan,
+                accepts_overrides=False,
             ),
             Tool[AddStep, AddStep](
                 name="planning_add_step",
                 description="Append one or more steps to the active plan.",
                 handler=suite.add_step,
+                accepts_overrides=False,
             ),
             Tool[UpdateStep, UpdateStep](
                 name="planning_update_step",
                 description="Edit the title or details for an existing step.",
                 handler=suite.update_step,
+                accepts_overrides=False,
             ),
             Tool[MarkStep, MarkStep](
                 name="planning_mark_step",
                 description="Update step status and optionally record a note.",
                 handler=suite.mark_step,
+                accepts_overrides=False,
             ),
             Tool[ClearPlan, ClearPlan](
                 name="planning_clear_plan",
                 description="Mark the current plan as abandoned.",
                 handler=suite.clear_plan,
+                accepts_overrides=False,
             ),
             Tool[ReadPlan, Plan](
                 name="planning_read_plan",
                 description="Return the latest plan snapshot.",
                 handler=suite.read_plan,
+                accepts_overrides=False,
             ),
         ),
     )

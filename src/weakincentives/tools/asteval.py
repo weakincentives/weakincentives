@@ -721,6 +721,7 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             name="evaluate_python",
             description="Evaluate a short Python expression in a sandboxed environment with optional VFS access.",
             handler=tool_suite.run,
+            accepts_overrides=False,
         )
         super().__init__(
             title="Python Evaluation Tool",
@@ -728,6 +729,7 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             template=_EVAL_TEMPLATE,
             default_params=_AstevalSectionParams(),
             tools=(tool,),
+            accepts_overrides=False,
         )
 
 

@@ -41,6 +41,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         children: Sequence[object] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
         tools: Sequence[object] | None = None,
+        accepts_overrides: bool = True,
     ) -> None:
         super().__init__()
         params_type = cast(
@@ -56,6 +57,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         self.title = title
         self.key = self._normalize_key(key)
         self.default_params = default_params
+        self.accepts_overrides = accepts_overrides
 
         normalized_children: list[Section[SupportsDataclass]] = []
         for child in children or ():

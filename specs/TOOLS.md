@@ -54,6 +54,8 @@ instances capture that response tuple, and every tool handler returns one direct
   require 1–200 characters so payloads stay portable.
 - `handler: Callable[[ParamsT], ToolResult[ResultT]] | None` – optional runtime hook surfaced to orchestration layers.
   Handlers must accept exactly one argument of type `ParamsT`, and when provided they must return a `ToolResult[ResultT]`.
+- `accepts_overrides: bool` – opt-in flag for the automatic override pipeline. Defaults to `True`, but built-in tooling
+  sets it to `False` so optimization experiments ignore them until the contracts stabilize.
 
 Parameter and result dataclasses inherit the same validation rules as section params: every placeholder referenced in
 markdown must exist on the dataclass, and required fields without defaults must be supplied when rendering. Tools bind the

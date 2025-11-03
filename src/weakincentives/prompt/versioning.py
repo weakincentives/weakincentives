@@ -39,6 +39,8 @@ class SectionLike(Protocol):
 
     def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]: ...
 
+    accepts_overrides: bool
+
 
 class SectionNodeLike(Protocol):
     path: tuple[str, ...]
@@ -84,10 +86,11 @@ class PromptDescriptor:
         sections: list[SectionDescriptor] = []
         tools: list[ToolDescriptor] = []
         for node in prompt.sections:
-            template = node.section.original_body_template()
-            if template is not None:
-                content_hash = sha256(template.encode("utf-8")).hexdigest()
-                sections.append(SectionDescriptor(node.path, content_hash))
+            if getattr(node.section, "accepts_overrides", True):
+                template = node.section.original_body_template()
+                if template is not None:
+                    content_hash = sha256(template.encode("utf-8")).hexdigest()
+                    sections.append(SectionDescriptor(node.path, content_hash))
             tool_descriptors = [
                 ToolDescriptor(
                     path=node.path,
@@ -95,6 +98,7 @@ class PromptDescriptor:
                     contract_hash=_tool_contract_hash(tool),
                 )
                 for tool in node.section.tools()
+                if tool.accepts_overrides
             ]
             tools.extend(tool_descriptors)
         return cls(prompt.ns, prompt.key, sections, tools)
