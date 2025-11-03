@@ -216,6 +216,46 @@ symbol_search_tool = Tool[SymbolSearchRequest, SymbolSearchResult](
 )
 ```
 
+Session reducers accumulate structured state across prompt and tool events.
+When the `symbol_search` tool returns results, register a reducer that records
+the queries the reviewer explored along with the snippets that satisfied each
+one. Downstream sections can inspect this slice with
+`session.select_all(ReviewedSymbol)` to summarize the investigation history.
+
+```python
+from dataclasses import dataclass
+
+from weakincentives.session import ToolData
+
+
+@dataclass
+class ReviewedSymbol:
+    query: str
+    matches: tuple[SymbolMatch, ...]
+
+
+def track_reviewed_symbols(
+    reviewed: tuple[ReviewedSymbol, ...],
+    event: ToolData,
+) -> tuple[ReviewedSymbol, ...]:
+    if event.value is None or not isinstance(event.value, SymbolSearchResult):
+        return reviewed
+
+    params = event.source.params
+    reviewed_symbol = ReviewedSymbol(
+        query=params.query,
+        matches=event.value.matches,
+    )
+    return (*reviewed, reviewed_symbol)
+
+
+session.register_reducer(
+    SymbolSearchResult,
+    track_reviewed_symbols,
+    slice_type=ReviewedSymbol,
+)
+```
+
 Attach custom tools to sections (next step) so the adapter can call them and
 record their outputs on the session alongside built-in reducers. The prompt can
 now chase suspicious references without delegating work back to the orchestrator.
