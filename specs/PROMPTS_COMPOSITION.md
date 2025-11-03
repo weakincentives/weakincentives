@@ -104,14 +104,15 @@ the parent prompt has already been rendered so its text and structured output me
 ### Minimal wrapper when the adapter supports structured outputs
 
 Model the delegation surface as a dedicated class so callers can retain the parent prompt,
-rendered copy, and specialized output type together. The constructor builds a new prompt instance
-that targets its own structured output type via the `delegation_output_type` parameter.
+rendered copy, and specialized output type together. Specialize the class with the delegated
+output type (for example, `DelegationPrompt[ParentOutput, DelegationPlan]`) so the constructor can
+derive the correct `Prompt` subclass without accepting an explicit type argument.
 
 ```python
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generic, Sequence, TypeVar
+from typing import Any, Generic, Sequence, TypeVar, cast, get_args
 
 from weakincentives.prompt import MarkdownSection, Prompt, Section
 from weakincentives.prompt.prompt import RenderedPrompt
@@ -179,8 +180,6 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
         self,
         parent_prompt: Prompt[ParentOutputT],
         rendered_parent: RenderedPrompt[ParentOutputT],
-        *,
-        delegation_output_type: type[DelegationOutputT],
         recap_lines: Sequence[str] | None = None,
     ) -> None:
         summary_section = MarkdownSection[DelegationSummaryParams](
@@ -201,6 +200,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
             sections.append(RecapSection())
             self._recap_params = RecapParams(bullets=tuple(recap_lines))
 
+        delegation_output_type = self._resolve_delegation_output_type()
         prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
         self._prompt = prompt_cls(
             ns=f"{parent_prompt.ns}.delegation",
@@ -209,6 +209,14 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
             inject_output_instructions=False,
             allow_extra_keys=bool(rendered_parent.allow_extra_keys),
         )
+
+    def _resolve_delegation_output_type(self) -> type[DelegationOutputT]:
+        try:
+            _, delegation_output = get_args(self.__orig_class__)
+        except AttributeError as error:
+            msg = "Specialize DelegationPrompt with an explicit output type"
+            raise TypeError(msg) from error
+        return cast(type[DelegationOutputT], delegation_output)
 
     @property
     def prompt(self) -> Prompt[DelegationOutputT]:
@@ -229,10 +237,9 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
 
 # Usage
 parent_render = parent_prompt.render(...)
-delegation_prompt = DelegationPrompt(
+delegation_prompt = DelegationPrompt[ParentOutputT, DelegationPlan](
     parent_prompt,
     parent_render,
-    delegation_output_type=DelegationPlan,
     recap_lines=("Check filesystem notes before drafting the plan.",),
 )
 rendered_delegation = delegation_prompt.render(
@@ -253,13 +260,18 @@ initialiser to inject the section between the summary and parent prompt when req
 `RecapSection` and `RecapParams` helpers from the minimal example when you need the optional recap.
 
 ```python
-from typing import Any, Sequence
+from typing import Any, Generic, Sequence, TypeVar, cast, get_args
 
-from weakincentives.prompt import Section
+from weakincentives.prompt import MarkdownSection, Prompt, Section
 from weakincentives.prompt.response_format import (
     ResponseFormatParams,
     ResponseFormatSection,
 )
+from weakincentives.prompt.prompt import RenderedPrompt
+
+
+ParentOutputT = TypeVar("ParentOutputT")
+DelegationOutputT = TypeVar("DelegationOutputT")
 
 
 class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
@@ -267,8 +279,6 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
         self,
         parent_prompt: Prompt[ParentOutputT],
         rendered_parent: RenderedPrompt[ParentOutputT],
-        *,
-        delegation_output_type: type[DelegationOutputT],
         recap_lines: Sequence[str] | None = None,
     ) -> None:
         summary_section = MarkdownSection[DelegationSummaryParams](
@@ -294,6 +304,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
             sections.append(RecapSection())
             self._recap_params = RecapParams(bullets=tuple(recap_lines))
 
+        delegation_output_type = self._resolve_delegation_output_type()
         prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
         self._prompt = prompt_cls(
             ns=f"{parent_prompt.ns}.delegation",
@@ -302,6 +313,14 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
             inject_output_instructions=False,
             allow_extra_keys=bool(rendered_parent.allow_extra_keys),
         )
+
+    def _resolve_delegation_output_type(self) -> type[DelegationOutputT]:
+        try:
+            _, delegation_output = get_args(self.__orig_class__)
+        except AttributeError as error:
+            msg = "Specialize DelegationPrompt with an explicit output type"
+            raise TypeError(msg) from error
+        return cast(type[DelegationOutputT], delegation_output)
 
     def _build_fallback_response_section(
         self,
