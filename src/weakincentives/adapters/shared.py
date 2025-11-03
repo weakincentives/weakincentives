@@ -100,25 +100,31 @@ def extract_payload(response: object) -> dict[str, Any] | None:
         except Exception:  # pragma: no cover - defensive
             return None
         if isinstance(payload, Mapping):
-            mapping_payload = cast(Mapping[str, Any], payload)
-            return dict(mapping_payload)
+            mapping_payload = _mapping_to_str_dict(cast(Mapping[Any, Any], payload))
+            if mapping_payload is not None:
+                return mapping_payload
         return None
     if isinstance(response, Mapping):  # pragma: no cover - defensive
-        return dict(response)
+        mapping_payload = _mapping_to_str_dict(cast(Mapping[Any, Any], response))
+        if mapping_payload is not None:
+            return mapping_payload
     return None
 
 
 def first_choice(response: object, *, prompt_name: str) -> object:
     """Return the first choice in a provider response or raise consistently."""
 
+    choices = getattr(response, "choices", None)
+    if not isinstance(choices, Sequence):
+        raise PromptEvaluationError(
+            "Provider response did not include any choices.",
+            prompt_name=prompt_name,
+            phase="response",
+        )
+    sequence_choices = cast(Sequence[object], choices)
     try:
-        choices = response.choices  # type: ignore[attr-defined]
-        return choices[0]
-    except (
-        AttributeError,
-        IndexError,
-        TypeError,
-    ) as error:  # pragma: no cover - defensive
+        return sequence_choices[0]
+    except IndexError as error:  # pragma: no cover - defensive
         raise PromptEvaluationError(
             "Provider response did not include any choices.",
             prompt_name=prompt_name,
@@ -126,16 +132,16 @@ def first_choice(response: object, *, prompt_name: str) -> object:
         ) from error
 
 
-def serialize_tool_call(tool_call: object) -> dict[str, Any]:
+def serialize_tool_call(tool_call: ProviderToolCall) -> dict[str, Any]:
     """Serialize a provider tool call into the assistant message payload."""
 
-    function = tool_call.function  # type: ignore[attr-defined]
+    function = tool_call.function
     return {
         "id": getattr(tool_call, "id", None),
         "type": "function",
         "function": {
-            "name": getattr(function, "name", None),
-            "arguments": getattr(function, "arguments", None) or "{}",
+            "name": function.name,
+            "arguments": function.arguments or "{}",
         },
     }
 
@@ -166,7 +172,18 @@ def parse_tool_arguments(
             phase="tool",
             provider_payload=provider_payload,
         )
-    return dict(cast(Mapping[str, Any], parsed))
+    parsed_mapping = cast(Mapping[Any, Any], parsed)
+    arguments: dict[str, Any] = {}
+    for key, value in parsed_mapping.items():
+        if not isinstance(key, str):
+            raise PromptEvaluationError(
+                "Tool call arguments must use string keys.",
+                prompt_name=prompt_name,
+                phase="tool",
+                provider_payload=provider_payload,
+            )
+        arguments[key] = value
+    return arguments
 
 
 def execute_tool_call(
@@ -415,6 +432,15 @@ def _parsed_payload_from_part(part: object) -> object | None:
     if part_type == "output_json":
         return getattr(part, "json", None)
     return None
+
+
+def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
+    str_mapping: dict[str, Any] = {}
+    for key, value in mapping.items():
+        if not isinstance(key, str):
+            return None
+        str_mapping[key] = value
+    return str_mapping
 
 
 __all__ = [
