@@ -6,6 +6,35 @@ Release highlights for weakincentives.
 
 - No changes yet.
 
+## v0.5.0 - 2025-11-02
+
+### Session & State
+
+- Added session snapshot capture and rollback APIs to persist dataclass slices, with new helpers and regression coverage.
+
+### Prompt Overrides
+
+- Introduced `LocalPromptOverridesStore` for persisting prompt overrides on disk with strict validation and a README walkthrough.
+- Renamed the prompt overrides protocol and exports to `PromptOverridesStore` so runtime and specs share consistent terminology.
+
+### Tool Execution & Adapters
+
+- Centralized adapter tool execution through a shared helper, removing redundant aliases and unifying reducer rollback handling.
+- Tool handlers now emit structured JSON responses (including a `success` flag) and adapters treat failures as non-fatal session events.
+
+### Events & Telemetry
+
+- Event buses now return a `PublishResult` summary capturing handler failures and expose `raise_if_errors` for aggregated exceptions.
+
+### Tooling & Quality
+
+- Enabled Pyright strict mode and tightened type contracts across adapters, tool serialization, and session snapshot plumbing.
+
+### Documentation
+
+- Added specs covering session snapshots, local prompt overrides, prompt subagent dispatch, and tool error handling.
+- Expanded ASTEval guidance with tool invocation examples and refreshed README tutorials with spec links and symbol search tooling.
+
 ## v0.4.0 - 2025-11-01
 
 ### Evaluation Tools
