@@ -19,26 +19,20 @@ from collections.abc import Mapping, Sequence
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
-from ..events import EventBus, PromptExecuted, ToolInvoked
+from ..events import EventBus
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
-from ..prompt.structured_output import OutputParseError, parse_structured_output
-from ..prompt.tool import ToolResult
+from . import shared as _shared
 from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse
 from .shared import (
+    ProviderChoice,
     ToolChoice,
     build_json_schema_response_format,
-    execute_tool_call,
-    extract_parsed_content,
-    extract_payload,
     first_choice,
     format_publish_failures,
-    message_text_content,
-    parse_schema_constrained_payload,
     parse_tool_arguments,
-    serialize_tool_call,
-    tool_to_spec,
+    run_conversation,
 )
 
 if TYPE_CHECKING:
@@ -176,44 +170,34 @@ class OpenAIAdapter:
             )
         else:
             rendered = prompt.render(*params)
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": rendered.text},
-        ]
-
+        response_format: dict[str, Any] | None = None
         should_parse_structured_output = (
             parse_output
             and rendered.output_type is not None
             and rendered.container is not None
         )
-        response_format: dict[str, Any] | None = None
         if should_parse_structured_output and self._use_native_response_format:
             response_format = build_json_schema_response_format(rendered, prompt_name)
 
-        tools = list(rendered.tools)
-        tool_specs = [tool_to_spec(tool) for tool in tools]
-        tool_registry = {tool.name: tool for tool in tools}
-        tool_events: list[ToolInvoked] = []
-        tool_message_records: list[
-            tuple[ToolResult[SupportsDataclass], dict[str, Any]]
-        ] = []
-        provider_payload: dict[str, Any] | None = None
-        # Allow forcing a specific tool once, then fall back to provider defaults.
-        next_tool_choice: ToolChoice = self._tool_choice
-
-        while True:
+        def _call_provider(
+            messages: list[dict[str, Any]],
+            tool_specs: Sequence[Mapping[str, Any]],
+            tool_choice_directive: ToolChoice | None,
+            response_format_payload: Mapping[str, Any] | None,
+        ) -> object:
             request_payload: dict[str, Any] = {
                 "model": self._model,
                 "messages": messages,
             }
             if tool_specs:
-                request_payload["tools"] = tool_specs
-                if next_tool_choice is not None:
-                    request_payload["tool_choice"] = next_tool_choice
-            if response_format is not None:
-                request_payload["response_format"] = response_format
+                request_payload["tools"] = list(tool_specs)
+                if tool_choice_directive is not None:
+                    request_payload["tool_choice"] = tool_choice_directive
+            if response_format_payload is not None:
+                request_payload["response_format"] = response_format_payload
 
             try:
-                response = self._client.chat.completions.create(**request_payload)
+                return self._client.chat.completions.create(**request_payload)
             except Exception as error:  # pragma: no cover - network/SDK failure
                 raise PromptEvaluationError(
                     "OpenAI request failed.",
@@ -221,111 +205,41 @@ class OpenAIAdapter:
                     phase="request",
                 ) from error
 
-            provider_payload = extract_payload(response)
-            choice = cast(
-                _CompletionChoice, first_choice(response, prompt_name=prompt_name)
-            )
-            message = choice.message
-            tool_calls = list(message.tool_calls or [])
-
-            if not tool_calls:
-                final_text = message_text_content(message.content)
-                output: OutputT | None = None
-                text_value: str | None = final_text or None
-
-                if should_parse_structured_output:
-                    parsed_payload = extract_parsed_content(message)
-                    if parsed_payload is not None:
-                        try:
-                            output = cast(
-                                OutputT,
-                                parse_schema_constrained_payload(
-                                    parsed_payload, rendered
-                                ),
-                            )
-                        except (TypeError, ValueError) as error:
-                            raise PromptEvaluationError(
-                                str(error),
-                                prompt_name=prompt_name,
-                                phase="response",
-                                provider_payload=provider_payload,
-                            ) from error
-                    else:
-                        try:
-                            output = parse_structured_output(final_text, rendered)
-                        except OutputParseError as error:
-                            raise PromptEvaluationError(
-                                error.message,
-                                prompt_name=prompt_name,
-                                phase="response",
-                                provider_payload=provider_payload,
-                            ) from error
-                    if output is not None:
-                        text_value = None
-
-                if (
-                    output is not None
-                    and tool_message_records
-                    and tool_message_records[-1][0].success
-                ):
-                    last_result, last_message = tool_message_records[-1]
-                    last_message["content"] = serialize_tool_message(
-                        last_result, payload=output
-                    )
-
-                response = PromptResponse(
-                    prompt_name=prompt_name,
-                    text=text_value,
-                    output=output,
-                    tool_results=tuple(tool_events),
-                    provider_payload=provider_payload,
-                )
-                _ = bus.publish(
-                    PromptExecuted(
-                        prompt_name=prompt_name,
-                        adapter="openai",
-                        result=cast(PromptResponse[object], response),
-                    )
-                )
-                return response
-
-            assistant_tool_calls = [serialize_tool_call(call) for call in tool_calls]
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content or "",
-                    "tool_calls": assistant_tool_calls,
-                }
+        def _select_choice(response: object) -> ProviderChoice:
+            return cast(
+                ProviderChoice,
+                first_choice(response, prompt_name=prompt_name),
             )
 
-            for tool_call in tool_calls:
-                invocation, tool_result = execute_tool_call(
-                    adapter_name="openai",
-                    tool_call=tool_call,
-                    tool_registry=tool_registry,
-                    bus=bus,
-                    session=session,
-                    prompt_name=prompt_name,
-                    provider_payload=provider_payload,
-                    format_publish_failures=format_publish_failures,
-                    parse_arguments=parse_tool_arguments,
-                    logger_override=logger,
-                )
-                tool_events.append(invocation)
-
-                tool_message = {
-                    "role": "tool",
-                    "tool_call_id": getattr(tool_call, "id", None),
-                    "content": serialize_tool_message(tool_result),
-                }
-                messages.append(tool_message)
-                tool_message_records.append((tool_result, tool_message))
-
-            if isinstance(next_tool_choice, Mapping):
-                tool_choice_mapping = cast(Mapping[str, object], next_tool_choice)
-                if tool_choice_mapping.get("type") == "function":
-                    # Relax forced single-function choice after the first call.
-                    next_tool_choice = "auto"
+        return run_conversation(
+            adapter_name="openai",
+            prompt_name=prompt_name,
+            rendered=rendered,
+            initial_messages=[{"role": "system", "content": rendered.text}],
+            parse_output=parse_output,
+            bus=bus,
+            session=session,
+            tool_choice=self._tool_choice,
+            response_format=response_format,
+            require_structured_output_text=False,
+            call_provider=_call_provider,
+            select_choice=_select_choice,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=format_publish_failures,
+            parse_arguments=parse_tool_arguments,
+            logger_override=logger,
+        )
 
 
-__all__ = ["OpenAIAdapter", "OpenAIProtocol"]
+__all__ = [
+    "OpenAIAdapter",
+    "OpenAIProtocol",
+    "extract_parsed_content",
+    "message_text_content",
+    "parse_schema_constrained_payload",
+]
+
+
+message_text_content = _shared.message_text_content
+extract_parsed_content = _shared.extract_parsed_content
+parse_schema_constrained_payload = _shared.parse_schema_constrained_payload

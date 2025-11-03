@@ -14,11 +14,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from weakincentives.adapters import PromptEvaluationError, shared
+from weakincentives.events import NullEventBus
+from weakincentives.prompt.prompt import RenderedPrompt
 
 
 def test_first_choice_returns_first_item() -> None:
@@ -56,3 +58,54 @@ def test_parse_tool_arguments_rejects_non_string_keys(
 
 def test_mapping_to_str_dict_rejects_non_string_keys() -> None:
     assert shared._mapping_to_str_dict({1: "value"}) is None
+
+
+def test_run_conversation_requires_message_payload() -> None:
+    rendered = RenderedPrompt(
+        text="system",
+        output_type=None,
+        container=None,
+        allow_extra_keys=None,
+    )
+    bus = NullEventBus()
+
+    class DummyChoice:
+        def __init__(self) -> None:
+            self.message = None
+
+    class DummyResponse:
+        def __init__(self) -> None:
+            self.choices = [DummyChoice()]
+
+    def call_provider(
+        messages: list[dict[str, Any]],
+        tool_specs: list[Mapping[str, Any]],
+        tool_choice: shared.ToolChoice | None,
+        response_format: Mapping[str, Any] | None,
+    ) -> DummyResponse:
+        return DummyResponse()
+
+    def select_choice(response: DummyResponse) -> shared.ProviderChoice:
+        return response.choices[0]
+
+    serialize_stub = cast(
+        shared.ToolMessageSerializer,
+        lambda _result, *, payload=None: "",
+    )
+
+    with pytest.raises(PromptEvaluationError):
+        shared.run_conversation(
+            adapter_name="test",
+            prompt_name="example",
+            rendered=rendered,
+            initial_messages=[{"role": "system", "content": rendered.text}],
+            parse_output=False,
+            bus=bus,
+            session=None,
+            tool_choice="auto",
+            response_format=None,
+            require_structured_output_text=False,
+            call_provider=call_provider,
+            select_choice=select_choice,
+            serialize_tool_message_fn=serialize_stub,
+        )

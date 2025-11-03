@@ -21,7 +21,7 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.adapters import shared
+from weakincentives.adapters import PromptEvaluationError, PromptResponse, shared
 from weakincentives.prompt.structured_output import ARRAY_WRAPPER_KEY
 
 try:
@@ -60,7 +60,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         WeirdResponse,
         simple_handler,
     )
-from weakincentives.adapters import PromptEvaluationError
 from weakincentives.events import (
     HandlerFailure,
     InProcessEventBus,
@@ -1495,3 +1494,82 @@ def test_litellm_parse_schema_constrained_payload_rejects_unknown_container() ->
 
     with pytest.raises(TypeError):
         module.parse_schema_constrained_payload({}, rendered)
+
+
+def test_litellm_adapter_delegates_to_shared_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
+
+    prompt = Prompt[StructuredAnswer](
+        ns=PROMPT_NS,
+        key="litellm-shared-runner",
+        name="shared-runner",
+        sections=[
+            MarkdownSection[GreetingParams](
+                title="Greeting",
+                key="greeting",
+                template="Say hello to ${user}.",
+            )
+        ],
+    )
+
+    sentinel = PromptResponse(
+        prompt_name="shared-runner",
+        text="sentinel",
+        output=None,
+        tool_results=(),
+        provider_payload=None,
+    )
+
+    captured: dict[str, Any] = {}
+
+    def fake_run_conversation(**kwargs: object) -> PromptResponse[StructuredAnswer]:
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(module, "run_conversation", fake_run_conversation)
+
+    message = DummyMessage(content="hi")
+    completion = RecordingCompletion([DummyResponse([DummyChoice(message)])])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
+
+    params = GreetingParams(user="Ari")
+    result = adapter.evaluate(prompt, params, bus=NullEventBus())
+
+    assert result is sentinel
+    assert captured["adapter_name"] == "litellm"
+    assert captured["prompt_name"] == "shared-runner"
+
+    expected_rendered = prompt.render(params, inject_output_instructions=False)
+    assert captured["rendered"] == expected_rendered
+    assert captured["initial_messages"] == [
+        {"role": "system", "content": expected_rendered.text}
+    ]
+
+    expected_response_format = module.build_json_schema_response_format(
+        expected_rendered, "shared-runner"
+    )
+    assert captured["response_format"] == expected_response_format
+    assert captured["require_structured_output_text"] is True
+    assert captured["serialize_tool_message_fn"] is module.serialize_tool_message
+
+    call_provider = captured["call_provider"]
+    select_choice = captured["select_choice"]
+    assert callable(call_provider)
+    assert callable(select_choice)
+
+    response = call_provider(
+        [{"role": "system", "content": "hi"}],
+        [],
+        None,
+        expected_response_format,
+    )
+    request_payload = cast(dict[str, Any], completion.requests[-1])
+    assert request_payload["model"] == "gpt-test"
+    messages = cast(list[dict[str, Any]], request_payload["messages"])
+    assert messages[0]["content"] == "hi"
+    assert request_payload["response_format"] == expected_response_format
+
+    choice = select_choice(response)
+    assert choice.message is message
