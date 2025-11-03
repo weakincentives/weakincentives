@@ -21,6 +21,7 @@ import io
 import json
 import logging
 import math
+import platform
 import statistics
 import sys
 import threading
@@ -421,7 +422,8 @@ def _create_interpreter() -> InterpreterProtocol:
 def _execute_with_timeout(
     func: Callable[[], object],
 ) -> tuple[bool, object | None, str]:
-    if sys.platform != "win32":  # pragma: no branch - platform check
+    timeout_message = "Execution timed out."
+    if platform.system() != "Windows" and sys.platform != "win32":
         import signal
 
         timed_out = False
@@ -437,11 +439,11 @@ def _execute_with_timeout(
             value = func()
             return False, value, ""
         except TimeoutError:
-            return True, None, "Execution timed out."
+            return True, None, timeout_message
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, previous)
-    timeout_message = "Execution timed out."
+
     result_container: dict[str, object | None] = {}
     error_container: dict[str, str] = {"message": ""}
     completed = threading.Event()

@@ -128,9 +128,5 @@ exclude = [
     ".ruff_cache",
     "dist",
 ]
-
-[tool.pyright.reportUnreachableCode]
-severity = "error"
-
-[tool.pyright.reportUnnecessaryCode]
-severity = "error"
+reportUnreachable = "error"
+reportUnusedExpression = "error"

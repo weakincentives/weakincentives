@@ -24,6 +24,7 @@ from uuid import UUID
 import pytest
 
 from weakincentives.serde import clone, dump, parse, schema
+from weakincentives.serde import dataclass_serde as serde_module
 from weakincentives.serde.dataclass_serde import (
     _SLOTTED_EXTRAS,
     _bool_from_str,
@@ -1046,6 +1047,32 @@ def test_object_type_and_union_handling() -> None:
     with pytest.raises(TypeError) as type_exc:
         _coerce_to_type("data", FailTwo | TypeFail, None, "field", config)
     assert str(type_exc.value) == "field: type boom"
+
+
+def test_union_without_matching_type_reports_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    union_type = int | None
+    config = _ParseConfig(
+        extra="ignore",
+        coerce=True,
+        case_insensitive=False,
+        alias_generator=None,
+        aliases=None,
+    )
+
+    original_get_args = serde_module.get_args
+
+    def fake_get_args(typ: object) -> tuple[object, ...]:
+        if typ is union_type:
+            return (type(None),)
+        return original_get_args(typ)
+
+    monkeypatch.setattr(serde_module, "get_args", fake_get_args)
+
+    with pytest.raises(TypeError) as exc:
+        _coerce_to_type("value", union_type, None, "field", config)
+    assert str(exc.value) == "field: no matching type in Union"
 
 
 def test_none_branch_and_literal_coercion() -> None:

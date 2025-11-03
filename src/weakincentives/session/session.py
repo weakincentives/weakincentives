@@ -40,6 +40,9 @@ class ToolData:
     source: ToolInvoked
 
 
+_TOOL_DATA_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolData)
+
+
 def _append_tool_data(
     slice_values: tuple[ToolData, ...], event: DataEvent
 ) -> tuple[ToolData, ...]:
@@ -171,7 +174,7 @@ class Session:
             dataclass_payload = cast(SupportsDataclass, payload)
 
         data = ToolData(value=dataclass_payload, source=event)
-        self._dispatch_data_event(ToolData, data)
+        self._dispatch_data_event(_TOOL_DATA_TYPE, data)
 
         if dataclass_payload is not None:
             self._dispatch_data_event(type(dataclass_payload), data)
@@ -195,7 +198,7 @@ class Session:
     ) -> None:
         registrations = self._reducers.get(data_type)
         if not registrations:
-            if data_type is ToolData:
+            if data_type is _TOOL_DATA_TYPE:
                 registrations = [
                     _ReducerRegistration(
                         reducer=cast(TypedReducer[Any], _append_tool_data),
