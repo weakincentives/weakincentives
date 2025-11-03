@@ -208,6 +208,45 @@ The tool operates against the session's `VirtualFileSystem` snapshot:
   that all files currently tracked in the VFS are available to reads and writes.
 - Sections should describe the helper functions (`read_text`, `write_text`) and
   remind models to keep code short to avoid timeouts.
+- Include concrete examples in the section copy so agents know how to invoke the
+  registered tools for both execution modes. Explicitly call out the
+  `"expr"`/`"statements"` toggle in the examples so downstream prompts can copy
+  and adapt them without guesswork.
+
+### Example Tool Calls
+
+The section documentation should embed examples for each execution mode so
+consumers can see the full payload shape the dispatcher expects:
+
+```json
+{
+  "name": "evaluate_python",
+  "arguments": {
+    "code": "2 * (3 + 4)",
+    "mode": "expr",
+    "globals": {},
+    "reads": [],
+    "writes": []
+  }
+}
+```
+
+```json
+{
+  "name": "evaluate_python",
+  "arguments": {
+    "code": "total = 0\nfor value in range(5):\n    total += value\nprint(total)",
+    "mode": "statements",
+    "globals": {},
+    "reads": [],
+    "writes": []
+  }
+}
+```
+
+Accompany the statement-mode example with copy explaining that the final
+expression result (when present) is surfaced through `value_repr` while stdout is
+captured verbatim, highlighting the behavioural difference from expression mode.
 
 ## Telemetry & Logging
 
