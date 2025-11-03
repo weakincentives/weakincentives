@@ -21,6 +21,9 @@ from typing import Any, cast
 
 import pytest
 
+from weakincentives.adapters import shared
+from weakincentives.prompt.structured_output import ARRAY_WRAPPER_KEY
+
 try:
     from tests.adapters._test_stubs import (
         DummyChoice,
@@ -464,10 +467,10 @@ def test_litellm_format_publish_failures_handles_defaults() -> None:
     module = cast(Any, _reload_module())
 
     failure = HandlerFailure(handler=lambda _: None, error=RuntimeError(""))
-    message = module._format_publish_failures((failure,))
+    message = module.format_publish_failures((failure,))
     assert message == "Reducer errors prevented applying tool result: RuntimeError"
     assert (
-        module._format_publish_failures(())
+        module.format_publish_failures(())
         == "Reducer errors prevented applying tool result."
     )
 
@@ -545,8 +548,8 @@ def test_litellm_adapter_includes_response_format_for_array_outputs() -> None:
     json_schema = cast(dict[str, Any], response_format["json_schema"])
     schema_payload = cast(dict[str, Any], json_schema["schema"])
     properties = cast(dict[str, Any], schema_payload["properties"])
-    assert module.ARRAY_WRAPPER_KEY in properties
-    items_schema = cast(dict[str, Any], properties[module.ARRAY_WRAPPER_KEY])
+    assert ARRAY_WRAPPER_KEY in properties
+    items_schema = cast(dict[str, Any], properties[ARRAY_WRAPPER_KEY])
     assert items_schema.get("type") == "array"
     assert items_schema.get("items", {}).get("type") == "object"
 
@@ -1317,24 +1320,24 @@ def test_litellm_message_text_content_handles_structured_parts() -> None:
     module = cast(Any, _reload_module())
 
     mapping_parts = [{"type": "output_text", "text": "Hello"}]
-    assert module._message_text_content(mapping_parts) == "Hello"
+    assert module.message_text_content(mapping_parts) == "Hello"
 
     class TextBlock:
         def __init__(self, text: str) -> None:
             self.type = "text"
             self.text = text
 
-    assert module._message_text_content([TextBlock("World")]) == "World"
-    assert module._message_text_content(123) == "123"
-    assert module._content_part_text(None) == ""
-    assert module._content_part_text({"type": "output_text", "text": 123}) == ""
+    assert module.message_text_content([TextBlock("World")]) == "World"
+    assert module.message_text_content(123) == "123"
+    assert shared._content_part_text(None) == ""
+    assert shared._content_part_text({"type": "output_text", "text": 123}) == ""
 
     class BadTextBlock:
         def __init__(self) -> None:
             self.type = "text"
             self.text = 123
 
-    assert module._content_part_text(BadTextBlock()) == ""
+    assert shared._content_part_text(BadTextBlock()) == ""
 
 
 def test_litellm_extract_parsed_content_handles_attribute_blocks() -> None:
@@ -1348,17 +1351,17 @@ def test_litellm_extract_parsed_content_handles_attribute_blocks() -> None:
     block = JsonBlock({"answer": "attribute"})
     message = DummyMessage(content=[block], tool_calls=None)
 
-    parsed = module._extract_parsed_content(message)
+    parsed = module.extract_parsed_content(message)
 
     assert parsed == {"answer": "attribute"}
-    assert module._parsed_payload_from_part({"type": "other"}) is None
+    assert shared._parsed_payload_from_part({"type": "other"}) is None
 
     class OtherBlock:
         def __init__(self) -> None:
             self.type = "other"
             self.json = {"answer": "ignored"}
 
-    assert module._parsed_payload_from_part(OtherBlock()) is None
+    assert shared._parsed_payload_from_part(OtherBlock()) is None
 
 
 def test_litellm_parse_schema_constrained_payload_unwraps_wrapped_array() -> None:
@@ -1379,18 +1382,18 @@ def test_litellm_parse_schema_constrained_payload_unwraps_wrapped_array() -> Non
 
     rendered = prompt.render(ToolParams(query="policies"))
 
-    payload = {module.ARRAY_WRAPPER_KEY: [{"answer": "Ready"}]}
+    payload = {ARRAY_WRAPPER_KEY: [{"answer": "Ready"}]}
 
-    parsed = module._parse_schema_constrained_payload(payload, rendered)
+    parsed = module.parse_schema_constrained_payload(payload, rendered)
 
     assert isinstance(parsed, list)
     assert parsed[0].answer == "Ready"
 
     with pytest.raises(TypeError):
-        module._parse_schema_constrained_payload({"wrong": []}, rendered)
+        module.parse_schema_constrained_payload({"wrong": []}, rendered)
 
     with pytest.raises(TypeError):
-        module._parse_schema_constrained_payload(["oops"], rendered)
+        module.parse_schema_constrained_payload(["oops"], rendered)
 
 
 def test_litellm_parse_schema_constrained_payload_handles_object_container() -> None:
@@ -1411,12 +1414,12 @@ def test_litellm_parse_schema_constrained_payload_handles_object_container() -> 
 
     rendered = prompt.render(ToolParams(query="policies"))
 
-    parsed = module._parse_schema_constrained_payload({"answer": "Ready"}, rendered)
+    parsed = module.parse_schema_constrained_payload({"answer": "Ready"}, rendered)
 
     assert parsed.answer == "Ready"
 
     with pytest.raises(TypeError):
-        module._parse_schema_constrained_payload("oops", rendered)
+        module.parse_schema_constrained_payload("oops", rendered)
 
 
 def test_litellm_build_json_schema_response_format_returns_none_for_plain_prompt() -> (
@@ -1439,7 +1442,7 @@ def test_litellm_build_json_schema_response_format_returns_none_for_plain_prompt
 
     rendered = prompt.render(ToolParams(query="world"))
 
-    response_format = module._build_json_schema_response_format(rendered, "plain")
+    response_format = module.build_json_schema_response_format(rendered, "plain")
 
     assert response_format is None
 
@@ -1455,7 +1458,7 @@ def test_litellm_parse_schema_constrained_payload_requires_structured_prompt() -
     )
 
     with pytest.raises(TypeError):
-        module._parse_schema_constrained_payload({}, rendered)
+        module.parse_schema_constrained_payload({}, rendered)
 
 
 def test_litellm_parse_schema_constrained_payload_rejects_non_sequence_arrays() -> None:
@@ -1477,7 +1480,7 @@ def test_litellm_parse_schema_constrained_payload_rejects_non_sequence_arrays() 
     rendered = prompt.render(ToolParams(query="policies"))
 
     with pytest.raises(TypeError):
-        module._parse_schema_constrained_payload("oops", rendered)
+        module.parse_schema_constrained_payload("oops", rendered)
 
 
 def test_litellm_parse_schema_constrained_payload_rejects_unknown_container() -> None:
@@ -1491,4 +1494,4 @@ def test_litellm_parse_schema_constrained_payload_rejects_unknown_container() ->
     )
 
     with pytest.raises(TypeError):
-        module._parse_schema_constrained_payload({}, rendered)
+        module.parse_schema_constrained_payload({}, rendered)
