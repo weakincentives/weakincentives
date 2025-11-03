@@ -35,6 +35,7 @@ from typing import Final, Literal, Protocol, TextIO, cast
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
 from ..session import ReducerEvent, Session, select_latest
+from ._overrides import resolve_tool_accepts_overrides
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
@@ -711,7 +712,13 @@ def _make_eval_result_reducer() -> Callable[
 class AstevalSection(MarkdownSection[_AstevalSectionParams]):
     """Prompt section exposing the :mod:`asteval` evaluation tool."""
 
-    def __init__(self, *, session: Session) -> None:
+    def __init__(
+        self,
+        *,
+        session: Session,
+        accepts_overrides: bool = False,
+        tool_overrides: bool | Iterable[str] | Mapping[str, bool] | None = None,
+    ) -> None:
         self._session = session
         session.register_reducer(
             EvalResult, _make_eval_result_reducer(), slice_type=VirtualFileSystem
@@ -721,7 +728,9 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             name="evaluate_python",
             description="Evaluate a short Python expression in a sandboxed environment with optional VFS access.",
             handler=tool_suite.run,
-            accepts_overrides=False,
+            accepts_overrides=resolve_tool_accepts_overrides(
+                "evaluate_python", tool_overrides, default=False
+            ),
         )
         super().__init__(
             title="Python Evaluation Tool",
@@ -729,7 +738,7 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             template=_EVAL_TEMPLATE,
             default_params=_AstevalSectionParams(),
             tools=(tool,),
-            accepts_overrides=False,
+            accepts_overrides=accepts_overrides,
         )
 
 

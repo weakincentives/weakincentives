@@ -558,3 +558,26 @@ def test_next_step_index_skips_non_numeric_suffix() -> None:
         PlanStep(step_id="Sbad", title="b", details=None, status="pending"),
     )
     assert _next_step_index(steps) == 1
+
+
+def test_planning_tools_section_allows_configuring_overrides() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    section = PlanningToolsSection(
+        session=session,
+        accepts_overrides=True,
+        tool_overrides={
+            "planning_add_step": True,
+            "planning_read_plan": True,
+        },
+    )
+
+    add_tool = find_tool(section, "planning_add_step")
+    read_tool = find_tool(section, "planning_read_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
+
+    assert section.accepts_overrides is True
+    assert add_tool.accepts_overrides is True
+    assert read_tool.accepts_overrides is True
+    assert setup_tool.accepts_overrides is False

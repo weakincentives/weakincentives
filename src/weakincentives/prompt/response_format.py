@@ -47,6 +47,7 @@ class ResponseFormatSection(MarkdownSection[ResponseFormatParams]):
         *,
         params: ResponseFormatParams,
         enabled: Callable[[ResponseFormatParams], bool] | None = None,
+        accepts_overrides: bool = False,
     ) -> None:
         super().__init__(
             title="Response Format",
@@ -54,5 +55,5 @@ class ResponseFormatSection(MarkdownSection[ResponseFormatParams]):
             template=_RESPONSE_FORMAT_BODY,
             default_params=params,
             enabled=enabled,
-            accepts_overrides=False,
+            accepts_overrides=accepts_overrides,
         )
