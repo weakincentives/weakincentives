@@ -558,29 +558,18 @@ class Prompt[OutputT]:
         if not section_tools:
             return
 
-        tools_iterable = cast(Sequence[object], section_tools)
-        for tool_candidate in tools_iterable:
-            if not isinstance(tool_candidate, Tool):
-                raise PromptValidationError(
-                    "Section tools() must return Tool instances.",
-                    section_path=path,
-                    dataclass_type=section.param_type,
-                )
-            tool: Tool[SupportsDataclass, SupportsDataclass] = cast(
-                Tool[SupportsDataclass, SupportsDataclass], tool_candidate
-            )
+        for tool in section_tools:
             params_type = cast(
                 type[SupportsDataclass] | None, getattr(tool, "params_type", None)
             )
             if not isinstance(params_type, type) or not is_dataclass(params_type):
+                dataclass_type = (
+                    params_type if isinstance(params_type, type) else section.param_type
+                )
                 raise PromptValidationError(
                     "Tool params_type must be a dataclass type.",
                     section_path=path,
-                    dataclass_type=(
-                        params_type
-                        if isinstance(params_type, type)
-                        else type(params_type)
-                    ),
+                    dataclass_type=dataclass_type,
                 )
             existing_path = self._tool_name_registry.get(tool.name)
             if existing_path is not None:
