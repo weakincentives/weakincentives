@@ -207,9 +207,7 @@ def test_code_review_session_display_tool_event_prints_count(
     assert "session recorded this call as #1" in output
 
 
-def test_code_review_session_display_tool_event_ignores_other_events(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_code_review_session_display_tool_event_requires_tool_event() -> None:
     session = CodeReviewSession(
         _StubAdapter(
             PromptResponse(
@@ -221,12 +219,11 @@ def test_code_review_session_display_tool_event_ignores_other_events(
         )
     )
 
-    session._display_tool_event(object())
+    with pytest.raises(AttributeError):
+        session._display_tool_event(object())
 
-    assert capsys.readouterr().out == ""
 
-
-def test_code_review_session_record_tool_call_ignores_non_tool_data() -> None:
+def test_code_review_session_record_tool_call_requires_tool_event() -> None:
     session = CodeReviewSession(
         _StubAdapter(
             PromptResponse(
@@ -250,12 +247,11 @@ def test_code_review_session_record_tool_call_ignores_non_tool_data() -> None:
         result=cast(PromptResponse[object], prompt_response),
     )
 
-    result = session._record_tool_call(
-        (),
-        PromptData(
-            value=ReviewResponse(summary="", issues=[], next_steps=[]),
-            source=prompt_event,
-        ),
-    )
-
-    assert result == ()
+    with pytest.raises(AttributeError):
+        session._record_tool_call(
+            (),
+            PromptData(
+                value=ReviewResponse(summary="", issues=[], next_steps=[]),
+                source=prompt_event,
+            ),
+        )
