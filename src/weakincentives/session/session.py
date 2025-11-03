@@ -47,9 +47,8 @@ _TOOL_DATA_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolDat
 def _append_tool_data(
     slice_values: tuple[ToolData, ...], event: ReducerEvent
 ) -> tuple[ToolData, ...]:
-    if not isinstance(event, ToolData):
-        return slice_values
-    return (*slice_values, event)
+    tool_data = cast(ToolData, event)
+    return (*slice_values, tool_data)
 
 
 @dataclass(slots=True, frozen=True)
@@ -190,12 +189,12 @@ class Session:
         return types
 
     def _on_tool_invoked(self, event: object) -> None:
-        if isinstance(event, ToolInvoked):
-            self._handle_tool_invoked(event)
+        tool_event = cast(ToolInvoked, event)
+        self._handle_tool_invoked(tool_event)
 
     def _on_prompt_executed(self, event: object) -> None:
-        if isinstance(event, PromptExecuted):
-            self._handle_prompt_executed(event)
+        prompt_event = cast(PromptExecuted, event)
+        self._handle_prompt_executed(prompt_event)
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
         payload = event.result.value
