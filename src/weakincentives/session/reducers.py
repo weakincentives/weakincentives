@@ -26,7 +26,7 @@ def append[T](slice_values: tuple[T, ...], event: DataEvent) -> tuple[T, ...]:
     value = cast(T, event.value)
     if value in slice_values:
         return slice_values
-    return slice_values + (value,)
+    return (*slice_values, value)
 
 
 def upsert_by[T, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
@@ -57,4 +57,4 @@ def replace_latest[T](slice_values: tuple[T, ...], event: DataEvent) -> tuple[T,
     return (cast(T, event.value),)
 
 
-__all__ = ["append", "upsert_by", "replace_latest"]
+__all__ = ["append", "replace_latest", "upsert_by"]

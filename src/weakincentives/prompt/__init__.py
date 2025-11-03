@@ -28,6 +28,8 @@ from .structured_output import OutputParseError, parse_structured_output
 from .tool import Tool, ToolResult
 
 __all__ = [
+    "MarkdownSection",
+    "OutputParseError",
     "Prompt",
     "PromptError",
     "PromptRenderError",
@@ -35,9 +37,7 @@ __all__ = [
     "Section",
     "SectionPath",
     "SupportsDataclass",
-    "MarkdownSection",
     "Tool",
     "ToolResult",
-    "OutputParseError",
     "parse_structured_output",
 ]

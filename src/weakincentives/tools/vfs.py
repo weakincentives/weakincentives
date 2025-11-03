@@ -574,14 +574,14 @@ def _truncate_to_milliseconds(value: datetime) -> datetime:
 
 
 __all__ = [
-    "VirtualFileSystem",
-    "VfsFile",
-    "VfsPath",
+    "DeleteEntry",
     "HostMount",
     "ListDirectory",
     "ListDirectoryResult",
     "ReadFile",
-    "WriteFile",
-    "DeleteEntry",
+    "VfsFile",
+    "VfsPath",
     "VfsToolsSection",
+    "VirtualFileSystem",
+    "WriteFile",
 ]

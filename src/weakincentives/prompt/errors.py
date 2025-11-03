@@ -51,7 +51,7 @@ class PromptRenderError(PromptError):
 
 __all__ = [
     "PromptError",
-    "PromptValidationError",
     "PromptRenderError",
+    "PromptValidationError",
     "SectionPath",
 ]

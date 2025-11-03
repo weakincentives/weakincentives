@@ -245,7 +245,7 @@ def execute_tool_call(
             value=None,
             success=False,
         )
-    except Exception as error:  # noqa: BLE001 - propagate message via ToolResult
+    except Exception as error:  # propagate message via ToolResult
         log = logger_override or logger
         log.exception("Tool '%s' raised an unexpected exception.", tool_name)
         tool_result = ToolResult(
@@ -370,10 +370,11 @@ def message_text_content(content: object) -> str:
     if isinstance(content, Sequence) and not isinstance(
         content, (str, bytes, bytearray)
     ):
-        fragments: list[str] = []
-        sequence_content = cast(Sequence[object], content)  # pyright: ignore[reportUnnecessaryCast]
-        for part in sequence_content:
-            fragments.append(_content_part_text(part))
+        sequence_content = cast(
+            Sequence[object],
+            content,
+        )  # pyright: ignore[reportUnnecessaryCast]
+        fragments = [_content_part_text(part) for part in sequence_content]
         return "".join(fragments)
     return str(content)
 
@@ -389,7 +390,10 @@ def extract_parsed_content(message: object) -> object | None:
     if isinstance(content, Sequence) and not isinstance(
         content, (str, bytes, bytearray)
     ):
-        sequence_content = cast(Sequence[object], content)  # pyright: ignore[reportUnnecessaryCast]
+        sequence_content = cast(
+            Sequence[object],
+            content,
+        )  # pyright: ignore[reportUnnecessaryCast]
         for part in sequence_content:
             payload = _parsed_payload_from_part(part)
             if payload is not None:
@@ -448,6 +452,8 @@ __all__ = [
     "ProviderToolCall",
     "ToolArgumentsParser",
     "ToolChoice",
+    "_content_part_text",
+    "_parsed_payload_from_part",
     "build_json_schema_response_format",
     "execute_tool_call",
     "extract_parsed_content",
@@ -459,6 +465,4 @@ __all__ = [
     "parse_tool_arguments",
     "serialize_tool_call",
     "tool_to_spec",
-    "_content_part_text",
-    "_parsed_payload_from_part",
 ]

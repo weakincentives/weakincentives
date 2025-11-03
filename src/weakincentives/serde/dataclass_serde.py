@@ -999,4 +999,4 @@ def schema(
     return schema_dict
 
 
-__all__ = ["parse", "dump", "clone", "schema"]
+__all__ = ["clone", "dump", "parse", "schema"]

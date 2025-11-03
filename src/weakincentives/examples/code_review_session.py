@@ -173,11 +173,11 @@ class CodeReviewSession:
             value=payload,
             call_id=event.source.call_id,
         )
-        return slice_values + (record,)
+        return (*slice_values, record)
 
 
 __all__ = [
-    "ToolCallLog",
-    "SupportsReviewEvaluate",
     "CodeReviewSession",
+    "SupportsReviewEvaluate",
+    "ToolCallLog",
 ]

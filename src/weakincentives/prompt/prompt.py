@@ -295,7 +295,7 @@ class Prompt[OutputT]:
         self._register_section_tools(section, path)
 
         for child in section.children:
-            child_path = path + (child.key,)
+            child_path = (*path, child.key)
             self._register_section(child, path=child_path, depth=depth + 1)
 
     @property

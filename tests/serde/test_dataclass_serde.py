@@ -226,8 +226,14 @@ class CollectionModel:
 @dataclass
 class LiteralModel:
     mode: Literal["auto", "manual"]
-    flag: Literal[True, False]
+    flag: bool
     value: int | float
+
+
+# Use literal bools to exercise coercion and schema branches.
+@dataclass
+class LiteralBoolModel:
+    flag: Literal[True, False]  # noqa: RUF038
 
 
 @dataclass
@@ -378,6 +384,21 @@ def test_parse_literal_invalid_values() -> None:
     with pytest.raises(TypeError) as exc2:
         parse(LiteralModel, {"mode": "auto", "flag": "maybe", "value": 1})
     assert "flag: Cannot interpret" in str(exc2.value)
+
+
+def test_parse_literal_bool_strings() -> None:
+    result = parse(LiteralBoolModel, {"flag": "true"})
+    assert result.flag is True
+    result_false = parse(LiteralBoolModel, {"flag": "off"})
+    assert result_false.flag is False
+
+
+def test_schema_literal_bool_includes_boolean_type() -> None:
+    schema_payload = cast(dict[str, Any], schema(LiteralBoolModel))
+    properties = cast(dict[str, Any], schema_payload["properties"])
+    flag_schema = cast(dict[str, Any], properties["flag"])
+    assert flag_schema["enum"] == [True, False]
+    assert flag_schema["type"] == "boolean"
 
 
 def test_parse_collection_types() -> None:
@@ -1094,7 +1115,7 @@ def test_none_branch_and_literal_coercion() -> None:
 
     @dataclass
     class FlagModel:
-        flag: Literal[True, False]
+        flag: bool
 
     assert parse(FlagModel, {"flag": "true"}).flag is True
 

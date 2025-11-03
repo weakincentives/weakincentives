@@ -80,7 +80,24 @@ target-version = "py312"
 extend-exclude = ["test-repositories"]
 
 [tool.ruff.lint]
-extend-select = ["I", "UP", "B", "SIM", "C4", "ANN", "RET", "RSE", "PTH", "ISC", "CPY"]
+extend-select = [
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "C4",
+    "ANN",
+    "RET",
+    "RSE",
+    "PTH",
+    "ISC",
+    "CPY",
+    "A",
+    "RUF",
+    "TRY",
+    "PERF",
+]
+extend-ignore = ["TRY003"]
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Version 2.0 \(the "License"\);

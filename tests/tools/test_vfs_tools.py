@@ -50,7 +50,8 @@ def _find_tool(
         if tool.name == name:
             assert tool.handler is not None
             return tool
-    raise AssertionError(f"Tool {name} not found")
+    message = f"Tool {name} not found"
+    raise AssertionError(message)
 
 
 def _invoke_tool(
@@ -182,7 +183,7 @@ def test_mount_snapshot_persisted_in_session(tmp_path: Path) -> None:
     assert snapshot is not None
     files_by_path = {file.path.segments: file for file in snapshot.files}
     assert ("sunfish", "README.md") in files_by_path
-    assert files_by_path[("sunfish", "README.md")].content == "hello mount"
+    assert files_by_path["sunfish", "README.md"].content == "hello mount"
 
 
 def test_list_directory_shows_children(monkeypatch: pytest.MonkeyPatch) -> None:
