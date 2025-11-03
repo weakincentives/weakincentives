@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from io import StringIO
 from types import TracebackType
 
 import pytest
@@ -212,6 +214,33 @@ def test_configure_logging_force_installs_json_formatter() -> None:
     assert payload["context"]["key"] == "value"
     assert "object" in payload["context"]
     assert payload["message"] == "payload"
+
+
+def test_configure_logging_json_mode_emits_structured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = StringIO()
+    monkeypatch.setattr(sys, "stderr", stream)
+
+    configure_logging(json_mode=True, force=True)
+
+    logger = get_logger("tests.logging.json").bind(component="json-test")
+    logger.logger.setLevel(logging.INFO)
+
+    logger.info("payload", event="tests.json", context={"key": "value"})
+
+    root = logging.getLogger()
+    handler = root.handlers[0]
+    handler.flush()
+
+    output = stream.getvalue().strip()
+    assert output
+
+    payload = json.loads(output)
+    assert payload["event"] == "tests.json"
+    assert payload["context"] == {"component": "json-test", "key": "value"}
+    assert payload["message"] == "payload"
+    assert payload["logger"] == "tests.logging.json"
 
 
 def test_configure_logging_defaults_to_text_formatter() -> None:

@@ -142,7 +142,11 @@ def test_in_process_bus_isolates_handler_exceptions(
         result = bus.publish(event)
 
     assert received == [event]
-    assert any("Error delivering event" in record.message for record in caplog.records)
+    assert any(
+        getattr(record, "event", None) == "event_delivery_failed"
+        and getattr(record, "context", {}).get("event_type") == "PromptExecuted"
+        for record in caplog.records
+    )
     assert result.handlers_invoked == (bad_handler, good_handler)
     assert len(result.errors) == 1
     failure = result.errors[0]
