@@ -41,6 +41,43 @@ def test_run_git_command_invokes_subprocess(monkeypatch: pytest.MonkeyPatch) -> 
     assert result.returncode == 0
 
 
+def test_run_git_tool_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(args: list[str]) -> SimpleNamespace:
+        assert args == ["git", "status"]
+        return _subprocess_result(stdout="clean\n")
+
+    monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
+
+    result = code_review_tools._run_git_tool(
+        ["git", "status"],
+        command_name="git status",
+        failure_value_factory=lambda: "failure",
+        success_parser=lambda stdout: ("ok", stdout.strip()),
+    )
+
+    assert result.message == "ok"
+    assert result.value == "clean"
+
+
+def test_run_git_tool_failure_without_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(args: list[str]) -> SimpleNamespace:
+        return _subprocess_result(returncode=1)
+
+    monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
+
+    result = code_review_tools._run_git_tool(
+        ["git", "status"],
+        command_name="git status",
+        failure_value_factory=lambda: "failure",
+        success_parser=lambda stdout: ("unused", stdout),
+    )
+
+    assert result.message == "git status failed with exit code 1."
+    assert result.value == "failure"
+
+
 def test_git_log_handler_success(monkeypatch: pytest.MonkeyPatch) -> None:
     captured_args: dict[str, list[str]] = {}
 
