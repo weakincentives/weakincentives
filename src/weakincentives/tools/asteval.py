@@ -19,7 +19,6 @@ import builtins
 import contextlib
 import io
 import json
-import logging
 import math
 import platform
 import statistics
@@ -32,6 +31,7 @@ from importlib import import_module
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast
 
+from ..logging import StructuredLogger, get_logger
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
 from ..session import ReducerEvent, Session, select_latest
@@ -40,7 +40,7 @@ from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
 ExpressionMode = Literal["expr", "statements"]
 
-_logger = logging.getLogger(__name__)
+_LOGGER: StructuredLogger = get_logger(__name__, context={"component": "tools.asteval"})
 
 _MAX_CODE_LENGTH: Final[int] = 2_000
 _MAX_STREAM_LENGTH: Final[int] = 4_096
@@ -677,10 +677,10 @@ class _AstevalToolSuite:
             writes=final_writes,
         )
 
-        _logger.debug(
-            "asteval.run",
-            extra={
-                "event": "asteval.run",
+        _LOGGER.debug(
+            "Asteval evaluation completed.",
+            event="asteval_run",
+            context={
                 "mode": mode,
                 "stdout_len": len(stdout),
                 "stderr_len": len(stderr),

@@ -15,12 +15,12 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 
 from ..events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
+from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import RenderedPrompt
 from ..prompt.structured_output import (
@@ -36,7 +36,9 @@ from .core import PromptEvaluationError, PromptResponse
 if TYPE_CHECKING:
     from ..session.session import Session
 
-logger = logging.getLogger(__name__)
+logger: StructuredLogger = get_logger(
+    __name__, context={"component": "adapters.shared"}
+)
 
 
 class ProviderFunctionCall(Protocol):
@@ -203,7 +205,7 @@ def execute_tool_call(
     provider_payload: dict[str, Any] | None,
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
     parse_arguments: ToolArgumentsParser,
-    logger_override: logging.Logger | None = None,
+    logger_override: StructuredLogger | None = None,
 ) -> tuple[ToolInvoked, ToolResult[SupportsDataclass]]:
     """Execute a provider tool call and publish the resulting event."""
 
@@ -242,22 +244,46 @@ def execute_tool_call(
             provider_payload=provider_payload,
         ) from error
     tool_params = cast(SupportsDataclass, parsed_params)
+    call_id = getattr(tool_call, "id", None)
+    log = (logger_override or logger).bind(
+        adapter=adapter_name,
+        prompt=prompt_name,
+        tool=tool_name,
+        call_id=call_id,
+    )
     tool_result: ToolResult[SupportsDataclass]
     try:
         tool_result = handler(tool_params)
     except ToolValidationError as error:
+        log.warning(
+            "Tool validation failed.",
+            event="tool_validation_failed",
+            context={"reason": str(error)},
+        )
         tool_result = ToolResult(
             message=f"Tool validation failed: {error}",
             value=None,
             success=False,
         )
     except Exception as error:  # propagate message via ToolResult
-        log = logger_override or logger
-        log.exception("Tool '%s' raised an unexpected exception.", tool_name)
+        log.exception(
+            "Tool handler raised an unexpected exception.",
+            event="tool_handler_exception",
+            context={"provider_payload": provider_payload},
+        )
         tool_result = ToolResult(
             message=f"Tool '{tool_name}' execution failed: {error}",
             value=None,
             success=False,
+        )
+    else:
+        log.info(
+            "Tool handler completed.",
+            event="tool_handler_completed",
+            context={
+                "success": tool_result.success,
+                "has_value": tool_result.value is not None,
+            },
         )
 
     snapshot = session.snapshot() if session is not None else None
@@ -267,13 +293,35 @@ def execute_tool_call(
         name=tool_name,
         params=tool_params,
         result=cast(ToolResult[object], tool_result),
-        call_id=getattr(tool_call, "id", None),
+        call_id=call_id,
     )
     publish_result = bus.publish(invocation)
     if not publish_result.ok:
         if snapshot is not None and session is not None:
             session.rollback(snapshot)
+            log.warning(
+                "Session rollback triggered after publish failure.",
+                event="session_rollback_due_to_publish_failure",
+            )
+        failure_handlers = [
+            getattr(failure.handler, "__qualname__", repr(failure.handler))
+            for failure in publish_result.errors
+        ]
+        log.error(
+            "Tool event publish failed.",
+            event="tool_event_publish_failed",
+            context={
+                "failure_count": len(publish_result.errors),
+                "failed_handlers": failure_handlers,
+            },
+        )
         tool_result.message = format_publish_failures(publish_result.errors)
+    else:
+        log.debug(
+            "Tool event published.",
+            event="tool_event_published",
+            context={"handler_count": publish_result.handled_count},
+        )
     return invocation, tool_result
 
 
@@ -539,11 +587,23 @@ def run_conversation[
         [Sequence[HandlerFailure]], str
     ] = format_publish_failures,
     parse_arguments: ToolArgumentsParser = parse_tool_arguments,
-    logger_override: logging.Logger | None = None,
+    logger_override: StructuredLogger | None = None,
 ) -> PromptResponse[OutputT]:
     """Execute a conversational exchange with a provider and return the result."""
 
     messages = list(initial_messages)
+    log = (logger_override or logger).bind(
+        adapter=adapter_name,
+        prompt=prompt_name,
+    )
+    log.info(
+        "Prompt execution started.",
+        event="prompt_execution_started",
+        context={
+            "tool_count": len(rendered.tools),
+            "parse_output": parse_output,
+        },
+    )
 
     should_parse_structured_output = (
         parse_output
@@ -648,6 +708,16 @@ def run_conversation[
                     result=cast(PromptResponse[object], response_payload),
                 )
             )
+            log.info(
+                "Prompt execution completed.",
+                event="prompt_execution_succeeded",
+                context={
+                    "tool_count": len(tool_events),
+                    "has_output": output is not None,
+                    "text_length": len(text_value or "") if text_value else 0,
+                    "structured_output": should_parse_structured_output,
+                },
+            )
             return response_payload
 
         assistant_tool_calls = [serialize_tool_call(call) for call in tool_calls]
@@ -657,6 +727,12 @@ def run_conversation[
                 "content": getattr(message, "content", None) or "",
                 "tool_calls": assistant_tool_calls,
             }
+        )
+
+        log.debug(
+            "Processing tool calls.",
+            event="prompt_tool_calls_detected",
+            context={"count": len(tool_calls)},
         )
 
         for tool_call in tool_calls:

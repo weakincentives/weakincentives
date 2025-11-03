@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 import subprocess  # nosec B404 - git invocation for root discovery
 import tempfile
@@ -22,6 +21,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal, cast, overload, override
 
+from ..logging import StructuredLogger, get_logger
 from ._types import SupportsDataclass
 from .tool import Tool
 from .versioning import (
@@ -36,7 +36,9 @@ from .versioning import (
     ToolOverride,
 )
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER: StructuredLogger = get_logger(
+    __name__, context={"component": "prompt_overrides"}
+)
 _FORMAT_VERSION = 1
 _DEFAULT_RELATIVE_PATH = Path(".weakincentives") / "prompts" / "overrides"
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -70,10 +72,13 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         )
         if not file_path.exists():
             _LOGGER.debug(
-                "Override file not found for ns=%s key=%s tag=%s",
-                descriptor.ns,
-                descriptor.key,
-                normalized_tag,
+                "Override file not found.",
+                event="prompt_override_missing",
+                context={
+                    "ns": descriptor.ns,
+                    "prompt_key": descriptor.key,
+                    "tag": normalized_tag,
+                },
             )
             return None
 
@@ -92,10 +97,13 @@ class LocalPromptOverridesStore(PromptOverridesStore):
 
         if not sections and not tools:
             _LOGGER.debug(
-                "No applicable overrides remain after validation for ns=%s key=%s tag=%s",
-                descriptor.ns,
-                descriptor.key,
-                tag,
+                "No applicable overrides remain after validation.",
+                event="prompt_override_empty",
+                context={
+                    "ns": descriptor.ns,
+                    "prompt_key": descriptor.key,
+                    "tag": normalized_tag,
+                },
             )
             return None
 
@@ -106,13 +114,16 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             sections=sections,
             tool_overrides=tools,
         )
-        _LOGGER.debug(
-            "Resolved override for ns=%s key=%s tag=%s with %d sections and %d tools",
-            descriptor.ns,
-            descriptor.key,
-            normalized_tag,
-            len(sections),
-            len(tools),
+        _LOGGER.info(
+            "Resolved prompt override.",
+            event="prompt_override_resolved",
+            context={
+                "ns": descriptor.ns,
+                "prompt_key": descriptor.key,
+                "tag": normalized_tag,
+                "section_count": len(sections),
+                "tool_count": len(tools),
+            },
         )
         return override
 
@@ -161,11 +172,16 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             sections=validated_sections,
             tool_overrides=validated_tools,
         )
-        _LOGGER.debug(
-            "Persisted override for ns=%s key=%s tag=%s",
-            descriptor.ns,
-            descriptor.key,
-            normalized_tag,
+        _LOGGER.info(
+            "Persisted prompt override.",
+            event="prompt_override_persisted",
+            context={
+                "ns": descriptor.ns,
+                "prompt_key": descriptor.key,
+                "tag": normalized_tag,
+                "section_count": len(validated_sections),
+                "tool_count": len(validated_tools),
+            },
         )
         return persisted
 
@@ -187,10 +203,13 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             file_path.unlink()
         except FileNotFoundError:
             _LOGGER.debug(
-                "No override file to delete for ns=%s key=%s tag=%s",
-                ns,
-                prompt_key,
-                normalized_tag,
+                "No override file to delete.",
+                event="prompt_override_delete_missing",
+                context={
+                    "ns": ns,
+                    "prompt_key": prompt_key,
+                    "tag": normalized_tag,
+                },
             )
 
     @override
@@ -384,7 +403,11 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 raise PromptOverridesError(
                     f"Unknown section path for override: {path_display}"
                 )
-            _LOGGER.debug("Skipping unknown override section path: %s", path_display)
+            _LOGGER.debug(
+                "Skipping unknown override section path.",
+                event="prompt_override_unknown_section",
+                context={"path": path_display},
+            )
             return None
         if not isinstance(expected_hash, str):
             raise PromptOverridesError("Section expected_hash must be a string.")
@@ -392,10 +415,13 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             if strict:
                 raise PromptOverridesError(f"Hash mismatch for section {path_display}.")
             _LOGGER.debug(
-                "Skipping stale override for %s (expected %s, found %s)",
-                path_display,
-                descriptor_section.content_hash,
-                expected_hash,
+                "Skipping stale section override.",
+                event="prompt_override_stale_section",
+                context={
+                    "path": path_display,
+                    "expected_hash": descriptor_section.content_hash,
+                    "found_hash": expected_hash,
+                },
             )
             return None
         if not isinstance(body, str):
@@ -451,7 +477,11 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         if descriptor_tool is None:
             if strict:
                 raise PromptOverridesError(f"Unknown tool override: {name}")
-            _LOGGER.debug("Skipping unknown tool override: %s", name)
+            _LOGGER.debug(
+                "Skipping unknown tool override.",
+                event="prompt_override_unknown_tool",
+                context={"tool": name},
+            )
             return None
         if not isinstance(expected_hash, str):
             raise PromptOverridesError("Tool expected_contract_hash must be a string.")
@@ -459,10 +489,13 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             if strict:
                 raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
             _LOGGER.debug(
-                "Skipping stale tool override for %s (expected %s, found %s)",
-                name,
-                descriptor_tool.contract_hash,
-                expected_hash,
+                "Skipping stale tool override.",
+                event="prompt_override_stale_tool",
+                context={
+                    "tool": name,
+                    "expected_hash": descriptor_tool.contract_hash,
+                    "found_hash": expected_hash,
+                },
             )
             return None
         if description is not None and not isinstance(description, str):

@@ -14,11 +14,11 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, cast, override
 
+from .logging import StructuredLogger, get_logger
 from .prompt._types import SupportsDataclass
 
 if TYPE_CHECKING:
@@ -27,7 +27,17 @@ if TYPE_CHECKING:
 
 EventHandler = Callable[[object], None]
 
-logger = logging.getLogger(__name__)
+
+def _describe_handler(handler: EventHandler) -> str:
+    module_name = getattr(handler, "__module__", None)
+    qualname = getattr(handler, "__qualname__", None)
+    if isinstance(qualname, str):
+        prefix = f"{module_name}." if isinstance(module_name, str) else ""
+        return f"{prefix}{qualname}"
+    return repr(handler)  # pragma: no cover - defensive fallback
+
+
+logger: StructuredLogger = get_logger(__name__, context={"component": "event_bus"})
 
 
 class EventBus(Protocol):
@@ -79,9 +89,12 @@ class InProcessEventBus:
                 handler(event)
             except Exception as error:
                 logger.exception(
-                    "Error delivering event %s to handler %r",
-                    type(event).__name__,
-                    handler,
+                    "Error delivering event.",
+                    event="event_delivery_failed",
+                    context={
+                        "handler": _describe_handler(handler),
+                        "event_type": type(event).__name__,
+                    },
                 )
                 failures.append(HandlerFailure(handler=handler, error=error))
 
