@@ -29,7 +29,6 @@ extra sections unless a future revision explicitly introduces them.
 
 Provide lightweight context to the subagent before showing the parent prompt. Include exactly the following fields:
 
-- **Delegation id** – deterministic identifier chosen by the parent.
 - **Reason** – a single sentence explaining why the subagent exists.
 - **Expected result** – one sentence describing the deliverable.
 - **May delegate further?** – `yes` or `no`.
@@ -85,4 +84,4 @@ section when composing the wrapper.
 ## Failure Handling
 
 Composition can fail only when the parent prompt cannot be embedded verbatim. In that case the delegating agent aborts
-the delegation attempt, records the error alongside the `delegation id`, and returns the failure to the caller.
+the delegation attempt, records the error, and returns the failure to the caller.
