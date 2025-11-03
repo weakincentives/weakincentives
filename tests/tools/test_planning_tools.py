@@ -261,6 +261,40 @@ def test_update_step_rejects_empty_patch() -> None:
         handler(UpdateStep(step_id="S001"))
 
 
+def test_update_step_updates_existing_step() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = PlanningToolsSection(session=session)
+    setup_tool = _find_tool(section, "planning_setup_plan")
+    update_tool = _find_tool(section, "planning_update_step")
+
+    _invoke_tool(
+        bus,
+        setup_tool,
+        SetupPlan(
+            objective="ship",
+            initial_steps=(
+                NewPlanStep(title="triage requests"),
+                NewPlanStep(title="categorise follow-ups"),
+            ),
+        ),
+    )
+
+    _invoke_tool(
+        bus,
+        update_tool,
+        UpdateStep(step_id="S002", title="categorise replies"),
+    )
+
+    plan = select_latest(session, Plan)
+    assert plan is not None
+    assert [step.title for step in plan.steps] == [
+        "triage requests",
+        "categorise replies",
+    ]
+    assert plan.steps[1].step_id == "S002"
+
+
 def test_update_step_requires_step_identifier() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
@@ -326,6 +360,46 @@ def test_mark_step_appends_note_and_updates_status() -> None:
     assert first.status == "done"
     assert first.notes == ("notes added",)
     assert plan.status == "active"
+
+
+def test_mark_step_sets_plan_completed_when_all_done() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = PlanningToolsSection(session=session)
+    setup_tool = _find_tool(section, "planning_setup_plan")
+    add_tool = _find_tool(section, "planning_add_step")
+    mark_tool = _find_tool(section, "planning_mark_step")
+
+    _invoke_tool(
+        bus,
+        setup_tool,
+        SetupPlan(
+            objective="resolve support backlog",
+            initial_steps=(
+                NewPlanStep(title="triage requests"),
+                NewPlanStep(title="categorise follow-ups"),
+            ),
+        ),
+    )
+    _invoke_tool(
+        bus,
+        add_tool,
+        AddStep(steps=(NewPlanStep(title="draft update"),)),
+    )
+
+    _invoke_tool(
+        bus,
+        mark_tool,
+        MarkStep(step_id="S001", status="done", note="triage complete"),
+    )
+    _invoke_tool(bus, mark_tool, MarkStep(step_id="S002", status="done"))
+    _invoke_tool(bus, mark_tool, MarkStep(step_id="S003", status="done"))
+
+    plan = select_latest(session, Plan)
+    assert plan is not None
+    assert plan.status == "completed"
+    assert plan.steps[0].notes == ("triage complete",)
+    assert all(step.status == "done" for step in plan.steps)
 
 
 def test_mark_step_rejects_abandoned_plan() -> None:
