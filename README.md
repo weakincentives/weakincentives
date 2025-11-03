@@ -473,8 +473,7 @@ workspace described in the
 [Local Prompt Overrides Store Specification](specs/LOCAL_PROMPT_OVERRIDES_STORE.md).
 Optimizers and prompt engineers can still drop JSON overrides into that tree by
 hand—checked into source control or generated during evaluations—without
-subclassing `PromptOverridesStore`. Because sections expose stable `(ns, key,
-path)` identifiers, overrides stay scoped to the intended content so teams can
+subclassing `PromptOverridesStore`. Because sections expose stable `(ns, key, path)` identifiers, overrides stay scoped to the intended content so teams can
 iterate on directives without risking accidental drift elsewhere in the tree.
 
 ### 8. Ship it

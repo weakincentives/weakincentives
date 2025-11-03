@@ -14,10 +14,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from importlib import import_module
 from typing import Any, Final, Literal, Protocol, cast
 
@@ -32,9 +31,9 @@ from ..prompt.structured_output import (
 from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
 from ..session import Session
-from ..tools.errors import ToolValidationError
 from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse
+from .shared import execute_tool_call, parse_tool_arguments
 
 _ERROR_MESSAGE: Final[str] = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -308,84 +307,19 @@ class OpenAIAdapter:
             )
 
             for tool_call in tool_calls:
-                function = tool_call.function
-                tool_name = function.name
-                tool = tool_registry.get(tool_name)
-                if tool is None:
-                    raise PromptEvaluationError(
-                        f"Unknown tool '{tool_name}' requested by provider.",
-                        prompt_name=prompt_name,
-                        phase="tool",
-                        provider_payload=provider_payload,
-                    )
-                if tool.handler is None:
-                    raise PromptEvaluationError(
-                        f"Tool '{tool_name}' does not have a registered handler.",
-                        prompt_name=prompt_name,
-                        phase="tool",
-                        provider_payload=provider_payload,
-                    )
-
-                arguments_mapping = _parse_tool_arguments(
-                    function.arguments,
+                invocation, tool_result = execute_tool_call(
+                    adapter_name="openai",
+                    tool_call=tool_call,
+                    tool_registry=tool_registry,
+                    bus=bus,
+                    session=session,
                     prompt_name=prompt_name,
                     provider_payload=provider_payload,
-                )
-
-                try:
-                    tool_params = parse(
-                        tool.params_type,
-                        arguments_mapping,
-                        extra="forbid",
-                    )
-                except (TypeError, ValueError) as error:
-                    raise PromptEvaluationError(
-                        f"Failed to parse params for tool '{tool_name}'.",
-                        prompt_name=prompt_name,
-                        phase="tool",
-                        provider_payload=provider_payload,
-                    ) from error
-
-                handler = cast(
-                    Callable[[SupportsDataclass], ToolResult[SupportsDataclass]],
-                    tool.handler,
-                )
-                try:
-                    tool_result = handler(tool_params)
-                except ToolValidationError as error:
-                    tool_result = ToolResult(
-                        message=f"Tool validation failed: {error}",
-                        value=None,
-                        success=False,
-                    )
-                except Exception as error:  # pragma: no cover - handler bug
-                    logger.exception(
-                        "Tool '%s' raised an unexpected exception.", tool_name
-                    )
-                    tool_result = ToolResult(
-                        message=f"Tool '{tool_name}' execution failed: {error}",
-                        value=None,
-                        success=False,
-                    )
-
-                snapshot = session.snapshot() if session is not None else None
-                invocation = ToolInvoked(
-                    prompt_name=prompt_name,
-                    adapter="openai",
-                    name=tool_name,
-                    params=tool_params,
-                    result=cast(ToolResult[object], tool_result),
-                    call_id=getattr(tool_call, "id", None),
+                    format_publish_failures=_format_publish_failures,
+                    parse_arguments=parse_tool_arguments,
+                    logger_override=logger,
                 )
                 tool_events.append(invocation)
-                publish_result = bus.publish(invocation)
-
-                if not publish_result.ok:
-                    if snapshot is not None and session is not None:
-                        session.rollback(snapshot)
-                    tool_result.message = _format_publish_failures(
-                        publish_result.errors
-                    )
 
                 tool_message = {
                     "role": "tool",
@@ -609,33 +543,6 @@ def _serialize_tool_call(tool_call: _ToolCall) -> dict[str, Any]:
             "arguments": function.arguments or "{}",
         },
     }
-
-
-def _parse_tool_arguments(
-    arguments_json: str | None,
-    *,
-    prompt_name: str,
-    provider_payload: dict[str, Any] | None,
-) -> dict[str, Any]:
-    if not arguments_json:
-        return {}
-    try:
-        parsed = json.loads(arguments_json)
-    except json.JSONDecodeError as error:
-        raise PromptEvaluationError(
-            "Failed to decode tool call arguments.",
-            prompt_name=prompt_name,
-            phase="tool",
-            provider_payload=provider_payload,
-        ) from error
-    if not isinstance(parsed, Mapping):
-        raise PromptEvaluationError(
-            "Tool call arguments must be a JSON object.",
-            prompt_name=prompt_name,
-            phase="tool",
-            provider_payload=provider_payload,
-        )
-    return dict(cast(Mapping[str, Any], parsed))
 
 
 __all__ = ["OpenAIAdapter", "OpenAIProtocol"]
