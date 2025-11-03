@@ -19,9 +19,10 @@ specification keeps the wrapper minimal and prescriptive so delegation stays tra
 A subagent prompt MUST follow the structure below:
 
 1. `# Delegation Summary`
+1. `## Response Format`
 1. `## Parent Prompt (Verbatim)`
 
-Only two sections are required. Additional sections are forbidden until a future revision explicitly introduces them.
+Only these sections are required. Additional sections are forbidden until a future revision explicitly introduces them.
 
 ### Delegation Summary
 
@@ -33,6 +34,17 @@ Provide lightweight context to the subagent before showing the parent prompt. In
 - **May delegate further?** – `yes` or `no`.
 
 Each field should appear as a bullet item in the order listed above. Do not include extra prose, tables, or subsections.
+
+### Response Format
+
+Describe the exact shape of the subagent's reply. The section MUST:
+
+- Declare the structured schema the parent expects (for example JSON keys, markdown tables, or ordered lists).
+- Reproduce any field-level descriptions or validation rules the parent requires.
+- Note whether the subagent should include explanatory prose outside the structured output.
+
+When the parent prompt already defines the response contract, copy it verbatim into this section so the subagent sees it
+without scanning the entire parent prompt. If the parent did not provide a format, state `Follow free-form response from parent prompt.` so the subagent knows no structured output is required.
 
 ### Parent Prompt (Verbatim)
 
@@ -49,9 +61,10 @@ NOT restate or reinterpret them. Any future need to override tools or policies r
 
 ## Reporting Guidance
 
-The subagent responds using the instructions already present in the inherited parent prompt. The wrapper does not add
-new reporting formats or references. If the parent needs bespoke reporting requirements, they must be authored in the
-parent prompt before delegation.
+The `Response Format` section is the only place the wrapper adds reporting guidance. Beyond that summary, the subagent
+responds using the instructions already present in the inherited parent prompt. If the parent needs bespoke reporting
+requirements, they must be authored in the parent prompt before delegation and mirrored into the `Response Format`
+section when composing the wrapper.
 
 ## Failure Handling
 
