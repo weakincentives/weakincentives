@@ -201,7 +201,8 @@ class _PlanningToolSuite:
         _ensure_active(plan, "add steps to")
         normalized_steps = _normalize_new_steps(params.steps)
         if not normalized_steps:
-            raise ToolValidationError("Provide at least one step to add.")
+            message = "Provide at least one step to add."
+            raise ToolValidationError(message)
         message = (
             "Queued"
             f" {len(normalized_steps)} step{'s' if len(normalized_steps) != 1 else ''}"
@@ -214,7 +215,8 @@ class _PlanningToolSuite:
         _ensure_active(plan, "update steps in")
         step_id = params.step_id.strip()
         if not step_id:
-            raise ToolValidationError("Step ID must be provided.")
+            message = "Step ID must be provided."
+            raise ToolValidationError(message)
         _ensure_ascii(step_id, "step_id")
         updated_title = (
             _normalize_required_text(
@@ -235,9 +237,8 @@ class _PlanningToolSuite:
             else None
         )
         if updated_title is None and updated_details is None:
-            raise ToolValidationError(
-                "Provide a new title or details to update a step."
-            )
+            message = "Provide a new title or details to update a step."
+            raise ToolValidationError(message)
         _ensure_step_exists(plan, step_id)
         normalized = UpdateStep(
             step_id=step_id,
@@ -249,10 +250,12 @@ class _PlanningToolSuite:
     def mark_step(self, params: MarkStep) -> ToolResult[MarkStep]:
         plan = _require_plan(self._session)
         if plan.status == "abandoned":
-            raise ToolValidationError("Cannot mark steps on an abandoned plan.")
+            message = "Cannot mark steps on an abandoned plan."
+            raise ToolValidationError(message)
         step_id = params.step_id.strip()
         if not step_id:
-            raise ToolValidationError("Step ID must be provided.")
+            message = "Step ID must be provided."
+            raise ToolValidationError(message)
         _ensure_ascii(step_id, "step_id")
         _ensure_step_exists(plan, step_id)
         note = _normalize_optional_text(
@@ -270,14 +273,16 @@ class _PlanningToolSuite:
     def clear_plan(self, params: ClearPlan) -> ToolResult[ClearPlan]:
         plan = _require_plan(self._session)
         if plan.status == "abandoned":
-            raise ToolValidationError("Plan already abandoned.")
+            message = "Plan already abandoned."
+            raise ToolValidationError(message)
         return ToolResult(message="Plan marked as abandoned.", value=params)
 
     def read_plan(self, params: ReadPlan) -> ToolResult[Plan]:
         del params
         plan = select_latest(self._session, Plan)
         if plan is None:
-            raise ToolValidationError("No plan is currently initialised.")
+            message = "No plan is currently initialised."
+            raise ToolValidationError(message)
         step_count = len(plan.steps)
         if step_count == 0:
             message = "Retrieved the current plan (no steps recorded)."
@@ -460,11 +465,11 @@ def _normalize_required_text(
 ) -> str:
     stripped = value.strip()
     if not stripped:
-        raise ToolValidationError(f"{field_name.title()} must not be empty.")
+        message = f"{field_name.title()} must not be empty."
+        raise ToolValidationError(message)
     if len(stripped) > max_length:
-        raise ToolValidationError(
-            f"{field_name.title()} must be <= {max_length} characters."
-        )
+        message = f"{field_name.title()} must be <= {max_length} characters."
+        raise ToolValidationError(message)
     _ensure_ascii(stripped, field_name)
     return stripped
 
@@ -481,14 +486,12 @@ def _normalize_optional_text(
     stripped = value.strip()
     if not stripped:
         if require_content:
-            raise ToolValidationError(
-                f"{field_name.title()} must not be empty when provided."
-            )
+            message = f"{field_name.title()} must not be empty when provided."
+            raise ToolValidationError(message)
         return None
     if len(stripped) > max_length:
-        raise ToolValidationError(
-            f"{field_name.title()} must be <= {max_length} characters."
-        )
+        message = f"{field_name.title()} must be <= {max_length} characters."
+        raise ToolValidationError(message)
     _ensure_ascii(stripped, field_name)
     return stripped
 
@@ -497,39 +500,41 @@ def _ensure_ascii(value: str, field_name: str) -> None:
     try:
         value.encode(_ASCII)
     except UnicodeEncodeError as error:  # pragma: no cover - defensive
-        raise ToolValidationError(f"{field_name.title()} must be ASCII.") from error
+        message = f"{field_name.title()} must be ASCII."
+        raise ToolValidationError(message) from error
 
 
 def _require_plan(session: Session) -> Plan:
     plan = select_latest(session, Plan)
     if plan is None:
-        raise ToolValidationError("No plan is currently initialised.")
+        message = "No plan is currently initialised."
+        raise ToolValidationError(message)
     return plan
 
 
 def _ensure_active(plan: Plan, action: str) -> None:
     if plan.status != "active":
-        raise ToolValidationError(
-            f"Plan must be active to {action}. Current status: {plan.status}."
-        )
+        message = f"Plan must be active to {action}. Current status: {plan.status}."
+        raise ToolValidationError(message)
 
 
 def _ensure_step_exists(plan: Plan, step_id: str) -> None:
     if not any(step.step_id == step_id for step in plan.steps):
-        raise ToolValidationError(f"Step {step_id} does not exist.")
+        message = f"Step {step_id} does not exist."
+        raise ToolValidationError(message)
 
 
 __all__ = [
+    "AddStep",
+    "ClearPlan",
+    "MarkStep",
+    "NewPlanStep",
     "Plan",
     "PlanStatus",
     "PlanStep",
-    "StepStatus",
-    "NewPlanStep",
-    "SetupPlan",
-    "AddStep",
-    "UpdateStep",
-    "MarkStep",
-    "ClearPlan",
-    "ReadPlan",
     "PlanningToolsSection",
+    "ReadPlan",
+    "SetupPlan",
+    "StepStatus",
+    "UpdateStep",
 ]

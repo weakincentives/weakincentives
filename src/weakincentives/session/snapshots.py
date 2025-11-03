@@ -57,7 +57,7 @@ def normalize_snapshot_state(
             dataclass_value = cast(SupportsDataclass, value)  # pyright: ignore[reportUnnecessaryCast]
             try:
                 dump(dataclass_value)
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 raise ValueError(
                     f"Slice {slice_type.__qualname__} cannot be serialized"
                 ) from error
@@ -103,7 +103,7 @@ def _infer_item_type(
         first_value = values[0]
         first_type = type(first_value)
         for value in values:
-            if type(value) is not first_type:  # noqa: E721 - intentional identity check
+            if type(value) is not first_type:  # intentional identity check
                 msg = (
                     "Snapshot slices must contain a single dataclass type; "
                     f"found {type(value)!r}"
@@ -159,7 +159,7 @@ class Snapshot:
             item_type = _infer_item_type(slice_type, values)
             try:
                 serialized_items = [dump(value) for value in values]
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 msg = f"Failed to serialize slice {slice_type.__qualname__}"
                 raise SnapshotSerializationError(msg) from error
 
@@ -254,7 +254,7 @@ class Snapshot:
                 item_mapping = cast(Mapping[str, object], item_obj)
                 try:
                     restored_item = parse(item_type, item_mapping)
-                except Exception as error:  # noqa: BLE001
+                except Exception as error:
                     raise SnapshotRestoreError(
                         f"Failed to restore slice {slice_type.__qualname__}"
                     ) from error

@@ -14,4 +14,4 @@
 
 from .dataclass_serde import clone, dump, parse, schema
 
-__all__ = ["parse", "dump", "clone", "schema"]
+__all__ = ["clone", "dump", "parse", "schema"]

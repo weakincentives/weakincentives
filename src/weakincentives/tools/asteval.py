@@ -409,7 +409,8 @@ def _create_interpreter() -> InterpreterProtocol:
     module = _load_asteval_module()
     interpreter_cls = getattr(module, "Interpreter", None)
     if not callable(interpreter_cls):  # pragma: no cover - defensive guard
-        raise RuntimeError("asteval dependency is not installed.")
+        message = "asteval dependency is not installed."
+        raise TypeError(message)
 
     interpreter = cast(
         InterpreterProtocol, interpreter_cls(use_numpy=False, minimal=True)
@@ -428,7 +429,7 @@ def _execute_with_timeout(
 
         timed_out = False
 
-        def handler(signum: int, frame: object | None) -> None:  # noqa: ARG001
+        def handler(_signum: int, _frame: object | None) -> None:
             nonlocal timed_out
             timed_out = True
             raise TimeoutError
@@ -437,9 +438,10 @@ def _execute_with_timeout(
         signal.setitimer(signal.ITIMER_REAL, _TIMEOUT_SECONDS)
         try:
             value = func()
-            return False, value, ""
         except TimeoutError:
             return True, None, timeout_message
+        else:
+            return False, value, ""
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, previous)

@@ -55,7 +55,8 @@ def _find_tool(
         if tool.name == name:
             assert tool.handler is not None
             return tool
-    raise AssertionError(f"Tool {name} not found")
+    message = f"Tool {name} not found"
+    raise AssertionError(message)
 
 
 def _invoke_tool(
@@ -321,7 +322,7 @@ def test_mark_step_appends_note_and_updates_status() -> None:
 
     plan = select_latest(session, Plan)
     assert plan is not None
-    first, second = plan.steps
+    first, _second = plan.steps
     assert first.status == "done"
     assert first.notes == ("notes added",)
     assert plan.status == "active"

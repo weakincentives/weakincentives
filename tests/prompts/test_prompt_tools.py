@@ -91,7 +91,7 @@ def _build_prompt() -> tuple[
     )
     guidance = MarkdownSection[GuidanceParams](
         title="Guidance",
-        template="Use ${primary_tool} when available.",
+        template=f"Use ${'{' + 'primary_tool' + '}'} when available.",
         key="guidance",
         enabled=lambda params: params.allow_tools,
         children=[primary_section],

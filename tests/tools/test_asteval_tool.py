@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, TypeVar, cast
 
@@ -187,7 +188,7 @@ def test_statements_mode_reads_and_writes() -> None:
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     written = {file.path.segments: file.content for file in snapshot.files}
-    assert written[("output", "summary.txt")] == "Report: hello"
+    assert written["output", "summary.txt"] == "Report: hello"
 
 
 def test_helper_write_appends() -> None:
@@ -215,7 +216,7 @@ def test_helper_write_appends() -> None:
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
-    assert files[("logs", "activity.log")] == "started-continued"
+    assert files["logs", "activity.log"] == "started-continued"
 
 
 def test_invalid_globals_raise() -> None:
@@ -230,7 +231,7 @@ def test_invalid_globals_raise() -> None:
 def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 
-    def fake_timeout(func: object) -> tuple[bool, object | None, str]:  # noqa: ANN001
+    def fake_timeout(func: Callable[[], object]) -> tuple[bool, object | None, str]:
         return True, None, "Execution timed out."
 
     monkeypatch.setattr(
@@ -261,7 +262,7 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_stdout_truncation_and_flush() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     extra = asteval_module._MAX_STREAM_LENGTH + 100
     params = EvalParams(
@@ -277,7 +278,7 @@ def test_stdout_truncation_and_flush() -> None:
 
 
 def test_print_invalid_sep_reports_error() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(code="print('value', sep=0)", mode="statements")
 
@@ -290,7 +291,7 @@ def test_print_invalid_sep_reports_error() -> None:
 
 
 def test_print_invalid_end_reports_error() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(code="print('value', end=0)", mode="statements")
 
@@ -303,7 +304,7 @@ def test_print_invalid_end_reports_error() -> None:
 
 
 def test_expression_mode_requires_expression() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         _invoke_tool(
@@ -314,7 +315,7 @@ def test_expression_mode_requires_expression() -> None:
 
 
 def test_invalid_mode_rejected() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(code="0", mode="invalid")  # type: ignore[arg-type]
 
@@ -323,7 +324,7 @@ def test_invalid_mode_rejected() -> None:
 
 
 def test_invalid_global_names_raise() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         _invoke_tool(
@@ -341,7 +342,7 @@ def test_invalid_global_names_raise() -> None:
 
 
 def test_code_length_validation() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     long_code = "x" * (asteval_module._MAX_CODE_LENGTH + 1)
     with pytest.raises(ToolValidationError):
@@ -353,7 +354,7 @@ def test_code_length_validation() -> None:
 
 
 def test_control_character_validation() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         _invoke_tool(
@@ -388,7 +389,7 @@ def test_normalize_path_invalid_segments(path: VfsPath) -> None:
 
 
 def test_read_requires_existing_file() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         _invoke_tool(
@@ -402,7 +403,7 @@ def test_read_requires_existing_file() -> None:
 
 
 def test_duplicate_reads_rejected() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     read = EvalFileRead(path=VfsPath(("docs", "info.txt")))
 
@@ -415,7 +416,7 @@ def test_duplicate_reads_rejected() -> None:
 
 
 def test_duplicate_writes_rejected() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     write = EvalFileWrite(path=VfsPath(("output", "data.txt")), content="x")
 
@@ -428,7 +429,7 @@ def test_duplicate_writes_rejected() -> None:
 
 
 def test_read_write_conflict_rejected() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     path = VfsPath(("docs", "info.txt"))
 
@@ -445,7 +446,7 @@ def test_read_write_conflict_rejected() -> None:
 
 
 def test_invalid_write_mode_rejected() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     write = EvalFileWrite(
         path=VfsPath(("output", "data.txt")),
@@ -462,7 +463,7 @@ def test_invalid_write_mode_rejected() -> None:
 
 
 def test_write_content_length_validation() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     long_content = "x" * (asteval_module._MAX_WRITE_LENGTH + 1)
     write = EvalFileWrite(path=VfsPath(("output", "large.txt")), content=long_content)
@@ -614,7 +615,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
 
 
 def test_write_text_rejects_empty_path() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     result = _invoke_tool(
         bus,
@@ -628,7 +629,7 @@ def test_write_text_rejects_empty_path() -> None:
 
 
 def test_globals_formatting_covers_primitives() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     code = (
         "text = 'hello'\n"
@@ -656,7 +657,7 @@ def test_globals_formatting_covers_primitives() -> None:
 
 
 def test_interpreter_error_surfaces_in_stderr() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     result = _invoke_tool(
         bus,
@@ -671,7 +672,7 @@ def test_interpreter_error_surfaces_in_stderr() -> None:
 
 
 def test_write_text_conflict_with_read_path() -> None:
-    session, bus, vfs_section, tool = _setup_sections()
+    _session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
         Tool[WriteFile, WriteFile], _find_tool(vfs_section, "vfs_write_file")
@@ -695,7 +696,7 @@ def test_write_text_conflict_with_read_path() -> None:
 
 
 def test_write_text_duplicate_targets() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(
         code=("write_text('logs/out.txt', 'a')\nwrite_text('logs/out.txt', 'b')"),
@@ -709,7 +710,7 @@ def test_write_text_duplicate_targets() -> None:
 
 
 def test_missing_template_variable_raises() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(
         code="0",
@@ -727,7 +728,7 @@ def test_missing_template_variable_raises() -> None:
 
 
 def test_duplicate_final_writes_detected() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(
         code="write_text('output/data.txt', 'helper')",

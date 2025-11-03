@@ -125,14 +125,14 @@ def test_reducers_run_in_registration_order() -> None:
     ) -> tuple[FirstSlice, ...]:
         call_order.append("first")
         value = cast(ExampleOutput, event.value)
-        return slice_values + (FirstSlice(value.text),)
+        return (*slice_values, FirstSlice(value.text))
 
     def second(
         slice_values: tuple[SecondSlice, ...], event: DataEvent
     ) -> tuple[SecondSlice, ...]:
         call_order.append("second")
         value = cast(ExampleOutput, event.value)
-        return slice_values + (SecondSlice(value.text),)
+        return (*slice_values, SecondSlice(value.text))
 
     session.register_reducer(ExampleOutput, first, slice_type=FirstSlice)
     session.register_reducer(ExampleOutput, second, slice_type=SecondSlice)
@@ -328,7 +328,7 @@ def test_snapshot_preserves_custom_reducer_behavior() -> None:
     ) -> tuple[Summary, ...]:
         value = cast(ExampleOutput, event.value)
         entries = slice_values[-1].entries if slice_values else ()
-        return (Summary(entries + (value.text,)),)
+        return (Summary((*entries, value.text)),)
 
     session.register_reducer(ExampleOutput, aggregate, slice_type=Summary)
 

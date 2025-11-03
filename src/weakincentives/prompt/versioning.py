@@ -72,14 +72,15 @@ class PromptDescriptor:
             if template is not None:
                 content_hash = sha256(template.encode("utf-8")).hexdigest()
                 sections.append(SectionDescriptor(node.path, content_hash))
-            for tool in node.section.tools():
-                tools.append(
-                    ToolDescriptor(
-                        path=node.path,
-                        name=tool.name,
-                        contract_hash=_tool_contract_hash(tool),
-                    )
+            tool_descriptors = [
+                ToolDescriptor(
+                    path=node.path,
+                    name=tool.name,
+                    contract_hash=_tool_contract_hash(tool),
                 )
+                for tool in node.section.tools()
+            ]
+            tools.extend(tool_descriptors)
         return cls(prompt.ns, prompt.key, sections, tools)
 
 
@@ -154,9 +155,9 @@ class PromptOverridesStore(Protocol):
 
 
 __all__ = [
-    "PromptOverridesError",
     "PromptDescriptor",
     "PromptOverride",
+    "PromptOverridesError",
     "PromptOverridesStore",
     "SectionDescriptor",
     "SectionOverride",

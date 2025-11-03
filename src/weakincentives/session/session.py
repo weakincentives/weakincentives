@@ -220,7 +220,7 @@ class Session:
             previous = self._state.get(slice_type, ())
             try:
                 result = registration.reducer(previous, event)
-            except Exception:  # noqa: BLE001
+            except Exception:  # log and continue
                 logger.exception(
                     "Reducer %r failed for data type %s",
                     registration.reducer,
@@ -236,9 +236,9 @@ def _is_dataclass_instance(value: object) -> bool:
 
 
 __all__ = [
+    "DataEvent",
+    "PromptData",
     "Session",
     "ToolData",
-    "PromptData",
-    "DataEvent",
     "TypedReducer",
 ]

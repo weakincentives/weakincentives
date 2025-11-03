@@ -45,10 +45,10 @@ class EventBus(Protocol):
 class NullEventBus:
     """Event bus implementation that discards all events."""
 
-    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:  # noqa: D401
+    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
         """No-op subscription hook."""
 
-    def publish(self, event: object) -> PublishResult:  # noqa: D401
+    def publish(self, event: object) -> PublishResult:
         """Drop the provided event instance."""
 
         return PublishResult(
@@ -76,7 +76,7 @@ class InProcessEventBus:
             invoked.append(handler)
             try:
                 handler(event)
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 logger.exception(
                     "Error delivering event %s to handler %r",
                     type(event).__name__,
@@ -160,7 +160,7 @@ __all__ = [
     "HandlerFailure",
     "InProcessEventBus",
     "NullEventBus",
-    "PublishResult",
     "PromptExecuted",
+    "PublishResult",
     "ToolInvoked",
 ]
