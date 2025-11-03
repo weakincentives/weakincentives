@@ -82,7 +82,33 @@ _EVAL_TEMPLATE: Final[str] = (
     "- Pre-load files via `reads`, or call `read_text(path)` inside code to fetch VFS files.\n"
     "- Stage edits with `write_text(path, content, mode)` or declare them in `writes`. Content must be ASCII.\n"
     "- Globals accept JSON-encoded strings and are parsed before execution.\n"
-    "- Execution stops after five seconds; design code to finish quickly."
+    "- Execution stops after five seconds; design code to finish quickly.\n\n"
+    "Expression mode returns the repr of the final expression and skips stdout unless you print explicitly:\n"
+    "```json\n"
+    "{\n"
+    '  "name": "evaluate_python",\n'
+    '  "arguments": {\n'
+    '    "code": "2 * (3 + 4)",\n'
+    '    "mode": "expr",\n'
+    '    "globals": {},\n'
+    '    "reads": [],\n'
+    '    "writes": []\n'
+    "  }\n"
+    "}\n"
+    "```\n\n"
+    "Statements mode runs multi-line scripts, captures stdout, and only returns a value if the last line is an expression:\n"
+    "```json\n"
+    "{\n"
+    '  "name": "evaluate_python",\n'
+    '  "arguments": {\n'
+    '    "code": "total = 0\\nfor value in range(5):\\n    total += value\\nprint(total)",\n'
+    '    "mode": "statements",\n'
+    '    "globals": {},\n'
+    '    "reads": [],\n'
+    '    "writes": []\n'
+    "  }\n"
+    "}\n"
+    "```"
 )
 
 
