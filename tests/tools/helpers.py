@@ -1,0 +1,66 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Shared helpers for tool tests."""
+
+from __future__ import annotations
+
+from typing import Protocol, TypeVar, cast
+
+from weakincentives.events import InProcessEventBus, ToolInvoked
+from weakincentives.prompt import SupportsDataclass
+from weakincentives.prompt.tool import Tool, ToolResult
+
+ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
+ResultT = TypeVar("ResultT", bound=SupportsDataclass)
+
+
+class ToolSection(Protocol):
+    """Protocol representing tool sections used in tests."""
+
+    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
+        """Return the tools exposed by the section."""
+
+
+def find_tool(
+    section: ToolSection, name: str
+) -> Tool[SupportsDataclass, SupportsDataclass]:
+    """Return the tool with the provided name from ``section``."""
+
+    for tool in section.tools():
+        if tool.name == name:
+            assert tool.handler is not None
+            return tool
+    message = f"Tool {name} not found"
+    raise AssertionError(message)
+
+
+def invoke_tool(
+    bus: InProcessEventBus,
+    tool: Tool[ParamsT, ResultT],
+    params: ParamsT,
+) -> ToolResult[ResultT]:
+    """Execute ``tool`` with ``params`` and publish the invocation event."""
+
+    handler = tool.handler
+    assert handler is not None
+    result = handler(params)
+    event = ToolInvoked(
+        prompt_name="test",
+        adapter="adapter",
+        name=tool.name,
+        params=params,
+        result=cast(ToolResult[object], result),
+    )
+    publish_result = bus.publish(event)
+    assert publish_result.ok
+    return result

@@ -16,14 +16,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import cast
 
 import pytest
 
 import weakincentives.tools.vfs as vfs_module
-from weakincentives.events import InProcessEventBus, ToolInvoked
-from weakincentives.prompt import SupportsDataclass
-from weakincentives.prompt.tool import Tool, ToolResult
+from tests.tools.helpers import find_tool, invoke_tool
+from weakincentives.events import InProcessEventBus
+from weakincentives.prompt.tool import ToolResult
 from weakincentives.session import Session, select_latest
 from weakincentives.tools import (
     DeleteEntry,
@@ -39,40 +39,6 @@ from weakincentives.tools import (
     WriteFile,
 )
 
-ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
-ResultT = TypeVar("ResultT", bound=SupportsDataclass)
-
-
-def _find_tool(
-    section: VfsToolsSection, name: str
-) -> Tool[SupportsDataclass, SupportsDataclass]:
-    for tool in section.tools():
-        if tool.name == name:
-            assert tool.handler is not None
-            return tool
-    message = f"Tool {name} not found"
-    raise AssertionError(message)
-
-
-def _invoke_tool(
-    bus: InProcessEventBus,
-    tool: Tool[ParamsT, ResultT],
-    params: ParamsT,
-) -> ToolResult[ResultT]:
-    handler = tool.handler
-    assert handler is not None
-    result = handler(params)
-    event = ToolInvoked(
-        prompt_name="test",
-        adapter="adapter",
-        name=tool.name,
-        params=params,
-        result=cast(ToolResult[object], result),
-    )
-    publish_result = bus.publish(event)
-    assert publish_result.ok
-    return result
-
 
 def test_write_file_creates_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
@@ -81,10 +47,10 @@ def test_write_file_creates_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
 
     params = WriteFile(path=VfsPath(("docs", "intro.md")), content="hello world")
-    _invoke_tool(bus, write_tool, params)
+    invoke_tool(bus, write_tool, params)
 
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
@@ -113,14 +79,14 @@ def test_write_file_appends(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("log.txt",)), content="start"),
     )
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("log.txt",)), content=" -> next", mode="append"),
@@ -141,21 +107,21 @@ def test_delete_directory_removes_nested(monkeypatch: pytest.MonkeyPatch) -> Non
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
-    delete_tool = _find_tool(section, "vfs_delete_entry")
+    write_tool = find_tool(section, "vfs_write_file")
+    delete_tool = find_tool(section, "vfs_delete_entry")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("src", "main.py")), content="print('hello')"),
     )
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("src", "utils", "helpers.py")), content="# helpers"),
     )
 
-    _invoke_tool(bus, delete_tool, DeleteEntry(path=VfsPath(("src",))))
+    invoke_tool(bus, delete_tool, DeleteEntry(path=VfsPath(("src",))))
 
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
@@ -193,21 +159,21 @@ def test_list_directory_shows_children(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
-    list_tool = _find_tool(section, "vfs_list_directory")
+    write_tool = find_tool(section, "vfs_write_file")
+    list_tool = find_tool(section, "vfs_list_directory")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("workspace", "notes.md")), content="notes"),
     )
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("workspace", "drafts", "todo.md")), content="todo"),
     )
 
-    result = _invoke_tool(bus, list_tool, ListDirectory(path=VfsPath(("workspace",))))
+    result = invoke_tool(bus, list_tool, ListDirectory(path=VfsPath(("workspace",))))
     assert result.value == ListDirectoryResult(
         path=VfsPath(("workspace",)),
         directories=("drafts",),
@@ -222,16 +188,16 @@ def test_read_file_returns_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
-    read_tool = _find_tool(section, "vfs_read_file")
+    write_tool = find_tool(section, "vfs_write_file")
+    read_tool = find_tool(section, "vfs_read_file")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("README.md",)), content="intro"),
     )
 
-    result = _invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("README.md",))))
+    result = invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("README.md",))))
     file = result.value
     assert isinstance(file, VfsFile)
     assert file.version == 1
@@ -246,7 +212,7 @@ def test_write_file_rejects_invalid_path(monkeypatch: pytest.MonkeyPatch) -> Non
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
     handler = write_tool.handler
     assert handler is not None
 
@@ -279,9 +245,9 @@ def test_host_mount_materialises_files(
         ),
         allowed_host_roots=(root,),
     )
-    read_tool = _find_tool(section, "vfs_read_file")
+    read_tool = find_tool(section, "vfs_read_file")
 
-    result = _invoke_tool(
+    result = invoke_tool(
         bus,
         read_tool,
         ReadFile(path=VfsPath(("reference", "guide.md"))),
@@ -305,7 +271,7 @@ def test_delete_requires_existing_path(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    delete_tool = _find_tool(section, "vfs_delete_entry")
+    delete_tool = find_tool(section, "vfs_delete_entry")
     handler = delete_tool.handler
     assert handler is not None
 
@@ -320,10 +286,10 @@ def test_delete_rejects_subpath_without_match(monkeypatch: pytest.MonkeyPatch) -
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
-    delete_tool = _find_tool(section, "vfs_delete_entry")
+    write_tool = find_tool(section, "vfs_write_file")
+    delete_tool = find_tool(section, "vfs_delete_entry")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("logs", "events.log")), content="start"),
@@ -342,10 +308,10 @@ def test_list_directory_rejects_file_path(monkeypatch: pytest.MonkeyPatch) -> No
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
-    list_tool = _find_tool(section, "vfs_list_directory")
+    write_tool = find_tool(section, "vfs_write_file")
+    list_tool = find_tool(section, "vfs_list_directory")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("src", "module.py")), content="print('hi')"),
@@ -364,10 +330,10 @@ def test_list_directory_defaults_to_root(monkeypatch: pytest.MonkeyPatch) -> Non
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
-    list_tool = _find_tool(section, "vfs_list_directory")
+    write_tool = find_tool(section, "vfs_write_file")
+    list_tool = find_tool(section, "vfs_list_directory")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("notes.md",)), content="notes"),
@@ -375,7 +341,7 @@ def test_list_directory_defaults_to_root(monkeypatch: pytest.MonkeyPatch) -> Non
 
     result = cast(
         ToolResult[ListDirectoryResult],
-        _invoke_tool(bus, list_tool, ListDirectory()),
+        invoke_tool(bus, list_tool, ListDirectory()),
     )
     assert result.value is not None
     assert result.value.path == VfsPath(())
@@ -391,10 +357,10 @@ def test_list_directory_ignores_unrelated_paths(
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
-    list_tool = _find_tool(section, "vfs_list_directory")
+    write_tool = find_tool(section, "vfs_write_file")
+    list_tool = find_tool(section, "vfs_list_directory")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("src", "app.py")), content="print('x')"),
@@ -402,7 +368,7 @@ def test_list_directory_ignores_unrelated_paths(
 
     result = cast(
         ToolResult[ListDirectoryResult],
-        _invoke_tool(bus, list_tool, ListDirectory(path=VfsPath(("docs",)))),
+        invoke_tool(bus, list_tool, ListDirectory(path=VfsPath(("docs",)))),
     )
     assert result.value is not None
     assert result.value.directories == ()
@@ -416,7 +382,7 @@ def test_read_file_requires_existing_path(monkeypatch: pytest.MonkeyPatch) -> No
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    read_tool = _find_tool(section, "vfs_read_file")
+    read_tool = find_tool(section, "vfs_read_file")
     handler = read_tool.handler
     assert handler is not None
 
@@ -431,7 +397,7 @@ def test_write_file_rejects_non_utf8_encoding(monkeypatch: pytest.MonkeyPatch) -
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
     handler = write_tool.handler
     assert handler is not None
 
@@ -452,11 +418,11 @@ def test_write_file_allows_utf8_content(monkeypatch: pytest.MonkeyPatch) -> None
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
-    read_tool = _find_tool(section, "vfs_read_file")
+    write_tool = find_tool(section, "vfs_write_file")
+    read_tool = find_tool(section, "vfs_read_file")
 
     content = "café ☕"
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("README.md",)), content=content),
@@ -464,7 +430,7 @@ def test_write_file_allows_utf8_content(monkeypatch: pytest.MonkeyPatch) -> None
 
     result = cast(
         ToolResult[VfsFile],
-        _invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("README.md",)))),
+        invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("README.md",)))),
     )
     assert result.value is not None
     assert result.value.content == content
@@ -477,9 +443,9 @@ def test_write_file_duplicate_create(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("config.yaml",)), content="first"),
@@ -500,7 +466,7 @@ def test_write_file_requires_existing_for_overwrite(
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
     handler = write_tool.handler
     assert handler is not None
 
@@ -521,7 +487,7 @@ def test_write_file_limits_content_length(monkeypatch: pytest.MonkeyPatch) -> No
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
     handler = write_tool.handler
     assert handler is not None
 
@@ -536,7 +502,7 @@ def test_write_file_requires_nonempty_path(monkeypatch: pytest.MonkeyPatch) -> N
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
     handler = write_tool.handler
     assert handler is not None
 
@@ -551,7 +517,7 @@ def test_path_depth_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
     handler = write_tool.handler
     assert handler is not None
 
@@ -569,9 +535,9 @@ def test_path_normalization_collapses_duplicate_slashes(
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("src//module.py",)), content="pass"),
@@ -589,7 +555,7 @@ def test_path_rejects_dot_segments(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
     handler = write_tool.handler
     assert handler is not None
 
@@ -604,7 +570,7 @@ def test_path_segment_length_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
     handler = write_tool.handler
     assert handler is not None
 
@@ -621,9 +587,9 @@ def test_path_normalization_ignores_blank_segments(
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("   ", "docs", "file.txt")), content="body"),
@@ -683,9 +649,9 @@ def test_host_mount_respects_exclude_patterns(
         ),
         allowed_host_roots=(root,),
     )
-    read_tool = _find_tool(section, "vfs_read_file")
+    read_tool = find_tool(section, "vfs_read_file")
     with pytest.raises(ToolValidationError):
-        _invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("docs", "notes.md"))))
+        invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("docs", "notes.md"))))
 
 
 def test_host_mount_enforces_byte_limit(
@@ -766,10 +732,10 @@ def test_host_mount_trims_blank_globs(
         ),
         allowed_host_roots=(root,),
     )
-    read_tool = _find_tool(section, "vfs_read_file")
+    read_tool = find_tool(section, "vfs_read_file")
     result = cast(
         ToolResult[VfsFile],
-        _invoke_tool(
+        invoke_tool(
             bus,
             read_tool,
             ReadFile(path=VfsPath(("docs", "guide.md"))),
@@ -795,10 +761,10 @@ def test_host_mount_handles_file_targets(
         mounts=(HostMount(host_path="README.md", mount_path=VfsPath(("docs",))),),
         allowed_host_roots=(root,),
     )
-    read_tool = _find_tool(section, "vfs_read_file")
+    read_tool = find_tool(section, "vfs_read_file")
     result = cast(
         ToolResult[VfsFile],
-        _invoke_tool(
+        invoke_tool(
             bus,
             read_tool,
             ReadFile(path=VfsPath(("docs", "README.md"))),
@@ -825,10 +791,10 @@ def test_host_mount_preserves_utf8_content(
         mounts=(HostMount(host_path="notes.txt"),),
         allowed_host_roots=(root,),
     )
-    read_tool = _find_tool(section, "vfs_read_file")
+    read_tool = find_tool(section, "vfs_read_file")
     result = cast(
         ToolResult[VfsFile],
-        _invoke_tool(
+        invoke_tool(
             bus,
             read_tool,
             ReadFile(path=VfsPath(("notes.txt",))),
@@ -866,14 +832,14 @@ def test_write_file_overwrite_updates_version(monkeypatch: pytest.MonkeyPatch) -
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    write_tool = _find_tool(section, "vfs_write_file")
+    write_tool = find_tool(section, "vfs_write_file")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(path=VfsPath(("report.txt",)), content="v1"),
     )
-    _invoke_tool(
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(
@@ -913,8 +879,8 @@ def test_write_to_mounted_file_uses_snapshot(
         mounts=(HostMount(host_path="docs", mount_path=VfsPath(("docs",))),),
         allowed_host_roots=(root,),
     )
-    write_tool = _find_tool(section, "vfs_write_file")
-    _invoke_tool(
+    write_tool = find_tool(section, "vfs_write_file")
+    invoke_tool(
         bus,
         write_tool,
         WriteFile(

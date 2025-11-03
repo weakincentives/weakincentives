@@ -14,13 +14,14 @@
 
 from __future__ import annotations
 
-from typing import TypeVar, cast
+from typing import cast
 
 import pytest
 
+from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import SupportsDataclass
-from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.prompt.tool import ToolResult
 from weakincentives.session import Session, ToolData, select_all, select_latest
 from weakincentives.tools import (
     AddStep,
@@ -44,40 +45,6 @@ from weakincentives.tools.planning import (
     _update_step_reducer,
 )
 
-ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
-ResultT = TypeVar("ResultT", bound=SupportsDataclass)
-
-
-def _find_tool(
-    section: PlanningToolsSection, name: str
-) -> Tool[SupportsDataclass, SupportsDataclass]:
-    for tool in section.tools():
-        if tool.name == name:
-            assert tool.handler is not None
-            return tool
-    message = f"Tool {name} not found"
-    raise AssertionError(message)
-
-
-def _invoke_tool(
-    bus: InProcessEventBus,
-    tool: Tool[ParamsT, ResultT],
-    params: ParamsT,
-) -> ToolResult[ResultT]:
-    handler = tool.handler
-    assert handler is not None
-    result = handler(params)
-    event = ToolInvoked(
-        prompt_name="test",
-        adapter="adapter",
-        name=tool.name,
-        params=params,
-        result=cast(ToolResult[object], result),
-    )
-    publish_result = bus.publish(event)
-    assert publish_result.ok
-    return result
-
 
 def _make_tool_data(name: str, value: SupportsDataclass) -> ToolData:
     result = ToolResult(message="ok", value=value)
@@ -95,13 +62,13 @@ def test_setup_plan_normalizes_payloads() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
 
     params = SetupPlan(
         objective="  refine onboarding flow  ",
         initial_steps=(NewPlanStep(title=" draft checklist ", details=" review doc "),),
     )
-    _invoke_tool(bus, setup_tool, params)
+    invoke_tool(bus, setup_tool, params)
 
     plan = select_latest(session, Plan)
     assert plan is not None
@@ -122,13 +89,13 @@ def test_setup_plan_normalizes_blank_details() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
 
     params = SetupPlan(
         objective="ship",
         initial_steps=(NewPlanStep(title="draft", details="   "),),
     )
-    _invoke_tool(bus, setup_tool, params)
+    invoke_tool(bus, setup_tool, params)
 
     plan = select_latest(session, Plan)
     assert plan is not None
@@ -139,7 +106,7 @@ def test_setup_plan_rejects_invalid_objective() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
 
     handler = setup_tool.handler
     assert handler is not None
@@ -155,7 +122,7 @@ def test_add_step_requires_existing_plan() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    add_tool = _find_tool(section, "planning_add_step")
+    add_tool = find_tool(section, "planning_add_step")
 
     with pytest.raises(ToolValidationError):
         handler = add_tool.handler
@@ -167,15 +134,15 @@ def test_add_step_appends_new_steps() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    add_tool = _find_tool(section, "planning_add_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    add_tool = find_tool(section, "planning_add_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
     )
-    _invoke_tool(
+    invoke_tool(
         bus,
         add_tool,
         AddStep(
@@ -196,10 +163,10 @@ def test_add_step_rejects_empty_payload() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    add_tool = _find_tool(section, "planning_add_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    add_tool = find_tool(section, "planning_add_step")
 
-    _invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
 
     handler = add_tool.handler
     assert handler is not None
@@ -211,16 +178,16 @@ def test_add_step_rejects_when_plan_not_active() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    mark_tool = _find_tool(section, "planning_mark_step")
-    add_tool = _find_tool(section, "planning_add_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    mark_tool = find_tool(section, "planning_mark_step")
+    add_tool = find_tool(section, "planning_add_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
     )
-    _invoke_tool(bus, mark_tool, MarkStep(step_id="S001", status="done"))
+    invoke_tool(bus, mark_tool, MarkStep(step_id="S001", status="done"))
 
     handler = add_tool.handler
     assert handler is not None
@@ -232,11 +199,11 @@ def test_session_keeps_single_plan_snapshot() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    add_tool = _find_tool(section, "planning_add_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    add_tool = find_tool(section, "planning_add_step")
 
-    _invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
-    _invoke_tool(
+    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(
         bus,
         add_tool,
         AddStep(steps=(NewPlanStep(title="draft"),)),
@@ -250,10 +217,10 @@ def test_update_step_rejects_empty_patch() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    update_tool = _find_tool(section, "planning_update_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    update_tool = find_tool(section, "planning_update_step")
 
-    _invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
 
     handler = update_tool.handler
     assert handler is not None
@@ -265,10 +232,10 @@ def test_update_step_updates_existing_step() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    update_tool = _find_tool(section, "planning_update_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    update_tool = find_tool(section, "planning_update_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(
@@ -280,7 +247,7 @@ def test_update_step_updates_existing_step() -> None:
         ),
     )
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         update_tool,
         UpdateStep(step_id="S002", title="categorise replies"),
@@ -299,10 +266,10 @@ def test_update_step_requires_step_identifier() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    update_tool = _find_tool(section, "planning_update_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    update_tool = find_tool(section, "planning_update_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
@@ -318,10 +285,10 @@ def test_update_step_rejects_unknown_identifier() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    update_tool = _find_tool(section, "planning_update_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    update_tool = find_tool(section, "planning_update_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
@@ -337,10 +304,10 @@ def test_mark_step_appends_note_and_updates_status() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    mark_tool = _find_tool(section, "planning_mark_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    mark_tool = find_tool(section, "planning_mark_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(
@@ -348,7 +315,7 @@ def test_mark_step_appends_note_and_updates_status() -> None:
             initial_steps=(NewPlanStep(title="draft"), NewPlanStep(title="review")),
         ),
     )
-    _invoke_tool(
+    invoke_tool(
         bus,
         mark_tool,
         MarkStep(step_id="S001", status="done", note="notes added"),
@@ -366,11 +333,11 @@ def test_mark_step_sets_plan_completed_when_all_done() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    add_tool = _find_tool(section, "planning_add_step")
-    mark_tool = _find_tool(section, "planning_mark_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    add_tool = find_tool(section, "planning_add_step")
+    mark_tool = find_tool(section, "planning_mark_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(
@@ -381,19 +348,19 @@ def test_mark_step_sets_plan_completed_when_all_done() -> None:
             ),
         ),
     )
-    _invoke_tool(
+    invoke_tool(
         bus,
         add_tool,
         AddStep(steps=(NewPlanStep(title="draft update"),)),
     )
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         mark_tool,
         MarkStep(step_id="S001", status="done", note="triage complete"),
     )
-    _invoke_tool(bus, mark_tool, MarkStep(step_id="S002", status="done"))
-    _invoke_tool(bus, mark_tool, MarkStep(step_id="S003", status="done"))
+    invoke_tool(bus, mark_tool, MarkStep(step_id="S002", status="done"))
+    invoke_tool(bus, mark_tool, MarkStep(step_id="S003", status="done"))
 
     plan = select_latest(session, Plan)
     assert plan is not None
@@ -406,16 +373,16 @@ def test_mark_step_rejects_abandoned_plan() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    mark_tool = _find_tool(section, "planning_mark_step")
-    clear_tool = _find_tool(section, "planning_clear_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    mark_tool = find_tool(section, "planning_mark_step")
+    clear_tool = find_tool(section, "planning_clear_plan")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
     )
-    _invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(bus, clear_tool, ClearPlan())
 
     handler = mark_tool.handler
     assert handler is not None
@@ -427,10 +394,10 @@ def test_mark_step_requires_identifier() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    mark_tool = _find_tool(section, "planning_mark_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    mark_tool = find_tool(section, "planning_mark_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
@@ -446,10 +413,10 @@ def test_mark_step_rejects_empty_note() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    mark_tool = _find_tool(section, "planning_mark_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    mark_tool = find_tool(section, "planning_mark_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
@@ -465,10 +432,10 @@ def test_mark_step_rejects_overlong_note() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    mark_tool = _find_tool(section, "planning_mark_step")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    mark_tool = find_tool(section, "planning_mark_step")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
@@ -484,11 +451,11 @@ def test_clear_plan_marks_status_abandoned() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    clear_tool = _find_tool(section, "planning_clear_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    clear_tool = find_tool(section, "planning_clear_plan")
 
-    _invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
-    _invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(bus, clear_tool, ClearPlan())
 
     plan = select_latest(session, Plan)
     assert plan is not None
@@ -500,11 +467,11 @@ def test_clear_plan_rejects_when_already_abandoned() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    clear_tool = _find_tool(section, "planning_clear_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    clear_tool = find_tool(section, "planning_clear_plan")
 
-    _invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
-    _invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(bus, clear_tool, ClearPlan())
 
     handler = clear_tool.handler
     assert handler is not None
@@ -516,10 +483,10 @@ def test_read_plan_returns_snapshot() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    read_tool = _find_tool(section, "planning_read_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    read_tool = find_tool(section, "planning_read_plan")
 
-    _invoke_tool(
+    invoke_tool(
         bus,
         setup_tool,
         SetupPlan(
@@ -528,7 +495,7 @@ def test_read_plan_returns_snapshot() -> None:
         ),
     )
 
-    result = _invoke_tool(bus, read_tool, ReadPlan())
+    result = invoke_tool(bus, read_tool, ReadPlan())
     assert isinstance(result.value, Plan)
     assert result.message == "Retrieved the current plan with 2 steps."
 
@@ -537,7 +504,7 @@ def test_read_plan_requires_existing_plan() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    read_tool = _find_tool(section, "planning_read_plan")
+    read_tool = find_tool(section, "planning_read_plan")
 
     handler = read_tool.handler
     assert handler is not None
@@ -549,14 +516,14 @@ def test_read_plan_reports_empty_steps() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
-    setup_tool = _find_tool(section, "planning_setup_plan")
-    clear_tool = _find_tool(section, "planning_clear_plan")
-    read_tool = _find_tool(section, "planning_read_plan")
+    setup_tool = find_tool(section, "planning_setup_plan")
+    clear_tool = find_tool(section, "planning_clear_plan")
+    read_tool = find_tool(section, "planning_read_plan")
 
-    _invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
-    _invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(bus, clear_tool, ClearPlan())
 
-    result = _invoke_tool(bus, read_tool, ReadPlan())
+    result = invoke_tool(bus, read_tool, ReadPlan())
     assert result.message == "Retrieved the current plan (no steps recorded)."
 
 
