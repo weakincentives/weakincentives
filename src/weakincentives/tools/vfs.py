@@ -29,7 +29,7 @@ from ..session import Session, replace_latest, select_latest
 from ..session.session import DataEvent
 from .errors import ToolValidationError
 
-FileEncoding = Literal["utf-8"]
+FileEncoding = str
 WriteMode = Literal["create", "overwrite", "append"]
 
 _ASCII: Final[str] = "ascii"

@@ -516,6 +516,26 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
 
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                expected_hash=section.content_hash, body="Body"
+            )
+        },
+        tool_overrides={
+            tool.name: ToolOverride(
+                name=tool.name,
+                expected_contract_hash=tool.contract_hash,
+                param_descriptions=123,  # type: ignore[arg-type]
+            )
+        },
+    )
+    with pytest.raises(PromptOverridesError):
+        store.upsert(descriptor, override)
+
 
 def test_seed_if_necessary_preserves_existing_override(tmp_path: Path) -> None:
     prompt = _build_prompt()

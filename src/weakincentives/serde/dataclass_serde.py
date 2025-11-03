@@ -274,7 +274,7 @@ def _coerce_to_type(
             if isinstance(last_error, TypeError):
                 raise TypeError(f"{path}: {message}") from last_error
             raise ValueError(f"{path}: {message}") from last_error
-            raise TypeError(f"{path}: no matching type in Union")
+        raise TypeError(f"{path}: no matching type in Union")
 
     if base_type is type(None):
         if value is not None:
@@ -579,7 +579,7 @@ def _serialize(
 
 def parse[T](
     cls: type[T],
-    data: Mapping[str, object],
+    data: Mapping[str, object] | object,
     *,
     extra: Literal["ignore", "forbid", "allow"] = "ignore",
     coerce: bool = True,
@@ -625,6 +625,7 @@ def parse[T](
         aliases=aliases,
     )
 
+    mapping_data = cast(Mapping[str, object], data)
     type_hints = get_type_hints(cls, include_extras=True)
     kwargs: dict[str, object] = {}
     used_keys: set[str] = set()
@@ -632,7 +633,7 @@ def parse[T](
     for field in dataclasses.fields(cls):
         if not field.init:
             continue
-        field_meta = dict(field.metadata) if field.metadata is not None else {}
+        field_meta = dict(field.metadata)
         field_alias = None
         if aliases and field.name in aliases:
             field_alias = aliases[field.name]
@@ -641,13 +642,13 @@ def parse[T](
         elif alias_generator is not None:
             field_alias = alias_generator(field.name)
 
-        key = _find_key(data, field.name, field_alias, case_insensitive)
+        key = _find_key(mapping_data, field.name, field_alias, case_insensitive)
         if key is None:
             if field.default is MISSING and field.default_factory is MISSING:
                 raise ValueError(f"Missing required field: '{field.name}'")
             continue
         used_keys.add(key)
-        raw_value = data[key]
+        raw_value = mapping_data[key]
         field_type = type_hints.get(field.name, field.type)
         try:
             value = _coerce_to_type(
@@ -659,7 +660,7 @@ def parse[T](
 
     instance = cls(**kwargs)
 
-    extras = {key: data[key] for key in data if key not in used_keys}
+    extras = {key: mapping_data[key] for key in mapping_data if key not in used_keys}
     if extras:
         if extra == "forbid":
             raise ValueError(f"Extra keys not permitted: {list(extras.keys())}")
@@ -669,9 +670,6 @@ def parse[T](
                     object.__setattr__(instance, key, value)
             else:
                 _set_extras(instance, extras)
-
-    if extra == "allow" and not extras:
-        pass
 
     validator = getattr(instance, "__validate__", None)
     if callable(validator):
@@ -708,7 +706,7 @@ def dump(
 
     result: dict[str, object] = {}
     for field in dataclasses.fields(obj):
-        field_meta = dict(field.metadata) if field.metadata is not None else {}
+        field_meta = dict(field.metadata)
         key = field.name
         if by_alias:
             alias = field_meta.get("alias")
@@ -820,7 +818,7 @@ def _schema_for_type(
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
     origin = get_origin(base_type)
 
-    if base_type in {object, _AnyType}:
+    if base_type is object or base_type is _AnyType:
         schema_data: dict[str, object] = {}
     elif dataclasses.is_dataclass(base_type):
         dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
@@ -976,7 +974,7 @@ def schema(
     for field in dataclasses.fields(cls):
         if not field.init:
             continue
-        field_meta = dict(field.metadata) if field.metadata is not None else {}
+        field_meta = dict(field.metadata)
         alias = field_meta.get("alias")
         if alias_generator is not None and not alias:
             alias = alias_generator(field.name)
@@ -988,7 +986,7 @@ def schema(
         if field.default is MISSING and field.default_factory is MISSING:
             required.append(property_name)
 
-    schema_dict = {
+    schema_dict: dict[str, object] = {
         "title": cls.__name__,
         "type": "object",
         "properties": properties,

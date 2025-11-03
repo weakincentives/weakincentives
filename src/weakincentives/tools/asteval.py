@@ -21,14 +21,16 @@ import io
 import json
 import logging
 import math
+import platform
 import statistics
 import sys
 import threading
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, Literal, TextIO, cast
+from importlib import import_module
+from types import MappingProxyType, ModuleType
+from typing import Final, Literal, Protocol, TextIO, cast
 
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
@@ -112,6 +114,17 @@ _EVAL_TEMPLATE: Final[str] = (
 )
 
 
+def _load_asteval_module() -> ModuleType:
+    try:
+        return import_module("asteval")
+    except ModuleNotFoundError as error:  # pragma: no cover - configuration guard
+        raise RuntimeError("asteval dependency is not installed.") from error
+
+
+def _str_dict_factory() -> dict[str, str]:
+    return {}
+
+
 @dataclass(slots=True, frozen=True)
 class EvalFileRead:
     path: VfsPath
@@ -128,7 +141,7 @@ class EvalFileWrite:
 class EvalParams:
     code: str
     mode: ExpressionMode = "expr"
-    globals: dict[str, str] = field(default_factory=dict)
+    globals: dict[str, str] = field(default_factory=_str_dict_factory)
     reads: tuple[EvalFileRead, ...] = field(default_factory=tuple)
     writes: tuple[EvalFileWrite, ...] = field(default_factory=tuple)
 
@@ -372,31 +385,35 @@ def _parse_user_globals(payload: Mapping[str, str]) -> dict[str, object]:
     return parsed
 
 
-if TYPE_CHECKING:
-    from asteval import Interpreter
+class InterpreterProtocol(Protocol):
+    symtable: MutableMapping[str, object]
+    node_handlers: MutableMapping[str, object] | None
+    error: list[object]
+
+    def eval(self, expression: str) -> object: ...
 
 
-def _sanitize_interpreter(interpreter: Interpreter) -> None:
-    try:
-        import asteval  # type: ignore
-    except ModuleNotFoundError as error:  # pragma: no cover - configuration guard
-        raise RuntimeError("asteval dependency is not installed.") from error
+def _sanitize_interpreter(interpreter: InterpreterProtocol) -> None:
+    module = _load_asteval_module()
 
-    for name in getattr(asteval, "ALL_DISALLOWED", ()):  # pragma: no cover - defensive
+    for name in getattr(module, "ALL_DISALLOWED", ()):  # pragma: no cover - defensive
         interpreter.symtable.pop(name, None)
     node_handlers = getattr(interpreter, "node_handlers", None)
-    if isinstance(node_handlers, dict):
+    if isinstance(node_handlers, MutableMapping):
+        handlers = cast(MutableMapping[str, object], node_handlers)
         for key in ("Eval", "Exec", "Import", "ImportFrom"):
-            node_handlers.pop(key, None)
+            handlers.pop(key, None)
 
 
-def _create_interpreter() -> Interpreter:
-    try:
-        from asteval import Interpreter  # type: ignore
-    except ModuleNotFoundError as error:  # pragma: no cover - configuration guard
-        raise RuntimeError("asteval dependency is not installed.") from error
+def _create_interpreter() -> InterpreterProtocol:
+    module = _load_asteval_module()
+    interpreter_cls = getattr(module, "Interpreter", None)
+    if not callable(interpreter_cls):  # pragma: no cover - defensive guard
+        raise RuntimeError("asteval dependency is not installed.")
 
-    interpreter = Interpreter(use_numpy=False, minimal=True)
+    interpreter = cast(
+        InterpreterProtocol, interpreter_cls(use_numpy=False, minimal=True)
+    )
     interpreter.symtable = dict(_SAFE_GLOBALS)
     _sanitize_interpreter(interpreter)
     return interpreter
@@ -405,7 +422,8 @@ def _create_interpreter() -> Interpreter:
 def _execute_with_timeout(
     func: Callable[[], object],
 ) -> tuple[bool, object | None, str]:
-    if sys.platform != "win32":  # pragma: no branch - platform check
+    timeout_message = "Execution timed out."
+    if platform.system() != "Windows" and sys.platform != "win32":
         import signal
 
         timed_out = False
@@ -421,11 +439,11 @@ def _execute_with_timeout(
             value = func()
             return False, value, ""
         except TimeoutError:
-            return True, None, "Execution timed out."
+            return True, None, timeout_message
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, previous)
-    timeout_message = "Execution timed out."
+
     result_container: dict[str, object | None] = {}
     error_container: dict[str, str] = {"message": ""}
     completed = threading.Event()
@@ -484,20 +502,22 @@ class _AstevalToolSuite:
 
         def sandbox_print(
             *args: object,
-            sep: str | None = " ",
-            end: str | None = "\n",
+            sep: object | None = " ",
+            end: object | None = "\n",
             file: TextIO | None = None,
             flush: bool = False,
         ) -> None:
-            if file is not None:  # pragma: no cover - requires custom injected writer
-                builtin_print(*args, sep=sep, end=end, file=file, flush=flush)
-                return
-            actual_sep = " " if sep is None else sep
-            actual_end = "\n" if end is None else end
-            if not isinstance(actual_sep, str):
+            if sep is not None and not isinstance(sep, str):
                 raise TypeError("sep must be None or a string.")
-            if not isinstance(actual_end, str):
+            if end is not None and not isinstance(end, str):
                 raise TypeError("end must be None or a string.")
+            actual_sep = " " if sep is None else str(sep)
+            actual_end = "\n" if end is None else str(end)
+            if file is not None:  # pragma: no cover - requires custom injected writer
+                builtin_print(
+                    *args, sep=actual_sep, end=actual_end, file=file, flush=flush
+                )
+                return
             text = actual_sep.join(str(arg) for arg in args)
             stdout_buffer.write(text)
             stdout_buffer.write(actual_end)
@@ -539,7 +559,7 @@ class _AstevalToolSuite:
             helper_writes.append(helper_write)
 
         symtable = interpreter.symtable
-        symtable.update(user_globals)
+        symtable.update(_merge_globals(read_globals, user_globals))
         symtable["vfs_reads"] = dict(read_globals)
         symtable["read_text"] = read_text
         symtable["write_text"] = write_text

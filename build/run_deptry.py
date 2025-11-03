@@ -28,8 +28,6 @@ def main() -> int:
         "-m",
         "deptry",
         "--no-ansi",
-        "--per-rule-ignores",
-        "DEP002=openai",
         str(package_path),
     ]
 

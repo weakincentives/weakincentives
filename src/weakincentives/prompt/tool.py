@@ -129,7 +129,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
 
     def _validate_handler(
         self,
-        handler: Callable[[ParamsT], ToolResult[ResultT]],
+        handler: object,
         params_type: type[SupportsDataclass],
         result_type: type[SupportsDataclass],
     ) -> None:
@@ -140,7 +140,8 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
                 placeholder="handler",
             )
 
-        signature = inspect.signature(handler)
+        callable_handler = cast(Callable[[ParamsT], ToolResult[ResultT]], handler)
+        signature = inspect.signature(callable_handler)
         parameters = list(signature.parameters.values())
 
         if len(parameters) != 1:
@@ -162,7 +163,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
             )
 
         try:
-            hints = get_type_hints(handler, include_extras=True)
+            hints = get_type_hints(callable_handler, include_extras=True)
         except Exception:
             hints = {}
 
