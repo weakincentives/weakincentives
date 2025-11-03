@@ -21,9 +21,11 @@ A subagent prompt MUST follow the structure below:
 1. `# Delegation Summary`
 1. `## Response Format` (only when fallback instructions are required)
 1. `## Parent Prompt (Verbatim)`
+1. `## Recap` (optional and always last)
 
-Only these sections may appear. Skip the `Response Format` block when fallback instructions are unnecessary, and never add
-extra sections unless a future revision explicitly introduces them.
+Only these sections may appear. Skip the `Response Format` block when fallback instructions are unnecessary. Use the
+`Recap` block only when a condensed reminder is required, and never add extra sections unless a future revision explicitly
+introduces them.
 
 ### Delegation Summary
 
@@ -68,6 +70,19 @@ Embed the parent prompt exactly as rendered at delegation time. The wrapper MUST
 - Surround the content with the markers `<!-- PARENT PROMPT START -->` and `<!-- PARENT PROMPT END -->` on their own lines.
 - Copy the original markdown byte-for-byte; no formatting, whitespace, or heading changes are allowed.
 - Abort delegation if size limits would force truncation. There is no fallback path that drops content.
+
+### Recap (Optional)
+
+Long parent prompts can push the context window to its limits. Add a recap when the delegating agent needs a compact
+reminder after the verbatim parent prompt. When present, the recap MUST:
+
+- Appear after the `Parent Prompt (Verbatim)` section and use the heading `## Recap`.
+- Reiterate critical instructions or checkpoints already stated in the parent prompt using short bullet points or numbered
+  lists. Do not invent new directives.
+- Fit within a few sentences so it does not meaningfully expand the prompt.
+
+Omit the recap when the parent prompt is already concise. Delegating agents are responsible for ensuring the recap mirrors
+the inherited instructions without altering their meaning.
 
 ## Tool and Policy Inheritance
 
@@ -123,6 +138,11 @@ class ParentPromptParams:
     body: str
 
 
+@dataclass
+class RecapParams:
+    bullets: Sequence[str]
+
+
 class ParentPromptSection(Section[ParentPromptParams]):
     def __init__(self, *, tools: Sequence[object] | None = None) -> None:
         super().__init__(
@@ -144,6 +164,16 @@ class ParentPromptSection(Section[ParentPromptParams]):
         )
 
 
+class RecapSection(Section[RecapParams]):
+    def __init__(self) -> None:
+        super().__init__(title="Recap", key="delegation-recap")
+
+    def render(self, params: RecapParams, depth: int) -> str:
+        heading = "#" * (depth + 2)
+        bullets = "\n".join(f"- {line}" for line in params.bullets)
+        return "\n".join((f"{heading} Recap", "", bullets))
+
+
 class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
     def __init__(
         self,
@@ -151,6 +181,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
         rendered_parent: RenderedPrompt[ParentOutputT],
         *,
         delegation_output_type: type[DelegationOutputT],
+        recap_lines: Sequence[str] | None = None,
     ) -> None:
         summary_section = MarkdownSection[DelegationSummaryParams](
             title="Delegation Summary",
@@ -162,11 +193,19 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
             ),
         )
         parent_section = ParentPromptSection(tools=rendered_parent.tools)
+
+        sections: list[Section[Any]] = [summary_section, parent_section]
+
+        self._recap_params: RecapParams | None = None
+        if recap_lines:
+            sections.append(RecapSection())
+            self._recap_params = RecapParams(bullets=tuple(recap_lines))
+
         prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
         self._prompt = prompt_cls(
             ns=f"{parent_prompt.ns}.delegation",
             key=f"{parent_prompt.key}-wrapper",
-            sections=(summary_section, parent_section),
+            sections=tuple(sections),
             inject_output_instructions=False,
             allow_extra_keys=bool(rendered_parent.allow_extra_keys),
         )
@@ -180,7 +219,12 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
         summary: DelegationSummaryParams,
         parent_params: ParentPromptParams,
     ) -> RenderedPrompt[DelegationOutputT]:
-        return self._prompt.render(summary, parent_params)
+        params: tuple[object, ...]
+        if self._recap_params is None:
+            params = (summary, parent_params)
+        else:
+            params = (summary, parent_params, self._recap_params)
+        return self._prompt.render(*params)
 
 
 # Usage
@@ -189,6 +233,7 @@ delegation_prompt = DelegationPrompt(
     parent_prompt,
     parent_render,
     delegation_output_type=DelegationPlan,
+    recap_lines=("Check filesystem notes before drafting the plan.",),
 )
 rendered_delegation = delegation_prompt.render(
     DelegationSummaryParams(
@@ -204,10 +249,11 @@ rendered_delegation = delegation_prompt.render(
 
 When the adapter lacks native structured output support, mirror the parent prompt's schema with a
 `ResponseFormatSection` before embedding the parent prompt text. Extend the `DelegationPrompt`
-initialiser to inject the section between the summary and parent prompt when required.
+initialiser to inject the section between the summary and parent prompt when required. Reuse the
+`RecapSection` and `RecapParams` helpers from the minimal example when you need the optional recap.
 
 ```python
-from typing import Any
+from typing import Any, Sequence
 
 from weakincentives.prompt import Section
 from weakincentives.prompt.response_format import (
@@ -223,6 +269,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
         rendered_parent: RenderedPrompt[ParentOutputT],
         *,
         delegation_output_type: type[DelegationOutputT],
+        recap_lines: Sequence[str] | None = None,
     ) -> None:
         summary_section = MarkdownSection[DelegationSummaryParams](
             title="Delegation Summary",
@@ -241,6 +288,11 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
             sections.append(response_section)
 
         sections.append(parent_section)
+
+        self._recap_params: RecapParams | None = None
+        if recap_lines:
+            sections.append(RecapSection())
+            self._recap_params = RecapParams(bullets=tuple(recap_lines))
 
         prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
         self._prompt = prompt_cls(
@@ -273,6 +325,18 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
                 extra_clause=extra_clause,
             )
         )
+
+    def render(
+        self,
+        summary: DelegationSummaryParams,
+        parent_params: ParentPromptParams,
+    ) -> RenderedPrompt[DelegationOutputT]:
+        params: tuple[object, ...]
+        if self._recap_params is None:
+            params = (summary, parent_params)
+        else:
+            params = (summary, parent_params, self._recap_params)
+        return self._prompt.render(*params)
 ```
 
 These examples keep the wrapper logic declarative, reuse the parent's tool catalog, and mirror the structured output
