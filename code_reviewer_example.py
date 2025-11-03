@@ -18,6 +18,7 @@ import json
 import os
 import textwrap
 from pathlib import Path
+from types import MethodType
 from typing import Any, cast
 
 from weakincentives.adapters.litellm import LiteLLMAdapter
@@ -68,47 +69,21 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
     "**/*.bmp",
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
+_LOG_STRING_LIMIT = 256
 
 
-class _PromptWithOverrides:
-    """Proxy prompt that renders through an overrides store."""
+def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 1]}…"
 
-    def __init__(
-        self,
-        prompt: Prompt[Any],
-        *,
-        overrides_store: LocalPromptOverridesStore,
-        tag: str,
-    ) -> None:
-        self._prompt = prompt
-        self._overrides_store = overrides_store
-        self._tag = tag
 
-    @property
-    def tag(self) -> str:
-        """Tag used when resolving overrides for renders."""
-
-        return self._tag
-
-    def update_tag(self, tag: str) -> None:
-        """Update the override tag for subsequent renders."""
-
-        self._tag = tag
-
-    def render(
-        self,
-        *params: SupportsDataclass,
-        inject_output_instructions: bool | None = None,
-    ) -> RenderedPrompt[Any]:
-        return self._prompt.render_with_overrides(
-            *params,
-            overrides_store=self._overrides_store,
-            tag=self._tag,
-            inject_output_instructions=inject_output_instructions,
-        )
-
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._prompt, name)
+def _format_for_log(payload: object, *, limit: int = _LOG_STRING_LIMIT) -> str:
+    try:
+        rendered = json.dumps(payload, ensure_ascii=False)
+    except TypeError:
+        rendered = repr(payload)
+    return _truncate_for_log(rendered, limit=limit)
 
 
 def _resolve_override_tag(tag: str | None = None) -> str:
@@ -119,69 +94,72 @@ def _resolve_override_tag(tag: str | None = None) -> str:
     return normalized or _DEFAULT_OVERRIDE_TAG
 
 
-def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
-    if not TEST_REPOSITORIES_ROOT.exists():
-        raise SystemExit(
-            f"Expected test repositories under {TEST_REPOSITORIES_ROOT!s},"
-            " but the directory is missing."
-        )
+def main() -> None:
+    """Launch the interactive code review walkthrough."""
 
-    guidance_section = MarkdownSection[ReviewGuidance](
-        title="Code Review Brief",
-        template=textwrap.dedent(
-            """
-            You are a code review assistant exploring the pre-mounted virtual
-            filesystem. The sunfish sample repository is available inside the
-            VFS under the `sunfish/` directory.
+    # High-level walkthrough for running a local code review loop. See AGENTS.md
+    # for workflow expectations around prompt overrides and tooling etiquette.
+    print("Launching sunfish code review session with planning and VFS tooling...")
+    print("- test-repositories/sunfish mounted under virtual path 'sunfish/'.")
+    print(
+        "- Available commands: 'history' (tool log), 'plan' (current plan),"
+        " 'exit' to quit."
+    )
+    print("- Python evaluation tool enabled for quick calculations and scripts.")
 
-            Use the available tools to stay grounded:
-            - Planning tools help you capture multi-step investigations; keep the
-              plan updated as you explore.
-            - VFS tools list directories, read files, and stage edits. Mounted
-              files are read-only; use writes to stage new snapshots.
-            - Python evaluation tools run short scripts with access to staged VFS
-              reads and writes for quick experiments.
+    override_tag = _resolve_override_tag()
+    print(
+        "- Prompt overrides load from '.weakincentives/prompts/overrides' "
+        f"with tag '{override_tag}'."
+    )
+    print(f"- Set {PROMPT_OVERRIDES_TAG_ENV} to switch override tags at runtime.")
 
-            Respond with JSON containing:
-            - summary: One paragraph describing your findings so far.
-            - issues: List concrete risks, questions, or follow-ups you found.
-            - next_steps: Actionable recommendations to progress the task.
-            """
-        ).strip(),
-        default_params=ReviewGuidance(),
-        key="code-review-brief",
+    session = SunfishReviewSession(
+        build_adapter(),
+        override_tag=override_tag,
     )
-    planning_section = PlanningToolsSection(session=session)
-    vfs_section = VfsToolsSection(
-        session=session,
-        mounts=(
-            HostMount(
-                host_path="sunfish",
-                mount_path=VfsPath(("sunfish",)),
-                include_glob=SUNFISH_MOUNT_INCLUDE_GLOBS,
-                exclude_glob=SUNFISH_MOUNT_EXCLUDE_GLOBS,
-                max_bytes=SUNFISH_MOUNT_MAX_BYTES,
-            ),
-        ),
-        allowed_host_roots=(TEST_REPOSITORIES_ROOT,),
-    )
-    asteval_section = AstevalSection(session=session)
-    user_turn_section = MarkdownSection[ReviewTurnParams](
-        title="Review Request",
-        template="${request}",
-        key="review-request",
-    )
-    return Prompt[ReviewResponse](
-        ns="examples/code-review",
-        key="code-review-session",
-        name="sunfish_code_review_agent",
-        sections=(
-            guidance_section,
-            planning_section,
-            vfs_section,
-            asteval_section,
-            user_turn_section,
-        ),
+    print("Type a review prompt to begin.")
+    while True:
+        try:
+            prompt = input("Review prompt: ").strip()
+        except EOFError:  # pragma: no cover - interactive convenience
+            break
+        if not prompt:
+            print("Goodbye.")
+            break
+        lowered = prompt.lower()
+        if lowered in {"exit", "quit"}:
+            break
+        if lowered == "history":
+            print(session.render_tool_history())
+            continue
+        if lowered == "plan":
+            print(session.render_plan_snapshot())
+            continue
+        answer = session.evaluate(prompt)
+        print(f"Agent: {answer}")
+
+
+def build_adapter() -> SupportsReviewEvaluate:
+    provider = os.getenv("CODE_REVIEW_EXAMPLE_PROVIDER", "openai").strip().lower()
+    if provider == "openai":
+        if "OPENAI_API_KEY" not in os.environ:
+            raise SystemExit("Set OPENAI_API_KEY before running this example.")
+        model = os.getenv("OPENAI_MODEL", "gpt-5")
+        return OpenAIAdapter(model=model)
+    if provider == "litellm":
+        api_key = os.getenv("LITELLM_API_KEY")
+        if api_key is None:
+            raise SystemExit("Set LITELLM_API_KEY before running this example.")
+        completion_kwargs: dict[str, Any] = {"api_key": api_key}
+        base_url = os.getenv("LITELLM_BASE_URL")
+        if base_url:
+            completion_kwargs["api_base"] = base_url
+        model = os.getenv("LITELLM_MODEL", "gpt-5")
+        return LiteLLMAdapter(model=model, completion_kwargs=completion_kwargs)
+    raise SystemExit(
+        "Supported providers: 'openai' (default) or 'litellm'."
+        " Set CODE_REVIEW_EXAMPLE_PROVIDER accordingly."
     )
 
 
@@ -208,14 +186,27 @@ class SunfishReviewSession:
             )
         except PromptOverridesError as exc:
             raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
-        self._prompt = cast(
-            Prompt[ReviewResponse],
-            _PromptWithOverrides(
-                base_prompt,
+
+        # Prompt overrides let you iterate on copy without touching versioned prompts;
+        # see specs/PROMPTS.md for guardrails around tagging and persistence.
+        def render_with_session_overrides(
+            prompt_obj: Prompt[Any],
+            *params: SupportsDataclass,
+            inject_output_instructions: bool | None = None,
+        ) -> RenderedPrompt[Any]:
+            return prompt_obj.render_with_overrides(
+                *params,
                 overrides_store=self._overrides_store,
                 tag=self._override_tag,
-            ),
+                inject_output_instructions=inject_output_instructions,
+            )
+
+        prompt_with_any = cast(Any, base_prompt)
+        prompt_with_any.render = MethodType(
+            render_with_session_overrides,
+            base_prompt,
         )
+        self._prompt = base_prompt
         self._history: list[ToolCallLog] = []
         self._bus.subscribe(ToolInvoked, self._on_tool_invoked)
 
@@ -276,12 +267,12 @@ class SunfishReviewSession:
                 payload = dump(raw_value, exclude_none=True)
             except TypeError:
                 payload = {"value": raw_value}
-        print(
-            f"[tool] {event.name} called with {serialized_params}\n"
-            f"       → {event.result.message}"
-        )
+        params_repr = _format_for_log(serialized_params)
+        message = _truncate_for_log(event.result.message or "")
+        print(f"[tool] {event.name} called with {params_repr}\n       → {message}")
         if payload:
-            print(f"       payload: {payload}")
+            payload_repr = _format_for_log(payload)
+            print(f"       payload: {payload_repr}")
 
         record = ToolCallLog(
             name=event.name,
@@ -293,69 +284,72 @@ class SunfishReviewSession:
         self._history.append(record)
 
 
-def build_adapter() -> SupportsReviewEvaluate:
-    provider = os.getenv("CODE_REVIEW_EXAMPLE_PROVIDER", "openai").strip().lower()
-    if provider == "openai":
-        if "OPENAI_API_KEY" not in os.environ:
-            raise SystemExit("Set OPENAI_API_KEY before running this example.")
-        model = os.getenv("OPENAI_MODEL", "gpt-5")
-        return OpenAIAdapter(model=model)
-    if provider == "litellm":
-        api_key = os.getenv("LITELLM_API_KEY")
-        if api_key is None:
-            raise SystemExit("Set LITELLM_API_KEY before running this example.")
-        completion_kwargs: dict[str, Any] = {"api_key": api_key}
-        base_url = os.getenv("LITELLM_BASE_URL")
-        if base_url:
-            completion_kwargs["api_base"] = base_url
-        model = os.getenv("LITELLM_MODEL", "gpt-5")
-        return LiteLLMAdapter(model=model, completion_kwargs=completion_kwargs)
-    raise SystemExit(
-        "Supported providers: 'openai' (default) or 'litellm'."
-        " Set CODE_REVIEW_EXAMPLE_PROVIDER accordingly."
-    )
+def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
+    if not TEST_REPOSITORIES_ROOT.exists():
+        raise SystemExit(
+            f"Expected test repositories under {TEST_REPOSITORIES_ROOT!s},"
+            " but the directory is missing."
+        )
 
+    # Prompt layout mirrors the design captured in specs/PROMPTS.md; update the spec
+    # first when changing section ordering or required fields.
+    guidance_section = MarkdownSection[ReviewGuidance](
+        title="Code Review Brief",
+        template=textwrap.dedent(
+            """
+            You are a code review assistant exploring the pre-mounted virtual
+            filesystem. The sunfish sample repository is available inside the
+            VFS under the `sunfish/` directory.
 
-def main() -> None:
-    print("Launching sunfish code review session with planning and VFS tooling...")
-    print("- test-repositories/sunfish mounted under virtual path 'sunfish/'.")
-    print(
-        "- Available commands: 'history' (tool log), 'plan' (current plan),"
-        " 'exit' to quit."
-    )
-    print("- Python evaluation tool enabled for quick calculations and scripts.")
+            Use the available tools to stay grounded:
+            - Planning tools help you capture multi-step investigations; keep the
+              plan updated as you explore.
+            - VFS tools list directories, read files, and stage edits. Mounted
+              files are read-only; use writes to stage new snapshots.
+            - Python evaluation tools run short scripts with access to staged VFS
+              reads and writes for quick experiments.
 
-    override_tag = _resolve_override_tag()
-    print(
-        "- Prompt overrides load from '.weakincentives/prompts/overrides' "
-        f"with tag '{override_tag}'."
+            Respond with JSON containing:
+            - summary: One paragraph describing your findings so far.
+            - issues: List concrete risks, questions, or follow-ups you found.
+            - next_steps: Actionable recommendations to progress the task.
+            """
+        ).strip(),
+        default_params=ReviewGuidance(),
+        key="code-review-brief",
     )
-    print(f"- Set {PROMPT_OVERRIDES_TAG_ENV} to switch override tags at runtime.")
-
-    session = SunfishReviewSession(
-        build_adapter(),
-        override_tag=override_tag,
+    planning_section = PlanningToolsSection(session=session)
+    vfs_section = VfsToolsSection(
+        session=session,
+        mounts=(
+            HostMount(
+                host_path="sunfish",
+                mount_path=VfsPath(("sunfish",)),
+                include_glob=SUNFISH_MOUNT_INCLUDE_GLOBS,
+                exclude_glob=SUNFISH_MOUNT_EXCLUDE_GLOBS,
+                max_bytes=SUNFISH_MOUNT_MAX_BYTES,
+            ),
+        ),
+        allowed_host_roots=(TEST_REPOSITORIES_ROOT,),
     )
-    print("Type a review prompt to begin.")
-    while True:
-        try:
-            prompt = input("Review prompt: ").strip()
-        except EOFError:  # pragma: no cover - interactive convenience
-            break
-        if not prompt:
-            print("Goodbye.")
-            break
-        lowered = prompt.lower()
-        if lowered in {"exit", "quit"}:
-            break
-        if lowered == "history":
-            print(session.render_tool_history())
-            continue
-        if lowered == "plan":
-            print(session.render_plan_snapshot())
-            continue
-        answer = session.evaluate(prompt)
-        print(f"Agent: {answer}")
+    asteval_section = AstevalSection(session=session)
+    user_turn_section = MarkdownSection[ReviewTurnParams](
+        title="Review Request",
+        template="${request}",
+        key="review-request",
+    )
+    return Prompt[ReviewResponse](
+        ns="examples/code-review",
+        key="code-review-session",
+        name="sunfish_code_review_agent",
+        sections=(
+            guidance_section,
+            planning_section,
+            vfs_section,
+            asteval_section,
+            user_turn_section,
+        ),
+    )
 
 
 if __name__ == "__main__":
