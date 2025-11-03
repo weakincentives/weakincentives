@@ -403,51 +403,54 @@ guidance to understand how namespace, prompt key, and tag hashing keep overrides
 pinned to the right sections and tools.
 
 ```python
-import json
 from pathlib import Path
 
 from weakincentives.prompt.local_prompt_overrides_store import (
     LocalPromptOverridesStore,
 )
-from weakincentives.prompt.versioning import PromptDescriptor
+from weakincentives.prompt.versioning import (
+    PromptDescriptor,
+    PromptOverride,
+    SectionOverride,
+)
 
 
 workspace_root = Path("/srv/agent-workspace")
 overrides_store = LocalPromptOverridesStore(root_path=workspace_root)
 
 descriptor = PromptDescriptor.from_prompt(review_prompt)
-overrides_store.seed_if_necessary(review_prompt, tag="assertive-feedback")
-
-override_path = (
-    workspace_root
-    / ".weakincentives"
-    / "prompts"
-    / "overrides"
-    / descriptor.ns
-    / descriptor.key
-    / "assertive-feedback.json"
+seed_override = overrides_store.seed_if_necessary(
+    review_prompt, tag="assertive-feedback"
 )
 
-override_path.parent.mkdir(parents=True, exist_ok=True)
-override_path.write_text(
-    json.dumps(
-        {
-            "version": 1,
-            "ns": descriptor.ns,
-            "prompt_key": descriptor.key,
-            "tag": "assertive-feedback",
-            "sections": {
-                "review.directives": [
+section_path = ("review", "directives")
+section_descriptor = next(
+    section
+    for section in descriptor.sections
+    if section.path == section_path
+)
+
+custom_override = PromptOverride(
+    ns=descriptor.ns,
+    prompt_key=descriptor.key,
+    tag="assertive-feedback",
+    sections={
+        **seed_override.sections,
+        section_path: SectionOverride(
+            expected_hash=section_descriptor.content_hash,
+            body="\n".join(
+                (
                     "- Classify findings using this severity scale: minor | major | critical.",
                     "- Always cite the exact diff hunk when raising a major or critical issue.",
                     "- Respond with ReviewBundle JSON. Missing fields terminate the run.",
-                ]
-            },
-        },
-        indent=2,
-    ),
-    encoding="utf-8",
+                )
+            ),
+        ),
+    },
+    tool_overrides=seed_override.tool_overrides,
 )
+
+persisted_override = overrides_store.upsert(descriptor, custom_override)
 
 rendered_with_override = review_prompt.render_with_overrides(
     PullRequestContext(
@@ -457,15 +460,19 @@ rendered_with_override = review_prompt.render_with_overrides(
         files_summary="loader.py, cache.py",
     ),
     overrides_store=overrides_store,
-    tag="assertive-feedback",
+    tag=persisted_override.tag,
 )
 
 
 print(rendered_with_override.text)
 ```
 
-The filesystem layout means optimizers and prompt engineers can drop override
-files locally—checked into source control or generated during evaluations—without
+The overrides store writes atomically to
+`.weakincentives/prompts/overrides/{ns}/{prompt_key}/{tag}.json` inside the
+workspace described in the
+[Local Prompt Overrides Store Specification](specs/LOCAL_PROMPT_OVERRIDES_STORE.md).
+Optimizers and prompt engineers can still drop JSON overrides into that tree by
+hand—checked into source control or generated during evaluations—without
 subclassing `PromptOverridesStore`. Because sections expose stable `(ns, key,
 path)` identifiers, overrides stay scoped to the intended content so teams can
 iterate on directives without risking accidental drift elsewhere in the tree.
