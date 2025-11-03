@@ -88,16 +88,18 @@ the parent prompt has already been rendered so its text and structured output me
 
 ### Minimal wrapper when the adapter supports structured outputs
 
-The helper below captures the rendered parent prompt, then instantiates a new prompt that targets
-its own structured output type via the `delegation_output_type` parameter.
+Model the delegation surface as a dedicated class so callers can retain the parent prompt,
+rendered copy, and specialized output type together. The constructor builds a new prompt instance
+that targets its own structured output type via the `delegation_output_type` parameter.
 
 ```python
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence, TypeVar
+from typing import Any, Generic, Sequence, TypeVar
 
 from weakincentives.prompt import MarkdownSection, Prompt, Section
+from weakincentives.prompt.prompt import RenderedPrompt
 
 ParentOutputT = TypeVar("ParentOutputT")
 DelegationOutputT = TypeVar("DelegationOutputT")
@@ -142,35 +144,48 @@ class ParentPromptSection(Section[ParentPromptParams]):
         )
 
 
-def wrap_prompt_for_delegation(
-    parent_prompt: Prompt[ParentOutputT],
-    rendered_parent: Any,
-    *,
-    delegation_output_type: type[DelegationOutputT],
-) -> Prompt[DelegationOutputT]:
-    summary_section = MarkdownSection[DelegationSummaryParams](
-        title="Delegation Summary",
-        key="delegation-summary",
-        template=(
-            "- **Reason** – ${reason}\n"
-            "- **Expected result** – ${expected_result}\n"
-            "- **May delegate further?** – ${may_delegate_further}"
-        ),
-    )
-    parent_section = ParentPromptSection(tools=rendered_parent.tools)
-    prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
-    return prompt_cls(
-        ns=f"{parent_prompt.ns}.delegation",
-        key=f"{parent_prompt.key}-wrapper",
-        sections=(summary_section, parent_section),
-        inject_output_instructions=False,
-        allow_extra_keys=bool(rendered_parent.allow_extra_keys),
-    )
+class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
+    def __init__(
+        self,
+        parent_prompt: Prompt[ParentOutputT],
+        rendered_parent: RenderedPrompt[ParentOutputT],
+        *,
+        delegation_output_type: type[DelegationOutputT],
+    ) -> None:
+        summary_section = MarkdownSection[DelegationSummaryParams](
+            title="Delegation Summary",
+            key="delegation-summary",
+            template=(
+                "- **Reason** – ${reason}\n"
+                "- **Expected result** – ${expected_result}\n"
+                "- **May delegate further?** – ${may_delegate_further}"
+            ),
+        )
+        parent_section = ParentPromptSection(tools=rendered_parent.tools)
+        prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
+        self._prompt = prompt_cls(
+            ns=f"{parent_prompt.ns}.delegation",
+            key=f"{parent_prompt.key}-wrapper",
+            sections=(summary_section, parent_section),
+            inject_output_instructions=False,
+            allow_extra_keys=bool(rendered_parent.allow_extra_keys),
+        )
+
+    @property
+    def prompt(self) -> Prompt[DelegationOutputT]:
+        return self._prompt
+
+    def render(
+        self,
+        summary: DelegationSummaryParams,
+        parent_params: ParentPromptParams,
+    ) -> RenderedPrompt[DelegationOutputT]:
+        return self._prompt.render(summary, parent_params)
 
 
 # Usage
 parent_render = parent_prompt.render(...)
-delegation_prompt = wrap_prompt_for_delegation(
+delegation_prompt = DelegationPrompt(
     parent_prompt,
     parent_render,
     delegation_output_type=DelegationPlan,
@@ -188,55 +203,76 @@ rendered_delegation = delegation_prompt.render(
 ### Wrapper with fallback response format instructions
 
 When the adapter lacks native structured output support, mirror the parent prompt's schema with a
-`ResponseFormatSection` before embedding the parent prompt text. The snippet below continues inside
-`wrap_prompt_for_delegation` from the previous example, reusing the same imports and type variables.
+`ResponseFormatSection` before embedding the parent prompt text. Extend the `DelegationPrompt`
+initialiser to inject the section between the summary and parent prompt when required.
 
 ```python
 from typing import Any
 
+from weakincentives.prompt import Section
 from weakincentives.prompt.response_format import (
     ResponseFormatParams,
     ResponseFormatSection,
 )
 
 
-def build_fallback_response_section(
-    rendered_parent: Any,
-) -> ResponseFormatSection | None:
-    container = rendered_parent.container
-    if container is None:
-        return None  # Parent prompt did not request structured output.
-
-    article = "an" if container.startswith(tuple("aeiou")) else "a"
-    extra_clause = (
-        "."
-        if rendered_parent.allow_extra_keys
-        else ". Do not add extra keys."
-    )
-
-    return ResponseFormatSection(
-        params=ResponseFormatParams(
-            article=article,
-            container=container,
-            extra_clause=extra_clause,
+class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
+    def __init__(
+        self,
+        parent_prompt: Prompt[ParentOutputT],
+        rendered_parent: RenderedPrompt[ParentOutputT],
+        *,
+        delegation_output_type: type[DelegationOutputT],
+    ) -> None:
+        summary_section = MarkdownSection[DelegationSummaryParams](
+            title="Delegation Summary",
+            key="delegation-summary",
+            template=(
+                "- **Reason** – ${reason}\n"
+                "- **Expected result** – ${expected_result}\n"
+                "- **May delegate further?** – ${may_delegate_further}"
+            ),
         )
-    )
+        parent_section = ParentPromptSection(tools=rendered_parent.tools)
+        sections: list[Section[Any]] = [summary_section]
 
+        response_section = self._build_fallback_response_section(rendered_parent)
+        if response_section is not None:
+            sections.append(response_section)
 
-# Continuing from the earlier wrapper to inject fallback instructions when needed.
-response_section = build_fallback_response_section(parent_render)
-sections = [summary_section]
-if response_section is not None:
-    sections.append(response_section)
-sections.append(parent_section)
-prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
-delegation_prompt = prompt_cls(
-    ns=f"{parent_prompt.ns}.delegation",
-    key=f"{parent_prompt.key}-wrapper",
-    sections=tuple(sections),
-    inject_output_instructions=False,
-    allow_extra_keys=bool(parent_render.allow_extra_keys),
-)
+        sections.append(parent_section)
+
+        prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
+        self._prompt = prompt_cls(
+            ns=f"{parent_prompt.ns}.delegation",
+            key=f"{parent_prompt.key}-wrapper",
+            sections=tuple(sections),
+            inject_output_instructions=False,
+            allow_extra_keys=bool(rendered_parent.allow_extra_keys),
+        )
+
+    def _build_fallback_response_section(
+        self,
+        rendered_parent: RenderedPrompt[ParentOutputT],
+    ) -> ResponseFormatSection | None:
+        container = rendered_parent.container
+        if container is None:
+            return None  # Parent prompt did not request structured output.
+
+        article = "an" if container.startswith(tuple("aeiou")) else "a"
+        extra_clause = (
+            "."
+            if rendered_parent.allow_extra_keys
+            else ". Do not add extra keys."
+        )
+
+        return ResponseFormatSection(
+            params=ResponseFormatParams(
+                article=article,
+                container=container,
+                extra_clause=extra_clause,
+            )
+        )
 ```
 
 These examples keep the wrapper logic declarative, reuse the parent's tool catalog, and mirror the structured output
