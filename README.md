@@ -25,6 +25,12 @@ while allowing the prompts to be automatically optimized.
 - The code-review example ties it together with override-aware prompts, session
   telemetry, and replayable tooling for deterministic agent runs.
 
+## Design principles
+
+- Prompt optimizers become important as your evaluation suite matures, but they
+  are not a day-one requirement. Start by writing prompts manually and wire in
+  automation only after you have a robust set of evals to guide the optimizer.
+
 ## Requirements
 
 - Python 3.12+ (the repository pins 3.14 in `.python-version` for development)
