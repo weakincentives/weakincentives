@@ -34,7 +34,7 @@ from weakincentives.session import (
     select_where,
     upsert_by,
 )
-from weakincentives.session.session import PromptData, _append_tool_data
+from weakincentives.session.session import _append_tool_data
 
 
 @dataclass(slots=True, frozen=True)
@@ -237,12 +237,12 @@ def test_tool_data_slice_records_failures() -> None:
     assert tool_events[1].source.result.success is False
 
 
-def test_append_tool_data_ignores_prompt_data() -> None:
-    prompt_event = make_prompt_event(ExampleOutput(text="hello"))
-    prompt_data = PromptData(value=ExampleOutput(text="hello"), source=prompt_event)
+def test_append_tool_data_appends_tool_data() -> None:
+    tool_event = make_tool_event(1)
+    tool_data = ToolData(value=ExamplePayload(value=1), source=tool_event)
 
-    appended = _append_tool_data((), cast(ReducerEvent, prompt_data))
-    assert appended == ()
+    appended = _append_tool_data((), cast(ReducerEvent, tool_data))
+    assert appended == (tool_data,)
 
 
 def test_selector_helpers_delegate_to_session() -> None:
