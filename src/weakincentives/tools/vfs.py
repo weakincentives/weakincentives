@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,7 +26,6 @@ from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
 from ..session import ReducerEvent, Session, replace_latest, select_latest
-from ._overrides import resolve_tool_accepts_overrides
 from .errors import ToolValidationError
 
 FileEncoding = str
@@ -136,7 +135,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         mounts: Sequence[HostMount] = (),
         allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
         accepts_overrides: bool = False,
-        tool_overrides: bool | Iterable[str] | Mapping[str, bool] | None = None,
+        tools_accept_overrides: bool = False,
     ) -> None:
         self._session = session
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
@@ -154,7 +153,10 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             slice_type=VirtualFileSystem,
         )
 
-        tools = _build_tools(session=session, overrides=tool_overrides)
+        tools = _build_tools(
+            session=session,
+            accepts_overrides=tools_accept_overrides,
+        )
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
@@ -168,7 +170,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 def _build_tools(
     *,
     session: Session,
-    overrides: bool | Iterable[str] | Mapping[str, bool] | None = None,
+    accepts_overrides: bool,
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
     suite = _VfsToolSuite(session=session)
     return cast(
@@ -178,33 +180,25 @@ def _build_tools(
                 name="vfs_list_directory",
                 description="Enumerate files and directories at a path.",
                 handler=suite.list_directory,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "vfs_list_directory", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
             Tool[ReadFile, VfsFile](
                 name="vfs_read_file",
                 description="Read file contents and metadata.",
                 handler=suite.read_file,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "vfs_read_file", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
             Tool[WriteFile, WriteFile](
                 name="vfs_write_file",
                 description="Create or update a file in the virtual filesystem.",
                 handler=suite.write_file,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "vfs_write_file", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
             Tool[DeleteEntry, DeleteEntry](
                 name="vfs_delete_entry",
                 description="Delete a file or directory subtree.",
                 handler=suite.delete_entry,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "vfs_delete_entry", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
         ),
     )

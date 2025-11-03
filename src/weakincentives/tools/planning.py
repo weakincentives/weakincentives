@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Final, Literal, cast
 
@@ -22,7 +22,6 @@ from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
 from ..session import ReducerEvent, Session, replace_latest, select_latest
-from ._overrides import resolve_tool_accepts_overrides
 from .errors import ToolValidationError
 
 PlanStatus = Literal["active", "completed", "abandoned"]
@@ -124,7 +123,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         *,
         session: Session,
         accepts_overrides: bool = False,
-        tool_overrides: bool | Iterable[str] | Mapping[str, bool] | None = None,
+        tools_accept_overrides: bool = False,
     ) -> None:
         self._session = session
         session.register_reducer(Plan, replace_latest)
@@ -134,7 +133,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         session.register_reducer(MarkStep, _mark_step_reducer, slice_type=Plan)
         session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
 
-        tools = _build_tools(session, overrides=tool_overrides)
+        tools = _build_tools(session, accepts_overrides=tools_accept_overrides)
         super().__init__(
             title="Planning Tools",
             key="planning.tools",
@@ -148,7 +147,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
 def _build_tools(
     session: Session,
     *,
-    overrides: bool | Iterable[str] | Mapping[str, bool] | None = None,
+    accepts_overrides: bool,
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
     suite = _PlanningToolSuite(session)
     return cast(
@@ -158,49 +157,37 @@ def _build_tools(
                 name="planning_setup_plan",
                 description="Create or replace the session plan.",
                 handler=suite.setup_plan,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "planning_setup_plan", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
             Tool[AddStep, AddStep](
                 name="planning_add_step",
                 description="Append one or more steps to the active plan.",
                 handler=suite.add_step,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "planning_add_step", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
             Tool[UpdateStep, UpdateStep](
                 name="planning_update_step",
                 description="Edit the title or details for an existing step.",
                 handler=suite.update_step,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "planning_update_step", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
             Tool[MarkStep, MarkStep](
                 name="planning_mark_step",
                 description="Update step status and optionally record a note.",
                 handler=suite.mark_step,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "planning_mark_step", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
             Tool[ClearPlan, ClearPlan](
                 name="planning_clear_plan",
                 description="Mark the current plan as abandoned.",
                 handler=suite.clear_plan,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "planning_clear_plan", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
             Tool[ReadPlan, Plan](
                 name="planning_read_plan",
                 description="Return the latest plan snapshot.",
                 handler=suite.read_plan,
-                accepts_overrides=resolve_tool_accepts_overrides(
-                    "planning_read_plan", overrides, default=False
-                ),
+                accepts_overrides=accepts_overrides,
             ),
         ),
     )

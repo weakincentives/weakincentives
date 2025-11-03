@@ -55,8 +55,9 @@ instances capture that response tuple, and every tool handler returns one direct
 - `handler: Callable[[ParamsT], ToolResult[ResultT]] | None` – optional runtime hook surfaced to orchestration layers.
   Handlers must accept exactly one argument of type `ParamsT`, and when provided they must return a `ToolResult[ResultT]`.
 - `accepts_overrides: bool` – opt-in flag for the automatic override pipeline. Defaults to `True`, but built-in tooling
-  defaults to `False` so optimization experiments ignore them until the contracts stabilize. Constructors expose knobs to
-  re-enable overrides for specific tools (or entire sections) once a deployment is ready.
+  defaults to `False` so optimization experiments ignore them until the contracts stabilize. Constructors expose section-
+  level toggles (for example `tools_accept_overrides`) that re-enable overrides for every tool they register once a
+  deployment is ready.
 
 Parameter and result dataclasses inherit the same validation rules as section params: every placeholder referenced in
 markdown must exist on the dataclass, and required fields without defaults must be supplied when rendering. Tools bind the

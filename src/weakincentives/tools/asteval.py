@@ -35,7 +35,6 @@ from typing import Final, Literal, Protocol, TextIO, cast
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
 from ..session import ReducerEvent, Session, select_latest
-from ._overrides import resolve_tool_accepts_overrides
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
@@ -717,7 +716,7 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         *,
         session: Session,
         accepts_overrides: bool = False,
-        tool_overrides: bool | Iterable[str] | Mapping[str, bool] | None = None,
+        tools_accept_overrides: bool = False,
     ) -> None:
         self._session = session
         session.register_reducer(
@@ -728,9 +727,7 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             name="evaluate_python",
             description="Evaluate a short Python expression in a sandboxed environment with optional VFS access.",
             handler=tool_suite.run,
-            accepts_overrides=resolve_tool_accepts_overrides(
-                "evaluate_python", tool_overrides, default=False
-            ),
+            accepts_overrides=tools_accept_overrides,
         )
         super().__init__(
             title="Python Evaluation Tool",

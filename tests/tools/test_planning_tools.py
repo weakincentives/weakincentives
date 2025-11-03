@@ -560,6 +560,16 @@ def test_next_step_index_skips_non_numeric_suffix() -> None:
     assert _next_step_index(steps) == 1
 
 
+def test_planning_tools_section_disables_tool_overrides_by_default() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    section = PlanningToolsSection(session=session)
+
+    assert section.accepts_overrides is False
+    assert all(tool.accepts_overrides is False for tool in section.tools())
+
+
 def test_planning_tools_section_allows_configuring_overrides() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
@@ -567,10 +577,7 @@ def test_planning_tools_section_allows_configuring_overrides() -> None:
     section = PlanningToolsSection(
         session=session,
         accepts_overrides=True,
-        tool_overrides={
-            "planning_add_step": True,
-            "planning_read_plan": True,
-        },
+        tools_accept_overrides=True,
     )
 
     add_tool = find_tool(section, "planning_add_step")
@@ -580,4 +587,4 @@ def test_planning_tools_section_allows_configuring_overrides() -> None:
     assert section.accepts_overrides is True
     assert add_tool.accepts_overrides is True
     assert read_tool.accepts_overrides is True
-    assert setup_tool.accepts_overrides is False
+    assert setup_tool.accepts_overrides is True

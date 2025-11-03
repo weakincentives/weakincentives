@@ -54,7 +54,7 @@ staying inside the strict `Template` feature set. Sections also declare an `acce
 to `True`. When false, the section is excluded from prompt descriptors and the override system ignores any supplied
 replacement bodies. Built-in sections provided by the framework (including the generated response format section)
 default this flag to `False` so automatic optimization infrastructure leaves them untouched, but their constructors
-expose an `accepts_overrides` argument so callers can opt in when a specific deployment is ready for tuning.
+expose an `accepts_overrides` argument so callers can opt in when a specific deployment is ready for tuning. Tool suites registered by those sections likewise offer a `tools_accept_overrides` boolean that enables overrides for every tool they contribute in a single switch.
 
 ## Construction Rules
 
