@@ -254,11 +254,10 @@ class SunfishReviewSession:
         return "\n".join(lines)
 
     def _on_tool_invoked(self, event: object) -> None:
-        if not isinstance(event, ToolInvoked):
-            return
+        tool_event = cast(ToolInvoked, event)
 
-        serialized_params = dump(event.params, exclude_none=True)
-        raw_value = event.result.value
+        serialized_params = dump(tool_event.params, exclude_none=True)
+        raw_value = tool_event.result.value
         payload: dict[str, object] | None
         if raw_value is None:
             payload = None
@@ -268,18 +267,18 @@ class SunfishReviewSession:
             except TypeError:
                 payload = {"value": raw_value}
         params_repr = _format_for_log(serialized_params)
-        message = _truncate_for_log(event.result.message or "")
-        print(f"[tool] {event.name} called with {params_repr}\n       → {message}")
+        message = _truncate_for_log(tool_event.result.message or "")
+        print(f"[tool] {tool_event.name} called with {params_repr}\n       → {message}")
         if payload:
             payload_repr = _format_for_log(payload)
             print(f"       payload: {payload_repr}")
 
         record = ToolCallLog(
-            name=event.name,
-            prompt_name=event.prompt_name,
-            message=event.result.message,
+            name=tool_event.name,
+            prompt_name=tool_event.prompt_name,
+            message=tool_event.result.message,
             value=payload,
-            call_id=event.call_id,
+            call_id=tool_event.call_id,
         )
         self._history.append(record)
 
