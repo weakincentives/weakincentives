@@ -15,7 +15,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import sys
 import textwrap
 from pathlib import Path
 from types import MethodType
@@ -94,11 +96,23 @@ def _resolve_override_tag(tag: str | None = None) -> str:
     return normalized or _DEFAULT_OVERRIDE_TAG
 
 
+def _configure_logging() -> None:
+    """Ensure INFO level logging is emitted to stdout."""
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+        force=True,
+    )
+
+
 def main() -> None:
     """Launch the interactive code review walkthrough."""
 
     # High-level walkthrough for running a local code review loop. See AGENTS.md
     # for workflow expectations around prompt overrides and tooling etiquette.
+    _configure_logging()
     print("Launching sunfish code review session with planning and VFS tooling...")
     print("- test-repositories/sunfish mounted under virtual path 'sunfish/'.")
     print(
