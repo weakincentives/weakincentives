@@ -15,12 +15,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
+from typing import TypeVar, cast
 
-from .session import DataEvent, TypedReducer
+from ._types import ReducerEvent
+
+T = TypeVar("T")
+K = TypeVar("K")
 
 
-def append[T](slice_values: tuple[T, ...], event: DataEvent) -> tuple[T, ...]:
+def append[T](slice_values: tuple[T, ...], event: ReducerEvent) -> tuple[T, ...]:
     """Append the event value if it is not already present."""
 
     value = cast(T, event.value)
@@ -29,10 +32,12 @@ def append[T](slice_values: tuple[T, ...], event: DataEvent) -> tuple[T, ...]:
     return (*slice_values, value)
 
 
-def upsert_by[T, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
+def upsert_by[T, K](
+    key_fn: Callable[[T], K],
+) -> Callable[[tuple[T, ...], ReducerEvent], tuple[T, ...]]:
     """Return a reducer that upserts items sharing the same derived key."""
 
-    def reducer(slice_values: tuple[T, ...], event: DataEvent) -> tuple[T, ...]:
+    def reducer(slice_values: tuple[T, ...], event: ReducerEvent) -> tuple[T, ...]:
         value = cast(T, event.value)
         key = key_fn(value)
         updated: list[T] = []
@@ -51,7 +56,9 @@ def upsert_by[T, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
     return reducer
 
 
-def replace_latest[T](slice_values: tuple[T, ...], event: DataEvent) -> tuple[T, ...]:
+def replace_latest[T](
+    slice_values: tuple[T, ...], event: ReducerEvent
+) -> tuple[T, ...]:
     """Keep only the most recent event value."""
 
     return (cast(T, event.value),)

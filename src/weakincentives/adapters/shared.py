@@ -18,7 +18,7 @@ import json
 import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from ..events import EventBus, HandlerFailure, ToolInvoked
 from ..prompt._types import SupportsDataclass
@@ -26,9 +26,11 @@ from ..prompt.prompt import RenderedPrompt
 from ..prompt.structured_output import ARRAY_WRAPPER_KEY
 from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
-from ..session import Session
 from ..tools.errors import ToolValidationError
 from .core import PromptEvaluationError
+
+if TYPE_CHECKING:
+    from ..session.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +81,7 @@ def tool_to_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
     """Return a provider-agnostic tool specification payload."""
 
     parameters_schema = schema(tool.params_type, extra="forbid")
-    parameters_schema.pop("title", None)
+    _ = parameters_schema.pop("title", None)
     return {
         "type": "function",
         "function": {
@@ -285,7 +287,7 @@ def build_json_schema_response_format(
 
     extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
     base_schema = schema(output_type, extra=extra_mode)
-    base_schema.pop("title", None)
+    _ = base_schema.pop("title", None)
 
     if container == "array":
         schema_payload = cast(
@@ -347,7 +349,7 @@ def parse_schema_constrained_payload(
         ):
             raise TypeError("Expected provider payload to be a JSON array.")
         parsed_items: list[object] = []
-        sequence_payload = cast(Sequence[object], payload)  # pyright: ignore[reportUnnecessaryCast]
+        sequence_payload = cast(Sequence[object], payload)
         for index, item in enumerate(sequence_payload):
             if not isinstance(item, Mapping):
                 raise TypeError(f"Array item at index {index} is not an object.")
@@ -373,7 +375,7 @@ def message_text_content(content: object) -> str:
         sequence_content = cast(
             Sequence[object],
             content,
-        )  # pyright: ignore[reportUnnecessaryCast]
+        )
         fragments = [_content_part_text(part) for part in sequence_content]
         return "".join(fragments)
     return str(content)
@@ -393,7 +395,7 @@ def extract_parsed_content(message: object) -> object | None:
         sequence_content = cast(
             Sequence[object],
             content,
-        )  # pyright: ignore[reportUnnecessaryCast]
+        )
         for part in sequence_content:
             payload = _parsed_payload_from_part(part)
             if payload is not None:

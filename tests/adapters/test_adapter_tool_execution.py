@@ -48,7 +48,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
 from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
 from weakincentives.prompt._types import SupportsDataclass
-from weakincentives.session import DataEvent, Session, replace_latest, select_latest
+from weakincentives.session import ReducerEvent, Session, replace_latest, select_latest
 from weakincentives.tools import ToolValidationError
 
 
@@ -319,7 +319,7 @@ def test_adapter_tool_execution_rolls_back_session(
     def failing_dispatch(
         self: Session,
         data_type: type[SupportsDataclass],
-        event: DataEvent,
+        event: ReducerEvent,
     ) -> None:
         original_dispatch(data_type, event)
         raise RuntimeError("Reducer crashed")

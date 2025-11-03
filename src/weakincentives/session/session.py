@@ -15,13 +15,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
 from ..events import EventBus, NullEventBus, PromptExecuted, ToolInvoked
 from ..prompt._types import SupportsDataclass
+from ._types import ReducerEvent, TypedReducer
 from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -44,7 +45,7 @@ _TOOL_DATA_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolDat
 
 
 def _append_tool_data(
-    slice_values: tuple[ToolData, ...], event: DataEvent
+    slice_values: tuple[ToolData, ...], event: ReducerEvent
 ) -> tuple[ToolData, ...]:
     if not isinstance(event, ToolData):
         return slice_values
@@ -60,8 +61,6 @@ class PromptData[T: SupportsDataclass]:
 
 
 type DataEvent = ToolData | PromptData[SupportsDataclass]
-
-type TypedReducer[S] = Callable[[tuple[S, ...], DataEvent], tuple[S, ...]]
 
 
 @dataclass(slots=True)
@@ -80,6 +79,7 @@ class Session:
         session_id: str | None = None,
         created_at: str | None = None,
     ) -> None:
+        super().__init__()
         self.session_id = session_id
         self.created_at = created_at
         self._bus = bus or NullEventBus()
@@ -106,7 +106,7 @@ class Session:
         )
         bucket = self._reducers.setdefault(data_type, [])
         bucket.append(registration)
-        self._state.setdefault(target_slice_type, ())
+        _ = self._state.setdefault(target_slice_type, ())
 
     def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]:
         """Return the tuple slice maintained for the provided type."""
@@ -194,7 +194,7 @@ class Session:
                     self._dispatch_data_event(type(dataclass_item), data)
 
     def _dispatch_data_event(
-        self, data_type: type[SupportsDataclass], event: DataEvent
+        self, data_type: type[SupportsDataclass], event: ReducerEvent
     ) -> None:
         registrations = self._reducers.get(data_type)
         if not registrations:

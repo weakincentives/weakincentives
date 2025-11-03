@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from importlib import import_module
-from typing import Any, TypeGuard, cast
+from typing import Any, TypeGuard, cast, override
 
 from ..prompt._types import SupportsDataclass
 from ..serde import dump, parse
@@ -56,7 +56,7 @@ def normalize_snapshot_state(
                 )
             dataclass_value = cast(SupportsDataclass, value)  # pyright: ignore[reportUnnecessaryCast]
             try:
-                dump(dataclass_value)
+                _ = dump(dataclass_value)
             except Exception as error:
                 raise ValueError(
                     f"Slice {slice_type.__qualname__} cannot be serialized"
@@ -140,6 +140,7 @@ class Snapshot:
         object.__setattr__(self, "created_at", _ensure_timezone(self.created_at))
         object.__setattr__(self, "slices", types.MappingProxyType(normalized))
 
+    @override
     def __hash__(self) -> int:
         ordered = tuple(
             sorted(

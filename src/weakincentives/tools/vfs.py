@@ -25,8 +25,7 @@ from typing import Final, Literal, cast
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
-from ..session import Session, replace_latest, select_latest
-from ..session.session import DataEvent
+from ..session import ReducerEvent, Session, replace_latest, select_latest
 from .errors import ToolValidationError
 
 FileEncoding = str
@@ -197,6 +196,7 @@ class _VfsToolSuite:
     """Collection of VFS handlers bound to a session instance."""
 
     def __init__(self, *, session: Session) -> None:
+        super().__init__()
         self._session = session
 
     def list_directory(self, params: ListDirectory) -> ToolResult[ListDirectoryResult]:
@@ -323,7 +323,7 @@ def _normalize_segments(raw_segments: Sequence[str]) -> tuple[str, ...]:
 
 def _ensure_ascii(value: str, field: str) -> None:
     try:
-        value.encode(_ASCII)
+        _ = value.encode(_ASCII)
     except UnicodeEncodeError as error:  # pragma: no cover - defensive guard
         raise ToolValidationError(
             f"{field.capitalize()} must be ASCII text."
@@ -466,7 +466,7 @@ def _resolve_mount_path(host_path: str, allowed_roots: Sequence[Path]) -> Path:
     for root in allowed_roots:
         candidate = (root / host_path).resolve()
         try:
-            candidate.relative_to(root)
+            _ = candidate.relative_to(root)
         except ValueError:
             continue
         if candidate.exists():
@@ -496,10 +496,10 @@ def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
 
 
 def _make_write_reducer() -> Callable[
-    [tuple[VirtualFileSystem, ...], DataEvent], tuple[VirtualFileSystem, ...]
+    [tuple[VirtualFileSystem, ...], ReducerEvent], tuple[VirtualFileSystem, ...]
 ]:
     def reducer(
-        slice_values: tuple[VirtualFileSystem, ...], event: DataEvent
+        slice_values: tuple[VirtualFileSystem, ...], event: ReducerEvent
     ) -> tuple[VirtualFileSystem, ...]:
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
         params = cast(WriteFile, event.value)
@@ -540,10 +540,10 @@ def _make_write_reducer() -> Callable[
 
 
 def _make_delete_reducer() -> Callable[
-    [tuple[VirtualFileSystem, ...], DataEvent], tuple[VirtualFileSystem, ...]
+    [tuple[VirtualFileSystem, ...], ReducerEvent], tuple[VirtualFileSystem, ...]
 ]:
     def reducer(
-        slice_values: tuple[VirtualFileSystem, ...], event: DataEvent
+        slice_values: tuple[VirtualFileSystem, ...], event: ReducerEvent
     ) -> tuple[VirtualFileSystem, ...]:
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
         params = cast(DeleteEntry, event.value)

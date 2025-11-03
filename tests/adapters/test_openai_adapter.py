@@ -76,7 +76,7 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.session import DataEvent, Session, replace_latest, select_latest
+from weakincentives.session import ReducerEvent, Session, replace_latest, select_latest
 from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.openai"
@@ -396,7 +396,7 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
     def failing_dispatch(
         self: Session,
         data_type: type[SupportsDataclass],
-        event: DataEvent,
+        event: ReducerEvent,
     ) -> None:
         original_dispatch(data_type, event)
         raise RuntimeError("Reducer crashed")

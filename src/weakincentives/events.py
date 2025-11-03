@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast, override
 
 from .prompt._types import SupportsDataclass
 
@@ -62,6 +62,7 @@ class InProcessEventBus:
     """Process-local event bus that delivers events synchronously."""
 
     def __init__(self) -> None:
+        super().__init__()
         self._handlers: dict[type[object], list[EventHandler]] = {}
 
     def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
@@ -98,6 +99,7 @@ class HandlerFailure:
     handler: EventHandler
     error: BaseException
 
+    @override
     def __str__(self) -> str:
         return f"{self.handler!r} -> {self.error!r}"
 

@@ -16,7 +16,7 @@ import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any
+from typing import Any, override
 
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
@@ -47,6 +47,7 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
             tools=tools,
         )
 
+    @override
     def render(self, params: ParamsT, depth: int) -> str:
         return self.render_with_template(self.template, params, depth)
 
@@ -69,6 +70,7 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
             return f"{heading}\n\n{rendered_body.strip()}"
         return heading
 
+    @override
     def placeholder_names(self) -> set[str]:
         template = Template(textwrap.dedent(self.template).strip())
         placeholders: set[str] = set()
@@ -92,6 +94,7 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
 
         return {field.name: getattr(params, field.name) for field in fields(params)}
 
+    @override
     def original_body_template(self) -> str:
         return self.template
 

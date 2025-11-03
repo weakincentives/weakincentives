@@ -21,8 +21,7 @@ from typing import Final, Literal, cast
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolResult
-from ..session import Session, replace_latest, select_latest
-from ..session.session import DataEvent
+from ..session import ReducerEvent, Session, replace_latest, select_latest
 from .errors import ToolValidationError
 
 PlanStatus = Literal["active", "completed", "abandoned"]
@@ -183,6 +182,7 @@ class _PlanningToolSuite:
     """Collection of tool handlers bound to a session instance."""
 
     def __init__(self, session: Session) -> None:
+        super().__init__()
         self._session = session
 
     def setup_plan(self, params: SetupPlan) -> ToolResult[SetupPlan]:
@@ -298,7 +298,7 @@ class _PlanningToolSuite:
 
 
 def _setup_plan_reducer(
-    slice_values: tuple[Plan, ...], event: DataEvent
+    slice_values: tuple[Plan, ...], event: ReducerEvent
 ) -> tuple[Plan, ...]:
     params = cast(SetupPlan, event.value)
     steps = tuple(
@@ -316,7 +316,7 @@ def _setup_plan_reducer(
 
 
 def _add_step_reducer(
-    slice_values: tuple[Plan, ...], event: DataEvent
+    slice_values: tuple[Plan, ...], event: ReducerEvent
 ) -> tuple[Plan, ...]:
     previous = _latest_plan(slice_values)
     if previous is None:
@@ -344,7 +344,7 @@ def _add_step_reducer(
 
 
 def _update_step_reducer(
-    slice_values: tuple[Plan, ...], event: DataEvent
+    slice_values: tuple[Plan, ...], event: ReducerEvent
 ) -> tuple[Plan, ...]:
     previous = _latest_plan(slice_values)
     if previous is None:
@@ -375,7 +375,7 @@ def _update_step_reducer(
 
 
 def _mark_step_reducer(
-    slice_values: tuple[Plan, ...], event: DataEvent
+    slice_values: tuple[Plan, ...], event: ReducerEvent
 ) -> tuple[Plan, ...]:
     previous = _latest_plan(slice_values)
     if previous is None:
@@ -412,7 +412,7 @@ def _mark_step_reducer(
 
 
 def _clear_plan_reducer(
-    slice_values: tuple[Plan, ...], event: DataEvent
+    slice_values: tuple[Plan, ...], event: ReducerEvent
 ) -> tuple[Plan, ...]:
     previous = _latest_plan(slice_values)
     if previous is None:
@@ -501,7 +501,7 @@ def _normalize_optional_text(
 
 def _ensure_ascii(value: str, field_name: str) -> None:
     try:
-        value.encode(_ASCII)
+        _ = value.encode(_ASCII)
     except UnicodeEncodeError as error:  # pragma: no cover - defensive
         message = f"{field_name.title()} must be ASCII."
         raise ToolValidationError(message) from error

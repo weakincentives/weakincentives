@@ -112,7 +112,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
                 placeholder="description",
             )
         try:
-            description_clean.encode("ascii")
+            _ = description_clean.encode("ascii")
         except UnicodeEncodeError as error:
             raise PromptValidationError(
                 "Tool description must be ASCII.",

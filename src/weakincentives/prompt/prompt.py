@@ -15,7 +15,16 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from types import MappingProxyType
-from typing import Any, ClassVar, Literal, cast, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    cast,
+    get_args,
+    get_origin,
+    override,
+)
 
 from ._types import SupportsDataclass
 from .errors import (
@@ -26,7 +35,9 @@ from .errors import (
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
 from .tool import Tool
-from .versioning import PromptOverridesStore, ToolOverride
+
+if TYPE_CHECKING:
+    from .versioning import PromptLike, PromptOverridesStore, ToolOverride
 
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
 
@@ -46,6 +57,7 @@ class RenderedPrompt[OutputT]:
         default=_EMPTY_TOOL_PARAM_DESCRIPTIONS
     )
 
+    @override
     def __str__(self) -> str:
         return self.text
 
@@ -125,6 +137,7 @@ class Prompt[OutputT]:
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
     ) -> None:
+        super().__init__()
         stripped_ns = ns.strip()
         if not stripped_ns:
             raise PromptValidationError("Prompt namespace must be a non-empty string.")
@@ -201,7 +214,7 @@ class Prompt[OutputT]:
 
         from .versioning import PromptDescriptor
 
-        descriptor = PromptDescriptor.from_prompt(self)
+        descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
         override = overrides_store.resolve(descriptor=descriptor, tag=tag)
 
         overrides: dict[SectionPath, str] = {}
@@ -277,7 +290,7 @@ class Prompt[OutputT]:
                     dataclass_type=params_type,
                 )
             self._defaults_by_path[path] = default_value
-            self._defaults_by_type.setdefault(params_type, default_value)
+            _ = self._defaults_by_type.setdefault(params_type, default_value)
 
         section_placeholders = section.placeholder_names()
         self.placeholders[path] = set(section_placeholders)

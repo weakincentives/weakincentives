@@ -21,7 +21,7 @@ from weakincentives.adapters.core import PromptResponse
 from weakincentives.events import InProcessEventBus, PromptExecuted, ToolInvoked
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.session import (
-    DataEvent,
+    ReducerEvent,
     Session,
     Snapshot,
     SnapshotRestoreError,
@@ -121,14 +121,14 @@ def test_reducers_run_in_registration_order() -> None:
     call_order: list[str] = []
 
     def first(
-        slice_values: tuple[FirstSlice, ...], event: DataEvent
+        slice_values: tuple[FirstSlice, ...], event: ReducerEvent
     ) -> tuple[FirstSlice, ...]:
         call_order.append("first")
         value = cast(ExampleOutput, event.value)
         return (*slice_values, FirstSlice(value.text))
 
     def second(
-        slice_values: tuple[SecondSlice, ...], event: DataEvent
+        slice_values: tuple[SecondSlice, ...], event: ReducerEvent
     ) -> tuple[SecondSlice, ...]:
         call_order.append("second")
         value = cast(ExampleOutput, event.value)
@@ -241,7 +241,7 @@ def test_append_tool_data_ignores_prompt_data() -> None:
     prompt_event = make_prompt_event(ExampleOutput(text="hello"))
     prompt_data = PromptData(value=ExampleOutput(text="hello"), source=prompt_event)
 
-    appended = _append_tool_data((), cast(DataEvent, prompt_data))
+    appended = _append_tool_data((), cast(ReducerEvent, prompt_data))
     assert appended == ()
 
 
@@ -273,7 +273,7 @@ def test_reducer_failure_leaves_previous_slice_unchanged() -> None:
     session.register_reducer(ExampleOutput, append)
 
     def faulty(
-        slice_values: tuple[ExampleOutput, ...], event: DataEvent
+        slice_values: tuple[ExampleOutput, ...], event: ReducerEvent
     ) -> tuple[ExampleOutput, ...]:
         raise RuntimeError("boom")
 
@@ -324,7 +324,7 @@ def test_snapshot_preserves_custom_reducer_behavior() -> None:
     session = Session(bus=bus)
 
     def aggregate(
-        slice_values: tuple[Summary, ...], event: DataEvent
+        slice_values: tuple[Summary, ...], event: ReducerEvent
     ) -> tuple[Summary, ...]:
         value = cast(ExampleOutput, event.value)
         entries = slice_values[-1].entries if slice_values else ()
