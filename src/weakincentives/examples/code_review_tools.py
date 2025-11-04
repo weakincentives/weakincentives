@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ..prompt import Tool, ToolResult
+from ..prompt import Tool, ToolContext, ToolResult
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -214,7 +214,10 @@ class TagListResult:
     tags: list[str]
 
 
-def git_log_handler(params: GitLogParams) -> ToolResult[GitLogResult]:
+def git_log_handler(
+    params: GitLogParams, *, context: ToolContext
+) -> ToolResult[GitLogResult]:
+    del context
     max_count = params.max_count
     args = ["git", "log", "--oneline"]
     if max_count is not None:
@@ -253,7 +256,10 @@ def git_log_handler(params: GitLogParams) -> ToolResult[GitLogResult]:
     )
 
 
-def current_time_handler(params: TimeQueryParams) -> ToolResult[TimeQueryResult]:
+def current_time_handler(
+    params: TimeQueryParams, *, context: ToolContext
+) -> ToolResult[TimeQueryResult]:
+    del context
     requested_timezone = params.timezone or "UTC"
     timezone_name = requested_timezone
     try:
@@ -281,7 +287,10 @@ def current_time_handler(params: TimeQueryParams) -> ToolResult[TimeQueryResult]
     )
 
 
-def branch_list_handler(params: BranchListParams) -> ToolResult[BranchListResult]:
+def branch_list_handler(
+    params: BranchListParams, *, context: ToolContext
+) -> ToolResult[BranchListResult]:
+    del context
     args = ["git", "branch", "--list"]
     if params.include_remote:
         args.append("--all")
@@ -307,7 +316,10 @@ def branch_list_handler(params: BranchListParams) -> ToolResult[BranchListResult
     )
 
 
-def tag_list_handler(params: TagListParams) -> ToolResult[TagListResult]:
+def tag_list_handler(
+    params: TagListParams, *, context: ToolContext
+) -> ToolResult[TagListResult]:
+    del context
     args = ["git", "tag", "--list"]
     if params.contains:
         args.extend(["--contains", params.contains])

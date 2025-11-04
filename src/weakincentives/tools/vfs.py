@@ -24,7 +24,7 @@ from typing import Final, Literal, cast
 
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..session import ReducerEvent, Session, replace_latest, select_latest
 from .errors import ToolValidationError
 
@@ -210,7 +210,10 @@ class _VfsToolSuite:
         super().__init__()
         self._session = session
 
-    def list_directory(self, params: ListDirectory) -> ToolResult[ListDirectoryResult]:
+    def list_directory(
+        self, params: ListDirectory, *, context: ToolContext
+    ) -> ToolResult[ListDirectoryResult]:
+        del context
         target = _normalize_optional_path(params.path)
         snapshot = self._latest_snapshot()
         if _has_file(snapshot.files, target):
@@ -237,7 +240,10 @@ class _VfsToolSuite:
         message = _format_directory_message(target, directories, files)
         return ToolResult(message=message, value=normalized)
 
-    def read_file(self, params: ReadFile) -> ToolResult[VfsFile]:
+    def read_file(
+        self, params: ReadFile, *, context: ToolContext
+    ) -> ToolResult[VfsFile]:
+        del context
         path = _normalize_required_path(params.path)
         snapshot = self._latest_snapshot()
         file = _find_file(snapshot.files, path)
@@ -246,7 +252,10 @@ class _VfsToolSuite:
         message = _format_read_file_message(file)
         return ToolResult(message=message, value=file)
 
-    def write_file(self, params: WriteFile) -> ToolResult[WriteFile]:
+    def write_file(
+        self, params: WriteFile, *, context: ToolContext
+    ) -> ToolResult[WriteFile]:
+        del context
         path = _normalize_required_path(params.path)
         if params.encoding != _DEFAULT_ENCODING:
             raise ToolValidationError("Only UTF-8 encoding is supported.")
@@ -262,7 +271,10 @@ class _VfsToolSuite:
         message = _format_write_file_message(path, content, mode)
         return ToolResult(message=message, value=normalized)
 
-    def delete_entry(self, params: DeleteEntry) -> ToolResult[DeleteEntry]:
+    def delete_entry(
+        self, params: DeleteEntry, *, context: ToolContext
+    ) -> ToolResult[DeleteEntry]:
+        del context
         path = _normalize_path(params.path)
         snapshot = self._latest_snapshot()
         matches = tuple(

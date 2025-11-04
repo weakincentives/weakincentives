@@ -73,6 +73,8 @@ from weakincentives.prompt import (
     Prompt,
     SupportsDataclass,
     Tool,
+    ToolContext,
+    ToolHandler,
     ToolResult,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
@@ -279,15 +281,18 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
 
     calls: list[str] = []
 
-    def handler(params: ToolParams) -> ToolResult[ToolPayload]:
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context
         calls.append(params.query)
         payload = ToolPayload(answer=f"Result for {params.query}")
         return ToolResult(message="completed", value=payload)
 
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
-        handler=handler,
+        handler=tool_handler,
     )
 
     prompt = Prompt[StructuredAnswer](
@@ -440,13 +445,16 @@ def test_openai_format_publish_failures_handles_defaults() -> None:
 def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     module = cast(Any, _reload_module())
 
-    def handler(_: ToolParams) -> ToolResult[ToolPayload]:
+    def handler(_: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context
         raise ToolValidationError("invalid query")
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
-        handler=handler,
+        handler=tool_handler,
     )
 
     prompt = Prompt(
@@ -740,13 +748,18 @@ def test_openai_adapter_raises_when_tool_handler_missing() -> None:
 def test_openai_adapter_handles_tool_call_without_arguments() -> None:
     module = cast(Any, _reload_module())
 
-    def optional_handler(params: OptionalParams) -> ToolResult[OptionalPayload]:
+    def optional_handler(
+        params: OptionalParams, *, context: ToolContext
+    ) -> ToolResult[OptionalPayload]:
+        del context
         return ToolResult(message="done", value=OptionalPayload(value=params.query))
+
+    tool_handler: ToolHandler[OptionalParams, OptionalPayload] = optional_handler
 
     tool = Tool[OptionalParams, OptionalPayload](
         name="optional_tool",
         description="Uses defaults when args are missing.",
-        handler=optional_handler,
+        handler=tool_handler,
     )
 
     prompt = Prompt(
@@ -1160,13 +1173,18 @@ def test_openai_adapter_raises_when_tool_params_invalid() -> None:
 def test_openai_adapter_records_handler_failures() -> None:
     module = cast(Any, _reload_module())
 
-    def failing_handler(params: ToolParams) -> ToolResult[ToolPayload]:
+    def failing_handler(
+        params: ToolParams, *, context: ToolContext
+    ) -> ToolResult[ToolPayload]:
+        del context
         raise RuntimeError("boom")
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], failing_handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
-        handler=failing_handler,
+        handler=tool_handler,
     )
 
     prompt = Prompt(

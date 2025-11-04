@@ -14,11 +14,12 @@
 
 from __future__ import annotations
 
-from typing import Protocol, TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast
 
+from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.events import InProcessEventBus, ToolInvoked
-from weakincentives.prompt import SupportsDataclass
-from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.prompt import Prompt, SupportsDataclass
+from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
 ResultT = TypeVar("ResultT", bound=SupportsDataclass)
@@ -29,6 +30,30 @@ class ToolSection(Protocol):
 
     def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
         """Return the tools exposed by the section."""
+
+
+class _DummyAdapter(ProviderAdapter[Any]):
+    def evaluate(
+        self,
+        prompt: Prompt[Any],
+        *params: SupportsDataclass,
+        parse_output: bool = True,
+        bus: InProcessEventBus,
+        session: object | None = None,
+    ) -> PromptResponse[Any]:
+        raise NotImplementedError
+
+
+def _build_context(bus: InProcessEventBus) -> ToolContext:
+    prompt = Prompt(ns="tests", key="tool-context-helper")
+    adapter = cast(ProviderAdapter[Any], _DummyAdapter())
+    return ToolContext(
+        prompt=prompt,
+        rendered_prompt=None,
+        adapter=adapter,
+        session=None,
+        event_bus=bus,
+    )
 
 
 def find_tool(
@@ -53,7 +78,7 @@ def invoke_tool(
 
     handler = tool.handler
     assert handler is not None
-    result = handler(params)
+    result = handler(params, context=_build_context(bus))
     event = ToolInvoked(
         prompt_name="test",
         adapter="adapter",

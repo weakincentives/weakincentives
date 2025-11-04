@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
+from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
 
 
 @dataclass
@@ -39,7 +39,10 @@ class LookupResult:
     document_url: str
 
 
-def _lookup_handler(params: LookupParams) -> ToolResult[LookupResult]:
+def _lookup_handler(
+    params: LookupParams, *, context: ToolContext
+) -> ToolResult[LookupResult]:
+    del context
     result = LookupResult(
         entity_id=params.entity_id,
         document_url="https://example.com",

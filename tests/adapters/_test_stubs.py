@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from weakincentives.prompt import ToolResult
+from weakincentives.prompt import ToolContext, ToolResult
 
 
 @dataclass
@@ -163,7 +163,10 @@ class OptionalPayload:
     value: str
 
 
-def simple_handler(params: ToolParams) -> ToolResult[ToolPayload]:
+def simple_handler(
+    params: ToolParams, *, context: ToolContext
+) -> ToolResult[ToolPayload]:
+    del context
     return ToolResult(message="ok", value=ToolPayload(answer=params.query))
 
 

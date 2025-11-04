@@ -13,10 +13,37 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
+from weakincentives.adapters.core import PromptResponse, ProviderAdapter
+from weakincentives.events import InProcessEventBus
 from weakincentives.examples import code_review_tools
+from weakincentives.prompt import Prompt, SupportsDataclass
+from weakincentives.prompt.tool import ToolContext
+
+
+class _ExampleAdapter(ProviderAdapter[Any]):
+    def evaluate(
+        self,
+        prompt: Prompt[Any],
+        *params: SupportsDataclass,
+        parse_output: bool = True,
+        bus: InProcessEventBus,
+        session: object | None = None,
+    ) -> PromptResponse[Any]:
+        raise NotImplementedError
+
+
+def _make_context() -> ToolContext:
+    return ToolContext(
+        prompt=Prompt(ns="examples", key="code-review"),
+        rendered_prompt=None,
+        adapter=cast(ProviderAdapter[Any], _ExampleAdapter()),
+        session=None,
+        event_bus=InProcessEventBus(),
+    )
 
 
 def _subprocess_result(
@@ -98,7 +125,7 @@ def test_git_log_handler_success(monkeypatch: pytest.MonkeyPatch) -> None:
         grep="feature",
         additional_args=("--decorate", "--stat"),
     )
-    result = code_review_tools.git_log_handler(params)
+    result = code_review_tools.git_log_handler(params, context=_make_context())
 
     assert captured_args["args"] == [
         "git",
@@ -133,7 +160,8 @@ def test_git_log_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
     result = code_review_tools.git_log_handler(
-        code_review_tools.GitLogParams(revision_range="bad")
+        code_review_tools.GitLogParams(revision_range="bad"),
+        context=_make_context(),
     )
     assert result.value is not None
     assert result.value.entries == []
@@ -152,7 +180,7 @@ def test_branch_list_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     params = code_review_tools.BranchListParams(
         include_remote=True, pattern="feature*", contains="abc123"
     )
-    result = code_review_tools.branch_list_handler(params)
+    result = code_review_tools.branch_list_handler(params, context=_make_context())
 
     assert captured_args["args"] == [
         "git",
@@ -174,7 +202,10 @@ def test_branch_list_handler_no_matches(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
-    result = code_review_tools.branch_list_handler(code_review_tools.BranchListParams())
+    result = code_review_tools.branch_list_handler(
+        code_review_tools.BranchListParams(),
+        context=_make_context(),
+    )
     assert result.value is not None
     assert result.value.branches == []
     assert result.message == "No branches matched the query."
@@ -187,7 +218,8 @@ def test_tag_list_handler_no_matches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
     result = code_review_tools.tag_list_handler(
-        code_review_tools.TagListParams(sort="-version:refname")
+        code_review_tools.TagListParams(sort="-version:refname"),
+        context=_make_context(),
     )
     assert result.value is not None
     assert result.value.tags == []
@@ -196,7 +228,8 @@ def test_tag_list_handler_no_matches(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_current_time_handler_valid_timezone() -> None:
     result = code_review_tools.current_time_handler(
-        code_review_tools.TimeQueryParams(timezone="UTC")
+        code_review_tools.TimeQueryParams(timezone="UTC"),
+        context=_make_context(),
     )
     assert result.value is not None
     assert result.value.timezone == "UTC"
@@ -205,7 +238,8 @@ def test_current_time_handler_valid_timezone() -> None:
 
 def test_current_time_handler_invalid_timezone() -> None:
     result = code_review_tools.current_time_handler(
-        code_review_tools.TimeQueryParams(timezone="Mars/Colony")
+        code_review_tools.TimeQueryParams(timezone="Mars/Colony"),
+        context=_make_context(),
     )
     assert result.value is not None
     assert result.value.timezone == "UTC"
@@ -219,7 +253,10 @@ def test_branch_list_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
-    result = code_review_tools.branch_list_handler(code_review_tools.BranchListParams())
+    result = code_review_tools.branch_list_handler(
+        code_review_tools.BranchListParams(),
+        context=_make_context(),
+    )
     assert result.value is not None
     assert result.value.branches == []
     assert result.message == "git branch failed: fatal: not a git repository"
@@ -232,7 +269,8 @@ def test_tag_list_handler_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
     result = code_review_tools.tag_list_handler(
-        code_review_tools.TagListParams(pattern="v*", contains="HEAD")
+        code_review_tools.TagListParams(pattern="v*", contains="HEAD"),
+        context=_make_context(),
     )
     assert result.value is not None
     assert result.value.tags == ["v1.0.0", "v1.1.0"]
@@ -245,7 +283,10 @@ def test_tag_list_handler_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
-    result = code_review_tools.tag_list_handler(code_review_tools.TagListParams())
+    result = code_review_tools.tag_list_handler(
+        code_review_tools.TagListParams(),
+        context=_make_context(),
+    )
     assert result.value is not None
     assert result.value.tags == []
     assert result.message == "git tag failed: fatal: bad pattern"
@@ -257,7 +298,10 @@ def test_git_log_handler_no_matching_entries(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(code_review_tools, "_run_git_command", fake_run)
 
-    result = code_review_tools.git_log_handler(code_review_tools.GitLogParams())
+    result = code_review_tools.git_log_handler(
+        code_review_tools.GitLogParams(),
+        context=_make_context(),
+    )
     assert result.message == "No git log entries matched the query."
     assert result.value is not None
     assert result.value.entries == []

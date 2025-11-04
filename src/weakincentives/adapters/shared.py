@@ -22,13 +22,13 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 from ..events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
-from ..prompt.prompt import RenderedPrompt
+from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     OutputParseError,
     parse_structured_output,
 )
-from ..prompt.tool import Tool, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..serde import parse, schema
 from ..tools.errors import ToolValidationError
 from ._provider_protocols import (
@@ -42,6 +42,7 @@ from ._provider_protocols import (
 from .core import PromptEvaluationError, PromptResponse
 
 if TYPE_CHECKING:
+    from ..adapters.core import ProviderAdapter
     from ..session.session import Session
 
 logger: StructuredLogger = get_logger(
@@ -195,6 +196,9 @@ def parse_tool_arguments(
 def execute_tool_call(
     *,
     adapter_name: str,
+    adapter: ProviderAdapter[Any],
+    prompt: Prompt[Any],
+    rendered_prompt: RenderedPrompt[Any] | None,
     tool_call: ProviderToolCall,
     tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsDataclass]],
     bus: EventBus,
@@ -250,8 +254,15 @@ def execute_tool_call(
         call_id=call_id,
     )
     tool_result: ToolResult[SupportsDataclass]
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered_prompt,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
     try:
-        tool_result = handler(tool_params)
+        tool_result = handler(tool_params, context=context)
     except ToolValidationError as error:
         log.warning(
             "Tool validation failed.",
@@ -561,6 +572,8 @@ def run_conversation[
 ](
     *,
     adapter_name: str,
+    adapter: ProviderAdapter[OutputT],
+    prompt: Prompt[OutputT],
     prompt_name: str,
     rendered: RenderedPrompt[OutputT],
     initial_messages: list[dict[str, Any]],
@@ -728,6 +741,9 @@ def run_conversation[
         for tool_call in tool_calls:
             invocation, tool_result = execute_tool_call(
                 adapter_name=adapter_name,
+                adapter=adapter,
+                prompt=prompt,
+                rendered_prompt=rendered,
                 tool_call=tool_call,
                 tool_registry=tool_registry,
                 bus=bus,
