@@ -49,6 +49,9 @@ _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_SEGMENT_LENGTH: Final[int] = 80
 _ASCII: Final[str] = "ascii"
 _TIMEOUT_SECONDS: Final[float] = 5.0
+_MISSING_DEPENDENCY_MESSAGE: Final[str] = (
+    "Install weakincentives[asteval] to enable the Python evaluation tool."
+)
 
 _SAFE_GLOBALS: Final[Mapping[str, object]] = MappingProxyType(
     {
@@ -117,7 +120,7 @@ def _load_asteval_module() -> ModuleType:
     try:
         return import_module("asteval")
     except ModuleNotFoundError as error:  # pragma: no cover - configuration guard
-        raise RuntimeError("asteval dependency is not installed.") from error
+        raise RuntimeError(_MISSING_DEPENDENCY_MESSAGE) from error
 
 
 def _str_dict_factory() -> dict[str, str]:
@@ -408,7 +411,7 @@ def _create_interpreter() -> InterpreterProtocol:
     module = _load_asteval_module()
     interpreter_cls = getattr(module, "Interpreter", None)
     if not callable(interpreter_cls):  # pragma: no cover - defensive guard
-        message = "asteval dependency is not installed."
+        message = _MISSING_DEPENDENCY_MESSAGE
         raise TypeError(message)
 
     interpreter = cast(

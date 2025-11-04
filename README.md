@@ -40,10 +40,12 @@ while allowing the prompts to be automatically optimized.
 
 ```bash
 uv add weakincentives
+# optional tool extras
+uv add "weakincentives[asteval]"
 # optional provider adapters
 uv add "weakincentives[openai]"
 uv add "weakincentives[litellm]"
-# cloning the repo? use: uv sync --extra openai --extra litellm
+# cloning the repo? use: uv sync --extra asteval --extra openai --extra litellm
 ```
 
 ## Logging
@@ -117,7 +119,9 @@ class ReviewBundle:
 Planning, virtual filesystem, and Python-evaluation sections register reducers on
 the session so every run supports plans, staged edits, and quick calculations.
 Mount diffs ahead of time so the agent can read them through the virtual
-filesystem without extra callbacks. Specs worth skimming:
+filesystem without extra callbacks. Install the `asteval` extra
+(`uv add "weakincentives[asteval]"`) before instantiating `AstevalSection` so the
+sandbox is available at runtime. Specs worth skimming:
 [Session State](specs/SESSIONS.md), [Prompt Event Emission](specs/EVENTS.md),
 [Virtual Filesystem Tools](specs/VFS_TOOLS.md), [Planning Tools](specs/PLANNING_TOOL.md),
 and [Asteval Integration](specs/ASTEVAL.md).

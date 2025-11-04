@@ -44,10 +44,12 @@ of read/write file operations to run before or after evaluation.
 
 ## External Dependency
 
-Add `asteval>=1.0.6` to `pyproject.toml` and sync it through `uv`. The module
-must import from `asteval` lazily inside the handler to avoid import costs when
-unused. Document the dependency in `CHANGELOG.md` under the "Unreleased"
-section.
+Expose `asteval>=1.0.6` behind a dedicated optional extra so the default
+installation remains stdlib-only. Update `pyproject.toml` with an
+`[project.optional-dependencies].asteval` entry, keep imports lazy inside the
+handler, and raise a descriptive runtime error that instructs users to install
+`weakincentives[asteval]` when the extra is missing. Document the packaging
+change in `CHANGELOG.md` under the "Unreleased" section.
 
 ## Tool Contract
 
