@@ -14,18 +14,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, cast, override
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from .logging import StructuredLogger, get_logger
-from .prompt._types import SupportsDataclass
+from ..logging import StructuredLogger, get_logger
+from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
 
 if TYPE_CHECKING:
-    from .adapters.core import PromptResponse
-    from .prompt.tool import ToolResult
-
-EventHandler = Callable[[object], None]
+    from ..adapters.core import PromptResponse
 
 
 def _describe_handler(handler: EventHandler) -> str:
@@ -38,18 +34,6 @@ def _describe_handler(handler: EventHandler) -> str:
 
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "event_bus"})
-
-
-class EventBus(Protocol):
-    """Minimal synchronous publish/subscribe abstraction."""
-
-    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
-        """Register a handler for the given event type."""
-        ...
-
-    def publish(self, event: object) -> PublishResult:
-        """Publish an event instance to subscribers."""
-        ...
 
 
 class NullEventBus:
@@ -106,68 +90,12 @@ class InProcessEventBus:
 
 
 @dataclass(slots=True, frozen=True)
-class HandlerFailure:
-    """Container describing a handler error captured during publish."""
-
-    handler: EventHandler
-    error: BaseException
-
-    @override
-    def __str__(self) -> str:
-        return f"{self.handler!r} -> {self.error!r}"
-
-
-@dataclass(slots=True, frozen=True)
-class PublishResult:
-    """Summary of an event publish invocation."""
-
-    event: object
-    handlers_invoked: tuple[EventHandler, ...]
-    errors: tuple[HandlerFailure, ...]
-    handled_count: int = field(init=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "handled_count", len(self.handlers_invoked))
-
-    @property
-    def ok(self) -> bool:
-        """Return ``True`` when no handler failures were recorded."""
-
-        return not self.errors
-
-    def raise_if_errors(self) -> None:
-        """Raise an ``ExceptionGroup`` if any handlers failed."""
-
-        if not self.errors:
-            return
-
-        failures = ", ".join(str(failure) for failure in self.errors)
-        message = f"Errors while publishing {type(self.event).__name__}: {failures}"
-        raise ExceptionGroup(
-            message,
-            tuple(cast(Exception, failure.error) for failure in self.errors),
-        )
-
-
-@dataclass(slots=True, frozen=True)
 class PromptExecuted:
     """Event emitted after an adapter finishes evaluating a prompt."""
 
     prompt_name: str
     adapter: str
     result: PromptResponse[object]
-
-
-@dataclass(slots=True, frozen=True)
-class ToolInvoked:
-    """Event emitted after an adapter executes a tool handler."""
-
-    prompt_name: str
-    adapter: str
-    name: str
-    params: SupportsDataclass
-    result: ToolResult[object]
-    call_id: str | None = None
 
 
 __all__ = [
