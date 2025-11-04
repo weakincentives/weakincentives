@@ -33,7 +33,7 @@ from weakincentives.tools import (
 def test_planning_end_to_end_flow() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     tools = {tool.name: tool for tool in section.tools()}
 
     setup_tool = tools["planning_setup_plan"]
@@ -53,11 +53,13 @@ def test_planning_end_to_end_flow() -> None:
                 NewPlanStep(title="categorise follow-ups"),
             ),
         ),
+        session=session,
     )
     invoke_tool(
         bus,
         add_tool,
         AddStep(steps=(NewPlanStep(title="draft update"),)),
+        session=session,
     )
 
     plan = select_latest(session, Plan)
@@ -72,21 +74,25 @@ def test_planning_end_to_end_flow() -> None:
         bus,
         update_tool,
         UpdateStep(step_id="S002", title="categorise replies"),
+        session=session,
     )
     invoke_tool(
         bus,
         mark_tool,
         MarkStep(step_id="S001", status="done", note="triage complete"),
+        session=session,
     )
     invoke_tool(
         bus,
         mark_tool,
         MarkStep(step_id="S002", status="done"),
+        session=session,
     )
     invoke_tool(
         bus,
         mark_tool,
         MarkStep(step_id="S003", status="done"),
+        session=session,
     )
 
     plan = select_latest(session, Plan)
@@ -94,10 +100,10 @@ def test_planning_end_to_end_flow() -> None:
     assert plan.status == "completed"
     assert plan.steps[0].notes == ("triage complete",)
 
-    result = invoke_tool(bus, read_tool, ReadPlan())
+    result = invoke_tool(bus, read_tool, ReadPlan(), session=session)
     assert result.message == "Retrieved the current plan with 3 steps."
 
-    invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
 
     plan = select_latest(session, Plan)
     assert plan is not None

@@ -61,14 +61,14 @@ def _make_tool_data(name: str, value: SupportsDataclass) -> ToolData:
 def test_setup_plan_normalizes_payloads() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
 
     params = SetupPlan(
         objective="  refine onboarding flow  ",
         initial_steps=(NewPlanStep(title=" draft checklist ", details=" review doc "),),
     )
-    invoke_tool(bus, setup_tool, params)
+    invoke_tool(bus, setup_tool, params, session=session)
 
     plan = select_latest(session, Plan)
     assert plan is not None
@@ -88,14 +88,14 @@ def test_setup_plan_normalizes_payloads() -> None:
 def test_setup_plan_normalizes_blank_details() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
 
     params = SetupPlan(
         objective="ship",
         initial_steps=(NewPlanStep(title="draft", details="   "),),
     )
-    invoke_tool(bus, setup_tool, params)
+    invoke_tool(bus, setup_tool, params, session=session)
 
     plan = select_latest(session, Plan)
     assert plan is not None
@@ -105,21 +105,37 @@ def test_setup_plan_normalizes_blank_details() -> None:
 def test_setup_plan_rejects_invalid_objective() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, setup_tool, SetupPlan(objective="   "))
+        invoke_tool(bus, setup_tool, SetupPlan(objective="   "), session=session)
 
     long_objective = "x" * 241
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, setup_tool, SetupPlan(objective=long_objective))
+        invoke_tool(
+            bus,
+            setup_tool,
+            SetupPlan(objective=long_objective),
+            session=session,
+        )
+
+
+def test_setup_plan_requires_session_in_context() -> None:
+    bus = InProcessEventBus()
+    section = PlanningToolsSection()
+    setup_tool = find_tool(section, "planning_setup_plan")
+
+    params = SetupPlan(objective="ship", initial_steps=())
+
+    with pytest.raises(ToolValidationError):
+        invoke_tool(bus, setup_tool, params)
 
 
 def test_add_step_requires_existing_plan() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     add_tool = find_tool(section, "planning_add_step")
 
     with pytest.raises(ToolValidationError):
@@ -127,13 +143,14 @@ def test_add_step_requires_existing_plan() -> None:
             bus,
             add_tool,
             AddStep(steps=(NewPlanStep(title="task"),)),
+            session=session,
         )
 
 
 def test_add_step_appends_new_steps() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
 
@@ -141,6 +158,7 @@ def test_add_step_appends_new_steps() -> None:
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
     invoke_tool(
         bus,
@@ -151,6 +169,7 @@ def test_add_step_appends_new_steps() -> None:
                 NewPlanStep(title="release"),
             )
         ),
+        session=session,
     )
 
     plan = select_latest(session, Plan)
@@ -162,20 +181,25 @@ def test_add_step_appends_new_steps() -> None:
 def test_add_step_rejects_empty_payload() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
 
-    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(
+        bus,
+        setup_tool,
+        SetupPlan(objective="ship", initial_steps=()),
+        session=session,
+    )
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, add_tool, AddStep(steps=()))
+        invoke_tool(bus, add_tool, AddStep(steps=()), session=session)
 
 
 def test_add_step_rejects_when_plan_not_active() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     mark_tool = find_tool(section, "planning_mark_step")
     add_tool = find_tool(section, "planning_add_step")
@@ -184,29 +208,42 @@ def test_add_step_rejects_when_plan_not_active() -> None:
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
-    invoke_tool(bus, mark_tool, MarkStep(step_id="S001", status="done"))
+    invoke_tool(
+        bus,
+        mark_tool,
+        MarkStep(step_id="S001", status="done"),
+        session=session,
+    )
 
     with pytest.raises(ToolValidationError):
         invoke_tool(
             bus,
             add_tool,
             AddStep(steps=(NewPlanStep(title="later"),)),
+            session=session,
         )
 
 
 def test_session_keeps_single_plan_snapshot() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
 
-    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(
+        bus,
+        setup_tool,
+        SetupPlan(objective="ship", initial_steps=()),
+        session=session,
+    )
     invoke_tool(
         bus,
         add_tool,
         AddStep(steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
 
     snapshots = select_all(session, Plan)
@@ -216,20 +253,25 @@ def test_session_keeps_single_plan_snapshot() -> None:
 def test_update_step_rejects_empty_patch() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
 
-    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
+    invoke_tool(
+        bus,
+        setup_tool,
+        SetupPlan(objective="ship", initial_steps=()),
+        session=session,
+    )
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, update_tool, UpdateStep(step_id="S001"))
+        invoke_tool(bus, update_tool, UpdateStep(step_id="S001"), session=session)
 
 
 def test_update_step_updates_existing_step() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
 
@@ -243,12 +285,14 @@ def test_update_step_updates_existing_step() -> None:
                 NewPlanStep(title="categorise follow-ups"),
             ),
         ),
+        session=session,
     )
 
     invoke_tool(
         bus,
         update_tool,
         UpdateStep(step_id="S002", title="categorise replies"),
+        session=session,
     )
 
     plan = select_latest(session, Plan)
@@ -263,7 +307,7 @@ def test_update_step_updates_existing_step() -> None:
 def test_update_step_requires_step_identifier() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
 
@@ -271,6 +315,7 @@ def test_update_step_requires_step_identifier() -> None:
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
 
     with pytest.raises(ToolValidationError):
@@ -278,13 +323,14 @@ def test_update_step_requires_step_identifier() -> None:
             bus,
             update_tool,
             UpdateStep(step_id="  ", title="rename"),
+            session=session,
         )
 
 
 def test_update_step_rejects_unknown_identifier() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
 
@@ -292,6 +338,7 @@ def test_update_step_rejects_unknown_identifier() -> None:
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
 
     with pytest.raises(ToolValidationError):
@@ -299,13 +346,14 @@ def test_update_step_rejects_unknown_identifier() -> None:
             bus,
             update_tool,
             UpdateStep(step_id="S999", title="rename"),
+            session=session,
         )
 
 
 def test_mark_step_appends_note_and_updates_status() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     mark_tool = find_tool(section, "planning_mark_step")
 
@@ -316,11 +364,13 @@ def test_mark_step_appends_note_and_updates_status() -> None:
             objective="ship",
             initial_steps=(NewPlanStep(title="draft"), NewPlanStep(title="review")),
         ),
+        session=session,
     )
     invoke_tool(
         bus,
         mark_tool,
         MarkStep(step_id="S001", status="done", note="notes added"),
+        session=session,
     )
 
     plan = select_latest(session, Plan)
@@ -334,7 +384,7 @@ def test_mark_step_appends_note_and_updates_status() -> None:
 def test_mark_step_sets_plan_completed_when_all_done() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
     mark_tool = find_tool(section, "planning_mark_step")
@@ -349,20 +399,33 @@ def test_mark_step_sets_plan_completed_when_all_done() -> None:
                 NewPlanStep(title="categorise follow-ups"),
             ),
         ),
+        session=session,
     )
     invoke_tool(
         bus,
         add_tool,
         AddStep(steps=(NewPlanStep(title="draft update"),)),
+        session=session,
     )
 
     invoke_tool(
         bus,
         mark_tool,
         MarkStep(step_id="S001", status="done", note="triage complete"),
+        session=session,
     )
-    invoke_tool(bus, mark_tool, MarkStep(step_id="S002", status="done"))
-    invoke_tool(bus, mark_tool, MarkStep(step_id="S003", status="done"))
+    invoke_tool(
+        bus,
+        mark_tool,
+        MarkStep(step_id="S002", status="done"),
+        session=session,
+    )
+    invoke_tool(
+        bus,
+        mark_tool,
+        MarkStep(step_id="S003", status="done"),
+        session=session,
+    )
 
     plan = select_latest(session, Plan)
     assert plan is not None
@@ -374,7 +437,7 @@ def test_mark_step_sets_plan_completed_when_all_done() -> None:
 def test_mark_step_rejects_abandoned_plan() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     mark_tool = find_tool(section, "planning_mark_step")
     clear_tool = find_tool(section, "planning_clear_plan")
@@ -383,17 +446,23 @@ def test_mark_step_rejects_abandoned_plan() -> None:
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
-    invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, mark_tool, MarkStep(step_id="S001", status="done"))
+        invoke_tool(
+            bus,
+            mark_tool,
+            MarkStep(step_id="S001", status="done"),
+            session=session,
+        )
 
 
 def test_mark_step_requires_identifier() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     mark_tool = find_tool(section, "planning_mark_step")
 
@@ -401,16 +470,22 @@ def test_mark_step_requires_identifier() -> None:
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, mark_tool, MarkStep(step_id="  ", status="done"))
+        invoke_tool(
+            bus,
+            mark_tool,
+            MarkStep(step_id="  ", status="done"),
+            session=session,
+        )
 
 
 def test_mark_step_rejects_empty_note() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     mark_tool = find_tool(section, "planning_mark_step")
 
@@ -418,6 +493,7 @@ def test_mark_step_rejects_empty_note() -> None:
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
 
     with pytest.raises(ToolValidationError):
@@ -425,13 +501,14 @@ def test_mark_step_rejects_empty_note() -> None:
             bus,
             mark_tool,
             MarkStep(step_id="S001", status="done", note="   "),
+            session=session,
         )
 
 
 def test_mark_step_rejects_overlong_note() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     mark_tool = find_tool(section, "planning_mark_step")
 
@@ -439,6 +516,7 @@ def test_mark_step_rejects_overlong_note() -> None:
         bus,
         setup_tool,
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        session=session,
     )
 
     with pytest.raises(ToolValidationError):
@@ -446,18 +524,24 @@ def test_mark_step_rejects_overlong_note() -> None:
             bus,
             mark_tool,
             MarkStep(step_id="S001", status="done", note="x" * 513),
+            session=session,
         )
 
 
 def test_clear_plan_marks_status_abandoned() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     clear_tool = find_tool(section, "planning_clear_plan")
 
-    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
-    invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(
+        bus,
+        setup_tool,
+        SetupPlan(objective="ship", initial_steps=()),
+        session=session,
+    )
+    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
 
     plan = select_latest(session, Plan)
     assert plan is not None
@@ -468,21 +552,26 @@ def test_clear_plan_marks_status_abandoned() -> None:
 def test_clear_plan_rejects_when_already_abandoned() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     clear_tool = find_tool(section, "planning_clear_plan")
 
-    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
-    invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(
+        bus,
+        setup_tool,
+        SetupPlan(objective="ship", initial_steps=()),
+        session=session,
+    )
+    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, clear_tool, ClearPlan())
+        invoke_tool(bus, clear_tool, ClearPlan(), session=session)
 
 
 def test_read_plan_returns_snapshot() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     read_tool = find_tool(section, "planning_read_plan")
 
@@ -493,9 +582,10 @@ def test_read_plan_returns_snapshot() -> None:
             objective="ship",
             initial_steps=(NewPlanStep(title="draft"), NewPlanStep(title="review")),
         ),
+        session=session,
     )
 
-    result = invoke_tool(bus, read_tool, ReadPlan())
+    result = invoke_tool(bus, read_tool, ReadPlan(), session=session)
     assert isinstance(result.value, Plan)
     assert result.message == "Retrieved the current plan with 2 steps."
 
@@ -503,25 +593,30 @@ def test_read_plan_returns_snapshot() -> None:
 def test_read_plan_requires_existing_plan() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     read_tool = find_tool(section, "planning_read_plan")
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, read_tool, ReadPlan())
+        invoke_tool(bus, read_tool, ReadPlan(), session=session)
 
 
 def test_read_plan_reports_empty_steps() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
     setup_tool = find_tool(section, "planning_setup_plan")
     clear_tool = find_tool(section, "planning_clear_plan")
     read_tool = find_tool(section, "planning_read_plan")
 
-    invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
-    invoke_tool(bus, clear_tool, ClearPlan())
+    invoke_tool(
+        bus,
+        setup_tool,
+        SetupPlan(objective="ship", initial_steps=()),
+        session=session,
+    )
+    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
 
-    result = invoke_tool(bus, read_tool, ReadPlan())
+    result = invoke_tool(bus, read_tool, ReadPlan(), session=session)
     assert result.message == "Retrieved the current plan (no steps recorded)."
 
 
@@ -559,21 +654,14 @@ def test_next_step_index_skips_non_numeric_suffix() -> None:
 
 
 def test_planning_tools_section_disables_tool_overrides_by_default() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-
-    section = PlanningToolsSection(session=session)
+    section = PlanningToolsSection()
 
     assert section.accepts_overrides is False
     assert all(tool.accepts_overrides is False for tool in section.tools())
 
 
 def test_planning_tools_section_allows_configuring_overrides() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-
     section = PlanningToolsSection(
-        session=session,
         accepts_overrides=True,
     )
 

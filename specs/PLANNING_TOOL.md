@@ -17,7 +17,7 @@ multi-user concepts are exposed.
 
 ## Session Integration
 
-- `PlanningToolsSection` requires a `Session` instance from `weakincentives.session`.
+- `PlanningToolsSection` requires `ToolContext.session` to expose a `Session` instance from `weakincentives.session`.
 - During initialisation the section registers `replace_latest` for the `Plan` slice so every tool result replaces the
   current plan snapshot automatically.
 - Reducers produce copy-on-write `Plan` instances; every invocation builds a new snapshot that replaces the previous
@@ -166,7 +166,7 @@ prompt = Prompt(
             title="Behaviour",
             template="Stay focused on ${objective} and call planning tools for multi-step work.",
         ),
-        planning.PlanningToolsSection(session=session),
+        planning.PlanningToolsSection(),
     ],
 )
 

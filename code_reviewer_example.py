@@ -336,7 +336,6 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         key="code-review-brief",
     )
     planning_section = PlanningToolsSection(
-        session=session,
         strategy=PlanningStrategy.PLAN_ACT_REFLECT,
     )
     vfs_section = VfsToolsSection(
