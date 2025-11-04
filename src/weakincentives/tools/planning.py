@@ -20,7 +20,7 @@ from typing import Final, Literal, cast
 
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..session import ReducerEvent, Session, replace_latest, select_latest
 from .errors import ToolValidationError
 
@@ -199,7 +199,10 @@ class _PlanningToolSuite:
         super().__init__()
         self._session = session
 
-    def setup_plan(self, params: SetupPlan) -> ToolResult[SetupPlan]:
+    def setup_plan(
+        self, params: SetupPlan, *, context: ToolContext
+    ) -> ToolResult[SetupPlan]:
+        del context
         objective = _normalize_required_text(
             params.objective,
             field_name="objective",
@@ -213,7 +216,8 @@ class _PlanningToolSuite:
         )
         return ToolResult(message=message, value=normalized)
 
-    def add_step(self, params: AddStep) -> ToolResult[AddStep]:
+    def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[AddStep]:
+        del context
         plan = _require_plan(self._session)
         _ensure_active(plan, "add steps to")
         normalized_steps = _normalize_new_steps(params.steps)
@@ -227,7 +231,10 @@ class _PlanningToolSuite:
         )
         return ToolResult(message=message, value=AddStep(steps=normalized_steps))
 
-    def update_step(self, params: UpdateStep) -> ToolResult[UpdateStep]:
+    def update_step(
+        self, params: UpdateStep, *, context: ToolContext
+    ) -> ToolResult[UpdateStep]:
+        del context
         plan = _require_plan(self._session)
         _ensure_active(plan, "update steps in")
         step_id = params.step_id.strip()
@@ -264,7 +271,10 @@ class _PlanningToolSuite:
         )
         return ToolResult(message=f"Step {step_id} update queued.", value=normalized)
 
-    def mark_step(self, params: MarkStep) -> ToolResult[MarkStep]:
+    def mark_step(
+        self, params: MarkStep, *, context: ToolContext
+    ) -> ToolResult[MarkStep]:
+        del context
         plan = _require_plan(self._session)
         if plan.status == "abandoned":
             message = "Cannot mark steps on an abandoned plan."
@@ -287,14 +297,18 @@ class _PlanningToolSuite:
             value=normalized,
         )
 
-    def clear_plan(self, params: ClearPlan) -> ToolResult[ClearPlan]:
+    def clear_plan(
+        self, params: ClearPlan, *, context: ToolContext
+    ) -> ToolResult[ClearPlan]:
+        del context
         plan = _require_plan(self._session)
         if plan.status == "abandoned":
             message = "Plan already abandoned."
             raise ToolValidationError(message)
         return ToolResult(message="Plan marked as abandoned.", value=params)
 
-    def read_plan(self, params: ReadPlan) -> ToolResult[Plan]:
+    def read_plan(self, params: ReadPlan, *, context: ToolContext) -> ToolResult[Plan]:
+        del context
         del params
         plan = select_latest(self._session, Plan)
         if plan is None:

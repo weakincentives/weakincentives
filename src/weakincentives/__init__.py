@@ -21,6 +21,8 @@ from .prompt import (
     Prompt,
     SupportsDataclass,
     Tool,
+    ToolContext,
+    ToolHandler,
     ToolResult,
     parse_structured_output,
 )
@@ -32,6 +34,8 @@ __all__ = [
     "StructuredLogger",
     "SupportsDataclass",
     "Tool",
+    "ToolContext",
+    "ToolHandler",
     "ToolResult",
     "configure_logging",
     "get_logger",

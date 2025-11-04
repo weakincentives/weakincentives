@@ -19,7 +19,14 @@ from typing import Any, cast
 import pytest
 
 from weakincentives.adapters import PromptEvaluationError, shared
-from weakincentives.events import NullEventBus
+from weakincentives.adapters.core import (
+    PromptResponse,
+    ProviderAdapter,
+    SessionProtocol,
+)
+from weakincentives.events import EventBus, NullEventBus
+from weakincentives.prompt import Prompt
+from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
 
 
@@ -93,9 +100,25 @@ def test_run_conversation_requires_message_payload() -> None:
         lambda _result, *, payload=None: "",
     )
 
+    class DummyAdapter(ProviderAdapter[object]):
+        def evaluate(
+            self,
+            prompt: Prompt[object],
+            *params: SupportsDataclass,
+            parse_output: bool = True,
+            bus: EventBus,
+            session: SessionProtocol | None = None,
+        ) -> PromptResponse[object]:
+            raise NotImplementedError
+
+    adapter = DummyAdapter()
+    prompt = Prompt(ns="tests", key="example")
+
     with pytest.raises(PromptEvaluationError):
         shared.run_conversation(
             adapter_name="test",
+            adapter=adapter,
+            prompt=prompt,
             prompt_name="example",
             rendered=rendered,
             initial_messages=[{"role": "system", "content": rendered.text}],

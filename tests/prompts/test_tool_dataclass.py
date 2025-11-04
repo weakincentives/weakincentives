@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated
 import pytest
 
 from weakincentives.prompt.errors import PromptValidationError
-from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 
 
 @dataclass
@@ -31,7 +31,10 @@ class ExampleResult:
     message: str
 
 
-def _example_handler(params: ExampleParams) -> ToolResult[ExampleResult]:
+def _example_handler(
+    params: ExampleParams, *, context: ToolContext
+) -> ToolResult[ExampleResult]:
+    del context
     return ToolResult(
         message=params.message, value=ExampleResult(message=params.message)
     )
@@ -157,7 +160,8 @@ def test_tool_rejects_invalid_descriptions(bad_description: str) -> None:
 
 
 def test_tool_rejects_non_dataclass_params_generic() -> None:
-    def handler(_: str) -> ToolResult[ExampleResult]:
+    def handler(_: str, *, context: ToolContext) -> ToolResult[ExampleResult]:
+        del context
         return ToolResult(message="msg", value=ExampleResult(message="msg"))
 
     with pytest.raises(PromptValidationError) as error_info:
@@ -174,7 +178,8 @@ def test_tool_rejects_non_dataclass_params_generic() -> None:
 
 
 def test_tool_rejects_non_dataclass_result_generic() -> None:
-    def handler(params: ExampleParams) -> ToolResult[str]:
+    def handler(params: ExampleParams, *, context: ToolContext) -> ToolResult[str]:
+        del context
         return ToolResult(message=params.message, value=params.message)
 
     with pytest.raises(PromptValidationError) as error_info:
@@ -204,10 +209,17 @@ def test_tool_rejects_handler_when_not_callable() -> None:
 
 
 def test_tool_rejects_handler_missing_param_annotation() -> None:
-    def handler(params):  # type: ignore[no-untyped-def]  # noqa: ANN001,ANN202
+    def handler(
+        params: ExampleParams,
+        *,
+        context: ToolContext,
+    ) -> ToolResult[ExampleResult]:
+        del context
         return ToolResult(
             message=params.message, value=ExampleResult(message=params.message)
         )
+
+    del handler.__annotations__["params"]
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, ExampleResult](
@@ -222,7 +234,8 @@ def test_tool_rejects_handler_missing_param_annotation() -> None:
 
 
 def test_tool_rejects_handler_with_wrong_param_annotation() -> None:
-    def handler(params: str) -> ToolResult[ExampleResult]:
+    def handler(params: str, *, context: ToolContext) -> ToolResult[ExampleResult]:
+        del context
         return ToolResult(message=params, value=ExampleResult(message=params))
 
     with pytest.raises(PromptValidationError) as error_info:
@@ -239,12 +252,53 @@ def test_tool_rejects_handler_with_wrong_param_annotation() -> None:
 
 def test_tool_rejects_handler_with_multiple_params() -> None:
     def handler(
-        first: ExampleParams, second: ExampleParams
+        first: ExampleParams,
+        second: ExampleParams,
+        *,
+        context: ToolContext,
     ) -> ToolResult[ExampleResult]:
+        del context
         combined = first.message + second.message
         return ToolResult(message=combined, value=ExampleResult(message=combined))
 
-    handler(ExampleParams(message="a"), ExampleParams(message="b"))
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, ExampleResult](
+            name="lookup_entity",
+            description="Fetch info",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "handler"
+
+
+def test_tool_rejects_handler_missing_context_parameter() -> None:
+    def handler(params: ExampleParams) -> ToolResult[ExampleResult]:
+        return ToolResult(
+            message=params.message, value=ExampleResult(message=params.message)
+        )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, ExampleResult](
+            name="lookup_entity",
+            description="Fetch info",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "handler"
+
+
+def test_tool_rejects_handler_with_positional_context_parameter() -> None:
+    def handler(
+        params: ExampleParams, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        del context
+        return ToolResult(
+            message=params.message, value=ExampleResult(message=params.message)
+        )
 
     with pytest.raises(PromptValidationError) as error_info:
         Tool[ExampleParams, ExampleResult](
@@ -259,7 +313,54 @@ def test_tool_rejects_handler_with_multiple_params() -> None:
 
 
 def test_tool_rejects_handler_with_keyword_only_param() -> None:
-    def handler(*, params: ExampleParams) -> ToolResult[ExampleResult]:
+    def handler(
+        *, params: ExampleParams, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        del context
+        return ToolResult(
+            message=params.message, value=ExampleResult(message=params.message)
+        )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, ExampleResult](
+            name="lookup_entity",
+            description="Fetch info",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "handler"
+
+
+def test_tool_rejects_handler_with_context_default() -> None:
+    def handler(
+        params: ExampleParams,
+        *,
+        context: ToolContext = None,  # type: ignore[assignment]
+    ) -> ToolResult[ExampleResult]:
+        del context
+        return ToolResult(
+            message=params.message, value=ExampleResult(message=params.message)
+        )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, ExampleResult](
+            name="lookup_entity",
+            description="Fetch info",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "handler"
+
+
+def test_tool_rejects_handler_with_wrong_context_name() -> None:
+    def handler(
+        params: ExampleParams, *, ctx: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        del ctx
         return ToolResult(
             message=params.message, value=ExampleResult(message=params.message)
         )
@@ -279,7 +380,10 @@ def test_tool_rejects_handler_with_keyword_only_param() -> None:
 def test_tool_accepts_annotated_param_and_return() -> None:
     def handler(
         params: Annotated[ExampleParams, "meta"],
+        *,
+        context: Annotated[ToolContext, "meta"],
     ) -> Annotated[ToolResult[ExampleResult], "meta"]:
+        del context
         return ToolResult(
             message=params.message, value=ExampleResult(message=params.message)
         )
@@ -294,7 +398,8 @@ def test_tool_accepts_annotated_param_and_return() -> None:
 
 
 def test_tool_rejects_handler_missing_return_annotation() -> None:
-    def handler(params: ExampleParams):  # type: ignore[no-untyped-def]  # noqa: ANN202
+    def handler(params: ExampleParams, *, context: ToolContext):  # type: ignore[no-untyped-def]  # noqa: ANN202
+        del context
         return ToolResult(
             message=params.message, value=ExampleResult(message=params.message)
         )
@@ -311,12 +416,53 @@ def test_tool_rejects_handler_missing_return_annotation() -> None:
     assert error.placeholder == "return"
 
 
+def test_tool_rejects_handler_missing_context_annotation() -> None:
+    def handler(params: ExampleParams, *, context) -> ToolResult[ExampleResult]:  # type: ignore[no-untyped-def]  # noqa: ANN001
+        del context
+        return ToolResult(
+            message=params.message, value=ExampleResult(message=params.message)
+        )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, ExampleResult](
+            name="lookup_entity",
+            description="Fetch info",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "handler"
+
+
+def test_tool_rejects_handler_with_wrong_context_annotation() -> None:
+    def handler(params: ExampleParams, *, context: object) -> ToolResult[ExampleResult]:
+        del context
+        return ToolResult(
+            message=params.message, value=ExampleResult(message=params.message)
+        )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, ExampleResult](
+            name="lookup_entity",
+            description="Fetch info",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "handler"
+
+
 def test_tool_handler_type_hint_fallback_handles_name_errors() -> None:
     if TYPE_CHECKING:
 
         class MissingType: ...
 
-    def handler(params: MissingType) -> ToolResult[ExampleResult]:  # type: ignore[name-defined]
+    def handler(
+        params: MissingType, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:  # type: ignore[name-defined]
+        del context
         return ToolResult(message="oops", value=ExampleResult(message="oops"))
 
     with pytest.raises(PromptValidationError) as error_info:
@@ -332,7 +478,8 @@ def test_tool_handler_type_hint_fallback_handles_name_errors() -> None:
 
 
 def test_tool_rejects_handler_with_wrong_return_annotation() -> None:
-    def handler(params: ExampleParams) -> ToolResult[str]:
+    def handler(params: ExampleParams, *, context: ToolContext) -> ToolResult[str]:
+        del context
         return ToolResult(message=params.message, value=params.message)
 
     with pytest.raises(PromptValidationError) as error_info:

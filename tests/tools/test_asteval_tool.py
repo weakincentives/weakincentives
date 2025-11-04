@@ -208,11 +208,13 @@ def test_helper_write_appends() -> None:
 
 
 def test_invalid_globals_raise() -> None:
-    _session, _bus, _vfs_section, tool = _setup_sections()
+    _session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
-        tool.handler(  # type: ignore[reportOptionalCall]
-            EvalParams(code="0", globals={"bad": "not json"})
+        invoke_tool(
+            bus,
+            tool,
+            EvalParams(code="0", globals={"bad": "not json"}),
         )
 
 

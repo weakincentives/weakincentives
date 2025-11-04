@@ -33,7 +33,7 @@ from typing import Final, Literal, Protocol, TextIO, cast
 
 from ..logging import StructuredLogger, get_logger
 from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..session import ReducerEvent, Session, select_latest
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
@@ -475,7 +475,10 @@ class _AstevalToolSuite:
         super().__init__()
         self._session = session
 
-    def run(self, params: EvalParams) -> ToolResult[EvalResult]:
+    def run(
+        self, params: EvalParams, *, context: ToolContext
+    ) -> ToolResult[EvalResult]:
+        del context
         code = _normalize_code(params.code)
         mode = params.mode
         if mode not in {"expr", "statements"}:

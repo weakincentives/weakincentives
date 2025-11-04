@@ -213,11 +213,12 @@ def test_write_file_rejects_invalid_path(monkeypatch: pytest.MonkeyPatch) -> Non
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "vfs_write_file")
-    handler = write_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(WriteFile(path=VfsPath(("/etc", "passwd")), content="x"))
+        invoke_tool(
+            bus,
+            write_tool,
+            WriteFile(path=VfsPath(("/etc", "passwd")), content="x"),
+        )
 
 
 def test_host_mount_materialises_files(
@@ -272,11 +273,8 @@ def test_delete_requires_existing_path(monkeypatch: pytest.MonkeyPatch) -> None:
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     delete_tool = find_tool(section, "vfs_delete_entry")
-    handler = delete_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(DeleteEntry(path=VfsPath(("missing",))))
+        invoke_tool(bus, delete_tool, DeleteEntry(path=VfsPath(("missing",))))
 
 
 def test_delete_rejects_subpath_without_match(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -295,10 +293,12 @@ def test_delete_rejects_subpath_without_match(monkeypatch: pytest.MonkeyPatch) -
         WriteFile(path=VfsPath(("logs", "events.log")), content="start"),
     )
 
-    handler = delete_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(DeleteEntry(path=VfsPath(("logs", "events.log", "old"))))
+        invoke_tool(
+            bus,
+            delete_tool,
+            DeleteEntry(path=VfsPath(("logs", "events.log", "old"))),
+        )
 
 
 def test_list_directory_rejects_file_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -317,10 +317,12 @@ def test_list_directory_rejects_file_path(monkeypatch: pytest.MonkeyPatch) -> No
         WriteFile(path=VfsPath(("src", "module.py")), content="print('hi')"),
     )
 
-    handler = list_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(ListDirectory(path=VfsPath(("src", "module.py"))))
+        invoke_tool(
+            bus,
+            list_tool,
+            ListDirectory(path=VfsPath(("src", "module.py"))),
+        )
 
 
 def test_list_directory_defaults_to_root(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -383,11 +385,8 @@ def test_read_file_requires_existing_path(monkeypatch: pytest.MonkeyPatch) -> No
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     read_tool = find_tool(section, "vfs_read_file")
-    handler = read_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(ReadFile(path=VfsPath(("missing.txt",))))
+        invoke_tool(bus, read_tool, ReadFile(path=VfsPath(("missing.txt",))))
 
 
 def test_write_file_rejects_non_utf8_encoding(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -398,16 +397,15 @@ def test_write_file_rejects_non_utf8_encoding(monkeypatch: pytest.MonkeyPatch) -
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "vfs_write_file")
-    handler = write_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(
+        invoke_tool(
+            bus,
+            write_tool,
             WriteFile(
                 path=VfsPath(("README.md",)),
                 content="hello",
                 encoding="latin-1",  # type: ignore[arg-type]
-            )
+            ),
         )
 
 
@@ -451,10 +449,12 @@ def test_write_file_duplicate_create(monkeypatch: pytest.MonkeyPatch) -> None:
         WriteFile(path=VfsPath(("config.yaml",)), content="first"),
     )
 
-    handler = write_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(WriteFile(path=VfsPath(("config.yaml",)), content="second"))
+        invoke_tool(
+            bus,
+            write_tool,
+            WriteFile(path=VfsPath(("config.yaml",)), content="second"),
+        )
 
 
 def test_write_file_requires_existing_for_overwrite(
@@ -467,16 +467,15 @@ def test_write_file_requires_existing_for_overwrite(
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "vfs_write_file")
-    handler = write_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(
+        invoke_tool(
+            bus,
+            write_tool,
             WriteFile(
                 path=VfsPath(("config.yaml",)),
                 content="value",
                 mode="overwrite",
-            )
+            ),
         )
 
 
@@ -488,11 +487,12 @@ def test_write_file_limits_content_length(monkeypatch: pytest.MonkeyPatch) -> No
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "vfs_write_file")
-    handler = write_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(WriteFile(path=VfsPath(("large.txt",)), content="x" * 48_001))
+        invoke_tool(
+            bus,
+            write_tool,
+            WriteFile(path=VfsPath(("large.txt",)), content="x" * 48_001),
+        )
 
 
 def test_write_file_requires_nonempty_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -503,11 +503,8 @@ def test_write_file_requires_nonempty_path(monkeypatch: pytest.MonkeyPatch) -> N
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "vfs_write_file")
-    handler = write_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(WriteFile(path=VfsPath(()), content="body"))
+        invoke_tool(bus, write_tool, WriteFile(path=VfsPath(()), content="body"))
 
 
 def test_path_depth_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -518,12 +515,13 @@ def test_path_depth_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "vfs_write_file")
-    handler = write_tool.handler
-    assert handler is not None
-
     deep_path = tuple(f"segment{i}" for i in range(17))
     with pytest.raises(ToolValidationError):
-        handler(WriteFile(path=VfsPath(deep_path), content="body"))
+        invoke_tool(
+            bus,
+            write_tool,
+            WriteFile(path=VfsPath(deep_path), content="body"),
+        )
 
 
 def test_path_normalization_collapses_duplicate_slashes(
@@ -556,11 +554,12 @@ def test_path_rejects_dot_segments(monkeypatch: pytest.MonkeyPatch) -> None:
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "vfs_write_file")
-    handler = write_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(WriteFile(path=VfsPath((".", "file.txt")), content="body"))
+        invoke_tool(
+            bus,
+            write_tool,
+            WriteFile(path=VfsPath((".", "file.txt")), content="body"),
+        )
 
 
 def test_path_segment_length_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -571,11 +570,12 @@ def test_path_segment_length_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "vfs_write_file")
-    handler = write_tool.handler
-    assert handler is not None
-
     with pytest.raises(ToolValidationError):
-        handler(WriteFile(path=VfsPath(("a" * 81,)), content="body"))
+        invoke_tool(
+            bus,
+            write_tool,
+            WriteFile(path=VfsPath(("a" * 81,)), content="body"),
+        )
 
 
 def test_path_normalization_ignores_blank_segments(

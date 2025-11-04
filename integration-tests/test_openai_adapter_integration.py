@@ -22,7 +22,7 @@ import pytest
 
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.events import NullEventBus
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
+from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
 
 pytest.importorskip("openai")
 
@@ -115,7 +115,10 @@ def _build_greeting_prompt() -> Prompt[object]:
 
 
 def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
-    def uppercase_tool(params: TransformRequest) -> ToolResult[TransformResult]:
+    def uppercase_tool(
+        params: TransformRequest, *, context: ToolContext
+    ) -> ToolResult[TransformResult]:
+        del context
         transformed = params.text.upper()
         message = f"Transformed '{params.text}' to uppercase."
         return ToolResult(message=message, value=TransformResult(text=transformed))

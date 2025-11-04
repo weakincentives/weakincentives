@@ -108,14 +108,12 @@ def test_setup_plan_rejects_invalid_objective() -> None:
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
 
-    handler = setup_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(SetupPlan(objective="   "))
+        invoke_tool(bus, setup_tool, SetupPlan(objective="   "))
 
     long_objective = "x" * 241
     with pytest.raises(ToolValidationError):
-        handler(SetupPlan(objective=long_objective))
+        invoke_tool(bus, setup_tool, SetupPlan(objective=long_objective))
 
 
 def test_add_step_requires_existing_plan() -> None:
@@ -125,9 +123,11 @@ def test_add_step_requires_existing_plan() -> None:
     add_tool = find_tool(section, "planning_add_step")
 
     with pytest.raises(ToolValidationError):
-        handler = add_tool.handler
-        assert handler is not None
-        handler(AddStep(steps=(NewPlanStep(title="task"),)))
+        invoke_tool(
+            bus,
+            add_tool,
+            AddStep(steps=(NewPlanStep(title="task"),)),
+        )
 
 
 def test_add_step_appends_new_steps() -> None:
@@ -168,10 +168,8 @@ def test_add_step_rejects_empty_payload() -> None:
 
     invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
 
-    handler = add_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(AddStep(steps=()))
+        invoke_tool(bus, add_tool, AddStep(steps=()))
 
 
 def test_add_step_rejects_when_plan_not_active() -> None:
@@ -189,10 +187,12 @@ def test_add_step_rejects_when_plan_not_active() -> None:
     )
     invoke_tool(bus, mark_tool, MarkStep(step_id="S001", status="done"))
 
-    handler = add_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(AddStep(steps=(NewPlanStep(title="later"),)))
+        invoke_tool(
+            bus,
+            add_tool,
+            AddStep(steps=(NewPlanStep(title="later"),)),
+        )
 
 
 def test_session_keeps_single_plan_snapshot() -> None:
@@ -222,10 +222,8 @@ def test_update_step_rejects_empty_patch() -> None:
 
     invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
 
-    handler = update_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(UpdateStep(step_id="S001"))
+        invoke_tool(bus, update_tool, UpdateStep(step_id="S001"))
 
 
 def test_update_step_updates_existing_step() -> None:
@@ -275,10 +273,12 @@ def test_update_step_requires_step_identifier() -> None:
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
     )
 
-    handler = update_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(UpdateStep(step_id="  ", title="rename"))
+        invoke_tool(
+            bus,
+            update_tool,
+            UpdateStep(step_id="  ", title="rename"),
+        )
 
 
 def test_update_step_rejects_unknown_identifier() -> None:
@@ -294,10 +294,12 @@ def test_update_step_rejects_unknown_identifier() -> None:
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
     )
 
-    handler = update_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(UpdateStep(step_id="S999", title="rename"))
+        invoke_tool(
+            bus,
+            update_tool,
+            UpdateStep(step_id="S999", title="rename"),
+        )
 
 
 def test_mark_step_appends_note_and_updates_status() -> None:
@@ -384,10 +386,8 @@ def test_mark_step_rejects_abandoned_plan() -> None:
     )
     invoke_tool(bus, clear_tool, ClearPlan())
 
-    handler = mark_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(MarkStep(step_id="S001", status="done"))
+        invoke_tool(bus, mark_tool, MarkStep(step_id="S001", status="done"))
 
 
 def test_mark_step_requires_identifier() -> None:
@@ -403,10 +403,8 @@ def test_mark_step_requires_identifier() -> None:
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
     )
 
-    handler = mark_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(MarkStep(step_id="  ", status="done"))
+        invoke_tool(bus, mark_tool, MarkStep(step_id="  ", status="done"))
 
 
 def test_mark_step_rejects_empty_note() -> None:
@@ -422,10 +420,12 @@ def test_mark_step_rejects_empty_note() -> None:
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
     )
 
-    handler = mark_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(MarkStep(step_id="S001", status="done", note="   "))
+        invoke_tool(
+            bus,
+            mark_tool,
+            MarkStep(step_id="S001", status="done", note="   "),
+        )
 
 
 def test_mark_step_rejects_overlong_note() -> None:
@@ -441,10 +441,12 @@ def test_mark_step_rejects_overlong_note() -> None:
         SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
     )
 
-    handler = mark_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(MarkStep(step_id="S001", status="done", note="x" * 513))
+        invoke_tool(
+            bus,
+            mark_tool,
+            MarkStep(step_id="S001", status="done", note="x" * 513),
+        )
 
 
 def test_clear_plan_marks_status_abandoned() -> None:
@@ -473,10 +475,8 @@ def test_clear_plan_rejects_when_already_abandoned() -> None:
     invoke_tool(bus, setup_tool, SetupPlan(objective="ship", initial_steps=()))
     invoke_tool(bus, clear_tool, ClearPlan())
 
-    handler = clear_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(ClearPlan())
+        invoke_tool(bus, clear_tool, ClearPlan())
 
 
 def test_read_plan_returns_snapshot() -> None:
@@ -506,10 +506,8 @@ def test_read_plan_requires_existing_plan() -> None:
     section = PlanningToolsSection(session=session)
     read_tool = find_tool(section, "planning_read_plan")
 
-    handler = read_tool.handler
-    assert handler is not None
     with pytest.raises(ToolValidationError):
-        handler(ReadPlan())
+        invoke_tool(bus, read_tool, ReadPlan())
 
 
 def test_read_plan_reports_empty_steps() -> None:

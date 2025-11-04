@@ -19,7 +19,7 @@ import pytest
 
 from weakincentives.prompt.markdown import MarkdownSection
 from weakincentives.prompt.section import Section
-from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 
 
 @dataclass
@@ -57,7 +57,8 @@ class _BareSection(Section[SectionParams]):
         return ""
 
 
-def _handler(params: ToolParams) -> ToolResult[ToolPayload]:
+def _handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+    del context
     return ToolResult(message=params.name, value=ToolPayload(message=params.name))
 
 

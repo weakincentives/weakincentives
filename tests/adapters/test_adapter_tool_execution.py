@@ -46,7 +46,14 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     )
 
 from weakincentives.events import InProcessEventBus, ToolInvoked
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolResult
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    Tool,
+    ToolContext,
+    ToolHandler,
+    ToolResult,
+)
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.session import ReducerEvent, Session, replace_latest, select_latest
 from weakincentives.tools import ToolValidationError
@@ -136,16 +143,19 @@ def _second_tool_message(requests: list[dict[str, object]]) -> dict[str, object]
 
 
 def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None:
-    def handler(params: ToolParams) -> ToolResult[ToolPayload]:
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context
         return ToolResult(
             message="completed",
             value=ToolPayload(answer=params.query),
         )
 
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
-        handler=handler,
+        handler=tool_handler,
     )
     prompt = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
@@ -186,13 +196,16 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
 def test_adapter_tool_execution_validation_error(
     adapter_harness: AdapterHarness,
 ) -> None:
-    def handler(_: ToolParams) -> ToolResult[ToolPayload]:
+    def handler(_: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context
         raise ToolValidationError("invalid query")
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
-        handler=handler,
+        handler=tool_handler,
     )
     prompt = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
@@ -235,13 +248,16 @@ def test_adapter_tool_execution_validation_error(
 def test_adapter_tool_execution_unexpected_exception(
     adapter_harness: AdapterHarness,
 ) -> None:
-    def handler(_: ToolParams) -> ToolResult[ToolPayload]:
+    def handler(_: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context
         raise RuntimeError("handler crash")
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
-        handler=handler,
+        handler=tool_handler,
     )
     prompt = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
@@ -286,16 +302,19 @@ def test_adapter_tool_execution_rolls_back_session(
     adapter_harness: AdapterHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def handler(params: ToolParams) -> ToolResult[ToolPayload]:
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context
         return ToolResult(
             message="completed",
             value=ToolPayload(answer=params.query),
         )
 
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
-        handler=handler,
+        handler=tool_handler,
     )
     prompt = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(

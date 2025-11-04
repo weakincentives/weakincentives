@@ -34,7 +34,8 @@ from .markdown import MarkdownSection
 from .prompt import Prompt
 from .section import Section
 from .structured_output import OutputParseError, parse_structured_output
-from .tool import Tool, ToolResult
+from .tool import Tool, ToolContext, ToolHandler
+from .tool_result import ToolResult
 
 __all__ = [
     "DelegationPrompt",
@@ -54,6 +55,8 @@ __all__ = [
     "SectionPath",
     "SupportsDataclass",
     "Tool",
+    "ToolContext",
+    "ToolHandler",
     "ToolResult",
     "parse_structured_output",
 ]

@@ -16,22 +16,50 @@ import inspect
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, is_dataclass
-from typing import Annotated, Any, Final, cast, get_args, get_origin, get_type_hints
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Final,
+    Protocol,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from ._types import SupportsDataclass
 from .errors import PromptValidationError
+from .tool_result import ToolResult
 
 _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 
-@dataclass(slots=True)
-class ToolResult[ResultValueT]:
-    """Structured response emitted by a tool handler."""
+if TYPE_CHECKING:
+    from ..events._types import EventBus
 
-    message: str
-    value: ResultValueT | None
-    success: bool = True
-    exclude_value_from_context: bool = False
+ParamsT_contra = TypeVar("ParamsT_contra", bound=SupportsDataclass, contravariant=True)
+ResultT_co = TypeVar("ResultT_co", bound=SupportsDataclass)
+
+
+@dataclass(slots=True, frozen=True)
+class ToolContext:
+    """Immutable container exposing prompt execution state to handlers."""
+
+    prompt: Any
+    rendered_prompt: Any
+    adapter: Any
+    session: Any
+    event_bus: EventBus
+
+
+class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
+    """Callable protocol implemented by tool handlers."""
+
+    def __call__(
+        self, params: ParamsT_contra, *, context: ToolContext
+    ) -> ToolResult[ResultT_co]: ...
 
 
 @dataclass(slots=True)
@@ -40,7 +68,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
 
     name: str
     description: str
-    handler: Callable[[ParamsT], ToolResult[ResultT]] | None
+    handler: ToolHandler[ParamsT, ResultT] | None
     params_type: type[Any] = field(init=False, repr=False)
     result_type: type[Any] = field(init=False, repr=False)
     accepts_overrides: bool = True
@@ -141,24 +169,45 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
                 placeholder="handler",
             )
 
-        callable_handler = cast(Callable[[ParamsT], ToolResult[ResultT]], handler)
+        callable_handler = cast(Callable[..., ToolResult[ResultT]], handler)
         signature = inspect.signature(callable_handler)
         parameters = list(signature.parameters.values())
 
-        if len(parameters) != 1:
+        if len(parameters) != 2:
             raise PromptValidationError(
-                "Tool handler must accept exactly one argument.",
+                "Tool handler must accept exactly one positional argument and the keyword-only 'context' parameter.",
                 dataclass_type=params_type,
                 placeholder="handler",
             )
 
         parameter = parameters[0]
+        context_parameter = parameters[1]
+
         if parameter.kind not in (
             inspect.Parameter.POSITIONAL_ONLY,
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
         ):
             raise PromptValidationError(
                 "Tool handler parameter must be positional.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+
+        if context_parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
+            raise PromptValidationError(
+                "Tool handler must declare a keyword-only 'context' parameter.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+        if context_parameter.default is not inspect.Signature.empty:
+            raise PromptValidationError(
+                "Tool handler 'context' parameter must not define a default value.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+        if context_parameter.name != "context":
+            raise PromptValidationError(
+                "Tool handler must name the keyword-only context parameter 'context'.",
                 dataclass_type=params_type,
                 placeholder="handler",
             )
@@ -180,6 +229,24 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
         if annotation is not params_type:
             raise PromptValidationError(
                 "Tool handler parameter annotation must match ParamsT.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+
+        context_annotation = hints.get(
+            context_parameter.name, context_parameter.annotation
+        )
+        if context_annotation is inspect.Parameter.empty:
+            raise PromptValidationError(
+                "Tool handler must annotate the 'context' parameter with ToolContext.",
+                dataclass_type=params_type,
+                placeholder="handler",
+            )
+        if get_origin(context_annotation) is Annotated:
+            context_annotation = get_args(context_annotation)[0]
+        if context_annotation is not ToolContext:
+            raise PromptValidationError(
+                "Tool handler 'context' annotation must be ToolContext.",
                 dataclass_type=params_type,
                 placeholder="handler",
             )
@@ -240,4 +307,4 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
         )
 
 
-__all__ = ["Tool", "ToolResult"]
+__all__ = ["Tool", "ToolContext", "ToolHandler", "ToolResult"]

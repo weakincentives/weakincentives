@@ -40,6 +40,7 @@ from .shared import (
 )
 
 if TYPE_CHECKING:
+    from ..adapters.core import ProviderAdapter
     from ..session.session import Session
 
 _ERROR_MESSAGE: Final[str] = (
@@ -190,6 +191,8 @@ class LiteLLMAdapter:
 
         return run_conversation(
             adapter_name="litellm",
+            adapter=cast("ProviderAdapter[OutputT]", self),
+            prompt=prompt,
             prompt_name=prompt_name,
             rendered=rendered,
             initial_messages=[{"role": "system", "content": rendered.text}],
