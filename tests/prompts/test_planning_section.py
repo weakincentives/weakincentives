@@ -15,23 +15,32 @@
 from __future__ import annotations
 
 from weakincentives.session import Session
-from weakincentives.tools import PlanningToolsSection
+from weakincentives.tools import PlanningStrategy, PlanningToolsSection
 
 
-def test_planning_section_renders_instructions() -> None:
+def _render_section(strategy: PlanningStrategy | None = None) -> str:
     session = Session()
-    section = PlanningToolsSection(session=session)
+    if strategy is None:
+        section = PlanningToolsSection(session=session)
+    else:
+        section = PlanningToolsSection(session=session, strategy=strategy)
 
     params = section.default_params
     assert params is not None
 
-    body = section.render(params, depth=0)
+    return section.render(params, depth=0)
+
+
+def test_planning_section_renders_instructions() -> None:
+    body = _render_section()
 
     assert "planning_setup_plan" in body
     assert "planning_read_plan" in body
     assert "Stay brief" in body
     assert "multi-step" in body
 
+    session = Session()
+    section = PlanningToolsSection(session=session)
     tool_names = tuple(tool.name for tool in section.tools())
     assert tool_names == (
         "planning_setup_plan",
@@ -41,3 +50,39 @@ def test_planning_section_renders_instructions() -> None:
         "planning_clear_plan",
         "planning_read_plan",
     )
+
+
+def test_planning_section_default_strategy_matches_react() -> None:
+    default_body = _render_section()
+    react_body = _render_section(PlanningStrategy.REACT)
+
+    assert default_body == react_body
+
+
+def test_plan_act_reflect_strategy_injects_guidance() -> None:
+    body = _render_section(PlanningStrategy.PLAN_ACT_REFLECT)
+
+    assert "plan-act-reflect" in body
+    assert "append a brief reflection" in body
+
+
+def test_goal_decompose_route_synthesise_strategy_injects_guidance() -> None:
+    body = _render_section(PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE)
+
+    assert "restating the goal" in body
+    assert "Break the goal into concrete sub-problems" in body
+    assert "synthesise the results" in body
+
+
+def test_planning_section_original_body_template_tracks_strategy() -> None:
+    session = Session()
+    par_section = PlanningToolsSection(
+        session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT
+    )
+    assert "plan-act-reflect" in par_section.original_body_template()
+
+    goal_section = PlanningToolsSection(
+        session=Session(),
+        strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
+    )
+    assert "restating the goal" in goal_section.original_body_template()

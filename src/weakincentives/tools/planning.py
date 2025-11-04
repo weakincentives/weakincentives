@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Final, Literal, cast
+from enum import Enum
+from typing import Final, Literal, cast, override
 
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
@@ -98,21 +99,56 @@ _MAX_TITLE_LENGTH: Final[int] = 160
 _MAX_DETAIL_LENGTH: Final[int] = 512
 _STEP_ID_PREFIX: Final[str] = "S"
 
-_PLANNING_SECTION_TEMPLATE: Final[str] = (
+
+class PlanningStrategy(Enum):
+    """Predefined guidance templates for the planning section."""
+
+    REACT = "react"
+    PLAN_ACT_REFLECT = "plan_act_reflect"
+    GOAL_DECOMPOSE_ROUTE_SYNTHESISE = "goal_decompose_route_synthesise"
+
+
+_PLANNING_SECTION_HEADER: Final[str] = (
     "Use planning tools for multi-step or stateful work that requires an"
     " execution plan.\n"
+)
+_PLANNING_SECTION_BODY: Final[str] = (
     "- Start with `planning_setup_plan` to set an objective (<=240 ASCII"
     " characters) and optional initial steps.\n"
     "- Keep steps concise (<=160 ASCII characters for titles, <=512 for"
     " details).\n"
     "- Extend plans with `planning_add_step` and refine steps with"
     " `planning_update_step`.\n"
-    "- Track progress via `planning_mark_step` (pending, in_progress,"
+    "- Track progress via `planning_mark_step` (pending, in_progress,\n"
     " blocked, done).\n"
     "- Inspect the latest plan using `planning_read_plan`.\n"
     "- Use `planning_clear_plan` only when abandoning the objective.\n"
     "Stay brief, ASCII-only, and skip planning for trivial single-step tasks."
 )
+
+
+def _template_for_strategy(strategy: PlanningStrategy) -> str:
+    guidance_map: dict[PlanningStrategy, str] = {
+        PlanningStrategy.REACT: "",
+        PlanningStrategy.PLAN_ACT_REFLECT: (
+            "Follow a plan-act-reflect rhythm: outline the entire plan before"
+            " executing any tools, then work through the steps.\n"
+            "After each tool call or completed step, append a brief reflection"
+            " as plan notes or status updates so progress stays visible.\n"
+        ),
+        PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE: (
+            "Begin by restating the goal in your own words to ensure the"
+            " objective is clear.\n"
+            "Break the goal into concrete sub-problems before routing tools to"
+            " each one, and record the routing in the plan steps.\n"
+            "When every tool has run, synthesise the results into a cohesive"
+            " answer and update the plan status as part of that synthesis.\n"
+        ),
+    }
+    guidance = guidance_map[strategy]
+    if not guidance:
+        return f"{_PLANNING_SECTION_HEADER}{_PLANNING_SECTION_BODY}"
+    return f"{_PLANNING_SECTION_HEADER}{guidance}{_PLANNING_SECTION_BODY}"
 
 
 class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
@@ -122,9 +158,11 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         self,
         *,
         session: Session,
+        strategy: PlanningStrategy = PlanningStrategy.REACT,
         accepts_overrides: bool = False,
     ) -> None:
         self._session = session
+        self._strategy = strategy
         session.register_reducer(Plan, replace_latest)
         session.register_reducer(SetupPlan, _setup_plan_reducer, slice_type=Plan)
         session.register_reducer(AddStep, _add_step_reducer, slice_type=Plan)
@@ -136,11 +174,20 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         super().__init__(
             title="Planning Tools",
             key="planning.tools",
-            template=_PLANNING_SECTION_TEMPLATE,
+            template=_template_for_strategy(strategy),
             default_params=_PlanningSectionParams(),
             tools=tools,
             accepts_overrides=accepts_overrides,
         )
+
+    @override
+    def render(self, params: _PlanningSectionParams, depth: int) -> str:
+        template = _template_for_strategy(self._strategy)
+        return self.render_with_template(template, params, depth)
+
+    @override
+    def original_body_template(self) -> str:
+        return _template_for_strategy(self._strategy)
 
 
 def _build_tools(
