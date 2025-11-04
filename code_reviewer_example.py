@@ -340,7 +340,6 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         strategy=PlanningStrategy.PLAN_ACT_REFLECT,
     )
     vfs_section = VfsToolsSection(
-        session=session,
         mounts=(
             HostMount(
                 host_path="sunfish",

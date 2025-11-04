@@ -17,14 +17,14 @@ copy-on-write, start empty automatically, and disappear when the session ends; n
 
 ## Session Integration
 
-- `VfsToolsSection` requires a `Session` from `weakincentives.session`.
-- During initialisation the section registers `replace_latest` for the `VirtualFileSystem` slice so every tool write
-  publishes a fresh snapshot. A missing snapshot implicitly resolves to an empty filesystem.
+- `VfsToolsSection` resolves the active `Session` from the `ToolContext` passed to each tool handler.
+- The section initialises reducers lazily the first time it encounters a session: it registers `replace_latest` for the
+  `VirtualFileSystem` slice, installs the write/delete reducers, and seeds the slice with the mount snapshot.
 - Reducers always clone the current `VirtualFileSystem` before applying changes to keep snapshots immutable to callers.
 - Orchestrators retrieve the active snapshot with `select_latest(session, VirtualFileSystem)` and should treat `None`
   as an empty filesystem until the first write occurs.
-- Host folder mounts configured on the section are materialised exactly once during initialisation and merged into the
-  empty snapshot before the first tool call executes.
+- Host folder mounts configured on the section are materialised when the section is constructed and merged into the
+  initial snapshot for every session during lazy initialisation.
 - Tool handlers run normalization and validation outside the reducer, returning informative status messages alongside
   the params dataclass used for the update.
 
@@ -181,7 +181,6 @@ prompt = Prompt(
             template="Use the virtual filesystem to stage edits before applying them to the host workspace.",
         ),
         vfs.VfsToolsSection(
-            session=session,
             mounts=(
                 vfs.HostMount(
                     host_path="docs/",
@@ -194,7 +193,8 @@ prompt = Prompt(
 )
 
 rendered = prompt.render(None)
-snapshot = select_latest(session, vfs.VirtualFileSystem)
+# Snapshots appear after the first tool invocation; select_latest returns None
+# until a handler observes the session.
 ```
 
 Host mounts are optional; omit the `mounts` argument to start from an entirely empty virtual filesystem.

@@ -33,6 +33,8 @@ from weakincentives.tools import (
     EvalParams,
     EvalResult,
     HostMount,
+    ListDirectory,
+    ListDirectoryResult,
     ToolValidationError,
     VfsPath,
     VfsToolsSection,
@@ -75,7 +77,7 @@ def _setup_sections() -> tuple[
 ]:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    vfs_section = VfsToolsSection(session=session)
+    vfs_section = VfsToolsSection()
     section = AstevalSection(session=session)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
     return session, bus, vfs_section, tool
@@ -149,6 +151,7 @@ def test_statements_mode_reads_and_writes() -> None:
         bus,
         write_tool,
         WriteFile(path=VfsPath(("docs", "info.txt")), content="sample text"),
+        session=session,
     )
 
     params = EvalParams(
@@ -491,6 +494,7 @@ def test_create_mode_rejects_existing_file() -> None:
         bus,
         write_tool,
         WriteFile(path=existing_path, content="original"),
+        session=session,
     )
 
     result = invoke_tool(
@@ -545,6 +549,7 @@ def test_overwrite_updates_existing_file() -> None:
         bus,
         write_tool,
         WriteFile(path=path, content="old"),
+        session=session,
     )
 
     result = invoke_tool(
@@ -598,11 +603,15 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
 
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    VfsToolsSection(
-        session=session,
+    vfs_section = VfsToolsSection(
         mounts=(HostMount(host_path="sunfish", mount_path=VfsPath(("sunfish",))),),
         allowed_host_roots=(root,),
     )
+    list_tool = cast(
+        Tool[ListDirectory, ListDirectoryResult],
+        find_tool(vfs_section, "vfs_list_directory"),
+    )
+    invoke_tool(bus, list_tool, ListDirectory(), session=session)
     section = AstevalSection(session=session)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
@@ -676,13 +685,13 @@ def test_interpreter_error_surfaces_in_stderr() -> None:
 
 
 def test_write_text_conflict_with_read_path() -> None:
-    _session, bus, vfs_section, tool = _setup_sections()
+    session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
         Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
     )
     path = VfsPath(("docs", "info.txt"))
-    invoke_tool(bus, write_tool, WriteFile(path=path, content="seed"))
+    invoke_tool(bus, write_tool, WriteFile(path=path, content="seed"), session=session)
 
     params = EvalParams(
         code="write_text('docs/info.txt', 'data')",
