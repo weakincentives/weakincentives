@@ -191,6 +191,6 @@ No custom telemetry is required. The planning tools rely solely on the default `
 
 ## Documentation Tasks
 
-- Add `openai_example.py` demonstrating the typical flow using the openai adapter.
+- Ensure `code_reviewer_example.py` demonstrates the typical flow using the OpenAI adapter.
 - Update the README to reference the planning suite and link to this specification.
 - Generate API reference entries for all dataclasses and tool functions in `weakincentives.tools.planning`.
