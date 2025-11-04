@@ -134,6 +134,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         session: Session,
         mounts: Sequence[HostMount] = (),
         allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
+        accepts_overrides: bool = False,
     ) -> None:
         self._session = session
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
@@ -151,18 +152,24 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             slice_type=VirtualFileSystem,
         )
 
-        tools = _build_tools(session=session)
+        tools = _build_tools(
+            session=session,
+            accepts_overrides=accepts_overrides,
+        )
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
             template=_VFS_SECTION_TEMPLATE,
             default_params=_VfsSectionParams(),
             tools=tools,
+            accepts_overrides=accepts_overrides,
         )
 
 
 def _build_tools(
-    *, session: Session
+    *,
+    session: Session,
+    accepts_overrides: bool,
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
     suite = _VfsToolSuite(session=session)
     return cast(
@@ -172,21 +179,25 @@ def _build_tools(
                 name="vfs_list_directory",
                 description="Enumerate files and directories at a path.",
                 handler=suite.list_directory,
+                accepts_overrides=accepts_overrides,
             ),
             Tool[ReadFile, VfsFile](
                 name="vfs_read_file",
                 description="Read file contents and metadata.",
                 handler=suite.read_file,
+                accepts_overrides=accepts_overrides,
             ),
             Tool[WriteFile, WriteFile](
                 name="vfs_write_file",
                 description="Create or update a file in the virtual filesystem.",
                 handler=suite.write_file,
+                accepts_overrides=accepts_overrides,
             ),
             Tool[DeleteEntry, DeleteEntry](
                 name="vfs_delete_entry",
                 description="Delete a file or directory subtree.",
                 handler=suite.delete_entry,
+                accepts_overrides=accepts_overrides,
             ),
         ),
     )

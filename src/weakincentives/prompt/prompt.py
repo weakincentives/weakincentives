@@ -411,13 +411,21 @@ class Prompt[OutputT]:
             dict(param_lookup),
             inject_output_instructions=inject_output_instructions,
         ):
-            override_body = override_lookup.get(node.path)
+            override_body = (
+                override_lookup.get(node.path)
+                if getattr(node.section, "accepts_overrides", True)
+                else None
+            )
             rendered = self._render_section(node, section_params, override_body)
 
             section_tools = node.section.tools()
             if section_tools:
                 for tool in section_tools:
-                    override = tool_override_lookup.get(tool.name)
+                    override = (
+                        tool_override_lookup.get(tool.name)
+                        if tool.accepts_overrides
+                        else None
+                    )
                     patched_tool = tool
                     if override is not None:
                         if (

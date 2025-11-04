@@ -118,7 +118,12 @@ _PLANNING_SECTION_TEMPLATE: Final[str] = (
 class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
     """Prompt section exposing the planning tool suite."""
 
-    def __init__(self, *, session: Session) -> None:
+    def __init__(
+        self,
+        *,
+        session: Session,
+        accepts_overrides: bool = False,
+    ) -> None:
         self._session = session
         session.register_reducer(Plan, replace_latest)
         session.register_reducer(SetupPlan, _setup_plan_reducer, slice_type=Plan)
@@ -127,18 +132,21 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         session.register_reducer(MarkStep, _mark_step_reducer, slice_type=Plan)
         session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
 
-        tools = _build_tools(session)
+        tools = _build_tools(session, accepts_overrides=accepts_overrides)
         super().__init__(
             title="Planning Tools",
             key="planning.tools",
             template=_PLANNING_SECTION_TEMPLATE,
             default_params=_PlanningSectionParams(),
             tools=tools,
+            accepts_overrides=accepts_overrides,
         )
 
 
 def _build_tools(
     session: Session,
+    *,
+    accepts_overrides: bool,
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
     suite = _PlanningToolSuite(session)
     return cast(
@@ -148,31 +156,37 @@ def _build_tools(
                 name="planning_setup_plan",
                 description="Create or replace the session plan.",
                 handler=suite.setup_plan,
+                accepts_overrides=accepts_overrides,
             ),
             Tool[AddStep, AddStep](
                 name="planning_add_step",
                 description="Append one or more steps to the active plan.",
                 handler=suite.add_step,
+                accepts_overrides=accepts_overrides,
             ),
             Tool[UpdateStep, UpdateStep](
                 name="planning_update_step",
                 description="Edit the title or details for an existing step.",
                 handler=suite.update_step,
+                accepts_overrides=accepts_overrides,
             ),
             Tool[MarkStep, MarkStep](
                 name="planning_mark_step",
                 description="Update step status and optionally record a note.",
                 handler=suite.mark_step,
+                accepts_overrides=accepts_overrides,
             ),
             Tool[ClearPlan, ClearPlan](
                 name="planning_clear_plan",
                 description="Mark the current plan as abandoned.",
                 handler=suite.clear_plan,
+                accepts_overrides=accepts_overrides,
             ),
             Tool[ReadPlan, Plan](
                 name="planning_read_plan",
                 description="Return the latest plan snapshot.",
                 handler=suite.read_plan,
+                accepts_overrides=accepts_overrides,
             ),
         ),
     )

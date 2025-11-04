@@ -81,6 +81,31 @@ def _setup_sections() -> tuple[
     return session, bus, vfs_section, tool
 
 
+def test_asteval_section_disables_tool_overrides_by_default() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    section = AstevalSection(session=session)
+    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+
+    assert section.accepts_overrides is False
+    assert tool.accepts_overrides is False
+
+
+def test_asteval_section_override_flags_opt_in() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    section = AstevalSection(
+        session=session,
+        accepts_overrides=True,
+    )
+    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+
+    assert section.accepts_overrides is True
+    assert tool.accepts_overrides is True
+
+
 def test_expression_mode_success() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 

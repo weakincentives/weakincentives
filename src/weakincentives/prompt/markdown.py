@@ -36,6 +36,7 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         children: Sequence[object] | None = None,
         enabled: Callable[[ParamsT], bool] | None = None,
         tools: Sequence[object] | None = None,
+        accepts_overrides: bool = True,
     ) -> None:
         self.template = template
         super().__init__(
@@ -45,6 +46,7 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
             children=children,
             enabled=enabled,
             tools=tools,
+            accepts_overrides=accepts_overrides,
         )
 
     @override

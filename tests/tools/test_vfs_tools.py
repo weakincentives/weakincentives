@@ -915,5 +915,23 @@ def test_prompt_section_exposes_all_tools() -> None:
         "vfs_write_file",
         "vfs_delete_entry",
     }
+    assert all(tool.accepts_overrides is False for tool in section.tools())
     template = section.template
     assert "virtual filesystem starts empty" in template.lower()
+
+
+def test_vfs_tools_section_allows_selective_override_opt_in() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    section = VfsToolsSection(
+        session=session,
+        accepts_overrides=True,
+    )
+
+    read_tool = find_tool(section, "vfs_read_file")
+    list_tool = find_tool(section, "vfs_list_directory")
+
+    assert section.accepts_overrides is True
+    assert read_tool.accepts_overrides is True
+    assert list_tool.accepts_overrides is True

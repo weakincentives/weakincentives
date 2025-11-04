@@ -44,8 +44,14 @@ class _BareSection(Section[SectionParams]):
         title: str,
         key: str,
         tools: Sequence[object] | None = None,
+        accepts_overrides: bool = True,
     ) -> None:
-        super().__init__(title=title, key=key, tools=tools)
+        super().__init__(
+            title=title,
+            key=key,
+            tools=tools,
+            accepts_overrides=accepts_overrides,
+        )
 
     def render(self, params: SectionParams, depth: int) -> str:
         return ""
@@ -55,11 +61,14 @@ def _handler(params: ToolParams) -> ToolResult[ToolPayload]:
     return ToolResult(message=params.name, value=ToolPayload(message=params.name))
 
 
-def _build_tool(name: str) -> Tool[ToolParams, ToolPayload]:
+def _build_tool(
+    name: str, *, accepts_overrides: bool = True
+) -> Tool[ToolParams, ToolPayload]:
     return Tool[ToolParams, ToolPayload](
         name=name,
         description="echo the provided name",
         handler=_handler,
+        accepts_overrides=accepts_overrides,
     )
 
 
@@ -96,3 +105,31 @@ def test_text_section_accepts_tools() -> None:
     )
 
     assert section.tools() == (tool,)
+
+
+def test_section_accepts_overrides_flag_defaults_true() -> None:
+    section = _BareSection(title="Defaults", key="defaults")
+
+    assert section.accepts_overrides is True
+
+
+def test_section_accepts_overrides_flag_can_be_disabled() -> None:
+    section = _BareSection(
+        title="Locked",
+        key="locked",
+        accepts_overrides=False,
+    )
+
+    assert section.accepts_overrides is False
+
+
+def test_tool_accepts_overrides_flag_defaults_true() -> None:
+    tool = _build_tool("defaults")
+
+    assert tool.accepts_overrides is True
+
+
+def test_tool_accepts_overrides_flag_can_be_disabled() -> None:
+    tool = _build_tool("locked", accepts_overrides=False)
+
+    assert tool.accepts_overrides is False

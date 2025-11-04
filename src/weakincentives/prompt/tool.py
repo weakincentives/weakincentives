@@ -43,6 +43,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
     handler: Callable[[ParamsT], ToolResult[ResultT]] | None
     params_type: type[Any] = field(init=False, repr=False)
     result_type: type[Any] = field(init=False, repr=False)
+    accepts_overrides: bool = True
 
     def __post_init__(self) -> None:
         params_type = cast(
