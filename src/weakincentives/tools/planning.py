@@ -18,6 +18,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Final, Literal, cast, override
+from weakref import WeakSet
 
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
@@ -157,20 +158,13 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
     def __init__(
         self,
         *,
-        session: Session,
         strategy: PlanningStrategy = PlanningStrategy.REACT,
         accepts_overrides: bool = False,
     ) -> None:
-        self._session = session
         self._strategy = strategy
-        session.register_reducer(Plan, replace_latest)
-        session.register_reducer(SetupPlan, _setup_plan_reducer, slice_type=Plan)
-        session.register_reducer(AddStep, _add_step_reducer, slice_type=Plan)
-        session.register_reducer(UpdateStep, _update_step_reducer, slice_type=Plan)
-        session.register_reducer(MarkStep, _mark_step_reducer, slice_type=Plan)
-        session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
+        self._configured_sessions: WeakSet[Session] = WeakSet()
 
-        tools = _build_tools(session, accepts_overrides=accepts_overrides)
+        tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
         super().__init__(
             title="Planning Tools",
             key="planning.tools",
@@ -179,6 +173,24 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             tools=tools,
             accepts_overrides=accepts_overrides,
         )
+
+    def ensure_session(self, context: ToolContext) -> Session:
+        session = context.session
+        if not isinstance(session, Session):
+            message = "PlanningToolsSection requires ToolContext.session to be a Session instance."
+            raise ToolValidationError(message)
+        if session not in self._configured_sessions:
+            self._initialize_session(session)
+            self._configured_sessions.add(session)
+        return session
+
+    def _initialize_session(self, session: Session) -> None:
+        session.register_reducer(Plan, replace_latest)
+        session.register_reducer(SetupPlan, _setup_plan_reducer, slice_type=Plan)
+        session.register_reducer(AddStep, _add_step_reducer, slice_type=Plan)
+        session.register_reducer(UpdateStep, _update_step_reducer, slice_type=Plan)
+        session.register_reducer(MarkStep, _mark_step_reducer, slice_type=Plan)
+        session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
 
     @override
     def render(self, params: _PlanningSectionParams, depth: int) -> str:
@@ -191,11 +203,11 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
 
 
 def _build_tools(
-    session: Session,
     *,
+    section: PlanningToolsSection,
     accepts_overrides: bool,
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
-    suite = _PlanningToolSuite(session)
+    suite = _PlanningToolSuite(section=section)
     return cast(
         tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
         (
@@ -240,16 +252,16 @@ def _build_tools(
 
 
 class _PlanningToolSuite:
-    """Collection of tool handlers bound to a session instance."""
+    """Collection of tool handlers bound to a section instance."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, *, section: PlanningToolsSection) -> None:
         super().__init__()
-        self._session = session
+        self._section = section
 
     def setup_plan(
         self, params: SetupPlan, *, context: ToolContext
     ) -> ToolResult[SetupPlan]:
-        del context
+        _ = self._section.ensure_session(context)
         objective = _normalize_required_text(
             params.objective,
             field_name="objective",
@@ -264,8 +276,8 @@ class _PlanningToolSuite:
         return ToolResult(message=message, value=normalized)
 
     def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[AddStep]:
-        del context
-        plan = _require_plan(self._session)
+        session = self._section.ensure_session(context)
+        plan = _require_plan(session)
         _ensure_active(plan, "add steps to")
         normalized_steps = _normalize_new_steps(params.steps)
         if not normalized_steps:
@@ -281,8 +293,8 @@ class _PlanningToolSuite:
     def update_step(
         self, params: UpdateStep, *, context: ToolContext
     ) -> ToolResult[UpdateStep]:
-        del context
-        plan = _require_plan(self._session)
+        session = self._section.ensure_session(context)
+        plan = _require_plan(session)
         _ensure_active(plan, "update steps in")
         step_id = params.step_id.strip()
         if not step_id:
@@ -321,8 +333,8 @@ class _PlanningToolSuite:
     def mark_step(
         self, params: MarkStep, *, context: ToolContext
     ) -> ToolResult[MarkStep]:
-        del context
-        plan = _require_plan(self._session)
+        session = self._section.ensure_session(context)
+        plan = _require_plan(session)
         if plan.status == "abandoned":
             message = "Cannot mark steps on an abandoned plan."
             raise ToolValidationError(message)
@@ -347,17 +359,17 @@ class _PlanningToolSuite:
     def clear_plan(
         self, params: ClearPlan, *, context: ToolContext
     ) -> ToolResult[ClearPlan]:
-        del context
-        plan = _require_plan(self._session)
+        session = self._section.ensure_session(context)
+        plan = _require_plan(session)
         if plan.status == "abandoned":
             message = "Plan already abandoned."
             raise ToolValidationError(message)
         return ToolResult(message="Plan marked as abandoned.", value=params)
 
     def read_plan(self, params: ReadPlan, *, context: ToolContext) -> ToolResult[Plan]:
-        del context
         del params
-        plan = select_latest(self._session, Plan)
+        session = self._section.ensure_session(context)
+        plan = select_latest(session, Plan)
         if plan is None:
             message = "No plan is currently initialised."
             raise ToolValidationError(message)
