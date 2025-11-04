@@ -38,6 +38,8 @@ class SubagentDispatch:
 
     summary: DelegationSummaryParams
     recap_lines: tuple[str, ...]
+    tool: str | None = None
+    files: Sequence[str] | None = None
 
 
 @dataclass(slots=True)
@@ -101,9 +103,18 @@ def _default_max_workers() -> int:
 
 
 def _normalize_dispatch(dispatch: SubagentDispatch) -> SubagentDispatch:
+    files = dispatch.files
+    if files is None:
+        normalized_files: tuple[str, ...] = ()
+    elif isinstance(files, str):
+        normalized_files = (files,)
+    else:
+        normalized_files = tuple(files)
     return SubagentDispatch(
         summary=dispatch.summary,
         recap_lines=tuple(dispatch.recap_lines),
+        tool=dispatch.tool,
+        files=normalized_files,
     )
 
 
@@ -257,5 +268,6 @@ __all__ = [
     "DispatchSubagentsParams",
     "SubagentDispatch",
     "SubagentResult",
+    "SubagentResults",
     "dispatch_subagents",
 ]

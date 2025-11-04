@@ -33,6 +33,8 @@ from weakincentives.prompt.tool import ToolContext
 class SubagentDispatch:
     summary: DelegationSummaryParams
     recap_lines: tuple[str, ...]
+    tool: str | None = None
+    files: Sequence[str] | None = None
 
 
 @dataclass(slots=True)
@@ -48,23 +50,28 @@ class SubagentResult(SupportsDataclass):
     error: str | None = None
 
 
-dispatch_subagents: Tool[DispatchSubagentsParams, Sequence[SubagentResult]]
+@dataclass(slots=True)
+class SubagentResults(SupportsDataclass):
+    items: tuple[SubagentResult, ...]
+
+
+dispatch_subagents: Tool[DispatchSubagentsParams, SubagentResults]
 ```
 
 Key aspects of the contract:
 
 - Tool parameters are provided **only** at call time. The LLM builds a `DispatchSubagentsParams` instance when it triggers the tool; the section never supplies defaults.
-- Every `SubagentDispatch` carries the metadata mandated by `PROMPTS_COMPOSITION.md`. The handler reconstructs the delegation wrapper by combining the `DelegationSummaryParams`, the parent prompt text from `ToolContext.rendered_prompt`, and the recap bullet list.
-- The tool returns one `SubagentResult` per input in matching order. Each result wraps the original dispatch metadata, the subagent output (if evaluation succeeded), and failure information when a child run raises.
+- Every `SubagentDispatch` carries the metadata mandated by `PROMPTS_COMPOSITION.md`. The handler reconstructs the delegation wrapper by combining the `DelegationSummaryParams`, the parent prompt text from `ToolContext.rendered_prompt`, and the recap bullet list. Optional metadata such as `tool` and `files` is preserved so downstream systems can audit or enrich follow-up work, and the handler normalizes `files` into an immutable tuple before execution.
+- The tool returns one `SubagentResult` per input in matching order. Each result wraps the original dispatch metadata, the subagent output (if evaluation succeeded), and failure information when a child run raises. Results are wrapped in a `SubagentResults` container that behaves like a tuple for iteration and indexing.
 
 ## Execution Requirements
 
 The handler must follow these steps for every invocation:
 
 1. **Read the parent prompt**: fetch `context.rendered_prompt`. If it is `None`, treat that as a bug in the orchestrator and surface an error—the orchestrator must render the prompt and populate `ToolContext` before tools execute (per `TOOL_CONTEXT.md`).
-1. **Clone the session**: call `context.session.clone()` for each dispatch (the method lives in `src/weakincentives/session/session.py`). Each clone must receive a fresh `EventBus` instance rather than reusing `context.event_bus`; `InProcessEventBus` from `src/weakincentives/events/__init__.py` is the default concrete implementation. When `context.session` is `None`, skip cloning but still create a dedicated bus for telemetry.
+1. **Reuse the parent context**: execute every child with `context.session` and `context.event_bus`. Sharing the parent session and bus keeps telemetry contiguous and avoids fragmenting state across clones. When `context.session` is `None`, continue dispatching with a `None` session but still rely on the parent bus.
 1. **Build the wrapper**: instantiate `DelegationPrompt` from `src/weakincentives/prompt/composition.py`, passing the parent prompt, the rendered text, and `recap_lines=dispatch.recap_lines` so the recap section always renders (even for empty tuples).
-1. **Evaluate in parallel**: submit each child prompt to `context.adapter.evaluate` using a `ThreadPoolExecutor` so the children run concurrently. Size the pool to `min(len(dispatches), max_workers_default)` where `max_workers_default` aligns with Python’s default when `None`. Propagate `session=cloned_session` and `bus=new_bus` for each call so reducers and telemetry remain isolated per child.
+1. **Evaluate in parallel**: submit each child prompt to `context.adapter.evaluate` using a `ThreadPoolExecutor` so the children run concurrently. Size the pool to `min(len(dispatches), max_workers_default)` where `max_workers_default` aligns with Python’s default when `None`. Propagate `session=context.session` and `bus=context.event_bus` for each call so reducers and telemetry observers see a unified stream.
 1. **Collect results**: capture successful outputs and wrap them in `ToolResult.success == True`. If any evaluation raises, mark the corresponding `SubagentResult.success` as `False`, populate the `error` field with the exception string, and keep the other children unaffected.
 1. **Publish tool completion**: return `ToolResult(value=results, success=True)` when all children finished. If cloning fails or the parent prompt is unavailable, return `ToolResult(success=False, value=None, message=...)` so downstream reducers can handle the failure.
 
@@ -80,13 +87,13 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Sequence, cast
 
-from weakincentives.events import InProcessEventBus
 from weakincentives.prompt import DelegationPrompt, ToolResult
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
     SubagentDispatch,
     SubagentResult,
+    SubagentResults,
 )
 
 
@@ -99,12 +106,6 @@ def _run_single_dispatch(
     if rendered_parent is None:
         raise RuntimeError("Parent prompt was not rendered before dispatch_subagents.")
 
-    new_bus = InProcessEventBus()
-    cloned_session = (
-        context.session.clone(bus=new_bus)
-        if context.session is not None
-        else None
-    )
     parent_output_type = cast(type[object], rendered_parent.output_type or object)
     child_prompt_cls = DelegationPrompt[parent_output_type, object]
     child_prompt = child_prompt_cls(
@@ -117,8 +118,8 @@ def _run_single_dispatch(
     result = context.adapter.evaluate(
         child_prompt.prompt,
         dispatch.summary,
-        bus=new_bus,
-        session=cloned_session,
+        bus=context.event_bus,
+        session=context.session,
     )
     return SubagentResult(
         dispatch=dispatch,
@@ -131,7 +132,7 @@ def handle_dispatch_subagents(
     params: DispatchSubagentsParams,
     *,
     context: ToolContext,
-) -> ToolResult[Sequence[SubagentResult]]:
+) -> ToolResult[SubagentResults]:
     try:
         with ThreadPoolExecutor(max_workers=len(params.dispatches) or None) as executor:
             futures = [
@@ -141,10 +142,11 @@ def handle_dispatch_subagents(
         results = [future.result() for future in futures]
     except Exception as error:
         return ToolResult(success=False, message=str(error))
-    return ToolResult(value=tuple(results), success=True)
+    payload = SubagentResults(items=tuple(results))
+    return ToolResult(value=payload, success=True)
 ```
 
-The production implementation must tighten error handling (for example, using per-child `try` blocks to keep healthy dispatches alive) and ensure the cloned session exposes the correct event bus attribute.
+The production implementation must tighten error handling (for example, using per-child `try` blocks to keep healthy dispatches alive) and rely on the shared session and event bus exposed by the parent context.
 
 ## Usage Example
 
@@ -195,6 +197,7 @@ tool_call = DispatchSubagentsParams(
                 may_delegate_further="no",
             ),
             recap_lines=("Pull weekly dashboard numbers", "Highlight major swings"),
+            tool="python_evaluate",
         ),
         SubagentDispatch(
             summary=DelegationSummaryParams(
@@ -203,6 +206,7 @@ tool_call = DispatchSubagentsParams(
                 may_delegate_further="no",
             ),
             recap_lines=("Cluster similar feedback", "Escalate urgent issues"),
+            files=("sunfish/README.md",),
         ),
     ),
 )
@@ -215,4 +219,4 @@ The example emphasizes that:
 
 - The prompt author only instantiates `SubagentsSection()`—no dispatch data is threaded into the prompt upfront.
 - The language model is responsible for calling the tool whenever its plan reveals parallelizable steps, building `DispatchSubagentsParams` dynamically with summary metadata and recap bullets.
-- Each dispatched child inherits the full rendered parent prompt while the handler manages parallel execution, session cloning, and recap propagation automatically.
+- Each dispatched child inherits the full rendered parent prompt while the handler manages parallel execution, shared session telemetry, and recap propagation automatically.

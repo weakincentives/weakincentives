@@ -27,6 +27,7 @@ from weakincentives.prompt import (
     SupportsDataclass,
     ToolContext,
 )
+from weakincentives.serde import parse
 from weakincentives.session import Session
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
@@ -233,3 +234,55 @@ def test_dispatch_subagents_includes_response_format_for_structured_parent() -> 
     assert result.success is True
     rendered_child = call["rendered"]
     assert "Response Format" in rendered_child.text
+
+
+def test_dispatch_subagents_normalizes_string_file_metadata() -> None:
+    context = _build_context()
+    dispatch = SubagentDispatch(
+        summary=DelegationSummaryParams(
+            reason="single file", expected_result="processed", may_delegate_further="no"
+        ),
+        recap_lines=("touch file",),
+        files="sunfish/README.md",
+    )
+
+    payload = _invoke_tool(context, (dispatch,))
+    result = payload["result"]
+
+    assert result.success is True
+    values = tuple(result.value)
+    assert values and values[0].dispatch.files == ("sunfish/README.md",)
+
+
+def test_dispatch_subagents_accepts_optional_metadata() -> None:
+    context = _build_context()
+    params_type = dispatch_subagents.params_type
+    summary = {
+        "reason": "count lines",
+        "expected_result": "line totals",
+        "may_delegate_further": "no",
+    }
+    raw_payload = {
+        "dispatches": [
+            {
+                "summary": summary,
+                "recap_lines": ["list target", "count lines"],
+                "tool": "python_evaluate",
+                "files": ["sunfish/README.md"],
+            }
+        ]
+    }
+
+    parsed = parse(params_type, raw_payload, extra="forbid")
+    dispatch = parsed.dispatches[0]
+    assert dispatch.tool == "python_evaluate"
+    assert list(dispatch.files or ()) == ["sunfish/README.md"]
+
+    payload = _invoke_tool(context, parsed.dispatches)
+    result = payload["result"]
+
+    assert result.success is True
+    assert result.value is not None
+    normalized = tuple(result.value)
+    assert normalized
+    assert normalized[0].dispatch.files == ("sunfish/README.md",)
