@@ -19,22 +19,15 @@ import logging
 import os
 import sys
 import textwrap
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MethodType
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
+from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.events import InProcessEventBus, ToolInvoked
-from weakincentives.examples.code_review_prompt import (
-    ReviewGuidance,
-    ReviewResponse,
-    ReviewTurnParams,
-)
-from weakincentives.examples.code_review_session import (
-    SupportsReviewEvaluate,
-    ToolCallLog,
-)
+from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.local_prompt_overrides_store import (
     LocalPromptOverridesStore,
@@ -76,6 +69,55 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
 _LOG_STRING_LIMIT = 256
+
+
+@dataclass(slots=True, frozen=True)
+class ReviewGuidance:
+    focus: str = field(
+        default=(
+            "Identify potential issues, risks, and follow-up questions for the changes "
+            "under review."
+        ),
+        metadata={
+            "description": "Default framing instructions for the review assistant.",
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class ReviewTurnParams:
+    request: str = field(
+        metadata={
+            "description": "User-provided review task or question to address.",
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class ReviewResponse:
+    summary: str
+    issues: list[str]
+    next_steps: list[str]
+
+
+@dataclass(slots=True, frozen=True)
+class ToolCallLog:
+    name: str
+    prompt_name: str
+    message: str
+    value: dict[str, Any] | None
+    call_id: str | None
+
+
+class SupportsReviewEvaluate(Protocol):
+    def evaluate(
+        self,
+        prompt: Prompt[ReviewResponse],
+        *params: SupportsDataclass,
+        parse_output: bool = True,
+        bus: EventBus,
+        session: Session | None = None,
+    ) -> PromptResponse[ReviewResponse]: ...
 
 
 def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
