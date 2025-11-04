@@ -502,9 +502,9 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
 __all__ = [
     "ChoiceSelector",
     "ConversationRequest",
+    "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
-    "ProviderChoice",
     "ProviderFunctionCall",
     "ProviderMessage",
     "ProviderToolCall",

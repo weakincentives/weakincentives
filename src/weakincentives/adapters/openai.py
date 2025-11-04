@@ -45,9 +45,7 @@ _ERROR_MESSAGE: Final[str] = (
 
 
 class _CompletionsAPI(Protocol):
-    def create(
-        self, *args: object, **kwargs: object
-    ) -> ProviderCompletionResponse: ...
+    def create(self, *args: object, **kwargs: object) -> ProviderCompletionResponse: ...
 
 
 class _ChatAPI(Protocol):

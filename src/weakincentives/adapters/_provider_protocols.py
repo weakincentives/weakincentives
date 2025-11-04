@@ -64,4 +64,6 @@ class ProviderCompletionResponse(Protocol):
 class ProviderCompletionCallable(Protocol):
     """Structural Protocol describing a provider completion callable."""
 
-    def __call__(self, *args: object, **kwargs: object) -> ProviderCompletionResponse: ...
+    def __call__(
+        self, *args: object, **kwargs: object
+    ) -> ProviderCompletionResponse: ...
