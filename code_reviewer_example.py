@@ -40,6 +40,7 @@ from weakincentives.prompt.local_prompt_overrides_store import (
     LocalPromptOverridesStore,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.prompt.subagents import SubagentsSection
 from weakincentives.prompt.versioning import PromptOverridesError
 from weakincentives.serde import dump
 from weakincentives.session import Session, select_latest
@@ -113,13 +114,17 @@ def main() -> None:
     # High-level walkthrough for running a local code review loop. See AGENTS.md
     # for workflow expectations around prompt overrides and tooling etiquette.
     _configure_logging()
-    print("Launching sunfish code review session with planning and VFS tooling...")
+    print(
+        "Launching sunfish code review session with planning, subagents, "
+        "and VFS tooling..."
+    )
     print("- test-repositories/sunfish mounted under virtual path 'sunfish/'.")
     print(
         "- Available commands: 'history' (tool log), 'plan' (current plan),"
         " 'exit' to quit."
     )
     print("- Python evaluation tool enabled for quick calculations and scripts.")
+    print("- Use dispatch_subagents for parallelizable follow-up tasks.")
 
     override_tag = _resolve_override_tag()
     print(
@@ -332,6 +337,7 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         key="code-review-brief",
     )
     planning_section = PlanningToolsSection(session=session)
+    subagents_section = SubagentsSection()
     vfs_section = VfsToolsSection(
         session=session,
         mounts=(
@@ -358,6 +364,7 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         sections=(
             guidance_section,
             planning_section,
+            subagents_section,
             vfs_section,
             asteval_section,
             user_turn_section,
