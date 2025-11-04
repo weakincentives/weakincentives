@@ -78,9 +78,18 @@ def _setup_sections() -> tuple[
     bus = InProcessEventBus()
     session = Session(bus=bus)
     vfs_section = VfsToolsSection()
-    section = AstevalSection(session=session)
+    section = AstevalSection()
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
     return session, bus, vfs_section, tool
+
+
+def test_context_requires_session() -> None:
+    _session, bus, _vfs_section, tool = _setup_sections()
+
+    with pytest.raises(ToolValidationError) as captured:
+        invoke_tool(bus, tool, EvalParams(code="0"))
+
+    assert "requires ToolContext.session" in str(captured.value)
 
 
 def test_missing_dependency_instructs_extra_install(
@@ -98,10 +107,7 @@ def test_missing_dependency_instructs_extra_install(
 
 
 def test_asteval_section_disables_tool_overrides_by_default() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-
-    section = AstevalSection(session=session)
+    section = AstevalSection()
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
     assert section.accepts_overrides is False
@@ -109,11 +115,7 @@ def test_asteval_section_disables_tool_overrides_by_default() -> None:
 
 
 def test_asteval_section_override_flags_opt_in() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-
     section = AstevalSection(
-        session=session,
         accepts_overrides=True,
     )
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -125,7 +127,7 @@ def test_asteval_section_override_flags_opt_in() -> None:
 def test_expression_mode_success() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 
-    result = invoke_tool(bus, tool, EvalParams(code="1 + 2"))
+    result = invoke_tool(bus, tool, EvalParams(code="1 + 2"), session=session)
 
     _assert_success_message(result)
     assert result.value is not None
@@ -173,7 +175,7 @@ def test_statements_mode_reads_and_writes() -> None:
         ),
     )
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
 
     assert result.value is not None
     payload = result.value
@@ -204,14 +206,14 @@ def test_helper_write_appends() -> None:
         mode="statements",
     )
 
-    invoke_tool(bus, tool, params)
+    invoke_tool(bus, tool, params, session=session)
 
     params_append = EvalParams(
         code=("write_text('logs/activity.log', '-continued', mode='append')\n'done'"),
         mode="statements",
     )
 
-    result = invoke_tool(bus, tool, params_append)
+    result = invoke_tool(bus, tool, params_append, session=session)
 
     assert result.value is not None
     payload = result.value
@@ -225,13 +227,14 @@ def test_helper_write_appends() -> None:
 
 
 def test_invalid_globals_raise() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         invoke_tool(
             bus,
             tool,
             EvalParams(code="0", globals={"bad": "not json"}),
+            session=session,
         )
 
 
@@ -256,7 +259,7 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     )
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
 
     assert result.value is not None
     payload = result.value
@@ -269,7 +272,7 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_stdout_truncation_and_flush() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     extra = asteval_module._MAX_STREAM_LENGTH + 100
     params = EvalParams(
@@ -277,7 +280,7 @@ def test_stdout_truncation_and_flush() -> None:
         mode="statements",
     )
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
     assert result.value is not None
     payload = result.value
     assert payload.stdout.endswith("...")
@@ -285,11 +288,11 @@ def test_stdout_truncation_and_flush() -> None:
 
 
 def test_print_invalid_sep_reports_error() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(code="print('value', sep=0)", mode="statements")
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
 
     assert result.message == "Evaluation failed; review stderr details in the payload."
     assert result.value is not None
@@ -298,11 +301,11 @@ def test_print_invalid_sep_reports_error() -> None:
 
 
 def test_print_invalid_end_reports_error() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(code="print('value', end=0)", mode="statements")
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
 
     assert result.message == "Evaluation failed; review stderr details in the payload."
     assert result.value is not None
@@ -311,33 +314,35 @@ def test_print_invalid_end_reports_error() -> None:
 
 
 def test_expression_mode_requires_expression() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         invoke_tool(
             bus,
             tool,
             EvalParams(code="value = 1", mode="expr"),
+            session=session,
         )
 
 
 def test_invalid_mode_rejected() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(code="0", mode="invalid")  # type: ignore[arg-type]
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, tool, params)
+        invoke_tool(bus, tool, params, session=session)
 
 
 def test_invalid_global_names_raise() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         invoke_tool(
             bus,
             tool,
             EvalParams(code="0", globals={"": "0"}),
+            session=session,
         )
 
     with pytest.raises(ToolValidationError):
@@ -345,11 +350,12 @@ def test_invalid_global_names_raise() -> None:
             bus,
             tool,
             EvalParams(code="0", globals={"not valid": "0"}),
+            session=session,
         )
 
 
 def test_code_length_validation() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     long_code = "x" * (asteval_module._MAX_CODE_LENGTH + 1)
     with pytest.raises(ToolValidationError):
@@ -357,17 +363,19 @@ def test_code_length_validation() -> None:
             bus,
             tool,
             EvalParams(code=long_code),
+            session=session,
         )
 
 
 def test_control_character_validation() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         invoke_tool(
             bus,
             tool,
             EvalParams(code="print('ok')\x01"),
+            session=session,
         )
 
 
@@ -396,7 +404,7 @@ def test_normalize_path_invalid_segments(path: VfsPath) -> None:
 
 
 def test_read_requires_existing_file() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     with pytest.raises(ToolValidationError):
         invoke_tool(
@@ -406,11 +414,12 @@ def test_read_requires_existing_file() -> None:
                 code="0",
                 reads=(EvalFileRead(path=VfsPath(("docs", "missing.txt"))),),
             ),
+            session=session,
         )
 
 
 def test_duplicate_reads_rejected() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     read = EvalFileRead(path=VfsPath(("docs", "info.txt")))
 
@@ -419,11 +428,12 @@ def test_duplicate_reads_rejected() -> None:
             bus,
             tool,
             EvalParams(code="0", reads=(read, read)),
+            session=session,
         )
 
 
 def test_duplicate_writes_rejected() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     write = EvalFileWrite(path=VfsPath(("output", "data.txt")), content="x")
 
@@ -432,11 +442,12 @@ def test_duplicate_writes_rejected() -> None:
             bus,
             tool,
             EvalParams(code="0", writes=(write, write)),
+            session=session,
         )
 
 
 def test_read_write_conflict_rejected() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     path = VfsPath(("docs", "info.txt"))
 
@@ -449,11 +460,12 @@ def test_read_write_conflict_rejected() -> None:
                 reads=(EvalFileRead(path=path),),
                 writes=(EvalFileWrite(path=path, content="x"),),
             ),
+            session=session,
         )
 
 
 def test_invalid_write_mode_rejected() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     write = EvalFileWrite(
         path=VfsPath(("output", "data.txt")),
@@ -466,11 +478,12 @@ def test_invalid_write_mode_rejected() -> None:
             bus,
             tool,
             EvalParams(code="0", writes=(write,)),
+            session=session,
         )
 
 
 def test_write_content_length_validation() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     long_content = "x" * (asteval_module._MAX_WRITE_LENGTH + 1)
     write = EvalFileWrite(path=VfsPath(("output", "large.txt")), content=long_content)
@@ -480,6 +493,7 @@ def test_write_content_length_validation() -> None:
             bus,
             tool,
             EvalParams(code="0", writes=(write,)),
+            session=session,
         )
 
 
@@ -506,6 +520,7 @@ def test_create_mode_rejects_existing_file() -> None:
                 EvalFileWrite(path=existing_path, content="new content", mode="create"),
             ),
         ),
+        session=session,
     )
 
     _assert_success_message(result)
@@ -531,6 +546,7 @@ def test_append_requires_existing_file() -> None:
                 ),
             ),
         ),
+        session=session,
     )
 
     _assert_success_message(result)
@@ -559,6 +575,7 @@ def test_overwrite_updates_existing_file() -> None:
             code="0",
             writes=(EvalFileWrite(path=path, content="updated", mode="overwrite"),),
         ),
+        session=session,
     )
 
     _assert_success_message(result)
@@ -580,6 +597,7 @@ def test_message_summarizes_multiple_writes() -> None:
         bus,
         tool,
         EvalParams(code="0", mode="statements", writes=writes),
+        session=session,
     )
 
     _assert_success_message(result)
@@ -612,13 +630,14 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
         find_tool(vfs_section, "vfs_list_directory"),
     )
     invoke_tool(bus, list_tool, ListDirectory(), session=session)
-    section = AstevalSection(session=session)
+    section = AstevalSection()
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
     result = invoke_tool(
         bus,
         tool,
         EvalParams(code="read_text('sunfish/README.md')", mode="expr"),
+        session=session,
     )
 
     _assert_success_message(result)
@@ -628,12 +647,13 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
 
 
 def test_write_text_rejects_empty_path() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     result = invoke_tool(
         bus,
         tool,
         EvalParams(code="write_text('', 'data')", mode="statements"),
+        session=session,
     )
 
     _assert_failure_message(result, had_pending_writes=True)
@@ -642,7 +662,7 @@ def test_write_text_rejects_empty_path() -> None:
 
 
 def test_globals_formatting_covers_primitives() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     code = (
         "text = 'hello'\n"
@@ -657,6 +677,7 @@ def test_globals_formatting_covers_primitives() -> None:
         bus,
         tool,
         EvalParams(code=code, mode="statements"),
+        session=session,
     )
 
     assert result.value is not None
@@ -670,12 +691,13 @@ def test_globals_formatting_covers_primitives() -> None:
 
 
 def test_interpreter_error_surfaces_in_stderr() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     result = invoke_tool(
         bus,
         tool,
         EvalParams(code="unknown_name + 1", mode="statements"),
+        session=session,
     )
 
     _assert_failure_message(result, had_pending_writes=False)
@@ -699,7 +721,7 @@ def test_write_text_conflict_with_read_path() -> None:
         reads=(EvalFileRead(path=path),),
     )
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
     _assert_failure_message(result, had_pending_writes=True)
     assert result.value is not None
     assert (
@@ -709,21 +731,21 @@ def test_write_text_conflict_with_read_path() -> None:
 
 
 def test_write_text_duplicate_targets() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(
         code=("write_text('logs/out.txt', 'a')\nwrite_text('logs/out.txt', 'b')"),
         mode="statements",
     )
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
     _assert_failure_message(result, had_pending_writes=True)
     assert result.value is not None
     assert "Duplicate write targets detected." in result.value.stderr
 
 
 def test_missing_template_variable_raises() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(
         code="0",
@@ -737,11 +759,11 @@ def test_missing_template_variable_raises() -> None:
     )
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, tool, params)
+        invoke_tool(bus, tool, params, session=session)
 
 
 def test_duplicate_final_writes_detected() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
+    session, bus, _vfs_section, tool = _setup_sections()
 
     params = EvalParams(
         code="write_text('output/data.txt', 'helper')",
@@ -754,7 +776,7 @@ def test_duplicate_final_writes_detected() -> None:
         ),
     )
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
     _assert_failure_message(result, had_pending_writes=True)
     assert result.value is not None
     assert "Duplicate write targets detected." in result.value.stderr
@@ -775,7 +797,7 @@ def test_overwrite_requires_existing_file() -> None:
         ),
     )
 
-    result = invoke_tool(bus, tool, params)
+    result = invoke_tool(bus, tool, params, session=session)
     _assert_success_message(result)
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is None or not snapshot.files
