@@ -31,6 +31,14 @@ from ..prompt.structured_output import (
 from ..prompt.tool import Tool, ToolResult
 from ..serde import parse, schema
 from ..tools.errors import ToolValidationError
+from ._provider_protocols import (
+    ProviderChoice,
+    ProviderCompletionCallable,
+    ProviderCompletionResponse,
+    ProviderFunctionCall,
+    ProviderMessage,
+    ProviderToolCall,
+)
 from .core import PromptEvaluationError, PromptResponse
 
 if TYPE_CHECKING:
@@ -39,16 +47,6 @@ if TYPE_CHECKING:
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "adapters.shared"}
 )
-
-
-class ProviderFunctionCall(Protocol):
-    name: str
-    arguments: str | None
-
-
-class ProviderToolCall(Protocol):
-    @property
-    def function(self) -> ProviderFunctionCall: ...
 
 
 class ToolArgumentsParser(Protocol):
@@ -504,6 +502,8 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
 __all__ = [
     "ChoiceSelector",
     "ConversationRequest",
+    "ProviderCompletionCallable",
+    "ProviderCompletionResponse",
     "ProviderChoice",
     "ProviderFunctionCall",
     "ProviderMessage",
@@ -529,16 +529,6 @@ __all__ = [
 
 
 OutputT = TypeVar("OutputT")
-
-
-class ProviderMessage(Protocol):
-    content: str | Sequence[object] | None
-    tool_calls: Sequence[ProviderToolCall] | None
-
-
-class ProviderChoice(Protocol):
-    @property
-    def message(self) -> ProviderMessage: ...
 
 
 ConversationRequest = Callable[

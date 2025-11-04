@@ -23,10 +23,14 @@ from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 from . import shared as _shared
+from ._provider_protocols import (
+    ProviderChoice,
+    ProviderCompletionCallable,
+    ProviderCompletionResponse,
+)
 from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse
 from .shared import (
-    ProviderChoice,
     ToolChoice,
     build_json_schema_response_format,
     first_choice,
@@ -44,42 +48,17 @@ _ERROR_MESSAGE: Final[str] = (
 )
 
 
-class _CompletionFunctionCall(Protocol):
-    name: str
-    arguments: str | None
-
-
-class _ToolCall(Protocol):
-    id: str
-    function: _CompletionFunctionCall
-
-
-class _Message(Protocol):
-    content: str | Sequence[object] | None
-    tool_calls: Sequence[_ToolCall] | None
-
-
-class _CompletionChoice(Protocol):
-    message: _Message
-
-
-class _CompletionResponse(Protocol):
-    choices: Sequence[_CompletionChoice]
-
-
-class _CompletionCallable(Protocol):
-    def __call__(self, *args: object, **kwargs: object) -> _CompletionResponse: ...
-
-
 class _LiteLLMModule(Protocol):
-    def completion(self, *args: object, **kwargs: object) -> _CompletionResponse: ...
+    def completion(
+        self, *args: object, **kwargs: object
+    ) -> ProviderCompletionResponse: ...
 
 
 class _LiteLLMCompletionFactory(Protocol):
-    def __call__(self, **kwargs: object) -> _CompletionCallable: ...
+    def __call__(self, **kwargs: object) -> ProviderCompletionCallable: ...
 
 
-LiteLLMCompletion = _CompletionCallable
+LiteLLMCompletion = ProviderCompletionCallable
 
 
 def _load_litellm_module() -> _LiteLLMModule:
@@ -99,7 +78,7 @@ def create_litellm_completion(**kwargs: object) -> LiteLLMCompletion:
 
     def _wrapped_completion(
         *args: object, **request_kwargs: object
-    ) -> _CompletionResponse:
+    ) -> ProviderCompletionResponse:
         merged: dict[str, object] = dict(kwargs)
         merged.update(request_kwargs)
         return module.completion(*args, **merged)
