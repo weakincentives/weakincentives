@@ -149,10 +149,10 @@ def test_dispatch_subagents_runs_each_child_in_parallel() -> None:
     assert len(values) == 2
     assert [item.success for item in values] == [True, True]
     assert result.value[0] is values[0]
-    assert calls[0]["bus"] is not context.event_bus
-    assert calls[0]["bus"] is not calls[1]["bus"]
-    assert calls[0]["session"] is not context.session
-    assert calls[1]["session"] is not context.session
+    assert calls[0]["bus"] is context.event_bus
+    assert calls[1]["bus"] is context.event_bus
+    assert calls[0]["session"] is context.session
+    assert calls[1]["session"] is context.session
     assert {call["params"][0].reason for call in calls} == {
         "collect data",
         "summarize",
@@ -207,33 +207,6 @@ def test_dispatch_subagents_marks_failed_children() -> None:
     child_result = next(iter(result.value))
     assert child_result.success is False
     assert child_result.error == "child failed"
-
-
-def test_dispatch_subagents_propagates_session_clone_errors() -> None:
-    context = _build_context()
-
-    class _BadSession:
-        def __init__(self) -> None:
-            self.clone_called = False
-
-    bad_session = _BadSession()
-    context = ToolContext(
-        prompt=context.prompt,
-        rendered_prompt=context.rendered_prompt,
-        adapter=context.adapter,
-        session=bad_session,
-        event_bus=context.event_bus,
-    )
-    handler = dispatch_subagents.handler
-    assert handler is not None
-
-    params = DispatchSubagentsParams(dispatches=(_make_dispatch("broken"),))
-
-    result = handler(params, context=context)
-
-    assert result.success is False
-    assert result.value is None
-    assert "Session does not support cloning." in result.message
 
 
 def test_dispatch_subagents_normalizes_empty_dispatches() -> None:

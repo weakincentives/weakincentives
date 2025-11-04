@@ -20,7 +20,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import SupportsIndex, cast, overload
 
-from ..events import InProcessEventBus
 from ..prompt._types import SupportsDataclass
 from ..prompt.composition import (
     DelegationPrompt,
@@ -96,13 +95,6 @@ class _DefaultDelegationOutput(SupportsDataclass):
     value: object | None = None
 
 
-@dataclass(slots=True)
-class _DispatchWork:
-    dispatch: SubagentDispatch
-    bus: InProcessEventBus
-    session: object | None
-
-
 def _default_max_workers() -> int:
     cpu_count = os.cpu_count() or 1
     return min(32, cpu_count + 4)
@@ -117,23 +109,8 @@ def _normalize_dispatch(dispatch: SubagentDispatch) -> SubagentDispatch:
 
 def _prepare_work_items(
     dispatches: Sequence[SubagentDispatch],
-    *,
-    context: ToolContext,
-) -> tuple[_DispatchWork, ...]:
-    session = context.session
-    work_items: list[_DispatchWork] = []
-    for dispatch in dispatches:
-        normalized = _normalize_dispatch(dispatch)
-        bus = InProcessEventBus()
-        clone: object | None = None
-        if session is not None:
-            clone_method = getattr(session, "clone", None)
-            if clone_method is None:
-                message = "Session does not support cloning."
-                raise RuntimeError(message)
-            clone = clone_method(bus=bus)
-        work_items.append(_DispatchWork(dispatch=normalized, bus=bus, session=clone))
-    return tuple(work_items)
+) -> tuple[SubagentDispatch, ...]:
+    return tuple(_normalize_dispatch(dispatch) for dispatch in dispatches)
 
 
 def _build_delegation_prompt(
@@ -154,7 +131,7 @@ def _build_delegation_prompt(
 
 
 def _evaluate_dispatch(
-    work: _DispatchWork,
+    dispatch: SubagentDispatch,
     *,
     context: ToolContext,
     rendered_parent: RenderedPrompt[_DefaultParentOutput],
@@ -162,67 +139,67 @@ def _evaluate_dispatch(
     prompt_wrapper = _build_delegation_prompt(
         context=context,
         rendered_parent=rendered_parent,
-        recap_lines=work.dispatch.recap_lines,
+        recap_lines=dispatch.recap_lines,
     )
     try:
         response = context.adapter.evaluate(
             prompt_wrapper.prompt,
-            work.dispatch.summary,
+            dispatch.summary,
             ParentPromptParams(body=rendered_parent.text),
-            RecapParams(bullets=work.dispatch.recap_lines),
-            bus=work.bus,
-            session=work.session,
+            RecapParams(bullets=dispatch.recap_lines),
+            bus=context.event_bus,
+            session=context.session,
         )
     except Exception as error:
         return SubagentResult(
-            dispatch=work.dispatch,
+            dispatch=dispatch,
             output=None,
             success=False,
             error=str(error),
         )
     return SubagentResult(
-        dispatch=work.dispatch,
+        dispatch=dispatch,
         output=response.output,
         success=True,
     )
 
 
 def _execute_dispatches(
-    work_items: Sequence[_DispatchWork],
+    dispatches: Sequence[SubagentDispatch],
     *,
     context: ToolContext,
     rendered_parent: RenderedPrompt[_DefaultParentOutput],
 ) -> tuple[SubagentResult, ...]:
-    if not work_items:
+    if not dispatches:
         return ()
 
-    if len(work_items) == 1:
+    if len(dispatches) == 1:
         return (
             _evaluate_dispatch(
-                work_items[0], context=context, rendered_parent=rendered_parent
+                dispatches[0], context=context, rendered_parent=rendered_parent
             ),
         )
 
-    max_workers = min(len(work_items), _default_max_workers())
+    max_workers = min(len(dispatches), _default_max_workers())
     results: list[SubagentResult] = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(
                 _evaluate_dispatch,
-                work,
+                dispatch,
                 context=context,
                 rendered_parent=rendered_parent,
             )
-            for work in work_items
+            for dispatch in dispatches
         ]
 
-        for work, future in zip(work_items, futures, strict=True):
+        for dispatch, future in zip(dispatches, futures, strict=True):
             try:
                 result = future.result()
             except Exception as error:  # pragma: no cover - defensive path
                 results.append(
                     SubagentResult(
-                        dispatch=work.dispatch,
+                        dispatch=dispatch,
                         output=None,
                         success=False,
                         error=str(error),
@@ -248,7 +225,7 @@ def _handle_dispatch_subagents(
         )
 
     try:
-        work_items = _prepare_work_items(tuple(params.dispatches), context=context)
+        work_items = _prepare_work_items(tuple(params.dispatches))
     except Exception as error:  # pragma: no cover - defensive path
         return ToolResult(message=str(error), value=None, success=False)
 
