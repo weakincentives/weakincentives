@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from importlib import import_module
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast
+from weakref import WeakSet
 
 from ..logging import StructuredLogger, get_logger
 from ..prompt.markdown import MarkdownSection
@@ -474,14 +475,14 @@ def _execute_with_timeout(
 
 
 class _AstevalToolSuite:
-    def __init__(self, *, session: Session) -> None:
+    def __init__(self, *, section: AstevalSection) -> None:
         super().__init__()
-        self._session = session
+        self._section = section
 
     def run(
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
-        del context
+        session = self._section.ensure_session(context)
         code = _normalize_code(params.code)
         mode = params.mode
         if mode not in {"expr", "statements"}:
@@ -493,9 +494,7 @@ class _AstevalToolSuite:
         if read_paths & write_paths:
             raise ToolValidationError("Reads and writes must not target the same path.")
 
-        snapshot = (
-            select_latest(self._session, VirtualFileSystem) or VirtualFileSystem()
-        )
+        snapshot = select_latest(session, VirtualFileSystem) or VirtualFileSystem()
         read_globals = _build_eval_globals(snapshot, reads)
         user_globals = _parse_user_globals(params.globals)
 
@@ -717,17 +716,9 @@ def _make_eval_result_reducer() -> Callable[
 class AstevalSection(MarkdownSection[_AstevalSectionParams]):
     """Prompt section exposing the :mod:`asteval` evaluation tool."""
 
-    def __init__(
-        self,
-        *,
-        session: Session,
-        accepts_overrides: bool = False,
-    ) -> None:
-        self._session = session
-        session.register_reducer(
-            EvalResult, _make_eval_result_reducer(), slice_type=VirtualFileSystem
-        )
-        tool_suite = _AstevalToolSuite(session=session)
+    def __init__(self, *, accepts_overrides: bool = False) -> None:
+        self._configured_sessions: WeakSet[Session] = WeakSet()
+        tool_suite = _AstevalToolSuite(section=self)
         tool = Tool[EvalParams, EvalResult](
             name="evaluate_python",
             description="Evaluate a short Python expression in a sandboxed environment with optional VFS access.",
@@ -742,6 +733,21 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             tools=(tool,),
             accepts_overrides=accepts_overrides,
         )
+
+    def ensure_session(self, context: ToolContext) -> Session:
+        session = context.session
+        if not isinstance(session, Session):
+            raise ToolValidationError(
+                "AstevalSection requires ToolContext.session to be a Session instance.",
+            )
+        if session not in self._configured_sessions:
+            session.register_reducer(
+                EvalResult,
+                _make_eval_result_reducer(),
+                slice_type=VirtualFileSystem,
+            )
+            self._configured_sessions.add(session)
+        return session
 
 
 __all__ = [

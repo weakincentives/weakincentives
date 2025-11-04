@@ -351,7 +351,7 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         ),
         allowed_host_roots=(TEST_REPOSITORIES_ROOT,),
     )
-    asteval_section = AstevalSection(session=session)
+    asteval_section = AstevalSection()
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
