@@ -44,7 +44,11 @@ from weakincentives.prompt.versioning import PromptOverridesError
 from weakincentives.serde import dump
 from weakincentives.session import Session, select_latest
 from weakincentives.tools.asteval import AstevalSection
-from weakincentives.tools.planning import Plan, PlanningToolsSection
+from weakincentives.tools.planning import (
+    Plan,
+    PlanningStrategy,
+    PlanningToolsSection,
+)
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -331,7 +335,10 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         default_params=ReviewGuidance(),
         key="code-review-brief",
     )
-    planning_section = PlanningToolsSection(session=session)
+    planning_section = PlanningToolsSection(
+        session=session,
+        strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+    )
     vfs_section = VfsToolsSection(
         session=session,
         mounts=(
