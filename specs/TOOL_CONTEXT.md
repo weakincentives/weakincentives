@@ -78,8 +78,9 @@ def handle_tool(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]
 ```
 
 The orchestrator injects `context=` via keyword arguments when calling the handler.
-Handlers that do not declare the parameter continue to run, but the migration path
-(below) introduces warnings before eventually making the argument mandatory.
+Handlers **must** declare this parameter. If a handler omits the `context` keyword,
+the orchestrator raises an error instead of attempting to call the tool with a
+partial signature.
 
 ## Construction Flow
 
@@ -128,5 +129,5 @@ mirror instructions, while session and bus forwarding keep telemetry consistent.
    runtime.
 1. Update built-in tool handlers and adapters to accept and thread the `context`
    keyword argument.
-1. Emit deprecation warnings when a handler omits the `context` parameter; remove the
-   shim in a future minor release once downstream callers have migrated.
+1. Enforce the required `context` keyword at call time so handlers that fail to opt
+   in raise immediately, ensuring no silent shims mask missing context.
