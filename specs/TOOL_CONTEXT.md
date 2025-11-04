@@ -70,17 +70,16 @@ class ToolContext:
 
 ## Handler Signature
 
-Handlers accept the context via a keyword-only parameter:
+Handlers remain synchronous and accept the context via a keyword-only parameter:
 
 ```python
-async def handle_tool(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]:
+def handle_tool(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]:
     ...
 ```
 
-Synchronous handlers keep working; the orchestrator injects `context=` via keyword
-arguments. Handlers that do not declare the parameter continue to run, but the
-migration path (below) introduces warnings before eventually making the argument
-mandatory.
+The orchestrator injects `context=` via keyword arguments when calling the handler.
+Handlers that do not declare the parameter continue to run, but the migration path
+(below) introduces warnings before eventually making the argument mandatory.
 
 ## Construction Flow
 
