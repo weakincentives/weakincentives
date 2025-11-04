@@ -171,14 +171,13 @@ directly; no asynchronous facade is provided.
 1. Apply queued writes using the VFS reducer (next section) and populate the
    result payload.
 
-### Timeout Guard
+### Timeout Behaviour
 
-- Wrap the synchronous handler in a blocking timeout guard that fails fast after
-  5 seconds. Prefer `signal.setitimer(signal.ITIMER_REAL, 5.0)` on Unix; fall
-  back to a worker thread with `join(timeout=5.0)` on platforms without signal
-  support.
-- On timeout, cancel execution and return `stderr="Execution timed out."` while
-  discarding any queued writes.
+- The evaluation handler currently runs without an enforced timeout to avoid
+  signal usage inside worker threads. Callers should keep code snippets short
+  and side-effect free, returning early if they need to abandon work.
+- Long-running snippets should communicate their progress via stdout or
+  intermediates so operators can interrupt the review manually if necessary.
 
 ## VFS Integration
 
@@ -203,11 +202,12 @@ The tool operates against the session's `VirtualFileSystem` snapshot:
 - Provide a dedicated section class, `AstevalSection`, in
   `weakincentives.tools.asteval`. The section is the public entry point: it
   registers `eval_tool` with the prompt and emits markdown that summarizes key
-  capabilities, limits, timeout behaviour, and safety rules.
+  capabilities, limits, runtime behaviour, and safety rules.
 - The section accepts a `Session` and the shared VFS handle only; it should note
   that all files currently tracked in the VFS are available to reads and writes.
 - Sections should describe the helper functions (`read_text`, `write_text`) and
-  remind models to keep code short to avoid timeouts.
+  remind models to keep code short even though the runtime does not enforce a
+  timeout.
 - Include concrete examples in the section copy so agents know how to invoke the
   registered tools for both execution modes. Explicitly call out the
   `"expr"`/`"statements"` toggle in the examples so downstream prompts can copy

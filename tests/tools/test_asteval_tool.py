@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -758,25 +757,7 @@ def test_overwrite_requires_existing_file() -> None:
     assert snapshot is None or not snapshot.files
 
 
-def test_execute_with_timeout_signal_path_times_out(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(asteval_module, "_TIMEOUT_SECONDS", 0.01, raising=False)
-
-    def sleeper() -> None:
-        time.sleep(0.05)
-
-    timed_out, value, message = asteval_module._execute_with_timeout(sleeper)
-
-    assert timed_out is True
-    assert value is None
-    assert message == "Execution timed out."
-
-
-def test_execute_with_timeout_windows_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(asteval_module.sys, "platform", "win32")
-    monkeypatch.setattr(asteval_module, "_TIMEOUT_SECONDS", 0.01, raising=False)
-
+def test_execute_with_timeout_returns_value() -> None:
     timed_out, value, message = asteval_module._execute_with_timeout(lambda: "ok")
 
     assert timed_out is False
@@ -784,25 +765,7 @@ def test_execute_with_timeout_windows_fallback(monkeypatch: pytest.MonkeyPatch) 
     assert message == ""
 
 
-def test_execute_with_timeout_windows_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(asteval_module.sys, "platform", "win32")
-    monkeypatch.setattr(asteval_module, "_TIMEOUT_SECONDS", 0.01, raising=False)
-
-    def sleeper() -> None:
-        time.sleep(0.05)
-
-    timed_out, value, message = asteval_module._execute_with_timeout(sleeper)
-
-    assert timed_out is True
-    assert value is None
-    assert message == "Execution timed out."
-
-
-def test_execute_with_timeout_windows_handles_timeout_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(asteval_module.sys, "platform", "win32")
-
+def test_execute_with_timeout_handles_timeout_error() -> None:
     def raiser() -> None:
         raise TimeoutError
 
@@ -813,11 +776,7 @@ def test_execute_with_timeout_windows_handles_timeout_error(
     assert message == "Execution timed out."
 
 
-def test_execute_with_timeout_windows_propagates_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(asteval_module.sys, "platform", "win32")
-
+def test_execute_with_timeout_propagates_other_errors() -> None:
     def explode() -> None:
         raise ValueError("boom")
 

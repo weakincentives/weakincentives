@@ -20,10 +20,7 @@ import contextlib
 import io
 import json
 import math
-import platform
 import statistics
-import sys
-import threading
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -48,7 +45,6 @@ _MAX_WRITE_LENGTH: Final[int] = 48_000
 _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_SEGMENT_LENGTH: Final[int] = 80
 _ASCII: Final[str] = "ascii"
-_TIMEOUT_SECONDS: Final[float] = 5.0
 
 _SAFE_GLOBALS: Final[Mapping[str, object]] = MappingProxyType(
     {
@@ -83,7 +79,7 @@ _EVAL_TEMPLATE: Final[str] = (
     "- Pre-load files via `reads`, or call `read_text(path)` inside code to fetch VFS files.\n"
     "- Stage edits with `write_text(path, content, mode)` or declare them in `writes`. Content must be ASCII.\n"
     "- Globals accept JSON-encoded strings and are parsed before execution.\n"
-    "- Execution stops after five seconds; design code to finish quickly.\n\n"
+    "- No automatic timeout is enforced; keep snippets short and fail fast manually if needed.\n\n"
     "Expression mode returns the repr of the final expression and skips stdout unless you print explicitly:\n"
     "```json\n"
     "{\n"
@@ -422,52 +418,10 @@ def _create_interpreter() -> InterpreterProtocol:
 def _execute_with_timeout(
     func: Callable[[], object],
 ) -> tuple[bool, object | None, str]:
-    timeout_message = "Execution timed out."
-    if platform.system() != "Windows" and sys.platform != "win32":
-        import signal
-
-        timed_out = False
-
-        def handler(_signum: int, _frame: object | None) -> None:
-            nonlocal timed_out
-            timed_out = True
-            raise TimeoutError
-
-        previous = signal.signal(signal.SIGALRM, handler)
-        _ = signal.setitimer(signal.ITIMER_REAL, _TIMEOUT_SECONDS)
-        try:
-            value = func()
-        except TimeoutError:
-            return True, None, timeout_message
-        else:
-            return False, value, ""
-        finally:
-            _ = signal.setitimer(signal.ITIMER_REAL, 0)
-            _ = signal.signal(signal.SIGALRM, previous)
-
-    result_container: dict[str, object | None] = {}
-    error_container: dict[str, str] = {"message": ""}
-    completed = threading.Event()
-
-    def runner() -> None:
-        try:
-            result_container["value"] = func()
-        except TimeoutError:
-            error_container["message"] = timeout_message
-        except Exception as error:  # pragma: no cover - forwarded later
-            result_container["error"] = error
-        finally:
-            completed.set()
-
-    thread = threading.Thread(target=runner, daemon=True)
-    thread.start()
-    _ = completed.wait(_TIMEOUT_SECONDS)
-    if not completed.is_set():
-        return True, None, timeout_message
-    if "error" in result_container:
-        error = cast(Exception, result_container["error"])
-        raise error
-    return False, result_container.get("value"), error_container["message"]
+    try:
+        return False, func(), ""
+    except TimeoutError:
+        return False, None, "Execution timed out."
 
 
 class _AstevalToolSuite:
