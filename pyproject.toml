@@ -47,6 +47,9 @@ openai = [
 litellm = [
     "litellm>=1.79.0",
 ]
+google-genai = [
+    "google-genai==1.48.0",
+]
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -131,7 +134,7 @@ norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["litellm", "asteval", "openai"]
+DEP002 = ["litellm", "asteval", "openai", "google-genai"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

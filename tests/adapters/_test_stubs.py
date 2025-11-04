@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -136,6 +136,96 @@ class DummyOpenAIClient:
         completions = DummyCompletionsAPI(responses)
         self.chat = DummyChatAPI(completions)
         self.completions = completions
+
+
+class DummyGeminiFunctionCall:
+    def __init__(
+        self,
+        name: str,
+        args: Mapping[str, object] | None = None,
+        call_id: str | None = None,
+    ) -> None:
+        self.name = name
+        self.args = args or {}
+        self.id = call_id
+
+
+class DummyGeminiPart:
+    def __init__(
+        self,
+        *,
+        text: str | None = None,
+        function_call: DummyGeminiFunctionCall | None = None,
+    ) -> None:
+        self.text = text
+        self.function_call = function_call
+
+    def model_dump(self) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        if self.text is not None:
+            payload["text"] = self.text
+        if self.function_call is not None:
+            function_payload: dict[str, object] = {
+                "name": self.function_call.name,
+                "args": dict(self.function_call.args),
+            }
+            if self.function_call.id is not None:
+                function_payload["id"] = self.function_call.id
+            payload["functionCall"] = function_payload
+        return payload
+
+
+@dataclass(slots=True)
+class DummyGeminiContent:
+    parts: Sequence[DummyGeminiPart]
+
+
+@dataclass(slots=True)
+class DummyGeminiCandidate:
+    content: DummyGeminiContent
+
+
+class DummyGeminiResponse:
+    def __init__(
+        self,
+        candidates: Sequence[DummyGeminiCandidate],
+        *,
+        parsed: object | None = None,
+        payload: Mapping[str, object] | None = None,
+    ) -> None:
+        self.candidates = list(candidates)
+        self.parsed = parsed
+        self._payload = dict(payload or {})
+
+    def model_dump(self) -> dict[str, object]:
+        return {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [part.model_dump() for part in candidate.content.parts]
+                    }
+                }
+                for candidate in self.candidates
+            ],
+            **self._payload,
+        }
+
+
+class DummyGeminiModels:
+    def __init__(self, responses: Sequence[DummyGeminiResponse]) -> None:
+        self._responses = list(responses)
+        self.requests: list[dict[str, object]] = []
+
+    def generate_content(self, **kwargs: object) -> DummyGeminiResponse:
+        self.requests.append(dict(kwargs))
+        if not self._responses:
+            raise AssertionError("No responses available")
+        return self._responses.pop(0)
+
+
+class DummyGeminiClient:
+    def __init__(self, responses: Sequence[DummyGeminiResponse]) -> None:
+        self.models = DummyGeminiModels(responses)
 
 
 @dataclass
