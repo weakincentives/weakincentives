@@ -15,6 +15,15 @@
 from __future__ import annotations
 
 from ._types import SupportsDataclass
+from .composition import (
+    DelegationPrompt,
+    DelegationSummaryParams,
+    DelegationSummarySection,
+    ParentPromptParams,
+    ParentPromptSection,
+    RecapParams,
+    RecapSection,
+)
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -28,12 +37,19 @@ from .structured_output import OutputParseError, parse_structured_output
 from .tool import Tool, ToolResult
 
 __all__ = [
+    "DelegationPrompt",
+    "DelegationSummaryParams",
+    "DelegationSummarySection",
     "MarkdownSection",
     "OutputParseError",
+    "ParentPromptParams",
+    "ParentPromptSection",
     "Prompt",
     "PromptError",
     "PromptRenderError",
     "PromptValidationError",
+    "RecapParams",
+    "RecapSection",
     "Section",
     "SectionPath",
     "SupportsDataclass",
