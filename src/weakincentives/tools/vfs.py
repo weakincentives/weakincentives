@@ -135,7 +135,6 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         mounts: Sequence[HostMount] = (),
         allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
         accepts_overrides: bool = False,
-        tools_accept_overrides: bool = False,
     ) -> None:
         self._session = session
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
@@ -155,7 +154,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 
         tools = _build_tools(
             session=session,
-            accepts_overrides=tools_accept_overrides,
+            accepts_overrides=accepts_overrides,
         )
         super().__init__(
             title="Virtual Filesystem Tools",

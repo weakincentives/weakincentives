@@ -577,7 +577,6 @@ def test_planning_tools_section_allows_configuring_overrides() -> None:
     section = PlanningToolsSection(
         session=session,
         accepts_overrides=True,
-        tools_accept_overrides=True,
     )
 
     add_tool = find_tool(section, "planning_add_step")

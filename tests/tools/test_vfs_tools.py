@@ -927,7 +927,6 @@ def test_vfs_tools_section_allows_selective_override_opt_in() -> None:
     section = VfsToolsSection(
         session=session,
         accepts_overrides=True,
-        tools_accept_overrides=True,
     )
 
     read_tool = find_tool(section, "vfs_read_file")

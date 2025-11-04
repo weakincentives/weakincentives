@@ -123,7 +123,6 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         *,
         session: Session,
         accepts_overrides: bool = False,
-        tools_accept_overrides: bool = False,
     ) -> None:
         self._session = session
         session.register_reducer(Plan, replace_latest)
@@ -133,7 +132,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         session.register_reducer(MarkStep, _mark_step_reducer, slice_type=Plan)
         session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
 
-        tools = _build_tools(session, accepts_overrides=tools_accept_overrides)
+        tools = _build_tools(session, accepts_overrides=accepts_overrides)
         super().__init__(
             title="Planning Tools",
             key="planning.tools",

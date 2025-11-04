@@ -99,7 +99,6 @@ def test_asteval_section_override_flags_opt_in() -> None:
     section = AstevalSection(
         session=session,
         accepts_overrides=True,
-        tools_accept_overrides=True,
     )
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 

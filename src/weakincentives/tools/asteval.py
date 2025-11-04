@@ -716,7 +716,6 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         *,
         session: Session,
         accepts_overrides: bool = False,
-        tools_accept_overrides: bool = False,
     ) -> None:
         self._session = session
         session.register_reducer(
@@ -727,7 +726,7 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             name="evaluate_python",
             description="Evaluate a short Python expression in a sandboxed environment with optional VFS access.",
             handler=tool_suite.run,
-            accepts_overrides=tools_accept_overrides,
+            accepts_overrides=accepts_overrides,
         )
         super().__init__(
             title="Python Evaluation Tool",
