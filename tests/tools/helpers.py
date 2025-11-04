@@ -20,6 +20,7 @@ from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+from weakincentives.session import Session
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
 ResultT = TypeVar("ResultT", bound=SupportsDataclass)
@@ -44,14 +45,16 @@ class _DummyAdapter(ProviderAdapter[Any]):
         raise NotImplementedError
 
 
-def _build_context(bus: InProcessEventBus) -> ToolContext:
+def _build_context(
+    bus: InProcessEventBus, session: Session | None = None
+) -> ToolContext:
     prompt = Prompt(ns="tests", key="tool-context-helper")
     adapter = cast(ProviderAdapter[Any], _DummyAdapter())
     return ToolContext(
         prompt=prompt,
         rendered_prompt=None,
         adapter=adapter,
-        session=None,
+        session=session,
         event_bus=bus,
     )
 
@@ -73,12 +76,14 @@ def invoke_tool(
     bus: InProcessEventBus,
     tool: Tool[ParamsT, ResultT],
     params: ParamsT,
+    *,
+    session: Session | None = None,
 ) -> ToolResult[ResultT]:
     """Execute ``tool`` with ``params`` and publish the invocation event."""
 
     handler = tool.handler
     assert handler is not None
-    result = handler(params, context=_build_context(bus))
+    result = handler(params, context=_build_context(bus, session))
     event = ToolInvoked(
         prompt_name="test",
         adapter="adapter",

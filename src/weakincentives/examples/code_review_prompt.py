@@ -98,7 +98,7 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
         key="code-review-brief",
     )
     planning_section = PlanningToolsSection(session=session)
-    vfs_section = VfsToolsSection(session=session)
+    vfs_section = VfsToolsSection()
     asteval_section = AstevalSection(session=session)
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",

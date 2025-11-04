@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal, cast
+from weakref import WeakSet
 
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
@@ -131,29 +132,16 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
     def __init__(
         self,
         *,
-        session: Session,
         mounts: Sequence[HostMount] = (),
         allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
         accepts_overrides: bool = False,
     ) -> None:
-        self._session = session
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
-        session.register_reducer(VirtualFileSystem, replace_latest)
-        mount_snapshot = _materialize_mounts(mounts, allowed_roots)
-        session.seed_slice(VirtualFileSystem, (mount_snapshot,))
-        session.register_reducer(
-            WriteFile,
-            _make_write_reducer(),
-            slice_type=VirtualFileSystem,
-        )
-        session.register_reducer(
-            DeleteEntry,
-            _make_delete_reducer(),
-            slice_type=VirtualFileSystem,
-        )
+        self._mount_snapshot = _materialize_mounts(mounts, allowed_roots)
+        self._configured_sessions: WeakSet[Session] = WeakSet()
 
         tools = _build_tools(
-            session=session,
+            section=self,
             accepts_overrides=accepts_overrides,
         )
         super().__init__(
@@ -165,13 +153,42 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
+    def ensure_session(self, context: ToolContext) -> Session:
+        session = context.session
+        if not isinstance(session, Session):
+            raise ToolValidationError(
+                "VfsToolsSection requires ToolContext.session to be a Session instance.",
+            )
+        if session not in self._configured_sessions:
+            self._initialize_session(session)
+            self._configured_sessions.add(session)
+        return session
+
+    def _initialize_session(self, session: Session) -> None:
+        session.register_reducer(VirtualFileSystem, replace_latest)
+        session.seed_slice(VirtualFileSystem, (self._mount_snapshot,))
+        session.register_reducer(
+            WriteFile,
+            _make_write_reducer(),
+            slice_type=VirtualFileSystem,
+        )
+        session.register_reducer(
+            DeleteEntry,
+            _make_delete_reducer(),
+            slice_type=VirtualFileSystem,
+        )
+
+    def latest_snapshot(self, session: Session) -> VirtualFileSystem:
+        snapshot = select_latest(session, VirtualFileSystem)
+        return snapshot or VirtualFileSystem()
+
 
 def _build_tools(
     *,
-    session: Session,
+    section: VfsToolsSection,
     accepts_overrides: bool,
 ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
-    suite = _VfsToolSuite(session=session)
+    suite = _VfsToolSuite(section=section)
     return cast(
         tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
         (
@@ -204,18 +221,18 @@ def _build_tools(
 
 
 class _VfsToolSuite:
-    """Collection of VFS handlers bound to a session instance."""
+    """Collection of VFS handlers bound to a section instance."""
 
-    def __init__(self, *, session: Session) -> None:
+    def __init__(self, *, section: VfsToolsSection) -> None:
         super().__init__()
-        self._session = session
+        self._section = section
 
     def list_directory(
         self, params: ListDirectory, *, context: ToolContext
     ) -> ToolResult[ListDirectoryResult]:
-        del context
+        session = self._section.ensure_session(context)
         target = _normalize_optional_path(params.path)
-        snapshot = self._latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         if _has_file(snapshot.files, target):
             raise ToolValidationError("Cannot list a file path; provide a directory.")
 
@@ -243,9 +260,9 @@ class _VfsToolSuite:
     def read_file(
         self, params: ReadFile, *, context: ToolContext
     ) -> ToolResult[VfsFile]:
-        del context
+        session = self._section.ensure_session(context)
         path = _normalize_required_path(params.path)
-        snapshot = self._latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         file = _find_file(snapshot.files, path)
         if file is None:
             raise ToolValidationError("File does not exist in the virtual filesystem.")
@@ -255,13 +272,13 @@ class _VfsToolSuite:
     def write_file(
         self, params: WriteFile, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
-        del context
+        session = self._section.ensure_session(context)
         path = _normalize_required_path(params.path)
         if params.encoding != _DEFAULT_ENCODING:
             raise ToolValidationError("Only UTF-8 encoding is supported.")
         content = _normalize_content(params.content)
         mode = params.mode
-        snapshot = self._latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         existing = _find_file(snapshot.files, path)
         if mode == "create" and existing is not None:
             raise ToolValidationError("File already exists; use overwrite or append.")
@@ -274,9 +291,9 @@ class _VfsToolSuite:
     def delete_entry(
         self, params: DeleteEntry, *, context: ToolContext
     ) -> ToolResult[DeleteEntry]:
-        del context
+        session = self._section.ensure_session(context)
         path = _normalize_path(params.path)
-        snapshot = self._latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         matches = tuple(
             file
             for file in snapshot.files
@@ -288,10 +305,6 @@ class _VfsToolSuite:
         normalized = DeleteEntry(path=path)
         message = _format_delete_message(path, matches)
         return ToolResult(message=message, value=normalized)
-
-    def _latest_snapshot(self) -> VirtualFileSystem:
-        snapshot = select_latest(self._session, VirtualFileSystem)
-        return snapshot or VirtualFileSystem()
 
 
 def _normalize_content(content: str) -> str:
