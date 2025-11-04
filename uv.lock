@@ -1923,7 +1923,7 @@ wheels = [
 
 [[package]]
 name = "weakincentives"
-version = "0.5.0.post1.dev5"
+version = "0.5.0.post1.dev21"
 source = { editable = "." }
 dependencies = [
     { name = "asteval" },

@@ -23,10 +23,10 @@ from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 from . import shared as _shared
+from ._provider_protocols import ProviderChoice, ProviderCompletionResponse
 from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse
 from .shared import (
-    ProviderChoice,
     ToolChoice,
     build_json_schema_response_format,
     first_choice,
@@ -44,31 +44,8 @@ _ERROR_MESSAGE: Final[str] = (
 )
 
 
-class _CompletionFunctionCall(Protocol):
-    name: str
-    arguments: str | None
-
-
-class _ToolCall(Protocol):
-    id: str
-    function: _CompletionFunctionCall
-
-
-class _Message(Protocol):
-    content: str | Sequence[object] | None
-    tool_calls: Sequence[_ToolCall] | None
-
-
-class _CompletionChoice(Protocol):
-    message: _Message
-
-
-class _CompletionResponse(Protocol):
-    choices: Sequence[_CompletionChoice]
-
-
 class _CompletionsAPI(Protocol):
-    def create(self, *args: object, **kwargs: object) -> _CompletionResponse: ...
+    def create(self, *args: object, **kwargs: object) -> ProviderCompletionResponse: ...
 
 
 class _ChatAPI(Protocol):
