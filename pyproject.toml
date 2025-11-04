@@ -47,6 +47,9 @@ openai = [
 litellm = [
     "litellm>=1.79.0",
 ]
+anthropic = [
+    "anthropic>=0.72.0",
+]
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -131,12 +134,13 @@ norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["litellm", "asteval", "openai"]
+DEP002 = ["litellm", "asteval", "openai", "anthropic"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
 include = ["src"]
+ignore = ["src/weakincentives/adapters/anthropic.py"]
 exclude = [
     "test-repositories",
     ".git",

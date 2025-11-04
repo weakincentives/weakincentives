@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -182,3 +182,52 @@ class RecordingCompletion:
         if not self._responses:
             raise AssertionError("No responses available")
         return self._responses.pop(0)
+
+
+@dataclass(slots=True)
+class DummyAnthropicTextBlock:
+    text: str
+    type: str = "text"
+
+
+@dataclass(slots=True)
+class DummyAnthropicToolUseBlock:
+    id: str
+    name: str
+    input: dict[str, Any]
+    type: str = "tool_use"
+
+
+@dataclass(slots=True)
+class DummyAnthropicMessage:
+    content: list[object]
+
+    def model_dump(self) -> dict[str, Any]:
+        return {"content": [dict(_normalise_block(part)) for part in self.content]}
+
+
+def _normalise_block(part: object) -> dict[str, Any]:
+    if isinstance(part, Mapping):
+        return {str(key): value for key, value in part.items()}
+    block = {"type": getattr(part, "type", "text")}
+    for attribute in ("text", "id", "name", "input", "tool_use_id", "content"):
+        if hasattr(part, attribute):
+            block[attribute] = getattr(part, attribute)
+    return block
+
+
+class DummyAnthropicMessagesAPI:
+    def __init__(self, responses: Sequence[object]) -> None:
+        self._responses = list(responses)
+        self.requests: list[dict[str, object]] = []
+
+    def create(self, **kwargs: object) -> object:
+        self.requests.append(kwargs)
+        if not self._responses:
+            raise AssertionError("No responses available")
+        return self._responses.pop(0)
+
+
+class DummyAnthropicClient:
+    def __init__(self, responses: Sequence[object]) -> None:
+        self.messages = DummyAnthropicMessagesAPI(responses)
