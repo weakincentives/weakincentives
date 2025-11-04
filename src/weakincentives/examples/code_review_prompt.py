@@ -99,7 +99,7 @@ def build_code_review_prompt(session: Session) -> Prompt[ReviewResponse]:
     )
     planning_section = PlanningToolsSection()
     vfs_section = VfsToolsSection()
-    asteval_section = AstevalSection(session=session)
+    asteval_section = AstevalSection()
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",

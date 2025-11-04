@@ -10,6 +10,9 @@ Release highlights for weakincentives.
 - Refactored `PlanningToolsSection` to configure sessions from
   `ToolContext.session`, simplifying prompt construction and aligning the suite
   with other tool sections.
+- Refactored `AstevalSection` to configure reducers via `ToolContext.session`,
+  removing the constructor `Session` dependency and aligning with other tool
+  sections.
 
 ## v0.5.0 - 2025-11-02
 
