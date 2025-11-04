@@ -81,6 +81,20 @@ def _setup_sections() -> tuple[
     return session, bus, vfs_section, tool
 
 
+def test_missing_dependency_instructs_extra_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_import(_module: str) -> object:
+        raise ModuleNotFoundError
+
+    monkeypatch.setattr(asteval_module, "import_module", fail_import)
+
+    with pytest.raises(RuntimeError) as captured:
+        asteval_module._load_asteval_module()
+
+    assert "weakincentives[asteval]" in str(captured.value)
+
+
 def test_asteval_section_disables_tool_overrides_by_default() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)

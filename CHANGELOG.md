@@ -4,7 +4,9 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- No changes yet.
+- Moved the asteval-backed evaluation tool behind the `asteval` extra so the core
+  library stays stdlib-only and surfaces a clearer install hint when the optional
+  dependency is missing.
 
 ## v0.5.0 - 2025-11-02
 

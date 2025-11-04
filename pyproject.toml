@@ -7,9 +7,7 @@ authors = [
     { name = "Andrei Savu", email = "andrei@weakincentives.com" }
 ]
 requires-python = ">=3.12"
-dependencies = [
-    "asteval>=1.0.6",
-]
+dependencies = []
 license = { text = "Apache-2.0" }
 keywords = [
     "ai",
@@ -41,6 +39,9 @@ Repository = "https://github.com/weakincentives/weakincentives"
 "Issue Tracker" = "https://github.com/weakincentives/weakincentives/issues"
 
 [project.optional-dependencies]
+asteval = [
+    "asteval>=1.0.6",
+]
 openai = [
     "openai>=2.6.1",
 ]
@@ -131,7 +132,7 @@ norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["litellm", "asteval", "openai"]
+DEP002 = ["asteval", "litellm", "openai"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
