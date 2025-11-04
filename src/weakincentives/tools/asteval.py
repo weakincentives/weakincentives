@@ -20,9 +20,7 @@ import contextlib
 import io
 import json
 import math
-import platform
 import statistics
-import sys
 import threading
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
@@ -427,28 +425,6 @@ def _execute_with_timeout(
     func: Callable[[], object],
 ) -> tuple[bool, object | None, str]:
     timeout_message = "Execution timed out."
-    if platform.system() != "Windows" and sys.platform != "win32":
-        import signal
-
-        timed_out = False
-
-        def handler(_signum: int, _frame: object | None) -> None:
-            nonlocal timed_out
-            timed_out = True
-            raise TimeoutError
-
-        previous = signal.signal(signal.SIGALRM, handler)
-        _ = signal.setitimer(signal.ITIMER_REAL, _TIMEOUT_SECONDS)
-        try:
-            value = func()
-        except TimeoutError:
-            return True, None, timeout_message
-        else:
-            return False, value, ""
-        finally:
-            _ = signal.setitimer(signal.ITIMER_REAL, 0)
-            _ = signal.signal(signal.SIGALRM, previous)
-
     result_container: dict[str, object | None] = {}
     error_container: dict[str, str] = {"message": ""}
     completed = threading.Event()

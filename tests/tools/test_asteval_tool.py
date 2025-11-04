@@ -803,7 +803,7 @@ def test_overwrite_requires_existing_file() -> None:
     assert snapshot is None or not snapshot.files
 
 
-def test_execute_with_timeout_signal_path_times_out(
+def test_execute_with_timeout_times_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(asteval_module, "_TIMEOUT_SECONDS", 0.01, raising=False)
@@ -818,8 +818,9 @@ def test_execute_with_timeout_signal_path_times_out(
     assert message == "Execution timed out."
 
 
-def test_execute_with_timeout_windows_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(asteval_module.sys, "platform", "win32")
+def test_execute_with_timeout_returns_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(asteval_module, "_TIMEOUT_SECONDS", 0.01, raising=False)
 
     timed_out, value, message = asteval_module._execute_with_timeout(lambda: "ok")
@@ -829,25 +830,9 @@ def test_execute_with_timeout_windows_fallback(monkeypatch: pytest.MonkeyPatch) 
     assert message == ""
 
 
-def test_execute_with_timeout_windows_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(asteval_module.sys, "platform", "win32")
-    monkeypatch.setattr(asteval_module, "_TIMEOUT_SECONDS", 0.01, raising=False)
-
-    def sleeper() -> None:
-        time.sleep(0.05)
-
-    timed_out, value, message = asteval_module._execute_with_timeout(sleeper)
-
-    assert timed_out is True
-    assert value is None
-    assert message == "Execution timed out."
-
-
-def test_execute_with_timeout_windows_handles_timeout_error(
+def test_execute_with_timeout_handles_timeout_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(asteval_module.sys, "platform", "win32")
-
     def raiser() -> None:
         raise TimeoutError
 
@@ -858,11 +843,9 @@ def test_execute_with_timeout_windows_handles_timeout_error(
     assert message == "Execution timed out."
 
 
-def test_execute_with_timeout_windows_propagates_error(
+def test_execute_with_timeout_propagates_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(asteval_module.sys, "platform", "win32")
-
     def explode() -> None:
         raise ValueError("boom")
 
