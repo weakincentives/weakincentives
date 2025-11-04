@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import RLock
 from typing import TYPE_CHECKING
 
 from ..logging import StructuredLogger, get_logger
@@ -58,13 +59,16 @@ class InProcessEventBus:
     def __init__(self) -> None:
         super().__init__()
         self._handlers: dict[type[object], list[EventHandler]] = {}
+        self._lock = RLock()
 
     def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
-        handlers = self._handlers.setdefault(event_type, [])
-        handlers.append(handler)
+        with self._lock:
+            handlers = self._handlers.setdefault(event_type, [])
+            handlers.append(handler)
 
     def publish(self, event: object) -> PublishResult:
-        handlers = tuple(self._handlers.get(type(event), ()))
+        with self._lock:
+            handlers = tuple(self._handlers.get(type(event), ()))
         invoked: list[EventHandler] = []
         failures: list[HandlerFailure] = []
         for handler in handlers:

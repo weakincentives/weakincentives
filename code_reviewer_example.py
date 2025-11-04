@@ -21,6 +21,7 @@ import sys
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock
 from types import MethodType
 from typing import Any, Protocol, cast
 
@@ -268,6 +269,7 @@ class SunfishReviewSession:
         )
         self._prompt = base_prompt
         self._history: list[ToolCallLog] = []
+        self._history_lock = RLock()
         self._bus.subscribe(ToolInvoked, self._on_tool_invoked)
 
     def evaluate(self, request: str) -> str:
@@ -284,11 +286,13 @@ class SunfishReviewSession:
         return "(no response from assistant)"
 
     def render_tool_history(self) -> str:
-        if not self._history:
-            return "No tool calls recorded yet."
+        with self._history_lock:
+            if not self._history:
+                return "No tool calls recorded yet."
+            history_snapshot = tuple(self._history)
 
         lines: list[str] = []
-        for index, record in enumerate(self._history, start=1):
+        for index, record in enumerate(history_snapshot, start=1):
             lines.append(
                 f"{index}. {record.name} ({record.prompt_name}) → {record.message}"
             )
@@ -328,19 +332,22 @@ class SunfishReviewSession:
                 payload = {"value": raw_value}
         params_repr = _format_for_log(serialized_params)
         message = _truncate_for_log(tool_event.result.message or "")
-        print(f"[tool] {tool_event.name} called with {params_repr}\n       → {message}")
-        if payload:
-            payload_repr = _format_for_log(payload)
-            print(f"       payload: {payload_repr}")
+        with self._history_lock:
+            print(
+                f"[tool] {tool_event.name} called with {params_repr}\n       → {message}"
+            )
+            if payload:
+                payload_repr = _format_for_log(payload)
+                print(f"       payload: {payload_repr}")
 
-        record = ToolCallLog(
-            name=tool_event.name,
-            prompt_name=tool_event.prompt_name,
-            message=tool_event.result.message,
-            value=payload,
-            call_id=tool_event.call_id,
-        )
-        self._history.append(record)
+            record = ToolCallLog(
+                name=tool_event.name,
+                prompt_name=tool_event.prompt_name,
+                message=tool_event.result.message,
+                value=payload,
+                call_id=tool_event.call_id,
+            )
+            self._history.append(record)
 
 
 def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
