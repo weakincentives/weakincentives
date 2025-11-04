@@ -17,12 +17,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, is_dataclass
 from datetime import UTC, datetime
+from threading import RLock
 from typing import Any, cast
 
 from ..events import EventBus, NullEventBus, PromptExecuted, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ._types import ReducerEvent, TypedReducer
+from .reducers import append
 from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -84,6 +86,8 @@ class Session:
         self._bus: EventBus = NullEventBus()
         self._reducers: dict[type[SupportsDataclass], list[_ReducerRegistration]] = {}
         self._state: dict[type[Any], tuple[Any, ...]] = {}
+        self._lock = RLock()
+        self._subscriptions_attached = False
 
         if bus is not None:
             self._attach_to_bus(bus)
@@ -103,7 +107,15 @@ class Session:
             created_at=created_at if created_at is not None else self.created_at,
         )
 
-        for data_type, registrations in self._reducers.items():
+        with self._lock:
+            reducer_snapshot = [
+                (data_type, tuple(registrations))
+                for data_type, registrations in self._reducers.items()
+            ]
+            state_snapshot = dict(self._state)
+            source_bus = self._bus
+
+        for data_type, registrations in reducer_snapshot:
             for registration in registrations:
                 clone.register_reducer(
                     data_type,
@@ -111,9 +123,10 @@ class Session:
                     slice_type=registration.slice_type,
                 )
 
-        clone._state = dict(self._state)
+        with clone._lock:
+            clone._state = state_snapshot
+            clone._bus = source_bus if bus is None else bus
 
-        clone._bus = self._bus if bus is None else bus
         if bus is not None:
             clone._attach_to_bus(bus)
 
@@ -133,26 +146,31 @@ class Session:
             reducer=cast(TypedReducer[Any], reducer),
             slice_type=target_slice_type,
         )
-        bucket = self._reducers.setdefault(data_type, [])
-        bucket.append(registration)
-        _ = self._state.setdefault(target_slice_type, ())
+        with self._lock:
+            bucket = self._reducers.setdefault(data_type, [])
+            bucket.append(registration)
+            _ = self._state.setdefault(target_slice_type, ())
 
     def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]:
         """Return the tuple slice maintained for the provided type."""
 
-        return cast(tuple[S, ...], self._state.get(slice_type, ()))
+        with self._lock:
+            return cast(tuple[S, ...], self._state.get(slice_type, ()))
 
     def seed_slice[S](self, slice_type: type[S], values: Iterable[S]) -> None:
         """Initialize or replace the stored tuple for the provided type."""
 
-        self._state[slice_type] = tuple(values)
+        with self._lock:
+            self._state[slice_type] = tuple(values)
 
     def snapshot(self) -> Snapshot:
         """Capture an immutable snapshot of the current session state."""
 
+        with self._lock:
+            state_snapshot = dict(self._state)
         try:
             normalized: Mapping[type[Any], tuple[Any, ...]] = normalize_snapshot_state(
-                cast(Mapping[object, tuple[object, ...]], self._state)
+                cast(Mapping[object, tuple[object, ...]], state_snapshot)
             )
         except ValueError as error:
             msg = "Unable to serialize session slices"
@@ -175,18 +193,20 @@ class Session:
             msg = f"Slice types not registered: {missing_names}"
             raise SnapshotRestoreError(msg)
 
-        new_state: dict[type[Any], tuple[Any, ...]] = dict(self._state)
-        for slice_type in registered_slices:
-            new_state[slice_type] = snapshot.slices.get(slice_type, ())
+        with self._lock:
+            new_state: dict[type[Any], tuple[Any, ...]] = dict(self._state)
+            for slice_type in registered_slices:
+                new_state[slice_type] = snapshot.slices.get(slice_type, ())
 
-        self._state = new_state
+            self._state = new_state
 
     def _registered_slice_types(self) -> set[type[Any]]:
-        types: set[type[Any]] = set(self._state)
-        for registrations in self._reducers.values():
-            for registration in registrations:
-                types.add(registration.slice_type)
-        return types
+        with self._lock:
+            types: set[type[Any]] = set(self._state)
+            for registrations in self._reducers.values():
+                for registration in registrations:
+                    types.add(registration.slice_type)
+            return types
 
     def _on_tool_invoked(self, event: object) -> None:
         tool_event = cast(ToolInvoked, event)
@@ -225,51 +245,54 @@ class Session:
     def _dispatch_data_event(
         self, data_type: type[SupportsDataclass], event: ReducerEvent
     ) -> None:
-        registrations = self._reducers.get(data_type)
-        if not registrations:
-            if data_type is _TOOL_DATA_TYPE:
-                registrations = [
-                    _ReducerRegistration(
-                        reducer=cast(TypedReducer[Any], _append_tool_data),
-                        slice_type=ToolData,
-                    )
-                ]
-            else:
-                from .reducers import append
+        with self._lock:
+            registrations = list(self._reducers.get(data_type, ()))
+            if not registrations:
+                if data_type is _TOOL_DATA_TYPE:
+                    registrations = [
+                        _ReducerRegistration(
+                            reducer=cast(TypedReducer[Any], _append_tool_data),
+                            slice_type=ToolData,
+                        )
+                    ]
+                else:
+                    registrations = [
+                        _ReducerRegistration(
+                            reducer=cast(TypedReducer[Any], append),
+                            slice_type=data_type,
+                        )
+                    ]
 
-                registrations = [
-                    _ReducerRegistration(
-                        reducer=cast(TypedReducer[Any], append),
-                        slice_type=data_type,
+            for registration in registrations:
+                slice_type = registration.slice_type
+                previous = self._state.get(slice_type, ())
+                try:
+                    result = registration.reducer(previous, event)
+                except Exception:  # log and continue
+                    reducer_name = getattr(
+                        registration.reducer, "__qualname__", repr(registration.reducer)
                     )
-                ]
-
-        for registration in registrations:
-            slice_type = registration.slice_type
-            previous = self._state.get(slice_type, ())
-            try:
-                result = registration.reducer(previous, event)
-            except Exception:  # log and continue
-                reducer_name = getattr(
-                    registration.reducer, "__qualname__", repr(registration.reducer)
-                )
-                logger.exception(
-                    "Reducer application failed.",
-                    event="session_reducer_failed",
-                    context={
-                        "reducer": reducer_name,
-                        "data_type": data_type.__qualname__,
-                        "slice_type": slice_type.__qualname__,
-                    },
-                )
-                continue
-            normalized = tuple(result)
-            self._state[slice_type] = normalized
+                    logger.exception(
+                        "Reducer application failed.",
+                        event="session_reducer_failed",
+                        context={
+                            "reducer": reducer_name,
+                            "data_type": data_type.__qualname__,
+                            "slice_type": slice_type.__qualname__,
+                        },
+                    )
+                    continue
+                normalized = tuple(result)
+                self._state[slice_type] = normalized
 
     def _attach_to_bus(self, bus: EventBus) -> None:
-        self._bus = bus
-        bus.subscribe(ToolInvoked, self._on_tool_invoked)
-        bus.subscribe(PromptExecuted, self._on_prompt_executed)
+        with self._lock:
+            if self._subscriptions_attached and self._bus is bus:
+                return
+            self._bus = bus
+            self._subscriptions_attached = True
+            bus.subscribe(ToolInvoked, self._on_tool_invoked)
+            bus.subscribe(PromptExecuted, self._on_prompt_executed)
 
 
 def _is_dataclass_instance(value: object) -> bool:

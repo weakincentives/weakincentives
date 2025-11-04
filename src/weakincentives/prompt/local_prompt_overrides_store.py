@@ -16,9 +16,11 @@ import json
 import re
 import subprocess  # nosec B404 - git invocation for root discovery
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import fields, is_dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any, Literal, cast, overload, override
 
 from ..logging import StructuredLogger, get_logger
@@ -57,6 +59,9 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         self._explicit_root = Path(root_path).resolve() if root_path else None
         self._root: Path | None = None
         self._overrides_relative_path = Path(overrides_relative_path)
+        self._root_lock = RLock()
+        self._path_locks: dict[Path, RLock] = {}
+        self._path_locks_lock = RLock()
 
     @override
     def resolve(
@@ -70,25 +75,27 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             prompt_key=descriptor.key,
             tag=normalized_tag,
         )
-        if not file_path.exists():
-            _LOGGER.debug(
-                "Override file not found.",
-                event="prompt_override_missing",
-                context={
-                    "ns": descriptor.ns,
-                    "prompt_key": descriptor.key,
-                    "tag": normalized_tag,
-                },
-            )
-            return None
+        with self._locked_override_path(file_path):
+            if not file_path.exists():
+                _LOGGER.debug(
+                    "Override file not found.",
+                    event="prompt_override_missing",
+                    context={
+                        "ns": descriptor.ns,
+                        "prompt_key": descriptor.key,
+                        "tag": normalized_tag,
+                    },
+                )
+                return None
 
-        try:
-            with file_path.open("r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-        except json.JSONDecodeError as error:
-            raise PromptOverridesError(
-                f"Failed to parse prompt override JSON: {file_path}"
-            ) from error
+            payload: dict[str, Any]
+            try:
+                with file_path.open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except json.JSONDecodeError as error:
+                raise PromptOverridesError(
+                    f"Failed to parse prompt override JSON: {file_path}"
+                ) from error
 
         self._validate_header(payload, descriptor, normalized_tag, file_path)
 
@@ -163,7 +170,8 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             "tools": self._serialize_tools(validated_tools),
         }
 
-        self._atomic_write(file_path, payload)
+        with self._locked_override_path(file_path):
+            self._atomic_write(file_path, payload)
 
         persisted = PromptOverride(
             ns=descriptor.ns,
@@ -199,18 +207,19 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             prompt_key=prompt_key,
             tag=normalized_tag,
         )
-        try:
-            file_path.unlink()
-        except FileNotFoundError:
-            _LOGGER.debug(
-                "No override file to delete.",
-                event="prompt_override_delete_missing",
-                context={
-                    "ns": ns,
-                    "prompt_key": prompt_key,
-                    "tag": normalized_tag,
-                },
-            )
+        with self._locked_override_path(file_path):
+            try:
+                file_path.unlink()
+            except FileNotFoundError:
+                _LOGGER.debug(
+                    "No override file to delete.",
+                    event="prompt_override_delete_missing",
+                    context={
+                        "ns": ns,
+                        "prompt_key": prompt_key,
+                        "tag": normalized_tag,
+                    },
+                )
 
     @override
     def seed_if_necessary(
@@ -227,45 +236,47 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             tag=normalized_tag,
         )
 
-        if file_path.exists():
-            existing = self.resolve(descriptor=descriptor, tag=normalized_tag)
-            if existing is None:
-                raise PromptOverridesError(
-                    "Override file exists but could not be resolved."
-                )
-            return existing
+        with self._locked_override_path(file_path):
+            if file_path.exists():
+                existing = self.resolve(descriptor=descriptor, tag=normalized_tag)
+                if existing is None:
+                    raise PromptOverridesError(
+                        "Override file exists but could not be resolved."
+                    )
+                return existing
 
-        sections = self._seed_sections(prompt, descriptor)
-        tools = self._seed_tools(prompt, descriptor)
+            sections = self._seed_sections(prompt, descriptor)
+            tools = self._seed_tools(prompt, descriptor)
 
-        seed_override = PromptOverride(
-            ns=descriptor.ns,
-            prompt_key=descriptor.key,
-            tag=normalized_tag,
-            sections=sections,
-            tool_overrides=tools,
-        )
-        return self.upsert(descriptor, seed_override)
+            seed_override = PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=normalized_tag,
+                sections=sections,
+                tool_overrides=tools,
+            )
+            return self.upsert(descriptor, seed_override)
 
     def _resolve_root(self) -> Path:
-        if self._root is not None:
-            return self._root
-        if self._explicit_root is not None:
-            self._root = self._explicit_root
-            return self._root
+        with self._root_lock:
+            if self._root is not None:
+                return self._root
+            if self._explicit_root is not None:
+                self._root = self._explicit_root
+                return self._root
 
-        git_root = self._git_toplevel()
-        if git_root is not None:
-            self._root = git_root
-            return self._root
+            git_root = self._git_toplevel()
+            if git_root is not None:
+                self._root = git_root
+                return self._root
 
-        traversal_root = self._walk_to_git_root()
-        if traversal_root is None:
-            raise PromptOverridesError(
-                "Failed to locate repository root. Provide root_path explicitly."
-            )
-        self._root = traversal_root
-        return self._root
+            traversal_root = self._walk_to_git_root()
+            if traversal_root is None:
+                raise PromptOverridesError(
+                    "Failed to locate repository root. Provide root_path explicitly."
+                )
+            self._root = traversal_root
+            return self._root
 
     def _git_toplevel(self) -> Path | None:
         try:
@@ -683,6 +694,20 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             _ = handle.write("\n")
             temp_name = Path(handle.name)
         _ = Path(temp_name).replace(file_path)
+
+    def _get_override_path_lock(self, file_path: Path) -> RLock:
+        with self._path_locks_lock:
+            lock = self._path_locks.get(file_path)
+            if lock is None:
+                lock = RLock()
+                self._path_locks[file_path] = lock
+            return lock
+
+    @contextmanager
+    def _locked_override_path(self, file_path: Path) -> Iterator[None]:
+        lock = self._get_override_path_lock(file_path)
+        with lock:
+            yield
 
     def _seed_sections(
         self,
