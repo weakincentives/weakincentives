@@ -576,6 +576,24 @@ parsing raw message strings.
    - `make check` (aggregates the quiet checks above plus Bandit, Deptry, pip-audit,
      and markdown linting)
 
+### Integration tests
+
+Provider integrations require live credentials, so the suite stays opt-in. Export the
+necessary OpenAI configuration and then run the dedicated `make` target, which disables
+coverage enforcement automatically:
+
+```bash
+export OPENAI_API_KEY="sk-your-key"
+# Optionally override the default model (`gpt-4.1`).
+export OPENAI_TEST_MODEL="gpt-4.1-mini"
+
+make integration-tests
+```
+
+`make integration-tests` forwards `--no-cov` to pytest so you can exercise the adapter
+scenarios without tripping the 100% coverage gate configured for the unit test suite. The
+tests remain skipped when `OPENAI_API_KEY` is not present.
+
 ## Documentation
 
 - `AGENTS.md` — operational handbook and contributor workflow.
