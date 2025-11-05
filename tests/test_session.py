@@ -21,6 +21,7 @@ from weakincentives.adapters.core import PromptResponse
 from weakincentives.events import InProcessEventBus, PromptExecuted, ToolInvoked
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.session import (
+    ReducerContext,
     ReducerEvent,
     Session,
     Snapshot,
@@ -121,15 +122,23 @@ def test_reducers_run_in_registration_order() -> None:
     call_order: list[str] = []
 
     def first(
-        slice_values: tuple[FirstSlice, ...], event: ReducerEvent
+        slice_values: tuple[FirstSlice, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContext,
     ) -> tuple[FirstSlice, ...]:
+        del context
         call_order.append("first")
         value = cast(ExampleOutput, event.value)
         return (*slice_values, FirstSlice(value.text))
 
     def second(
-        slice_values: tuple[SecondSlice, ...], event: ReducerEvent
+        slice_values: tuple[SecondSlice, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContext,
     ) -> tuple[SecondSlice, ...]:
+        del context
         call_order.append("second")
         value = cast(ExampleOutput, event.value)
         return (*slice_values, SecondSlice(value.text))
@@ -241,7 +250,8 @@ def test_append_tool_data_appends_tool_data() -> None:
     tool_event = make_tool_event(1)
     tool_data = ToolData(value=ExamplePayload(value=1), source=tool_event)
 
-    appended = _append_tool_data((), cast(ReducerEvent, tool_data))
+    context = ReducerContext(session=Session(), event_bus=InProcessEventBus())
+    appended = _append_tool_data((), cast(ReducerEvent, tool_data), context=context)
     assert appended == (tool_data,)
 
 
@@ -273,8 +283,12 @@ def test_reducer_failure_leaves_previous_slice_unchanged() -> None:
     session.register_reducer(ExampleOutput, append)
 
     def faulty(
-        slice_values: tuple[ExampleOutput, ...], event: ReducerEvent
+        slice_values: tuple[ExampleOutput, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContext,
     ) -> tuple[ExampleOutput, ...]:
+        del context
         raise RuntimeError("boom")
 
     session.register_reducer(ExampleOutput, faulty)
@@ -324,8 +338,12 @@ def test_snapshot_preserves_custom_reducer_behavior() -> None:
     session = Session(bus=bus)
 
     def aggregate(
-        slice_values: tuple[Summary, ...], event: ReducerEvent
+        slice_values: tuple[Summary, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContext,
     ) -> tuple[Summary, ...]:
+        del context
         value = cast(ExampleOutput, event.value)
         entries = slice_values[-1].entries if slice_values else ()
         return (Summary((*entries, value.text)),)

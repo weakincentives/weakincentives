@@ -47,7 +47,15 @@ class PromptData(Generic[T]):
 
 DataEvent = ToolData | PromptData[SupportsDataclass]
 
-TypedReducer[S] = Callable[[tuple[S, ...], DataEvent], tuple[S, ...]]
+
+class TypedReducer(Protocol[S]):
+    def __call__(
+        self,
+        slice_values: tuple[S, ...],
+        event: DataEvent,
+        *,
+        context: ReducerContext,
+    ) -> tuple[S, ...]: ...
 ```
 
 Session state is an immutable mapping from a **slice type** to a tuple of dataclass
@@ -80,10 +88,10 @@ class Session:
         created_at: str | None = None,
     ) -> "Session": ...
 
-    def register_reducer[T, S](
+    def register_reducer[S](
         self,
-        data_type: type[T],
-        reducer: TypedReducer[T, S],
+        data_type: type[SupportsDataclass],
+        reducer: TypedReducer[S],
         *,
         slice_type: type[S] | None = None,
     ) -> None: ...
@@ -110,6 +118,20 @@ Provide three reducers:
 1. `append` – Default behavior, dedupes by equality.
 1. `upsert_by(key_fn)` – Replaces items that share the same derived key.
 1. `replace_latest` – Stores only the most recent value.
+
+Reducers implement the signature:
+
+```python
+def reducer(
+    slice_values: tuple[SliceType, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContext,
+) -> tuple[SliceType, ...]: ...
+```
+
+`ReducerContext` exposes the active `Session` and event bus so reducers can inspect
+other slices or publish telemetry without bespoke wiring.
 
 ### Selectors
 

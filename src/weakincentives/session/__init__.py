@@ -13,6 +13,7 @@
 """Session state container for agent runs."""
 
 from ._types import ReducerEvent, TypedReducer
+from .reducer_context import ReducerContext
 from .reducers import append, replace_latest, upsert_by
 from .selectors import select_all, select_latest, select_where
 from .session import DataEvent, PromptData, Session, ToolData
@@ -25,6 +26,7 @@ from .snapshots import (
 __all__ = [
     "DataEvent",
     "PromptData",
+    "ReducerContext",
     "ReducerEvent",
     "Session",
     "Snapshot",
