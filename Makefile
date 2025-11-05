@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check integration-tests all clean
+.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check integration-tests demo all clean
 
 # Format code with ruff
 format:
@@ -52,10 +52,14 @@ test:
 # Run OpenAI integration tests
 integration-tests:
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
-		echo "OPENAI_API_KEY is not set; export it to run integration tests." >&2; \
-		exit 1; \
+	        echo "OPENAI_API_KEY is not set; export it to run integration tests." >&2; \
+	        exit 1; \
 	fi
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
+
+# Launch the interactive code reviewer demo
+demo:
+	@uv run --all-extras python code_reviewer_example.py
 
 # Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, markdown, test)
 check: format-check lint typecheck bandit deptry pip-audit markdown-check test
