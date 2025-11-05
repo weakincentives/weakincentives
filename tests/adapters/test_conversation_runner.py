@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -38,7 +39,9 @@ from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.session.protocols import SnapshotProtocol
 from weakincentives.session.session import Session
+from weakincentives.session.snapshots import Snapshot
 
 from ._test_stubs import DummyChoice, DummyMessage, DummyResponse, DummyToolCall
 
@@ -122,10 +125,10 @@ def build_runner(
     tool_choice: ToolChoice = "auto",
     parse_output: bool = False,
     response_format: Mapping[str, Any] | None = None,
-    session: object | None = None,
+    session: SessionProtocol | None = None,
 ) -> ConversationRunner[object]:
     prompt = Prompt(ns="tests", key="example")
-    session_arg = cast(Session | None, session)
+    session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
     return ConversationRunner[object](
         adapter_name="dummy",
         adapter=DummyAdapter(),
@@ -268,17 +271,17 @@ def test_conversation_runner_parses_structured_output() -> None:
     assert response.output == StructuredOutput(answer="42")
 
 
-class SessionStub:
+class SessionStub(SessionProtocol):
     def __init__(self) -> None:
-        self.snapshots: list[object] = []
-        self.rollbacks: list[object] = []
+        self.snapshots: list[SnapshotProtocol] = []
+        self.rollbacks: list[SnapshotProtocol] = []
 
-    def snapshot(self) -> object:
-        snapshot = object()
+    def snapshot(self) -> SnapshotProtocol:
+        snapshot = Snapshot(created_at=datetime.now(UTC))
         self.snapshots.append(snapshot)
         return snapshot
 
-    def rollback(self, snapshot: object) -> None:
+    def rollback(self, snapshot: SnapshotProtocol) -> None:
         self.rollbacks.append(snapshot)
 
 

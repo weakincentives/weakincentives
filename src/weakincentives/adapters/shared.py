@@ -579,7 +579,7 @@ class ConversationRunner[OutputT]:
     initial_messages: list[dict[str, Any]]
     parse_output: bool
     bus: EventBus
-    session: Session | None
+    session: SessionProtocol
     tool_choice: ToolChoice
     response_format: Mapping[str, Any] | None
     require_structured_output_text: bool
