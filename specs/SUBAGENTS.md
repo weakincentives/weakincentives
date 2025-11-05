@@ -47,8 +47,7 @@ class DispatchSubagentsParams:
 
 @dataclass(slots=True)
 class SubagentResult(SupportsDataclass):
-    dispatch: SubagentDispatch
-    output: object | None
+    output: str
     success: bool
     error: str | None = None
 
@@ -59,7 +58,8 @@ dispatch_subagents: Tool[DispatchSubagentsParams, Sequence[SubagentResult]]
 Key rules:
 
 - Parameters are constructed entirely by the LLM at call time. No defaults live in the section.
-- Results mirror the input order and always include the original dispatch metadata.
+- Results mirror the input order.
+- Each child's `output` is a plain string so downstream reducers can concatenate or summarize without extra coercion.
 - Failures are captured per child via `success`/`error` while allowing healthy siblings to return normally.
 
 ## Runtime Flow
