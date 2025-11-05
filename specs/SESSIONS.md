@@ -68,14 +68,14 @@ src/weakincentives/session/
 
 ```python
 class Session:
-    def __init__(self, *, bus: EventBus | None = None,
+    def __init__(self, *, bus: EventBus,
                  session_id: str | None = None,
                  created_at: str | None = None) -> None: ...
 
     def clone(
         self,
         *,
-        bus: EventBus | None = None,
+        bus: EventBus,
         session_id: str | None = None,
         created_at: str | None = None,
     ) -> "Session": ...
@@ -99,9 +99,8 @@ class Session:
 - Reducers never mutate the previous tuple; they always return a new tuple instance.
 - `clone` produces a new Session instance that preserves the current state snapshot
   and reducer registrations. Passing `bus`, `session_id`, or `created_at` overrides
-  the copied metadata; omitted parameters reuse the original values.
-- Cloned sessions start unsubscribed. Supplying a `bus` attaches the clone to the
-  provided event bus without modifying the original session subscription.
+  the copied metadata; omitted parameters reuse the original values. Clones attach
+  to the provided event bus without modifying the original session subscription.
 
 ### Reducers
 

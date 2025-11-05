@@ -21,9 +21,11 @@ from typing import cast
 
 import pytest
 
+from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.events import NullEventBus
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.session import Session
 
 pytest.importorskip("litellm")
 
@@ -191,7 +193,15 @@ def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
     prompt = _build_greeting_prompt()
     params = GreetingParams(audience="LiteLLM integration tests")
 
-    response = adapter.evaluate(prompt, params, parse_output=False, bus=NullEventBus())
+    bus = NullEventBus()
+    session = Session(bus=bus)
+    response = adapter.evaluate(
+        prompt,
+        params,
+        parse_output=False,
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
 
     assert response.prompt_name == "greeting"
     assert response.text is not None
@@ -204,7 +214,14 @@ def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
     prompt = _build_tool_prompt(tool)
     params = TransformRequest(text="LiteLLM integration")
 
-    response = adapter.evaluate(prompt, params, bus=NullEventBus())
+    bus = NullEventBus()
+    session = Session(bus=bus)
+    response = adapter.evaluate(
+        prompt,
+        params,
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
 
     assert response.text is not None
     assert "LITELLM INTEGRATION" in response.text.upper()
@@ -219,7 +236,14 @@ def test_litellm_adapter_parses_structured_output(adapter: LiteLLMAdapter) -> No
     prompt = _build_structured_prompt()
     params = ReviewParams(text="Integration tests should remain deterministic.")
 
-    response = adapter.evaluate(prompt, params, bus=NullEventBus())
+    bus = NullEventBus()
+    session = Session(bus=bus)
+    response = adapter.evaluate(
+        prompt,
+        params,
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
 
     assert response.output is not None
     assert isinstance(response.output, ReviewAnalysis)

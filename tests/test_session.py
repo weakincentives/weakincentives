@@ -358,7 +358,7 @@ def test_snapshot_rollback_requires_registered_slices() -> None:
     assert result.ok
     snapshot = source.snapshot()
 
-    target = Session()
+    target = Session(bus=InProcessEventBus())
 
     with pytest.raises(SnapshotRestoreError):
         target.rollback(snapshot)
@@ -367,7 +367,7 @@ def test_snapshot_rollback_requires_registered_slices() -> None:
 
 
 def test_snapshot_rejects_non_dataclass_values() -> None:
-    session = Session()
+    session = Session(bus=InProcessEventBus())
     session.seed_slice(str, ("value",))
 
     with pytest.raises(SnapshotSerializationError):
@@ -383,7 +383,8 @@ def test_clone_preserves_state_and_reducer_registration() -> None:
     result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert result.ok
 
-    clone = session.clone()
+    clone_bus = InProcessEventBus()
+    clone = session.clone(bus=clone_bus)
 
     assert clone.session_id == "source"
     assert clone.created_at == "now"
@@ -391,11 +392,15 @@ def test_clone_preserves_state_and_reducer_registration() -> None:
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
     assert clone._reducers.keys() == session._reducers.keys()
 
-    # Clone stays unsubscribed until a bus is provided.
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    clone_bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
-    assert clone.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
-    assert session.select_all(ExampleOutput) == (ExampleOutput(text="second"),)
+    assert clone.select_all(ExampleOutput)[-1] == ExampleOutput(text="second")
+    assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="third")))
+
+    assert session.select_all(ExampleOutput)[-1] == ExampleOutput(text="third")
+    assert clone.select_all(ExampleOutput)[-1] == ExampleOutput(text="second")
 
 
 def test_clone_attaches_to_new_bus_when_provided() -> None:

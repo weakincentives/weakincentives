@@ -10,24 +10,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Integration adapters for optional third-party providers."""
+"""Protocols describing Session behavior exposed to other modules."""
 
 from __future__ import annotations
 
-from .core import (
-    PromptEvaluationError,
-    PromptResponse,
-    ProviderAdapter,
-    SessionProtocol,
-)
+from typing import Protocol
 
-__all__ = [
-    "PromptEvaluationError",
-    "PromptResponse",
-    "ProviderAdapter",
-    "SessionProtocol",
-]
+from .snapshots import Snapshot
+
+type SnapshotProtocol = Snapshot
 
 
-def __dir__() -> list[str]:
-    return sorted({*globals().keys(), *(__all__)})
+class SessionProtocol(Protocol):
+    """Structural protocol implemented by session state containers."""
+
+    def snapshot(self) -> SnapshotProtocol: ...
+
+    def rollback(self, snapshot: SnapshotProtocol) -> None: ...
+
+
+__all__ = ["SessionProtocol", "SnapshotProtocol"]

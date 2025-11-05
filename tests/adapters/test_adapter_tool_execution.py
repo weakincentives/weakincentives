@@ -55,7 +55,13 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt._types import SupportsDataclass
-from weakincentives.session import ReducerEvent, Session, replace_latest, select_latest
+from weakincentives.session import (
+    ReducerEvent,
+    Session,
+    SessionProtocol,
+    replace_latest,
+    select_latest,
+)
 from weakincentives.tools import ToolValidationError
 
 
@@ -170,12 +176,14 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     adapter, requests = adapter_harness.build(responses)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     events = _record_tool_events(bus)
 
     result = adapter.evaluate(  # type: ignore[call-arg]
         prompt,
         ToolParams(query="policies"),
         bus=bus,
+        session=cast(SessionProtocol, session),
     )
 
     assert len(events) == 1
@@ -222,12 +230,14 @@ def test_adapter_tool_execution_validation_error(
     adapter, requests = adapter_harness.build(responses)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     events = _record_tool_events(bus)
 
     result = adapter.evaluate(  # type: ignore[call-arg]
         prompt,
         ToolParams(query="invalid"),
         bus=bus,
+        session=cast(SessionProtocol, session),
     )
 
     assert len(events) == 1
@@ -272,12 +282,14 @@ def test_adapter_tool_execution_unexpected_exception(
     adapter, requests = adapter_harness.build(responses)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     events = _record_tool_events(bus)
 
     result = adapter.evaluate(  # type: ignore[call-arg]
         prompt,
         ToolParams(query="policies"),
         bus=bus,
+        session=cast(SessionProtocol, session),
     )
 
     assert len(events) == 1

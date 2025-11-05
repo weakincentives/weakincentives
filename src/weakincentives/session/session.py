@@ -20,10 +20,11 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, cast
 
-from ..events import EventBus, NullEventBus, PromptExecuted, ToolInvoked
+from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ._types import ReducerEvent, TypedReducer
+from .protocols import SnapshotProtocol
 from .reducers import append
 from .snapshots import (
     Snapshot,
@@ -76,36 +77,28 @@ class Session:
     def __init__(
         self,
         *,
-        bus: EventBus | None = None,
+        bus: EventBus,
         session_id: str | None = None,
         created_at: str | None = None,
     ) -> None:
         super().__init__()
         self.session_id = session_id
         self.created_at = created_at
-        self._bus: EventBus = NullEventBus()
+        self._bus: EventBus = bus
         self._reducers: dict[type[SupportsDataclass], list[_ReducerRegistration]] = {}
         self._state: dict[type[Any], tuple[Any, ...]] = {}
         self._lock = RLock()
         self._subscriptions_attached = False
-
-        if bus is not None:
-            self._attach_to_bus(bus)
+        self._attach_to_bus(bus)
 
     def clone(
         self,
         *,
-        bus: EventBus | None = None,
+        bus: EventBus,
         session_id: str | None = None,
         created_at: str | None = None,
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
-
-        clone = Session(
-            bus=None,
-            session_id=session_id if session_id is not None else self.session_id,
-            created_at=created_at if created_at is not None else self.created_at,
-        )
 
         with self._lock:
             reducer_snapshot = [
@@ -113,7 +106,12 @@ class Session:
                 for data_type, registrations in self._reducers.items()
             ]
             state_snapshot = dict(self._state)
-            source_bus = self._bus
+
+        clone = Session(
+            bus=bus,
+            session_id=session_id if session_id is not None else self.session_id,
+            created_at=created_at if created_at is not None else self.created_at,
+        )
 
         for data_type, registrations in reducer_snapshot:
             for registration in registrations:
@@ -125,10 +123,6 @@ class Session:
 
         with clone._lock:
             clone._state = state_snapshot
-            clone._bus = source_bus if bus is None else bus
-
-        if bus is not None:
-            clone._attach_to_bus(bus)
 
         return clone
 
@@ -163,7 +157,7 @@ class Session:
         with self._lock:
             self._state[slice_type] = tuple(values)
 
-    def snapshot(self) -> Snapshot:
+    def snapshot(self) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state."""
 
         with self._lock:
@@ -179,7 +173,7 @@ class Session:
         created_at = datetime.now(UTC)
         return Snapshot(created_at=created_at, slices=normalized)
 
-    def rollback(self, snapshot: Snapshot) -> None:
+    def rollback(self, snapshot: SnapshotProtocol) -> None:
         """Restore session slices from the provided snapshot."""
 
         registered_slices = self._registered_slice_types()

@@ -15,17 +15,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
-from ..events._types import EventBus, ToolInvoked
 from ..prompt._types import SupportsDataclass
-from ..prompt.prompt import Prompt
+from ..session.protocols import SessionProtocol
+
+if TYPE_CHECKING:
+    from ..events._types import EventBus, ToolInvoked
+    from ..prompt.prompt import Prompt
 
 OutputT = TypeVar("OutputT")
-
-
-class SessionProtocol(Protocol):
-    def rollback(self, snapshot: object) -> None: ...
 
 
 class ProviderAdapter(Protocol[OutputT]):
@@ -37,7 +36,7 @@ class ProviderAdapter(Protocol[OutputT]):
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
-        session: SessionProtocol | None = None,
+        session: SessionProtocol,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response."""
 
@@ -77,4 +76,5 @@ __all__ = [
     "PromptEvaluationError",
     "PromptResponse",
     "ProviderAdapter",
+    "SessionProtocol",
 ]

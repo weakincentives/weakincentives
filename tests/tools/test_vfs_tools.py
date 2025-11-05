@@ -22,8 +22,9 @@ import pytest
 
 import weakincentives.tools.vfs as vfs_module
 from tests.tools.helpers import find_tool, invoke_tool
+from weakincentives.adapters.core import SessionProtocol
 from weakincentives.events import InProcessEventBus
-from weakincentives.prompt.tool import ToolResult
+from weakincentives.prompt.tool import ToolContext, ToolResult
 from weakincentives.session import Session, select_latest
 from weakincentives.tools import (
     DeleteEntry,
@@ -77,8 +78,17 @@ def test_requires_session_in_context(monkeypatch: pytest.MonkeyPatch) -> None:
     write_tool = find_tool(section, "vfs_write_file")
 
     params = WriteFile(path=VfsPath(("docs", "intro.md")), content="hello world")
+    handler = write_tool.handler
+    assert handler is not None
+    context = ToolContext(
+        prompt=None,
+        rendered_prompt=None,
+        adapter=None,
+        session=cast(SessionProtocol, object()),
+        event_bus=bus,
+    )
     with pytest.raises(ToolValidationError, match="Session instance"):
-        invoke_tool(bus, write_tool, params)
+        handler(params, context=context)
 
 
 def test_write_file_appends(monkeypatch: pytest.MonkeyPatch) -> None:

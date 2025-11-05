@@ -20,9 +20,11 @@ from typing import cast
 
 import pytest
 
+from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.events import NullEventBus
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.session import Session
 
 pytest.importorskip("openai")
 
@@ -190,7 +192,11 @@ def test_openai_adapter_returns_text(adapter: OpenAIAdapter) -> None:
     prompt = _build_greeting_prompt()
     params = GreetingParams(audience="integration tests")
 
-    response = adapter.evaluate(prompt, params, parse_output=False, bus=NullEventBus())
+    bus = NullEventBus()
+    session = Session(bus=bus)
+    response = adapter.evaluate(
+        prompt, params, parse_output=False, bus=bus, session=session
+    )
 
     assert response.prompt_name == "greeting"
     assert response.text is not None
@@ -207,7 +213,11 @@ def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
         tool_choice={"type": "function", "function": {"name": tool.name}},
     )
 
-    response = adapter.evaluate(prompt, params, parse_output=False, bus=NullEventBus())
+    bus = NullEventBus()
+    session = Session(bus=bus)
+    response = adapter.evaluate(
+        prompt, params, parse_output=False, bus=bus, session=session
+    )
 
     assert response.prompt_name == "uppercase_workflow"
     assert response.tool_results, "Expected at least one tool invocation."
@@ -233,7 +243,9 @@ def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None
         ),
     )
 
-    response = adapter.evaluate(prompt, sample, bus=NullEventBus())
+    bus = NullEventBus()
+    session = Session(bus=bus)
+    response = adapter.evaluate(prompt, sample, bus=bus, session=session)
 
     assert response.prompt_name == "structured_review"
     assert response.output is not None
@@ -259,10 +271,13 @@ def test_openai_adapter_parses_structured_output_without_native_schema(
         use_native_response_format=False,
     )
 
+    bus = NullEventBus()
+    session = Session(bus=bus)
     response = custom_adapter.evaluate(
         prompt,
         sample,
-        bus=NullEventBus(),
+        bus=bus,
+        session=cast(SessionProtocol, session),
     )
 
     assert response.prompt_name == "structured_review"
@@ -282,7 +297,14 @@ def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -
         ),
     )
 
-    response = adapter.evaluate(prompt, sample, bus=NullEventBus())
+    bus = NullEventBus()
+    session = Session(bus=bus)
+    response = adapter.evaluate(
+        prompt,
+        sample,
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
 
     assert response.prompt_name == "structured_review_list"
     assert response.output is not None

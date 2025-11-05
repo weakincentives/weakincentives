@@ -16,11 +16,14 @@ from __future__ import annotations
 
 from typing import Any, Protocol, TypeVar, cast
 
-from weakincentives.adapters.core import PromptResponse, ProviderAdapter
+from weakincentives.adapters.core import (
+    PromptResponse,
+    ProviderAdapter,
+    SessionProtocol,
+)
 from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
-from weakincentives.session import Session
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
 ResultT = TypeVar("ResultT", bound=SupportsDataclass)
@@ -40,14 +43,12 @@ class _DummyAdapter(ProviderAdapter[Any]):
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: InProcessEventBus,
-        session: object | None = None,
+        session: SessionProtocol,
     ) -> PromptResponse[Any]:
         raise NotImplementedError
 
 
-def _build_context(
-    bus: InProcessEventBus, session: Session | None = None
-) -> ToolContext:
+def _build_context(bus: InProcessEventBus, session: SessionProtocol) -> ToolContext:
     prompt = Prompt(ns="tests", key="tool-context-helper")
     adapter = cast(ProviderAdapter[Any], _DummyAdapter())
     return ToolContext(
@@ -77,7 +78,7 @@ def invoke_tool(
     tool: Tool[ParamsT, ResultT],
     params: ParamsT,
     *,
-    session: Session | None = None,
+    session: SessionProtocol,
 ) -> ToolResult[ResultT]:
     """Execute ``tool`` with ``params`` and publish the invocation event."""
 

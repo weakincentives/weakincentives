@@ -28,6 +28,7 @@ from weakincentives.events import EventBus, NullEventBus
 from weakincentives.prompt import Prompt
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.session import Session
 
 
 def test_first_choice_returns_first_item() -> None:
@@ -107,12 +108,13 @@ def test_run_conversation_requires_message_payload() -> None:
             *params: SupportsDataclass,
             parse_output: bool = True,
             bus: EventBus,
-            session: SessionProtocol | None = None,
+            session: SessionProtocol,
         ) -> PromptResponse[object]:
             raise NotImplementedError
 
     adapter = DummyAdapter()
     prompt = Prompt(ns="tests", key="example")
+    session = Session(bus=bus)
 
     with pytest.raises(PromptEvaluationError):
         shared.run_conversation(
@@ -124,7 +126,7 @@ def test_run_conversation_requires_message_payload() -> None:
             initial_messages=[{"role": "system", "content": rendered.text}],
             parse_output=False,
             bus=bus,
-            session=None,
+            session=session,
             tool_choice="auto",
             response_format=None,
             require_structured_output_text=False,

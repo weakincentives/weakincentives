@@ -25,7 +25,7 @@ from ..prompt.prompt import Prompt
 from . import shared as _shared
 from ._provider_protocols import ProviderChoice, ProviderCompletionResponse
 from ._tool_messages import serialize_tool_message
-from .core import PromptEvaluationError, PromptResponse
+from .core import PromptEvaluationError, PromptResponse, SessionProtocol
 from .shared import (
     ToolChoice,
     build_json_schema_response_format,
@@ -37,7 +37,6 @@ from .shared import (
 
 if TYPE_CHECKING:
     from ..adapters.core import ProviderAdapter
-    from ..session.session import Session
 
 _ERROR_MESSAGE: Final[str] = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -126,7 +125,7 @@ class OpenAIAdapter:
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
-        session: Session | None = None,
+        session: SessionProtocol,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
 
