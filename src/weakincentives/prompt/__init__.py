@@ -32,10 +32,28 @@ from .errors import (
 )
 from .markdown import MarkdownSection
 from .prompt import Prompt
+from .registry import (
+    PromptRegistry,
+    clear_registry,
+    get_prompt,
+    iter_prompts,
+    register_prompt,
+    unregister_prompt,
+)
 from .section import Section
 from .structured_output import OutputParseError, parse_structured_output
 from .tool import Tool, ToolContext, ToolHandler
 from .tool_result import ToolResult
+from .versioning import (
+    PromptDescriptor,
+    PromptOverride,
+    PromptOverridesError,
+    PromptOverridesStore,
+    SectionDescriptor,
+    SectionOverride,
+    ToolDescriptor,
+    ToolOverride,
+)
 
 __all__ = [
     "DelegationPrompt",
@@ -46,17 +64,31 @@ __all__ = [
     "ParentPromptParams",
     "ParentPromptSection",
     "Prompt",
+    "PromptDescriptor",
     "PromptError",
+    "PromptOverride",
+    "PromptOverridesError",
+    "PromptOverridesStore",
+    "PromptRegistry",
     "PromptRenderError",
     "PromptValidationError",
     "RecapParams",
     "RecapSection",
     "Section",
+    "SectionDescriptor",
+    "SectionOverride",
     "SectionPath",
     "SupportsDataclass",
     "Tool",
     "ToolContext",
+    "ToolDescriptor",
     "ToolHandler",
+    "ToolOverride",
     "ToolResult",
+    "clear_registry",
+    "get_prompt",
+    "iter_prompts",
     "parse_structured_output",
+    "register_prompt",
+    "unregister_prompt",
 ]
