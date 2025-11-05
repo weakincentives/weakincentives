@@ -19,9 +19,10 @@ from typing import cast
 import pytest
 
 from tests.tools.helpers import find_tool, invoke_tool
+from weakincentives.adapters.core import SessionProtocol
 from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import SupportsDataclass
-from weakincentives.prompt.tool import ToolResult
+from weakincentives.prompt.tool import ToolContext, ToolResult
 from weakincentives.session import Session, ToolData, select_all, select_latest
 from weakincentives.tools import (
     AddStep,
@@ -128,8 +129,18 @@ def test_setup_plan_requires_session_in_context() -> None:
 
     params = SetupPlan(objective="ship", initial_steps=())
 
+    handler = setup_tool.handler
+    assert handler is not None
+    context = ToolContext(
+        prompt=None,
+        rendered_prompt=None,
+        adapter=None,
+        session=cast(SessionProtocol, object()),
+        event_bus=bus,
+    )
+
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, setup_tool, params)
+        handler(params, context=context)
 
 
 def test_add_step_requires_existing_plan() -> None:

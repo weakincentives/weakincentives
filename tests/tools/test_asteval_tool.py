@@ -23,8 +23,9 @@ import pytest
 
 import weakincentives.tools.asteval as asteval_module
 from tests.tools.helpers import find_tool, invoke_tool
+from weakincentives.adapters.core import SessionProtocol
 from weakincentives.events import InProcessEventBus
-from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.session import Session, select_latest
 from weakincentives.tools import (
     AstevalSection,
@@ -86,8 +87,18 @@ def _setup_sections() -> tuple[
 def test_context_requires_session() -> None:
     _session, bus, _vfs_section, tool = _setup_sections()
 
+    handler = tool.handler
+    assert handler is not None
+    context = ToolContext(
+        prompt=None,
+        rendered_prompt=None,
+        adapter=None,
+        session=cast(SessionProtocol, object()),
+        event_bus=bus,
+    )
+
     with pytest.raises(ToolValidationError) as captured:
-        invoke_tool(bus, tool, EvalParams(code="0"))
+        handler(EvalParams(code="0"), context=context)
 
     assert "requires ToolContext.session" in str(captured.value)
 

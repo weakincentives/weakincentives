@@ -38,6 +38,7 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 if TYPE_CHECKING:
     from ..events._types import EventBus
+    from ..session.protocols import SessionProtocol
 
 ParamsT_contra = TypeVar("ParamsT_contra", bound=SupportsDataclass, contravariant=True)
 ResultT_co = TypeVar("ResultT_co", bound=SupportsDataclass)
@@ -50,7 +51,7 @@ class ToolContext:
     prompt: Any
     rendered_prompt: Any
     adapter: Any
-    session: Any
+    session: SessionProtocol
     event_bus: EventBus
 
 

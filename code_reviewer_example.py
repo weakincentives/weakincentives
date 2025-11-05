@@ -26,6 +26,7 @@ from types import MethodType
 from typing import Any, Protocol, cast
 
 from weakincentives.adapters import PromptResponse
+from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
@@ -117,7 +118,7 @@ class SupportsReviewEvaluate(Protocol):
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
-        session: Session | None = None,
+        session: SessionProtocol,
     ) -> PromptResponse[ReviewResponse]: ...
 
 
@@ -207,7 +208,7 @@ def build_adapter() -> SupportsReviewEvaluate:
         if "OPENAI_API_KEY" not in os.environ:
             raise SystemExit("Set OPENAI_API_KEY before running this example.")
         model = os.getenv("OPENAI_MODEL", "gpt-5")
-        return OpenAIAdapter(model=model)
+        return cast(SupportsReviewEvaluate, OpenAIAdapter(model=model))
     if provider == "litellm":
         api_key = os.getenv("LITELLM_API_KEY")
         if api_key is None:
@@ -217,7 +218,10 @@ def build_adapter() -> SupportsReviewEvaluate:
         if base_url:
             completion_kwargs["api_base"] = base_url
         model = os.getenv("LITELLM_MODEL", "gpt-5")
-        return LiteLLMAdapter(model=model, completion_kwargs=completion_kwargs)
+        return cast(
+            SupportsReviewEvaluate,
+            LiteLLMAdapter(model=model, completion_kwargs=completion_kwargs),
+        )
     raise SystemExit(
         "Supported providers: 'openai' (default) or 'litellm'."
         " Set CODE_REVIEW_EXAMPLE_PROVIDER accordingly."
@@ -277,6 +281,7 @@ class SunfishReviewSession:
             self._prompt,
             ReviewTurnParams(request=request),
             bus=self._bus,
+            session=self._session,
         )
         if response.output is not None:
             rendered_output = dump(response.output, exclude_none=True)

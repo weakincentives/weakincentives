@@ -22,6 +22,7 @@ from typing import cast
 
 from code_reviewer_example import ReviewResponse, SunfishReviewSession
 from weakincentives.adapters import PromptResponse
+from weakincentives.adapters.core import SessionProtocol
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.local_prompt_overrides_store import LocalPromptOverridesStore
@@ -47,7 +48,7 @@ class _StubAdapter:
         *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
-        session: Session | None = None,
+        session: SessionProtocol,
     ) -> PromptResponse[ReviewResponse]:
         raise NotImplementedError
 

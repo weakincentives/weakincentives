@@ -63,7 +63,7 @@ Key rules:
 Every tool invocation MUST execute the following steps:
 
 1. **Require the rendered parent prompt**. `context.rendered_prompt` is mandatory. Treat a missing prompt as an orchestrator bug and respond with a failing `ToolResult`.
-1. **Share state with children**. For each delegation, reuse the original `context.session` instead of cloning it so children mutate the exact same state object the parent uses. ALWAYS pass the parent's event bus reference so observers receive child telemetry in real time. When `context.session` is `None`, still hand each child the parent's bus reference.
+1. **Share state with children**. For each delegation, reuse the original `context.session` and event bus without cloning so children mutate the exact same objects the parent uses and observers receive child telemetry in real time.
 1. **Wrap the child prompt**. Build a `DelegationPrompt` using the rendered parent prompt and the recap lines carried inside `DelegationParams`. Propagate response format metadata and tool descriptions exactly as described in `PROMPTS_COMPOSITION.md`.
 1. **Run in parallel**. Evaluate each child through `context.adapter.evaluate` using a `ThreadPoolExecutor`. Use `min(len(delegations), default_max_workers)` where `default_max_workers` matches Python's executor default when `None`.
 1. **Collect per-child outcomes**. Successful executions populate `output` and set `success=True`. Exceptions are caught and converted into `success=False` with an error string, without cancelling other children.

@@ -40,11 +40,10 @@ from ._provider_protocols import (
     ProviderMessage,
     ProviderToolCall,
 )
-from .core import PromptEvaluationError, PromptResponse
+from .core import PromptEvaluationError, PromptResponse, SessionProtocol
 
 if TYPE_CHECKING:
     from ..adapters.core import ProviderAdapter
-    from ..session.session import Session
 
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "adapters.shared"}
@@ -203,7 +202,7 @@ def execute_tool_call(
     tool_call: ProviderToolCall,
     tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsDataclass]],
     bus: EventBus,
-    session: Session | None,
+    session: SessionProtocol,
     prompt_name: str,
     provider_payload: dict[str, Any] | None,
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
@@ -296,7 +295,7 @@ def execute_tool_call(
             },
         )
 
-    snapshot = session.snapshot() if session is not None else None
+    snapshot = session.snapshot()
     invocation = ToolInvoked(
         prompt_name=prompt_name,
         adapter=adapter_name,
@@ -307,12 +306,11 @@ def execute_tool_call(
     )
     publish_result = bus.publish(invocation)
     if not publish_result.ok:
-        if snapshot is not None and session is not None:
-            session.rollback(snapshot)
-            log.warning(
-                "Session rollback triggered after publish failure.",
-                event="session_rollback_due_to_publish_failure",
-            )
+        session.rollback(snapshot)
+        log.warning(
+            "Session rollback triggered after publish failure.",
+            event="session_rollback_due_to_publish_failure",
+        )
         failure_handlers = [
             getattr(failure.handler, "__qualname__", repr(failure.handler))
             for failure in publish_result.errors
@@ -816,7 +814,7 @@ def run_conversation[
     initial_messages: list[dict[str, Any]],
     parse_output: bool,
     bus: EventBus,
-    session: Session | None,
+    session: SessionProtocol,
     tool_choice: ToolChoice,
     response_format: Mapping[str, Any] | None,
     require_structured_output_text: bool,

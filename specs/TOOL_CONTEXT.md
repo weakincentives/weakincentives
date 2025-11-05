@@ -52,7 +52,7 @@ class ToolContext:
     prompt: Prompt[Any]
     rendered_prompt: RenderedPrompt[Any] | None
     adapter: ProviderAdapter[Any]
-    session: Session | None
+    session: Session
     event_bus: EventBus
 ```
 
@@ -63,8 +63,8 @@ class ToolContext:
 - `adapter` is the provider adapter already orchestrating the outer request. Handlers
   can reuse it to execute nested prompts while sharing retry, tracing, and
   serialization behaviour.
-- `session` is the active session instance (if any). Forwarding it ensures child
-  prompts update the same reducers and selectors.
+- `session` is the active session instance. Forwarding it ensures child prompts
+  update the same reducers and selectors.
 - `event_bus` is the in-process event bus the runtime uses for telemetry. Tools reuse
   it to publish tool or prompt events when delegating work.
 
