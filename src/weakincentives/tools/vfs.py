@@ -60,63 +60,206 @@ _VFS_SECTION_TEMPLATE: Final[str] = (
 class VfsPath:
     """Relative POSIX-style path representation."""
 
-    segments: tuple[str, ...]
+    segments: tuple[str, ...] = field(
+        metadata={
+            "description": (
+                "Ordered path segments. Values must be relative, ASCII-only, and "
+                "free of '.' or '..'."
+            )
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class VfsFile:
-    path: VfsPath
-    content: str
-    encoding: FileEncoding
-    size_bytes: int
-    version: int
-    created_at: datetime
-    updated_at: datetime
+    """Snapshot of a single file stored in the virtual filesystem."""
+
+    path: VfsPath = field(
+        metadata={"description": "Location of the file within the virtual filesystem."}
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "UTF-8 text content of the file. Binary data is not supported."
+            )
+        }
+    )
+    encoding: FileEncoding = field(
+        metadata={"description": "Name of the codec used to decode the file contents."}
+    )
+    size_bytes: int = field(
+        metadata={"description": "Size of the encoded file on disk, in bytes."}
+    )
+    version: int = field(
+        metadata={
+            "description": (
+                "Monotonic version counter that increments after each write."
+            )
+        }
+    )
+    created_at: datetime = field(
+        metadata={
+            "description": "Timestamp indicating when the file was first created."
+        }
+    )
+    updated_at: datetime = field(
+        metadata={"description": "Timestamp of the most recent write operation."}
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class VirtualFileSystem:
-    files: tuple[VfsFile, ...] = field(default_factory=tuple)
+    """Immutable snapshot of the virtual filesystem state."""
+
+    files: tuple[VfsFile, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": (
+                "Collection of tracked files. Each entry captures file metadata "
+                "and contents."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class ListDirectory:
-    path: VfsPath | None = None
+    """Parameters for enumerating filesystem entries."""
+
+    path: VfsPath | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Directory to inspect. Omit to list the virtual filesystem root."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class ListDirectoryResult:
-    path: VfsPath
-    directories: tuple[str, ...]
-    files: tuple[str, ...]
+    """Result payload returned by :func:`vfs_list_directory`."""
+
+    path: VfsPath = field(metadata={"description": "Directory that was enumerated."})
+    directories: tuple[str, ...] = field(
+        metadata={"description": "Child directory names sorted alphabetically."}
+    )
+    files: tuple[str, ...] = field(
+        metadata={"description": "Child file names sorted alphabetically."}
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class ReadFile:
-    path: VfsPath
+    """Parameters for fetching the contents of a file."""
+
+    path: VfsPath = field(
+        metadata={
+            "description": "Path to the file to read within the virtual filesystem."
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class WriteFile:
-    path: VfsPath
-    content: str
-    mode: WriteMode = "create"
-    encoding: FileEncoding = _DEFAULT_ENCODING
+    """Parameters for creating or updating a file."""
+
+    path: VfsPath = field(
+        metadata={
+            "description": "Target path to create or modify within the virtual filesystem."
+        }
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "UTF-8 text to write. Content is limited to 48k characters per call."
+            )
+        }
+    )
+    mode: WriteMode = field(
+        default="create",
+        metadata={
+            "description": (
+                "Write strategy: create new file, overwrite existing content, or "
+                "append to the end."
+            )
+        },
+    )
+    encoding: FileEncoding = field(
+        default=_DEFAULT_ENCODING,
+        metadata={
+            "description": (
+                "Encoding name for the provided content. Defaults to UTF-8."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class DeleteEntry:
-    path: VfsPath
+    """Parameters for removing a file or directory."""
+
+    path: VfsPath = field(
+        metadata={"description": "Path to delete from the virtual filesystem."}
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class HostMount:
-    host_path: str
-    mount_path: VfsPath | None = None
-    include_glob: tuple[str, ...] = field(default_factory=tuple)
-    exclude_glob: tuple[str, ...] = field(default_factory=tuple)
-    max_bytes: int | None = None
-    follow_symlinks: bool = False
+    """Mount configuration used to seed the virtual filesystem."""
+
+    host_path: str = field(
+        metadata={
+            "description": (
+                "Absolute path on the host machine that should be exposed in the "
+                "virtual filesystem."
+            )
+        }
+    )
+    mount_path: VfsPath | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional virtual filesystem destination. Defaults to mirroring "
+                "the host directory name."
+            )
+        },
+    )
+    include_glob: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": (
+                "Glob patterns that must match for files to be mounted. Empty "
+                "tuple includes everything."
+            )
+        },
+    )
+    exclude_glob: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": (
+                "Glob patterns used to filter files from the mount. Applied after "
+                "includes."
+            )
+        },
+    )
+    max_bytes: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional byte budget for the mounted tree. Files exceeding the "
+                "limit are skipped."
+            )
+        },
+    )
+    follow_symlinks: bool = field(
+        default=False,
+        metadata={
+            "description": (
+                "Whether to resolve symbolic links inside the mounted directory."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -194,25 +337,37 @@ def _build_tools(
         (
             Tool[ListDirectory, ListDirectoryResult](
                 name="vfs_list_directory",
-                description="Enumerate files and directories at a path.",
+                description=(
+                    "Enumerate files and directories under a relative VFS path. "
+                    "Omit the path to list the root."
+                ),
                 handler=suite.list_directory,
                 accepts_overrides=accepts_overrides,
             ),
             Tool[ReadFile, VfsFile](
                 name="vfs_read_file",
-                description="Read file contents and metadata.",
+                description=(
+                    "Read the latest version of a file and return its UTF-8 "
+                    "contents with metadata."
+                ),
                 handler=suite.read_file,
                 accepts_overrides=accepts_overrides,
             ),
             Tool[WriteFile, WriteFile](
                 name="vfs_write_file",
-                description="Create or update a file in the virtual filesystem.",
+                description=(
+                    "Create or update a UTF-8 text file. Supply the target path, "
+                    "content, and write mode."
+                ),
                 handler=suite.write_file,
                 accepts_overrides=accepts_overrides,
             ),
             Tool[DeleteEntry, DeleteEntry](
                 name="vfs_delete_entry",
-                description="Delete a file or directory subtree.",
+                description=(
+                    "Delete a file or directory tree from the virtual filesystem. "
+                    "Directories are removed recursively."
+                ),
                 handler=suite.delete_entry,
                 accepts_overrides=accepts_overrides,
             ),
