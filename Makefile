@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check integration-tests demo all clean
+.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check integration-tests demo wink all clean
 
 # Format code with ruff
 format:
@@ -61,6 +61,10 @@ integration-tests:
 demo:
 	@uv run --all-extras python code_reviewer_example.py
 
+# Run the wink CLI
+wink:
+	@uv run wink $(filter-out $@,$(MAKECMDGOALS))
+
 # Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, markdown, test)
 check: format-check lint typecheck bandit deptry pip-audit markdown-check test
 
@@ -72,3 +76,6 @@ clean:
 	rm -rf .pytest_cache .ruff_cache __pycache__
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+
+%:
+	@:

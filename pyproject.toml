@@ -38,6 +38,9 @@ Documentation = "https://github.com/weakincentives/weakincentives#readme"
 Repository = "https://github.com/weakincentives/weakincentives"
 "Issue Tracker" = "https://github.com/weakincentives/weakincentives/issues"
 
+[project.scripts]
+wink = "weakincentives.cli.wink:main"
+
 [project.optional-dependencies]
 asteval = [
     "asteval>=1.0.6",
