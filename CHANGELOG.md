@@ -4,6 +4,10 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+- _No changes yet._
+
+## v0.6.0 - 2025-11-05
+
 ### Prompt & Delegation
 
 - Added delegation prompt composition helpers, a `SubagentsSection`, and the
