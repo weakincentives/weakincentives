@@ -14,7 +14,7 @@ import importlib
 import json
 import sys
 import types
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from importlib import import_module as std_import_module
 from types import MethodType
 from typing import Any, TypeVar, cast
@@ -35,6 +35,9 @@ try:
         DummyMessage,
         DummyOpenAIClient,
         DummyResponse,
+        DummyResponseFunctionToolCall,
+        DummyResponseOutputMessage,
+        DummyResponseOutputText,
         DummyToolCall,
         GreetingParams,
         MappingResponse,
@@ -53,6 +56,9 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         DummyMessage,
         DummyOpenAIClient,
         DummyResponse,
+        DummyResponseFunctionToolCall,
+        DummyResponseOutputMessage,
+        DummyResponseOutputText,
         DummyToolCall,
         GreetingParams,
         MappingResponse,
@@ -114,6 +120,34 @@ def _evaluate_with_bus(
     )
 
 
+def _make_text_message(
+    text: str,
+    *,
+    parsed: object | None = None,
+) -> DummyResponseOutputMessage:
+    return DummyResponseOutputMessage([DummyResponseOutputText(text, parsed=parsed)])
+
+
+def _make_response(
+    text: str,
+    *,
+    tool_calls: Sequence[DummyResponseFunctionToolCall] = (),
+    parsed: object | None = None,
+) -> DummyResponse:
+    output: list[object] = [_make_text_message(text, parsed=parsed)]
+    output.extend(tool_calls)
+    return DummyResponse(output)
+
+
+def _tool_call_from_dummy(tool_call: DummyToolCall) -> DummyResponseFunctionToolCall:
+    return DummyResponseFunctionToolCall(
+        call_id=tool_call.id,
+        tool_id=tool_call.id,
+        name=tool_call.function.name,
+        arguments=tool_call.function.arguments,
+    )
+
+
 def test_create_openai_client_requires_optional_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -172,8 +206,7 @@ def test_openai_adapter_constructs_client_when_not_provided(
         ],
     )
 
-    message = DummyMessage(content="Hello, Sam!", tool_calls=None)
-    response = DummyResponse([DummyChoice(message)])
+    response = _make_response("Hello, Sam!")
     client = DummyOpenAIClient([response])
     captured_kwargs: list[dict[str, object]] = []
 
@@ -214,8 +247,7 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
         ],
     )
 
-    message = DummyMessage(content="Hello again!", tool_calls=None)
-    response = DummyResponse([DummyChoice(message)])
+    response = _make_response("Hello again!")
     captured_kwargs: list[dict[str, object]] = []
 
     def fake_factory(**kwargs: object) -> DummyOpenAIClient:
@@ -278,8 +310,7 @@ def test_openai_adapter_returns_plain_text_response() -> None:
         ],
     )
 
-    message = DummyMessage(content="Hello, Sam!", tool_calls=None)
-    response = DummyResponse([DummyChoice(message)])
+    response = _make_response("Hello, Sam!")
     client = DummyOpenAIClient([response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
@@ -294,10 +325,11 @@ def test_openai_adapter_returns_plain_text_response() -> None:
     assert result.output is None
     assert result.tool_results == ()
 
-    request = cast(dict[str, Any], client.completions.requests[0])
-    messages = cast(list[dict[str, Any]], request["messages"])
-    assert messages[0]["role"] == "system"
-    assert str(messages[0]["content"]).startswith("## Greeting")
+    request = cast(dict[str, Any], client.responses.requests[0])
+    input_items = cast(list[dict[str, Any]], request["input"])
+    assert input_items[0]["role"] == "system"
+    system_content = cast(list[dict[str, Any]], input_items[0]["content"])
+    assert system_content[0]["text"].startswith("## Greeting")
     assert "tools" not in request
 
 
@@ -339,11 +371,8 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
         name="search_notes",
         arguments=json.dumps({"query": "policies"}),
     )
-    first = DummyResponse(
-        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
-    )
-    second_message = DummyMessage(content=json.dumps({"answer": "Policy summary"}))
-    second = DummyResponse([DummyChoice(second_message)])
+    first = _make_response("thinking", tool_calls=[_tool_call_from_dummy(tool_call)])
+    second = _make_response(json.dumps({"answer": "Policy summary"}))
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
@@ -362,20 +391,21 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     assert record.call_id == "call_1"
     assert calls == ["policies"]
 
-    first_request = cast(dict[str, Any], client.completions.requests[0])
+    first_request = cast(dict[str, Any], client.responses.requests[0])
     tools = cast(list[dict[str, Any]], first_request["tools"])
     function_spec = cast(dict[str, Any], tools[0]["function"])
     assert function_spec["name"] == "search_notes"
     assert first_request.get("tool_choice") == "auto"
 
-    second_request = cast(dict[str, Any], client.completions.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["messages"])
-    tool_message = second_messages[-1]
-    assert tool_message["role"] == "tool"
-    serialized = json.loads(tool_message["content"])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
+    second_input = cast(list[dict[str, Any]], second_request["input"])
+    tool_message = second_input[-1]
+    assert tool_message["type"] == "function_call_output"
+    assert tool_message["call_id"] == "call_1"
+    serialized = json.loads(tool_message["output"])
     assert serialized["message"] == "completed"
     assert serialized["success"] is True
-    assert serialized["payload"] == {"answer": "Policy summary"}
+    assert serialized["payload"] == {"answer": "Result for policies"}
 
 
 def test_openai_adapter_rolls_back_session_on_publish_failure(
@@ -408,11 +438,8 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
         name="search_notes",
         arguments=json.dumps({"query": "policies"}),
     )
-    first = DummyResponse(
-        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
-    )
-    second_message = DummyMessage(content=json.dumps({"answer": "Policy summary"}))
-    second = DummyResponse([DummyChoice(second_message)])
+    first = _make_response("thinking", tool_calls=[_tool_call_from_dummy(tool_call)])
+    second = _make_response(json.dumps({"answer": "Policy summary"}))
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
@@ -537,15 +564,15 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     assert event.result.value is None
     assert event.call_id == "call_1"
 
-    first_request = cast(dict[str, Any], client.completions.requests[0])
-    first_messages = cast(list[dict[str, Any]], first_request["messages"])
-    assert first_messages[0]["role"] == "system"
+    first_request = cast(dict[str, Any], client.responses.requests[0])
+    first_input = cast(list[dict[str, Any]], first_request["input"])
+    assert first_input[0]["role"] == "system"
 
-    second_request = cast(dict[str, Any], client.completions.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["messages"])
-    tool_message = second_messages[-1]
-    assert tool_message["role"] == "tool"
-    serialized = json.loads(tool_message["content"])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
+    second_input = cast(list[dict[str, Any]], second_request["input"])
+    tool_message = second_input[-1]
+    assert tool_message["type"] == "function_call_output"
+    serialized = json.loads(tool_message["output"])
     assert serialized["message"] == "Tool validation failed: invalid query"
     assert serialized["success"] is False
     assert "payload" not in serialized
@@ -568,11 +595,7 @@ def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
     )
 
     payload = [{"answer": "First"}, {"answer": "Second"}]
-    message = DummyMessage(
-        content=json.dumps(payload),
-        tool_calls=None,
-    )
-    response = DummyResponse([DummyChoice(message)])
+    response = _make_response(json.dumps(payload))
     client = DummyOpenAIClient([response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
@@ -585,8 +608,8 @@ def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
     assert isinstance(result.output, list)
     assert [item.answer for item in result.output] == ["First", "Second"]
 
-    request = cast(dict[str, Any], client.completions.requests[0])
-    response_format = cast(dict[str, Any], request["response_format"])
+    request = cast(dict[str, Any], client.responses.requests[0])
+    response_format = cast(dict[str, Any], request["text"])
     json_schema = cast(dict[str, Any], response_format["json_schema"])
     schema_payload = cast(dict[str, Any], json_schema["schema"])
     properties = cast(dict[str, Any], schema_payload["properties"])
@@ -624,11 +647,8 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
         name="search_notes",
         arguments=json.dumps({"query": "policies"}),
     )
-    first = DummyResponse(
-        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
-    )
-    final_message = DummyMessage(content="All done")
-    second = DummyResponse([DummyChoice(final_message)])
+    first = _make_response("thinking", tool_calls=[_tool_call_from_dummy(tool_call)])
+    second = _make_response("All done")
     client = DummyOpenAIClient([first, second])
 
     forced_choice: Mapping[str, object] = {
@@ -649,9 +669,9 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
 
     assert result.text == "All done"
 
-    assert len(client.completions.requests) == 2
-    first_request = cast(dict[str, Any], client.completions.requests[0])
-    second_request = cast(dict[str, Any], client.completions.requests[1])
+    assert len(client.responses.requests) == 2
+    first_request = cast(dict[str, Any], client.responses.requests[0])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
     assert first_request.get("tool_choice") == forced_choice
     assert second_request.get("tool_choice") == "auto"
 
@@ -684,11 +704,8 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
         name="search_notes",
         arguments=json.dumps({"query": "policies"}),
     )
-    first = DummyResponse(
-        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
-    )
-    second_message = DummyMessage(content=json.dumps({"answer": "Policy summary"}))
-    second = DummyResponse([DummyChoice(second_message)])
+    first = _make_response("thinking", tool_calls=[_tool_call_from_dummy(tool_call)])
+    second = _make_response(json.dumps({"answer": "Policy summary"}))
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
@@ -855,8 +872,7 @@ def test_openai_adapter_reads_output_json_content_blocks() -> None:
         {"type": "output_json", "json": {"answer": "Block"}},
         JsonBlock({"answer": "Attribute"}),
     ]
-    message = DummyMessage(content=content_blocks, tool_calls=None)
-    response = DummyResponse([DummyChoice(message)])
+    response = DummyResponse([DummyResponseOutputMessage(content_blocks)])
     client = DummyOpenAIClient([response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
@@ -886,9 +902,7 @@ def test_openai_adapter_raises_when_structured_output_missing_json() -> None:
         ],
     )
 
-    response = DummyResponse(
-        [DummyChoice(DummyMessage(content="no-json", tool_calls=None))]
-    )
+    response = _make_response("no-json")
     client = DummyOpenAIClient([response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
@@ -919,8 +933,7 @@ def test_openai_adapter_raises_on_invalid_parsed_payload() -> None:
         ],
     )
 
-    message = DummyMessage(content=None, tool_calls=None, parsed="not-a-mapping")
-    response = DummyResponse([DummyChoice(message)])
+    response = _make_response("", parsed="not-a-mapping")
     client = DummyOpenAIClient([response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
@@ -1276,11 +1289,11 @@ def test_openai_adapter_records_handler_failures() -> None:
     assert event.result.value is None
     assert "execution failed: boom" in event.result.message
 
-    second_request = cast(dict[str, Any], client.completions.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["messages"])
-    tool_message = second_messages[-1]
-    assert tool_message["role"] == "tool"
-    serialized = json.loads(tool_message["content"])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
+    second_input = cast(list[dict[str, Any]], second_request["input"])
+    tool_message = second_input[-1]
+    assert tool_message["type"] == "function_call_output"
+    serialized = json.loads(tool_message["output"])
     assert serialized["success"] is False
     assert serialized["message"].endswith("execution failed: boom")
 
@@ -1461,8 +1474,7 @@ def test_openai_adapter_delegates_to_shared_runner(
 
     monkeypatch.setattr(module, "run_conversation", fake_run_conversation)
 
-    message = DummyMessage(content="hi")
-    client = DummyOpenAIClient([DummyResponse([DummyChoice(message)])])
+    client = DummyOpenAIClient([_make_response("hi")])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     params = GreetingParams(user="Ari")
@@ -1496,11 +1508,121 @@ def test_openai_adapter_delegates_to_shared_runner(
         None,
         expected_response_format,
     )
-    request_payload = cast(dict[str, Any], client.completions.requests[-1])
+    request_payload = cast(dict[str, Any], client.responses.requests[-1])
     assert request_payload["model"] == "gpt-test"
-    messages = cast(list[dict[str, Any]], request_payload["messages"])
-    assert messages[0]["content"] == "hi"
-    assert request_payload["response_format"] == expected_response_format
+    input_items = cast(list[dict[str, Any]], request_payload["input"])
+    assert input_items[0]["content"][0]["text"] == "hi"
+    assert request_payload["text"] == expected_response_format
 
     choice = select_choice(response)
-    assert choice.message is message
+    content = getattr(choice.message, "content", ())
+    assert content and getattr(content[0], "text", None) == "hi"
+
+
+def test_openai_convert_messages_to_input_handles_edge_cases() -> None:
+    module = cast(Any, _reload_module())
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": "Hello there",
+            "tool_calls": [
+                "invalid",
+                {"call_id": 123, "function": "unsupported"},
+                {"id": "call_2", "function": {"name": "search", "arguments": None}},
+            ],
+        },
+        {"role": "tool", "content": "ignored"},
+        {"role": "tool", "tool_call_id": "call_2", "content": "result"},
+    ]
+
+    input_items = module._convert_messages_to_input(messages)
+
+    assert input_items == [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "input_text", "text": "Hello there"}],
+        },
+        {
+            "type": "function_call",
+            "call_id": "123",
+            "name": None,
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_2",
+            "name": "search",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_2",
+            "output": "result",
+        },
+    ]
+
+
+class _OtherResponseItem:
+    def __init__(self) -> None:
+        self.type = "other"
+
+    def model_dump(self) -> dict[str, str]:
+        return {"type": "other", "value": "kept"}
+
+
+class _ScalarMessage:
+    class _Content:
+        def model_dump(self) -> str:
+            return "raw text"
+
+    def __init__(self) -> None:
+        self.type = "message"
+        self.content = self._Content()
+
+
+def test_openai_wrap_response_choice_converts_items() -> None:
+    module = cast(Any, _reload_module())
+
+    text_part = DummyResponseOutputText("Hello", parsed={"answer": 1})
+    message_item = DummyResponseOutputMessage([text_part])
+    function_call = DummyResponseFunctionToolCall(
+        call_id="call_1",
+        name="lookup",
+        arguments='{"query": "value"}',
+        tool_id=None,
+    )
+    scalar_message = _ScalarMessage()
+    other_item = _OtherResponseItem()
+
+    response = types.SimpleNamespace(
+        output=[message_item, function_call, scalar_message, other_item],
+        parsed=None,
+    )
+
+    choice = module._wrap_response_choice(response, "prompt-name")
+    message = choice.message
+
+    payload = message.model_dump()
+    assert payload["content"][0]["text"] == "Hello"
+    assert payload["content"][1] == "raw text"
+    assert payload["content"][2] == {"type": "other", "value": "kept"}
+    assert payload["tool_calls"][0]["id"] == "call_1"
+    assert payload["tool_calls"][0]["function"] == {
+        "name": "lookup",
+        "arguments": '{"query": "value"}',
+    }
+    assert payload["parsed"] == {"answer": 1}
+    assert choice.model_dump() == {"message": payload}
+    assert module._model_dump_value({1: "one"}) == {"1": "one"}
+    assert module._model_dump_value(5) == 5
+
+
+def test_openai_wrap_response_choice_requires_sequence() -> None:
+    module = cast(Any, _reload_module())
+
+    response = types.SimpleNamespace(output=None)
+
+    with pytest.raises(PromptEvaluationError):
+        module._wrap_response_choice(response, "prompt-name")

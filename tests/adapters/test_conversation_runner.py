@@ -319,7 +319,7 @@ def test_conversation_runner_requires_message_payload() -> None:
 
     class MissingMessageResponse(DummyResponse):
         def __init__(self) -> None:
-            super().__init__(choices=[DummyChoice(DummyMessage(content=None))])
+            super().__init__([DummyChoice(DummyMessage(content=None))])
             self.choices[0].message = None
 
     provider = ProviderStub([MissingMessageResponse()])

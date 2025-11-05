@@ -85,7 +85,7 @@ def adapter_harness(request: pytest.FixtureRequest) -> AdapterHarness:
             adapter = openai_module.OpenAIAdapter(
                 model="gpt-test", client=cast(Any, client)
             )
-            return adapter, client.completions.requests
+            return adapter, client.responses.requests
 
         return AdapterHarness(name="openai", build=build)
 
@@ -144,8 +144,27 @@ def _record_tool_events(bus: InProcessEventBus) -> list[ToolInvoked]:
 
 def _second_tool_message(requests: list[dict[str, object]]) -> dict[str, object]:
     assert len(requests) >= 2
-    messages = cast(list[dict[str, object]], requests[1]["messages"])
-    return messages[-1]
+    request = requests[1]
+    if "input" in request:
+        input_items = cast(list[dict[str, object]], request["input"])
+        for item in reversed(input_items):
+            if item.get("type") == "function_call_output":
+                return item
+    else:
+        messages = cast(list[dict[str, object]], request["messages"])
+        return messages[-1]
+    raise AssertionError("No tool output message found in requests")
+
+
+def _tool_message_content(tool_message: dict[str, object]) -> str:
+    content = tool_message.get("output")
+    if content is None:
+        content = tool_message.get("content")
+    if isinstance(content, list):
+        assert content, "Tool message content was empty"
+        content = content[0]
+    assert isinstance(content, str), "Tool message content must be a string"
+    return content
 
 
 def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None:
@@ -194,7 +213,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
+    content_raw = _tool_message_content(tool_message)
     content = json.loads(content_raw)
     assert content["message"] == "completed"
     assert content["success"] is True
@@ -248,7 +267,7 @@ def test_adapter_tool_execution_validation_error(
     assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
+    content_raw = _tool_message_content(tool_message)
     content = json.loads(content_raw)
     assert content["message"] == "Tool validation failed: invalid query"
     assert content["success"] is False
@@ -303,7 +322,7 @@ def test_adapter_tool_execution_unexpected_exception(
     assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
+    content_raw = _tool_message_content(tool_message)
     content = json.loads(content_raw)
     assert content["message"] == "Tool 'search_notes' execution failed: handler crash"
     assert content["success"] is False
@@ -383,7 +402,7 @@ def test_adapter_tool_execution_rolls_back_session(
     assert latest_payload == ToolPayload(answer="baseline")
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
+    content_raw = _tool_message_content(tool_message)
     content = json.loads(content_raw)
     assert content["message"] == invocation.result.message
     assert content["success"] is True
