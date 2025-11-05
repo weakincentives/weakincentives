@@ -51,10 +51,6 @@ test:
 
 # Run OpenAI integration tests
 integration-tests:
-	@if [ -z "$$OPENAI_API_KEY" ]; then \
-	        echo "OPENAI_API_KEY is not set; export it to run integration tests." >&2; \
-	        exit 1; \
-	fi
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
 
 # Launch the interactive code reviewer demo
