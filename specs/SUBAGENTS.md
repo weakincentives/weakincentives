@@ -24,25 +24,20 @@ No other sections, knobs, or pre-baked templates are required. The parent prompt
 
 The tool handler resides in `src/weakincentives/tools/subagents.py` and exports:
 
+> **Upcoming rename**: `DelegationSummaryParams` will be refactored into `DelegationParams`, absorbing the recap bullets so each delegation is expressed as a single payload. The tool signature below reflects that target shape; do not introduce an intermediate `SubagentDispatch` wrapper.
+
 ```python
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Sequence
 
-from weakincentives.prompt import DelegationSummaryParams, Tool, ToolResult
+from weakincentives.prompt import DelegationParams, Tool, ToolResult
 from weakincentives.prompt._types import SupportsDataclass
-
-
-@dataclass(slots=True)
-class SubagentDispatch:
-    summary: DelegationSummaryParams
-    recap_lines: tuple[str, ...]
-
 
 @dataclass(slots=True)
 class DispatchSubagentsParams:
-    dispatches: Sequence[SubagentDispatch]
+    delegations: Sequence[DelegationParams]
 
 
 @dataclass(slots=True)
@@ -61,15 +56,16 @@ Key rules:
 - Results mirror the input order.
 - Each child's `output` is a plain string so downstream reducers can concatenate or summarize without extra coercion.
 - Failures are captured per child via `success`/`error` while allowing healthy siblings to return normally.
+- `DelegationParams` replaces the old `DelegationSummaryParams` and owns both the recap lines and summary fields so call sites have a single payload to construct.
 
 ## Runtime Flow
 
 Every tool invocation MUST execute the following steps:
 
 1. **Require the rendered parent prompt**. `context.rendered_prompt` is mandatory. Treat a missing prompt as an orchestrator bug and respond with a failing `ToolResult`.
-1. **Share state with children**. For each dispatch, reuse the original `context.session` instead of cloning it so children mutate the exact same state object the parent uses. ALWAYS pass the parent's event bus reference so observers receive child telemetry in real time. When `context.session` is `None`, still hand each child the parent's bus reference.
-1. **Wrap the child prompt**. Build a `DelegationPrompt` using the rendered parent prompt and the provided recap lines. Propagate response format metadata and tool descriptions exactly as described in `PROMPTS_COMPOSITION.md`.
-1. **Run in parallel**. Evaluate each child through `context.adapter.evaluate` using a `ThreadPoolExecutor`. Use `min(len(dispatches), default_max_workers)` where `default_max_workers` matches Python's executor default when `None`.
+1. **Share state with children**. For each delegation, reuse the original `context.session` instead of cloning it so children mutate the exact same state object the parent uses. ALWAYS pass the parent's event bus reference so observers receive child telemetry in real time. When `context.session` is `None`, still hand each child the parent's bus reference.
+1. **Wrap the child prompt**. Build a `DelegationPrompt` using the rendered parent prompt and the recap lines carried inside `DelegationParams`. Propagate response format metadata and tool descriptions exactly as described in `PROMPTS_COMPOSITION.md`.
+1. **Run in parallel**. Evaluate each child through `context.adapter.evaluate` using a `ThreadPoolExecutor`. Use `min(len(delegations), default_max_workers)` where `default_max_workers` matches Python's executor default when `None`.
 1. **Collect per-child outcomes**. Successful executions populate `output` and set `success=True`. Exceptions are caught and converted into `success=False` with an error string, without cancelling other children.
 1. **Return a structured result**. On handler-level success, return `ToolResult(value=tuple(results), success=True)`. When preconditions fail (for example, prompt not rendered, cloning unsupported), surface `ToolResult(success=False, value=None, message=...)`.
 
@@ -85,11 +81,10 @@ Every tool invocation MUST execute the following steps:
 ```python
 from dataclasses import dataclass
 
-from weakincentives.prompt import DelegationSummaryParams, MarkdownSection, Prompt
+from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt
 from weakincentives.prompt.subagents import SubagentsSection
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
-    SubagentDispatch,
     dispatch_subagents,
 )
 
@@ -115,13 +110,11 @@ daily_update = Prompt[str](
 rendered = daily_update.render(UpdateParams(body="Summarize blockers, then plan execution."))
 
 params = DispatchSubagentsParams(
-    dispatches=(
-        SubagentDispatch(
-            summary=DelegationSummaryParams(
-                reason="Gather product A metrics",
-                expected_result="Table of the latest KPIs",
-                may_delegate_further="no",
-            ),
+    delegations=(
+        DelegationParams(
+            reason="Gather product A metrics",
+            expected_result="Table of the latest KPIs",
+            may_delegate_further="no",
             recap_lines=("Pull weekly dashboard numbers", "Highlight major swings"),
         ),
     ),
