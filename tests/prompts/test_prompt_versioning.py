@@ -60,6 +60,11 @@ class _LookupResult:
     success: bool
 
 
+@dataclass
+class _LookupItem:
+    value: str
+
+
 def _build_tool_prompt(
     *, accepts_overrides: bool = True
 ) -> tuple[Prompt, Tool[_GreetingParams, _LookupResult]]:
@@ -73,6 +78,31 @@ def _build_tool_prompt(
         ns="tests/versioning",
         key="versioned-greeting-tools",
         name="greeting-tools",
+        sections=[
+            MarkdownSection[_GreetingParams](
+                title="Greeting",
+                template="Greet ${subject} warmly.",
+                key="greeting",
+                tools=[tool],
+            )
+        ],
+    )
+    return prompt, tool
+
+
+def _build_sequence_tool_prompt(
+    *, accepts_overrides: bool = True
+) -> tuple[Prompt, Tool[_GreetingParams, tuple[_LookupItem, ...]]]:
+    tool = Tool[_GreetingParams, tuple[_LookupItem, ...]](
+        name="greeter_sequence",
+        description="Greet and capture multiple responses.",
+        handler=None,
+        accepts_overrides=accepts_overrides,
+    )
+    prompt = Prompt(
+        ns="tests/versioning",
+        key="versioned-greeting-tools-seq",
+        name="greeting-tools-seq",
         sections=[
             MarkdownSection[_GreetingParams](
                 title="Greeting",
@@ -156,6 +186,33 @@ def test_prompt_descriptor_collects_tools() -> None:
     assert descriptor.tools == [
         ToolDescriptor(
             path=("greeting",), name="greeter", contract_hash=expected_contract
+        )
+    ]
+
+
+def test_prompt_descriptor_collects_sequence_tools() -> None:
+    prompt, tool = _build_sequence_tool_prompt()
+
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    description_hash = hash_text(tool.description)
+    params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
+    item_schema = schema(tool.result_type, extra="ignore")
+    result_schema = {
+        "title": f"{tool.result_type.__name__}List",
+        "type": "array",
+        "items": item_schema,
+    }
+    result_schema_hash = hash_json(result_schema)
+    expected_contract = hash_text(
+        "::".join((description_hash, params_schema_hash, result_schema_hash))
+    )
+
+    assert descriptor.tools == [
+        ToolDescriptor(
+            path=("greeting",),
+            name="greeter_sequence",
+            contract_hash=expected_contract,
         )
     ]
 

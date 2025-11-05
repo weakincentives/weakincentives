@@ -18,8 +18,8 @@ from types import MappingProxyType
 import pytest
 
 from weakincentives.prompt import (
+    DelegationParams,
     DelegationPrompt,
-    DelegationSummaryParams,
     MarkdownSection,
     ParentPromptParams,
     Prompt,
@@ -92,16 +92,16 @@ def test_delegation_prompt_renders_required_sections() -> None:
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
         parent_prompt,
         parent_with_descriptions,
-        recap_lines=("Prioritize areas touched in the latest commits.",),
     )
 
     assert delegation.prompt.key == "parent-wrapper"
 
     rendered = delegation.render(
-        DelegationSummaryParams(
+        DelegationParams(
             reason="The parent agent needs a focused investigation.",
             expected_result="A prioritized list of next actions.",
             may_delegate_further="no",
+            recap_lines=("Prioritize areas touched in the latest commits.",),
         )
     )
 
@@ -137,10 +137,11 @@ def test_delegation_prompt_with_response_format_instructions() -> None:
     )
 
     rendered = delegation.render(
-        DelegationSummaryParams(
+        DelegationParams(
             reason="Specialize on filesystem enumeration.",
             expected_result="Detailed plan for the next commit.",
             may_delegate_further="no",
+            recap_lines=("Keep notes concise.",),
         ),
         parent=ParentPromptParams(body=rendered_parent.text),
     )
@@ -153,7 +154,7 @@ def test_delegation_prompt_with_response_format_instructions() -> None:
     )
 
 
-def test_delegation_prompt_rejects_recap_params_without_section() -> None:
+def test_delegation_prompt_allows_explicit_recap_override() -> None:
     parent_prompt, _ = _build_parent_prompt()
     rendered_parent = parent_prompt.render(ParentSectionParams(guidance="logs"))
 
@@ -162,15 +163,18 @@ def test_delegation_prompt_rejects_recap_params_without_section() -> None:
         rendered_parent,
     )
 
-    with pytest.raises(ValueError):
-        delegation.render(
-            DelegationSummaryParams(
-                reason="Need assistance reviewing logs.",
-                expected_result="Summary of suspicious findings.",
-                may_delegate_further="yes",
-            ),
-            recap=RecapParams(bullets=("Watch for repeated errors.",)),
-        )
+    rendered = delegation.render(
+        DelegationParams(
+            reason="Need assistance reviewing logs.",
+            expected_result="Summary of suspicious findings.",
+            may_delegate_further="yes",
+            recap_lines=("Focus on log rotation issues.",),
+        ),
+        recap=RecapParams(bullets=("Inspect authentication failures.",)),
+    )
+
+    assert "- Inspect authentication failures." in rendered.text
+    assert "- Focus on log rotation issues." not in rendered.text
 
 
 def test_delegation_prompt_requires_specialization() -> None:
@@ -202,10 +206,11 @@ def test_delegation_prompt_skips_fallback_when_parent_freeform() -> None:
     )
 
     rendered = delegation.render(
-        DelegationSummaryParams(
+        DelegationParams(
             reason="Need ad-hoc context.",
             expected_result="Short summary of findings.",
             may_delegate_further="no",
+            recap_lines=("Highlight unresolved questions.",),
         ),
         parent=ParentPromptParams(body=rendered_parent.text),
     )
@@ -221,19 +226,20 @@ def test_delegation_prompt_empty_recap_uses_placeholder() -> None:
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
         parent_prompt,
         rendered_parent,
-        recap_lines=(),
     )
 
     rendered = delegation.render(
-        DelegationSummaryParams(
+        DelegationParams(
             reason="Capture key signals.",
             expected_result="List of signal hypotheses.",
             may_delegate_further="yes",
+            recap_lines=(),
         )
     )
 
-    recap_section = rendered.text.split("## Recap", 1)[-1].strip()
-    assert recap_section == ""
+    assert "## Recap" in rendered.text
+    recap_segment = rendered.text.split("## Recap", 1)[-1]
+    assert "- " not in recap_segment
 
 
 def test_merge_tool_param_descriptions_combines_entries() -> None:

@@ -29,7 +29,12 @@ from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.events import EventBus, InProcessEventBus, ToolInvoked
-from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    SubagentsSection,
+    SupportsDataclass,
+)
 from weakincentives.prompt.local_prompt_overrides_store import (
     LocalPromptOverridesStore,
 )
@@ -167,6 +172,7 @@ def main() -> None:
         " 'exit' to quit."
     )
     print("- Python evaluation tool enabled for quick calculations and scripts.")
+    print("- Subagent delegation tool available for parallelizable review tasks.")
 
     override_tag = _resolve_override_tag()
     print(
@@ -329,7 +335,17 @@ class SunfishReviewSession:
             try:
                 payload = dump(raw_value, exclude_none=True)
             except TypeError:
-                payload = {"value": raw_value}
+                if isinstance(raw_value, tuple):
+                    try:
+                        payload = {
+                            "children": [
+                                dump(item, exclude_none=True) for item in raw_value
+                            ]
+                        }
+                    except TypeError:
+                        payload = {"value": raw_value}
+                else:
+                    payload = {"value": raw_value}
         params_repr = _format_for_log(serialized_params)
         message = _truncate_for_log(tool_event.result.message or "")
         with self._history_lock:
@@ -387,6 +403,7 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
     planning_section = PlanningToolsSection(
         strategy=PlanningStrategy.PLAN_ACT_REFLECT,
     )
+    subagents_section = SubagentsSection()
     vfs_section = VfsToolsSection(
         mounts=(
             HostMount(
@@ -412,6 +429,7 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
         sections=(
             guidance_section,
             planning_section,
+            subagents_section,
             vfs_section,
             asteval_section,
             user_turn_section,

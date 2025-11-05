@@ -189,7 +189,16 @@ __all__ = [
 def _tool_contract_hash(tool: Tool[Any, Any]) -> str:
     description_hash = hash_text(tool.description)
     params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
-    result_schema_hash = hash_json(schema(tool.result_type, extra="ignore"))
+    if getattr(tool, "result_container", "object") == "array":
+        item_schema = schema(tool.result_type, extra="ignore")
+        result_schema = {
+            "title": f"{tool.result_type.__name__}List",
+            "type": "array",
+            "items": item_schema,
+        }
+    else:
+        result_schema = schema(tool.result_type, extra="ignore")
+    result_schema_hash = hash_json(result_schema)
     return hash_text(
         "::".join((description_hash, params_schema_hash, result_schema_hash))
     )
