@@ -67,7 +67,7 @@ Key rules:
 Every tool invocation MUST execute the following steps:
 
 1. **Require the rendered parent prompt**. `context.rendered_prompt` is mandatory. Treat a missing prompt as an orchestrator bug and respond with a failing `ToolResult`.
-1. **Share state with children**. For each dispatch, call `context.session.clone()` and pass the shared event bus. Clones MUST point at the same session state store as the parent so reads and writes stay consistent. They MUST also reuse the parent event bus (or a bridge to it) so observers receive child telemetry in real time. When `context.session` is `None`, still hand each child the parent's bus reference.
+1. **Share state with children**. For each dispatch, reuse the original `context.session` instead of cloning it so children mutate the exact same state object the parent uses. ALWAYS pass the parent's event bus reference so observers receive child telemetry in real time. When `context.session` is `None`, still hand each child the parent's bus reference.
 1. **Wrap the child prompt**. Build a `DelegationPrompt` using the rendered parent prompt and the provided recap lines. Propagate response format metadata and tool descriptions exactly as described in `PROMPTS_COMPOSITION.md`.
 1. **Run in parallel**. Evaluate each child through `context.adapter.evaluate` using a `ThreadPoolExecutor`. Use `min(len(dispatches), default_max_workers)` where `default_max_workers` matches Python's executor default when `None`.
 1. **Collect per-child outcomes**. Successful executions populate `output` and set `success=True`. Exceptions are caught and converted into `success=False` with an error string, without cancelling other children.
@@ -77,7 +77,7 @@ Every tool invocation MUST execute the following steps:
 
 - Keep the handler synchronous; the executor supplies concurrency.
 - Avoid bespoke telemetry plumbing—sharing the event bus is sufficient.
-- Ensure cloned sessions inherit any adapters or configuration stored on the parent session object.
+- Ensure the shared session instance is safe for concurrent access and already carries any adapters or configuration the parent relies on.
 - Tests should cover mixed success/failure batches and verify that state written by a child is visible to the parent after completion.
 
 ## Minimal Usage Sketch
