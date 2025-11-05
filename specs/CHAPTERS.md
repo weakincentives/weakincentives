@@ -1,0 +1,107 @@
+# Chapters Specification
+
+## Introduction
+
+Chapters extend the prompt system with a coarse-grained switch that governs which
+parts of a prompt tree enter the model's context window. Each chapter groups a
+set of prompt sections that should either render together or remain completely
+hidden from the large language model. Adapters inspect chapters during query
+preparation to decide which content becomes visible for a given turn and which
+content stays dark.
+
+## Goals
+
+- **Explicit visibility boundaries**: Treat a chapter as the authoritative
+  toggle for large prompt regions, ensuring sensitive or off-topic material does
+  not leak into the context window.
+- **Predictable defaults**: Closed chapters are the default so new content
+  remains opt-in until adapters explicitly open it.
+- **Composable structure**: Chapters wrap existing `Section` trees without
+  changing section authoring practices.
+- **Deterministic evaluation**: Decisions about open or closed state happen
+  before rendering, producing a new `Prompt` instance with only the active
+  sections.
+
+## Chapter Template
+
+Authors define chapters with the following fields. The template is expressed as
+Python-style pseudocode to mirror the surrounding prompt abstractions.
+
+```python
+@dataclass
+class Chapter[ParamsT]:
+    key: str                     # machine-safe identifier, stable across releases
+    title: str                   # human-readable heading used in documentation
+    description: str | None = None  # optional rationale for auditing tools
+    sections: tuple[Section[Any], ...] = ()  # ordered section payload
+    enabled: Callable[[ParamsT], bool] | None = None  # optional fine-grained gate
+```
+
+- `key` MUST be unique within a prompt namespace and follow the same identifier
+  rules as sections (`^[a-z0-9][a-z0-9._-]{0,63}$`).
+- `title` SHOULD mirror the chapter's user-facing headline.
+- `description` captures intent, data sensitivity, or logging hints.
+- `sections` include the existing section instances that render when the chapter
+  is open.
+- `enabled` receives the effective chapter parameters and returns whether the
+  chapter may open. When absent the chapter remains eligible to open.
+
+Chapter parameter types follow the same rules as section parameters: they are
+structured dataclasses specialized at definition time. A chapter may expose
+defaults that adapters can override during `prepare()`.
+
+## Section Composition
+
+Chapters do not replace section-level `enabled` callables. When a chapter opens,
+individual sections still consult their own selectors. This allows a chapter to
+provide the coarse-grained boundary while sections inside continue to perform
+fine-grained feature gating.
+
+## Adapter Responsibilities
+
+Adapters gain a `prepare()` method that evaluates the current query context and
+returns a new `Prompt` instance scoped to the active chapters.
+
+```python
+def prepare(self, query: Query) -> Prompt:
+    """Return a prompt configured for `query`."""
+```
+
+1. Start from the base prompt definition, where all chapters default to the
+   **closed** state.
+2. Inspect each chapter in declaration order and decide whether to open it for
+   the current query. Decisions MAY consider
+   - the user message, accumulated thread history, or tool state,
+   - chapter metadata (`key`, `title`, `description`), and
+   - optional chapter-level parameters.
+3. For each chapter resolved to the open state, include its sections in the new
+   prompt tree. Closed chapters contribute no sections and remain hidden.
+4. When a chapter is open, still respect section-level `enabled` callables to
+   skip individual sections as needed.
+5. Return a fresh `Prompt` instance whose section tree contains only the open
+   chapter content. This ensures subsequent render calls operate on a snapshot of
+   the adapter's decision.
+
+Adapters SHOULD surface telemetry describing which chapters opened or closed so
+operators can audit visibility choices.
+
+## Lifecycle Considerations
+
+- **Default safety**: Treat the closed state as the default whenever new
+  chapters ship. Adapters must explicitly opt in to opening them.
+- **Overrides**: Prompt override tooling interacts with chapters the same way it
+  interacts with sections. Overrides for closed chapters remain inert until the
+  chapter opens.
+- **Nested chapters**: Chapters SHOULD remain flat to avoid nested visibility
+  calculations. When nesting is unavoidable, the outer chapter's state gates all
+  inner content.
+- **Versioning**: Include chapter metadata in prompt descriptors so versioned
+  prompts capture the visibility structure.
+
+## Open Questions
+
+- How do we expose chapter decisions in logs while protecting sensitive content?
+- Should adapters cache chapter decisions for the duration of a session?
+- Do we need adapter-provided hooks to override chapter defaults at runtime?
+
+These items should be resolved before stabilizing the API.
