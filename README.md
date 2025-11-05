@@ -6,38 +6,34 @@ heavy dependencies. Optional adapters snap in when you need a model provider.
 
 ## What's novel?
 
-- A Redux-like session state manager that keeps every tool invocation and prompt
-  interaction observable, replayable, and ready for reducer-driven automation.
-- Prompt composition primitives that let you assemble deterministic, typed
-  sections into reusable blueprints without surrendering control to opaque
-  templating layers.
-- First-class support for prompt overrides, laying the groundwork for an
-  optimizer that plugs directly into your development cycle and becomes a key
-  operations tool once agents ship to production.
-- Everything runs locally without mandatory APIs or hosted services, and every
-  render stays deterministic and version-control friendly so diffs capture real
-  intent instead of churn.
-
-## Highlights
-
-- Prompt objects compose trees of dataclass-backed sections, render deterministic
-  Markdown with validated placeholders, and automatically surface tool contracts.
-- Prompt definitions ship with hash-based descriptors plus on-disk overrides that
-  stay in sync through schema validation and Git-root discovery.
-- Provider adapters share a conversation loop that negotiates tool calls, applies
-  JSON-schema response formats, and normalizes structured payloads.
-- An in-process event bus publishes `ToolInvoked` and `PromptExecuted` events while
-  the session aggregates typed payloads, supports reducers, and enables rollback.
-- Built-in planning, virtual filesystem, and Python-eval sections register their
-  own reducers, enforce domain-specific validation, and expose guided Markdown.
-- The code-review example ties it together with override-aware prompts, session
+- **Observable session state with reducer support.** A Redux-like session state
+  manager keeps every tool invocation and prompt interaction observable,
+  replayable, and ready for automation while an in-process event bus publishes
+  `ToolInvoked` and `PromptExecuted` events. Built-in planning, virtual
+  filesystem, and Python-eval sections register reducers, enforce
+  domain-specific validation, and expose guided Markdown so stateful runs stay
+  deterministic.
+- **Composable prompt blueprints with strict contracts.** Prompt composition
+  primitives let you assemble deterministic, typed sections into reusable
+  blueprints. Prompt objects compose trees of dataclass-backed sections, render
+  Markdown with validated placeholders, and automatically surface tool
+  contracts so every render stays predictable.
+- **Override-friendly workflows that scale into optimization.** First-class
+  support for prompt overrides lays the groundwork for an optimizer that plugs
+  into your development cycle. Prompt definitions ship with hash-based
+  descriptors plus on-disk overrides that stay in sync through schema
+  validation and Git-root discovery. Prompt optimizers become important as your
+  evaluation suite matures, but they are not a day-one requirement—start by
+  writing prompts manually and add automation once you have robust evals.
+- **Provider adapters that standardize tool negotiation.** Provider adapters
+  share a conversation loop that negotiates tool calls, applies JSON-schema
+  response formats, and normalizes structured payloads, making the runtime
+  model-agnostic.
+- **Local-first, deterministic execution.** Everything runs locally without
+  mandatory APIs or hosted services, and every render stays
+  version-control-friendly so diffs capture intent instead of churn. The
+  code-review example ties it together with override-aware prompts, session
   telemetry, and replayable tooling for deterministic agent runs.
-
-## Design principles
-
-- Prompt optimizers become important as your evaluation suite matures, but they
-  are not a day-one requirement. Start by writing prompts manually and wire in
-  automation only after you have a robust set of evals to guide the optimizer.
 
 ## Requirements
 
@@ -55,30 +51,6 @@ uv add "weakincentives[openai]"
 uv add "weakincentives[litellm]"
 # cloning the repo? use: uv sync --extra asteval --extra openai --extra litellm
 ```
-
-## Logging
-
-Weak Incentives ships a structured logging adapter so hosts can add contextual
-metadata to every record without manual dictionary plumbing. Call
-`configure_logging()` during startup to install the default handler and then
-bind logger instances wherever you need telemetry:
-
-```python
-from weakincentives.logging import configure_logging, get_logger
-
-configure_logging(json_mode=True)
-logger = get_logger("demo").bind(component="cli")
-logger.info("boot", event="demo.start", context={"attempt": 1})
-```
-
-The helper respects any existing root handlers—omit `force=True` if your
-application already configures logging and you only want Weak Incentives to
-honor the selected level. When you do want to take over the pipeline, call
-`configure_logging(..., force=True)` and then customize the root handler list
-with additional sinks (for example, forwarding records to Cloud Logging or a
-structured log shipper). Each emitted record contains an `event` field plus a
-`context` mapping, so downstream processors can make routing decisions without
-parsing raw message strings.
 
 ## Tutorial: Build a Stateful Code-Reviewing Agent
 
@@ -559,6 +531,30 @@ Run it inside a worker, bot, or scheduler; the captured session state keeps each
 evaluation replayable. For long-lived deployments, follow
 [Tool-Aware Prompt Versioning](specs/TOOL_AWARE_PROMPT_VERSIONING.md) to keep
 overrides and tool descriptors in sync.
+
+## Logging
+
+Weak Incentives ships a structured logging adapter so hosts can add contextual
+metadata to every record without manual dictionary plumbing. Call
+`configure_logging()` during startup to install the default handler and then
+bind logger instances wherever you need telemetry:
+
+```python
+from weakincentives.logging import configure_logging, get_logger
+
+configure_logging(json_mode=True)
+logger = get_logger("demo").bind(component="cli")
+logger.info("boot", event="demo.start", context={"attempt": 1})
+```
+
+The helper respects any existing root handlers—omit `force=True` if your
+application already configures logging and you only want Weak Incentives to
+honor the selected level. When you do want to take over the pipeline, call
+`configure_logging(..., force=True)` and then customize the root handler list
+with additional sinks (for example, forwarding records to Cloud Logging or a
+structured log shipper). Each emitted record contains an `event` field plus a
+`context` mapping, so downstream processors can make routing decisions without
+parsing raw message strings.
 
 ## Development Setup
 
