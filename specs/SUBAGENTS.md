@@ -28,29 +28,29 @@ The tool handler resides in `src/weakincentives/tools/subagents.py` and exports:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
 
 from weakincentives.prompt import DelegationParams, Tool, ToolResult
-from weakincentives.prompt._types import SupportsDataclass
 
 @dataclass(slots=True)
 class DispatchSubagentsParams:
-    delegations: Sequence[DelegationParams]
+    delegations: tuple[DelegationParams, ...]
 
 
 @dataclass(slots=True)
-class SubagentResult(SupportsDataclass):
+class SubagentResult:
     output: str
     success: bool
     error: str | None = None
 
 
-dispatch_subagents: Tool[DispatchSubagentsParams, Sequence[SubagentResult]]
+dispatch_subagents: Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]
 ```
 
 Key rules:
 
 - Parameters are constructed entirely by the LLM at call time. No defaults live in the section.
+- `DispatchSubagentsParams` coerces the provided delegations into a tuple so downstream code can rely on immutability and
+  deterministic ordering.
 - Results mirror the input order.
 - Each child's `output` is a plain string so downstream reducers can concatenate or summarize without extra coercion.
 - Failures are captured per child via `success`/`error` while allowing healthy siblings to return normally.
