@@ -609,7 +609,7 @@ def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
     assert [item.answer for item in result.output] == ["First", "Second"]
 
     request = cast(dict[str, Any], client.responses.requests[0])
-    response_format = cast(dict[str, Any], request["text"])
+    response_format = cast(dict[str, Any], request["response_format"])
     json_schema = cast(dict[str, Any], response_format["json_schema"])
     schema_payload = cast(dict[str, Any], json_schema["schema"])
     properties = cast(dict[str, Any], schema_payload["properties"])
@@ -1512,7 +1512,7 @@ def test_openai_adapter_delegates_to_shared_runner(
     assert request_payload["model"] == "gpt-test"
     input_items = cast(list[dict[str, Any]], request_payload["input"])
     assert input_items[0]["content"][0]["text"] == "hi"
-    assert request_payload["text"] == expected_response_format
+    assert request_payload["response_format"] == expected_response_format
 
     choice = select_choice(response)
     content = getattr(choice.message, "content", ())

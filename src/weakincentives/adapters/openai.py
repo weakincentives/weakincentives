@@ -168,7 +168,7 @@ class OpenAIAdapter:
                 if tool_choice_directive is not None:
                     request_payload["tool_choice"] = tool_choice_directive
             if response_format_payload is not None:
-                request_payload["text"] = response_format_payload
+                request_payload["response_format"] = dict(response_format_payload)
 
             try:
                 if response_format_payload is not None:
