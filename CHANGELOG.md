@@ -4,15 +4,52 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- Moved the asteval-backed evaluation tool behind the `asteval` extra so the core
-  library stays stdlib-only and surfaces a clearer install hint when the optional
-  dependency is missing.
-- Refactored `PlanningToolsSection` to configure sessions from
-  `ToolContext.session`, simplifying prompt construction and aligning the suite
-  with other tool sections.
-- Refactored `AstevalSection` to configure reducers via `ToolContext.session`,
-  removing the constructor `Session` dependency and aligning with other tool
-  sections.
+### Prompt & Delegation
+
+- Added delegation prompt composition helpers, a `SubagentsSection`, and the
+  `dispatch_subagents` tool so parent prompts can fan work out to subagents
+  while reusing parent response formats and reducer wiring.
+- Rebuilt the local prompt overrides store with structured logging, strict
+  slug/tag validation, file-level locks, and atomic writes, and taught sections
+  and tools to declare an `accepts_overrides` flag so override pipelines target
+  only opted-in surfaces.
+
+### Tool Runtime
+
+- Introduced the typed `ToolContext` passed to every handler (rendered prompt,
+  adapter, session, and bus) and updated planning, VFS, and ASTEval sections to
+  pull session state from the context while validating handler signatures.
+- Added configurable planning strategy templates and tighter reducer wiring for
+  plan updates, aligning built-in planning tools with the new context and
+  override controls.
+- Made the ASTEval integration an optional extra and removed the signal-based
+  timeout shim while keeping the tool quiet by default.
+
+### Session & Adapters
+
+- Hardened session concurrency with RLock-protected reducers, snapshot restores,
+  and new thread-safety regression tests/specs while the event bus now emits
+  structured logs for publish failures.
+- Centralized adapter protocols and the conversation runner, enforcing that
+  adapters always supply a session and event bus before executing prompts and
+  improving tool invocation error reporting.
+
+### Logging & Telemetry
+
+- Added a structured logging facility used across sessions, event buses, and
+  prompt overrides, alongside dedicated unit tests and README guidance for
+  configuring INFO-level output in the code review example.
+
+### Documentation, Examples & Tooling
+
+- Replaced the multi-file code review demo with an updated
+  `code_reviewer_example.py` that mounts repositories, tracks tool calls, and
+  emits structured logs, removing the legacy example modules/tests.
+- Expanded the specs portfolio with new documents for the CLI, logging schema,
+  tool context, planning strategies, prompt composition, subagents, and thread
+  safety, plus refreshed README sections.
+- Added a `make demo` target, tightened the Bandit compatibility shim, and
+  refreshed dependency locks.
 
 ## v0.5.0 - 2025-11-02
 
