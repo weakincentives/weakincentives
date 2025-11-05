@@ -5,7 +5,7 @@ This handbook is the primary source of truth for autonomous or assisted agents w
 ## Project Snapshot
 
 - **Goal**: Build tooling for "side effect free" background agents; current codebase is intentionally minimal and pre-alpha.
-- **Language**: Python 3.14 (see `.python-version`).
+- **Language**: Python 3.12 (see `.python-version`).
 - **Package manager**: [`uv`](https://github.com/astral-sh/uv) orchestrates dependency management and task execution.
 - **Build backend**: `hatchling` (configured in `pyproject.toml`).
 
@@ -21,7 +21,7 @@ This handbook is the primary source of truth for autonomous or assisted agents w
 
 ## Environment & Setup
 
-1. Install Python 3.14 (pyenv users can run `pyenv install 3.14.0` if needed).
+1. Install Python 3.12 (pyenv users can run `pyenv install 3.12.0` if needed).
 1. Install `uv` locally.
 1. Sync dependencies and development tooling:
    ```bash

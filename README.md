@@ -37,7 +37,7 @@ heavy dependencies. Optional adapters snap in when you need a model provider.
 
 ## Requirements
 
-- Python 3.12+ (the repository pins 3.14 in `.python-version` for development)
+- Python 3.12+ (the repository pins 3.12 in `.python-version` for development)
 - [`uv`](https://github.com/astral-sh/uv) CLI
 
 ## Install
@@ -558,7 +558,7 @@ parsing raw message strings.
 
 ## Development Setup
 
-1. Install Python 3.14 (for example with `pyenv install 3.14.0`).
+1. Install Python 3.12 (for example with `pyenv install 3.12.0`).
 
 1. Install `uv`, then bootstrap the environment and hooks:
 
