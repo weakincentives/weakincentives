@@ -30,15 +30,18 @@ def _patch_ast() -> None:
     if constant is None:
         return
 
-    for deprecated in ("Num", "Str", "Bytes", "NameConstant", "Ellipsis"):
-        if not hasattr(ast, deprecated):
+    deprecated_nodes = ("Num", "Str", "Bytes", "NameConstant", "Ellipsis")
+    ast_members = ast.__dict__
+    for deprecated in deprecated_nodes:
+        if deprecated not in ast_members:
             setattr(ast, deprecated, constant)  # type: ignore[attr-defined]
 
     def _make_property() -> property:
         return property(lambda self: self.value)
 
+    constant_members = constant.__dict__
     for attr_name in ("n", "s", "b"):
-        if not hasattr(constant, attr_name):
+        if attr_name not in constant_members:
             setattr(constant, attr_name, _make_property())
 
 
