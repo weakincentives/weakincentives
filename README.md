@@ -4,11 +4,19 @@
 Compose deterministic prompts, run typed tools, and parse strict JSON replies without
 heavy dependencies. Optional adapters snap in when you need a model provider.
 
-## Why now?
+## What's novel?
 
-This library was built out of frustration with LangGraph and DSPy to explore
-better ways to do state and context management when building apps with LLMs
-while allowing the prompts to be automatically optimized.
+- A Redux-like session state manager that keeps every tool invocation and prompt
+  interaction observable, replayable, and ready for reducer-driven automation.
+- Prompt composition primitives that let you assemble deterministic, typed
+  sections into reusable blueprints without surrendering control to opaque
+  templating layers.
+- First-class support for prompt overrides, laying the groundwork for an
+  optimizer that plugs directly into your development cycle and becomes a key
+  operations tool once agents ship to production.
+- Everything runs locally without mandatory APIs or hosted services, and every
+  render stays deterministic and version-control friendly so diffs capture real
+  intent instead of churn.
 
 ## Highlights
 
