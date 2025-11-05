@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess  # nosec B404 - git invocation for root discovery
+
+# Bandit false positive: git invocation uses explicit arguments for root discovery.
+import subprocess  # nosec B404
 import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -280,7 +282,8 @@ class LocalPromptOverridesStore(PromptOverridesStore):
 
     def _git_toplevel(self) -> Path | None:
         try:
-            result = subprocess.run(  # nosec B603 B607 - git is invoked with explicit args
+            # Bandit false positive: git invocation uses explicit arguments.
+            result = subprocess.run(  # nosec B603 B607
                 ["git", "rev-parse", "--show-toplevel"],
                 check=True,
                 capture_output=True,
