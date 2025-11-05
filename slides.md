@@ -94,6 +94,60 @@ print(rendered.text)
 
 ______________________________________________________________________
 
+## Built-in sections
+
+- Planning, virtual filesystem, and evaluation sections ship ready for real runs.
+- Each section registers reducers so session state always reflects the latest plan, mounts, and eval results.
+- Planning helpers expose plan setup and step updates without writing ad-hoc schemas.
+- A virtual filesystem snapshot keeps diffs and patches available without extra tool calls.
+- The optional asteval sandbox runs quick calculations inside the same prompt with deterministic IO guards.
+
+```python
+from pathlib import Path
+
+from weakincentives.tools import (
+    HostMount,
+    PlanningToolsSection,
+    VfsPath,
+    VfsToolsSection,
+)
+
+diff_root = Path("/srv/agent-mounts")
+vfs_section = VfsToolsSection(
+    allowed_host_roots=(diff_root,),
+    mounts=(
+        HostMount(
+            host_path="octo_widgets/cache-layer.diff",
+            mount_path=VfsPath(("diffs", "cache-layer.diff")),
+        ),
+    ),
+)
+planning_section = PlanningToolsSection()
+
+print((planning_section.key, vfs_section.key))
+```
+
+______________________________________________________________________
+
+## Tool suites and helpers
+
+- Tool bindings surface typed requests and responses for plans, file IO, and math evals.
+- `PlanningToolsSection` exposes creation, update, and completion hooks for multi-step plans.
+- `VfsToolsSection` wraps read/write/delete operations with host-path allowlists.
+- `AstevalSection` enables sandboxed Python evaluation when `weakincentives[asteval]` is installed.
+- Advanced flows can dispatch nested agents with the `dispatch_subagents` helper.
+
+```python
+from weakincentives.tools import PlanningToolsSection
+
+section = PlanningToolsSection()
+tool_names = tuple(tool.name for tool in section.tools)
+
+print(tool_names[:3])
+```
+
+______________________________________________________________________
+
 ## Override-friendly workflows
 
 - Prompt overrides enable experimentation without changing source-controlled defaults.
