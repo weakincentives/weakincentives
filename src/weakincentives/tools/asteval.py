@@ -128,33 +128,132 @@ def _str_dict_factory() -> dict[str, str]:
 
 @dataclass(slots=True, frozen=True)
 class EvalFileRead:
-    path: VfsPath
+    """File that should be read from the virtual filesystem before execution."""
+
+    path: VfsPath = field(
+        metadata={
+            "description": (
+                "Relative VFS path to load. Contents are injected into "
+                "`reads` for convenience."
+            )
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class EvalFileWrite:
-    path: VfsPath
-    content: str
-    mode: Literal["create", "overwrite", "append"] = "create"
+    """File that should be written back to the virtual filesystem."""
+
+    path: VfsPath = field(
+        metadata={"description": "Relative VFS path to create or update."}
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "ASCII text to persist after execution. Content longer than 48k "
+                "characters is rejected."
+            )
+        }
+    )
+    mode: Literal["create", "overwrite", "append"] = field(
+        default="create",
+        metadata={
+            "description": (
+                "Write strategy for the file: create a new entry, overwrite the "
+                "existing content, or append."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class EvalParams:
-    code: str
-    mode: ExpressionMode = "expr"
-    globals: dict[str, str] = field(default_factory=_str_dict_factory)
-    reads: tuple[EvalFileRead, ...] = field(default_factory=tuple)
-    writes: tuple[EvalFileWrite, ...] = field(default_factory=tuple)
+    """Parameter payload passed to the Python evaluation tool."""
+
+    code: str = field(
+        metadata={
+            "description": (
+                "Python expression or script to execute (<=2,000 characters)."
+            )
+        }
+    )
+    mode: ExpressionMode = field(
+        default="expr",
+        metadata={
+            "description": (
+                "Execution mode: 'expr' evaluates a single expression and "
+                "returns its repr, while 'statements' runs a script."
+            )
+        },
+    )
+    globals: dict[str, str] = field(
+        default_factory=_str_dict_factory,
+        metadata={
+            "description": (
+                "Mapping of global variable names to JSON-encoded strings. The "
+                "payload is decoded before execution."
+            )
+        },
+    )
+    reads: tuple[EvalFileRead, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": (
+                "Files to load into the VFS before execution. Each entry is "
+                "available to helper utilities."
+            )
+        },
+    )
+    writes: tuple[EvalFileWrite, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": (
+                "Files to write after execution completes. These mirror calls to "
+                "`write_text`."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class EvalResult:
-    value_repr: str | None
-    stdout: str
-    stderr: str
-    globals: dict[str, str]
-    reads: tuple[EvalFileRead, ...]
-    writes: tuple[EvalFileWrite, ...]
+    """Structured result produced by the Python evaluation tool."""
+
+    value_repr: str | None = field(
+        metadata={
+            "description": (
+                "String representation of the final expression result. Null when "
+                "statements mode does not produce a value."
+            )
+        }
+    )
+    stdout: str = field(
+        metadata={
+            "description": (
+                "Captured standard output stream, truncated to 4,096 characters."
+            )
+        }
+    )
+    stderr: str = field(
+        metadata={
+            "description": (
+                "Captured standard error stream, truncated to 4,096 characters."
+            )
+        }
+    )
+    globals: dict[str, str] = field(
+        metadata={
+            "description": (
+                "JSON-serialisable globals returned from the sandbox after execution."
+            )
+        }
+    )
+    reads: tuple[EvalFileRead, ...] = field(
+        metadata={"description": "File read requests fulfilled during execution."}
+    )
+    writes: tuple[EvalFileWrite, ...] = field(
+        metadata={"description": "File write operations requested by the code."}
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -697,7 +796,11 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         tool_suite = _AstevalToolSuite(section=self)
         tool = Tool[EvalParams, EvalResult](
             name="evaluate_python",
-            description="Evaluate a short Python expression in a sandboxed environment with optional VFS access.",
+            description=(
+                "Run a short Python expression or script in a sandbox. Supports "
+                "preloading VFS files, staging writes, and returning captured "
+                "stdout, stderr, and result data."
+            ),
             handler=tool_suite.run,
             accepts_overrides=accepts_overrides,
         )
