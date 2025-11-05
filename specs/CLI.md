@@ -96,20 +96,20 @@ Creates or updates an override in the system editor.
    `seed_if_necessary` when no override exists. Failure to locate the prompt
    descriptor returns an error instructing the user to verify the namespace and
    key.
-2. Materialize the current override payload as JSON in a temporary file. When
+1. Materialize the current override payload as JSON in a temporary file. When
    invoked with `--create-only`, the CLI seeds an override and exits without
    opening the editor.
-3. Determine the editor command in priority order: `--editor`, `$WINK_EDITOR`,
+1. Determine the editor command in priority order: `--editor`, `$WINK_EDITOR`,
    `$VISUAL`, `$EDITOR`, fallback to `vi`. If no editor can be resolved, abort
    with instructions to set `$EDITOR`.
-4. Launch the editor in blocking mode. The CLI must:
+1. Launch the editor in blocking mode. The CLI must:
    - Preserve `$EDITOR` semantics (respect quoted arguments, etc.).
    - Detect when the user exits without modifications and print `No changes`.
    - Re-open the editor if the buffer contains invalid JSON and the user agrees
      to retry; otherwise abort with the invalid content path for manual recovery.
-5. Parse the modified JSON into `PromptOverride`, validate section and tool
+1. Parse the modified JSON into `PromptOverride`, validate section and tool
    hashes against the descriptor, and call `PromptOverridesStore.upsert`.
-6. Print a success message describing the stored file path and any warnings about
+1. Print a success message describing the stored file path and any warnings about
    skipped sections (e.g., stale hashes filtered by the store).
 
 ### `wink delete`
@@ -180,4 +180,3 @@ configuration file located at `<root>/.weakincentives/wink.toml`.
 - Editor fallback ordering and temp file cleanup should be covered by unit tests
   around the helper that resolves the editor command and manages subprocess
   invocation.
-
