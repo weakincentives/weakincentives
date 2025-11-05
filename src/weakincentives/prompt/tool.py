@@ -15,12 +15,14 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable
+from collections.abc import Sequence as SequenceABC
 from dataclasses import dataclass, field, is_dataclass
 from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
     Final,
+    Literal,
     Protocol,
     TypeVar,
     cast,
@@ -41,7 +43,7 @@ if TYPE_CHECKING:
     from ..session.protocols import SessionProtocol
 
 ParamsT_contra = TypeVar("ParamsT_contra", bound=SupportsDataclass, contravariant=True)
-ResultT_co = TypeVar("ResultT_co", bound=SupportsDataclass)
+ResultT_co = TypeVar("ResultT_co")
 
 
 @dataclass(slots=True, frozen=True)
@@ -64,7 +66,7 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
 
 
 @dataclass(slots=True)
-class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
+class Tool[ParamsT: SupportsDataclass, ResultT]:
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
@@ -72,23 +74,26 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
     handler: ToolHandler[ParamsT, ResultT] | None
     params_type: type[Any] = field(init=False, repr=False)
     result_type: type[Any] = field(init=False, repr=False)
+    result_container: Literal["object", "array"] = field(
+        init=False,
+        repr=False,
+    )
+    _result_annotation: object = field(init=False, repr=False)
     accepts_overrides: bool = True
 
     def __post_init__(self) -> None:
         params_type = cast(
             type[SupportsDataclass] | None, getattr(self, "params_type", None)
         )
-        result_type = cast(
-            type[SupportsDataclass] | None, getattr(self, "result_type", None)
-        )
-        if params_type is None or result_type is None:
+        raw_result_annotation = getattr(self, "_result_annotation", None)
+        if params_type is None or raw_result_annotation is None:
             origin = getattr(self, "__orig_class__", None)
             if origin is not None:  # pragma: no cover - interpreter-specific path
                 args = get_args(origin)
-                if len(args) == 2 and all(isinstance(arg, type) for arg in args):
+                if len(args) == 2:
                     params_type = cast(type[SupportsDataclass], args[0])
-                    result_type = cast(type[SupportsDataclass], args[1])
-        if params_type is None or result_type is None:
+                    raw_result_annotation = args[1]
+        if params_type is None or raw_result_annotation is None:
             raise PromptValidationError(
                 "Tool must be instantiated with concrete type arguments.",
                 placeholder="type_arguments",
@@ -100,15 +105,16 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
                 dataclass_type=params_type,
                 placeholder="ParamsT",
             )
-        if not is_dataclass(result_type):
-            raise PromptValidationError(
-                "Tool ResultT must be a dataclass type.",
-                dataclass_type=result_type,
-                placeholder="ResultT",
-            )
+
+        result_type, result_container = self._normalize_result_annotation(
+            raw_result_annotation,
+            params_type,
+        )
 
         self.params_type = params_type
         self.result_type = result_type
+        self.result_container = result_container
+        self._result_annotation = raw_result_annotation
 
         raw_name = self.name
         stripped_name = raw_name.strip()
@@ -152,7 +158,11 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
 
         handler = self.handler
         if handler is not None:
-            self._validate_handler(handler, params_type, result_type)
+            self._validate_handler(
+                handler,
+                params_type,
+                raw_result_annotation,
+            )
 
         self.name = name_clean
         self.description = description_clean
@@ -161,7 +171,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
         self,
         handler: object,
         params_type: type[SupportsDataclass],
-        result_type: type[SupportsDataclass],
+        result_annotation: object,
     ) -> None:
         if not callable(handler):
             raise PromptValidationError(
@@ -265,13 +275,92 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
         origin = get_origin(return_annotation)
         if origin is ToolResult:
             result_args_raw = get_args(return_annotation)
-            if result_args_raw == (result_type,):
+            if result_args_raw and self._matches_result_annotation(
+                result_args_raw[0],
+                result_annotation,
+            ):
                 return
         raise PromptValidationError(
             "Tool handler return annotation must be ToolResult[ResultT].",
             dataclass_type=params_type,
             placeholder="return",
         )
+
+    @staticmethod
+    def _normalize_result_annotation(
+        annotation: object,
+        params_type: type[SupportsDataclass],
+    ) -> tuple[type[SupportsDataclass], Literal["object", "array"]]:
+        if isinstance(annotation, type):
+            if not is_dataclass(annotation):
+                bad_type = cast(type[Any], annotation)
+                raise PromptValidationError(
+                    "Tool ResultT must be a dataclass type.",
+                    dataclass_type=bad_type,
+                    placeholder="ResultT",
+                )
+            return annotation, "object"
+
+        origin = get_origin(annotation)
+        if origin in {list, tuple, SequenceABC}:
+            args = get_args(annotation)
+            element: object | None = None
+            if origin is tuple:
+                if len(args) != 2 or args[1] is not Ellipsis:
+                    raise PromptValidationError(
+                        "Variadic Tuple[ResultT, ...] is required for Tool sequence results.",
+                        dataclass_type=params_type,
+                        placeholder="ResultT",
+                    )
+                element = args[0]
+            elif len(args) == 1:
+                element = args[0]
+            if not isinstance(element, type) or not is_dataclass(element):
+                raise PromptValidationError(
+                    "Tool ResultT sequence element must be a dataclass type.",
+                    dataclass_type=params_type,
+                    placeholder="ResultT",
+                )
+            return cast(type[SupportsDataclass], element), "array"
+
+        raise PromptValidationError(
+            "Tool ResultT must be a dataclass type or a sequence of dataclasses.",
+            dataclass_type=params_type,
+            placeholder="ResultT",
+        )
+
+    @staticmethod
+    def _matches_result_annotation(candidate: object, expected: object) -> bool:
+        if candidate is expected:
+            return True
+
+        candidate_origin = get_origin(candidate)
+        expected_origin = get_origin(expected)
+
+        if candidate_origin is None or expected_origin is None:
+            return False
+
+        sequence_origins = {list, tuple, SequenceABC}
+        if candidate_origin in sequence_origins and expected_origin in sequence_origins:
+            candidate_args = get_args(candidate)
+            expected_args = get_args(expected)
+            candidate_element = (
+                candidate_args[0]
+                if candidate_origin is not tuple
+                else candidate_args[0]
+                if len(candidate_args) == 2
+                else None
+            )
+            expected_element = (
+                expected_args[0]
+                if expected_origin is not tuple
+                else expected_args[0]
+                if len(expected_args) == 2
+                else None
+            )
+            return candidate_element is expected_element
+
+        return False
 
     @classmethod
     def __class_getitem__(
@@ -286,17 +375,19 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
             raise TypeError(
                 "Tool[...] expects two type arguments (ParamsT, ResultT)."
             ) from error
-        if not isinstance(params_candidate, type) or not isinstance(
-            result_candidate, type
-        ):
-            raise TypeError("Tool[...] type arguments must be types.")
+        if not isinstance(params_candidate, type):
+            raise TypeError("Tool ParamsT type argument must be a type.")
         params_type = cast(type[SupportsDataclass], params_candidate)
-        result_type = cast(type[SupportsDataclass], result_candidate)
+        result_annotation = result_candidate
+        if not cls._is_supported_result_annotation(result_annotation):
+            raise TypeError(
+                "Tool ResultT type argument must be a dataclass type or a sequence of dataclass types."
+            )
 
         class _SpecializedTool(cls):
             def __post_init__(self) -> None:
                 self.params_type = params_type
-                self.result_type = result_type
+                self._result_annotation = result_annotation
                 Tool.__post_init__(cast("Tool[Any, Any]", self))  # pyright: ignore[reportUnknownMemberType]
 
         _SpecializedTool.__name__ = cls.__name__
@@ -306,6 +397,14 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsDataclass]:
             "type[Tool[SupportsDataclass, SupportsDataclass]]",
             _SpecializedTool,
         )
+
+    @staticmethod
+    def _is_supported_result_annotation(candidate: object) -> bool:
+        if isinstance(candidate, type):
+            return True
+
+        origin = get_origin(candidate)
+        return origin in {list, tuple, SequenceABC}
 
 
 __all__ = ["Tool", "ToolContext", "ToolHandler", "ToolResult"]

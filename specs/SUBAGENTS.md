@@ -24,8 +24,6 @@ No other sections, knobs, or pre-baked templates are required. The parent prompt
 
 The tool handler resides in `src/weakincentives/tools/subagents.py` and exports:
 
-> **Upcoming rename**: `DelegationSummaryParams` will be refactored into `DelegationParams`, absorbing the recap bullets so each delegation is expressed as a single payload. The tool signature below reflects that target shape; do not introduce an intermediate `SubagentDispatch` wrapper.
-
 ```python
 from __future__ import annotations
 

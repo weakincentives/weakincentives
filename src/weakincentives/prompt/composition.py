@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, ClassVar, Generic, TypeVar, cast, override
 
@@ -30,12 +30,16 @@ DelegationOutputT = TypeVar("DelegationOutputT")
 
 
 @dataclass(slots=True)
-class DelegationSummaryParams:
+class DelegationParams:
     """Delegation summary fields surfaced to the delegated agent."""
 
     reason: str
     expected_result: str
     may_delegate_further: str
+    recap_lines: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        self.recap_lines = tuple(self.recap_lines)
 
 
 @dataclass(slots=True)
@@ -52,7 +56,7 @@ class RecapParams:
     bullets: tuple[str, ...]
 
 
-class DelegationSummarySection(MarkdownSection[DelegationSummaryParams]):
+class DelegationSummarySection(MarkdownSection[DelegationParams]):
     """Delegation summary rendered as a fixed bullet list."""
 
     def __init__(self) -> None:
@@ -140,7 +144,6 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
         rendered_parent: RenderedPrompt[ParentOutputT],
         *,
         include_response_format: bool = False,
-        recap_lines: Sequence[str] | None = None,
     ) -> None:
         super().__init__()
         self._rendered_parent = rendered_parent
@@ -158,13 +161,8 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
 
         sections.append(parent_section)
 
-        self._recap_section: RecapSection | None = None
-        self._default_recap: RecapParams | None = None
-        if recap_lines is not None:
-            self._recap_section = RecapSection()
-            sections.append(self._recap_section)
-            if recap_lines:
-                self._default_recap = RecapParams(bullets=tuple(recap_lines))
+        self._recap_section = RecapSection()
+        sections.append(self._recap_section)
 
         delegation_output_type = self._resolve_delegation_output_type()
         prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
@@ -211,7 +209,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
 
     def render(
         self,
-        summary: DelegationSummaryParams,
+        summary: DelegationParams,
         parent: ParentPromptParams | None = None,
         recap: RecapParams | None = None,
     ) -> RenderedPrompt[DelegationOutputT]:
@@ -219,15 +217,9 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
         parent_params = parent or ParentPromptParams(body=self._rendered_parent.text)
         params.append(parent_params)
 
-        if self._recap_section is not None:
-            recap_params = recap or self._default_recap
-            if recap_params is None:
-                recap_params = RecapParams(bullets=())
-            params.append(recap_params)
-        elif recap is not None:
-            raise ValueError(
-                "Recap parameters supplied without enabling the recap section."
-            )
+        default_recap = RecapParams(bullets=tuple(summary.recap_lines))
+        recap_params = recap or default_recap
+        params.append(recap_params)
 
         rendered = self._prompt.render(*tuple(params))
         merged_descriptions = _merge_tool_param_descriptions(
@@ -264,8 +256,8 @@ def _merge_tool_param_descriptions(
 
 
 __all__ = [
+    "DelegationParams",
     "DelegationPrompt",
-    "DelegationSummaryParams",
     "DelegationSummarySection",
     "ParentPromptParams",
     "ParentPromptSection",

@@ -37,6 +37,11 @@ from .planning import (
     StepStatus,
     UpdateStep,
 )
+from .subagents import (
+    DispatchSubagentsParams,
+    SubagentResult,
+    dispatch_subagents,
+)
 from .vfs import (
     DeleteEntry,
     HostMount,
@@ -55,6 +60,7 @@ __all__ = [
     "AstevalSection",
     "ClearPlan",
     "DeleteEntry",
+    "DispatchSubagentsParams",
     "EvalFileRead",
     "EvalFileWrite",
     "EvalParams",
@@ -73,6 +79,7 @@ __all__ = [
     "ReadPlan",
     "SetupPlan",
     "StepStatus",
+    "SubagentResult",
     "ToolValidationError",
     "UpdateStep",
     "VfsFile",
@@ -80,4 +87,5 @@ __all__ = [
     "VfsToolsSection",
     "VirtualFileSystem",
     "WriteFile",
+    "dispatch_subagents",
 ]

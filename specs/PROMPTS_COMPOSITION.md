@@ -122,7 +122,7 @@ DelegationOutputT = TypeVar("DelegationOutputT")
 
 
 @dataclass
-class DelegationSummaryParams:
+class DelegationParams:
     reason: str
     expected_result: str
     may_delegate_further: str
@@ -182,7 +182,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
         rendered_parent: RenderedPrompt[ParentOutputT],
         recap_lines: Sequence[str] | None = None,
     ) -> None:
-        summary_section = MarkdownSection[DelegationSummaryParams](
+    summary_section = MarkdownSection[DelegationParams](
             title="Delegation Summary",
             key="delegation-summary",
             template=(
@@ -224,7 +224,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
 
     def render(
         self,
-        summary: DelegationSummaryParams,
+        summary: DelegationParams,
         parent_params: ParentPromptParams,
     ) -> RenderedPrompt[DelegationOutputT]:
         params: tuple[object, ...]
@@ -240,13 +240,13 @@ parent_render = parent_prompt.render(...)
 delegation_prompt = DelegationPrompt[ParentOutputT, DelegationPlan](
     parent_prompt,
     parent_render,
-    recap_lines=("Check filesystem notes before drafting the plan.",),
 )
 rendered_delegation = delegation_prompt.render(
-    DelegationSummaryParams(
+    DelegationParams(
         reason="Specialize on the filesystem investigation",
         expected_result="Actionable plan for the next commit",
         may_delegate_further="no",
+        recap_lines=("Check filesystem notes before drafting the plan.",),
     ),
     ParentPromptParams(body=parent_render.text),
 )
@@ -281,7 +281,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
         rendered_parent: RenderedPrompt[ParentOutputT],
         recap_lines: Sequence[str] | None = None,
     ) -> None:
-        summary_section = MarkdownSection[DelegationSummaryParams](
+        summary_section = MarkdownSection[DelegationParams](
             title="Delegation Summary",
             key="delegation-summary",
             template=(
@@ -347,7 +347,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
 
     def render(
         self,
-        summary: DelegationSummaryParams,
+        summary: DelegationParams,
         parent_params: ParentPromptParams,
     ) -> RenderedPrompt[DelegationOutputT]:
         params: tuple[object, ...]

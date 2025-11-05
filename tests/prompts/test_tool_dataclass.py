@@ -31,6 +31,11 @@ class ExampleResult:
     message: str
 
 
+@dataclass
+class OtherResult:
+    payload: str
+
+
 def _example_handler(
     params: ExampleParams, *, context: ToolContext
 ) -> ToolResult[ExampleResult]:
@@ -82,6 +87,11 @@ def test_tool_class_getitem_requires_two_type_arguments() -> None:
 def test_tool_class_getitem_requires_type_objects() -> None:
     with pytest.raises(TypeError):
         Tool[ExampleParams, "not-a-type"]  # type: ignore[index]
+
+
+def test_tool_class_getitem_requires_params_type_argument() -> None:
+    with pytest.raises(TypeError):
+        Tool["not-a-type", ExampleResult]  # type: ignore[index]
 
 
 def test_tool_class_getitem_rejects_extra_type_arguments() -> None:
@@ -192,6 +202,146 @@ def test_tool_rejects_non_dataclass_result_generic() -> None:
     error = error_info.value
     assert isinstance(error, PromptValidationError)
     assert error.dataclass_type is str
+    assert error.placeholder == "ResultT"
+
+
+def test_tool_accepts_variadic_tuple_result_type() -> None:
+    def handler(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[list[ExampleResult]]:
+        del context
+        return ToolResult(
+            message=params.message,
+            value=[ExampleResult(message=params.message)],
+        )
+
+    tool = Tool[ExampleParams, tuple[ExampleResult, ...]](
+        name="collect_examples",
+        description="Collect multiple examples.",
+        handler=handler,  # type: ignore[arg-type]
+    )
+
+    assert tool.result_container == "array"
+    assert tool.result_type is ExampleResult
+
+
+def test_tool_accepts_list_result_type() -> None:
+    def handler(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[list[ExampleResult]]:
+        del context
+        return ToolResult(
+            message=params.message,
+            value=[ExampleResult(message=params.message)],
+        )
+
+    tool = Tool[ExampleParams, list[ExampleResult]](
+        name="collect_list",
+        description="Collect examples in a list.",
+        handler=handler,
+    )
+
+    assert tool.result_container == "array"
+    assert tool.result_type is ExampleResult
+
+
+def test_tool_rejects_tuple_result_without_ellipsis() -> None:
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, tuple[ExampleResult, ExampleResult]](
+            name="bad_tuple",
+            description="Invalid tuple result.",
+            handler=_example_handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "ResultT"
+
+
+def test_tool_rejects_sequence_with_non_dataclass_element() -> None:
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, tuple[str, ...]](
+            name="bad_element",
+            description="Invalid element type.",
+            handler=_example_handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "ResultT"
+
+
+def test_tool_rejects_handler_with_mismatched_sequence_return() -> None:
+    def handler(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[list[OtherResult]]:
+        del context
+        return ToolResult(
+            message=params.message,
+            value=[OtherResult(payload=params.message)],
+        )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, tuple[ExampleResult, ...]](
+            name="bad_return",
+            description="Invalid return annotation.",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "return"
+
+
+def test_tool_rejects_result_annotation_of_unsupported_generic() -> None:
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, list[str]](
+            name="bad_generic",
+            description="Unsupported generic result.",
+            handler=_example_handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "ResultT"
+
+
+def test_tool_class_getitem_rejects_unsupported_result_annotation() -> None:
+    with pytest.raises(TypeError):
+        Tool.__class_getitem__((ExampleParams, dict[str, ExampleResult]))  # type: ignore[arg-type]
+
+
+def test_tool_rejects_handler_with_non_sequence_result_when_sequence_expected() -> None:
+    def handler(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[dict[str, ExampleResult]]:
+        del context
+        return ToolResult(
+            message=params.message,
+            value={"item": ExampleResult(message=params.message)},
+        )
+
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool[ExampleParams, tuple[ExampleResult, ...]](
+            name="bad_mapping_return",
+            description="Handler returns a mapping.",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
+    assert error.placeholder == "return"
+
+
+def test_tool_normalize_result_annotation_rejects_unknown_annotation() -> None:
+    with pytest.raises(PromptValidationError) as error_info:
+        Tool._normalize_result_annotation(
+            ExampleResult | None,
+            ExampleParams,
+        )
+
+    error = error_info.value
+    assert isinstance(error, PromptValidationError)
     assert error.placeholder == "ResultT"
 
 
