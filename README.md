@@ -14,6 +14,9 @@ heavy dependencies. Optional adapters snap in when you need a model provider.
 - First-class support for prompt overrides, laying the groundwork for an
   optimizer that plugs directly into your development cycle and becomes a key
   operations tool once agents ship to production.
+- Everything runs locally without mandatory APIs or hosted services, and every
+  render stays deterministic and version-control friendly so diffs capture real
+  intent instead of churn.
 
 ## Highlights
 
