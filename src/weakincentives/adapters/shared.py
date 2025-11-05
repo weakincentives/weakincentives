@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 
 from ..events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
@@ -513,6 +514,7 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
 __all__ = [
     "ChoiceSelector",
     "ConversationRequest",
+    "ConversationRunner",
     "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
@@ -567,6 +569,241 @@ class ToolMessageSerializer(Protocol):
     ) -> object: ...
 
 
+@dataclass(slots=True)
+class ConversationRunner[OutputT]:
+    """Coordinate a conversational exchange with a provider."""
+
+    adapter_name: str
+    adapter: ProviderAdapter[OutputT]
+    prompt: Prompt[OutputT]
+    prompt_name: str
+    rendered: RenderedPrompt[OutputT]
+    initial_messages: list[dict[str, Any]]
+    parse_output: bool
+    bus: EventBus
+    session: Session | None
+    tool_choice: ToolChoice
+    response_format: Mapping[str, Any] | None
+    require_structured_output_text: bool
+    call_provider: ConversationRequest
+    select_choice: ChoiceSelector
+    serialize_tool_message_fn: ToolMessageSerializer
+    format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
+        format_publish_failures
+    )
+    parse_arguments: ToolArgumentsParser = parse_tool_arguments
+    logger_override: StructuredLogger | None = None
+    _log: StructuredLogger = field(init=False)
+    _messages: list[dict[str, Any]] = field(init=False)
+    _tool_specs: list[dict[str, Any]] = field(init=False)
+    _tool_registry: dict[str, Tool[SupportsDataclass, SupportsDataclass]] = field(
+        init=False
+    )
+    _tool_events: list[ToolInvoked] = field(init=False)
+    _tool_message_records: list[
+        tuple[ToolResult[SupportsDataclass], dict[str, Any]]
+    ] = field(init=False)
+    _provider_payload: dict[str, Any] | None = field(init=False, default=None)
+    _next_tool_choice: ToolChoice = field(init=False)
+    _should_parse_structured_output: bool = field(init=False)
+
+    def run(self) -> PromptResponse[OutputT]:
+        """Execute the conversation loop and return the final response."""
+
+        self._prepare_payload()
+
+        while True:
+            response = self.call_provider(
+                self._messages,
+                self._tool_specs,
+                self._next_tool_choice if self._tool_specs else None,
+                self.response_format,
+            )
+
+            self._provider_payload = extract_payload(response)
+            choice = self.select_choice(response)
+            message = getattr(choice, "message", None)
+            if message is None:
+                raise PromptEvaluationError(
+                    "Provider response did not include a message payload.",
+                    prompt_name=self.prompt_name,
+                    phase="response",
+                    provider_payload=self._provider_payload,
+                )
+
+            tool_calls_sequence = getattr(message, "tool_calls", None)
+            tool_calls = list(tool_calls_sequence or [])
+
+            if not tool_calls:
+                return self._finalize_response(message)
+
+            self._handle_tool_calls(message, tool_calls)
+
+    def _prepare_payload(self) -> None:
+        """Initialize execution state prior to the provider loop."""
+
+        self._messages = list(self.initial_messages)
+        self._log = (self.logger_override or logger).bind(
+            adapter=self.adapter_name,
+            prompt=self.prompt_name,
+        )
+        self._log.info(
+            "Prompt execution started.",
+            event="prompt_execution_started",
+            context={
+                "tool_count": len(self.rendered.tools),
+                "parse_output": self.parse_output,
+            },
+        )
+
+        tools = list(self.rendered.tools)
+        self._tool_specs = [tool_to_spec(tool) for tool in tools]
+        self._tool_registry = {tool.name: tool for tool in tools}
+        self._tool_events = []
+        self._tool_message_records = []
+        self._provider_payload = None
+        self._next_tool_choice = self.tool_choice
+        self._should_parse_structured_output = (
+            self.parse_output
+            and self.rendered.output_type is not None
+            and self.rendered.container is not None
+        )
+
+    def _handle_tool_calls(
+        self,
+        message: object,
+        tool_calls: Sequence[ProviderToolCall],
+    ) -> None:
+        """Execute provider tool calls and record emitted messages."""
+
+        assistant_tool_calls = [serialize_tool_call(call) for call in tool_calls]
+        self._messages.append(
+            {
+                "role": "assistant",
+                "content": getattr(message, "content", None) or "",
+                "tool_calls": assistant_tool_calls,
+            }
+        )
+
+        self._log.debug(
+            "Processing tool calls.",
+            event="prompt_tool_calls_detected",
+            context={"count": len(tool_calls)},
+        )
+
+        for tool_call in tool_calls:
+            invocation, tool_result = execute_tool_call(
+                adapter_name=self.adapter_name,
+                adapter=self.adapter,
+                prompt=self.prompt,
+                rendered_prompt=self.rendered,
+                tool_call=tool_call,
+                tool_registry=self._tool_registry,
+                bus=self.bus,
+                session=self.session,
+                prompt_name=self.prompt_name,
+                provider_payload=self._provider_payload,
+                format_publish_failures=self.format_publish_failures,
+                parse_arguments=self.parse_arguments,
+                logger_override=self.logger_override,
+            )
+            self._tool_events.append(invocation)
+
+            tool_message = {
+                "role": "tool",
+                "tool_call_id": getattr(tool_call, "id", None),
+                "content": self.serialize_tool_message_fn(tool_result),
+            }
+            self._messages.append(tool_message)
+            self._tool_message_records.append((tool_result, tool_message))
+
+        if isinstance(self._next_tool_choice, Mapping):
+            tool_choice_mapping = cast(Mapping[str, object], self._next_tool_choice)
+            if tool_choice_mapping.get("type") == "function":
+                self._next_tool_choice = "auto"
+
+    def _finalize_response(self, message: object) -> PromptResponse[OutputT]:
+        """Assemble and publish the final prompt response."""
+
+        final_text = message_text_content(getattr(message, "content", None))
+        output: OutputT | None = None
+        text_value: str | None = final_text or None
+
+        if self._should_parse_structured_output:
+            parsed_payload = extract_parsed_content(message)
+            if parsed_payload is not None:
+                try:
+                    output = cast(
+                        OutputT,
+                        parse_schema_constrained_payload(parsed_payload, self.rendered),
+                    )
+                except (TypeError, ValueError) as error:
+                    raise PromptEvaluationError(
+                        str(error),
+                        prompt_name=self.prompt_name,
+                        phase="response",
+                        provider_payload=self._provider_payload,
+                    ) from error
+            else:
+                if final_text or not self.require_structured_output_text:
+                    try:
+                        output = parse_structured_output(
+                            final_text or "", self.rendered
+                        )
+                    except OutputParseError as error:
+                        raise PromptEvaluationError(
+                            error.message,
+                            prompt_name=self.prompt_name,
+                            phase="response",
+                            provider_payload=self._provider_payload,
+                        ) from error
+                else:
+                    raise PromptEvaluationError(
+                        "Provider response did not include structured output.",
+                        prompt_name=self.prompt_name,
+                        phase="response",
+                        provider_payload=self._provider_payload,
+                    )
+            if output is not None:
+                text_value = None
+
+        if (
+            output is not None
+            and self._tool_message_records
+            and self._tool_message_records[-1][0].success
+        ):
+            last_result, last_message = self._tool_message_records[-1]
+            last_message["content"] = self.serialize_tool_message_fn(
+                last_result, payload=output
+            )
+
+        response_payload = PromptResponse(
+            prompt_name=self.prompt_name,
+            text=text_value,
+            output=output,
+            tool_results=tuple(self._tool_events),
+            provider_payload=self._provider_payload,
+        )
+        _ = self.bus.publish(
+            PromptExecuted(
+                prompt_name=self.prompt_name,
+                adapter=self.adapter_name,
+                result=cast(PromptResponse[object], response_payload),
+            )
+        )
+        self._log.info(
+            "Prompt execution completed.",
+            event="prompt_execution_succeeded",
+            context={
+                "tool_count": len(self._tool_events),
+                "has_output": output is not None,
+                "text_length": len(text_value or "") if text_value else 0,
+                "structured_output": self._should_parse_structured_output,
+            },
+        )
+        return response_payload
+
+
 def run_conversation[
     OutputT,
 ](
@@ -594,177 +831,24 @@ def run_conversation[
 ) -> PromptResponse[OutputT]:
     """Execute a conversational exchange with a provider and return the result."""
 
-    messages = list(initial_messages)
-    log = (logger_override or logger).bind(
-        adapter=adapter_name,
-        prompt=prompt_name,
+    runner = ConversationRunner[OutputT](
+        adapter_name=adapter_name,
+        adapter=adapter,
+        prompt=prompt,
+        prompt_name=prompt_name,
+        rendered=rendered,
+        initial_messages=initial_messages,
+        parse_output=parse_output,
+        bus=bus,
+        session=session,
+        tool_choice=tool_choice,
+        response_format=response_format,
+        require_structured_output_text=require_structured_output_text,
+        call_provider=call_provider,
+        select_choice=select_choice,
+        serialize_tool_message_fn=serialize_tool_message_fn,
+        format_publish_failures=format_publish_failures,
+        parse_arguments=parse_arguments,
+        logger_override=logger_override,
     )
-    log.info(
-        "Prompt execution started.",
-        event="prompt_execution_started",
-        context={
-            "tool_count": len(rendered.tools),
-            "parse_output": parse_output,
-        },
-    )
-
-    should_parse_structured_output = (
-        parse_output
-        and rendered.output_type is not None
-        and rendered.container is not None
-    )
-
-    tools = list(rendered.tools)
-    tool_specs = [tool_to_spec(tool) for tool in tools]
-    tool_registry = {tool.name: tool for tool in tools}
-    tool_events: list[ToolInvoked] = []
-    tool_message_records: list[
-        tuple[ToolResult[SupportsDataclass], dict[str, Any]]
-    ] = []
-    provider_payload: dict[str, Any] | None = None
-    next_tool_choice: ToolChoice = tool_choice
-
-    while True:
-        response = call_provider(
-            messages,
-            tool_specs,
-            next_tool_choice if tool_specs else None,
-            response_format,
-        )
-
-        provider_payload = extract_payload(response)
-        choice = select_choice(response)
-        message = getattr(choice, "message", None)
-        if message is None:
-            raise PromptEvaluationError(
-                "Provider response did not include a message payload.",
-                prompt_name=prompt_name,
-                phase="response",
-                provider_payload=provider_payload,
-            )
-
-        tool_calls_sequence = getattr(message, "tool_calls", None)
-        tool_calls = list(tool_calls_sequence or [])
-
-        if not tool_calls:
-            final_text = message_text_content(getattr(message, "content", None))
-            output: OutputT | None = None
-            text_value: str | None = final_text or None
-
-            if should_parse_structured_output:
-                parsed_payload = extract_parsed_content(message)
-                if parsed_payload is not None:
-                    try:
-                        output = cast(
-                            OutputT,
-                            parse_schema_constrained_payload(parsed_payload, rendered),
-                        )
-                    except (TypeError, ValueError) as error:
-                        raise PromptEvaluationError(
-                            str(error),
-                            prompt_name=prompt_name,
-                            phase="response",
-                            provider_payload=provider_payload,
-                        ) from error
-                else:
-                    if final_text or not require_structured_output_text:
-                        try:
-                            output = parse_structured_output(final_text or "", rendered)
-                        except OutputParseError as error:
-                            raise PromptEvaluationError(
-                                error.message,
-                                prompt_name=prompt_name,
-                                phase="response",
-                                provider_payload=provider_payload,
-                            ) from error
-                    else:
-                        raise PromptEvaluationError(
-                            "Provider response did not include structured output.",
-                            prompt_name=prompt_name,
-                            phase="response",
-                            provider_payload=provider_payload,
-                        )
-                if output is not None:
-                    text_value = None
-
-            if (
-                output is not None
-                and tool_message_records
-                and tool_message_records[-1][0].success
-            ):
-                last_result, last_message = tool_message_records[-1]
-                last_message["content"] = serialize_tool_message_fn(
-                    last_result, payload=output
-                )
-
-            response_payload = PromptResponse(
-                prompt_name=prompt_name,
-                text=text_value,
-                output=output,
-                tool_results=tuple(tool_events),
-                provider_payload=provider_payload,
-            )
-            _ = bus.publish(
-                PromptExecuted(
-                    prompt_name=prompt_name,
-                    adapter=adapter_name,
-                    result=cast(PromptResponse[object], response_payload),
-                )
-            )
-            log.info(
-                "Prompt execution completed.",
-                event="prompt_execution_succeeded",
-                context={
-                    "tool_count": len(tool_events),
-                    "has_output": output is not None,
-                    "text_length": len(text_value or "") if text_value else 0,
-                    "structured_output": should_parse_structured_output,
-                },
-            )
-            return response_payload
-
-        assistant_tool_calls = [serialize_tool_call(call) for call in tool_calls]
-        messages.append(
-            {
-                "role": "assistant",
-                "content": getattr(message, "content", None) or "",
-                "tool_calls": assistant_tool_calls,
-            }
-        )
-
-        log.debug(
-            "Processing tool calls.",
-            event="prompt_tool_calls_detected",
-            context={"count": len(tool_calls)},
-        )
-
-        for tool_call in tool_calls:
-            invocation, tool_result = execute_tool_call(
-                adapter_name=adapter_name,
-                adapter=adapter,
-                prompt=prompt,
-                rendered_prompt=rendered,
-                tool_call=tool_call,
-                tool_registry=tool_registry,
-                bus=bus,
-                session=session,
-                prompt_name=prompt_name,
-                provider_payload=provider_payload,
-                format_publish_failures=format_publish_failures,
-                parse_arguments=parse_arguments,
-                logger_override=logger_override,
-            )
-            tool_events.append(invocation)
-
-            tool_message = {
-                "role": "tool",
-                "tool_call_id": getattr(tool_call, "id", None),
-                "content": serialize_tool_message_fn(tool_result),
-            }
-            messages.append(tool_message)
-            tool_message_records.append((tool_result, tool_message))
-
-        if isinstance(next_tool_choice, Mapping):
-            tool_choice_mapping = cast(Mapping[str, object], next_tool_choice)
-            if tool_choice_mapping.get("type") == "function":
-                next_tool_choice = "auto"
+    return runner.run()
