@@ -49,6 +49,9 @@ litellm = [
     "litellm>=1.79.0",
 ]
 
+[project.scripts]
+wink = "weakincentives.cli:main"
+
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
