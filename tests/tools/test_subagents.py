@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
-from weakincentives.events import InProcessEventBus
+from weakincentives.events import EventBus, InProcessEventBus
 from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, RecapParams
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
@@ -28,7 +28,9 @@ from weakincentives.prompt.tool import ToolContext
 from weakincentives.session import Session
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
+    SubagentIsolationLevel,
     SubagentResult,
+    build_dispatch_subagents_tool,
     dispatch_subagents,
 )
 
@@ -207,6 +209,95 @@ def test_dispatch_subagents_runs_children_in_parallel() -> None:
     ]
     assert all(bus is context.event_bus for bus in adapter.buses)
     assert all(s is session for s in adapter.sessions)
+
+
+def test_dispatch_subagents_isolates_children_when_requested() -> None:
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="first",
+                expected_result="one",
+                may_delegate_further="no",
+                recap_lines=("First",),
+            ),
+            DelegationParams(
+                reason="second",
+                expected_result="two",
+                may_delegate_further="no",
+                recap_lines=("Second",),
+            ),
+        ),
+    )
+
+    isolated_tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    handler = isolated_tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert all(bus is not context.event_bus for bus in adapter.buses)
+    assert len({id(bus) for bus in adapter.buses}) == len(adapter.buses)
+    assert all(s is not session for s in adapter.sessions)
+
+
+def test_dispatch_subagents_reports_clone_failures() -> None:
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+
+    class BrokenSession(Session):
+        def clone(
+            self,
+            *,
+            bus: EventBus,
+            session_id: str | None = None,
+            created_at: str | None = None,
+        ) -> Session:
+            raise RuntimeError("no clones available")
+
+    session = BrokenSession(bus=bus)
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="fail-clone",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("Recap",),
+            ),
+        ),
+    )
+
+    isolated_tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    handler = isolated_tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is False
+    assert result.value is None
+    assert result.message is not None
+    assert "clone" in result.message.lower()
 
 
 def test_dispatch_subagents_collects_failures() -> None:

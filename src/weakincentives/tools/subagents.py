@@ -17,14 +17,17 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, is_dataclass
+from enum import Enum, auto
 from typing import Any, Final, cast
 
 from ..adapters.core import PromptResponse
+from ..events import EventBus, InProcessEventBus
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.tool import Tool, ToolContext
 from ..prompt.tool_result import ToolResult
 from ..serde import dump
+from ..session.protocols import SessionProtocol
 
 
 def _default_max_workers() -> int:
@@ -54,6 +57,21 @@ class SubagentResult:
     error: str | None = None
 
 
+class SubagentIsolationLevel(Enum):
+    """Enumerate the isolation guarantees offered to child runs."""
+
+    NO_ISOLATION = auto()
+    FULL_ISOLATION = auto()
+
+
+@dataclass(slots=True)
+class _ChildRuntime:
+    """Execution context provisioned for a child delegation."""
+
+    session: SessionProtocol
+    bus: EventBus
+
+
 def _extract_output_text(response: PromptResponse[Any]) -> str:
     if response.text:
         return response.text
@@ -71,10 +89,36 @@ def _build_error(message: str) -> str:
     return cleaned or "Subagent execution failed"
 
 
+def _prepare_child_runtimes(
+    *,
+    context: ToolContext,
+    count: int,
+    isolation_level: SubagentIsolationLevel,
+) -> tuple[_ChildRuntime, ...]:
+    if isolation_level is SubagentIsolationLevel.NO_ISOLATION:
+        return tuple(
+            _ChildRuntime(session=context.session, bus=context.event_bus)
+            for _ in range(count)
+        )
+
+    runtimes: list[_ChildRuntime] = []
+    for _ in range(count):
+        bus = InProcessEventBus()
+        try:
+            session_clone = context.session.clone(bus=bus)
+        except Exception as error:  # pragma: no cover - defensive
+            raise RuntimeError(
+                "dispatch_subagents could not clone the session for full isolation"
+            ) from error
+        runtimes.append(_ChildRuntime(session=session_clone, bus=bus))
+    return tuple(runtimes)
+
+
 def _dispatch_subagents(
     params: DispatchSubagentsParams,
     *,
     context: ToolContext,
+    isolation_level: SubagentIsolationLevel,
 ) -> ToolResult[tuple[SubagentResult, ...]]:
     rendered_parent = cast(RenderedPrompt[Any] | None, context.rendered_prompt)
     if rendered_parent is None:
@@ -113,7 +157,22 @@ def _dispatch_subagents(
     adapter = context.adapter
     parse_output = rendered_parent.container is not None
 
-    def _run_child(delegation: DelegationParams) -> SubagentResult:
+    try:
+        runtimes = _prepare_child_runtimes(
+            context=context,
+            count=len(delegations),
+            isolation_level=isolation_level,
+        )
+    except RuntimeError as error:
+        return ToolResult(
+            message=_build_error(str(error)),
+            value=None,
+            success=False,
+        )
+
+    def _run_child(
+        delegation: DelegationParams, runtime: _ChildRuntime
+    ) -> SubagentResult:
         recap = RecapParams(bullets=delegation.recap_lines)
         try:
             response = adapter.evaluate(
@@ -121,8 +180,8 @@ def _dispatch_subagents(
                 delegation,
                 recap,
                 parse_output=parse_output,
-                bus=context.event_bus,
-                session=context.session,
+                bus=runtime.bus,
+                session=runtime.session,
             )
         except Exception as error:  # pragma: no cover - defensive
             return SubagentResult(
@@ -139,7 +198,8 @@ def _dispatch_subagents(
     results: list[SubagentResult] = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(_run_child, delegation) for delegation in delegations
+            executor.submit(_run_child, delegation, runtime)
+            for delegation, runtime in zip(delegations, runtimes, strict=True)
         ]
         for future in futures:
             try:
@@ -159,16 +219,35 @@ def _dispatch_subagents(
     )
 
 
-dispatch_subagents = Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]](
-    name="dispatch_subagents",
-    description="Run delegated child prompts in parallel.",
-    handler=_dispatch_subagents,
-    accepts_overrides=False,
-)
+def build_dispatch_subagents_tool(
+    *, isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.NO_ISOLATION
+) -> Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]:
+    """Return a ``dispatch_subagents`` tool configured for the requested isolation."""
+
+    def _handler(
+        params: DispatchSubagentsParams, *, context: ToolContext
+    ) -> ToolResult[tuple[SubagentResult, ...]]:
+        return _dispatch_subagents(
+            params,
+            context=context,
+            isolation_level=isolation_level,
+        )
+
+    return Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]](
+        name="dispatch_subagents",
+        description="Run delegated child prompts in parallel.",
+        handler=_handler,
+        accepts_overrides=False,
+    )
+
+
+dispatch_subagents = build_dispatch_subagents_tool()
 
 
 __all__ = [
     "DispatchSubagentsParams",
+    "SubagentIsolationLevel",
     "SubagentResult",
+    "build_dispatch_subagents_tool",
     "dispatch_subagents",
 ]

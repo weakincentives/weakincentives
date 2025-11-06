@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from ..events._types import EventBus
 from .snapshots import Snapshot
 
 type SnapshotProtocol = Snapshot
@@ -27,6 +28,14 @@ class SessionProtocol(Protocol):
     def snapshot(self) -> SnapshotProtocol: ...
 
     def rollback(self, snapshot: SnapshotProtocol) -> None: ...
+
+    def clone(
+        self,
+        *,
+        bus: EventBus,
+        session_id: str | None = None,
+        created_at: str | None = None,
+    ) -> SessionProtocol: ...
 
 
 __all__ = ["SessionProtocol", "SnapshotProtocol"]

@@ -15,7 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final, override
+from typing import TYPE_CHECKING, Final, override
+
+if TYPE_CHECKING:
+    from ..tools.subagents import SubagentIsolationLevel
 
 from .section import Section
 
@@ -38,14 +41,33 @@ _DELEGATION_BODY: Final[str] = (
 class SubagentsSection(Section[_SubagentsSectionParams]):
     """Explain the delegation workflow and expose the dispatch tool."""
 
-    def __init__(self) -> None:
-        from ..tools.subagents import dispatch_subagents
+    def __init__(
+        self,
+        *,
+        isolation_level: SubagentIsolationLevel | None = None,
+    ) -> None:
+        from ..tools.subagents import (
+            SubagentIsolationLevel,
+            build_dispatch_subagents_tool,
+            dispatch_subagents,
+        )
+
+        resolved_level = (
+            SubagentIsolationLevel.NO_ISOLATION
+            if isolation_level is None
+            else isolation_level
+        )
+        tool = (
+            dispatch_subagents
+            if resolved_level is SubagentIsolationLevel.NO_ISOLATION
+            else build_dispatch_subagents_tool(isolation_level=resolved_level)
+        )
 
         super().__init__(
             title="Delegation",
             key="subagents",
             default_params=_SubagentsSectionParams(),
-            tools=(dispatch_subagents,),
+            tools=(tool,),
             accepts_overrides=False,
         )
 

@@ -13,15 +13,28 @@
 """Coverage tests for the SubagentsSection helper."""
 
 from weakincentives.prompt.subagents import SubagentsSection
-from weakincentives.tools.subagents import dispatch_subagents
+from weakincentives.tools.subagents import (
+    SubagentIsolationLevel,
+    dispatch_subagents,
+)
 
 
 def test_subagents_section_render_mentions_tool() -> None:
     section = SubagentsSection()
-    assert section.tools() == (dispatch_subagents,)
+    tools = section.tools()
+    assert len(tools) == 1
+    assert tools[0].name == dispatch_subagents.name
 
     params = section.param_type()
     rendered = section.render(params, depth=0)
 
     assert "dispatch_subagents" in rendered
     assert "parallel" in rendered.lower()
+
+
+def test_subagents_section_configures_isolation_level() -> None:
+    section = SubagentsSection(isolation_level=SubagentIsolationLevel.FULL_ISOLATION)
+    tool = section.tools()[0]
+
+    assert tool is not dispatch_subagents
+    assert tool.name == dispatch_subagents.name
