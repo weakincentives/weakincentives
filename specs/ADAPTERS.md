@@ -103,7 +103,11 @@ that subscribe to `ToolInvoked` will receive the identical objects stored on the
 1. **Assemble Response** – Populate `PromptResponse` with the final text. If `rendered.output_type` is present and
    `parse_output` is `True`, call `parse_structured_output(final_text, rendered)` to produce `output`; otherwise leave it as
    `None`.
-1. **Return** – Hand the fully populated `PromptResponse` back to the caller.
+1. **Publish Result** – Emit a `PromptExecuted` event through the supplied bus once the `PromptResponse` is built. The
+   publication must reuse the same `PromptResponse` instance and inspect the `PublishResult` returned by `bus.publish`. If
+   `.ok` is `False`, adapters should log or otherwise surface the captured handler failures for diagnostics without
+   interrupting the evaluation flow.
+1. **Return** – Hand the fully populated `PromptResponse` back to the caller after recording the publish outcome.
 
 ## Tool Execution
 
@@ -134,6 +138,11 @@ The exception should expose:
 - `phase` (`"request"`, `"tool"`, `"response"`, etc.)
 - Provider-specific diagnostics (status code, request id)
 - The original exception or payload when relevant
+
+When publishing `PromptExecuted`, adapters MUST inspect the returned `PublishResult` (see `specs/EVENTS.md`) and surface any
+delivery failures through their diagnostic channel (logging, tracing, metrics, etc.). Publishing errors must not raise new
+exceptions or otherwise abort evaluation; instead, record the failure details alongside the already constructed
+`PromptResponse` so callers receive the evaluation outcome even when downstream subscribers misbehave.
 
 ## Non-Goals
 
