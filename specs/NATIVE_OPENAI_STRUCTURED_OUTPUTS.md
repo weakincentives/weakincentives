@@ -23,6 +23,8 @@ The OpenAI adapter already renders prompts into a `RenderedPrompt` object that c
 1. Use the existing serde helpers to build a JSON Schema fragment for the target dataclass. Pass `extra="forbid"` when extra keys are disallowed.
 1. When `output_container == "array"`, wrap the schema in an array definition with `items` pointing to the dataclass schema.
 1. Generate a deterministic schema `name` (e.g., based on `prompt.name`) so repeated calls stay stable.
+   - The OpenAI `json_schema["name"]` field accepts only ASCII letters, digits, underscores, and hyphens (`^[A-Za-z0-9_-]+$`) and must be 1–64 characters long; enforce these limits during generation.
+   - Sanitize prompt names (e.g., via slugification that lowercases, replaces invalid characters with hyphens, and trims consecutive separators) before truncating to the 64-character ceiling to remain within OpenAI's constraints.
 
 ## Request Payload Updates
 
@@ -49,3 +51,4 @@ The OpenAI adapter already renders prompts into a `RenderedPrompt` object that c
 - Extend OpenAI adapter tests to assert that `response_format` is populated whenever structured output metadata is present.
 - Add fixtures covering provider responses with parsed content to validate the new happy path.
 - Ensure tests continue to cover the legacy fallback path where only text is returned.
+- Add a unit asserting sanitized schema names stay within the OpenAI character set and length limits.
