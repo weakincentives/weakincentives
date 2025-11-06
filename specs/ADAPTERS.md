@@ -37,6 +37,8 @@ class ProviderAdapter(Protocol):
         self,
         prompt: Prompt[OutputT],
         *params: object,
+        goal_section_key: str,
+        chapters_expansion_policy: ChaptersExpansionPolicy = ChaptersExpansionPolicy.ALL_INCLUDED,
         parse_output: bool = True,
         bus: EventBus,
     ) -> PromptResponse[OutputT]:
@@ -47,6 +49,14 @@ Implementations own the provider client and any serialization glue needed for th
 provided `Prompt` instance.
 
 - `params`: Positional dataclass instances forwarded to `prompt.render(*params)`; adapters must preserve type matching.
+- `goal_section_key`: Keyword-only pointer to the `Section.key` representing the
+  user's immediate goal or intent. Chapter gating MUST anchor on this section as
+  described in `specs/CHAPTERS.md`.
+- `chapters_expansion_policy`: Keyword-only selector describing how aggressively
+  the adapter may open chapters for this evaluation. `ALL_INCLUDED` is the
+  default and mirrors the behavior described in `specs/CHAPTERS.md`. Implementations MUST
+  support at least the three core states defined in `specs/CHAPTERS.md` and MAY
+  introduce provider-specific extensions.
 - `parse_output`: When `True`, adapters call `parse_structured_output` on the final message if the prompt declares structured
   output; disable to keep only the raw text.
 - `bus`: Evaluation-scoped event dispatcher supplied by the caller. Pass `NullEventBus()` to discard telemetry or reuse a
@@ -75,7 +85,12 @@ that subscribe to `ToolInvoked` will receive the identical objects stored on the
 
 ## Evaluation Flow
 
-1. **Render** – Call `rendered = prompt.render(*params)` once per evaluation. This yields the markdown
+1. **Resolve Chapters** – Derive the subset of chapters to open based on the
+   provided `goal_section_key`, the selected
+   `chapters_expansion_policy`, and the heuristics defined in
+   `specs/CHAPTERS.md`. Render against the resulting chapter snapshot.
+1. **Render** – Call `rendered = prompt.render(*params)` once per evaluation using
+   the chapter-filtered prompt snapshot. This yields the markdown
    (`rendered.text`), tool registry (`rendered.tools`), and optional output contract metadata.
 1. **Prepare Payload** – Construct the provider-specific request body using `rendered.text` as the system prompt (or
    equivalent) and translate each `Tool` into the provider's tool schema.
@@ -149,6 +164,7 @@ prompt = Prompt(
     name="draft_reply",
     sections=[
         MarkdownSection[MessageParams](
+            key="task",
             title="Task",
             template="Please draft a reply to ${sender} about ${topic}.",
         )
@@ -157,6 +173,8 @@ prompt = Prompt(
 response = adapter.evaluate(
     prompt,
     MessageParams(sender="Jordan", topic="launch plan"),
+    goal_section_key="task",
+    chapters_expansion_policy=ChaptersExpansionPolicy.INTENT_CLASSIFIER,
     bus=bus,
 )
 print(response.text or response.output)
