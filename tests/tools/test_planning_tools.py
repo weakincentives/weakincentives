@@ -20,10 +20,10 @@ import pytest
 
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.adapters.core import SessionProtocol
-from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import SupportsDataclass
 from weakincentives.prompt.tool import ToolContext, ToolResult
-from weakincentives.session import (
+from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
+from weakincentives.runtime.session import (
     ReducerContext,
     Session,
     ToolData,

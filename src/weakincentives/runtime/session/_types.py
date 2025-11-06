@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Protocol, TypeVar
 
+from ...prompt._types import SupportsDataclass
 from ..events import EventBus
-from ..prompt._types import SupportsDataclass
 from .protocols import SessionProtocol
 
 

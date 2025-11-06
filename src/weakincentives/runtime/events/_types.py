@@ -18,8 +18,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol, cast, override
 
-from ..prompt._types import SupportsDataclass
-from ..prompt.tool_result import ToolResult
+from ...prompt._types import SupportsDataclass
+from ...prompt.tool_result import ToolResult
 
 EventHandler = Callable[[object], None]
 

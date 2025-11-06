@@ -19,7 +19,8 @@ from typing import cast
 import pytest
 
 from weakincentives.adapters.core import PromptResponse
-from weakincentives.events import (
+from weakincentives.prompt.tool import ToolResult
+from weakincentives.runtime.events import (
     HandlerFailure,
     InProcessEventBus,
     NullEventBus,
@@ -27,7 +28,6 @@ from weakincentives.events import (
     PublishResult,
     ToolInvoked,
 )
-from weakincentives.prompt.tool import ToolResult
 
 
 def make_prompt_response(prompt_name: str) -> PromptResponse[object]:
@@ -138,7 +138,7 @@ def test_in_process_bus_isolates_handler_exceptions(
         adapter="test",
         result=make_prompt_response("demo"),
     )
-    with caplog.at_level(logging.ERROR, logger="weakincentives.events"):
+    with caplog.at_level(logging.ERROR, logger="weakincentives.runtime.events"):
         result = bus.publish(event)
 
     assert received == [event]

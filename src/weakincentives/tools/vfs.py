@@ -26,7 +26,7 @@ from weakref import WeakSet
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
-from ..session import (
+from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
     Session,

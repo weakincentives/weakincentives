@@ -20,12 +20,12 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
-from weakincentives.events import InProcessEventBus
 from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, RecapParams
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import ToolContext
-from weakincentives.session import Session
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
     SubagentResult,

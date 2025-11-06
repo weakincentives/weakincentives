@@ -22,7 +22,7 @@ from ..logging import StructuredLogger, get_logger
 from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
 
 if TYPE_CHECKING:
-    from ..adapters.core import PromptResponse
+    from ...adapters.core import PromptResponse
 
 
 def _describe_handler(handler: EventHandler) -> str:

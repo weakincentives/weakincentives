@@ -20,9 +20,9 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, cast, override
 
+from ...prompt._types import SupportsDataclass
 from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..logging import StructuredLogger, get_logger
-from ..prompt._types import SupportsDataclass
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append

@@ -21,8 +21,8 @@ from typing import cast
 
 import pytest
 
-from weakincentives.session import snapshots
-from weakincentives.session.snapshots import (
+from weakincentives.runtime.session import snapshots
+from weakincentives.runtime.session.snapshots import (
     SNAPSHOT_SCHEMA_VERSION,
     Snapshot,
     SnapshotRestoreError,
@@ -80,10 +80,12 @@ def test_resolve_type_validation_errors() -> None:
         _resolve_type("invalid")
 
     with pytest.raises(SnapshotRestoreError):
-        _resolve_type("weakincentives.session.snapshots:MissingType")
+        _resolve_type("weakincentives.runtime.session.snapshots:MissingType")
 
     with pytest.raises(SnapshotRestoreError):
-        _resolve_type("weakincentives.session.snapshots:normalize_snapshot_state")
+        _resolve_type(
+            "weakincentives.runtime.session.snapshots:normalize_snapshot_state"
+        )
 
 
 def test_ensure_timezone_adds_utc() -> None:

@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from .adapters import PromptResponse
-from .logging import StructuredLogger, configure_logging, get_logger
 from .prompt import (
     MarkdownSection,
     Prompt,
@@ -26,6 +25,7 @@ from .prompt import (
     ToolResult,
     parse_structured_output,
 )
+from .runtime import StructuredLogger, configure_logging, get_logger
 
 __all__ = [
     "MarkdownSection",

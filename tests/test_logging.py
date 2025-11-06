@@ -24,7 +24,7 @@ from types import TracebackType
 
 import pytest
 
-from weakincentives.logging import (
+from weakincentives.runtime.logging import (
     StructuredLogger,
     _coerce_level,
     _unwrap_logger,

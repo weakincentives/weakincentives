@@ -45,7 +45,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         ToolPayload,
     )
 
-from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -55,7 +54,8 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt._types import SupportsDataclass
-from weakincentives.session import (
+from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
+from weakincentives.runtime.session import (
     ReducerEvent,
     Session,
     SessionProtocol,

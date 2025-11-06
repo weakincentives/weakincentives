@@ -193,7 +193,7 @@ def configure_logging(
                     "datefmt": "%Y-%m-%d %H:%M:%S",
                 },
                 "json": {
-                    "()": "weakincentives.logging._JsonFormatter",
+                    "()": "weakincentives.runtime.logging._JsonFormatter",
                 },
             },
             "handlers": {

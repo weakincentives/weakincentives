@@ -109,8 +109,8 @@ and [Asteval Integration](specs/ASTEVAL.md).
 ```python
 from pathlib import Path
 
-from weakincentives.events import InProcessEventBus, PromptExecuted
-from weakincentives.session import Session
+from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
+from weakincentives.runtime.session import Session
 from weakincentives.tools import (
     AstevalSection,
     HostMount,
@@ -242,7 +242,7 @@ one. Downstream sections can inspect this slice with
 ```python
 from dataclasses import dataclass
 
-from weakincentives.session import ToolData
+from weakincentives.runtime.session import ToolData
 
 
 @dataclass
@@ -413,7 +413,7 @@ reducer before `PlanningToolsSection` if you need history. See
 [Session Snapshots](specs/SESSION_SNAPSHOTS.md) for selector and rollback rules.
 
 ```python
-from weakincentives.session import select_latest
+from weakincentives.runtime.session import select_latest
 from weakincentives.tools import Plan, VirtualFileSystem
 
 
@@ -540,7 +540,7 @@ metadata to every record without manual dictionary plumbing. Call
 bind logger instances wherever you need telemetry:
 
 ```python
-from weakincentives.logging import configure_logging, get_logger
+from weakincentives.runtime.logging import configure_logging, get_logger
 
 configure_logging(json_mode=True)
 logger = get_logger("demo").bind(component="cli")

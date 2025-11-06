@@ -42,9 +42,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from weakincentives.adapters.core import ProviderAdapter
-from weakincentives.events import EventBus
+from weakincentives.runtime.events import EventBus
 from weakincentives.prompt.prompt import Prompt, RenderedPrompt
-from weakincentives.session.session import Session
+from weakincentives.runtime.session.session import Session
 
 
 @dataclass(slots=True, frozen=True)

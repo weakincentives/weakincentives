@@ -66,14 +66,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         simple_handler,
     )
 from weakincentives.adapters import PromptEvaluationError
-from weakincentives.events import (
-    EventBus,
-    HandlerFailure,
-    InProcessEventBus,
-    NullEventBus,
-    PromptExecuted,
-    ToolInvoked,
-)
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -84,7 +76,20 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.session import ReducerEvent, Session, replace_latest, select_latest
+from weakincentives.runtime.events import (
+    EventBus,
+    HandlerFailure,
+    InProcessEventBus,
+    NullEventBus,
+    PromptExecuted,
+    ToolInvoked,
+)
+from weakincentives.runtime.session import (
+    ReducerEvent,
+    Session,
+    replace_latest,
+    select_latest,
+)
 from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.openai"

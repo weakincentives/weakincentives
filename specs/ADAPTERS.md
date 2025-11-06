@@ -157,7 +157,7 @@ exceptions or otherwise abort evaluation; instead, record the failure details al
 from dataclasses import dataclass
 
 from weakincentives.adapters.core import ProviderAdapter
-from weakincentives.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.prompt import Prompt, MarkdownSection
 
 

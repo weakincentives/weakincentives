@@ -30,10 +30,10 @@ from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast
 from weakref import WeakSet
 
-from ..logging import StructuredLogger, get_logger
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
-from ..session import (
+from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
     Session,

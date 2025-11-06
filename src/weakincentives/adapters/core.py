@@ -18,11 +18,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from ..prompt._types import SupportsDataclass
-from ..session.protocols import SessionProtocol
+from ..runtime.session.protocols import SessionProtocol
 
 if TYPE_CHECKING:
-    from ..events._types import EventBus, ToolInvoked
     from ..prompt.prompt import Prompt
+    from ..runtime.events._types import EventBus, ToolInvoked
 
 OutputT = TypeVar("OutputT")
 

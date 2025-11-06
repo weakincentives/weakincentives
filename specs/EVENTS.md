@@ -16,7 +16,7 @@ prompt execution observable inside a single process.
 
 ## Event Bus Abstraction
 
-- Adapters MUST emit prompt lifecycle events through an in-process message bus exposed by `weakincentives.events`.
+- Adapters MUST emit prompt lifecycle events through an in-process message bus exposed by `weakincentives.runtime.events`.
 - The bus presents a minimal synchronous API: `subscribe(event_type, handler)` for registration and `publish(event)` for
   dispatch. Implementations MAY batch or queue under the hood but MUST deliver callbacks on the publishing thread by
   default.
@@ -31,7 +31,7 @@ prompt execution observable inside a single process.
 
 ## Event Dataclasses
 
-Events live under `weakincentives.events` and follow the same conventions as other core dataclasses (frozen, typed,
+Events live under `weakincentives.runtime.events` and follow the same conventions as other core dataclasses (frozen, typed,
 ASCII-friendly field names). The minimal spec keeps payloads strictly typed; provider-specific metadata can be added in
 follow-on patches once concrete types are defined.
 
@@ -89,7 +89,7 @@ the core synchronous semantics.
 
 ### API Additions
 
-- Introduce `PublishResult` in `weakincentives.events` as a frozen, slot-based dataclass.
+- Introduce `PublishResult` in `weakincentives.runtime.events` as a frozen, slot-based dataclass.
   - Fields:
     - `event: object` – the event instance that was dispatched.
     - `handlers_invoked: tuple[EventHandler, ...]` – ordered snapshot of handlers targeted for this publish call.

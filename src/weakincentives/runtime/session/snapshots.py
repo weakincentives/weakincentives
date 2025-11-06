@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Snapshot serialization utilities for :mod:`weakincentives.session`."""
+"""Snapshot serialization utilities for :mod:`weakincentives.runtime.session`."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ from datetime import UTC, datetime
 from importlib import import_module
 from typing import Any, TypeGuard, cast, override
 
-from ..prompt._types import SupportsDataclass
-from ..serde import dump, parse
+from ...prompt._types import SupportsDataclass
+from ...serde import dump, parse
 
 SNAPSHOT_SCHEMA_VERSION = "1"
 
