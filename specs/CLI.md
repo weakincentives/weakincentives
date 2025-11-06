@@ -1,86 +1,93 @@
-# wink Terminal Agent Specification
+# wink MCP Server Specification
 
 ## Purpose
 
-The `wink` terminal agent is a conversational assistant built on top of
-`weakincentives`. Instead of exposing a collection of discrete CLI commands, the
-agent guides the user through prompt override workflows directly from the
-terminal. It specializes in helping practitioners understand, inspect, and
-modify prompt overrides without juggling file paths or manual JSON editing.
+The `wink` CLI now exists solely to expose a Model Context Protocol (MCP)
+server. Instead of mediating interactions directly, the CLI spins up a server
+that can be registered in Codex, Claude Desktop, or any other MCP-compatible
+client. The MCP surface gives downstream chat interfaces the ability to inspect
+and mutate prompt overrides while relying on `weakincentives` for the heavy
+lifting.
 
-## Core Responsibilities
+## Execution Model
 
-- Provide a natural-language interface for exploring prompt overrides stored in
-  the local overrides store.
-- Streamline the process of reviewing and updating override content while
-  preserving provenance information surfaced by `weakincentives`.
-- Maintain session context so follow-up questions and refinements remain
-  anchored to the active override the user is working on.
+- `wink mcp` (or an equivalent entry point) should start the server, advertise
+  its capabilities, and block until the hosting client disconnects.
+- Configuration is file-based: read overrides storage paths, environment
+  settings, and authentication (if any) from a static config file or CLI flags
+  so that Codex/Claude can launch the server deterministically.
+- Logging must default to structured, single-line entries that downstream
+  clients can tail for debugging without overflowing tokens.
 
-## Model & Transport
+## MCP Capabilities
 
-- Default model: `gpt-5` served through the `openai` adapter provided by
-  `weakincentives`.
-- The agent should surface an explicit message whenever a different model or
-  transport is requested so the user can confirm the change.
+Expose the minimum viable tool set required for working with prompt overrides.
 
-## Tooling Interface
+### `wink.list_overrides`
 
-The terminal agent exposes a minimal tool surface tailored to prompt override
-management.
+- **Input**: optional namespace filter.
+- **Behavior**: enumerate namespaces, prompt keys, and tags known to the
+  configured `PromptOverridesStore`. Return lightweight metadata so MCP clients
+  can present pickers before making a specific request.
+- **Errors**: bubble storage or permission issues using MCP error semantics so
+  clients can display actionable messages.
 
-### Retrieve Override Tool
+### `wink.get_override`
 
-- Input: namespace (`ns`), prompt key (`prompt`), and tag (`tag`, default
+- **Input**: namespace (`ns`), prompt key (`prompt`), and tag (`tag`, default
   `latest`).
-- Behavior: resolves the override using the configured
-  `PromptOverridesStore`, returning structured metadata and the JSON body.
-- Usage: invoked automatically when the user asks to inspect an override or to
-  confirm the current working context before proposing edits.
+- **Behavior**: resolve the override via `PromptOverridesStore`, returning the
+  JSON payload, descriptor hints, and backing file path.
+- **Usage**: primary read primitive invoked by Codex/Claude when a user asks to
+  inspect an override.
 
-### Update Override Tool
+### `wink.upsert_override`
 
-- Input: namespace, prompt key, tag (default `latest`), and the replacement JSON
-  payload.
-- Behavior: validates the payload against descriptor expectations when
-  available, then calls `PromptOverridesStore.upsert` and returns the resolved
-  file path.
-- Usage: activated when the user accepts the agent’s proposed modifications or
-  supplies their own override content.
+- **Input**: namespace, prompt key, tag (default `latest`), and a replacement
+  JSON payload.
+- **Behavior**: validate the payload against descriptor expectations when
+  available, persist the change through `PromptOverridesStore.upsert`, and
+  return the updated metadata (including the file path).
+- **Safety**: require an explicit `confirm` flag so clients must opt in before
+  mutations occur.
 
-## Interaction Flow
+## Client Integration Notes
 
-1. **Session kickoff** – the agent introduces itself, states that it defaults to
-   `gpt-5` via the OpenAI adapter, and explains how it can help with prompt
-   overrides.
-1. **Intent capture** – it asks clarifying questions to gather the relevant
-   namespace, prompt key, and tag before taking any action.
-1. **Inspection loop** – when viewing an override, the agent surfaces a concise
-   summary plus the full JSON body, highlighting notable fields or differences
-   compared to descriptor defaults when available.
-1. **Editing loop** – the agent drafts proposed changes, confirms the diff with
-   the user, and only writes updates after receiving explicit approval.
-1. **Session recap** – upon completion, it summarizes the changes made and the
-   file locations touched so the user can continue work outside the chat.
+- Provide a sample Codex/Claude MCP configuration that points at the CLI entry
+  point, including expected environment variables and working directory
+  assumptions. For example:
 
-## User Experience Guidelines
+  ```json
+  {
+    "command": "wink",
+    "args": ["mcp", "--config", "~/.config/wink/config.toml"],
+    "env": {
+      "WINK_OVERRIDES_DIR": "~/weakincentives/overrides"
+    },
+    "cwd": "~/weakincentives"
+  }
+  ```
 
-- Prefer succinct, actionable prompts that keep the user oriented within the
-  current override context.
-- Always confirm destructive actions, even when the user’s instruction is
-  direct, unless the user explicitly opts into automation for the current
-  session.
-- Emit validation or storage errors verbosely so users can correct malformed
-  payloads without rerunning commands.
-- Encourage version control hygiene by reminding the user to commit changes
-  after successfully updating overrides.
+- Keep outputs compact; Claude and Codex impose strict token budgets on MCP tool
+  responses.
 
-## Extensibility Notes
+- Make sure every response includes enough context (namespace, key, tag) so chat
+  clients can craft follow-up prompts without additional round-trips.
 
-- Additional tools (for example, descriptor discovery or diff generation) can be
-  layered on later, but the default experience should remain focused on
-  retrieval and update workflows.
-- Keep the agent shell-agnostic: all messaging and prompts should work in any
-  terminal environment without relying on escape sequences or color output.
-- Document any future capability expansions alongside updated usage examples so
-  downstream agents remain aligned with the conversational interface.
+## Operational Guidance
+
+- Ship with sensible defaults for override directories and config file
+  locations, but allow overrides through environment variables so multiple
+  clients can target different stores.
+- Emit explicit diagnostics when validation fails or when an override cannot be
+  found; MCP clients surface these errors verbatim to users.
+- Encourage downstream users to version control their overrides by surfacing the
+  backing file paths in every mutation response.
+
+## Extensibility
+
+- Additional tools (for example, diff generation or descriptor discovery) can be
+  layered on later, but keep the default surface minimal to reduce client setup
+  complexity.
+- Consider advertising text-streaming or notification channels once the MCP
+  ecosystem stabilizes; for now, stick to synchronous tool calls.
