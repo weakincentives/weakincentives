@@ -113,9 +113,12 @@ directly; no asynchronous facade is provided.
 - `mode` – `"expr"` returns the expression result and disallows assignments;
   `"statements"` allows multi-line statements and returns the last expression
   value if present.
-- `globals` – Optional dictionary of variable names to JSON-serializable string
-  representations that bootstrap the interpreter state. They are parsed inside
-  the handler; invalid JSON should raise a `ToolValidationError` with context.
+- `globals` – Optional dictionary of variable names to JSON strings. Each value
+  is decoded with `json.loads` before evaluation so the interpreter receives the
+  underlying primitive (e.g. `int`, `float`, `bool`, `None`, `str`) or nested
+  structures composed of those primitives. Payloads that fail to decode or
+  resolve to unsupported types raise a `ToolValidationError` with the offending
+  key name so prompt authors receive immediate feedback.
 - `reads` – A sequence of file reads to inject into `globals`. Each read loads a
   VFS file and exposes its text under `globals[path_alias]`. The alias is the
   joined POSIX path string.
@@ -130,10 +133,12 @@ directly; no asynchronous facade is provided.
   produced.
 - `stdout` / `stderr` – Captured streams produced during evaluation. Both are
   bounded to 4_096 characters; longer streams are truncated with an ellipsis.
-- `globals` – Final global variables (stringified) for transparency. Only values
-  with JSON-safe primitive types (`str`, `int`, `float`, `bool`, `None`) are
-  returned; others fall back to their `repr` prefixed with `"!repr:"` to
-  communicate lossy conversion.
+- `globals` – Final global variables (stringified) for transparency. Values that
+  originated from decoded input globals reappear here as their JSON-safe
+  primitive equivalents (`str`, `int`, `float`, `bool`, `None`) or nested
+  containers composed of those primitives. If evaluation produces values that
+  cannot be losslessly serialized, the handler falls back to their `repr`
+  prefixed with `"!repr:"` to communicate the conversion boundary.
 - `reads` / `writes` – Echoed input descriptors, potentially augmented with the
   final content that was written.
 
