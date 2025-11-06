@@ -415,7 +415,9 @@ class Prompt[OutputT]:
 
             open_sections.extend(chapter.sections)
 
-        return Prompt(
+        prompt_cls = type(self)
+
+        return prompt_cls(
             ns=self.ns,
             key=self.key,
             name=self.name,
