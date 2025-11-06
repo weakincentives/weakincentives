@@ -181,6 +181,34 @@ def test_mount_snapshot_persisted_in_session(tmp_path: Path) -> None:
     assert files_by_path["sunfish", "README.md"].content == "hello mount"
 
 
+def test_mount_permission_error_translated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    restricted = root / "restricted.txt"
+    restricted.write_text("secret", encoding="utf-8")
+
+    original_read_text = Path.read_text
+
+    def fake_read_text(
+        self: Path, encoding: str | None = None, errors: str | None = None
+    ) -> str:
+        if self == restricted:
+            raise PermissionError("access denied")
+        return original_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", fake_read_text)
+
+    mount = HostMount(host_path="restricted.txt", mount_path=VfsPath(("restricted",)))
+
+    with pytest.raises(ToolValidationError, match=str(restricted)):
+        VfsToolsSection(
+            mounts=(mount,),
+            allowed_host_roots=(root,),
+        )
+
+
 def test_list_directory_shows_children(monkeypatch: pytest.MonkeyPatch) -> None:
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
