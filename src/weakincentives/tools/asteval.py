@@ -33,7 +33,13 @@ from weakref import WeakSet
 from ..logging import StructuredLogger, get_logger
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
-from ..session import ReducerContext, ReducerEvent, Session, TypedReducer, select_latest
+from ..session import (
+    ReducerContextProtocol,
+    ReducerEvent,
+    Session,
+    TypedReducer,
+    select_latest,
+)
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
@@ -777,7 +783,7 @@ def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
         slice_values: tuple[VirtualFileSystem, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
+        context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
         del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()

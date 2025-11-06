@@ -113,16 +113,16 @@ class Session:
 
 ### Reducers
 
-Provide three reducers (each accepts the keyword-only ``context`` argument and may
+Provide three reducers (each accepts the keyword-only `context` argument and may
 ignore it when unused):
 
 1. `append` – Default behavior, dedupes by equality.
 1. `upsert_by(key_fn)` – Replaces items that share the same derived key.
 1. `replace_latest` – Stores only the most recent value.
 
-``ReducerContext`` instances bundle the active ``Session`` and event bus for the
+`ReducerContext` instances bundle the active `Session` and event bus for the
 current invocation. Callers construct a fresh context per event and pass it as the
-``context=`` keyword argument so reducers can inspect session state or publish their
+`context=` keyword argument so reducers can inspect session state or publish their
 own events without resorting to global lookups.
 
 ### Selectors

@@ -18,14 +18,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, is_dataclass
 from datetime import UTC, datetime
 from threading import RLock
-from typing import Any, cast
+from typing import Any, cast, override
 
 from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
-from ._types import ReducerEvent, TypedReducer
-from .reducer_context import ReducerContext, build_reducer_context
-from .protocols import SnapshotProtocol
+from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
+from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append
 from .snapshots import (
     Snapshot,
@@ -52,7 +51,7 @@ def _append_tool_data(
     slice_values: tuple[ToolData, ...],
     event: ReducerEvent,
     *,
-    context: ReducerContext,
+    context: ReducerContextProtocol,
 ) -> tuple[ToolData, ...]:
     del context
     tool_data = cast(ToolData, event)
@@ -76,7 +75,7 @@ class _ReducerRegistration:
     slice_type: type[Any]
 
 
-class Session:
+class Session(SessionProtocol):
     """Collect dataclass payloads from prompt executions and tool invocations."""
 
     def __init__(
@@ -162,6 +161,7 @@ class Session:
         with self._lock:
             self._state[slice_type] = tuple(values)
 
+    @override
     def snapshot(self) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state."""
 
@@ -178,6 +178,7 @@ class Session:
         created_at = datetime.now(UTC)
         return Snapshot(created_at=created_at, slices=normalized)
 
+    @override
     def rollback(self, snapshot: SnapshotProtocol) -> None:
         """Restore session slices from the provided snapshot."""
 
@@ -244,6 +245,8 @@ class Session:
     def _dispatch_data_event(
         self, data_type: type[SupportsDataclass], event: ReducerEvent
     ) -> None:
+        from .reducer_context import build_reducer_context
+
         with self._lock:
             registrations = list(self._reducers.get(data_type, ()))
             if not registrations:

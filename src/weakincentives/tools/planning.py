@@ -24,7 +24,7 @@ from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..session import (
-    ReducerContext,
+    ReducerContextProtocol,
     ReducerEvent,
     Session,
     replace_latest,
@@ -552,7 +552,7 @@ def _setup_plan_reducer(
     slice_values: tuple[Plan, ...],
     event: ReducerEvent,
     *,
-    context: ReducerContext,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
     del context
     params = cast(SetupPlan, event.value)
@@ -574,7 +574,7 @@ def _add_step_reducer(
     slice_values: tuple[Plan, ...],
     event: ReducerEvent,
     *,
-    context: ReducerContext,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
     del context
     previous = _latest_plan(slice_values)
@@ -606,7 +606,7 @@ def _update_step_reducer(
     slice_values: tuple[Plan, ...],
     event: ReducerEvent,
     *,
-    context: ReducerContext,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
     del context
     previous = _latest_plan(slice_values)
@@ -641,7 +641,7 @@ def _mark_step_reducer(
     slice_values: tuple[Plan, ...],
     event: ReducerEvent,
     *,
-    context: ReducerContext,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
     del context
     previous = _latest_plan(slice_values)
@@ -682,7 +682,7 @@ def _clear_plan_reducer(
     slice_values: tuple[Plan, ...],
     event: ReducerEvent,
     *,
-    context: ReducerContext,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
     del context
     previous = _latest_plan(slice_values)

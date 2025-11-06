@@ -27,7 +27,7 @@ from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..session import (
-    ReducerContext,
+    ReducerContextProtocol,
     ReducerEvent,
     Session,
     TypedReducer,
@@ -698,7 +698,7 @@ def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
         slice_values: tuple[VirtualFileSystem, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
+        context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
         del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
@@ -744,7 +744,7 @@ def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
         slice_values: tuple[VirtualFileSystem, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
+        context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
         del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()

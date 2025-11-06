@@ -21,7 +21,7 @@ from weakincentives.adapters.core import PromptResponse
 from weakincentives.events import InProcessEventBus, PromptExecuted, ToolInvoked
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.session import (
-    ReducerContext,
+    ReducerContextProtocol,
     ReducerEvent,
     Session,
     Snapshot,
@@ -126,7 +126,7 @@ def test_reducers_run_in_registration_order() -> None:
         slice_values: tuple[FirstSlice, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
+        context: ReducerContextProtocol,
     ) -> tuple[FirstSlice, ...]:
         del context
         call_order.append("first")
@@ -137,7 +137,7 @@ def test_reducers_run_in_registration_order() -> None:
         slice_values: tuple[SecondSlice, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
+        context: ReducerContextProtocol,
     ) -> tuple[SecondSlice, ...]:
         del context
         call_order.append("second")
@@ -289,7 +289,7 @@ def test_reducer_failure_leaves_previous_slice_unchanged() -> None:
         slice_values: tuple[ExampleOutput, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
+        context: ReducerContextProtocol,
     ) -> tuple[ExampleOutput, ...]:
         del context
         raise RuntimeError("boom")
@@ -344,7 +344,7 @@ def test_snapshot_preserves_custom_reducer_behavior() -> None:
         slice_values: tuple[Summary, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
+        context: ReducerContextProtocol,
     ) -> tuple[Summary, ...]:
         del context
         value = cast(ExampleOutput, event.value)

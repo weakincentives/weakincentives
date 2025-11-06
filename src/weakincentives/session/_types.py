@@ -16,8 +16,9 @@ from __future__ import annotations
 
 from typing import Protocol, TypeVar
 
+from ..events import EventBus
 from ..prompt._types import SupportsDataclass
-from .reducer_context import ReducerContext
+from .protocols import SessionProtocol
 
 
 class ReducerEvent(Protocol):
@@ -30,6 +31,13 @@ class ReducerEvent(Protocol):
 S = TypeVar("S")
 
 
+class ReducerContextProtocol(Protocol):
+    """Protocol implemented by reducer context objects."""
+
+    session: SessionProtocol
+    event_bus: EventBus
+
+
 class TypedReducer(Protocol[S]):
     """Protocol for reducer callables maintained by :class:`Session`."""
 
@@ -38,9 +46,8 @@ class TypedReducer(Protocol[S]):
         slice_values: tuple[S, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
-    ) -> tuple[S, ...]:
-        ...
+        context: ReducerContextProtocol,
+    ) -> tuple[S, ...]: ...
 
 
 __all__ = ["ReducerEvent", "TypedReducer"]

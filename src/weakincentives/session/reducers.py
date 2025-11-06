@@ -17,15 +17,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TypeVar, cast
 
-from ._types import ReducerEvent, TypedReducer
-from .reducer_context import ReducerContext
+from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 
 T = TypeVar("T")
 K = TypeVar("K")
 
 
 def append[T](
-    slice_values: tuple[T, ...], event: ReducerEvent, *, context: ReducerContext
+    slice_values: tuple[T, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContextProtocol,
 ) -> tuple[T, ...]:
     """Append the event value if it is not already present."""
 
@@ -43,7 +45,7 @@ def upsert_by[T, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
         slice_values: tuple[T, ...],
         event: ReducerEvent,
         *,
-        context: ReducerContext,
+        context: ReducerContextProtocol,
     ) -> tuple[T, ...]:
         del context
         value = cast(T, event.value)
@@ -68,7 +70,7 @@ def replace_latest[T](
     slice_values: tuple[T, ...],
     event: ReducerEvent,
     *,
-    context: ReducerContext,
+    context: ReducerContextProtocol,
 ) -> tuple[T, ...]:
     """Keep only the most recent event value."""
 

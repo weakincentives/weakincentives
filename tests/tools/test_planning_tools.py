@@ -23,7 +23,14 @@ from weakincentives.adapters.core import SessionProtocol
 from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import SupportsDataclass
 from weakincentives.prompt.tool import ToolContext, ToolResult
-from weakincentives.session import Session, ToolData, select_all, select_latest
+from weakincentives.session import (
+    ReducerContext,
+    Session,
+    ToolData,
+    build_reducer_context,
+    select_all,
+    select_latest,
+)
 from weakincentives.tools import (
     AddStep,
     ClearPlan,
@@ -57,6 +64,12 @@ def _make_tool_data(name: str, value: SupportsDataclass) -> ToolData:
         result=cast(ToolResult[object], result),
     )
     return ToolData(value=value, source=event)
+
+
+def _make_reducer_context() -> ReducerContext:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    return build_reducer_context(session=session, event_bus=bus)
 
 
 def test_setup_plan_normalizes_payloads() -> None:
@@ -646,10 +659,12 @@ def test_reducers_ignore_events_without_plan() -> None:
     )
     clear_event = _make_tool_data("planning_clear_plan", ClearPlan())
 
-    assert _add_step_reducer((), add_event) == ()
-    assert _update_step_reducer((), update_event) == ()
-    assert _mark_step_reducer((), mark_event) == ()
-    assert _clear_plan_reducer((), clear_event) == ()
+    context = _make_reducer_context()
+
+    assert _add_step_reducer((), add_event, context=context) == ()
+    assert _update_step_reducer((), update_event, context=context) == ()
+    assert _mark_step_reducer((), mark_event, context=context) == ()
+    assert _clear_plan_reducer((), clear_event, context=context) == ()
 
 
 def test_latest_plan_returns_none_when_empty() -> None:

@@ -15,27 +15,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from ..events import EventBus
-
-if TYPE_CHECKING:
-    from .session import Session
+from ._types import ReducerContextProtocol
+from .protocols import SessionProtocol
 
 
 @dataclass(slots=True, frozen=True)
-class ReducerContext:
+class ReducerContext(ReducerContextProtocol):
     """Immutable bundle of runtime services shared with reducers."""
 
-    session: "Session"
+    session: SessionProtocol
     event_bus: EventBus
 
 
-def build_reducer_context(*, session: "Session", event_bus: EventBus) -> ReducerContext:
+def build_reducer_context(
+    *, session: SessionProtocol, event_bus: EventBus
+) -> ReducerContext:
     """Return a :class:`ReducerContext` for the provided session and event bus."""
 
     return ReducerContext(session=session, event_bus=event_bus)
 
 
 __all__ = ["ReducerContext", "build_reducer_context"]
-
