@@ -12,7 +12,10 @@ executions while keeping the integration surface minimal.
   `weakincentives.runtime`.
 - Implement it as an immutable `@dataclass(slots=True, frozen=True)` with the
   following optional fields (all default to `None`, meaning "no limit"):
-  - `max_duration: datetime.timedelta | None`
+  - `deadline: datetime.datetime | None`
+    - When provided, require a timezone-aware UTC timestamp.
+    - Reject naive datetimes or deadlines that are already in the past during
+      `__post_init__`.
   - `max_tool_calls: int | None`
   - `max_delegation_depth: int | None`
   - `max_parallel_subagents: int | None`
@@ -25,12 +28,16 @@ executions while keeping the integration surface minimal.
 
 ## Deadline Enforcement
 
-- The orchestrator records a monotonic start time for every prompt run.
-- When `max_duration` is set, adapters and sections consult
-  `limits.deadline` (start + duration) through a helper on `RunLimits`.
+- The orchestrator records the run start using
+  `datetime.datetime.now(datetime.timezone.utc)` and caches the corresponding
+  monotonic baseline for elapsed computations.
+- When `deadline` is set, adapters and sections consult `limits.deadline`
+  through a helper on `RunLimits`.
 - The helper returns `None` when no deadline is configured.
-- Before executing any tool or subagent dispatch, compare the current monotonic
-  time to the deadline and abort with a structured timeout error when exceeded.
+- Before executing any tool or subagent dispatch, compare the current UTC time
+  to the configured deadline and abort with a structured timeout error when
+  exceeded. Use the monotonic baseline to compute any `time_remaining` output so
+  the check stays resilient to wall-clock shifts.
 - Timeout errors propagate as failed `ToolResult` or prompt evaluation results
   without raising unhandled exceptions.
 
@@ -39,8 +46,7 @@ executions while keeping the integration surface minimal.
 - Maintain a counter on the execution context that increments before each tool
   invocation (including `dispatch_subagents`).
 - When `max_tool_calls` is set and the counter would exceed the limit, short
-  circuit with a failed `ToolResult` (`success=False`, `message="tool call
-  limit reached"`).
+  circuit with a failed `ToolResult` (`success=False`, `message="tool call limit reached"`).
 - Do not attempt the tool call once the limit trips; return immediately so
   downstream reducers see a clean failure state.
 
