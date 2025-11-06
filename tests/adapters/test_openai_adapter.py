@@ -421,6 +421,20 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
     session.register_reducer(ToolPayload, replace_latest)
     session.seed_slice(ToolPayload, (ToolPayload(answer="baseline"),))
 
+    tool_events: list[ToolInvoked] = []
+    prompt_events: list[PromptExecuted] = []
+
+    def record_tool_event(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        tool_events.append(event)
+
+    def record_prompt_event(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
+        prompt_events.append(event)
+
+    bus.subscribe(ToolInvoked, record_tool_event)
+    bus.subscribe(PromptExecuted, record_prompt_event)
+
     original_dispatch = session._dispatch_data_event
 
     def failing_dispatch(
@@ -437,14 +451,18 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
         MethodType(failing_dispatch, session),
     )
 
-    result = adapter.evaluate(
-        prompt,
-        ToolParams(query="policies"),
-        bus=bus,
-        session=session,
-    )
+    with pytest.raises(ExceptionGroup) as exc_info:
+        adapter.evaluate(
+            prompt,
+            ToolParams(query="policies"),
+            bus=bus,
+            session=session,
+        )
 
-    tool_event = result.tool_results[0]
+    assert "Reducer crashed" in str(exc_info.value)
+
+    assert tool_events
+    tool_event = tool_events[0]
     assert tool_event.result.message.startswith(
         "Reducer errors prevented applying tool result:"
     )
@@ -452,7 +470,10 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
 
     latest_payload = select_latest(session, ToolPayload)
     assert latest_payload == ToolPayload(answer="baseline")
-    assert result.output == StructuredAnswer(answer="Policy summary")
+
+    assert prompt_events
+    prompt_result = prompt_events[0].result
+    assert prompt_result.output == StructuredAnswer(answer="Policy summary")
 
 
 def test_openai_format_publish_failures_handles_defaults() -> None:
