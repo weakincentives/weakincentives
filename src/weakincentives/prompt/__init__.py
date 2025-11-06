@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from ._types import SupportsDataclass
+from .chapter import Chapter, ChaptersExpansionPolicy
 from .composition import (
     DelegationParams,
     DelegationPrompt,
@@ -52,6 +53,8 @@ from .tool import Tool, ToolContext, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
+    "Chapter",
+    "ChaptersExpansionPolicy",
     "DelegationParams",
     "DelegationPrompt",
     "DelegationSummarySection",
