@@ -638,6 +638,8 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
             content = path.read_text(encoding=_DEFAULT_ENCODING)
         except UnicodeDecodeError as error:  # pragma: no cover - defensive guard
             raise ToolValidationError("Mounted file must be valid UTF-8.") from error
+        except OSError as error:
+            raise ToolValidationError(f"Failed to read mounted file {path}.") from error
         size = len(content.encode(_DEFAULT_ENCODING))
         if mount.max_bytes is not None and consumed_bytes + size > mount.max_bytes:
             raise ToolValidationError("Host mount exceeded the configured byte budget.")
