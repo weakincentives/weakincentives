@@ -18,38 +18,85 @@ lifting.
   so that Codex/Claude can launch the server deterministically.
 - Logging must default to structured, single-line entries that downstream
   clients can tail for debugging without overflowing tokens.
+- Any helper routines that need an LLM session must default to the `gpt-5`
+  model through the OpenAI adapter, while still allowing explicit overrides via
+  configuration.
 
 ## MCP Capabilities
 
 Expose the minimum viable tool set required for working with prompt overrides.
+All read and write operations must target individual sections or tools so
+clients can manage fine-grained changes without clobbering entire prompt
+payloads.
 
 ### `wink.list_overrides`
 
 - **Input**: optional namespace filter.
-- **Behavior**: enumerate namespaces, prompt keys, and tags known to the
-  configured `PromptOverridesStore`. Return lightweight metadata so MCP clients
-  can present pickers before making a specific request.
+- **Behavior**: enumerate namespaces, prompt keys, tags, and the section/tool
+  handles currently overridden within each prompt. Return just enough metadata
+  (paths, hashes, last-modified timestamps) for MCP clients to render pickers
+  without loading full payloads.
 - **Errors**: bubble storage or permission issues using MCP error semantics so
   clients can display actionable messages.
 
-### `wink.get_override`
+### `wink.get_section_override`
 
-- **Input**: namespace (`ns`), prompt key (`prompt`), and tag (`tag`, default
-  `latest`).
-- **Behavior**: resolve the override via `PromptOverridesStore`, returning the
-  JSON payload, descriptor hints, and backing file path.
-- **Usage**: primary read primitive invoked by Codex/Claude when a user asks to
-  inspect an override.
+- **Input**: namespace (`ns`), prompt key (`prompt`), tag (`tag`, default
+  `latest`), and section path (`section_path`, slash-delimited).
+- **Behavior**: retrieve a single section override, including the rendered body,
+  expected hash, descriptor metadata, and backing file path. Return `null`
+  values when the section exists but is currently unmodified so clients can
+  seed new overrides without extra calls.
+- **Usage**: preferred read primitive for Codex/Claude when a user is editing a
+  specific section of a prompt.
 
-### `wink.upsert_override`
+### `wink.write_section_override`
 
-- **Input**: namespace, prompt key, tag (default `latest`), and a replacement
-  JSON payload.
-- **Behavior**: validate the payload against descriptor expectations when
-  available, persist the change through `PromptOverridesStore.upsert`, and
-  return the updated metadata (including the file path).
+- **Input**: namespace, prompt key, tag (default `latest`), section path, and
+  replacement markdown body. Accept optional `expected_hash` or
+  `descriptor_version` inputs so clients can guard against stale edits.
+- **Behavior**: validate the section path against the prompt descriptor,
+  confirm hash alignment, and persist only the targeted section body via
+  `PromptOverridesStore.upsert`. Preserve untouched sections and tool entries in
+  the existing override file.
 - **Safety**: require an explicit `confirm` flag so clients must opt in before
-  mutations occur.
+  mutations occur. Surface precise error messages when validation fails so
+  conversational clients can offer corrective guidance.
+
+### `wink.delete_section_override`
+
+- **Input**: namespace, prompt key, tag (default `latest`), and section path.
+- **Behavior**: remove the section entry from the override file while leaving
+  other sections and tool overrides intact. If the last override is removed,
+  delete the file entirely so future reads fall back to prompt defaults.
+- **Errors**: treat missing entries as no-ops but return structured messages so
+  clients can inform users when there was nothing to delete.
+
+### `wink.get_tool_override`
+
+- **Input**: namespace, prompt key, tag (default `latest`), and tool name.
+- **Behavior**: load a single tool override including description, parameter
+  metadata, expected contract hash, and backing file path. Return descriptor
+  defaults when the tool has no override yet.
+
+### `wink.write_tool_override`
+
+- **Input**: namespace, prompt key, tag (default `latest`), tool name, and the
+  override payload (description plus parameter descriptions). Accept optional
+  `expected_contract_hash` to protect against stale descriptors.
+- **Behavior**: validate the tool against the prompt descriptor, merge the new
+  payload into the existing override file without disturbing other entries, and
+  persist via `PromptOverridesStore.upsert`.
+- **Safety**: require the same `confirm` flag semantics as section writes.
+
+### `wink.delete_tool_override`
+
+- **Input**: namespace, prompt key, tag (default `latest`), and tool name.
+- **Behavior**: remove the specific tool override while keeping other entries
+  untouched. When the override file becomes empty, delete it to signal that the
+  prompt has returned to defaults.
+- **Errors**: missing tool entries should not error; report a structured
+  warning to the client instead.
 
 ## Client Integration Notes
 
