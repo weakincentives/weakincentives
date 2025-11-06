@@ -23,7 +23,7 @@ def iter_project_files(target: Path) -> list[Path]:
     return [
         path
         for path in sorted(target.rglob("*"))
-        if path.is_file() and path.suffix != ".pyc"
+        if path.is_file() and path.suffix == ".md"
     ]
 
 
@@ -39,25 +39,14 @@ def emit_file(path: Path, project_root: Path) -> None:
 
 def main() -> None:
     project_root = Path(__file__).resolve().parent
-    prelude_files = [project_root / "README.md", project_root / "ROADMAP.md"]
-    postlude_files = [
-        project_root / "pyproject.toml",
-        project_root / "openai_example.py",
-        project_root / "litellm_example.py",
-    ]
-    targets = [project_root / "specs", project_root / "src"]
+    readme_file = project_root / "README.md"
+    specs_dir = project_root / "specs"
 
-    for path in prelude_files:
-        if path.exists():
-            emit_file(path, project_root)
+    if readme_file.exists():
+        emit_file(readme_file, project_root)
 
-    for target in targets:
-        for path in iter_project_files(target):
-            emit_file(path, project_root)
-
-    for path in postlude_files:
-        if path.exists():
-            emit_file(path, project_root)
+    for path in iter_project_files(specs_dir):
+        emit_file(path, project_root)
 
 
 if __name__ == "__main__":
