@@ -64,6 +64,30 @@ omit it rather than emitting empty placeholders.
 `logging.exception()` automatically records a stack trace and SHOULD be used for
 exception paths where execution continues after capturing the error.
 
+## Structured Context Delivery
+
+Always pass structured fields via the logger's `extra` mapping (or the
+repository's helper wrappers) instead of formatting them into the message
+string. This keeps the message stable while downstream collectors receive the
+full context payload.
+
+```python
+logger.info(
+    "Tool execution completed",
+    extra={
+        "event": "tool.run",
+        "prompt_name": prompt.name,
+        "adapter": adapter_id,
+        "tool": tool.name,
+        "mode": tool.mode,
+    },
+)
+```
+
+When reporting exceptions, continue using `logging.exception` (or
+`logger.exception`) and include the same `extra` mapping so the structured
+fields propagate alongside the traceback.
+
 ## Error Handling Expectations
 
 - Publishing events MUST NOT raise from subscriber failures; the bus records
