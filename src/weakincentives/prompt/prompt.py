@@ -37,7 +37,7 @@ from .section import Section
 from .tool import Tool
 
 if TYPE_CHECKING:
-    from .versioning import PromptLike, PromptOverridesStore, ToolOverride
+    from .overrides import PromptLike, PromptOverridesStore, ToolOverride
 
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
 
@@ -212,7 +212,7 @@ class Prompt[OutputT]:
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt using overrides supplied by an overrides store."""
 
-        from .versioning import PromptDescriptor
+        from .overrides import PromptDescriptor
 
         descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
         override = overrides_store.resolve(descriptor=descriptor, tag=tag)

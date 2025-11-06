@@ -447,10 +447,8 @@ namespace, key, and tag hashes aligned.
 ```python
 from pathlib import Path
 
-from weakincentives.prompt.local_prompt_overrides_store import (
+from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
-)
-from weakincentives.prompt.versioning import (
     PromptDescriptor,
     PromptOverride,
     SectionOverride,

@@ -24,9 +24,8 @@ from code_reviewer_example import ReviewResponse, SunfishReviewSession
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.prompt import Prompt, SupportsDataclass
-from weakincentives.prompt.local_prompt_overrides_store import LocalPromptOverridesStore
+from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.prompt.versioning import PromptOverride
 from weakincentives.runtime.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session, ToolData
 

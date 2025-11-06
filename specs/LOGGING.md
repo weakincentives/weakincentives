@@ -11,7 +11,7 @@ created via `logging.getLogger(__name__)`.
 | `src/weakincentives/events.py` | `logger` | `exception` (ERROR) | "Error delivering event %s to handler %r" | `event_type` (`type(event).__name__`), `handler` |
 | `src/weakincentives/session/session.py` | `logger` | `exception` (ERROR) | "Reducer %r failed for data type %s" | `reducer`, `data_type` |
 | `src/weakincentives/adapters/shared.py` | `logger` (or override) | `exception` (ERROR) | "Tool '%s' raised an unexpected exception." | `tool_name` |
-| `src/weakincentives/prompt/local_prompt_overrides_store.py` | `_LOGGER` | `debug` | Missing override file, empty override payload, persistence success, delete-miss, unknown section/tool, stale hashes | `ns`, `prompt_key`, `tag`, `section_path`, `expected_hash`, `found_hash`, `tool_name` |
+| `src/weakincentives/prompt/overrides/local_store.py` | `_LOGGER` | `debug` | Missing override file, empty override payload, persistence success, delete-miss, unknown section/tool, stale hashes | `ns`, `prompt_key`, `tag`, `section_path`, `expected_hash`, `found_hash`, `tool_name` |
 | `src/weakincentives/tools/asteval.py` | `_logger` | `debug` | event="asteval.run" | `event`, `mode`, `stdout_len`, `stderr_len`, `write_count`, `code_preview` |
 
 ### Module Notes
@@ -22,7 +22,7 @@ created via `logging.getLogger(__name__)`.
   suppresses the exception, skips the reducer, and continues dispatching.
 - **adapters/shared.py**: Unexpected tool handler failures are logged at ERROR.
   The adapter converts the exception into a failed `ToolResult` and continues.
-- **prompt/local_prompt_overrides_store.py**: Diagnostic messages for override
+- **prompt/overrides/local_store.py**: Diagnostic messages for override
   lookups, persistence, and validation run at DEBUG. They use positional
   formatting to emit namespace, prompt key, tag, and mismatch details.
 - **tools/asteval.py**: Tool runs emit a DEBUG record with an explicit
