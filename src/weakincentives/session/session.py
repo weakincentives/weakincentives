@@ -264,29 +264,32 @@ class Session(SessionProtocol):
                             slice_type=data_type,
                         )
                     ]
+            event_bus = self._bus
 
-            context = build_reducer_context(session=self, event_bus=self._bus)
+        context = build_reducer_context(session=self, event_bus=event_bus)
 
-            for registration in registrations:
-                slice_type = registration.slice_type
+        for registration in registrations:
+            slice_type = registration.slice_type
+            with self._lock:
                 previous = self._state.get(slice_type, ())
-                try:
-                    result = registration.reducer(previous, event, context=context)
-                except Exception:  # log and continue
-                    reducer_name = getattr(
-                        registration.reducer, "__qualname__", repr(registration.reducer)
-                    )
-                    logger.exception(
-                        "Reducer application failed.",
-                        event="session_reducer_failed",
-                        context={
-                            "reducer": reducer_name,
-                            "data_type": data_type.__qualname__,
-                            "slice_type": slice_type.__qualname__,
-                        },
-                    )
-                    continue
-                normalized = tuple(result)
+            try:
+                result = registration.reducer(previous, event, context=context)
+            except Exception:  # log and continue
+                reducer_name = getattr(
+                    registration.reducer, "__qualname__", repr(registration.reducer)
+                )
+                logger.exception(
+                    "Reducer application failed.",
+                    event="session_reducer_failed",
+                    context={
+                        "reducer": reducer_name,
+                        "data_type": data_type.__qualname__,
+                        "slice_type": slice_type.__qualname__,
+                    },
+                )
+                continue
+            normalized = tuple(result)
+            with self._lock:
                 self._state[slice_type] = normalized
 
     def _attach_to_bus(self, bus: EventBus) -> None:
