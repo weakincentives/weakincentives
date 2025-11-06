@@ -5,9 +5,9 @@
 Chapters extend the prompt system with a coarse-grained switch that governs which
 parts of a prompt tree enter the model's context window. Each chapter groups a
 set of prompt sections that should either render together or remain completely
-hidden from the large language model. Adapters inspect chapters during query
-preparation to decide which content becomes visible for a given turn and which
-content stays dark.
+hidden from the large language model. Adapters inspect chapters during evaluation
+to decide which content becomes visible for a given turn and which content stays
+dark.
 
 ## Goals
 
@@ -19,8 +19,8 @@ content stays dark.
 - **Composable structure**: Chapters wrap existing `Section` trees without
   changing section authoring practices.
 - **Deterministic evaluation**: Decisions about open or closed state happen
-  before rendering, producing a new `Prompt` instance with only the active
-  sections.
+  inside adapter `evaluate()` before rendering, producing a new `Prompt`
+  instance with only the active sections.
 
 ## Chapter Template
 
@@ -48,7 +48,7 @@ class Chapter[ParamsT]:
 
 Chapter parameter types follow the same rules as section parameters: they are
 structured dataclasses specialized at definition time. A chapter may expose
-defaults that adapters can override during `prepare()`.
+defaults that adapters can override during adapter evaluation.
 
 ## Section Composition
 
@@ -57,20 +57,33 @@ individual sections still consult their own selectors. This allows a chapter to
 provide the coarse-grained boundary while sections inside continue to perform
 fine-grained feature gating.
 
-## Adapter Responsibilities
+## Evaluation Responsibilities
 
-Adapters gain a `prepare()` method that evaluates the current prompt context and
-returns a new `Prompt` instance scoped to the active chapters.
+Chapter gating happens inside `ProviderAdapter.evaluate()`. Implementations MUST
+accept a keyword argument that points at the section expressing the user's goal
+or intent so gating heuristics can anchor on a consistent signal.
 
 ```python
-def prepare(self, prompt: Prompt) -> Prompt:
-    """Return a prompt configured for `prompt`."""
+class ProviderAdapter(Protocol):
+    def evaluate(
+        self,
+        prompt: Prompt[OutputT],
+        *params: object,
+        goal_section_key: str,
+        parse_output: bool = True,
+        bus: EventBus,
+    ) -> PromptResponse[OutputT]:
+        ...
 ```
 
 1. Start from the base prompt definition, where all chapters default to the
    **closed** state.
+1. Locate the section identified by `goal_section_key`. The key MUST refer to a
+   concrete `Section.key` inside the prompt definition; adapters SHOULD raise a
+   configuration error if the key is missing or ambiguous.
 1. Inspect each chapter in declaration order and decide whether to open it for
-   the current prompt. Decisions MAY consider
+   the current evaluation. Decisions MAY consider
+   - the goal/intent section content,
    - the user message, accumulated thread history, or tool state,
    - chapter metadata (`key`, `title`, `description`), and
    - optional chapter-level parameters.
@@ -78,12 +91,14 @@ def prepare(self, prompt: Prompt) -> Prompt:
    prompt tree. Closed chapters contribute no sections and remain hidden.
 1. When a chapter is open, still respect section-level `enabled` callables to
    skip individual sections as needed.
-1. Return a fresh `Prompt` instance whose section tree contains only the open
-   chapter content. This ensures subsequent render calls operate on a snapshot of
-   the adapter's decision.
+1. Produce a fresh `Prompt` instance whose section tree contains only the open
+   chapter content and render that snapshot. This ensures subsequent render calls
+   operate on a deterministic decision.
 
 Adapters SHOULD surface telemetry describing which chapters opened or closed so
-operators can audit visibility choices.
+operators can audit visibility choices. They MAY log the goal section key and
+resolved text to explain the decision path, redacting sensitive payloads as
+needed.
 
 ## Lifecycle Considerations
 
