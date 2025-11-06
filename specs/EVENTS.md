@@ -107,6 +107,33 @@ the core synchronous semantics.
   - Implement `__str__` to emit a concise diagnostic (`"{handler!r} -> {error!r}"`) for logging and debugging.
 - Export `PublishResult` and `HandlerFailure` via `__all__` so downstream code can type against them.
 
+### Publisher Responsibilities
+
+- Publishers MUST treat a non-empty `PublishResult.errors` as a signal that delivery degraded.
+  - Emit a single log line that aggregates the `HandlerFailure` diagnostics in order. Reuse the
+    existing `logger.exception` calls for the individual failures but add a summary entry so
+    operators have a stable breadcrumb tying the publish call to its failures.
+  - After logging, publishers MAY surface additional diagnostics (for example by attaching the
+    aggregated string to a tracing span or structured log event) but MUST keep evaluation flows
+    uninterrupted by default.
+- Publishers SHOULD expose a configuration or contextual knob that lets callers opt into
+  propagation by invoking `PublishResult.raise_if_errors()`.
+- When publishers choose to ignore the errors, they MUST still log the aggregated diagnostic and
+  continue without raising.
+
+#### Adapter and Session Guidance
+
+- Adapter implementations emitting events during prompt execution SHOULD inspect the returned
+  `PublishResult` immediately.
+  - Call `raise_if_errors()` in environments where instrumentation failures invalidate the run
+    (for example, adapter conformance suites or integration tests that assert telemetry). This
+    keeps observability guarantees strict when required.
+  - Otherwise, adapters SHOULD log the aggregated diagnostic and proceed without raising so prompt
+    responses remain uninterrupted for end users.
+- Session managers that orchestrate multiple adapter invocations SHOULD mirror this behaviour:
+  raise on errors when running in verification or debugging modes, but treat telemetry failures as
+  non-fatal in production flows after logging the summary diagnostic.
+
 ### EventBus Contract Changes
 
 - Update the `EventBus` protocol so `publish` returns `PublishResult` instead of `None`.
@@ -139,3 +166,5 @@ the core synchronous semantics.
   need `assert bus.publish(...).ok` or assignment to `_` to avoid unused-value linting depending on context.
 - Consider adding a smoke test ensuring that `NullEventBus.publish` returns a result object with `handled_count == 0` and
   no errors.
+- Add targeted coverage in adapter/session tests to assert that a publish result with errors triggers the expected
+  aggregated logging or, when configured, a propagated `ExceptionGroup` via `raise_if_errors()`.
