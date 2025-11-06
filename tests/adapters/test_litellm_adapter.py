@@ -787,6 +787,98 @@ def test_litellm_adapter_surfaces_tool_validation_errors() -> None:
     assert "payload" not in serialized
 
 
+def test_litellm_adapter_surfaces_tool_type_errors() -> None:
+    module = cast(Any, _reload_module())
+
+    invoked = False
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context, params
+        nonlocal invoked
+        invoked = True
+        return ToolResult(
+            message="completed",
+            value=ToolPayload(answer="should not run"),
+        )
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+
+    prompt = Prompt(
+        ns=PROMPT_NS,
+        key="litellm-tool-type-error",
+        name="search-type-error",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": None}),
+    )
+    first = DummyResponse(
+        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
+    )
+    second = DummyResponse(
+        [
+            DummyChoice(
+                DummyMessage(content="Please adjust the payload.", tool_calls=None)
+            )
+        ]
+    )
+    completion = RecordingCompletion([first, second])
+    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
+
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
+
+    def record(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        tool_events.append(event)
+
+    bus.subscribe(ToolInvoked, record)
+
+    result = _evaluate_with_bus(
+        adapter,
+        prompt,
+        ToolParams(query="policies"),
+        bus=bus,
+    )
+
+    assert result.text == "Please adjust the payload."
+    assert result.output is None
+    assert invoked is False
+    assert len(tool_events) == 1
+    event = tool_events[0]
+    assert event.result.message == "Tool validation failed: query: value cannot be None"
+    assert event.result.success is False
+    assert event.result.value is None
+    assert event.call_id == "call_1"
+
+    second_request = completion.requests[1]
+    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    tool_message = second_messages[-1]
+    assert tool_message["role"] == "tool"
+    serialized = json.loads(tool_message["content"])
+    assert (
+        serialized["message"] == "Tool validation failed: query: value cannot be None"
+    )
+    assert serialized["success"] is False
+    assert "payload" not in serialized
+
+
 def test_litellm_adapter_reads_output_json_content_blocks() -> None:
     module = cast(Any, _reload_module())
 

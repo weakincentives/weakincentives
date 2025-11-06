@@ -256,14 +256,7 @@ def execute_tool_call(
     try:
         try:
             parsed_params = parse(tool.params_type, arguments_mapping, extra="forbid")
-        except TypeError as error:
-            raise PromptEvaluationError(
-                f"Failed to parse params for tool '{tool_name}'.",
-                prompt_name=prompt_name,
-                phase="tool",
-                provider_payload=provider_payload,
-            ) from error  # pragma: no cover - defensive
-        except ValueError as error:
+        except (TypeError, ValueError) as error:
             tool_params = cast(
                 SupportsDataclass,
                 _RejectedToolParams(
