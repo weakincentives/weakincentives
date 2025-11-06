@@ -133,10 +133,11 @@ class ProviderAdapter(Protocol):
    chapter content and render that snapshot. This ensures subsequent render calls
    operate on a deterministic decision.
 
-Adapters SHOULD surface telemetry describing which chapters opened or closed so
-operators can audit visibility choices. They SHOULD also log which
-`chapters_expansion_policy` governed the decision along with the goal section
-key and resolved text, redacting sensitive payloads as needed.
+Adapters MUST thread chapter metadata and resolved state into the prompt
+descriptor so optimization tooling can inspect visibility choices. Dedicated
+telemetry or logging streams for chapter decisions remain out of scope; rely on
+existing descriptor metadata and redaction guidance when sharing prompt
+snapshots.
 
 ## Lifecycle Considerations
 
@@ -144,17 +145,13 @@ key and resolved text, redacting sensitive payloads as needed.
   chapters ship. Adapters must explicitly opt in to opening them.
 - **Overrides**: Prompt override tooling interacts with chapters the same way it
   interacts with sections. Overrides for closed chapters remain inert until the
-  chapter opens.
+  chapter opens, and adapters do not need bespoke hooks to mutate chapter
+  defaults at runtime.
+- **Per-evaluation decisions**: Adapters MUST recompute chapter visibility for
+  every evaluation instead of caching the outcome for a session so shifts in
+  user intent immediately influence chapter state.
 - **Nested chapters**: Chapters SHOULD remain flat to avoid nested visibility
   calculations. When nesting is unavoidable, the outer chapter's state gates all
   inner content.
 - **Versioning**: Include chapter metadata in prompt descriptors so versioned
   prompts capture the visibility structure.
-
-## Open Questions
-
-- How do we expose chapter decisions in logs while protecting sensitive content?
-- Should adapters cache chapter decisions for the duration of a session?
-- Do we need adapter-provided hooks to override chapter defaults at runtime?
-
-These items should be resolved before stabilizing the API.
