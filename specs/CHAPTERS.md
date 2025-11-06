@@ -59,26 +59,26 @@ fine-grained feature gating.
 
 ## Adapter Responsibilities
 
-Adapters gain a `prepare()` method that evaluates the current query context and
+Adapters gain a `prepare()` method that evaluates the current prompt context and
 returns a new `Prompt` instance scoped to the active chapters.
 
 ```python
-def prepare(self, query: Query) -> Prompt:
-    """Return a prompt configured for `query`."""
+def prepare(self, prompt: Prompt) -> Prompt:
+    """Return a prompt configured for `prompt`."""
 ```
 
 1. Start from the base prompt definition, where all chapters default to the
    **closed** state.
-2. Inspect each chapter in declaration order and decide whether to open it for
-   the current query. Decisions MAY consider
+1. Inspect each chapter in declaration order and decide whether to open it for
+   the current prompt. Decisions MAY consider
    - the user message, accumulated thread history, or tool state,
    - chapter metadata (`key`, `title`, `description`), and
    - optional chapter-level parameters.
-3. For each chapter resolved to the open state, include its sections in the new
+1. For each chapter resolved to the open state, include its sections in the new
    prompt tree. Closed chapters contribute no sections and remain hidden.
-4. When a chapter is open, still respect section-level `enabled` callables to
+1. When a chapter is open, still respect section-level `enabled` callables to
    skip individual sections as needed.
-5. Return a fresh `Prompt` instance whose section tree contains only the open
+1. Return a fresh `Prompt` instance whose section tree contains only the open
    chapter content. This ensures subsequent render calls operate on a snapshot of
    the adapter's decision.
 
