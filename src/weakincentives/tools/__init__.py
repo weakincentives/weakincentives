@@ -40,6 +40,7 @@ from .planning import (
 from .subagents import (
     DispatchSubagentsParams,
     SubagentResult,
+    SubagentsSection,
     dispatch_subagents,
 )
 from .vfs import (
@@ -80,6 +81,7 @@ __all__ = [
     "SetupPlan",
     "StepStatus",
     "SubagentResult",
+    "SubagentsSection",
     "ToolValidationError",
     "UpdateStep",
     "VfsFile",

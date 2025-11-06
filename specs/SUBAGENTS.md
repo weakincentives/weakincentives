@@ -13,7 +13,7 @@ No other sections, knobs, or pre-baked templates are required. The parent prompt
 
 ## Section Requirements
 
-`SubagentsSection` lives in `src/weakincentives/prompt/subagents.py` and is exported from `weakincentives.prompt`. When rendered it MUST:
+`SubagentsSection` lives alongside the tool in `src/weakincentives/tools/subagents.py` and is exported from `weakincentives.tools`. When rendered it MUST:
 
 1. Briefly explain that the parent agent can offload parallelizable steps by calling `dispatch_subagents`.
 1. State that every delegation must include recap bullets so the parent can audit the child’s plan.
@@ -80,11 +80,8 @@ Every tool invocation MUST execute the following steps:
 from dataclasses import dataclass
 
 from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt
-from weakincentives.prompt.subagents import SubagentsSection
-from weakincentives.tools.subagents import (
-    DispatchSubagentsParams,
-    dispatch_subagents,
-)
+from weakincentives.tools import SubagentsSection, dispatch_subagents
+from weakincentives.tools.subagents import DispatchSubagentsParams
 
 
 @dataclass(slots=True)
