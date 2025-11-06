@@ -782,13 +782,27 @@ class ConversationRunner[OutputT]:
             tool_results=tuple(self._tool_events),
             provider_payload=self._provider_payload,
         )
-        _ = self.bus.publish(
+        publish_result = self.bus.publish(
             PromptExecuted(
                 prompt_name=self.prompt_name,
                 adapter=self.adapter_name,
                 result=cast(PromptResponse[object], response_payload),
             )
         )
+        if not publish_result.ok:
+            failure_handlers = [
+                getattr(failure.handler, "__qualname__", repr(failure.handler))
+                for failure in publish_result.errors
+            ]
+            self._log.error(
+                "Prompt execution publish failed.",
+                event="prompt_execution_publish_failed",
+                context={
+                    "failure_count": len(publish_result.errors),
+                    "failed_handlers": failure_handlers,
+                },
+            )
+            publish_result.raise_if_errors()
         self._log.info(
             "Prompt execution completed.",
             event="prompt_execution_succeeded",
@@ -797,6 +811,7 @@ class ConversationRunner[OutputT]:
                 "has_output": output is not None,
                 "text_length": len(text_value or "") if text_value else 0,
                 "structured_output": self._should_parse_structured_output,
+                "handler_count": publish_result.handled_count,
             },
         )
         return response_payload

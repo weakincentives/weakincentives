@@ -90,9 +90,10 @@ def serialize_tool_message(
 
 
 class RecordingBus(EventBus):
-    def __init__(self, *, fail_tool: bool = False) -> None:
+    def __init__(self, *, fail_tool: bool = False, fail_prompt: bool = False) -> None:
         self.events: list[object] = []
         self.fail_tool = fail_tool
+        self.fail_prompt = fail_prompt
 
     def subscribe(
         self, event_type: type[object], handler: EventHandler
@@ -102,19 +103,22 @@ class RecordingBus(EventBus):
     def publish(self, event: object) -> PublishResult:
         self.events.append(event)
         if self.fail_tool and isinstance(event, ToolInvoked):
-
-            def failure_handler(_event: object) -> None:  # pragma: no cover - defensive
-                return None
-
-            failure = HandlerFailure(
-                handler=failure_handler, error=RuntimeError("reducer failure")
-            )
-            return PublishResult(
-                event=event,
-                handlers_invoked=(failure_handler,),
-                errors=(failure,),
-            )
+            return self._failure_result(event, "reducer failure")
+        if self.fail_prompt and isinstance(event, PromptExecuted):
+            return self._failure_result(event, "prompt publish failure")
         return PublishResult(event=event, handlers_invoked=(), errors=())
+
+    @staticmethod
+    def _failure_result(event: object, message: str) -> PublishResult:
+        def failure_handler(_event: object) -> None:  # pragma: no cover - defensive
+            return None
+
+        failure = HandlerFailure(handler=failure_handler, error=RuntimeError(message))
+        return PublishResult(
+            event=event,
+            handlers_invoked=(failure_handler,),
+            errors=(failure,),
+        )
 
 
 def build_runner(
@@ -164,6 +168,27 @@ def test_conversation_runner_success() -> None:
 
     assert response.text == "Hello"
     assert response.output is None
+    assert isinstance(bus.events[-1], PromptExecuted)
+    assert provider.calls[0]["messages"][0]["content"] == "system"
+
+
+def test_conversation_runner_raises_on_prompt_publish_failure() -> None:
+    rendered = RenderedPrompt(
+        text="system",
+        output_type=None,
+        container=None,
+        allow_extra_keys=None,
+    )
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
+    provider = ProviderStub(responses)
+    bus = RecordingBus(fail_prompt=True)
+
+    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
+
+    with pytest.raises(ExceptionGroup) as exc_info:
+        runner.run()
+
+    assert "prompt publish failure" in str(exc_info.value)
     assert isinstance(bus.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
 
