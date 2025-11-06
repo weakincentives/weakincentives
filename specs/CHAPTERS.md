@@ -7,7 +7,9 @@ parts of a prompt tree enter the model's context window. Each chapter groups a
 set of prompt sections that should either render together or remain completely
 hidden from the large language model. Adapters inspect chapters during evaluation
 to decide which content becomes visible for a given turn and which content stays
-dark.
+dark. Conceptually a chapter is a specialized `Section` subclass whose value
+comes from aggregating other sections; it never renders standalone content or
+tools.
 
 ## Goals
 
@@ -45,6 +47,9 @@ class Chapter[ParamsT]:
   is open.
 - `enabled` receives the effective chapter parameters and returns whether the
   chapter may open. When absent the chapter remains eligible to open.
+- Chapters remain section derivatives—they expose the same metadata surface but
+  do not declare their own tools. Tool declarations stay scoped to the sections
+  that the chapter aggregates.
 
 Chapter parameter types follow the same rules as section parameters: they are
 structured dataclasses specialized at definition time. A chapter may expose
@@ -76,7 +81,8 @@ MUST document the additional states alongside the adapter.
 Chapters do not replace section-level `enabled` callables. When a chapter opens,
 individual sections still consult their own selectors. This allows a chapter to
 provide the coarse-grained boundary while sections inside continue to perform
-fine-grained feature gating.
+fine-grained feature gating. Chapters also never own tools directly; only the
+sections they contain register tool handlers.
 
 ## Evaluation Responsibilities
 
