@@ -35,11 +35,11 @@ from weakincentives.prompt import (
     SubagentsSection,
     SupportsDataclass,
 )
-from weakincentives.prompt.local_prompt_overrides_store import (
+from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
+    PromptOverridesError,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.prompt.versioning import PromptOverridesError
 from weakincentives.runtime.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump

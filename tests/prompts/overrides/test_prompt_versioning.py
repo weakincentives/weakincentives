@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 
 from weakincentives.prompt import MarkdownSection, Prompt, Section, Tool
-from weakincentives.prompt.versioning import (
+from weakincentives.prompt.overrides import (
     PromptDescriptor,
     PromptOverride,
     PromptOverridesStore,

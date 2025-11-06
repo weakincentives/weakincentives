@@ -22,10 +22,8 @@ import pytest
 
 from weakincentives.prompt import MarkdownSection, Prompt, Tool
 from weakincentives.prompt._types import SupportsDataclass
-from weakincentives.prompt.local_prompt_overrides_store import (
+from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
-)
-from weakincentives.prompt.versioning import (
     PromptDescriptor,
     PromptOverride,
     PromptOverridesError,
@@ -164,7 +162,7 @@ def test_root_detection_manual_traversal(
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    from weakincentives.prompt import local_prompt_overrides_store as store_module
+    from weakincentives.prompt.overrides import local_store as store_module
 
     def _raise_file_not_found(*_args: object, **_kwargs: object) -> None:
         raise FileNotFoundError
@@ -687,7 +685,7 @@ def test_root_detection_git_command_success(
 
     prompt = _build_prompt()
 
-    from weakincentives.prompt import local_prompt_overrides_store as store_module
+    from weakincentives.prompt.overrides import local_store as store_module
 
     @dataclass
     class _Result:
@@ -716,7 +714,7 @@ def test_root_detection_without_git_raises(
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    from weakincentives.prompt import local_prompt_overrides_store as store_module
+    from weakincentives.prompt.overrides import local_store as store_module
 
     monkeypatch.setattr(
         store_module.subprocess,
@@ -742,7 +740,7 @@ def test_git_toplevel_empty_output_falls_back(
 
     prompt = _build_prompt()
 
-    from weakincentives.prompt import local_prompt_overrides_store as store_module
+    from weakincentives.prompt.overrides import local_store as store_module
 
     class _BlankResult:
         stdout = ""

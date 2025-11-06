@@ -17,9 +17,9 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Protocol
 
-from ..serde.dataclass_serde import schema
-from ._types import SupportsDataclass
-from .tool import Tool
+from ...serde.dataclass_serde import schema
+from .._types import SupportsDataclass
+from ..tool import Tool
 
 
 def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:

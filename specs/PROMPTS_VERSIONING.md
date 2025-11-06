@@ -150,7 +150,7 @@ A convenience `render` method MAY delegate to `render_with_overrides` when no st
 from dataclasses import dataclass
 
 from weakincentives.prompt import Prompt, MarkdownSection
-from weakincentives.prompt.versioning import (
+from weakincentives.prompt.overrides import (
     PromptDescriptor,
     PromptOverride,
     PromptOverridesStore,
