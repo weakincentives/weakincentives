@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Final, cast
 
@@ -46,8 +46,6 @@ class Chapter[ParamsT: SupportsDataclass]:
     sections: tuple[Section[Any], ...] = ()
     default_params: ParamsT | None = None
     enabled: Callable[[ParamsT], bool] | None = None
-    params_type: type[ParamsT] = field(init=False, repr=False)
-    param_type: type[ParamsT] = field(init=False, repr=False)
 
     _params_type: ClassVar[type[SupportsDataclass] | None] = None
 
@@ -60,8 +58,6 @@ class Chapter[ParamsT: SupportsDataclass]:
                 "Chapter must be instantiated with a concrete ParamsT type."
             )
 
-        self.params_type: type[ParamsT] = params_type
-        self.param_type: type[ParamsT] = params_type
         self.key = self._normalize_key(self.key)
 
         normalized_sections: list[Section[SupportsDataclass]] = []
@@ -77,6 +73,14 @@ class Chapter[ParamsT: SupportsDataclass]:
             raise TypeError(
                 "Chapter default_params must match the declared ParamsT type."
             )
+
+    @property
+    def params_type(self) -> type[ParamsT]:
+        return cast(type[ParamsT], self.__class__._params_type)
+
+    @property
+    def param_type(self) -> type[ParamsT]:
+        return self.params_type
 
     def is_enabled(self, params: ParamsT | None) -> bool:
         """Return True when the chapter should open for the provided params."""
