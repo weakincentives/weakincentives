@@ -257,6 +257,8 @@ _PLANNING_SECTION_HEADER: Final[str] = (
 _PLANNING_SECTION_BODY: Final[str] = (
     "- Start with `planning_setup_plan` to set an objective (<=240 ASCII"
     " characters) and optional initial steps.\n"
+    "- Step identifiers use the `S###` format and stay stable even if"
+    " other steps are removed—reference them for every update.\n"
     "- Keep steps concise (<=160 ASCII characters for titles, <=512 for"
     " details).\n"
     "- Extend plans with `planning_add_step` and refine steps with"
@@ -356,7 +358,8 @@ def _build_tools(
                 name="planning_setup_plan",
                 description=(
                     "Create or replace the session plan with a short objective and "
-                    "optional seed steps."
+                    "optional seed steps; identifiers restart at `S001` for the new"
+                    " snapshot."
                 ),
                 handler=suite.setup_plan,
                 accepts_overrides=accepts_overrides,
@@ -365,7 +368,8 @@ def _build_tools(
                 name="planning_add_step",
                 description=(
                     "Append one or more queued steps to the active plan. Provide "
-                    "step titles and optional details."
+                    "step titles and optional details; new steps receive the next "
+                    "`S###` identifier regardless of prior deletions."
                 ),
                 handler=suite.add_step,
                 accepts_overrides=accepts_overrides,
