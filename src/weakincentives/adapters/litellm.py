@@ -18,10 +18,10 @@ from collections.abc import Mapping, Sequence
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
-from ..events import EventBus
-from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
+from ..runtime.events import EventBus
+from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
 from ._provider_protocols import (
     ProviderChoice,

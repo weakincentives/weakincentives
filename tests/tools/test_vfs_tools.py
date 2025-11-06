@@ -23,9 +23,9 @@ import pytest
 import weakincentives.tools.vfs as vfs_module
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.adapters.core import SessionProtocol
-from weakincentives.events import InProcessEventBus
 from weakincentives.prompt.tool import ToolContext, ToolResult
-from weakincentives.session import Session, select_latest
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
     DeleteEntry,
     HostMount,

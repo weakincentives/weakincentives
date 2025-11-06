@@ -18,9 +18,9 @@ from typing import cast
 import pytest
 
 from weakincentives.adapters.core import PromptResponse
-from weakincentives.events import InProcessEventBus, PromptExecuted, ToolInvoked
 from weakincentives.prompt.tool import ToolResult
-from weakincentives.session import (
+from weakincentives.runtime.events import InProcessEventBus, PromptExecuted, ToolInvoked
+from weakincentives.runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
     Session,
@@ -36,7 +36,7 @@ from weakincentives.session import (
     select_where,
     upsert_by,
 )
-from weakincentives.session.session import _append_tool_data
+from weakincentives.runtime.session.session import _append_tool_data
 
 
 @dataclass(slots=True, frozen=True)

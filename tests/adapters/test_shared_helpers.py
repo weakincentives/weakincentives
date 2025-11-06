@@ -24,11 +24,11 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
-from weakincentives.events import EventBus, NullEventBus
 from weakincentives.prompt import Prompt
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.session import Session
+from weakincentives.runtime.events import EventBus, NullEventBus
+from weakincentives.runtime.session import Session
 
 
 def test_first_choice_returns_first_item() -> None:

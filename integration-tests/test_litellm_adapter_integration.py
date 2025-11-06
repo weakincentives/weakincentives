@@ -23,9 +23,9 @@ import pytest
 
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.litellm import LiteLLMAdapter
-from weakincentives.events import NullEventBus
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
-from weakincentives.session import Session
+from weakincentives.runtime.events import NullEventBus
+from weakincentives.runtime.session import Session
 
 pytest.importorskip("litellm")
 

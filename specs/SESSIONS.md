@@ -16,7 +16,7 @@ all state transitions are pure functions driven by the event stream.
    `(tuple[T, ...], DataEvent[T], *, context=ReducerContext) -> tuple[T, ...]`
    functions. Reducers run synchronously on the publisher thread.
 1. **Event bus integration** – Sessions subscribe to `ToolInvoked` and `PromptExecuted`
-   from `weakincentives.events`. They ignore every other event type.
+   from `weakincentives.runtime.events`. They ignore every other event type.
 1. **Default behavior that works** – Without custom reducers, the Session appends new
    dataclass values (deduping by equality) and keeps results immutable.
 1. **Flexible slices** – Reducers may manage a slice whose element type differs from
@@ -35,7 +35,7 @@ all state transitions are pure functions driven by the event stream.
 
 ```python
 from weakincentives.prompt._types import SupportsDataclass
-from weakincentives.session import ReducerContext
+from weakincentives.runtime.session import ReducerContext
 
 @dataclass(slots=True, frozen=True)
 class ToolData:

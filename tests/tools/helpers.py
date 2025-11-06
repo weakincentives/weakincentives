@@ -21,9 +21,9 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
-from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
 ResultT = TypeVar("ResultT", bound=SupportsDataclass)

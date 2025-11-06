@@ -162,10 +162,10 @@ The section follows the shared prompt conventions (`specs/PROMPTS.md`) and adds 
 
 ```python
 from dataclasses import dataclass
-from weakincentives.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.prompt import MarkdownSection, Prompt
-from weakincentives.session import Session
-from weakincentives.session.selectors import select_latest
+from weakincentives.runtime.session import Session
+from weakincentives.runtime.session.selectors import select_latest
 from weakincentives.tools import vfs
 
 bus = InProcessEventBus()

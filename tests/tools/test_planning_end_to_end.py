@@ -15,8 +15,8 @@
 from __future__ import annotations
 
 from tests.tools.helpers import invoke_tool
-from weakincentives.events import InProcessEventBus
-from weakincentives.session import Session, select_latest
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
     AddStep,
     ClearPlan,

@@ -17,7 +17,7 @@ multi-user concepts are exposed.
 
 ## Session Integration
 
-- `PlanningToolsSection` requires `ToolContext.session` to expose a `Session` instance from `weakincentives.session`.
+- `PlanningToolsSection` requires `ToolContext.session` to expose a `Session` instance from `weakincentives.runtime.session`.
 - During initialisation the section registers `replace_latest` for the `Plan` slice so every tool result replaces the
   current plan snapshot automatically.
 - Reducers produce copy-on-write `Plan` instances; every invocation builds a new snapshot that replaces the previous
@@ -144,10 +144,10 @@ The section follows the standard prompt system rules (see `specs/PROMPTS.md`) an
 
 ```python
 from dataclasses import dataclass
-from weakincentives.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.prompt import MarkdownSection, Prompt
-from weakincentives.session import Session
-from weakincentives.session.selectors import select_latest
+from weakincentives.runtime.session import Session
+from weakincentives.runtime.session.selectors import select_latest
 from weakincentives.tools import planning
 
 @dataclass
