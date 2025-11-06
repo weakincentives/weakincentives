@@ -38,7 +38,7 @@ class ProviderAdapter(Protocol):
         prompt: Prompt[OutputT],
         *params: object,
         goal_section_key: str,
-        chapters_expansion_policy: ChaptersExpansionPolicy = ChaptersExpansionPolicy.INTENT_CLASSIFIER,
+        chapters_expansion_policy: ChaptersExpansionPolicy = ChaptersExpansionPolicy.ALL_INCLUDED,
         parse_output: bool = True,
         bus: EventBus,
     ) -> PromptResponse[OutputT]:
@@ -53,7 +53,8 @@ provided `Prompt` instance.
   user's immediate goal or intent. Chapter gating MUST anchor on this section as
   described in `specs/CHAPTERS.md`.
 - `chapters_expansion_policy`: Keyword-only selector describing how aggressively
-  the adapter may open chapters for this evaluation. Implementations MUST
+  the adapter may open chapters for this evaluation. `ALL_INCLUDED` is the
+  default and mirrors the behavior described in `specs/CHAPTERS.md`. Implementations MUST
   support at least the three core states defined in `specs/CHAPTERS.md` and MAY
   introduce provider-specific extensions.
 - `parse_output`: When `True`, adapters call `parse_structured_output` on the final message if the prompt declares structured

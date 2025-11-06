@@ -98,7 +98,7 @@ class ProviderAdapter(Protocol):
         prompt: Prompt[OutputT],
         *params: object,
         goal_section_key: str,
-        chapters_expansion_policy: ChaptersExpansionPolicy = ChaptersExpansionPolicy.INTENT_CLASSIFIER,
+        chapters_expansion_policy: ChaptersExpansionPolicy = ChaptersExpansionPolicy.ALL_INCLUDED,
         parse_output: bool = True,
         bus: EventBus,
     ) -> PromptResponse[OutputT]:
@@ -109,7 +109,8 @@ class ProviderAdapter(Protocol):
    **closed** state.
 1. Honor the selected `chapters_expansion_policy` to decide how chapters may
    open:
-   - `ALL_INCLUDED`: every chapter opens without additional adjudication.
+   - `ALL_INCLUDED`: every chapter opens without additional adjudication and is
+     the default when callers omit the argument.
    - `LLM_TOOL`: the adapter exposes a tool that lets the model request
      additional chapters during evaluation.
    - `INTENT_CLASSIFIER`: the adapter uses a deterministic classifier (rule-
