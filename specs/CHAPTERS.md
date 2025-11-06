@@ -50,6 +50,27 @@ Chapter parameter types follow the same rules as section parameters: they are
 structured dataclasses specialized at definition time. A chapter may expose
 defaults that adapters can override during adapter evaluation.
 
+## Expansion Policy
+
+Adapters interpret a `ChaptersExpansionPolicy` enum to decide how aggressively
+they may reveal chapter content during evaluation.
+
+```python
+class ChaptersExpansionPolicy(StrEnum):
+    ALL_INCLUDED = "all_included"         # open every chapter before rendering
+    LLM_TOOL = "llm_tool"                 # allow the model to request chapters via tool calls
+    INTENT_CLASSIFIER = "intent_classifier"  # use classifier heuristics tied to goal section content
+```
+
+- `ALL_INCLUDED` trades privacy for completeness by rendering every chapter.
+- `LLM_TOOL` keeps chapters closed initially but registers a tool that lets the
+  large language model request additional chapters by key at runtime.
+- `INTENT_CLASSIFIER` runs a deterministic gate (rules or secondary model)
+  before rendering to open only chapters aligned with the goal section context.
+
+Implementations MAY extend the enum with provider-specific strategies, but they
+MUST document the additional states alongside the adapter.
+
 ## Section Composition
 
 Chapters do not replace section-level `enabled` callables. When a chapter opens,
@@ -60,8 +81,9 @@ fine-grained feature gating.
 ## Evaluation Responsibilities
 
 Chapter gating happens inside `ProviderAdapter.evaluate()`. Implementations MUST
-accept a keyword argument that points at the section expressing the user's goal
-or intent so gating heuristics can anchor on a consistent signal.
+accept keyword arguments that (a) point at the section expressing the user's
+goal or intent so gating heuristics can anchor on a consistent signal and (b)
+describe how the adapter may expand chapters beyond the default closed state.
 
 ```python
 class ProviderAdapter(Protocol):
@@ -70,6 +92,7 @@ class ProviderAdapter(Protocol):
         prompt: Prompt[OutputT],
         *params: object,
         goal_section_key: str,
+        chapters_expansion_policy: ChaptersExpansionPolicy = ChaptersExpansionPolicy.INTENT_CLASSIFIER,
         parse_output: bool = True,
         bus: EventBus,
     ) -> PromptResponse[OutputT]:
@@ -78,6 +101,14 @@ class ProviderAdapter(Protocol):
 
 1. Start from the base prompt definition, where all chapters default to the
    **closed** state.
+1. Honor the selected `chapters_expansion_policy` to decide how chapters may
+   open:
+   - `ALL_INCLUDED`: every chapter opens without additional adjudication.
+   - `LLM_TOOL`: the adapter exposes a tool that lets the model request
+     additional chapters during evaluation.
+   - `INTENT_CLASSIFIER`: the adapter uses a deterministic classifier (rule-
+     based or model-driven) anchored on the `goal_section_key` content to decide
+     which chapters to open before rendering.
 1. Locate the section identified by `goal_section_key`. The key MUST refer to a
    concrete `Section.key` inside the prompt definition; adapters SHOULD raise a
    configuration error if the key is missing or ambiguous.
@@ -96,9 +127,9 @@ class ProviderAdapter(Protocol):
    operate on a deterministic decision.
 
 Adapters SHOULD surface telemetry describing which chapters opened or closed so
-operators can audit visibility choices. They MAY log the goal section key and
-resolved text to explain the decision path, redacting sensitive payloads as
-needed.
+operators can audit visibility choices. They SHOULD also log which
+`chapters_expansion_policy` governed the decision along with the goal section
+key and resolved text, redacting sensitive payloads as needed.
 
 ## Lifecycle Considerations
 
