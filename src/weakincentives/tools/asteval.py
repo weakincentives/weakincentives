@@ -33,7 +33,13 @@ from weakref import WeakSet
 from ..logging import StructuredLogger, get_logger
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
-from ..session import ReducerEvent, Session, select_latest
+from ..session import (
+    ReducerContextProtocol,
+    ReducerEvent,
+    Session,
+    TypedReducer,
+    select_latest,
+)
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
@@ -772,12 +778,14 @@ class _AstevalToolSuite:
         return ToolResult(message=message, value=result)
 
 
-def _make_eval_result_reducer() -> Callable[
-    [tuple[VirtualFileSystem, ...], ReducerEvent], tuple[VirtualFileSystem, ...]
-]:
+def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
     def reducer(
-        slice_values: tuple[VirtualFileSystem, ...], event: ReducerEvent
+        slice_values: tuple[VirtualFileSystem, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
+        del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
         value = cast(EvalResult, event.value)
         if not value.writes:

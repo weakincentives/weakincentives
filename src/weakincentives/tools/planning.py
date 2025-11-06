@@ -23,7 +23,13 @@ from weakref import WeakSet
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
-from ..session import ReducerEvent, Session, replace_latest, select_latest
+from ..session import (
+    ReducerContextProtocol,
+    ReducerEvent,
+    Session,
+    replace_latest,
+    select_latest,
+)
 from .errors import ToolValidationError
 
 PlanStatus = Literal["active", "completed", "abandoned"]
@@ -543,8 +549,12 @@ class _PlanningToolSuite:
 
 
 def _setup_plan_reducer(
-    slice_values: tuple[Plan, ...], event: ReducerEvent
+    slice_values: tuple[Plan, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
+    del context
     params = cast(SetupPlan, event.value)
     steps = tuple(
         PlanStep(
@@ -561,8 +571,12 @@ def _setup_plan_reducer(
 
 
 def _add_step_reducer(
-    slice_values: tuple[Plan, ...], event: ReducerEvent
+    slice_values: tuple[Plan, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
+    del context
     previous = _latest_plan(slice_values)
     if previous is None:
         return slice_values
@@ -589,8 +603,12 @@ def _add_step_reducer(
 
 
 def _update_step_reducer(
-    slice_values: tuple[Plan, ...], event: ReducerEvent
+    slice_values: tuple[Plan, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
+    del context
     previous = _latest_plan(slice_values)
     if previous is None:
         return slice_values
@@ -620,8 +638,12 @@ def _update_step_reducer(
 
 
 def _mark_step_reducer(
-    slice_values: tuple[Plan, ...], event: ReducerEvent
+    slice_values: tuple[Plan, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
+    del context
     previous = _latest_plan(slice_values)
     if previous is None:
         return slice_values
@@ -657,8 +679,12 @@ def _mark_step_reducer(
 
 
 def _clear_plan_reducer(
-    slice_values: tuple[Plan, ...], event: ReducerEvent
+    slice_values: tuple[Plan, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
+    del context
     previous = _latest_plan(slice_values)
     if previous is None:
         return slice_values

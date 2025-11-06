@@ -14,10 +14,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Protocol, TypeVar
 
+from ..events import EventBus
 from ..prompt._types import SupportsDataclass
+from .protocols import SessionProtocol
 
 
 class ReducerEvent(Protocol):
@@ -30,7 +31,23 @@ class ReducerEvent(Protocol):
 S = TypeVar("S")
 
 
-TypedReducer = Callable[[tuple[S, ...], ReducerEvent], tuple[S, ...]]
+class ReducerContextProtocol(Protocol):
+    """Protocol implemented by reducer context objects."""
+
+    session: SessionProtocol
+    event_bus: EventBus
+
+
+class TypedReducer(Protocol[S]):
+    """Protocol for reducer callables maintained by :class:`Session`."""
+
+    def __call__(
+        self,
+        slice_values: tuple[S, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContextProtocol,
+    ) -> tuple[S, ...]: ...
 
 
 __all__ = ["ReducerEvent", "TypedReducer"]

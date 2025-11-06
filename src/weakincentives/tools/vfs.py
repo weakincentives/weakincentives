@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,7 +26,14 @@ from weakref import WeakSet
 from ..prompt import SupportsDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
-from ..session import ReducerEvent, Session, replace_latest, select_latest
+from ..session import (
+    ReducerContextProtocol,
+    ReducerEvent,
+    Session,
+    TypedReducer,
+    replace_latest,
+    select_latest,
+)
 from .errors import ToolValidationError
 
 FileEncoding = str
@@ -686,12 +693,14 @@ def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
             yield current / name
 
 
-def _make_write_reducer() -> Callable[
-    [tuple[VirtualFileSystem, ...], ReducerEvent], tuple[VirtualFileSystem, ...]
-]:
+def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
     def reducer(
-        slice_values: tuple[VirtualFileSystem, ...], event: ReducerEvent
+        slice_values: tuple[VirtualFileSystem, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
+        del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
         params = cast(WriteFile, event.value)
         timestamp = _now()
@@ -730,12 +739,14 @@ def _make_write_reducer() -> Callable[
     return reducer
 
 
-def _make_delete_reducer() -> Callable[
-    [tuple[VirtualFileSystem, ...], ReducerEvent], tuple[VirtualFileSystem, ...]
-]:
+def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
     def reducer(
-        slice_values: tuple[VirtualFileSystem, ...], event: ReducerEvent
+        slice_values: tuple[VirtualFileSystem, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
+        del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
         params = cast(DeleteEntry, event.value)
         target = params.path.segments
