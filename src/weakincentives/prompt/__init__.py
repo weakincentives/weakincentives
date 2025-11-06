@@ -34,7 +34,6 @@ from .markdown import MarkdownSection
 from .prompt import Prompt
 from .section import Section
 from .structured_output import OutputParseError, parse_structured_output
-from .subagents import SubagentsSection
 from .tool import Tool, ToolContext, ToolHandler
 from .tool_result import ToolResult
 
@@ -54,7 +53,6 @@ __all__ = [
     "RecapSection",
     "Section",
     "SectionPath",
-    "SubagentsSection",
     "SupportsDataclass",
     "Tool",
     "ToolContext",

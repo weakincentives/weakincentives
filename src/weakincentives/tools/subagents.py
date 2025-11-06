@@ -17,11 +17,12 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, is_dataclass
-from typing import Any, Final, cast
+from typing import Any, Final, cast, override
 
 from ..adapters.core import PromptResponse
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.prompt import Prompt, RenderedPrompt
+from ..prompt.section import Section
 from ..prompt.tool import Tool, ToolContext
 from ..prompt.tool_result import ToolResult
 from ..serde import dump
@@ -167,8 +168,42 @@ dispatch_subagents = Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]](
 )
 
 
+@dataclass(slots=True)
+class _SubagentsSectionParams:
+    """Placeholder params container for the subagents section."""
+
+    pass
+
+
+_DELEGATION_BODY: Final[str] = (
+    "Use `dispatch_subagents` to offload work that can proceed in parallel.\n"
+    "Each delegation must include recap bullet points so the parent can audit\n"
+    "the child plan. Prefer dispatching concurrent tasks over running them\n"
+    "sequentially yourself."
+)
+
+
+class SubagentsSection(Section[_SubagentsSectionParams]):
+    """Explain the delegation workflow and expose the dispatch tool."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            title="Delegation",
+            key="subagents",
+            default_params=_SubagentsSectionParams(),
+            tools=(dispatch_subagents,),
+            accepts_overrides=False,
+        )
+
+    @override
+    def render(self, params: _SubagentsSectionParams, depth: int) -> str:
+        heading = "#" * (depth + 2)
+        return f"{heading} {self.title}\n\n{_DELEGATION_BODY}"
+
+
 __all__ = [
     "DispatchSubagentsParams",
     "SubagentResult",
+    "SubagentsSection",
     "dispatch_subagents",
 ]

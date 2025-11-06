@@ -12,8 +12,7 @@
 
 """Coverage tests for the SubagentsSection helper."""
 
-from weakincentives.prompt.subagents import SubagentsSection
-from weakincentives.tools.subagents import dispatch_subagents
+from weakincentives.tools import SubagentsSection, dispatch_subagents
 
 
 def test_subagents_section_render_mentions_tool() -> None:
