@@ -12,7 +12,8 @@ all state transitions are pure functions driven by the event stream.
 1. **Typed routing** – Dataclass payloads/outputs map 1:1 to dedicated slices, while
    every tool invocation is also recorded in the generic `ToolData` slice even when
    the handler fails and returns `value=None`.
-1. **Pure reducers** – State transitions are pure `(tuple[T, ...], DataEvent[T]) -> tuple[T, ...]`
+1. **Pure reducers** – State transitions are pure
+   `(tuple[T, ...], DataEvent[T], *, context=ReducerContext) -> tuple[T, ...]`
    functions. Reducers run synchronously on the publisher thread.
 1. **Event bus integration** – Sessions subscribe to `ToolInvoked` and `PromptExecuted`
    from `weakincentives.events`. They ignore every other event type.
@@ -34,6 +35,7 @@ all state transitions are pure functions driven by the event stream.
 
 ```python
 from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.session import ReducerContext
 
 @dataclass(slots=True, frozen=True)
 class ToolData:
@@ -47,7 +49,14 @@ class PromptData(Generic[T]):
 
 DataEvent = ToolData | PromptData[SupportsDataclass]
 
-TypedReducer[S] = Callable[[tuple[S, ...], DataEvent], tuple[S, ...]]
+class TypedReducer(Protocol[S]):
+    def __call__(
+        self,
+        slice_values: tuple[S, ...],
+        event: DataEvent,
+        *,
+        context: ReducerContext,
+    ) -> tuple[S, ...]: ...
 ```
 
 Session state is an immutable mapping from a **slice type** to a tuple of dataclass
@@ -104,11 +113,17 @@ class Session:
 
 ### Reducers
 
-Provide three reducers:
+Provide three reducers (each accepts the keyword-only ``context`` argument and may
+ignore it when unused):
 
 1. `append` – Default behavior, dedupes by equality.
 1. `upsert_by(key_fn)` – Replaces items that share the same derived key.
 1. `replace_latest` – Stores only the most recent value.
+
+``ReducerContext`` instances bundle the active ``Session`` and event bus for the
+current invocation. Callers construct a fresh context per event and pass it as the
+``context=`` keyword argument so reducers can inspect session state or publish their
+own events without resorting to global lookups.
 
 ### Selectors
 

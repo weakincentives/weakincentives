@@ -14,6 +14,7 @@
 
 from ._types import ReducerEvent, TypedReducer
 from .protocols import SessionProtocol, SnapshotProtocol
+from .reducer_context import ReducerContext, build_reducer_context
 from .reducers import append, replace_latest, upsert_by
 from .selectors import select_all, select_latest, select_where
 from .session import DataEvent, PromptData, Session, ToolData
@@ -27,6 +28,7 @@ __all__ = [
     "DataEvent",
     "PromptData",
     "ReducerEvent",
+    "ReducerContext",
     "Session",
     "SessionProtocol",
     "Snapshot",
@@ -35,6 +37,7 @@ __all__ = [
     "SnapshotSerializationError",
     "ToolData",
     "TypedReducer",
+    "build_reducer_context",
     "append",
     "replace_latest",
     "select_all",

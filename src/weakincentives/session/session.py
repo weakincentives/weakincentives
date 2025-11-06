@@ -24,6 +24,7 @@ from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ..prompt._types import SupportsDataclass
 from ._types import ReducerEvent, TypedReducer
+from .reducer_context import ReducerContext, build_reducer_context
 from .protocols import SnapshotProtocol
 from .reducers import append
 from .snapshots import (
@@ -48,8 +49,12 @@ _TOOL_DATA_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolDat
 
 
 def _append_tool_data(
-    slice_values: tuple[ToolData, ...], event: ReducerEvent
+    slice_values: tuple[ToolData, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContext,
 ) -> tuple[ToolData, ...]:
+    del context
     tool_data = cast(ToolData, event)
     return (*slice_values, tool_data)
 
@@ -257,11 +262,13 @@ class Session:
                         )
                     ]
 
+            context = build_reducer_context(session=self, event_bus=self._bus)
+
             for registration in registrations:
                 slice_type = registration.slice_type
                 previous = self._state.get(slice_type, ())
                 try:
-                    result = registration.reducer(previous, event)
+                    result = registration.reducer(previous, event, context=context)
                 except Exception:  # log and continue
                     reducer_name = getattr(
                         registration.reducer, "__qualname__", repr(registration.reducer)
