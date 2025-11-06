@@ -255,6 +255,68 @@ def test_adapter_tool_execution_validation_error(
     assert "payload" not in content
 
 
+def test_adapter_tool_execution_rejects_extra_arguments(
+    adapter_harness: AdapterHarness,
+) -> None:
+    invoked = False
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context, params
+        nonlocal invoked
+        invoked = True
+        return ToolResult(
+            message="completed",
+            value=ToolPayload(answer="should not run"),
+        )
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+    prompt = _build_prompt(adapter_harness, tool)
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "policies", "extra": True}),
+    )
+    responses = _build_responses(
+        tool_call=tool_call,
+        final_message=DummyMessage(
+            content="Please adjust the payload.", tool_calls=None
+        ),
+    )
+    adapter, requests = adapter_harness.build(responses)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    events = _record_tool_events(bus)
+
+    result = adapter.evaluate(  # type: ignore[call-arg]
+        prompt,
+        ToolParams(query="policies"),
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
+
+    assert invoked is False
+    assert len(events) == 1
+    invocation = events[0]
+    assert invocation.result.success is False
+    assert invocation.result.value is None
+    assert "Extra keys not permitted" in invocation.result.message
+    assert invocation is result.tool_results[0]
+
+    tool_message = _second_tool_message(requests)
+    content_raw = cast(str, tool_message["content"])
+    content = json.loads(content_raw)
+    assert content["success"] is False
+    assert "Extra keys not permitted" in content["message"]
+    assert "payload" not in content
+
+
 def test_adapter_tool_execution_unexpected_exception(
     adapter_harness: AdapterHarness,
 ) -> None:

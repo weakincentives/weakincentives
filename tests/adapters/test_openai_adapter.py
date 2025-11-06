@@ -1155,7 +1155,7 @@ def test_openai_adapter_raises_for_unknown_tool() -> None:
     assert err.value.phase == "tool"
 
 
-def test_openai_adapter_raises_when_tool_params_invalid() -> None:
+def test_openai_adapter_handles_invalid_tool_params() -> None:
     module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
@@ -1183,21 +1183,27 @@ def test_openai_adapter_raises_when_tool_params_invalid() -> None:
         name="search_notes",
         arguments=json.dumps({}),
     )
-    response = DummyResponse(
-        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
-    )
-    client = DummyOpenAIClient([response])
+    responses = [
+        DummyResponse(
+            [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
+        ),
+        DummyResponse([DummyChoice(DummyMessage(content="Try again"))]),
+    ]
+    client = DummyOpenAIClient(responses)
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
-            adapter,
-            prompt,
-            ToolParams(query="policies"),
-        )
+    result = _evaluate_with_bus(
+        adapter,
+        prompt,
+        ToolParams(query="policies"),
+    )
 
-    assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    assert result.text == "Try again"
+    assert len(result.tool_results) == 1
+    invocation = result.tool_results[0]
+    assert invocation.result.success is False
+    assert invocation.result.value is None
+    assert "Missing required field" in invocation.result.message
 
 
 def test_openai_adapter_records_handler_failures() -> None:

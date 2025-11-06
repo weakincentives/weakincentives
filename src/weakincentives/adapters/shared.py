@@ -50,6 +50,14 @@ logger: StructuredLogger = get_logger(
 )
 
 
+@dataclass(slots=True)
+class _RejectedToolParams:
+    """Dataclass used when provider arguments fail validation."""
+
+    raw_arguments: dict[str, Any]
+    error: str
+
+
 class ToolArgumentsParser(Protocol):
     def __call__(
         self,
@@ -236,16 +244,6 @@ def execute_tool_call(
         provider_payload=provider_payload,
     )
 
-    try:
-        parsed_params = parse(tool.params_type, arguments_mapping, extra="forbid")
-    except (TypeError, ValueError) as error:
-        raise PromptEvaluationError(
-            f"Failed to parse params for tool '{tool_name}'.",
-            prompt_name=prompt_name,
-            phase="tool",
-            provider_payload=provider_payload,
-        ) from error
-    tool_params = cast(SupportsDataclass, parsed_params)
     call_id = getattr(tool_call, "id", None)
     log = (logger_override or logger).bind(
         adapter=adapter_name,
@@ -253,17 +251,46 @@ def execute_tool_call(
         tool=tool_name,
         call_id=call_id,
     )
+    tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsDataclass]
-    context = ToolContext(
-        prompt=prompt,
-        rendered_prompt=rendered_prompt,
-        adapter=adapter,
-        session=session,
-        event_bus=bus,
-    )
     try:
+        try:
+            parsed_params = parse(tool.params_type, arguments_mapping, extra="forbid")
+        except TypeError as error:
+            raise PromptEvaluationError(
+                f"Failed to parse params for tool '{tool_name}'.",
+                prompt_name=prompt_name,
+                phase="tool",
+                provider_payload=provider_payload,
+            ) from error  # pragma: no cover - defensive
+        except ValueError as error:
+            tool_params = cast(
+                SupportsDataclass,
+                _RejectedToolParams(
+                    raw_arguments=dict(arguments_mapping),
+                    error=str(error),
+                ),
+            )
+            raise ToolValidationError(str(error)) from error
+
+        tool_params = cast(SupportsDataclass, parsed_params)
+        context = ToolContext(
+            prompt=prompt,
+            rendered_prompt=rendered_prompt,
+            adapter=adapter,
+            session=session,
+            event_bus=bus,
+        )
         tool_result = handler(tool_params, context=context)
     except ToolValidationError as error:
+        if tool_params is None:  # pragma: no cover - defensive
+            tool_params = cast(
+                SupportsDataclass,
+                _RejectedToolParams(
+                    raw_arguments=dict(arguments_mapping),
+                    error=str(error),
+                ),
+            )
         log.warning(
             "Tool validation failed.",
             event="tool_validation_failed",
@@ -294,6 +321,9 @@ def execute_tool_call(
                 "has_value": tool_result.value is not None,
             },
         )
+
+    if tool_params is None:  # pragma: no cover - defensive
+        raise RuntimeError("Tool parameters were not parsed.")
 
     snapshot = session.snapshot()
     invocation = ToolInvoked(
