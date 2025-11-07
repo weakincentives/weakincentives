@@ -39,8 +39,10 @@ from .planning import (
 )
 from .subagents import (
     DispatchSubagentsParams,
+    SubagentIsolationLevel,
     SubagentResult,
     SubagentsSection,
+    build_dispatch_subagents_tool,
     dispatch_subagents,
 )
 from .vfs import (
@@ -80,6 +82,7 @@ __all__ = [
     "ReadPlan",
     "SetupPlan",
     "StepStatus",
+    "SubagentIsolationLevel",
     "SubagentResult",
     "SubagentsSection",
     "ToolValidationError",
@@ -89,5 +92,6 @@ __all__ = [
     "VfsToolsSection",
     "VirtualFileSystem",
     "WriteFile",
+    "build_dispatch_subagents_tool",
     "dispatch_subagents",
 ]
