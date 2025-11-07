@@ -25,7 +25,7 @@ from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, Rec
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import ToolContext
-from weakincentives.session import Session
+from weakincentives.session import Session, SessionProtocol
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
     SubagentIsolationLevel,
@@ -56,8 +56,8 @@ class RecordingAdapter(ProviderAdapter[Any]):
         empty_text: set[str] | None = None,
     ) -> None:
         self.calls: list[tuple[str, tuple[str, ...]]] = []
-        self.sessions: list[Session | None] = []
-        self.buses: list[InProcessEventBus] = []
+        self.sessions: list[SessionProtocol] = []
+        self.buses: list[EventBus] = []
         self._failures = failures or set()
         self._delays = delays or {}
         self._structured_outputs = structured_outputs or {}
@@ -69,8 +69,8 @@ class RecordingAdapter(ProviderAdapter[Any]):
         prompt: Prompt[Any],
         *params: SupportsDataclass,
         parse_output: bool = True,
-        bus: InProcessEventBus,
-        session: Session | None = None,
+        bus: EventBus,
+        session: SessionProtocol,
     ) -> PromptResponse[Any]:
         delegation = cast(DelegationParams, params[0])
         recap = (
