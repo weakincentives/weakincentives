@@ -47,9 +47,11 @@ all nested work spawned during that evaluation.
 1. **Rendered Prompt Metadata** – After validation the orchestrator stores the
    deadline on the rendered prompt instance (`RenderedPrompt.deadline: datetime | None`). All child prompts created during the run inherit this value unless a
    stricter deadline is provided explicitly.
-1. **Tool Context** – Extend `ToolContext` with a `deadline: datetime | None`
-   attribute. The orchestrator populates it before every handler invocation so
-   tools can self-limit work or spawn nested prompts with the same deadline.
+1. **Tool Context** – `ToolContext` already exposes the active
+   `RenderedPrompt`, so handlers read the deadline from
+   `context.rendered_prompt.deadline`. Orchestrators MUST ensure the
+   `RenderedPrompt` attached to each invocation carries the appropriate
+   timestamp before dispatching the tool.
 
 ## Enforcement Rules
 
