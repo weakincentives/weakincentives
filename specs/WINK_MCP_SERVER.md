@@ -1,81 +1,91 @@
-# wink MCP Server Specification
+# wink MCP server requirements
 
-## Overview
+## Purpose
 
-The `wink` CLI now serves exclusively as the launcher for a Model Context Protocol (MCP) server. The CLI should expose the prompt override surface area already implemented in `weakincentives`, letting Codex, Claude Desktop, and other MCP-compatible clients inspect and mutate overrides while delegating all storage and validation to the core library.
+The `wink` CLI exists to start a Model Context Protocol (MCP) server that
+exposes the prompt override workflows already implemented in
+`weakincentives`. MCP-compatible clients (Codex, Claude Desktop, etc.) should
+be able to list, inspect, and mutate overrides while the core library handles
+storage, validation, and rendering.
 
-## Runtime & Dependencies
+## Packaging
 
-- **CLI extra**: Ship the `wink` command and its MCP dependencies as a dedicated optional extra (for example, `[project.optional-dependencies.wink]` in `pyproject.toml`). Installing `weakincentives[wink]` must pull in the CLI entry point, the MCP transport/bindings, and any runtime glue so hosts can enable the server with a single flag.
-- **Model adapters**: The server defaults to the OpenAI adapter for `gpt-5`. Declare the adapter dependency inside the same `wink` extra (alongside any other runtime adapters) so a single install flow captures the CLI surface and LLM requirements.
-- **Local configuration**: The server reads overrides directories, environment flags, and optional auth tokens from a TOML or YAML config file. Provide a sample config and reference paths in documentation so headless clients can launch deterministically.
-- **Logging & diagnostics**: Standardize on structured, single-line logs (JSON or key-value) and expose `--log-level` and `--log-format` flags to let hosting clients control verbosity.
+- Ship the CLI and every runtime dependency required to host the MCP server
+  under a single optional extra (for example,
+  `[project.optional-dependencies.wink]` in `pyproject.toml`). Installing
+  `weakincentives[wink]` must provide the `wink` entry point and the MCP
+  transport/bindings so the server comes up without additional manual installs.
 
-## Execution Model
+## Runtime
 
-1. `wink mcp` (or an equivalent entry point) spins up the MCP server, advertises available tools, and blocks until the client disconnects.
-1. Resolve configuration strictly from CLI flags and a static config file so Codex/Claude can start the server without environment discovery.
-1. Helper routines that need an LLM session should default to the `gpt-5` model via the OpenAI adapter but accept overrides in the config.
-1. Emit structured logs throughout startup, capability registration, and shutdown. Errors must map to MCP error semantics so clients can surface actionable messages.
+1. `wink mcp` (or an equivalent command) starts the server, advertises its
+   tools, and blocks until the client disconnects.
+1. Resolve configuration from CLI flags and a static config file (TOML or YAML)
+   that captures override directories, environment flags, and any optional
+   authentication. Document a sample configuration so headless launchers can
+   boot deterministically.
+1. Emit structured, single-line logs and map failures onto MCP error semantics
+   so clients receive actionable diagnostics.
 
-## MCP Capabilities
+## Tools
 
-Expose the smallest viable toolset for prompt override workflows. Each tool must operate on individual sections or tools to avoid clobbering complete override files.
+Expose a minimal set of MCP tools, each acting on a specific section or tool
+definition so clients can make precise changes.
 
-### `wink.list_overrides`
+- **`wink.list_overrides`** — Accepts an optional namespace filter. Returns
+  namespaces, prompt keys, tags, and overridden handles along with lightweight
+  metadata (paths, hashes, timestamps) suitable for UI pickers. Propagate
+  storage or permission errors through MCP error payloads.
+- **`wink.get_section_override`** — Takes `ns`, `prompt`, `tag` (default
+  `latest`), and a slash-delimited `section_path`. Returns the rendered body,
+  descriptor metadata, expected hash, and backing file path. When the section
+  exists but is unmodified, return explicit `null` values so clients can seed a
+  new override without extra calls.
+- **`wink.write_section_override`** — Accepts namespace, prompt key, tag,
+  section path, replacement Markdown, and optional guards such as
+  `expected_hash` or `descriptor_version`. Validate the descriptor path,
+  confirm hash alignment, and persist only the targeted section through
+  `PromptOverridesStore.upsert`. Require a `confirm` flag and surface precise
+  validation errors.
+- **`wink.delete_section_override`** — Accepts namespace, prompt key, tag, and
+  section path. Remove the specific section while leaving other overrides
+  intact. Delete the override file if it becomes empty, but treat missing
+  entries as no-ops that still return structured warnings.
+- **`wink.get_tool_override`** — Accepts namespace, prompt key, tag, and tool
+  name. Return the override payload (description, parameter metadata, contract
+  hash, backing path) or descriptor defaults when no override exists.
+- **`wink.write_tool_override`** — Accepts namespace, prompt key, tag, tool
+  name, override payload, and an optional `expected_contract_hash`. Validate
+  against the descriptor, merge the payload without disturbing other entries,
+  persist via `PromptOverridesStore.upsert`, and require the same `confirm`
+  semantics as section writes.
+- **`wink.delete_tool_override`** — Accepts namespace, prompt key, tag, and
+  tool name. Remove only the targeted tool override, deleting the file when it
+  becomes empty. Missing entries should return structured warnings rather than
+  errors.
 
-- **Input**: Optional namespace filter.
-- **Output**: Namespaces, prompt keys, tags, and handles for overridden sections/tools. Include metadata (storage path, hash, last modified timestamp) so clients can render pickers without fetching full payloads.
-- **Errors**: Propagate storage and permission issues through MCP error payloads.
+## Client integration
 
-### `wink.get_section_override`
+- Publish a sample configuration for Codex/Claude that invokes
+  `wink mcp --config ~/.config/wink/config.toml`, sets `WINK_OVERRIDES_DIR`, and
+  pins the working directory. Ensure the server shuts down cleanly once the
+  client disconnects.
+- Keep tool responses compact to stay within MCP token budgets, and always
+  include namespace, prompt key, and tag context so conversational clients can
+  chain follow-up calls.
 
-- **Input**: `ns`, `prompt`, `tag` (default `latest`), `section_path` (slash-delimited).
-- **Output**: Rendered body, expected hash, descriptor metadata, and the backing file path. Return explicit `null` values when the section exists but is unmodified.
-- **Usage**: Primary read primitive when a user edits a specific section.
+## Operations
 
-### `wink.write_section_override`
-
-- **Input**: Namespace, prompt key, tag (default `latest`), section path, replacement Markdown body, and optional `expected_hash` or `descriptor_version` guards.
-- **Behavior**: Validate the section path against the prompt descriptor, ensure hash alignment, and persist only the targeted section via `PromptOverridesStore.upsert` while leaving other entries untouched.
-- **Safety**: Require an explicit `confirm` flag before applying mutations. Provide precise validation errors for conversational guidance.
-
-### `wink.delete_section_override`
-
-- **Input**: Namespace, prompt key, tag (default `latest`), section path.
-- **Behavior**: Remove the specified section from the override file without affecting other entries. Delete the file entirely when all overrides are gone so reads fall back to defaults.
-- **Errors**: Missing entries are treated as no-ops but return structured warnings.
-
-### `wink.get_tool_override`
-
-- **Input**: Namespace, prompt key, tag (default `latest`), tool name.
-- **Behavior**: Return the tool override (description, parameters, contract hash, backing path) or descriptor defaults if no override exists.
-
-### `wink.write_tool_override`
-
-- **Input**: Namespace, prompt key, tag (default `latest`), tool name, override payload (description and parameter metadata), optional `expected_contract_hash` guard.
-- **Behavior**: Validate the tool against the descriptor, merge the payload into the existing override file, and persist via `PromptOverridesStore.upsert`.
-- **Safety**: Enforce the same `confirm` flag semantics as section writes.
-
-### `wink.delete_tool_override`
-
-- **Input**: Namespace, prompt key, tag (default `latest`), tool name.
-- **Behavior**: Remove the target tool override while preserving other entries. Delete the override file when it becomes empty to restore defaults.
-- **Errors**: Surface structured warnings when the tool entry is absent.
-
-## Client Integration
-
-- Publish a sample MCP client configuration that invokes `wink mcp --config ~/.config/wink/config.toml`, sets `WINK_OVERRIDES_DIR`, and pins the working directory. Confirm that the server exits cleanly when the client disconnects so headless launchers do not hang.
-- Keep tool responses terse. Claude and Codex enforce tight token budgets; return only the metadata a client needs to render UI controls or stage follow-up calls.
-- Include namespace, prompt key, and tag in every response payload so conversational clients can compose subsequent requests without extra lookups.
-
-## Operational Guidance
-
-- Ship sensible defaults for override directories and config file locations, while still honoring environment variable overrides for multi-client setups.
-- Emit detailed diagnostics when validation fails or an override cannot be found. MCP clients surface these messages verbatim.
-- Encourage users to version control overrides by including the backing file path in all mutation responses.
+- Provide sensible default locations for override directories and config
+  files, while allowing environment variable overrides for multi-client
+  setups.
+- Emit clear diagnostics when validation fails or when an override cannot be
+  located; MCP clients pass these messages directly to users.
+- Surface backing file paths in mutation responses so users can version-control
+  overrides.
 
 ## Extensibility
 
-- Keep the default tool surface minimal. Additional helpers (diffs, descriptor discovery, streaming notifications) can arrive later without breaking existing clients.
-- Evaluate adding streaming or notification channels once the MCP ecosystem stabilizes; the initial release should stick to synchronous tool calls.
+Keep the initial surface area lean. Additional helpers (diff generation,
+descriptor discovery, streaming notifications) can arrive later without
+disrupting the base MCP workflow.
