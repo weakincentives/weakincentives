@@ -75,10 +75,15 @@ class _DummyPrompt:
     ns: str
     key: str
     _sections: tuple[_DummySectionNode, ...]
+    _chapters: tuple[object, ...] = ()
 
     @property
     def sections(self) -> tuple[_DummySectionNode, ...]:
         return self._sections
+
+    @property
+    def chapters(self) -> tuple[object, ...]:
+        return self._chapters
 
 
 def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:

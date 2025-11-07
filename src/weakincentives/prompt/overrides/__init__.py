@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from .local_store import LocalPromptOverridesStore
 from .versioning import (
+    ChapterDescriptor,
+    ChapterOverride,
     PromptDescriptor,
     PromptLike,
     PromptOverride,
@@ -30,6 +32,8 @@ from .versioning import (
 )
 
 __all__ = [
+    "ChapterDescriptor",
+    "ChapterOverride",
     "LocalPromptOverridesStore",
     "PromptDescriptor",
     "PromptLike",

@@ -38,7 +38,12 @@ from .section import Section
 from .tool import Tool
 
 if TYPE_CHECKING:
-    from .overrides import PromptLike, PromptOverridesStore, ToolOverride
+    from .overrides import (
+        ChapterOverride,
+        PromptLike,
+        PromptOverridesStore,
+        ToolOverride,
+    )
 
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
 
@@ -182,9 +187,9 @@ class Prompt[OutputT]:
                 )
             seen_chapter_keys.add(normalized.key)
             normalized_chapters.append(normalized)
-        self._chapters: tuple[Chapter[SupportsDataclass], ...] = tuple(
-            normalized_chapters
-        )
+        base_chapters = tuple(normalized_chapters)
+        self._base_chapters: tuple[Chapter[SupportsDataclass], ...] = base_chapters
+        self._chapters: tuple[Chapter[SupportsDataclass], ...] = base_chapters
         self._chapter_key_registry: dict[str, Chapter[SupportsDataclass]] = {
             chapter.key: chapter for chapter in self._chapters
         }
@@ -219,6 +224,34 @@ class Prompt[OutputT]:
                 depth=0,
             )
 
+    def _reset_chapters(self) -> None:
+        self._chapters = self._base_chapters
+        self._chapter_key_registry = {
+            chapter.key: chapter for chapter in self._chapters
+        }
+
+    def _apply_chapter_overrides(
+        self,
+        overrides: Mapping[tuple[str, ...], ChapterOverride],
+    ) -> None:
+        if not overrides:
+            self._reset_chapters()
+            return
+
+        patched: list[Chapter[SupportsDataclass]] = []
+        for chapter in self._base_chapters:
+            override = overrides.get((chapter.key,))
+            if override is not None and override.description != chapter.description:
+                patched_chapter = replace(chapter, description=override.description)
+            else:
+                patched_chapter = chapter
+            patched.append(patched_chapter)
+
+        self._chapters = tuple(patched)
+        self._chapter_key_registry = {
+            chapter.key: chapter for chapter in self._chapters
+        }
+
     def render(
         self,
         *params: SupportsDataclass,
@@ -226,6 +259,7 @@ class Prompt[OutputT]:
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt using provided parameter dataclass instances."""
 
+        self._reset_chapters()
         param_lookup = self._collect_param_lookup(params)
         return self._render_internal(
             param_lookup,
@@ -243,10 +277,12 @@ class Prompt[OutputT]:
 
         from .overrides import PromptDescriptor
 
+        self._reset_chapters()
         descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
         override = overrides_store.resolve(descriptor=descriptor, tag=tag)
 
         overrides: dict[SectionPath, str] = {}
+        chapter_overrides: dict[tuple[str, ...], ChapterOverride] = {}
         tool_overrides: dict[str, ToolOverride] = {}
         if (
             override is not None
@@ -263,6 +299,18 @@ class Prompt[OutputT]:
                     and section_override.expected_hash == descriptor_hash
                 ):
                     overrides[path] = section_override.body
+            if override.chapters:
+                descriptor_chapter_index = {
+                    chapter.path: chapter.description_hash
+                    for chapter in descriptor.chapters
+                }
+                for path, chapter_override in override.chapters.items():
+                    descriptor_hash = descriptor_chapter_index.get(path)
+                    if (
+                        descriptor_hash is not None
+                        and chapter_override.expected_hash == descriptor_hash
+                    ):
+                        chapter_overrides[path] = chapter_override
             if override.tool_overrides:
                 descriptor_tool_index = {
                     tool.name: tool.contract_hash for tool in descriptor.tools
@@ -275,6 +323,7 @@ class Prompt[OutputT]:
                     ):
                         tool_overrides[name] = tool_override
 
+        self._apply_chapter_overrides(chapter_overrides)
         param_lookup = self._collect_param_lookup(params)
         return self._render_internal(
             param_lookup,

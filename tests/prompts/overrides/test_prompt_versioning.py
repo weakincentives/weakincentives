@@ -15,8 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 
-from weakincentives.prompt import MarkdownSection, Prompt, Section, Tool
+from weakincentives.prompt import Chapter, MarkdownSection, Prompt, Section, Tool
 from weakincentives.prompt.overrides import (
+    ChapterDescriptor,
     PromptDescriptor,
     PromptOverride,
     PromptOverridesStore,
@@ -128,6 +129,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
             content_hash=sha256(b"Greet ${subject} warmly.").hexdigest(),
         )
     ]
+    assert descriptor.chapters == []
     assert descriptor.tools == []
 
 
@@ -155,6 +157,7 @@ def test_prompt_descriptor_excludes_response_format_section() -> None:
     assert ("response-format",) not in paths
     assert descriptor.tools == []
     assert descriptor.ns == "tests/versioning"
+    assert descriptor.chapters == []
 
 
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
@@ -168,6 +171,7 @@ def test_prompt_descriptor_ignores_non_hash_sections() -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
 
     assert descriptor.sections == []
+    assert descriptor.chapters == []
     assert descriptor.tools == []
 
 
@@ -186,6 +190,42 @@ def test_prompt_descriptor_collects_tools() -> None:
     assert descriptor.tools == [
         ToolDescriptor(
             path=("greeting",), name="greeter", contract_hash=expected_contract
+        )
+    ]
+    assert descriptor.chapters == []
+
+
+def test_prompt_descriptor_collects_chapters() -> None:
+    chapter_section = MarkdownSection[_GreetingParams](
+        title="Background",
+        template="Provide ${subject} context.",
+        key="context",
+    )
+    chapter = Chapter[_GreetingParams](
+        key="background",
+        title="Background",
+        description="Share prior history.",
+        sections=(chapter_section,),
+    )
+    prompt = Prompt(
+        ns="tests/versioning",
+        key="versioned-greeting-chapter",
+        sections=[
+            MarkdownSection[_GreetingParams](
+                title="Greeting",
+                template="Greet ${subject} warmly.",
+                key="greeting",
+            )
+        ],
+        chapters=[chapter],
+    )
+
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    assert descriptor.chapters == [
+        ChapterDescriptor(
+            path=("background",),
+            description_hash=hash_json("Share prior history."),
         )
     ]
 
@@ -215,6 +255,7 @@ def test_prompt_descriptor_collects_sequence_tools() -> None:
             contract_hash=expected_contract,
         )
     ]
+    assert descriptor.chapters == []
 
 
 def test_prompt_descriptor_skips_tools_without_override_acceptance() -> None:

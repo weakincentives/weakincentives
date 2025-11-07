@@ -29,6 +29,9 @@ from ...runtime.logging import StructuredLogger, get_logger
 from .._types import SupportsDataclass
 from ..tool import Tool
 from .versioning import (
+    ChapterDescriptor,
+    ChapterLike,
+    ChapterOverride,
     PromptDescriptor,
     PromptLike,
     PromptOverride,
@@ -102,9 +105,10 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         self._validate_header(payload, descriptor, normalized_tag, file_path)
 
         sections = self._load_sections(payload.get("sections", {}), descriptor)
+        chapters = self._load_chapters(payload.get("chapters", {}), descriptor)
         tools = self._load_tools(payload.get("tools", {}), descriptor)
 
-        if not sections and not tools:
+        if not sections and not chapters and not tools:
             _LOGGER.debug(
                 "No applicable overrides remain after validation.",
                 event="prompt_override_empty",
@@ -121,6 +125,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             prompt_key=descriptor.key,
             tag=tag,
             sections=sections,
+            chapters=chapters,
             tool_overrides=tools,
         )
         _LOGGER.info(
@@ -131,6 +136,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "prompt_key": descriptor.key,
                 "tag": normalized_tag,
                 "section_count": len(sections),
+                "chapter_count": len(chapters),
                 "tool_count": len(tools),
             },
         )
@@ -158,6 +164,10 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             override.sections,
             descriptor,
         )
+        validated_chapters = self._validate_chapters_for_write(
+            override.chapters,
+            descriptor,
+        )
         validated_tools = self._validate_tools_for_write(
             override.tool_overrides,
             descriptor,
@@ -169,6 +179,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             "prompt_key": descriptor.key,
             "tag": normalized_tag,
             "sections": self._serialize_sections(validated_sections),
+            "chapters": self._serialize_chapters(validated_chapters),
             "tools": self._serialize_tools(validated_tools),
         }
 
@@ -180,6 +191,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             prompt_key=descriptor.key,
             tag=normalized_tag,
             sections=validated_sections,
+            chapters=validated_chapters,
             tool_overrides=validated_tools,
         )
         _LOGGER.info(
@@ -190,6 +202,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "prompt_key": descriptor.key,
                 "tag": normalized_tag,
                 "section_count": len(validated_sections),
+                "chapter_count": len(validated_chapters),
                 "tool_count": len(validated_tools),
             },
         )
@@ -248,6 +261,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 return existing
 
             sections = self._seed_sections(prompt, descriptor)
+            chapters = self._seed_chapters(prompt, descriptor)
             tools = self._seed_tools(prompt, descriptor)
 
             seed_override = PromptOverride(
@@ -255,6 +269,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 prompt_key=descriptor.key,
                 tag=normalized_tag,
                 sections=sections,
+                chapters=chapters,
                 tool_overrides=tools,
             )
             return self.upsert(descriptor, seed_override)
@@ -370,6 +385,11 @@ class LocalPromptOverridesStore(PromptOverridesStore):
     ) -> dict[tuple[str, ...], SectionDescriptor]:
         return {section.path: section for section in descriptor.sections}
 
+    def _chapter_descriptor_index(
+        self, descriptor: PromptDescriptor
+    ) -> dict[tuple[str, ...], ChapterDescriptor]:
+        return {chapter.path: chapter for chapter in descriptor.chapters}
+
     def _tool_descriptor_index(
         self, descriptor: PromptDescriptor
     ) -> dict[str, ToolDescriptor]:
@@ -443,6 +463,79 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         return SectionOverride(
             expected_hash=expected_hash,
             body=body,
+        )
+
+    @overload
+    def _normalize_chapter_override(
+        self,
+        *,
+        path: tuple[str, ...],
+        descriptor_chapter: ChapterDescriptor | None,
+        expected_hash: object,
+        description: object,
+        strict: Literal[True],
+        path_display: str,
+        description_error_message: str,
+    ) -> ChapterOverride: ...
+
+    @overload
+    def _normalize_chapter_override(
+        self,
+        *,
+        path: tuple[str, ...],
+        descriptor_chapter: ChapterDescriptor | None,
+        expected_hash: object,
+        description: object,
+        strict: Literal[False],
+        path_display: str,
+        description_error_message: str,
+    ) -> ChapterOverride | None: ...
+
+    def _normalize_chapter_override(
+        self,
+        *,
+        path: tuple[str, ...],
+        descriptor_chapter: ChapterDescriptor | None,
+        expected_hash: object,
+        description: object,
+        strict: bool,
+        path_display: str,
+        description_error_message: str,
+    ) -> ChapterOverride | None:
+        if descriptor_chapter is None:
+            if strict:
+                raise PromptOverridesError(
+                    f"Unknown chapter path for override: {path_display}"
+                )
+            _LOGGER.debug(
+                "Skipping unknown override chapter path.",
+                event="prompt_override_unknown_chapter",
+                context={"path": path_display},
+            )
+            return None
+        if not isinstance(expected_hash, str):
+            raise PromptOverridesError("Chapter expected_hash must be a string.")
+        if expected_hash != descriptor_chapter.description_hash:
+            if strict:
+                raise PromptOverridesError(f"Hash mismatch for chapter {path_display}.")
+            _LOGGER.debug(
+                "Skipping stale chapter override.",
+                event="prompt_override_stale_chapter",
+                context={
+                    "path": path_display,
+                    "expected_hash": descriptor_chapter.description_hash,
+                    "found_hash": expected_hash,
+                },
+            )
+            return None
+        if not isinstance(description, str) and description is not None:
+            raise PromptOverridesError(description_error_message)
+        normalized_description: str | None = (
+            None if description is None else description
+        )
+        return ChapterOverride(
+            expected_hash=expected_hash,
+            description=normalized_description,
         )
 
     @overload
@@ -573,6 +666,43 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 overrides[path] = section_override
         return overrides
 
+    def _load_chapters(
+        self,
+        payload: object | None,
+        descriptor: PromptDescriptor,
+    ) -> dict[tuple[str, ...], ChapterOverride]:
+        if payload is None:
+            return {}
+        if not isinstance(payload, Mapping):
+            raise PromptOverridesError("Chapters payload must be a mapping.")
+        if not payload:
+            return {}
+        mapping_payload = cast(Mapping[object, object], payload)
+        descriptor_index = self._chapter_descriptor_index(descriptor)
+        overrides: dict[tuple[str, ...], ChapterOverride] = {}
+        for path_key_obj, chapter_payload_raw in mapping_payload.items():
+            if not isinstance(path_key_obj, str):
+                raise PromptOverridesError("Chapter keys must be strings.")
+            path_key = path_key_obj
+            path = tuple(part for part in path_key.split("/") if part)
+            if not isinstance(chapter_payload_raw, Mapping):
+                raise PromptOverridesError("Chapter payload must be an object.")
+            chapter_payload = cast(Mapping[str, object], chapter_payload_raw)
+            expected_hash = chapter_payload.get("expected_hash")
+            description = chapter_payload.get("description")
+            chapter_override = self._normalize_chapter_override(
+                path=path,
+                descriptor_chapter=descriptor_index.get(path),
+                expected_hash=expected_hash,
+                description=description,
+                strict=False,
+                path_display=path_key,
+                description_error_message="Chapter description must be a string when provided.",
+            )
+            if chapter_override is not None:
+                overrides[path] = chapter_override
+        return overrides
+
     def _load_tools(
         self,
         payload: object | None,
@@ -637,6 +767,31 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             validated[path] = normalized_section
         return validated
 
+    def _validate_chapters_for_write(
+        self,
+        chapters: Mapping[tuple[str, ...], ChapterOverride],
+        descriptor: PromptDescriptor,
+    ) -> dict[tuple[str, ...], ChapterOverride]:
+        if not chapters:
+            return {}
+        descriptor_index = self._chapter_descriptor_index(descriptor)
+        validated: dict[tuple[str, ...], ChapterOverride] = {}
+        for path, chapter_override in chapters.items():
+            path_display = "/".join(path)
+            normalized_chapter = self._normalize_chapter_override(
+                path=path,
+                descriptor_chapter=descriptor_index.get(path),
+                expected_hash=cast(Any, chapter_override).expected_hash,
+                description=cast(Any, chapter_override).description,
+                strict=True,
+                path_display=path_display,
+                description_error_message=(
+                    f"Chapter override description must be a string when provided for {path_display}."
+                ),
+            )
+            validated[path] = normalized_chapter
+        return validated
+
     def _validate_tools_for_write(
         self,
         tools: Mapping[str, ToolOverride],
@@ -671,6 +826,19 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             serialized[key] = {
                 "expected_hash": section_override.expected_hash,
                 "body": section_override.body,
+            }
+        return serialized
+
+    def _serialize_chapters(
+        self,
+        chapters: Mapping[tuple[str, ...], ChapterOverride],
+    ) -> dict[str, dict[str, object]]:
+        serialized: dict[str, dict[str, object]] = {}
+        for path, chapter_override in chapters.items():
+            key = "/".join(path)
+            serialized[key] = {
+                "expected_hash": chapter_override.expected_hash,
+                "description": chapter_override.description,
             }
         return serialized
 
@@ -733,6 +901,30 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             seeded[section.path] = SectionOverride(
                 expected_hash=section.content_hash,
                 body=template,
+            )
+        return seeded
+
+    def _seed_chapters(
+        self,
+        prompt: PromptLike,
+        descriptor: PromptDescriptor,
+    ) -> dict[tuple[str, ...], ChapterOverride]:
+        if not descriptor.chapters:
+            return {}
+        chapter_lookup: dict[tuple[str, ...], ChapterLike] = {}
+        for chapter_obj in prompt.chapters:
+            path = (chapter_obj.key,)
+            chapter_lookup[path] = chapter_obj
+        seeded: dict[tuple[str, ...], ChapterOverride] = {}
+        for chapter in descriptor.chapters:
+            chapter_obj = chapter_lookup.get(chapter.path)
+            if chapter_obj is None:
+                raise PromptOverridesError(
+                    f"Prompt missing chapter for descriptor path {'/'.join(chapter.path)}."
+                )
+            seeded[chapter.path] = ChapterOverride(
+                expected_hash=chapter.description_hash,
+                description=chapter_obj.description,
             )
         return seeded
 

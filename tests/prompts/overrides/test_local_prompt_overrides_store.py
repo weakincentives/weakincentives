@@ -20,9 +20,11 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, Prompt, Tool
+from weakincentives.prompt import Chapter, MarkdownSection, Prompt, Tool
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.overrides import (
+    ChapterDescriptor,
+    ChapterOverride,
     LocalPromptOverridesStore,
     PromptDescriptor,
     PromptOverride,
@@ -45,6 +47,11 @@ class _ToolParams:
 @dataclass
 class _ToolResult:
     result: str
+
+
+@dataclass
+class _ChapterParams:
+    detail: str
 
 
 def _build_prompt() -> Prompt:
@@ -78,6 +85,32 @@ def _build_prompt_with_tool() -> Prompt:
                 tools=[tool],
             )
         ],
+    )
+
+
+def _build_prompt_with_chapter() -> Prompt:
+    chapter_section = MarkdownSection[_ChapterParams](
+        title="Background",
+        template="Detail: ${detail}.",
+        key="chapter-detail",
+    )
+    chapter = Chapter[_ChapterParams](
+        key="background",
+        title="Background",
+        description="Provide historical context.",
+        sections=(chapter_section,),
+    )
+    return Prompt(
+        ns="tests/versioning",
+        key="versioned-greeting-chapter",
+        sections=[
+            MarkdownSection[_GreetingParams](
+                title="Greeting",
+                template="Greet ${subject} warmly.",
+                key="greeting",
+            )
+        ],
+        chapters=[chapter],
     )
 
 
@@ -118,10 +151,12 @@ def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
     payload = json.loads(override_path.read_text(encoding="utf-8"))
     assert payload["version"] == 1
     assert payload["sections"]["greeting"]["body"] == "Cheer loudly for ${subject}."
+    assert payload["chapters"] == {}
 
     resolved = store.resolve(descriptor)
     assert resolved is not None
     assert resolved.sections[section.path].body == "Cheer loudly for ${subject}."
+    assert resolved.chapters == {}
 
     store.delete(ns=descriptor.ns, prompt_key=descriptor.key, tag="latest")
     assert not override_path.exists()
@@ -140,6 +175,7 @@ def test_seed_if_necessary_captures_prompt_content(tmp_path: Path) -> None:
 
     assert section.path in override.sections
     assert override.sections[section.path].body == "Greet ${subject} warmly."
+    assert override.chapters == {}
 
     tool_descriptor = descriptor.tools[0]
     assert tool_descriptor.name in override.tool_overrides
@@ -150,6 +186,80 @@ def test_seed_if_necessary_captures_prompt_content(tmp_path: Path) -> None:
     resolved = store.resolve(descriptor, tag="stable")
     assert resolved is not None
     assert resolved.sections[section.path].body == "Greet ${subject} warmly."
+    assert resolved.chapters == {}
+
+
+def test_render_with_overrides_applies_chapter_description(tmp_path: Path) -> None:
+    prompt = _build_prompt_with_chapter()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    seed_override = store.seed_if_necessary(prompt)
+    chapter_descriptor = descriptor.chapters[0]
+    assert (
+        seed_override.chapters[chapter_descriptor.path].description
+        == "Provide historical context."
+    )
+
+    patched_override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        chapters={
+            chapter_descriptor.path: ChapterOverride(
+                expected_hash=chapter_descriptor.description_hash,
+                description="Share recent updates.",
+            )
+        },
+    )
+
+    store.upsert(descriptor, patched_override)
+
+    assert prompt.chapters[0].description == "Provide historical context."
+
+    _ = prompt.render_with_overrides(
+        _GreetingParams(subject="friend"),
+        overrides_store=store,
+    )
+
+    assert prompt.chapters[0].description == "Share recent updates."
+
+
+def test_render_with_overrides_retains_chapter_description_when_missing(
+    tmp_path: Path,
+) -> None:
+    prompt = _build_prompt_with_chapter()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    seed_override = store.seed_if_necessary(prompt)
+    chapter = descriptor.chapters[0]
+
+    assert (
+        seed_override.chapters[chapter.path].description
+        == "Provide historical context."
+    )
+
+    identical_override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        chapters={
+            chapter.path: ChapterOverride(
+                expected_hash=chapter.description_hash,
+                description="Provide historical context.",
+            )
+        },
+    )
+
+    store.upsert(descriptor, identical_override)
+
+    _ = prompt.render_with_overrides(
+        _GreetingParams(subject="friend"),
+        overrides_store=store,
+    )
+
+    assert prompt.chapters[0].description == "Provide historical context."
 
 
 def test_root_detection_manual_traversal(
@@ -201,6 +311,8 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
     section = descriptor.sections[0]
     override_path = _override_path(tmp_path, descriptor)
     override_path.parent.mkdir(parents=True, exist_ok=True)
+    chapter = PromptDescriptor.from_prompt(_build_prompt_with_chapter()).chapters[0]
+
     payload: dict[str, Any] = {
         "version": 1,
         "ns": descriptor.ns,
@@ -211,6 +323,16 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
                 "expected_hash": "not-a-match",
                 "body": "Cheer loudly.",
             }
+        },
+        "chapters": {
+            "/".join(chapter.path): {
+                "expected_hash": "wrong",
+                "description": "Ignore chapter.",
+            },
+            "unknown": {
+                "expected_hash": chapter.description_hash,
+                "description": "Unused chapter.",
+            },
         },
         "tools": {},
     }
@@ -264,6 +386,59 @@ def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
         )
 
 
+def test_resolve_chapter_payload_validation_errors(tmp_path: Path) -> None:
+    prompt = _build_prompt_with_chapter()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+    chapter = descriptor.chapters[0]
+    chapter_key = "/".join(chapter.path)
+
+    assert store._load_chapters(None, descriptor) == {}
+    assert store._load_chapters({}, descriptor) == {}
+
+    with pytest.raises(PromptOverridesError):
+        store._load_chapters(cast(Mapping[str, object], ["invalid"]), descriptor)
+
+    with pytest.raises(PromptOverridesError):
+        store._load_chapters(cast(Mapping[str, object], {1: {}}), descriptor)
+
+    with pytest.raises(PromptOverridesError):
+        store._load_chapters({chapter_key: "invalid"}, descriptor)
+
+    with pytest.raises(PromptOverridesError):
+        store._load_chapters(
+            {chapter_key: {"expected_hash": 123, "description": "Body"}},
+            descriptor,
+        )
+
+    with pytest.raises(PromptOverridesError):
+        store._load_chapters(
+            {
+                chapter_key: {
+                    "expected_hash": chapter.description_hash,
+                    "description": [],
+                }
+            },
+            descriptor,
+        )
+
+    payload = {
+        "unknown": {
+            "expected_hash": chapter.description_hash,
+            "description": "Unused",
+        }
+    }
+    assert store._load_chapters(payload, descriptor) == {}
+
+    payload = {
+        chapter_key: {
+            "expected_hash": "mismatch",
+            "description": "Unused",
+        }
+    }
+    assert store._load_chapters(payload, descriptor) == {}
+
+
 def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
     prompt = _build_prompt_with_tool()
     descriptor = PromptDescriptor.from_prompt(prompt)
@@ -281,6 +456,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
         "prompt_key": descriptor.key,
         "tag": "latest",
         "sections": {},
+        "chapters": {},
         "tools": {},
     }
 
@@ -535,6 +711,55 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         store.upsert(descriptor, override)
 
 
+def test_upsert_chapter_validation_errors(tmp_path: Path) -> None:
+    prompt = _build_prompt_with_chapter()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+    chapter = descriptor.chapters[0]
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        chapters={
+            ("unknown",): ChapterOverride(
+                expected_hash=chapter.description_hash,
+                description="Body",
+            )
+        },
+    )
+    with pytest.raises(PromptOverridesError):
+        store.upsert(descriptor, override)
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        chapters={
+            chapter.path: ChapterOverride(
+                expected_hash="mismatch",
+                description="Body",
+            )
+        },
+    )
+    with pytest.raises(PromptOverridesError):
+        store.upsert(descriptor, override)
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        chapters={
+            chapter.path: ChapterOverride(
+                expected_hash=chapter.description_hash,
+                description=123,  # type: ignore[arg-type]
+            )
+        },
+    )
+    with pytest.raises(PromptOverridesError):
+        store.upsert(descriptor, override)
+
+
 def test_upsert_rejects_non_string_section_hash(tmp_path: Path) -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
@@ -586,6 +811,26 @@ def test_upsert_rejects_non_string_tool_hash(tmp_path: Path) -> None:
 
     with pytest.raises(PromptOverridesError):
         store.upsert(descriptor, override)
+
+
+def test_seed_chapters_missing_prompt_entry(tmp_path: Path) -> None:
+    prompt = _build_prompt_with_chapter()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    bad_descriptor = PromptDescriptor(
+        ns=descriptor.ns,
+        key=descriptor.key,
+        sections=list(descriptor.sections),
+        chapters=[
+            *descriptor.chapters,
+            ChapterDescriptor(path=("missing",), description_hash="deadbeef"),
+        ],
+        tools=list(descriptor.tools),
+    )
+
+    with pytest.raises(PromptOverridesError):
+        store._seed_chapters(prompt, bad_descriptor)
 
 
 def test_upsert_allows_none_tool_description(tmp_path: Path) -> None:

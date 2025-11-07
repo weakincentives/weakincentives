@@ -26,6 +26,10 @@ def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride
     return {}
 
 
+def _chapter_override_mapping_factory() -> dict[tuple[str, ...], ChapterOverride]:
+    return {}
+
+
 def _tool_override_mapping_factory() -> dict[str, ToolOverride]:
     return {}
 
@@ -42,6 +46,11 @@ class SectionLike(Protocol):
     accepts_overrides: bool
 
 
+class ChapterLike(Protocol):
+    key: str
+    description: str | None
+
+
 class SectionNodeLike(Protocol):
     path: tuple[str, ...]
     section: SectionLike
@@ -54,6 +63,9 @@ class PromptLike(Protocol):
     @property
     def sections(self) -> tuple[SectionNodeLike, ...]: ...
 
+    @property
+    def chapters(self) -> tuple[ChapterLike, ...]: ...
+
 
 @dataclass(slots=True)
 class SectionDescriptor:
@@ -61,6 +73,14 @@ class SectionDescriptor:
 
     path: tuple[str, ...]
     content_hash: str
+
+
+@dataclass(slots=True)
+class ChapterDescriptor:
+    """Hash metadata describing a prompt chapter."""
+
+    path: tuple[str, ...]
+    description_hash: str
 
 
 @dataclass(slots=True)
@@ -79,11 +99,13 @@ class PromptDescriptor:
     ns: str
     key: str
     sections: list[SectionDescriptor]
+    chapters: list[ChapterDescriptor]
     tools: list[ToolDescriptor]
 
     @classmethod
     def from_prompt(cls, prompt: PromptLike) -> PromptDescriptor:
         sections: list[SectionDescriptor] = []
+        chapters: list[ChapterDescriptor] = []
         tools: list[ToolDescriptor] = []
         for node in prompt.sections:
             if getattr(node.section, "accepts_overrides", True):
@@ -101,7 +123,11 @@ class PromptDescriptor:
                 if tool.accepts_overrides
             ]
             tools.extend(tool_descriptors)
-        return cls(prompt.ns, prompt.key, sections, tools)
+        for chapter in prompt.chapters:
+            path = (chapter.key,)
+            description_hash = hash_json(chapter.description)
+            chapters.append(ChapterDescriptor(path, description_hash))
+        return cls(prompt.ns, prompt.key, sections, chapters, tools)
 
 
 @dataclass(slots=True)
@@ -110,6 +136,14 @@ class SectionOverride:
 
     expected_hash: str
     body: str
+
+
+@dataclass(slots=True)
+class ChapterOverride:
+    """Override payload for a prompt chapter description."""
+
+    expected_hash: str
+    description: str | None
 
 
 @dataclass(slots=True)
@@ -133,6 +167,9 @@ class PromptOverride:
     tag: str
     sections: dict[tuple[str, ...], SectionOverride] = field(
         default_factory=_section_override_mapping_factory
+    )
+    chapters: dict[tuple[str, ...], ChapterOverride] = field(
+        default_factory=_chapter_override_mapping_factory
     )
     tool_overrides: dict[str, ToolOverride] = field(
         default_factory=_tool_override_mapping_factory
@@ -175,6 +212,8 @@ class PromptOverridesStore(Protocol):
 
 
 __all__ = [
+    "ChapterDescriptor",
+    "ChapterOverride",
     "PromptDescriptor",
     "PromptOverride",
     "PromptOverridesError",
