@@ -21,7 +21,7 @@ from .asteval import (
     EvalParams,
     EvalResult,
 )
-from .errors import ToolValidationError
+from .errors import DeadlineExceededError, ToolValidationError
 from .planning import (
     AddStep,
     ClearPlan,
@@ -60,6 +60,7 @@ __all__ = [
     "AddStep",
     "AstevalSection",
     "ClearPlan",
+    "DeadlineExceededError",
     "DeleteEntry",
     "DispatchSubagentsParams",
     "EvalFileRead",

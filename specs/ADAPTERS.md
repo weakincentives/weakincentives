@@ -36,11 +36,11 @@ class ProviderAdapter(Protocol):
     def evaluate(
         self,
         prompt: Prompt[OutputT],
-        *params: object,
-        goal_section_key: str,
-        chapters_expansion_policy: ChaptersExpansionPolicy = ChaptersExpansionPolicy.ALL_INCLUDED,
+        *params: SupportsDataclass,
         parse_output: bool = True,
         bus: EventBus,
+        session: SessionProtocol,
+        deadline: datetime | None = None,
     ) -> PromptResponse[OutputT]:
         ...
 ```
@@ -49,18 +49,12 @@ Implementations own the provider client and any serialization glue needed for th
 provided `Prompt` instance.
 
 - `params`: Positional dataclass instances forwarded to `prompt.render(*params)`; adapters must preserve type matching.
-- `goal_section_key`: Keyword-only pointer to the `Section.key` representing the
-  user's immediate goal or intent. Chapter gating MUST anchor on this section as
-  described in `specs/CHAPTERS.md`.
-- `chapters_expansion_policy`: Keyword-only selector describing how aggressively
-  the adapter may open chapters for this evaluation. `ALL_INCLUDED` is the
-  default and mirrors the behavior described in `specs/CHAPTERS.md`. Implementations MUST
-  support at least the three core states defined in `specs/CHAPTERS.md` and MAY
-  introduce provider-specific extensions.
 - `parse_output`: When `True`, adapters call `parse_structured_output` on the final message if the prompt declares structured
   output; disable to keep only the raw text.
 - `bus`: Evaluation-scoped event dispatcher supplied by the caller. Pass `NullEventBus()` to discard telemetry or reuse a
   shared bus when coordinating multiple adapters within the same request.
+- `session`: Concrete `SessionProtocol` used to snapshot and rollback state when publishing events.
+- `deadline`: Optional timezone-aware `datetime` indicating when evaluation must complete. `None` disables deadline enforcement.
 
 ### `PromptResponse`
 
@@ -86,9 +80,7 @@ that subscribe to `ToolInvoked` will receive the identical objects stored on the
 ## Evaluation Flow
 
 1. **Resolve Chapters** – Derive the subset of chapters to open based on the
-   provided `goal_section_key`, the selected
-   `chapters_expansion_policy`, and the heuristics defined in
-   `specs/CHAPTERS.md`. Render against the resulting chapter snapshot.
+   prompt's gating configuration and orchestrator policy before rendering.
 1. **Render** – Call `rendered = prompt.render(*params)` once per evaluation using
    the chapter-filtered prompt snapshot. This yields the markdown
    (`rendered.text`), tool registry (`rendered.tools`), and optional output contract metadata.

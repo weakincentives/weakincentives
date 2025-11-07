@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, is_dataclass
+from datetime import datetime
 from typing import Any, Final, cast, override
 
 from ..adapters.core import PromptResponse
@@ -114,8 +115,35 @@ def _dispatch_subagents(
     adapter = context.adapter
     parse_output = rendered_parent.container is not None
 
+    parent_deadline = rendered_parent.deadline
+
+    def _normalize_deadline(candidate: object) -> datetime | None:
+        if not isinstance(candidate, datetime):
+            return None
+        tzinfo = candidate.tzinfo
+        if tzinfo is None or tzinfo.utcoffset(candidate) is None:
+            return None
+        return candidate
+
+    parent_candidate = _normalize_deadline(parent_deadline)
+
+    def _select_child_deadline(delegation: DelegationParams) -> datetime | None:
+        override_candidate = _normalize_deadline(getattr(delegation, "deadline", None))
+        candidates = [
+            deadline for deadline in (parent_candidate, override_candidate) if deadline
+        ]
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        try:
+            return min(candidates)
+        except TypeError:  # pragma: no cover - defensive
+            return candidates[0]
+
     def _run_child(delegation: DelegationParams) -> SubagentResult:
         recap = RecapParams(bullets=delegation.recap_lines)
+        child_deadline = _select_child_deadline(delegation)
         try:
             response = adapter.evaluate(
                 delegation_prompt.prompt,
@@ -124,6 +152,7 @@ def _dispatch_subagents(
                 parse_output=parse_output,
                 bus=context.event_bus,
                 session=context.session,
+                deadline=child_deadline,
             )
         except Exception as error:  # pragma: no cover - defensive
             return SubagentResult(

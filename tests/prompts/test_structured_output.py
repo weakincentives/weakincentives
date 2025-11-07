@@ -407,6 +407,7 @@ def test_parse_structured_output_rejects_unknown_container() -> None:
         output_type=Summary,
         container=cast(Literal["object", "array"], "invalid"),
         allow_extra_keys=None,
+        deadline=None,
     )
 
     with pytest.raises(OutputParseError) as exc:

@@ -15,6 +15,7 @@ import json
 import sys
 import types
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from importlib import import_module as std_import_module
 from types import MethodType
 from typing import Any, TypeVar, cast
@@ -108,6 +109,7 @@ def _evaluate_with_bus(
     prompt: Prompt[OutputT],
     *params: SupportsDataclass,
     bus: EventBus | None = None,
+    deadline: datetime | None = None,
 ) -> PromptResponse[OutputT]:
     target_bus = bus or NullEventBus()
     session: SessionProtocol = cast(SessionProtocol, Session(bus=target_bus))
@@ -116,7 +118,102 @@ def _evaluate_with_bus(
         *params,
         bus=target_bus,
         session=session,
+        deadline=deadline,
     )
+
+
+def _build_greeting_prompt(key: str) -> Prompt[GreetingParams]:
+    return Prompt(
+        ns=PROMPT_NS,
+        key=key,
+        sections=(
+            MarkdownSection[GreetingParams](
+                title="Greeting",
+                key="greeting",
+                template="Say hello to ${user}.",
+            ),
+        ),
+    )
+
+
+def test_openai_adapter_rejects_naive_deadline() -> None:
+    module = cast(Any, _reload_module())
+    prompt = _build_greeting_prompt("deadline-naive")
+    response = DummyResponse([DummyChoice(DummyMessage(content="hi"))])
+    adapter = module.OpenAIAdapter(
+        model="gpt-test", client=DummyOpenAIClient([response])
+    )
+
+    naive_deadline = datetime.now()
+
+    with pytest.raises(PromptEvaluationError) as exc_info:
+        _evaluate_with_bus(
+            adapter,
+            prompt,
+            GreetingParams(user="Sam"),
+            deadline=naive_deadline,
+        )
+
+    error = exc_info.value
+    assert isinstance(error, PromptEvaluationError)
+    message = str(error).lower()
+    assert "timezone" in message
+    assert error.phase == "preflight"
+
+
+def test_openai_adapter_rejects_past_deadline() -> None:
+    module = cast(Any, _reload_module())
+    prompt = _build_greeting_prompt("deadline-past")
+    response = DummyResponse([DummyChoice(DummyMessage(content="hi"))])
+    adapter = module.OpenAIAdapter(
+        model="gpt-test", client=DummyOpenAIClient([response])
+    )
+
+    past_deadline = datetime.now(UTC) - timedelta(seconds=5)
+
+    with pytest.raises(PromptEvaluationError) as exc_info:
+        _evaluate_with_bus(
+            adapter,
+            prompt,
+            GreetingParams(user="Sam"),
+            deadline=past_deadline,
+        )
+
+    error = exc_info.value
+    assert isinstance(error, PromptEvaluationError)
+    message = str(error).lower()
+    assert "future" in message
+    assert error.phase == "preflight"
+
+
+def test_openai_adapter_rejects_same_second_deadline() -> None:
+    module = cast(Any, _reload_module())
+    prompt = _build_greeting_prompt("deadline-tight")
+    response = DummyResponse([DummyChoice(DummyMessage(content="hi"))])
+    adapter = module.OpenAIAdapter(
+        model="gpt-test", client=DummyOpenAIClient([response])
+    )
+
+    now = datetime.now(UTC)
+    if now.microsecond == 999_999:  # pragma: no cover - extremely unlikely
+        now = datetime.now(UTC)
+    near_deadline = (
+        now.replace(microsecond=0) + timedelta(seconds=1) - timedelta(microseconds=1)
+    )
+
+    with pytest.raises(PromptEvaluationError) as exc_info:
+        _evaluate_with_bus(
+            adapter,
+            prompt,
+            GreetingParams(user="Sam"),
+            deadline=near_deadline,
+        )
+
+    error = exc_info.value
+    assert isinstance(error, PromptEvaluationError)
+    message = str(error).lower()
+    assert "current second" in message
+    assert error.phase == "preflight"
 
 
 def test_create_openai_client_requires_optional_dependency(
@@ -1191,6 +1288,7 @@ def test_openai_parse_schema_constrained_payload_requires_structured_prompt() ->
         output_type=None,
         container=None,
         allow_extra_keys=None,
+        deadline=None,
     )
 
     with pytest.raises(TypeError):
@@ -1227,6 +1325,7 @@ def test_openai_parse_schema_constrained_payload_rejects_unknown_container() -> 
         output_type=StructuredAnswer,
         container="invalid",  # type: ignore[arg-type]
         allow_extra_keys=False,
+        deadline=None,
     )
 
     with pytest.raises(TypeError):

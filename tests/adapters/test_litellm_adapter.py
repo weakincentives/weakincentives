@@ -15,6 +15,7 @@ import json
 import sys
 import types
 from collections.abc import Mapping
+from datetime import datetime
 from importlib import import_module as std_import_module
 from types import MethodType
 from typing import Any, TypeVar, cast
@@ -104,6 +105,7 @@ def _evaluate_with_bus(
     *params: SupportsDataclass,
     bus: EventBus | None = None,
     session: SessionProtocol | None = None,
+    deadline: datetime | None = None,
 ) -> PromptResponse[OutputT]:
     target_bus = bus or NullEventBus()
     target_session = (
@@ -116,6 +118,7 @@ def _evaluate_with_bus(
         *params,
         bus=target_bus,
         session=target_session,
+        deadline=deadline,
     )
 
 
@@ -1637,6 +1640,7 @@ def test_litellm_parse_schema_constrained_payload_requires_structured_prompt() -
         output_type=None,
         container=None,
         allow_extra_keys=None,
+        deadline=None,
     )
 
     with pytest.raises(TypeError):
@@ -1673,6 +1677,7 @@ def test_litellm_parse_schema_constrained_payload_rejects_unknown_container() ->
         output_type=StructuredAnswer,
         container="invalid",  # type: ignore[arg-type]
         allow_extra_keys=False,
+        deadline=None,
     )
 
     with pytest.raises(TypeError):

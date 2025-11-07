@@ -17,7 +17,8 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 
 from ..prompt._types import SupportsDataclass
@@ -31,7 +32,7 @@ from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..runtime.events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse, schema
-from ..tools.errors import ToolValidationError
+from ..tools.errors import DeadlineExceededError, ToolValidationError
 from ._provider_protocols import (
     ProviderChoice,
     ProviderCompletionCallable,
@@ -48,6 +49,72 @@ if TYPE_CHECKING:
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "adapters.shared"}
 )
+
+
+def normalize_deadline(
+    deadline: datetime | None, *, prompt_name: str
+) -> datetime | None:
+    """Validate and normalize a caller-supplied deadline."""
+
+    if deadline is None:
+        return None
+    tzinfo = deadline.tzinfo
+    if tzinfo is None or tzinfo.utcoffset(deadline) is None:
+        raise PromptEvaluationError(
+            "Deadline must include timezone information.",
+            prompt_name=prompt_name,
+            phase="preflight",
+        )
+
+    normalized = deadline.astimezone(UTC)
+    now = datetime.now(UTC)
+    payload = {"deadline": normalized.isoformat()}
+
+    if normalized <= now:
+        raise PromptEvaluationError(
+            "Deadline must be in the future.",
+            prompt_name=prompt_name,
+            phase="preflight",
+            provider_payload=payload,
+        )
+
+    if normalized.replace(microsecond=0) == now.replace(microsecond=0):
+        raise PromptEvaluationError(
+            "Deadline must extend beyond the current second.",
+            prompt_name=prompt_name,
+            phase="preflight",
+            provider_payload=payload,
+        )
+
+    return normalized
+
+
+def _deadline_payload(deadline: datetime) -> dict[str, Any]:
+    remaining = (deadline - datetime.now(UTC)).total_seconds()
+    return {
+        "deadline": deadline.isoformat(),
+        "time_remaining_seconds": max(0.0, remaining),
+    }
+
+
+def ensure_deadline_active(
+    deadline: datetime | None,
+    *,
+    prompt_name: str,
+    message: str,
+) -> None:
+    """Raise when the deadline has elapsed."""
+
+    if deadline is None:
+        return
+    now = datetime.now(UTC)
+    if now >= deadline:
+        raise PromptEvaluationError(
+            message,
+            prompt_name=prompt_name,
+            phase="deadline",
+            provider_payload=_deadline_payload(deadline),
+        )
 
 
 @dataclass(slots=True)
@@ -253,6 +320,12 @@ def execute_tool_call(
     )
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsDataclass]
+    deadline = getattr(rendered_prompt, "deadline", None)
+    ensure_deadline_active(
+        deadline,
+        prompt_name=prompt_name,
+        message=f"Deadline exceeded before invoking tool '{tool_name}'.",
+    )
     try:
         try:
             parsed_params = parse(tool.params_type, arguments_mapping, extra="forbid")
@@ -275,6 +348,16 @@ def execute_tool_call(
             event_bus=bus,
         )
         tool_result = handler(tool_params, context=context)
+    except DeadlineExceededError as error:
+        message = str(error).strip() or f"Tool '{tool_name}' exceeded the deadline."
+        raise PromptEvaluationError(
+            message,
+            prompt_name=prompt_name,
+            phase="deadline",
+            provider_payload=_deadline_payload(deadline)
+            if deadline is not None
+            else None,
+        ) from error
     except ToolValidationError as error:
         if tool_params is None:  # pragma: no cover - defensive
             tool_params = cast(
@@ -614,6 +697,7 @@ class ConversationRunner[OutputT]:
     )
     parse_arguments: ToolArgumentsParser = parse_tool_arguments
     logger_override: StructuredLogger | None = None
+    deadline: datetime | None = None
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
@@ -634,6 +718,11 @@ class ConversationRunner[OutputT]:
         self._prepare_payload()
 
         while True:
+            ensure_deadline_active(
+                self.deadline,
+                prompt_name=self.prompt_name,
+                message="Deadline exceeded before sending provider request.",
+            )
             response = self.call_provider(
                 self._messages,
                 self._tool_specs,
@@ -835,6 +924,12 @@ class ConversationRunner[OutputT]:
                 "text_length": len(text_value or "") if text_value else 0,
                 "structured_output": self._should_parse_structured_output,
                 "handler_count": publish_result.handled_count,
+                "deadline": self.deadline.isoformat()
+                if self.deadline is not None
+                else None,
+                "time_remaining_seconds": None
+                if self.deadline is None
+                else max(0.0, (self.deadline - datetime.now(UTC)).total_seconds()),
             },
         )
         return response_payload
@@ -864,15 +959,21 @@ def run_conversation[
     ] = format_publish_failures,
     parse_arguments: ToolArgumentsParser = parse_tool_arguments,
     logger_override: StructuredLogger | None = None,
+    deadline: datetime | None = None,
 ) -> PromptResponse[OutputT]:
     """Execute a conversational exchange with a provider and return the result."""
 
+    rendered_with_deadline = (
+        replace(rendered, deadline=deadline)
+        if deadline is not None and rendered.deadline != deadline
+        else rendered
+    )
     runner = ConversationRunner[OutputT](
         adapter_name=adapter_name,
         adapter=adapter,
         prompt=prompt,
         prompt_name=prompt_name,
-        rendered=rendered,
+        rendered=rendered_with_deadline,
         initial_messages=initial_messages,
         parse_output=parse_output,
         bus=bus,
@@ -886,5 +987,6 @@ def run_conversation[
         format_publish_failures=format_publish_failures,
         parse_arguments=parse_arguments,
         logger_override=logger_override,
+        deadline=deadline,
     )
     return runner.run()

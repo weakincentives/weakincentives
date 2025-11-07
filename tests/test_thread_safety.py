@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -48,6 +49,7 @@ class _StubAdapter:
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
+        deadline: datetime | None = None,
     ) -> PromptResponse[ReviewResponse]:
         raise NotImplementedError
 

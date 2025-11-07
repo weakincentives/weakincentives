@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from types import MethodType
 from typing import Any, cast
 
@@ -45,6 +46,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         ToolPayload,
     )
 
+from weakincentives.adapters import PromptEvaluationError
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -62,7 +64,7 @@ from weakincentives.runtime.session import (
     replace_latest,
     select_latest,
 )
-from weakincentives.tools import ToolValidationError
+from weakincentives.tools import DeadlineExceededError, ToolValidationError
 
 
 @dataclass
@@ -253,6 +255,52 @@ def test_adapter_tool_execution_validation_error(
     assert content["message"] == "Tool validation failed: invalid query"
     assert content["success"] is False
     assert "payload" not in content
+
+
+def test_adapter_tool_execution_deadline_error(
+    adapter_harness: AdapterHarness,
+) -> None:
+    def handler(_: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context
+        raise DeadlineExceededError("deadline reached")
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+    prompt = _build_prompt(adapter_harness, tool)
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "timeout"}),
+    )
+    responses = _build_responses(
+        tool_call=tool_call,
+        final_message=DummyMessage(content="All done", tool_calls=None),
+    )
+    adapter, _ = adapter_harness.build(responses)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    with pytest.raises(PromptEvaluationError) as exc_info:
+        adapter.evaluate(  # type: ignore[call-arg]
+            prompt,
+            ToolParams(query="timeout"),
+            bus=bus,
+            session=cast(SessionProtocol, session),
+            deadline=datetime.now(UTC) + timedelta(seconds=5),
+        )
+
+    error = exc_info.value
+    assert isinstance(error, PromptEvaluationError)
+    assert error.phase == "deadline"
+    assert "deadline" in str(error).lower()
+    assert error.provider_payload is not None
+    assert "deadline" in error.provider_payload
 
 
 def test_adapter_tool_execution_rejects_extra_arguments(

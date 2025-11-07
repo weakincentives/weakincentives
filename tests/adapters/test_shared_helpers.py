@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -74,6 +75,7 @@ def test_run_conversation_requires_message_payload() -> None:
         output_type=None,
         container=None,
         allow_extra_keys=None,
+        deadline=None,
     )
     bus = NullEventBus()
 
@@ -109,6 +111,7 @@ def test_run_conversation_requires_message_payload() -> None:
             parse_output: bool = True,
             bus: EventBus,
             session: SessionProtocol,
+            deadline: datetime | None = None,
         ) -> PromptResponse[object]:
             raise NotImplementedError
 

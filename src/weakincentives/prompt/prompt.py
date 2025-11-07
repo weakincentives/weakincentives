@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
+from datetime import datetime
 from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
@@ -51,6 +52,7 @@ class RenderedPrompt[OutputT]:
     output_type: type[Any] | None
     container: Literal["object", "array"] | None
     allow_extra_keys: bool | None
+    deadline: datetime | None = None
     _tools: tuple[Tool[SupportsDataclass, SupportsDataclass], ...] = field(
         default_factory=tuple
     )

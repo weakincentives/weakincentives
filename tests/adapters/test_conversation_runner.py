@@ -13,8 +13,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
@@ -54,6 +54,7 @@ class DummyAdapter(ProviderAdapter[object]):
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol | None = None,
+        deadline: datetime | None = None,
     ) -> PromptResponse[object]:
         raise NotImplementedError
 
@@ -130,9 +131,12 @@ def build_runner(
     parse_output: bool = False,
     response_format: Mapping[str, Any] | None = None,
     session: SessionProtocol | None = None,
+    deadline: datetime | None = None,
 ) -> ConversationRunner[object]:
     prompt = Prompt(ns="tests", key="example")
     session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
+    if deadline is not None and rendered.deadline != deadline:
+        rendered = replace(rendered, deadline=deadline)
     return ConversationRunner[object](
         adapter_name="dummy",
         adapter=DummyAdapter(),
@@ -149,6 +153,7 @@ def build_runner(
         call_provider=provider,
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=serialize_tool_message,
+        deadline=deadline,
     )
 
 
@@ -158,6 +163,7 @@ def test_conversation_runner_success() -> None:
         output_type=None,
         container=None,
         allow_extra_keys=None,
+        deadline=None,
     )
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
@@ -178,6 +184,7 @@ def test_conversation_runner_raises_on_prompt_publish_failure() -> None:
         output_type=None,
         container=None,
         allow_extra_keys=None,
+        deadline=None,
     )
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
@@ -191,6 +198,35 @@ def test_conversation_runner_raises_on_prompt_publish_failure() -> None:
     assert "prompt publish failure" in str(exc_info.value)
     assert isinstance(bus.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
+
+
+def test_conversation_runner_aborts_when_deadline_passed() -> None:
+    past_deadline = datetime.now(UTC) - timedelta(seconds=1)
+    rendered = RenderedPrompt(
+        text="system",
+        output_type=None,
+        container=None,
+        allow_extra_keys=None,
+        deadline=past_deadline,
+    )
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
+    provider = ProviderStub(responses)
+    bus = RecordingBus()
+
+    runner = build_runner(
+        rendered=rendered,
+        provider=provider,
+        bus=bus,
+        deadline=past_deadline,
+    )
+
+    with pytest.raises(PromptEvaluationError) as exc_info:
+        runner.run()
+
+    error = exc_info.value
+    assert isinstance(error, PromptEvaluationError)
+    assert error.phase == "deadline"
+    assert provider.calls == []
 
 
 @dataclass
@@ -216,6 +252,7 @@ def tool_rendered_prompt(tool: Tool[EchoParams, EchoPayload]) -> RenderedPrompt[
         output_type=None,
         container=None,
         allow_extra_keys=None,
+        deadline=None,
         _tools=cast(
             tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
             (tool,),
@@ -268,6 +305,7 @@ def test_conversation_runner_parses_structured_output() -> None:
         output_type=StructuredOutput,
         container="object",
         allow_extra_keys=False,
+        deadline=None,
     )
     responses = [
         DummyResponse(
@@ -340,6 +378,7 @@ def test_conversation_runner_requires_message_payload() -> None:
         output_type=None,
         container=None,
         allow_extra_keys=None,
+        deadline=None,
     )
 
     class MissingMessageResponse(DummyResponse):

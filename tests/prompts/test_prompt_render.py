@@ -274,6 +274,7 @@ def test_rendered_prompt_str_returns_text() -> None:
         output_type=None,
         container=None,
         allow_extra_keys=None,
+        deadline=None,
     )
 
     assert str(rendered) == "Rendered output"

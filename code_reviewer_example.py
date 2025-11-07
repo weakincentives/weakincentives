@@ -20,6 +20,7 @@ import os
 import sys
 import textwrap
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from threading import RLock
 from types import MethodType
@@ -124,6 +125,7 @@ class SupportsReviewEvaluate(Protocol):
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
+        deadline: datetime | None = None,
     ) -> PromptResponse[ReviewResponse]: ...
 
 

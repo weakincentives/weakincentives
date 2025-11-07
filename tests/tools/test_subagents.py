@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
@@ -43,6 +44,11 @@ class ParentOutput:
     summary: str
 
 
+@dataclass(slots=True)
+class DelegationWithDeadline(DelegationParams):
+    deadline: datetime | None = None
+
+
 class RecordingAdapter(ProviderAdapter[Any]):
     def __init__(
         self,
@@ -56,6 +62,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
         self.calls: list[tuple[str, tuple[str, ...]]] = []
         self.sessions: list[Session | None] = []
         self.buses: list[InProcessEventBus] = []
+        self.deadlines: list[datetime | None] = []
         self._failures = failures or set()
         self._delays = delays or {}
         self._structured_outputs = structured_outputs or {}
@@ -69,6 +76,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
         parse_output: bool = True,
         bus: InProcessEventBus,
         session: Session | None = None,
+        deadline: datetime | None = None,
     ) -> PromptResponse[Any]:
         delegation = cast(DelegationParams, params[0])
         recap = (
@@ -78,6 +86,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
         self.calls.append((reason, recap.bullets))
         self.sessions.append(session)
         self.buses.append(bus)
+        self.deadlines.append(deadline)
         if reason in self._failures:
             raise RuntimeError(f"failure: {reason}")
         delay = self._delays.get(reason, 0.0)
@@ -209,6 +218,112 @@ def test_dispatch_subagents_runs_children_in_parallel() -> None:
     assert all(s is session for s in adapter.sessions)
 
 
+def test_dispatch_subagents_propagates_deadline() -> None:
+    prompt, rendered = _build_parent_prompt()
+    deadline = datetime.now(UTC) + timedelta(seconds=5)
+    rendered_with_deadline = replace(rendered, deadline=deadline)
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered_with_deadline,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="one",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("recap",),
+            ),
+            DelegationParams(
+                reason="two",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("recap",),
+            ),
+        )
+    )
+
+    handler = dispatch_subagents.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert adapter.deadlines == [deadline, deadline]
+
+
+def test_dispatch_subagents_prefers_override_deadline() -> None:
+    prompt, rendered = _build_parent_prompt()
+    parent_deadline = datetime.now(UTC) + timedelta(seconds=20)
+    override_deadline = datetime.now(UTC) + timedelta(seconds=5)
+    rendered_with_deadline = replace(rendered, deadline=parent_deadline)
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered_with_deadline,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationWithDeadline(
+                reason="one",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("recap",),
+                deadline=override_deadline,
+            ),
+        )
+    )
+
+    handler = dispatch_subagents.handler
+    assert handler is not None
+    handler(params, context=context)
+
+    assert adapter.deadlines == [override_deadline]
+
+
+def test_dispatch_subagents_ignores_naive_override() -> None:
+    prompt, rendered = _build_parent_prompt()
+    parent_deadline = datetime.now(UTC) + timedelta(seconds=15)
+    rendered_with_deadline = replace(rendered, deadline=parent_deadline)
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered_with_deadline,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationWithDeadline(
+                reason="naive",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("recap",),
+                deadline=datetime.now(),
+            ),
+        )
+    )
+
+    handler = dispatch_subagents.handler
+    assert handler is not None
+    handler(params, context=context)
+
+    assert adapter.deadlines == [parent_deadline]
+
+
 def test_dispatch_subagents_collects_failures() -> None:
     prompt, rendered = _build_parent_prompt()
     adapter = RecordingAdapter(failures={"fail"})
@@ -267,6 +382,7 @@ def test_dispatch_subagents_requires_dataclass_output_type() -> None:
             output_type=str,
             container=rendered.container,
             allow_extra_keys=rendered.allow_extra_keys,
+            deadline=rendered.deadline,
             _tools=rendered.tools,
             _tool_param_descriptions=rendered.tool_param_descriptions,
         ),

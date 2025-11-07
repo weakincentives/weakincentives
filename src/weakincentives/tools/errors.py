@@ -19,4 +19,8 @@ class ToolValidationError(ValueError):
     """Raised when tool parameters fail validation checks."""
 
 
-__all__ = ["ToolValidationError"]
+class DeadlineExceededError(RuntimeError):
+    """Raised when a tool cannot complete before the configured deadline."""
+
+
+__all__ = ["DeadlineExceededError", "ToolValidationError"]

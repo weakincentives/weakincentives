@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Protocol, TypeVar, cast
 
 from weakincentives.adapters.core import (
@@ -44,6 +45,7 @@ class _DummyAdapter(ProviderAdapter[Any]):
         parse_output: bool = True,
         bus: InProcessEventBus,
         session: SessionProtocol,
+        deadline: datetime | None = None,
     ) -> PromptResponse[Any]:
         raise NotImplementedError
 

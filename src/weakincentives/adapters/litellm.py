@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from datetime import datetime
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
@@ -128,8 +130,12 @@ class LiteLLMAdapter:
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
+        deadline: datetime | None = None,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
+        normalized_deadline = _shared.normalize_deadline(
+            deadline, prompt_name=prompt_name
+        )
         has_structured_output = (
             getattr(prompt, "_output_type", None) is not None
             and getattr(prompt, "_output_container", None) is not None
@@ -147,6 +153,8 @@ class LiteLLMAdapter:
             )
         else:
             rendered = prompt.render(*params)
+        if normalized_deadline is not None:
+            rendered = replace(rendered, deadline=normalized_deadline)
         response_format: dict[str, Any] | None = None
         should_parse_structured_output = (
             parse_output
@@ -207,6 +215,7 @@ class LiteLLMAdapter:
             format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=logger,
+            deadline=normalized_deadline,
         )
 
 

@@ -103,6 +103,7 @@ rendered_child = context.adapter.evaluate(
     child_params,
     bus=context.event_bus,
     session=context.session,
+    deadline=context.rendered_prompt.deadline,
 )
 
 return ToolResult(

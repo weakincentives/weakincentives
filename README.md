@@ -371,6 +371,8 @@ events automatically. For payload formats and parsing guarantees see
 [Native OpenAI Structured Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md).
 
 ```python
+from datetime import UTC, datetime, timedelta
+
 from weakincentives.adapters.openai import OpenAIAdapter
 
 
@@ -389,6 +391,8 @@ response = adapter.evaluate(
         files_summary="loader.py, cache.py",
     ),
     bus=bus,
+    session=session,
+    deadline=datetime.now(UTC) + timedelta(minutes=2),
 )
 
 
