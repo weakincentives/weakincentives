@@ -48,6 +48,13 @@ openai = [
 litellm = [
     "litellm>=1.79.0",
 ]
+wink = [
+    "mcp>=1.0.0",
+    "pyyaml>=6.0.2",
+]
+
+[project.scripts]
+wink = "weakincentives.cli.wink:main"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -132,7 +139,7 @@ norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "litellm", "openai"]
+DEP002 = ["asteval", "litellm", "mcp", "openai", "pyyaml"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
