@@ -14,6 +14,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from weakincentives.prompt import PromptRenderError
 from weakincentives.tools import PlanningStrategy, PlanningToolsSection
 
 
@@ -79,3 +82,10 @@ def test_planning_section_original_body_template_tracks_strategy() -> None:
         strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
     )
     assert "restating the goal" in goal_section.original_body_template()
+
+
+def test_planning_section_rejects_missing_params() -> None:
+    section = PlanningToolsSection()
+
+    with pytest.raises(PromptRenderError):
+        section.render(None, depth=0)

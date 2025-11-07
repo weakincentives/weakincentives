@@ -22,8 +22,11 @@ from weakincentives.prompt import (
     DelegationPrompt,
     MarkdownSection,
     ParentPromptParams,
+    ParentPromptSection,
     Prompt,
+    PromptRenderError,
     RecapParams,
+    RecapSection,
     Tool,
 )
 from weakincentives.prompt.composition import _merge_tool_param_descriptions
@@ -204,19 +207,31 @@ def test_delegation_prompt_skips_fallback_when_parent_freeform() -> None:
         rendered_parent,
         include_response_format=True,
     )
-
     rendered = delegation.render(
         DelegationParams(
-            reason="Need ad-hoc context.",
-            expected_result="Short summary of findings.",
+            reason="Gather raw observations.",
+            expected_result="A quick log summary.",
             may_delegate_further="no",
-            recap_lines=("Highlight unresolved questions.",),
+            recap_lines=("Capture high-level anomalies.",),
         ),
         parent=ParentPromptParams(body=rendered_parent.text),
     )
 
-    header_segment = rendered.text.split("<!-- PARENT PROMPT START -->", 1)[0]
-    assert "## Response Format" not in header_segment
+    assert "## Response Format" not in rendered.text
+
+
+def test_parent_prompt_section_requires_params() -> None:
+    section = ParentPromptSection()
+
+    with pytest.raises(PromptRenderError):
+        section.render(None, depth=0)
+
+
+def test_recap_section_requires_params() -> None:
+    section = RecapSection()
+
+    with pytest.raises(PromptRenderError):
+        section.render(None, depth=0)
 
 
 def test_delegation_prompt_empty_recap_uses_placeholder() -> None:

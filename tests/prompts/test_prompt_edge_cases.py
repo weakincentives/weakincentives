@@ -67,6 +67,18 @@ class NullConstructedParams:
         return None
 
 
+@dataclass
+class InvalidConstructedParams:
+    value: str = "unused"
+
+    def __new__(
+        cls,
+        *args: object,
+        **kwargs: object,
+    ) -> InvalidConstructedParams | object:
+        return {"value": "not dataclass"}
+
+
 def test_prompt_render_detects_constructor_returning_none() -> None:
     section = MarkdownSection[NullConstructedParams](
         title="Null",
@@ -85,6 +97,26 @@ def test_prompt_render_detects_constructor_returning_none() -> None:
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("null",)
     assert error.dataclass_type is NullConstructedParams
+
+
+def test_prompt_render_detects_constructor_returning_non_dataclass() -> None:
+    section = MarkdownSection[InvalidConstructedParams](
+        title="Invalid",
+        template="Invalid body",
+        key="invalid",
+    )
+    prompt = Prompt(
+        ns="tests.prompts",
+        key="edge-constructor-invalid",
+        sections=[section],
+    )
+
+    with pytest.raises(PromptRenderError) as exc:
+        prompt.render()
+
+    error = cast(PromptRenderError, exc.value)
+    assert error.section_path == ("invalid",)
+    assert error.dataclass_type is InvalidConstructedParams
 
 
 @dataclass

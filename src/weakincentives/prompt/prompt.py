@@ -291,7 +291,7 @@ class Prompt[OutputT]:
         depth: int,
     ) -> None:
         params_type = section.param_type
-        if not is_dataclass(params_type):
+        if params_type is not None and not is_dataclass(params_type):
             raise PromptValidationError(
                 "Section params must be a dataclass.",
                 section_path=path,
@@ -302,9 +302,10 @@ class Prompt[OutputT]:
             section=section, depth=depth, path=path
         )
         self._section_nodes.append(node)
-        self._params_registry.setdefault(params_type, []).append(node)
+        if params_type is not None:
+            self._params_registry.setdefault(params_type, []).append(node)
 
-        if section.default_params is not None:
+        if params_type is not None and section.default_params is not None:
             default_value = section.default_params
             if isinstance(default_value, type) or not is_dataclass(default_value):
                 raise PromptValidationError(
@@ -323,16 +324,25 @@ class Prompt[OutputT]:
 
         section_placeholders = section.placeholder_names()
         self.placeholders[path] = set(section_placeholders)
-        param_fields = {field.name for field in fields(params_type)}
-        unknown_placeholders = section_placeholders - param_fields
-        if unknown_placeholders:
-            placeholder = sorted(unknown_placeholders)[0]
-            raise PromptValidationError(
-                "Template references unknown placeholder.",
-                section_path=path,
-                dataclass_type=params_type,
-                placeholder=placeholder,
-            )
+        if params_type is None:
+            if section_placeholders:
+                placeholder = sorted(section_placeholders)[0]
+                raise PromptValidationError(
+                    "Section does not accept parameters but declares placeholders.",
+                    section_path=path,
+                    placeholder=placeholder,
+                )
+        else:
+            param_fields = {field.name for field in fields(params_type)}
+            unknown_placeholders = section_placeholders - param_fields
+            if unknown_placeholders:
+                placeholder = sorted(unknown_placeholders)[0]
+                raise PromptValidationError(
+                    "Template references unknown placeholder.",
+                    section_path=path,
+                    dataclass_type=params_type,
+                    placeholder=placeholder,
+                )
 
         self._register_section_tools(section, path)
 
@@ -356,7 +366,7 @@ class Prompt[OutputT]:
         self,
         policy: ChaptersExpansionPolicy,
         *,
-        chapter_params: Mapping[str, SupportsDataclass] | None = None,
+        chapter_params: Mapping[str, SupportsDataclass | None] | None = None,
     ) -> Prompt[OutputT]:
         """Return a prompt snapshot with chapters opened per the supplied policy."""
 
@@ -375,7 +385,7 @@ class Prompt[OutputT]:
     def _expand_chapters_all_included(
         self,
         *,
-        chapter_params: Mapping[str, SupportsDataclass],
+        chapter_params: Mapping[str, SupportsDataclass | None],
     ) -> Prompt[OutputT]:
         provided_lookup = dict(chapter_params)
         unknown_keys = set(provided_lookup) - set(self._chapter_key_registry.keys())
@@ -389,14 +399,15 @@ class Prompt[OutputT]:
         open_sections: list[Section[SupportsDataclass]] = list(self._base_sections)
 
         for chapter in self._chapters:
-            params: SupportsDataclass | None = provided_lookup.get(chapter.key)
-            if params is not None:
+            key_present = chapter.key in provided_lookup
+            params = provided_lookup.get(chapter.key)
+            if key_present:
                 params = self._normalize_chapter_params(chapter, params)
             elif chapter.default_params is not None:
                 params = _clone_dataclass(chapter.default_params)
 
             if chapter.enabled is not None:
-                if params is None:
+                if params is None and chapter.param_type is not None:
                     raise PromptValidationError(
                         "Chapter requires parameters for enabled predicate.",
                         section_path=(chapter.key,),
@@ -430,13 +441,22 @@ class Prompt[OutputT]:
     def _normalize_chapter_params(
         self,
         chapter: Chapter[SupportsDataclass],
-        params: SupportsDataclass,
-    ) -> SupportsDataclass:
-        if not isinstance(params, chapter.param_type) or not is_dataclass(params):
+        params: SupportsDataclass | None,
+    ) -> SupportsDataclass | None:
+        params_type = chapter.param_type
+        if params_type is None:
+            if params is not None:
+                raise PromptValidationError(
+                    "Chapter does not accept parameters.",
+                    section_path=(chapter.key,),
+                )
+            return None
+
+        if not isinstance(params, params_type) or not is_dataclass(params):
             raise PromptValidationError(
                 "Chapter parameters must be instances of the declared dataclass.",
                 section_path=(chapter.key,),
-                dataclass_type=chapter.param_type,
+                dataclass_type=params_type,
             )
         return params
 
@@ -581,7 +601,7 @@ class Prompt[OutputT]:
     def _render_section(
         self,
         node: SectionNode[SupportsDataclass],
-        section_params: SupportsDataclass,
+        section_params: SupportsDataclass | None,
         override_body: str | None,
     ) -> str:
         params_type = node.section.param_type
@@ -589,7 +609,7 @@ class Prompt[OutputT]:
             render_override = getattr(node.section, "render_with_template", None)
             if override_body is not None and callable(render_override):
                 override_renderer = cast(
-                    Callable[[str, SupportsDataclass, int], str],
+                    Callable[[str, SupportsDataclass | None, int], str],
                     render_override,
                 )
                 rendered = override_renderer(override_body, section_params, node.depth)
@@ -617,8 +637,11 @@ class Prompt[OutputT]:
         self,
         node: SectionNode[SupportsDataclass],
         param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
-    ) -> SupportsDataclass:
+    ) -> SupportsDataclass | None:
         params_type = node.section.param_type
+        if params_type is None:
+            return None
+
         section_params: SupportsDataclass | None = param_lookup.get(params_type)
 
         if section_params is None:
@@ -631,7 +654,9 @@ class Prompt[OutputT]:
                     section_params = _clone_dataclass(type_default)
                 else:
                     try:
-                        constructor = cast(Callable[[], SupportsDataclass], params_type)
+                        constructor = cast(
+                            Callable[[], SupportsDataclass | None], params_type
+                        )
                         section_params = constructor()
                     except TypeError as error:
                         raise PromptRenderError(
@@ -640,14 +665,29 @@ class Prompt[OutputT]:
                             dataclass_type=params_type,
                         ) from error
 
-        return section_params
+        result: SupportsDataclass | None = section_params
+        if result is None:
+            raise PromptRenderError(
+                "Section constructor must return a dataclass instance.",
+                section_path=node.path,
+                dataclass_type=params_type,
+            )
+
+        if not is_dataclass(result):
+            raise PromptRenderError(
+                "Section constructor must return a dataclass instance.",
+                section_path=node.path,
+                dataclass_type=params_type,
+            )
+
+        return result
 
     def _iter_enabled_sections(
         self,
         param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
         *,
         inject_output_instructions: bool | None = None,
-    ) -> Iterator[tuple[SectionNode[SupportsDataclass], SupportsDataclass]]:
+    ) -> Iterator[tuple[SectionNode[SupportsDataclass], SupportsDataclass | None]]:
         skip_depth: int | None = None
 
         for node in self._section_nodes:
@@ -664,7 +704,7 @@ class Prompt[OutputT]:
                 enabled = inject_output_instructions
             else:
                 try:
-                    enabled = node.section.is_enabled(section_params)
+                    enabled = node.section.is_enabled(cast(Any, section_params))
                 except Exception as error:
                     raise PromptRenderError(
                         "Section enabled predicate failed.",

@@ -50,11 +50,11 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         )
 
     @override
-    def render(self, params: ParamsT, depth: int) -> str:
+    def render(self, params: ParamsT | None, depth: int) -> str:
         return self.render_with_template(self.template, params, depth)
 
     def render_with_template(
-        self, template_text: str, params: ParamsT, depth: int
+        self, template_text: str, params: ParamsT | None, depth: int
     ) -> str:
         heading_level = "#" * (depth + 2)
         heading = f"{heading_level} {self.title.strip()}"
@@ -87,7 +87,9 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         return placeholders
 
     @staticmethod
-    def _normalize_params(params: ParamsT) -> dict[str, Any]:
+    def _normalize_params(params: ParamsT | None) -> dict[str, Any]:
+        if params is None:
+            return {}
         if not is_dataclass(params) or isinstance(params, type):
             raise PromptRenderError(
                 "Section params must be a dataclass instance.",
