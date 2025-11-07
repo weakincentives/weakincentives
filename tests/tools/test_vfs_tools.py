@@ -481,7 +481,7 @@ def test_write_file_rejects_non_utf8_encoding(monkeypatch: pytest.MonkeyPatch) -
             WriteFile(
                 path=VfsPath(("README.md",)),
                 content="hello",
-                encoding="latin-1",  # type: ignore[arg-type]
+                encoding="latin-1",
             ),
             session=session,
         )

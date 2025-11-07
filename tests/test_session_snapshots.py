@@ -51,12 +51,12 @@ def make_snapshot_payload() -> dict[str, object]:
 
 def test_normalize_snapshot_state_validates_keys() -> None:
     with pytest.raises(ValueError):
-        normalize_snapshot_state({"not a type": ()})  # type: ignore[arg-type]
+        normalize_snapshot_state({"not a type": ()})
 
 
 def test_normalize_snapshot_state_rejects_nondataclass_values() -> None:
     with pytest.raises(ValueError):
-        normalize_snapshot_state({SnapshotItem: ("value",)})  # type: ignore[arg-type]
+        normalize_snapshot_state({SnapshotItem: ("value",)})
 
 
 def test_normalize_snapshot_state_reports_serialization_errors(

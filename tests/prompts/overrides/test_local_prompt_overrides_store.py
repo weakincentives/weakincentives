@@ -813,7 +813,7 @@ def test_seed_sections_missing_section_raises(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
-    prompt._section_nodes = []  # type: ignore[attr-defined]
+    prompt._section_nodes = []
 
     with pytest.raises(PromptOverridesError):
         store._seed_sections(prompt, descriptor)
@@ -825,7 +825,7 @@ def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     for node in getattr(prompt, "_section_nodes", []):
-        node.section.original_body_template = lambda: None  # type: ignore[assignment]
+        node.section.original_body_template = lambda: None
 
     with pytest.raises(PromptOverridesError):
         store._seed_sections(prompt, descriptor)
@@ -837,7 +837,7 @@ def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     for node in getattr(prompt, "_section_nodes", []):
-        node.section._tools = ()  # type: ignore[attr-defined]
+        node.section._tools = ()
 
     with pytest.raises(PromptOverridesError):
         store._seed_tools(prompt, descriptor)
@@ -860,7 +860,7 @@ def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
         handler=None,
     )
 
-    tool.params_type = str  # type: ignore[assignment]
+    tool.params_type = str
 
     assert (
         store._collect_param_descriptions(

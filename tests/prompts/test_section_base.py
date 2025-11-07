@@ -97,4 +97,4 @@ def test_section_requires_specialized_type_parameter() -> None:
 
 def test_section_rejects_multiple_type_arguments() -> None:
     with pytest.raises(TypeError):
-        Section.__class_getitem__((int, str))  # type: ignore[call-arg]
+        Section.__class_getitem__((int, str))

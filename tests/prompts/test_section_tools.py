@@ -81,7 +81,7 @@ def test_sections_default_to_no_tools() -> None:
 
 def test_sections_reject_non_tool_entries() -> None:
     with pytest.raises(TypeError):
-        _BareSection(title="Invalid", key="invalid", tools=["oops"])  # type: ignore[arg-type]
+        _BareSection(title="Invalid", key="invalid", tools=["oops"])
 
 
 def test_sections_expose_tools_in_order() -> None:

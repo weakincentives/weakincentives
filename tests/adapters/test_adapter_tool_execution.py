@@ -179,7 +179,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(  # type: ignore[call-arg]
+    result = adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -233,7 +233,7 @@ def test_adapter_tool_execution_validation_error(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(  # type: ignore[call-arg]
+    result = adapter.evaluate(
         prompt,
         ToolParams(query="invalid"),
         bus=bus,
@@ -294,7 +294,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(  # type: ignore[call-arg]
+    result = adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -356,7 +356,7 @@ def test_adapter_tool_execution_rejects_type_errors(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(  # type: ignore[call-arg]
+    result = adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -412,7 +412,7 @@ def test_adapter_tool_execution_unexpected_exception(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(  # type: ignore[call-arg]
+    result = adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -490,7 +490,7 @@ def test_adapter_tool_execution_rolls_back_session(
 
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(  # type: ignore[call-arg]
+    result = adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,

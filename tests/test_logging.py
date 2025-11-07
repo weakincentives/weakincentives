@@ -267,7 +267,7 @@ def test_unwrap_logger_raises_for_invalid_adapter() -> None:
     class _BrokenAdapter(logging.LoggerAdapter):
         def __init__(self) -> None:
             super().__init__(logging.getLogger("broken"), {})
-            self.logger = object()  # type: ignore[assignment]
+            self.logger = object()
 
     adapter = _BrokenAdapter()
 
