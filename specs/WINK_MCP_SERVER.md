@@ -6,18 +6,17 @@ The `wink` CLI now serves exclusively as the launcher for a Model Context Protoc
 
 ## Runtime & Dependencies
 
-- **Python & package manager**: Target Python 3.12 and orchestrate installs with `uv`, matching the rest of the repository.
-- **Project extras**: The server code depends on the OpenAI adapter to reach the `gpt-5` default. Document that operators must run `uv sync --extra openai` (or `pip install weakincentives[openai]`) before launching the server. Keep helper routines defensive if the extra is missing.
-- **MCP protocol bindings**: Add a dedicated optional dependency group for the MCP server (for example, `model-context-protocol>=0.1.0` and any transport helpers). Ship a `uv` task, e.g. `uv sync --group mcp`, so agents can prepare a fully wired environment with a single command.
+- **CLI extra**: Ship the `wink` command and its MCP dependencies as a dedicated optional extra (for example, `[project.optional-dependencies.wink]` in `pyproject.toml`). Installing `weakincentives[wink]` must pull in the CLI entry point, the MCP transport/bindings, and any runtime glue so hosts can enable the server with a single flag.
+- **Model adapters**: The server defaults to the OpenAI adapter for `gpt-5`. Declare the adapter dependency inside the same `wink` extra (alongside any other runtime adapters) so a single install flow captures the CLI surface and LLM requirements.
 - **Local configuration**: The server reads overrides directories, environment flags, and optional auth tokens from a TOML or YAML config file. Provide a sample config and reference paths in documentation so headless clients can launch deterministically.
 - **Logging & diagnostics**: Standardize on structured, single-line logs (JSON or key-value) and expose `--log-level` and `--log-format` flags to let hosting clients control verbosity.
 
 ## Execution Model
 
 1. `wink mcp` (or an equivalent entry point) spins up the MCP server, advertises available tools, and blocks until the client disconnects.
-2. Resolve configuration strictly from CLI flags and a static config file so Codex/Claude can start the server without environment discovery.
-3. Helper routines that need an LLM session should default to the `gpt-5` model via the OpenAI adapter but accept overrides in the config.
-4. Emit structured logs throughout startup, capability registration, and shutdown. Errors must map to MCP error semantics so clients can surface actionable messages.
+1. Resolve configuration strictly from CLI flags and a static config file so Codex/Claude can start the server without environment discovery.
+1. Helper routines that need an LLM session should default to the `gpt-5` model via the OpenAI adapter but accept overrides in the config.
+1. Emit structured logs throughout startup, capability registration, and shutdown. Errors must map to MCP error semantics so clients can surface actionable messages.
 
 ## MCP Capabilities
 
