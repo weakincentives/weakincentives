@@ -20,18 +20,15 @@ ______________________________________________________________________
 
 ## Quickstart
 
-1. **Install** the package and optional extras with [`uv`](https://github.com/astral-sh/uv):
+1. Install the core package, then add extras when you need adapters:
    ```bash
-   uv add weakincentives
-   uv add "weakincentives[asteval]"
-   uv add "weakincentives[openai]"
-   uv add "weakincentives[litellm]"
+   uv add weakincentives "weakincentives[openai]"
    ```
-1. **Sync the repo** (if developing locally):
+1. Sync the repo with all extras to mirror CI:
    ```bash
-   uv sync --extra asteval --extra openai --extra litellm
+   uv sync --all-extras
    ```
-1. **Explore the examples** in `code_reviewer_example.py` and the prompts under `specs/` to understand the runtime patterns.
+1. Run `code_reviewer_example.py` to see sessions, prompts, and tools working together.
 
 ```python
 from weakincentives.logging import configure_logging
@@ -43,10 +40,9 @@ ______________________________________________________________________
 
 ## Observable session state
 
-- Redux-inspired session ledger captures every prompt and tool interaction.
-- Reducers attach domain-specific validation while keeping runs deterministic.
-- In-process event bus emits `ToolInvoked` and `PromptExecuted` events for telemetry.
-- Built-in planning, virtual filesystem, and Python evaluation sections register reducers automatically.
+- Append-only session ledger captures prompts and tool calls.
+- Reducers validate records while keeping the run deterministic.
+- Event bus emits `ToolInvoked` and `PromptExecuted` telemetry out of the box.
 
 ```python
 from weakincentives.events import InProcessEventBus, ToolInvoked
@@ -64,10 +60,9 @@ ______________________________________________________________________
 
 ## Composable prompt blueprints
 
-- Prompt sections are typed dataclasses with validated placeholders.
-- Sections assemble into reusable prompt trees that enforce strict contracts.
-- Markdown renders stay predictable and version-control-friendly.
-- Tool contracts surface alongside prompts to keep structured replies consistent.
+- Sections are typed dataclasses with validated placeholders.
+- Prompts reuse those sections so contracts stay consistent.
+- Markdown output is deterministic and diff-friendly.
 
 ```python
 from dataclasses import dataclass
@@ -96,11 +91,9 @@ ______________________________________________________________________
 
 ## Built-in sections
 
-- Planning, virtual filesystem, and evaluation sections ship ready for real runs.
-- Each section registers reducers so session state always reflects the latest plan, mounts, and eval results.
-- Planning helpers expose plan setup and step updates without writing ad-hoc schemas.
-- A virtual filesystem snapshot keeps diffs and patches available without extra tool calls.
-- The optional asteval sandbox runs quick calculations inside the same prompt with deterministic IO guards.
+- Planning, virtual filesystem, and evaluation ship as ready-made sections.
+- Each registers reducers so session state mirrors plans, mounts, and evals.
+- Optional `AstevalSection` runs guarded calculations inline.
 
 ```python
 from pathlib import Path
@@ -131,11 +124,9 @@ ______________________________________________________________________
 
 ## Tool suites and helpers
 
-- Tool bindings surface typed requests and responses for plans, file IO, and math evals.
-- `PlanningToolsSection` exposes creation, update, and completion hooks for multi-step plans.
-- `VfsToolsSection` wraps read/write/delete operations with host-path allowlists.
-- `AstevalSection` enables sandboxed Python evaluation when `weakincentives[asteval]` is installed.
-- Advanced flows can dispatch nested agents with the `dispatch_subagents` helper.
+- Tools expose typed payloads for plans, VFS access, and evals.
+- `PlanningToolsSection` wraps create/update/complete lifecycle calls.
+- `VfsToolsSection` enforces allowlists for host paths and patches.
 
 ```python
 from weakincentives.tools import PlanningToolsSection
@@ -150,10 +141,9 @@ ______________________________________________________________________
 
 ## Override-friendly workflows
 
-- Prompt overrides enable experimentation without changing source-controlled defaults.
-- Hash-based descriptors keep overrides aligned with prompt schema changes.
-- On-disk overrides are validated and resolved relative to the Git root.
-- Optimization loops plug into the same override surface as manual tweaks.
+- Overrides let you test changes without touching the default prompt set.
+- Descriptors hash the schema so stale overrides are rejected early.
+- Stores resolve relative to the repo root for reproducible runs.
 
 ```python
 from weakincentives.prompt.local_prompt_overrides_store import LocalPromptOverridesStore
@@ -169,9 +159,9 @@ ______________________________________________________________________
 
 ## Provider adapters
 
-- Conversation loop negotiates tool calls across model providers.
-- JSON Schema-enforced response formats normalize structured payloads.
-- Runtime stays model-agnostic while adapters share the same negotiation contract.
+- Negotiation loop handles tool calls for each provider integration.
+- JSON Schema validation keeps structured responses aligned.
+- Swapping adapters preserves the same runtime contract.
 
 ```python
 from dataclasses import dataclass
@@ -211,9 +201,9 @@ ______________________________________________________________________
 
 ## Local-first, deterministic execution
 
-- No mandatory hosted services—everything runs locally by default.
-- Reproducible renders keep diffs meaningful and easy to review.
-- Code review example combines overrides, session telemetry, and replayable tooling.
+- Local defaults avoid relying on hosted services.
+- Deterministic renders keep diffs small and reviewable.
+- Code review example shows overrides, telemetry, and tooling together.
 
 ```python
 from weakincentives.events import NullEventBus
@@ -228,9 +218,9 @@ ______________________________________________________________________
 
 ## Next steps
 
-- Read the specs in `specs/` for deep dives into sessions, prompts, tooling, and overrides.
-- Extend the library with typed tools and prompts tailored to your workflow.
-- Wire the Marp workflow to publish these slides via GitHub Pages.
+- Dive into `specs/` for detailed behavior and extension points.
+- Add domain-specific prompts and tools on top of the typed primitives.
+- Enable the Pages workflow to publish or export the deck when ready.
 
 ```python
 from weakincentives import parse_structured_output
