@@ -20,6 +20,7 @@ from types import MappingProxyType
 from typing import Any, ClassVar, Generic, TypeVar, cast, override
 
 from ._types import SupportsDataclass
+from .errors import PromptRenderError
 from .markdown import MarkdownSection
 from .prompt import Prompt, RenderedPrompt
 from .response_format import ResponseFormatParams, ResponseFormatSection
@@ -88,7 +89,12 @@ class ParentPromptSection(Section[ParentPromptParams]):
         )
 
     @override
-    def render(self, params: ParentPromptParams, depth: int) -> str:
+    def render(self, params: ParentPromptParams | None, depth: int) -> str:
+        if params is None:
+            raise PromptRenderError(
+                "Parent prompt section requires parameters.",
+                dataclass_type=ParentPromptParams,
+            )
         heading = "#" * (depth + 2)
         prefix = f"{heading} {self.title}"
         body = params.body
@@ -108,7 +114,12 @@ class RecapSection(Section[RecapParams]):
         super().__init__(title="Recap", key="recap")
 
     @override
-    def render(self, params: RecapParams, depth: int) -> str:
+    def render(self, params: RecapParams | None, depth: int) -> str:
+        if params is None:
+            raise PromptRenderError(
+                "Recap section requires parameters.",
+                dataclass_type=RecapParams,
+            )
         heading = "#" * (depth + 2)
         prefix = f"{heading} {self.title}"
         bullets = params.bullets

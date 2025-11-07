@@ -92,6 +92,28 @@ class SummaryParams:
     summary: str
 
 
+def test_prompt_renders_section_without_params() -> None:
+    static_section = MarkdownSection(
+        title="Static", key="static", template="Static content."
+    )
+    prompt = Prompt(
+        ns="tests.prompts",
+        key="paramless-section",
+        sections=(static_section,),
+    )
+
+    rendered = prompt.render()
+
+    assert rendered.text.strip().endswith("Static content.")
+
+
+def test_prompt_rejects_placeholders_for_paramless_section() -> None:
+    section = MarkdownSection(title="Bad", key="bad", template="${value}")
+
+    with pytest.raises(PromptValidationError):
+        Prompt(ns="tests.prompts", key="bad-section", sections=(section,))
+
+
 def build_nested_prompt() -> Prompt:
     leaf = MarkdownSection[LeafParams](
         title="Leaf",

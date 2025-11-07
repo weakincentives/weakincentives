@@ -21,6 +21,7 @@ from typing import Final, Literal, cast, override
 from weakref import WeakSet
 
 from ..prompt import SupportsDataclass
+from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..runtime.session import (
@@ -342,7 +343,12 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
 
     @override
-    def render(self, params: _PlanningSectionParams, depth: int) -> str:
+    def render(self, params: _PlanningSectionParams | None, depth: int) -> str:
+        if params is None:
+            raise PromptRenderError(
+                "Planning tools section requires parameters.",
+                dataclass_type=_PlanningSectionParams,
+            )
         template = _template_for_strategy(self._strategy)
         return self.render_with_template(template, params, depth)
 

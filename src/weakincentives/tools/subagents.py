@@ -23,6 +23,7 @@ from typing import Any, Final, cast, override
 
 from ..adapters.core import PromptResponse
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
+from ..prompt.errors import PromptRenderError
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.section import Section
 from ..prompt.tool import Tool, ToolContext
@@ -279,8 +280,12 @@ class SubagentsSection(Section[_SubagentsSectionParams]):
         )
 
     @override
-    def render(self, params: _SubagentsSectionParams, depth: int) -> str:
-        del params
+    def render(self, params: _SubagentsSectionParams | None, depth: int) -> str:
+        if params is None:
+            raise PromptRenderError(
+                "Subagents section requires parameters.",
+                dataclass_type=_SubagentsSectionParams,
+            )
         heading = "#" * (depth + 2)
         return f"{heading} {self.title}\n\n{_DELEGATION_BODY}"
 

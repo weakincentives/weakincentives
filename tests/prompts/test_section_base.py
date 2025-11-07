@@ -90,9 +90,42 @@ def test_plain_section_render_stubs_result() -> None:
     assert PlainSection.render(instance, object(), 0) == ""
 
 
-def test_section_requires_specialized_type_parameter() -> None:
+def test_plain_section_allows_absence_of_params() -> None:
+    section = PlainSection(title="Plain", key="plain")
+
+    assert section.param_type is None
+    assert section.is_enabled(None) is True
+    assert section.render(None, 1) == ""
+
+
+def test_plain_section_accepts_parameterless_enabled_callable() -> None:
+    section = PlainSection(title="Plain", key="plain", enabled=lambda: False)
+
+    assert section.is_enabled(None) is False
+
+
+def test_plain_section_parameterless_enabled_handles_argument() -> None:
+    recorded: list[object | None] = []
+
+    def enabled(value: object | None) -> bool:
+        recorded.append(value)
+        return value is None
+
+    section = PlainSection(title="Plain", key="plain", enabled=enabled)
+
+    assert section.is_enabled(None) is True
+    assert recorded == [None]
+
+
+def test_plain_section_parameterless_enabled_handles_non_inspectable_callable() -> None:
+    section = PlainSection(title="Plain", key="plain", enabled=bool)
+
+    assert section.is_enabled(None) is False
+
+
+def test_section_without_params_rejects_defaults() -> None:
     with pytest.raises(TypeError):
-        PlainSection(title="Plain", key="plain")
+        PlainSection(title="Plain", key="plain", default_params=object())
 
 
 def test_section_rejects_multiple_type_arguments() -> None:

@@ -12,10 +12,11 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, ClassVar, Final, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
@@ -39,25 +40,26 @@ class Section[ParamsT: SupportsDataclass](ABC):
         key: str,
         default_params: ParamsT | None = None,
         children: Sequence[object] | None = None,
-        enabled: Callable[[ParamsT], bool] | None = None,
+        enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None = None,
         tools: Sequence[object] | None = None,
         accepts_overrides: bool = True,
     ) -> None:
         super().__init__()
+        params_candidate = getattr(self.__class__, "_params_type", None)
         params_type = cast(
-            type[ParamsT] | None, getattr(self.__class__, "_params_type", None)
+            type[ParamsT] | None,
+            params_candidate if isinstance(params_candidate, type) else None,
         )
-        if params_type is None:
-            raise TypeError(
-                "Section must be instantiated with a concrete ParamsT type."
-            )
 
-        self.params_type: type[ParamsT] = params_type
-        self.param_type: type[ParamsT] = params_type
+        self.params_type: type[ParamsT] | None = params_type
+        self.param_type: type[ParamsT] | None = params_type
         self.title = title
         self.key = self._normalize_key(key)
         self.default_params = default_params
         self.accepts_overrides = accepts_overrides
+
+        if self.params_type is None and self.default_params is not None:
+            raise TypeError("Section without parameters cannot define default_params.")
 
         normalized_children: list[Section[SupportsDataclass]] = []
         for child in children or ():
@@ -67,10 +69,12 @@ class Section[ParamsT: SupportsDataclass](ABC):
         self.children: tuple[Section[SupportsDataclass], ...] = tuple(
             normalized_children
         )
-        self._enabled = enabled
+        self._enabled: Callable[[ParamsT | None], bool] | None = (
+            self._normalize_enabled(enabled, params_type)
+        )
         self._tools = self._normalize_tools(tools)
 
-    def is_enabled(self, params: ParamsT) -> bool:
+    def is_enabled(self, params: ParamsT | None) -> bool:
         """Return True when the section should render for the given params."""
 
         if self._enabled is None:
@@ -78,7 +82,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         return bool(self._enabled(params))
 
     @abstractmethod
-    def render(self, params: ParamsT, depth: int) -> str:
+    def render(self, params: ParamsT | None, depth: int) -> str:
         """Produce markdown output for the section at the supplied depth."""
 
     def placeholder_names(self) -> set[str]:
@@ -139,6 +143,46 @@ class Section[ParamsT: SupportsDataclass](ABC):
                 raise TypeError("Section tools must be Tool instances.")
             normalized.append(cast(Tool[SupportsDataclass, SupportsDataclass], tool))
         return tuple(normalized)
+
+    @staticmethod
+    def _normalize_enabled(
+        enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None,
+        params_type: type[SupportsDataclass] | None,
+    ) -> Callable[[ParamsT | None], bool] | None:
+        if enabled is None:
+            return None
+        if params_type is None and not _callable_requires_positional_argument(enabled):
+            zero_arg = cast(Callable[[], bool], enabled)
+
+            def _without_params(_: ParamsT | None) -> bool:
+                return bool(zero_arg())
+
+            return _without_params
+
+        coerced = cast(Callable[[ParamsT], bool], enabled)
+
+        def _with_params(value: ParamsT | None) -> bool:
+            return bool(coerced(cast(ParamsT, value)))
+
+        return _with_params
+
+
+def _callable_requires_positional_argument(callback: Callable[..., Any]) -> bool:
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        return True
+    for parameter in signature.parameters.values():
+        if (
+            parameter.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+            and parameter.default is inspect.Signature.empty
+        ):
+            return True
+    return False
 
 
 __all__ = ["Section"]

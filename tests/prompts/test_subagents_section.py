@@ -12,6 +12,9 @@
 
 """Coverage tests for the SubagentsSection helper."""
 
+import pytest
+
+from weakincentives.prompt.errors import PromptRenderError
 from weakincentives.tools import SubagentsSection
 from weakincentives.tools.subagents import (
     SubagentIsolationLevel,
@@ -27,7 +30,9 @@ def test_subagents_section_render_mentions_tool() -> None:
     tool = tools[0]
     assert tool.name == dispatch_subagents.name
 
-    params = section.param_type()
+    params_type = section.param_type
+    assert params_type is not None
+    params = params_type()
     rendered = section.render(params, depth=0)
 
     assert "dispatch_subagents" in rendered
@@ -46,3 +51,10 @@ def test_subagents_section_builds_isolated_tool() -> None:
     )
     assert tool.name == expected.name
     assert tool.description == expected.description
+
+
+def test_subagents_section_rejects_missing_params() -> None:
+    section = SubagentsSection()
+
+    with pytest.raises(PromptRenderError):
+        section.render(None, depth=0)

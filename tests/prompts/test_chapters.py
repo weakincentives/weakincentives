@@ -186,9 +186,115 @@ def test_expand_chapters_with_no_chapters_returns_original_prompt() -> None:
     assert expanded is base_prompt
 
 
-def test_chapter_requires_concrete_type_specialization() -> None:
+def test_expand_chapters_includes_chapter_without_params() -> None:
+    base_section = MarkdownSection[BaseParams](
+        title="Base",
+        template="Base: ${summary}",
+        key="base",
+    )
+    static_section = MarkdownSection(
+        title="Static", template="Static chapter", key="static-section"
+    )
+    static_chapter = Chapter(
+        key="static-chapter",
+        title="Static Chapter",
+        sections=(static_section,),
+    )
+    prompt = Prompt(
+        ns="tests.prompts",
+        key="chapter-paramless",
+        sections=(base_section,),
+        chapters=(static_chapter,),
+    )
+
+    expanded = prompt.expand_chapters(ChaptersExpansionPolicy.ALL_INCLUDED)
+
+    rendered = expanded.render(BaseParams(summary="demo"))
+
+    assert "Static chapter" in rendered.text
+
+
+def test_expand_chapters_rejects_params_for_paramless_chapter() -> None:
+    static_section = MarkdownSection(
+        title="Static", template="Static", key="static-section"
+    )
+    chapter = Chapter(key="static", title="Static", sections=(static_section,))
+    prompt = Prompt(
+        ns="tests.prompts",
+        key="chapter-paramless-params",
+        sections=(),
+        chapters=(chapter,),
+    )
+
+    with pytest.raises(PromptValidationError):
+        prompt.expand_chapters(
+            ChaptersExpansionPolicy.ALL_INCLUDED,
+            chapter_params={"static": BaseParams(summary="noop")},
+        )
+
+
+def test_expand_chapters_accepts_none_for_paramless_chapter() -> None:
+    static_section = MarkdownSection(
+        title="Static", template="Static", key="static-section"
+    )
+    chapter = Chapter(key="static", title="Static", sections=(static_section,))
+    prompt = Prompt(
+        ns="tests.prompts",
+        key="chapter-paramless-none",
+        sections=(),
+        chapters=(chapter,),
+    )
+
+    expanded = prompt.expand_chapters(
+        ChaptersExpansionPolicy.ALL_INCLUDED,
+        chapter_params={"static": None},
+    )
+
+    rendered = expanded.render()
+
+    assert "Static" in rendered.text
+
+
+def test_chapter_without_params_defaults_to_none() -> None:
+    chapter = Chapter(key="static", title="Static")
+
+    assert chapter.param_type is None
+    assert chapter.sections == ()
+    assert chapter.is_enabled(None) is True
+
+
+def test_chapter_without_params_accepts_parameterless_enabled_callable() -> None:
+    chapter = Chapter(key="static", title="Static", enabled=lambda: False)
+
+    assert chapter.is_enabled(None) is False
+
+
+def test_chapter_without_params_enabled_callable_handles_argument() -> None:
+    recorded: list[object | None] = []
+
+    def enabled(value: object | None) -> bool:
+        recorded.append(value)
+        return value is None
+
+    chapter = Chapter(key="static", title="Static", enabled=enabled)
+
+    assert chapter.is_enabled(None) is True
+    assert recorded == [None]
+
+
+def test_chapter_without_params_enabled_callable_handles_non_inspectable_callable() -> (
+    None
+):
+    chapter = Chapter(key="static", title="Static", enabled=bool)
+
+    assert chapter.is_enabled(None) is False
+
+
+def test_chapter_without_params_rejects_defaults() -> None:
     with pytest.raises(TypeError):
-        Chapter(key="invalid", title="Invalid")
+        Chapter(
+            key="invalid", title="Invalid", default_params=ToggleParams(include=True)
+        )
 
 
 def test_chapter_rejects_non_section_payloads() -> None:
