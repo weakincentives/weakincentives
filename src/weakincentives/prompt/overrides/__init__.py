@@ -14,6 +14,11 @@
 
 from __future__ import annotations
 
+from .inspection import (
+    OverrideFileMetadata,
+    iter_override_files,
+    resolve_overrides_root,
+)
 from .local_store import LocalPromptOverridesStore
 from .versioning import (
     PromptDescriptor,
@@ -31,6 +36,7 @@ from .versioning import (
 
 __all__ = [
     "LocalPromptOverridesStore",
+    "OverrideFileMetadata",
     "PromptDescriptor",
     "PromptLike",
     "PromptOverride",
@@ -42,4 +48,6 @@ __all__ = [
     "ToolOverride",
     "hash_json",
     "hash_text",
+    "iter_override_files",
+    "resolve_overrides_root",
 ]
