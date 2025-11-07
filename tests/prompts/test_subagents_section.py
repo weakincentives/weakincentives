@@ -12,7 +12,7 @@
 
 """Coverage tests for the SubagentsSection helper."""
 
-from weakincentives.prompt import SubagentsSection
+from weakincentives.tools import SubagentsSection
 from weakincentives.tools.subagents import (
     SubagentIsolationLevel,
     build_dispatch_subagents_tool,

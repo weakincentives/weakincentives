@@ -19,11 +19,12 @@ from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, is_dataclass
 from enum import Enum, auto
-from typing import Any, Final, cast
+from typing import Any, Final, cast, override
 
 from ..adapters.core import PromptResponse
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.prompt import Prompt, RenderedPrompt
+from ..prompt.section import Section
 from ..prompt.tool import Tool, ToolContext
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
@@ -240,6 +241,50 @@ def build_dispatch_subagents_tool(
     )
 
 
+@dataclass(slots=True)
+class _SubagentsSectionParams:
+    """Placeholder params container for the subagents section."""
+
+    pass
+
+
+_DELEGATION_BODY: Final[str] = (
+    "Use `dispatch_subagents` to offload work that can proceed in parallel.\n"
+    "Each delegation must include recap bullet points so the parent can audit\n"
+    "the child plan. Prefer dispatching concurrent tasks over running them\n"
+    "sequentially yourself."
+)
+
+
+class SubagentsSection(Section[_SubagentsSectionParams]):
+    """Explain the delegation workflow and expose the dispatch tool."""
+
+    def __init__(
+        self,
+        *,
+        isolation_level: SubagentIsolationLevel | None = None,
+    ) -> None:
+        effective_level = (
+            isolation_level
+            if isolation_level is not None
+            else SubagentIsolationLevel.NO_ISOLATION
+        )
+        tool = build_dispatch_subagents_tool(isolation_level=effective_level)
+        super().__init__(
+            title="Delegation",
+            key="subagents",
+            default_params=_SubagentsSectionParams(),
+            tools=(tool,),
+            accepts_overrides=False,
+        )
+
+    @override
+    def render(self, params: _SubagentsSectionParams, depth: int) -> str:
+        del params
+        heading = "#" * (depth + 2)
+        return f"{heading} {self.title}\n\n{_DELEGATION_BODY}"
+
+
 dispatch_subagents = build_dispatch_subagents_tool()
 
 
@@ -247,6 +292,7 @@ __all__ = [
     "DispatchSubagentsParams",
     "SubagentIsolationLevel",
     "SubagentResult",
+    "SubagentsSection",
     "build_dispatch_subagents_tool",
     "dispatch_subagents",
 ]

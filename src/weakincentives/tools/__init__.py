@@ -41,6 +41,7 @@ from .subagents import (
     DispatchSubagentsParams,
     SubagentIsolationLevel,
     SubagentResult,
+    SubagentsSection,
     build_dispatch_subagents_tool,
     dispatch_subagents,
 )
@@ -83,6 +84,7 @@ __all__ = [
     "StepStatus",
     "SubagentIsolationLevel",
     "SubagentResult",
+    "SubagentsSection",
     "ToolValidationError",
     "UpdateStep",
     "VfsFile",
