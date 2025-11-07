@@ -18,6 +18,11 @@ heavy dependencies. Optional adapters snap in when you need a model provider.
   blueprints. Prompt objects compose trees of dataclass-backed sections, render
   Markdown with validated placeholders, and automatically surface tool
   contracts so every render stays predictable.
+- **Chapter-driven visibility controls.** Chapters group sections into coarse
+  visibility boundaries so adapters decide when prompt regions enter the model
+  context. They default to the closed state, keeping sensitive or off-topic
+  material hidden until runtime policies open them. Expansion strategies and
+  lifecycle guidance live in [Chapters Specification](specs/CHAPTERS.md).
 - **Override-friendly workflows that scale into optimization.** First-class
   support for prompt overrides lays the groundwork for an optimizer that plugs
   into your development cycle. Prompt definitions ship with hash-based
