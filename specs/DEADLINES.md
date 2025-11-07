@@ -42,10 +42,6 @@ all nested work spawned during that evaluation.
 - Introduce a `DeadlineExceededError(RuntimeError)` in `weakincentives.tools.errors`.
   Tools raise it when they cannot finish before the cutoff.
 
-- Extend `ToolResult` with an optional `deadline_exceeded: bool = False` field so
-  adapters can surface fatal deadline breaches from integrations that cannot
-  throw exceptions directly.
-
 ## Deadline Propagation
 
 1. **Rendered Prompt Metadata** – After validation the orchestrator stores the
@@ -67,17 +63,17 @@ all nested work spawned during that evaluation.
   it into a `PromptEvaluationError` with `phase="deadline"`, aborting the entire
   evaluation loop immediately. When the deadline expires before invocation, the
   runtime raises the same `PromptEvaluationError` without calling the handler.
-- **Tool Execution (Fallback)** – If a tool integration cannot raise
-  `DeadlineExceededError`, extend `ToolResult` with a boolean
-  `deadline_exceeded` flag. Adapters treat a result with
-  `deadline_exceeded=True` as fatal, re-raising `PromptEvaluationError` with
-  `phase="deadline"` so downstream components observe a consistent failure
-  signal.
+- **Tool Execution Contract** – All components treat `DeadlineExceededError`
+  as the sole signal that the deadline has been exceeded. Handlers that cannot
+  complete in time MUST raise it directly so the runtime can translate it into
+  a `PromptEvaluationError` with `phase="deadline"` and halt the evaluation
+  loop immediately.
 - **Subagents** – Delegation helpers reuse the deadline supplied by the parent
   context. Child prompts run with the earlier of the parent deadline and any
   explicit child override. When a delegated prompt overruns the deadline the
-  helper raises `PromptEvaluationError` with `phase="deadline"` so the parent
-  evaluation terminates immediately.
+  helper lets `DeadlineExceededError` propagate so the parent runtime converts
+  it into `PromptEvaluationError` with `phase="deadline"` and terminates the
+  evaluation immediately.
 - **Polling & Retries** – Any retry loops (for streaming responses or provider
   backoffs) must re-check the deadline before each iteration to avoid overshooting
   the wall-clock budget.
