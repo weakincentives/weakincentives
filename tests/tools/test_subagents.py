@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any, cast
 
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
@@ -24,11 +25,14 @@ from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, Rec
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import ToolContext
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.session.protocols import SessionProtocol, SnapshotProtocol
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
+    SubagentIsolationLevel,
     SubagentResult,
+    build_dispatch_subagents_tool,
     dispatch_subagents,
 )
 
@@ -61,6 +65,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
         self._structured_outputs = structured_outputs or {}
         self._raw_outputs = raw_outputs or {}
         self._empty_text = empty_text or set()
+        self._lock = Lock()
 
     def evaluate(
         self,
@@ -70,47 +75,69 @@ class RecordingAdapter(ProviderAdapter[Any]):
         bus: InProcessEventBus,
         session: Session | None = None,
     ) -> PromptResponse[Any]:
+        del parse_output
         delegation = cast(DelegationParams, params[0])
         recap = (
             cast(RecapParams, params[1]) if len(params) > 1 else RecapParams(bullets=())
         )
         reason = delegation.reason
-        self.calls.append((reason, recap.bullets))
-        self.sessions.append(session)
-        self.buses.append(bus)
+        with self._lock:
+            self.calls.append((reason, recap.bullets))
+            self.sessions.append(session)
+            self.buses.append(bus)
         if reason in self._failures:
             raise RuntimeError(f"failure: {reason}")
         delay = self._delays.get(reason, 0.0)
         if delay:
             time.sleep(delay)
+        prompt_name = prompt.name or prompt.key
+
+        def _emit(response: PromptResponse[Any]) -> PromptResponse[Any]:
+            bus.publish(
+                PromptExecuted(
+                    prompt_name=prompt_name,
+                    adapter="recording",
+                    result=cast(PromptResponse[object], response),
+                )
+            )
+            return response
+
         if reason in self._empty_text:
-            return PromptResponse(
-                prompt_name=prompt.name or prompt.key,
-                text="",
-                output=None,
-                tool_results=(),
+            return _emit(
+                PromptResponse(
+                    prompt_name=prompt_name,
+                    text="",
+                    output=None,
+                    tool_results=(),
+                )
             )
         structured = self._structured_outputs.get(reason)
         if structured is not None:
-            return PromptResponse(
-                prompt_name=prompt.name or prompt.key,
-                text="",
-                output=structured,
-                tool_results=(),
+            return _emit(
+                PromptResponse(
+                    prompt_name=prompt_name,
+                    text="",
+                    output=structured,
+                    tool_results=(),
+                )
             )
         raw_output = self._raw_outputs.get(reason)
         if raw_output is not None:
-            return PromptResponse(
-                prompt_name=prompt.name or prompt.key,
-                text="",
-                output=raw_output,
+            return _emit(
+                PromptResponse(
+                    prompt_name=prompt_name,
+                    text="",
+                    output=raw_output,
+                    tool_results=(),
+                )
+            )
+        return _emit(
+            PromptResponse(
+                prompt_name=prompt_name,
+                text=f"child:{reason}",
+                output=None,
                 tool_results=(),
             )
-        return PromptResponse(
-            prompt_name=prompt.name or prompt.key,
-            text=f"child:{reason}",
-            output=None,
-            tool_results=(),
         )
 
 
@@ -200,7 +227,6 @@ def test_dispatch_subagents_runs_children_in_parallel() -> None:
         "child:slow",
         "child:fast",
     ]
-    assert all(child.success for child in result.value)
     assert adapter.calls == [
         ("slow", ("Focus on slow path",)),
         ("fast", ("Focus on fast path",)),
@@ -401,4 +427,124 @@ def test_dispatch_subagents_returns_empty_output_when_child_returns_none() -> No
     assert child.output == ""
 
 
-"""Tests for the subagent dispatch tooling."""
+def test_dispatch_subagents_shares_state_without_isolation() -> None:
+    @dataclass(slots=True)
+    class ChildRecord:
+        field: str
+
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter(
+        structured_outputs={"shared": ChildRecord(field="value")}
+    )
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="shared",
+                expected_result="capture state",
+                may_delegate_further="no",
+                recap_lines=("Record to session",),
+            ),
+        ),
+    )
+
+    handler = dispatch_subagents.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    captured = session.select_all(ChildRecord)
+    assert captured == (ChildRecord(field="value"),)
+
+
+def test_dispatch_subagents_full_isolation_clones_state() -> None:
+    @dataclass(slots=True)
+    class ChildRecord:
+        field: str
+
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter(
+        structured_outputs={"isolated": ChildRecord(field="value")}
+    )
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="isolated",
+                expected_result="capture state",
+                may_delegate_further="no",
+                recap_lines=("Record to clone",),
+            ),
+        ),
+    )
+
+    handler = tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert session.select_all(ChildRecord) == ()
+    assert adapter.sessions
+    assert all(child_session is not session for child_session in adapter.sessions)
+    assert all(child_bus is not bus for child_bus in adapter.buses)
+
+
+def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
+    class NonCloningSession(SessionProtocol):
+        def snapshot(self) -> SnapshotProtocol:
+            raise NotImplementedError
+
+        def rollback(self, snapshot: SnapshotProtocol) -> None:
+            raise NotImplementedError
+
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = NonCloningSession()
+    tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="non-clone",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("Should fail",),
+            ),
+        ),
+    )
+
+    handler = tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is False
+    assert result.value is None
+    assert "cloning" in result.message.lower()

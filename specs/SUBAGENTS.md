@@ -13,12 +13,14 @@ No other sections, knobs, or pre-baked templates are required. The parent prompt
 
 ## Section Requirements
 
-`SubagentsSection` lives alongside the tool in `src/weakincentives/tools/subagents.py` and is exported from `weakincentives.tools`. When rendered it MUST:
+`SubagentsSection` lives in `src/weakincentives/prompt/subagents.py` and is exported from `weakincentives.prompt`. When rendered it MUST:
 
 1. Briefly explain that the parent agent can offload parallelizable steps by calling `dispatch_subagents`.
 1. State that every delegation must include recap bullets so the parent can audit the child’s plan.
 1. List only the `dispatch_subagents` tool in `tools()`.
 1. Avoid runtime configuration—no static dispatch payloads, flags, or template data.
+
+`SubagentsSection` accepts an optional `isolation_level` argument that defaults to `SubagentIsolationLevel.NO_ISOLATION`. The section instantiates the dispatch tool with a closure that captures the requested isolation mode so every handler invocation enforces the configured behavior.
 
 ## Tool Contract
 
@@ -28,8 +30,15 @@ The tool handler resides in `src/weakincentives/tools/subagents.py` and exports:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from weakincentives.prompt import DelegationParams, Tool, ToolResult
+
+
+class SubagentIsolationLevel(Enum):
+    NO_ISOLATION = auto()
+    FULL_ISOLATION = auto()
+
 
 @dataclass(slots=True)
 class DispatchSubagentsParams:
@@ -41,6 +50,11 @@ class SubagentResult:
     output: str
     success: bool
     error: str | None = None
+
+
+def build_dispatch_subagents_tool(
+    *, isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.NO_ISOLATION
+) -> Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]: ...
 
 
 dispatch_subagents: Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]
@@ -56,12 +70,19 @@ Key rules:
 - Failures are captured per child via `success`/`error` while allowing healthy siblings to return normally.
 - `DelegationParams` replaces the old `DelegationSummaryParams` and owns both the recap lines and summary fields so call sites have a single payload to construct.
 
+## Isolation Levels
+
+Isolation levels describe how much access a child run has to parent state and telemetry surfaces. They are expressed with the `SubagentIsolationLevel` enum defined alongside the tool contract. Unless a caller opts into a different mode, subagents run with **No Isolation** (`SubagentIsolationLevel.NO_ISOLATION`).
+
+- **No Isolation (default)** – Children inherit the exact `Session` instance, event bus, and tool access the parent uses. Tool calls and state mutations occur against the shared objects so observers can watch every update in real time.
+- **Full Isolation** – Each child runs inside a brand new environment. Clone the parent session via `context.session.clone()` (or the equivalent repository helper) and back it with a newly created event bus. The cloned session MUST NOT share mutable state with the parent, and the fresh event bus MUST prevent telemetry from crossing run boundaries.
+
 ## Runtime Flow
 
 Every tool invocation MUST execute the following steps:
 
 1. **Require the rendered parent prompt**. `context.rendered_prompt` is mandatory. Treat a missing prompt as an orchestrator bug and respond with a failing `ToolResult`.
-1. **Share state with children**. For each delegation, reuse the original `context.session` and event bus without cloning so children mutate the exact same objects the parent uses and observers receive child telemetry in real time.
+1. **Resolve the isolation level**. The section wires the requested `SubagentIsolationLevel` into the tool handler via a closure. In **No Isolation** mode the handler reuses the original `context.session` and event bus so children mutate the exact same objects the parent uses and observers receive child telemetry in real time. When configured for **Full Isolation** (`SubagentIsolationLevel.FULL_ISOLATION`), clone the parent session (`context.session.clone()`) and construct a fresh event bus for each child so no state or telemetry leaks across runs.
 1. **Wrap the child prompt**. Build a `DelegationPrompt` using the rendered parent prompt and the recap lines carried inside `DelegationParams`. Propagate response format metadata and tool descriptions exactly as described in `PROMPTS_COMPOSITION.md`.
 1. **Run in parallel**. Evaluate each child through `context.adapter.evaluate` using a `ThreadPoolExecutor`. Use `min(len(delegations), default_max_workers)` where `default_max_workers` matches Python's executor default when `None`.
 1. **Collect per-child outcomes**. Successful executions populate `output` and set `success=True`. Exceptions are caught and converted into `success=False` with an error string, without cancelling other children.
@@ -70,18 +91,23 @@ Every tool invocation MUST execute the following steps:
 ## Implementation Notes
 
 - Keep the handler synchronous; the executor supplies concurrency.
-- Avoid bespoke telemetry plumbing—sharing the event bus is sufficient.
+- Avoid bespoke telemetry plumbing—reuse the shared bus in No Isolation and provision a new one in Full Isolation with the canonical cloning helper.
 - Ensure the shared session instance is safe for concurrent access and already carries any adapters or configuration the parent relies on.
-- Tests should cover mixed success/failure batches and verify that state written by a child is visible to the parent after completion.
+- Tests should cover mixed success/failure batches, verify that state written by a child is visible to the parent after completion in No Isolation, and confirm that Full Isolation leaves parent state untouched.
 
 ## Minimal Usage Sketch
 
 ```python
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt
-from weakincentives.tools import SubagentsSection, dispatch_subagents
-from weakincentives.tools.subagents import DispatchSubagentsParams
+from weakincentives.prompt.subagents import SubagentsSection
+from weakincentives.tools.subagents import (
+    DispatchSubagentsParams,
+    SubagentIsolationLevel,
+    SubagentResult,
+    build_dispatch_subagents_tool,
+)
 
 
 @dataclass(slots=True)
@@ -115,5 +141,23 @@ params = DispatchSubagentsParams(
     ),
 )
 
-result = dispatch_subagents(params, context=...)
+# Default behaviour uses No Isolation, reusing the parent session and event bus.
+shared_tool = build_dispatch_subagents_tool()
+result = shared_tool.handler(params, context=...)
+
+# Opt into Full Isolation by configuring the SubagentsSection itself.
+isolated_section = SubagentsSection(
+    isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+)
+isolated_prompt = replace(
+    daily_update,
+    sections=(daily_update.sections[0], isolated_section),
+)
+isolated_rendered = isolated_prompt.render(
+    UpdateParams(body="Summarize blockers, then plan execution.")
+)
+isolated_tool = build_dispatch_subagents_tool(
+    isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+)
+isolated_result = isolated_tool.handler(params, context=...)
 ```
