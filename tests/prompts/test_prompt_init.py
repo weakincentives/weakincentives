@@ -205,7 +205,7 @@ def test_text_section_rejects_non_section_children() -> None:
             title="Parent",
             template="${value}",
             key="parent",
-            children=["not a section"],  # type: ignore[arg-type]
+            children=["not a section"],
         )
 
     assert "Section instances" in str(exc.value)

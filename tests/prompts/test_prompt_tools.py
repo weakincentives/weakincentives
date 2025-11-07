@@ -224,7 +224,7 @@ def test_prompt_tools_requires_tool_instances() -> None:
 
 def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     tool = _build_primary_tool()
-    tool.params_type = str  # type: ignore[assignment]
+    tool.params_type = str
 
     section = MarkdownSection[PrimarySectionParams](
         title="Primary",

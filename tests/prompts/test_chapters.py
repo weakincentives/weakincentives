@@ -188,7 +188,7 @@ def test_expand_chapters_with_no_chapters_returns_original_prompt() -> None:
 
 def test_chapter_requires_concrete_type_specialization() -> None:
     with pytest.raises(TypeError):
-        Chapter(key="invalid", title="Invalid")  # type: ignore[type-abstract]
+        Chapter(key="invalid", title="Invalid")
 
 
 def test_chapter_rejects_non_section_payloads() -> None:

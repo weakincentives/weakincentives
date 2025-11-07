@@ -339,7 +339,7 @@ def test_expression_mode_requires_expression() -> None:
 def test_invalid_mode_rejected() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 
-    params = EvalParams(code="0", mode="invalid")  # type: ignore[arg-type]
+    params = EvalParams(code="0", mode="invalid")
 
     with pytest.raises(ToolValidationError):
         invoke_tool(bus, tool, params, session=session)

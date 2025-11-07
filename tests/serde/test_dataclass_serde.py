@@ -326,9 +326,9 @@ def test_parse_handles_coercion_aliases_and_normalization() -> None:
 
 def test_parse_requires_mapping_and_dataclass() -> None:
     with pytest.raises(TypeError):
-        parse(int, {})  # type: ignore[arg-type]
+        parse(int, {})
     with pytest.raises(TypeError):
-        parse(User, [])  # type: ignore[arg-type]
+        parse(User, [])
 
 
 def test_parse_strict_type_errors_when_coercion_disabled() -> None:
@@ -554,7 +554,7 @@ def test_parse_extra_policies() -> None:
         case_insensitive=True,
         extra="allow",
     )
-    assert allowed.nickname == "Ada"  # type: ignore[attr-defined]
+    assert allowed.nickname == "Ada"
 
     ignored = parse(
         User,
@@ -668,7 +668,7 @@ def test_clone_preserves_extras_and_revalidates() -> None:
     )
     updated = clone(user, age=40)
     assert updated.age == 40
-    assert updated.nickname == "Ada"  # type: ignore[attr-defined]
+    assert updated.nickname == "Ada"
 
     slotted = parse(Slotted, {"name": "Ada", "nickname": "Ace"}, extra="allow")
     cloned_slotted = clone(slotted)
@@ -678,7 +678,7 @@ def test_clone_preserves_extras_and_revalidates() -> None:
         clone(user, age=10)
 
     with pytest.raises(TypeError):
-        clone(object())  # type: ignore[arg-type]
+        clone(object())
 
 
 def test_dump_serializes_with_aliases_and_computed() -> None:
@@ -717,7 +717,7 @@ def test_dump_serializes_with_aliases_and_computed() -> None:
     assert "created_at" in plain
 
     with pytest.raises(TypeError):
-        dump(object())  # type: ignore[arg-type]
+        dump(object())
 
 
 def test_dump_exclude_none_recursively() -> None:
@@ -872,7 +872,7 @@ def test_schema_invalid_extra_value_and_type_errors() -> None:
     with pytest.raises(ValueError):
         schema(User, extra="boom")  # type: ignore[arg-type]
     with pytest.raises(TypeError):
-        schema(object)  # type: ignore[arg-type]
+        schema(object)
 
 
 def test_parse_length_constraints_enforced() -> None:
