@@ -39,15 +39,18 @@ all nested work spawned during that evaluation.
   thread it through helper layers such as prompt runners, orchestration
   utilities, and the `ToolContext` dataclass so handlers can inspect the value.
 
+- Introduce a `DeadlineExceededError(RuntimeError)` in `weakincentives.tools.errors`.
+  Tools raise it when they cannot finish before the cutoff.
+
+- Extend `ToolResult` with an optional `deadline_exceeded: bool = False` field so
+  adapters can surface fatal deadline breaches from integrations that cannot
+  throw exceptions directly.
+
 ## Deadline Propagation
 
 1. **Rendered Prompt Metadata** – After validation the orchestrator stores the
-   deadline on the rendered prompt instance (`RenderedPrompt.deadline: datetime |
-   None`). All child prompts created during the run inherit this value unless a
+   deadline on the rendered prompt instance (`RenderedPrompt.deadline: datetime | None`). All child prompts created during the run inherit this value unless a
    stricter deadline is provided explicitly.
-1. **Session State** – Publish a `PromptDeadlineAssigned` event containing the
-   normalized deadline. Reducers can surface the remaining time to tools or
-   logging sinks without accessing adapter internals.
 1. **Tool Context** – Extend `ToolContext` with a `deadline: datetime | None`
    attribute. The orchestrator populates it before every handler invocation so
    tools can self-limit work or spawn nested prompts with the same deadline.
@@ -58,13 +61,23 @@ all nested work spawned during that evaluation.
   the deadline immediately before sending a request. If the deadline has passed
   they skip the provider call and raise `PromptEvaluationError` with
   `phase="deadline"`.
-- **Tool Execution** – The runtime checks the deadline before invoking each tool
-  handler. When time has expired it returns `ToolResult(success=False, value=None,
-  message="deadline exceeded")` without calling the handler.
+- **Tool Execution** – Add a `DeadlineExceededError` exception to
+  `weakincentives.tools.errors`. Tool handlers MUST raise this error if the
+  remaining time is insufficient to complete work safely. The runtime converts
+  it into a `PromptEvaluationError` with `phase="deadline"`, aborting the entire
+  evaluation loop immediately. When the deadline expires before invocation, the
+  runtime raises the same `PromptEvaluationError` without calling the handler.
+- **Tool Execution (Fallback)** – If a tool integration cannot raise
+  `DeadlineExceededError`, extend `ToolResult` with a boolean
+  `deadline_exceeded` flag. Adapters treat a result with
+  `deadline_exceeded=True` as fatal, re-raising `PromptEvaluationError` with
+  `phase="deadline"` so downstream components observe a consistent failure
+  signal.
 - **Subagents** – Delegation helpers reuse the deadline supplied by the parent
   context. Child prompts run with the earlier of the parent deadline and any
-  explicit child override. Subagents exceeding the deadline return a failing
-  `ToolResult` whose error message notes the timeout.
+  explicit child override. When a delegated prompt overruns the deadline the
+  helper raises `PromptEvaluationError` with `phase="deadline"` so the parent
+  evaluation terminates immediately.
 - **Polling & Retries** – Any retry loops (for streaming responses or provider
   backoffs) must re-check the deadline before each iteration to avoid overshooting
   the wall-clock budget.
@@ -84,4 +97,3 @@ all nested work spawned during that evaluation.
 - Subagent tests create parent/child prompts with conflicting deadlines and
   verify that the tighter deadline prevails.
 - Regression tests confirm that omitting `deadline` preserves current behavior.
-
