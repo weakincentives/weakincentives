@@ -53,10 +53,17 @@ instances capture that response tuple, and every tool handler returns one direct
 - `description: str` – concise model-facing summary. We constrain summaries to ASCII, strip surrounding whitespace, and
   require 1–200 characters so payloads stay portable.
 - `handler: Callable[[ParamsT], ToolResult[ResultT]] | None` – optional runtime hook surfaced to orchestration layers.
-  Handlers must accept exactly one argument of type `ParamsT`, and when provided they must return a `ToolResult[ResultT]`.
+  Handlers must accept a positional `params: ParamsT` argument **and** a keyword-only
+  `context: ToolContext` parameter. When provided they must return a
+  `ToolResult[ResultT]`. See `specs/TOOL_CONTEXT.md` for the full context contract.
 - `accepts_overrides: bool` – opt-in flag for the automatic override pipeline. Defaults to `True`, but built-in tooling
   defaults to `False` so optimization experiments ignore them until the contracts stabilize. Built-in sections pass their
   own `accepts_overrides` value down to every tool they register so the entire suite opts in together when deployments are ready.
+
+```python
+def handle_tool(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]:
+    ...
+```
 
 Parameter and result dataclasses inherit the same validation rules as section params: every placeholder referenced in
 markdown must exist on the dataclass, and required fields without defaults must be supplied when rendering. Tools bind the
@@ -91,7 +98,8 @@ and tool metadata.
 ## Runtime Execution
 
 Sections only document callable capabilities. Higher-level orchestration code is responsible for invoking the appropriate
-handler when an LLM emits a tool call, passing the params dataclass instance as the sole argument. Handlers return a
+handler when an LLM emits a tool call, passing the params dataclass instance and injecting the
+[`ToolContext`](TOOL_CONTEXT.md) keyword argument. Handlers return a
 `ToolResult[result_type]` directly, setting `success=False` and `value=None` when they cannot satisfy the contract. The
 prompt layer remains side effect free—it surfaces handlers and `result_type` metadata without executing them. The package
 provides no sync/async bridging helpers; orchestrators decide when to `await` or call handlers directly.
@@ -100,7 +108,7 @@ provides no sync/async bridging helpers; orchestrators decide when to `await` or
 
 ```python
 from dataclasses import dataclass, field
-from weakincentives.prompt import Prompt, MarkdownSection, Tool, ToolResult
+from weakincentives.prompt import Prompt, MarkdownSection, Tool, ToolContext, ToolResult
 
 @dataclass
 class LookupParams:
@@ -120,7 +128,9 @@ class GuidanceParams:
 class ToolDescriptionParams:
     primary_tool: str = "lookup_entity"
 
-def lookup_handler(params: LookupParams) -> ToolResult[LookupResult]:
+def lookup_handler(
+    params: LookupParams, *, context: ToolContext
+) -> ToolResult[LookupResult]:
     result = LookupResult(entity_id=params.entity_id, document_url="https://example.com")
     message = f"Fetched entity {result.entity_id}."
     return ToolResult(message=message, value=result)
@@ -181,6 +191,6 @@ sections own their tool collections directly, no additional subclasses are neede
   dataclass).
 - Rendering without required tool parameters raises `PromptRenderError`, mirroring existing section behavior.
 - Registering two tools with the same name triggers `PromptValidationError` to preserve lookup determinism.
-- Handler references that do not accept exactly one argument matching the `ParamsT` dataclass raise
-  `PromptValidationError` during prompt validation.
+- Handler references that fail to declare `params: ParamsT` and `*, context: ToolContext`
+  raise `PromptValidationError` during prompt validation.
 - Disabled sections contribute neither markdown nor entries in `RenderedPrompt.tools`.
