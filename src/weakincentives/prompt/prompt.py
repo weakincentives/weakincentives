@@ -27,6 +27,7 @@ from typing import (
 )
 
 from ._types import SupportsDataclass
+from .chapter import Chapter, ChaptersExpansionPolicy
 from .errors import (
     PromptRenderError,
     PromptValidationError,
@@ -134,6 +135,7 @@ class Prompt[OutputT]:
         key: str,
         name: str | None = None,
         sections: Sequence[Section[Any]] | None = None,
+        chapters: Sequence[Chapter[Any]] | None = None,
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
     ) -> None:
@@ -150,6 +152,9 @@ class Prompt[OutputT]:
         base_sections: list[Section[SupportsDataclass]] = [
             cast(Section[SupportsDataclass], section) for section in sections or ()
         ]
+        self._base_sections: tuple[Section[SupportsDataclass], ...] = tuple(
+            base_sections
+        )
         self._sections: tuple[Section[SupportsDataclass], ...] = tuple(base_sections)
         self._section_nodes: list[SectionNode[SupportsDataclass]] = []
         self._params_registry: dict[
@@ -159,6 +164,30 @@ class Prompt[OutputT]:
         self._defaults_by_type: dict[type[SupportsDataclass], SupportsDataclass] = {}
         self.placeholders: dict[SectionPath, set[str]] = {}
         self._tool_name_registry: dict[str, SectionPath] = {}
+        self._allow_extra_keys_requested = allow_extra_keys
+
+        normalized_chapters: list[Chapter[SupportsDataclass]] = []
+        seen_chapter_keys: set[str] = set()
+        for chapter in chapters or ():
+            if not isinstance(chapter, Chapter):  # pyright: ignore[reportUnnecessaryIsInstance]
+                raise PromptValidationError(
+                    "Prompt chapters must be Chapter instances.",
+                    section_path=(getattr(chapter, "key", "?"),),
+                )
+            normalized = cast(Chapter[SupportsDataclass], chapter)
+            if normalized.key in seen_chapter_keys:
+                raise PromptValidationError(
+                    "Prompt chapters must use unique keys.",
+                    section_path=(normalized.key,),
+                )
+            seen_chapter_keys.add(normalized.key)
+            normalized_chapters.append(normalized)
+        self._chapters: tuple[Chapter[SupportsDataclass], ...] = tuple(
+            normalized_chapters
+        )
+        self._chapter_key_registry: dict[str, Chapter[SupportsDataclass]] = {
+            chapter.key: chapter for chapter in self._chapters
+        }
 
         self._output_type: type[Any] | None
         self._output_container: Literal["object", "array"] | None
@@ -318,6 +347,98 @@ class Prompt[OutputT]:
     @property
     def param_types(self) -> set[type[SupportsDataclass]]:
         return set(self._params_registry.keys())
+
+    @property
+    def chapters(self) -> tuple[Chapter[SupportsDataclass], ...]:
+        return self._chapters
+
+    def expand_chapters(
+        self,
+        policy: ChaptersExpansionPolicy,
+        *,
+        chapter_params: Mapping[str, SupportsDataclass] | None = None,
+    ) -> Prompt[OutputT]:
+        """Return a prompt snapshot with chapters opened per the supplied policy."""
+
+        if not self._chapters:
+            return self
+
+        if policy is ChaptersExpansionPolicy.ALL_INCLUDED:
+            return self._expand_chapters_all_included(
+                chapter_params=chapter_params or {}
+            )
+
+        raise NotImplementedError(
+            f"Chapters expansion policy '{policy.value}' is not supported."
+        )
+
+    def _expand_chapters_all_included(
+        self,
+        *,
+        chapter_params: Mapping[str, SupportsDataclass],
+    ) -> Prompt[OutputT]:
+        provided_lookup = dict(chapter_params)
+        unknown_keys = set(provided_lookup) - set(self._chapter_key_registry.keys())
+        if unknown_keys:
+            unknown_key = sorted(unknown_keys)[0]
+            raise PromptValidationError(
+                "Chapter parameters reference unknown chapter key.",
+                section_path=(unknown_key,),
+            )
+
+        open_sections: list[Section[SupportsDataclass]] = list(self._base_sections)
+
+        for chapter in self._chapters:
+            params: SupportsDataclass | None = provided_lookup.get(chapter.key)
+            if params is not None:
+                params = self._normalize_chapter_params(chapter, params)
+            elif chapter.default_params is not None:
+                params = _clone_dataclass(chapter.default_params)
+
+            if chapter.enabled is not None:
+                if params is None:
+                    raise PromptValidationError(
+                        "Chapter requires parameters for enabled predicate.",
+                        section_path=(chapter.key,),
+                        dataclass_type=chapter.param_type,
+                    )
+                try:
+                    enabled = chapter.is_enabled(cast(Any, params))
+                except Exception as error:
+                    raise PromptValidationError(
+                        "Chapter enabled predicate failed.",
+                        section_path=(chapter.key,),
+                        dataclass_type=chapter.param_type,
+                    ) from error
+                if not enabled:
+                    continue
+
+            open_sections.extend(chapter.sections)
+
+        prompt_cls = type(self)
+
+        return prompt_cls(
+            ns=self.ns,
+            key=self.key,
+            name=self.name,
+            sections=open_sections,
+            chapters=(),
+            inject_output_instructions=self.inject_output_instructions,
+            allow_extra_keys=self._allow_extra_keys_requested,
+        )
+
+    def _normalize_chapter_params(
+        self,
+        chapter: Chapter[SupportsDataclass],
+        params: SupportsDataclass,
+    ) -> SupportsDataclass:
+        if not isinstance(params, chapter.param_type) or not is_dataclass(params):
+            raise PromptValidationError(
+                "Chapter parameters must be instances of the declared dataclass.",
+                section_path=(chapter.key,),
+                dataclass_type=chapter.param_type,
+            )
+        return params
 
     def _resolve_output_spec(
         self, allow_extra_keys: bool
