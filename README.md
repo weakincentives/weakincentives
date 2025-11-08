@@ -287,16 +287,22 @@ Attach custom tools to sections (next step) so the adapter can call them and
 record their outputs on the session alongside built-in reducers. The prompt can
 now chase suspicious references without delegating work back to the orchestrator.
 
-### 4. Compose the prompt with deterministic sections
+### 4. Compose the prompt with deterministic sections and chapters
 
 Sections render through `string.Template`, so keep placeholders readable and
-combine guidance with the tool suites into one auditable prompt tree. See the
-[Prompt Class](specs/PROMPTS.md) and
-[Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md) specs for the
-rendering and hashing rules that stabilize this structure.
+combine guidance with the tool suites into one auditable prompt tree. Long-form
+checklists or escalation playbooks often span many pages and only matter for
+specialized reviews; wrap them in a chapter so adapters can toggle visibility
+based on the user prompt. See the [Prompt Class](specs/PROMPTS.md),
+[Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md), and
+[Chapters Specification](specs/CHAPTERS.md) for the rendering, hashing, and
+visibility rules that stabilize this structure.
 
 ```python
+from dataclasses import dataclass
+
 from weakincentives import MarkdownSection, Prompt
+from weakincentives.prompt import Chapter, ChaptersExpansionPolicy
 
 
 @dataclass
@@ -307,6 +313,15 @@ class ReviewGuidance:
         "Security regressions, concurrency bugs, test coverage gaps, and"
         " ambiguous logic should be escalated."
     )
+
+
+@dataclass
+class ComplianceChapterParams:
+    required: bool = False
+    primary_jurisdictions: str = ""
+    regulation_matrix_summary: str = ""
+    escalation_contact: str = "compliance@octo.widgets"
+    evidence_workspace: str = "gs://audit-artifacts"
 
 
 overview_section = MarkdownSection[PullRequestContext](
@@ -354,10 +369,62 @@ review_prompt = Prompt[ReviewBundle](
         asteval_section,
         analysis_section,
     ),
+    chapters=(
+        Chapter[ComplianceChapterParams](
+            key="review.compliance",
+            title="Compliance Deep Dive",
+            description=(
+                "Multi-page regulations guidance that only opens when the "
+                "request demands a compliance audit."
+            ),
+            sections=(
+                MarkdownSection[ComplianceChapterParams](
+                    title="Regulatory Background",
+                    key="review.compliance.background",
+                    template="""
+                    Compliance review requested.
+                    Focus jurisdictions: ${primary_jurisdictions}
+
+                    The attached regulation matrix may span many pages. Only
+                    cite sections that apply to this pull request.
+                    """,
+                    default_params=ComplianceChapterParams(),
+                ),
+                MarkdownSection[ComplianceChapterParams](
+                    title="Compliance Checklist",
+                    key="review.compliance.checklist",
+                    template="""
+                    - Summarize gaps against: ${regulation_matrix_summary}
+                    - Escalate urgent findings to: ${escalation_contact}
+                    - Link all evidence in: ${evidence_workspace}
+                    """,
+                    default_params=ComplianceChapterParams(),
+                ),
+            ),
+            default_params=ComplianceChapterParams(),
+            enabled=lambda params: params.required,
+        ),
+    ),
 )
 
 
-rendered = review_prompt.render(
+requires_compliance_review = True  # derived from user metadata
+compliance_params = ComplianceChapterParams(
+    required=requires_compliance_review,
+    primary_jurisdictions="SOX §404, PCI-DSS",
+    regulation_matrix_summary="See 12-page compliance dossier in appendix.",
+    evidence_workspace="gs://audit-artifacts/octo-widgets",
+)
+
+expanded_prompt = review_prompt.expand_chapters(
+    ChaptersExpansionPolicy.ALL_INCLUDED,
+    chapter_params={
+        "review.compliance": compliance_params,
+    },
+)
+
+
+rendered = expanded_prompt.render(
     PullRequestContext(
         repository="octo/widgets",
         title="Add caching layer",
@@ -365,6 +432,7 @@ rendered = review_prompt.render(
         files_summary="loader.py, cache.py",
     ),
     ReviewGuidance(),
+    compliance_params,
 )
 
 
@@ -372,11 +440,17 @@ print(rendered.text)
 print([tool.name for tool in rendered.tools])
 ```
 
+Set `requires_compliance_review = False` (and skip the chapter parameters) when
+the user prompt does not request a regulated-industry audit—the compliance
+chapter stays closed and the oversized guidance never reaches the model.
+
 ### 5. Evaluate the prompt with an adapter
 
 Adapters send the rendered prompt to a provider and publish telemetry to the
 event bus; the session wiring above captures `PromptExecuted` and `ToolInvoked`
-events automatically. For payload formats and parsing guarantees see
+events automatically. Pass the chapter-expanded prompt plus the same parameter
+dataclasses you used for rendering so the adapter sees the specialized
+compliance guidance. For payload formats and parsing guarantees see
 [Adapter Evaluation](specs/ADAPTERS.md) and
 [Native OpenAI Structured Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md).
 
@@ -391,14 +465,17 @@ adapter = OpenAIAdapter(
 
 
 response = adapter.evaluate(
-    review_prompt,
+    expanded_prompt,
     PullRequestContext(
         repository="octo/widgets",
         title="Add caching layer",
         body="Introduces memoization to reduce redundant IO while preserving correctness.",
         files_summary="loader.py, cache.py",
     ),
+    ReviewGuidance(),
+    compliance_params,
     bus=bus,
+    session=session,
 )
 
 
