@@ -20,6 +20,7 @@ import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -31,6 +32,7 @@ from ..prompt.overrides import (
     PromptOverridesError,
     PromptOverridesStore,
     SectionDescriptor,
+    SectionOverride,
 )
 from .config import MCPServerConfig
 
@@ -139,6 +141,30 @@ class SectionOverrideSnapshot:
     descriptor_version: int
 
 
+@dataclass(frozen=True, slots=True)
+class SectionOverrideMutationResult:
+    """Result payload for section override mutations."""
+
+    ns: str
+    prompt: str
+    tag: str
+    section_path: tuple[str, ...]
+    expected_hash: str
+    override_body: str | None
+    descriptor_version: int
+    backing_file_path: Path
+    updated_at: datetime | None
+    warnings: tuple[str, ...] = ()
+
+
+class SectionOverrideApplyError(WinkOverridesError):
+    """Raised when applying a section override fails."""
+
+
+class SectionOverrideRemoveError(WinkOverridesError):
+    """Raised when removing a section override fails."""
+
+
 def fetch_section_override(
     *,
     config: MCPServerConfig,
@@ -191,6 +217,215 @@ def fetch_section_override(
         default_body=default_body,
         backing_file_path=backing_path,
         descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+
+def apply_section_override(
+    *,
+    config: MCPServerConfig,
+    store: PromptOverridesStore,
+    ns: str,
+    prompt: str,
+    tag: str,
+    section_path: str,
+    body: str,
+    expected_hash: str | None,
+    descriptor_version: int | None,
+    confirm: bool,
+) -> SectionOverrideMutationResult:
+    """Persist a section override after validating guards."""
+
+    normalized_path = _parse_section_path(section_path)
+    section_display = "/".join(normalized_path) or "<root>"
+
+    if not confirm:
+        raise SectionOverrideApplyError(
+            "Confirmation required to persist section overrides.",
+        )
+
+    prompt_obj = _load_prompt(ns, prompt, config)
+    section_node = _find_section_node(prompt_obj, normalized_path)
+    if section_node is None:
+        raise SectionNotFoundError(ns, prompt, normalized_path)
+    if not getattr(section_node.section, "accepts_overrides", True):
+        raise SectionOverridesUnavailableError(ns, prompt, normalized_path)
+
+    descriptor = PromptDescriptor.from_prompt(cast(PromptLike, prompt_obj))
+    descriptor_section = _find_section_descriptor(descriptor, normalized_path)
+    if descriptor_section is None:
+        raise SectionOverridesUnavailableError(ns, prompt, normalized_path)
+
+    if (
+        descriptor_version is not None
+        and descriptor_version != PROMPT_DESCRIPTOR_VERSION
+    ):
+        raise SectionOverrideApplyError(
+            f"Descriptor version mismatch. Expected {PROMPT_DESCRIPTOR_VERSION}, received {descriptor_version}."
+        )
+
+    if expected_hash is None:
+        raise SectionOverrideApplyError(
+            "expected_hash must be provided to apply a section override.",
+        )
+    if expected_hash != descriptor_section.content_hash:
+        raise SectionOverrideApplyError(
+            f"Hash mismatch for section {section_display}. Expected {descriptor_section.content_hash}, received {expected_hash}."
+        )
+
+    try:
+        existing_override = store.resolve(descriptor, tag=tag)
+    except PromptOverridesError as error:
+        raise SectionOverrideApplyError(
+            "Failed to load existing overrides before applying section override."
+        ) from error
+
+    sections = dict(existing_override.sections) if existing_override else {}
+    tools = dict(existing_override.tool_overrides) if existing_override else {}
+
+    sections[normalized_path] = SectionOverride(
+        expected_hash=expected_hash,
+        body=body,
+    )
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag=tag,
+        sections=sections,
+        tool_overrides=tools,
+    )
+
+    try:
+        persisted = store.upsert(descriptor, override)
+    except PromptOverridesError as error:
+        raise SectionOverrideApplyError(
+            "Failed to persist section override."
+        ) from error
+
+    persisted_section = persisted.sections.get(normalized_path)
+    if persisted_section is None:
+        raise SectionOverrideApplyError(
+            "Persisted override missing target section after write.",
+        )
+
+    backing_path = _build_override_file_path(config, ns, prompt, tag)
+    updated_at = _stat_timestamp(backing_path)
+    if updated_at is None:
+        updated_at = _now()
+
+    return SectionOverrideMutationResult(
+        ns=ns,
+        prompt=prompt,
+        tag=tag,
+        section_path=normalized_path,
+        expected_hash=descriptor_section.content_hash,
+        override_body=persisted_section.body,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        backing_file_path=backing_path,
+        updated_at=updated_at,
+    )
+
+
+def remove_section_override(
+    *,
+    config: MCPServerConfig,
+    store: PromptOverridesStore,
+    ns: str,
+    prompt: str,
+    tag: str,
+    section_path: str,
+    descriptor_version: int | None,
+) -> SectionOverrideMutationResult:
+    """Remove a single section override, deleting the file when empty."""
+
+    normalized_path = _parse_section_path(section_path)
+    section_display = "/".join(normalized_path) or "<root>"
+
+    prompt_obj = _load_prompt(ns, prompt, config)
+    section_node = _find_section_node(prompt_obj, normalized_path)
+    if section_node is None:
+        raise SectionNotFoundError(ns, prompt, normalized_path)
+    if not getattr(section_node.section, "accepts_overrides", True):
+        raise SectionOverridesUnavailableError(ns, prompt, normalized_path)
+
+    descriptor = PromptDescriptor.from_prompt(cast(PromptLike, prompt_obj))
+    descriptor_section = _find_section_descriptor(descriptor, normalized_path)
+    if descriptor_section is None:
+        raise SectionOverridesUnavailableError(ns, prompt, normalized_path)
+
+    if (
+        descriptor_version is not None
+        and descriptor_version != PROMPT_DESCRIPTOR_VERSION
+    ):
+        raise SectionOverrideRemoveError(
+            f"Descriptor version mismatch. Expected {PROMPT_DESCRIPTOR_VERSION}, received {descriptor_version}."
+        )
+
+    try:
+        existing_override = store.resolve(descriptor, tag=tag)
+    except PromptOverridesError as error:
+        raise SectionOverrideRemoveError(
+            "Failed to load existing overrides before removing section override."
+        ) from error
+
+    backing_path = _build_override_file_path(config, ns, prompt, tag)
+    warnings: list[str] = []
+
+    if existing_override is None or normalized_path not in existing_override.sections:
+        warnings.append(
+            f"No override found for section {section_display}. Nothing to remove."
+        )
+        return SectionOverrideMutationResult(
+            ns=ns,
+            prompt=prompt,
+            tag=tag,
+            section_path=normalized_path,
+            expected_hash=descriptor_section.content_hash,
+            override_body=None,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            backing_file_path=backing_path,
+            updated_at=_stat_timestamp(backing_path),
+            warnings=tuple(warnings),
+        )
+
+    sections = dict(existing_override.sections)
+    _ = sections.pop(normalized_path, None)
+    tools = dict(existing_override.tool_overrides)
+
+    if sections or tools:
+        override = PromptOverride(
+            ns=descriptor.ns,
+            prompt_key=descriptor.key,
+            tag=tag,
+            sections=sections,
+            tool_overrides=tools,
+        )
+        try:
+            _ = store.upsert(descriptor, override)
+        except PromptOverridesError as error:
+            raise SectionOverrideRemoveError(
+                "Failed to persist section removal."
+            ) from error
+        updated_at = _stat_timestamp(backing_path)
+        if updated_at is None:
+            updated_at = _now()
+    else:
+        updated_at = _stat_timestamp(backing_path)
+        store.delete(ns=descriptor.ns, prompt_key=descriptor.key, tag=tag)
+        if updated_at is None:
+            updated_at = _now()
+
+    return SectionOverrideMutationResult(
+        ns=ns,
+        prompt=prompt,
+        tag=tag,
+        section_path=normalized_path,
+        expected_hash=descriptor_section.content_hash,
+        override_body=None,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        backing_file_path=backing_path,
+        updated_at=updated_at,
+        warnings=tuple(warnings),
     )
 
 
@@ -398,14 +633,37 @@ def _temporary_sys_path(workspace_root: Path) -> Iterator[None]:
                 sys.path.remove(workspace)
 
 
+def _stat_timestamp(path: Path) -> datetime | None:
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError:
+        return None
+    timestamp = datetime.fromtimestamp(stat_result.st_mtime, tz=UTC)
+    return _truncate_to_milliseconds(timestamp)
+
+
+def _now() -> datetime:
+    return _truncate_to_milliseconds(datetime.now(UTC))
+
+
+def _truncate_to_milliseconds(value: datetime) -> datetime:
+    microsecond = value.microsecond - (value.microsecond % 1000)
+    return value.replace(microsecond=microsecond, tzinfo=UTC)
+
+
 __all__ = [
     "PROMPT_DESCRIPTOR_VERSION",
     "PromptNotFoundError",
     "PromptRegistryImportError",
     "SectionNotFoundError",
+    "SectionOverrideApplyError",
+    "SectionOverrideMutationResult",
+    "SectionOverrideRemoveError",
     "SectionOverrideResolutionError",
     "SectionOverrideSnapshot",
     "SectionOverridesUnavailableError",
     "WinkOverridesError",
+    "apply_section_override",
     "fetch_section_override",
+    "remove_section_override",
 ]
