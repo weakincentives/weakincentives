@@ -19,7 +19,7 @@ import re
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -33,7 +33,10 @@ from ..prompt.overrides import (
     PromptOverridesStore,
     SectionDescriptor,
     SectionOverride,
+    ToolDescriptor,
+    ToolOverride,
 )
+from ..prompt.tool import Tool
 from .config import MCPServerConfig
 
 type PromptAny = Prompt[Any]
@@ -126,6 +129,58 @@ class SectionOverrideResolutionError(WinkOverridesError):
         self.__cause__ = cause
 
 
+class ToolNotFoundError(WinkOverridesError):
+    """Raised when the requested tool override cannot be located."""
+
+    def __init__(self, ns: str, prompt_key: str, tool_name: str) -> None:
+        super().__init__(f"Tool not found for {ns}/{prompt_key}: {tool_name}")
+        self.ns = ns
+        self.prompt_key = prompt_key
+        self.tool_name = tool_name
+
+
+class ToolOverridesUnavailableError(WinkOverridesError):
+    """Raised when the requested tool does not support overrides."""
+
+    def __init__(self, ns: str, prompt_key: str, tool_name: str) -> None:
+        super().__init__(
+            f"Tool overrides unavailable for {ns}/{prompt_key}: {tool_name}"
+        )
+        self.ns = ns
+        self.prompt_key = prompt_key
+        self.tool_name = tool_name
+
+
+class ToolOverrideResolutionError(WinkOverridesError):
+    """Raised when the overrides store cannot resolve the requested tool."""
+
+    def __init__(
+        self,
+        ns: str,
+        prompt_key: str,
+        tag: str,
+        tool_name: str,
+        *,
+        cause: PromptOverridesError,
+    ) -> None:
+        super().__init__(
+            f"Failed to resolve overrides for {ns}/{prompt_key}:{tag} tool {tool_name}"
+        )
+        self.ns = ns
+        self.prompt_key = prompt_key
+        self.tag = tag
+        self.tool_name = tool_name
+        self.__cause__ = cause
+
+
+class ToolOverrideApplyError(WinkOverridesError):
+    """Raised when applying a tool override fails."""
+
+
+class ToolOverrideRemoveError(WinkOverridesError):
+    """Raised when removing a tool override fails."""
+
+
 @dataclass(frozen=True, slots=True)
 class SectionOverrideSnapshot:
     """Structured representation of a section override lookup."""
@@ -151,6 +206,44 @@ class SectionOverrideMutationResult:
     section_path: tuple[str, ...]
     expected_hash: str
     override_body: str | None
+    descriptor_version: int
+    backing_file_path: Path
+    updated_at: datetime | None
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ToolOverrideSnapshot:
+    """Structured representation of a tool override lookup."""
+
+    ns: str
+    prompt: str
+    tag: str
+    tool_name: str
+    expected_contract_hash: str
+    override_description: str | None
+    override_param_descriptions: dict[str, str]
+    default_description: str
+    default_param_descriptions: dict[str, str]
+    description: str
+    param_descriptions: dict[str, str]
+    backing_file_path: Path
+    descriptor_version: int
+
+
+@dataclass(frozen=True, slots=True)
+class ToolOverrideMutationResult:
+    """Result payload for tool override mutations."""
+
+    ns: str
+    prompt: str
+    tag: str
+    tool_name: str
+    expected_contract_hash: str
+    override_description: str | None
+    override_param_descriptions: dict[str, str]
+    description: str
+    param_descriptions: dict[str, str]
     descriptor_version: int
     backing_file_path: Path
     updated_at: datetime | None
@@ -215,6 +308,84 @@ def fetch_section_override(
         expected_hash=descriptor_section.content_hash,
         override_body=override_body,
         default_body=default_body,
+        backing_file_path=backing_path,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+
+def fetch_tool_override(
+    *,
+    config: MCPServerConfig,
+    store: PromptOverridesStore,
+    ns: str,
+    prompt: str,
+    tag: str,
+    tool_name: str,
+) -> ToolOverrideSnapshot:
+    """Resolve a tool override for the wink MCP helpers."""
+
+    prompt_obj = _load_prompt(ns, prompt, config)
+    tool_obj = _find_tool(prompt_obj, tool_name)
+    if tool_obj is None:
+        raise ToolNotFoundError(ns, prompt, tool_name)
+    if not getattr(tool_obj, "accepts_overrides", True):
+        raise ToolOverridesUnavailableError(ns, prompt, tool_name)
+
+    descriptor = PromptDescriptor.from_prompt(cast(PromptLike, prompt_obj))
+    descriptor_tool = _find_tool_descriptor(descriptor, tool_name)
+    if descriptor_tool is None:
+        raise ToolOverridesUnavailableError(ns, prompt, tool_name)
+
+    try:
+        override_payload = store.resolve(descriptor, tag=tag)
+    except PromptOverridesError as error:
+        raise ToolOverrideResolutionError(
+            ns,
+            prompt,
+            tag,
+            tool_name,
+            cause=error,
+        ) from error
+
+    override_entry = (
+        override_payload.tool_overrides.get(tool_name)
+        if override_payload is not None
+        else None
+    )
+
+    override_description = (
+        override_entry.description if override_entry is not None else None
+    )
+    override_param_descriptions = (
+        dict(override_entry.param_descriptions) if override_entry is not None else {}
+    )
+
+    default_description = tool_obj.description
+    default_param_descriptions = _collect_tool_param_descriptions(tool_obj)
+
+    effective_description = (
+        override_description
+        if override_description is not None
+        else default_description
+    )
+    effective_param_descriptions = dict(default_param_descriptions)
+    if override_param_descriptions:
+        effective_param_descriptions.update(override_param_descriptions)
+
+    backing_path = _build_override_file_path(config, ns, prompt, tag)
+
+    return ToolOverrideSnapshot(
+        ns=ns,
+        prompt=prompt,
+        tag=tag,
+        tool_name=tool_name,
+        expected_contract_hash=descriptor_tool.contract_hash,
+        override_description=override_description,
+        override_param_descriptions=override_param_descriptions,
+        default_description=default_description,
+        default_param_descriptions=default_param_descriptions,
+        description=effective_description,
+        param_descriptions=effective_param_descriptions,
         backing_file_path=backing_path,
         descriptor_version=PROMPT_DESCRIPTOR_VERSION,
     )
@@ -326,6 +497,140 @@ def apply_section_override(
     )
 
 
+def apply_tool_override(
+    *,
+    config: MCPServerConfig,
+    store: PromptOverridesStore,
+    ns: str,
+    prompt: str,
+    tag: str,
+    tool_name: str,
+    description: str | None,
+    param_descriptions: object | None,
+    expected_contract_hash: str | None,
+    descriptor_version: int | None,
+    confirm: bool,
+) -> ToolOverrideMutationResult:
+    """Persist a tool override after validating guards."""
+
+    if not confirm:
+        raise ToolOverrideApplyError(
+            "Confirmation required to persist tool overrides.",
+        )
+
+    prompt_obj = _load_prompt(ns, prompt, config)
+    tool_obj = _find_tool(prompt_obj, tool_name)
+    if tool_obj is None:
+        raise ToolNotFoundError(ns, prompt, tool_name)
+    if not getattr(tool_obj, "accepts_overrides", True):
+        raise ToolOverridesUnavailableError(ns, prompt, tool_name)
+
+    descriptor = PromptDescriptor.from_prompt(cast(PromptLike, prompt_obj))
+    descriptor_tool = _find_tool_descriptor(descriptor, tool_name)
+    if descriptor_tool is None:
+        raise ToolOverridesUnavailableError(ns, prompt, tool_name)
+
+    if (
+        descriptor_version is not None
+        and descriptor_version != PROMPT_DESCRIPTOR_VERSION
+    ):
+        raise ToolOverrideApplyError(
+            f"Descriptor version mismatch. Expected {PROMPT_DESCRIPTOR_VERSION}, received {descriptor_version}."
+        )
+
+    if expected_contract_hash is None:
+        raise ToolOverrideApplyError(
+            "expected_contract_hash must be provided to apply a tool override.",
+        )
+    if expected_contract_hash != descriptor_tool.contract_hash:
+        raise ToolOverrideApplyError(
+            f"Hash mismatch for tool override. Expected {descriptor_tool.contract_hash}, received {expected_contract_hash}."
+        )
+
+    normalized_param_descriptions: dict[str, str] = {}
+    if param_descriptions is not None:
+        if isinstance(param_descriptions, Mapping):
+            mapping_params = cast(Mapping[object, object], param_descriptions)
+        else:
+            raise ToolOverrideApplyError(
+                "Tool parameter descriptions must be a mapping of strings to strings.",
+            )
+        for key, value in mapping_params.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise ToolOverrideApplyError(
+                    "Tool parameter descriptions must be a mapping of strings to strings.",
+                )
+            normalized_param_descriptions[key] = value
+
+    try:
+        existing_override = store.resolve(descriptor, tag=tag)
+    except PromptOverridesError as error:
+        raise ToolOverrideApplyError(
+            "Failed to load existing overrides before applying tool override."
+        ) from error
+
+    sections = dict(existing_override.sections) if existing_override else {}
+    tools = dict(existing_override.tool_overrides) if existing_override else {}
+
+    tools[tool_name] = ToolOverride(
+        name=descriptor_tool.name,
+        expected_contract_hash=descriptor_tool.contract_hash,
+        description=description,
+        param_descriptions=dict(normalized_param_descriptions),
+    )
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag=tag,
+        sections=sections,
+        tool_overrides=tools,
+    )
+
+    try:
+        persisted = store.upsert(descriptor, override)
+    except PromptOverridesError as error:
+        raise ToolOverrideApplyError("Failed to persist tool override.") from error
+
+    persisted_tool = persisted.tool_overrides.get(tool_name)
+    if persisted_tool is None:
+        raise ToolOverrideApplyError(
+            "Persisted override missing target tool after write."
+        )
+
+    default_param_descriptions = _collect_tool_param_descriptions(tool_obj)
+    override_param_descriptions = dict(persisted_tool.param_descriptions)
+    effective_param_descriptions = dict(default_param_descriptions)
+    if override_param_descriptions:
+        effective_param_descriptions.update(override_param_descriptions)
+
+    effective_description = (
+        persisted_tool.description
+        if persisted_tool.description is not None
+        else tool_obj.description
+    )
+
+    backing_path = _build_override_file_path(config, ns, prompt, tag)
+    updated_at = _stat_timestamp(backing_path)
+    if updated_at is None:
+        updated_at = _now()
+
+    return ToolOverrideMutationResult(
+        ns=ns,
+        prompt=prompt,
+        tag=tag,
+        tool_name=tool_name,
+        expected_contract_hash=descriptor_tool.contract_hash,
+        override_description=persisted_tool.description,
+        override_param_descriptions=override_param_descriptions,
+        description=effective_description,
+        param_descriptions=effective_param_descriptions,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        backing_file_path=backing_path,
+        updated_at=updated_at,
+    )
+
+
 def remove_section_override(
     *,
     config: MCPServerConfig,
@@ -422,6 +727,136 @@ def remove_section_override(
         section_path=normalized_path,
         expected_hash=descriptor_section.content_hash,
         override_body=None,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        backing_file_path=backing_path,
+        updated_at=updated_at,
+        warnings=tuple(warnings),
+    )
+
+
+def remove_tool_override(
+    *,
+    config: MCPServerConfig,
+    store: PromptOverridesStore,
+    ns: str,
+    prompt: str,
+    tag: str,
+    tool_name: str,
+    descriptor_version: int | None,
+) -> ToolOverrideMutationResult:
+    """Remove a single tool override, deleting the file when empty."""
+
+    prompt_obj = _load_prompt(ns, prompt, config)
+    tool_obj = _find_tool(prompt_obj, tool_name)
+    if tool_obj is None:
+        raise ToolNotFoundError(ns, prompt, tool_name)
+    if not getattr(tool_obj, "accepts_overrides", True):
+        raise ToolOverridesUnavailableError(ns, prompt, tool_name)
+
+    descriptor = PromptDescriptor.from_prompt(cast(PromptLike, prompt_obj))
+    descriptor_tool = _find_tool_descriptor(descriptor, tool_name)
+    if descriptor_tool is None:
+        raise ToolOverridesUnavailableError(ns, prompt, tool_name)
+
+    if (
+        descriptor_version is not None
+        and descriptor_version != PROMPT_DESCRIPTOR_VERSION
+    ):
+        raise ToolOverrideRemoveError(
+            f"Descriptor version mismatch. Expected {PROMPT_DESCRIPTOR_VERSION}, received {descriptor_version}."
+        )
+
+    try:
+        existing_override = store.resolve(descriptor, tag=tag)
+    except PromptOverridesError as error:
+        raise ToolOverrideRemoveError(
+            "Failed to load existing overrides before removing tool override."
+        ) from error
+
+    default_param_descriptions = _collect_tool_param_descriptions(tool_obj)
+    backing_path = _build_override_file_path(config, ns, prompt, tag)
+    warnings: list[str] = []
+
+    if existing_override is None:
+        warnings.append(f"No override found for tool {tool_name}. Nothing to remove.")
+        return ToolOverrideMutationResult(
+            ns=ns,
+            prompt=prompt,
+            tag=tag,
+            tool_name=tool_name,
+            expected_contract_hash=descriptor_tool.contract_hash,
+            override_description=None,
+            override_param_descriptions={},
+            description=tool_obj.description,
+            param_descriptions=dict(default_param_descriptions),
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            backing_file_path=backing_path,
+            updated_at=_stat_timestamp(backing_path),
+            warnings=tuple(warnings),
+        )
+
+    sections = dict(existing_override.sections)
+    tools = dict(existing_override.tool_overrides)
+    removed = tools.pop(tool_name, None)
+
+    if removed is None:
+        warnings.append(f"No override found for tool {tool_name}. Nothing to remove.")
+        return ToolOverrideMutationResult(
+            ns=ns,
+            prompt=prompt,
+            tag=tag,
+            tool_name=tool_name,
+            expected_contract_hash=descriptor_tool.contract_hash,
+            override_description=None,
+            override_param_descriptions={},
+            description=tool_obj.description,
+            param_descriptions=dict(default_param_descriptions),
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            backing_file_path=backing_path,
+            updated_at=_stat_timestamp(backing_path),
+            warnings=tuple(warnings),
+        )
+
+    if sections or tools:
+        override = PromptOverride(
+            ns=descriptor.ns,
+            prompt_key=descriptor.key,
+            tag=tag,
+            sections=sections,
+            tool_overrides=tools,
+        )
+        try:
+            _ = store.upsert(descriptor, override)
+        except PromptOverridesError as error:
+            raise ToolOverrideRemoveError("Failed to persist tool removal.") from error
+        updated_at = _stat_timestamp(backing_path)
+        if updated_at is None:
+            updated_at = _now()
+    else:
+        updated_at = _stat_timestamp(backing_path)
+        try:
+            store.delete(ns=descriptor.ns, prompt_key=descriptor.key, tag=tag)
+        except FileNotFoundError:
+            warnings.append(
+                "Override file missing while removing tool override. Nothing to delete."
+            )
+        except PromptOverridesError as error:
+            raise ToolOverrideRemoveError("Failed to delete tool override.") from error
+        except Exception as error:  # pragma: no cover - defensive conversion
+            raise ToolOverrideRemoveError("Failed to delete tool override.") from error
+        if updated_at is None:
+            updated_at = _now()
+
+    return ToolOverrideMutationResult(
+        ns=ns,
+        prompt=prompt,
+        tag=tag,
+        tool_name=tool_name,
+        expected_contract_hash=descriptor_tool.contract_hash,
+        override_description=None,
+        override_param_descriptions={},
+        description=tool_obj.description,
+        param_descriptions=dict(default_param_descriptions),
         descriptor_version=PROMPT_DESCRIPTOR_VERSION,
         backing_file_path=backing_path,
         updated_at=updated_at,
@@ -576,6 +1011,15 @@ def _find_section_descriptor(
     return None
 
 
+def _find_tool_descriptor(
+    descriptor: PromptDescriptor, tool_name: str
+) -> ToolDescriptor | None:
+    for tool in descriptor.tools:
+        if tool.name == tool_name:
+            return tool
+    return None
+
+
 def _find_section_node(
     prompt: PromptAny, section_path: tuple[str, ...]
 ) -> _SectionNodeProtocol | None:
@@ -583,6 +1027,27 @@ def _find_section_node(
         if node.path == section_path:
             return cast(_SectionNodeProtocol, node)
     return None
+
+
+def _find_tool(prompt: PromptAny, tool_name: str) -> Tool[Any, Any] | None:
+    for node in prompt.sections:
+        for tool in node.section.tools():
+            if tool.name == tool_name:
+                return cast(Tool[Any, Any], tool)
+    return None
+
+
+def _collect_tool_param_descriptions(tool: Tool[Any, Any]) -> dict[str, str]:
+    params_type = getattr(tool, "params_type", None)
+    if not isinstance(params_type, type) or not is_dataclass(params_type):
+        return {}
+    descriptions: dict[str, str] = {}
+    for field in fields(params_type):
+        metadata = cast(Mapping[str, object], field.metadata)
+        description = metadata.get("description")
+        if isinstance(description, str) and description:
+            descriptions[field.name] = description
+    return descriptions
 
 
 def _build_override_file_path(
@@ -662,8 +1127,18 @@ __all__ = [
     "SectionOverrideResolutionError",
     "SectionOverrideSnapshot",
     "SectionOverridesUnavailableError",
+    "ToolNotFoundError",
+    "ToolOverrideApplyError",
+    "ToolOverrideMutationResult",
+    "ToolOverrideRemoveError",
+    "ToolOverrideResolutionError",
+    "ToolOverrideSnapshot",
+    "ToolOverridesUnavailableError",
     "WinkOverridesError",
     "apply_section_override",
+    "apply_tool_override",
     "fetch_section_override",
+    "fetch_tool_override",
     "remove_section_override",
+    "remove_tool_override",
 ]

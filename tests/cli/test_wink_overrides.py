@@ -38,6 +38,13 @@ from weakincentives.cli.wink_overrides import (
     SectionOverrideResolutionError,
     SectionOverrideSnapshot,
     SectionOverridesUnavailableError,
+    ToolNotFoundError,
+    ToolOverrideApplyError,
+    ToolOverrideMutationResult,
+    ToolOverrideRemoveError,
+    ToolOverrideResolutionError,
+    ToolOverrideSnapshot,
+    ToolOverridesUnavailableError,
     _build_override_file_path,
     _coerce_prompt,
     _extract_override_body,
@@ -51,8 +58,11 @@ from weakincentives.cli.wink_overrides import (
     _split_namespace,
     _validate_identifier,
     apply_section_override,
+    apply_tool_override,
     fetch_section_override,
+    fetch_tool_override,
     remove_section_override,
+    remove_tool_override,
 )
 from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import (
@@ -62,6 +72,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
     PromptOverridesStore,
     SectionOverride,
+    ToolOverride,
 )
 
 
@@ -79,7 +90,72 @@ def prompt_workspace(tmp_path: Path) -> Iterator[tuple[Path, str]]:
     module_dir.mkdir()
     module_code = dedent(
         """
+        from dataclasses import dataclass, field
+
         from weakincentives.prompt import MarkdownSection, Prompt
+        from weakincentives.prompt.tool import Tool, ToolContext
+        from weakincentives.prompt.tool_result import ToolResult
+
+
+        @dataclass
+        class SearchParams:
+            query: str = field(metadata={"description": "Search query"})
+
+
+        @dataclass
+        class SearchResult:
+            value: str
+
+
+        @dataclass
+        class IndexParams:
+            document_id: str = field(
+                metadata={"description": "Document identifier"}
+            )
+
+
+        @dataclass
+        class IndexResult:
+            success: bool
+
+
+        def _search_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            return ToolResult(message="ok", value=None)
+
+
+        def _index_handler(
+            params: IndexParams, *, context: ToolContext
+        ) -> ToolResult[IndexResult]:
+            return ToolResult(message="ok", value=None)
+
+
+        def _disabled_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            return ToolResult(message="ok", value=None)
+
+
+        search_tool = Tool[SearchParams, SearchResult](
+            name="search_docs",
+            description="Search the documentation.",
+            handler=_search_handler,
+        )
+
+        index_tool = Tool[IndexParams, IndexResult](
+            name="index_docs",
+            description="Index documentation.",
+            handler=_index_handler,
+        )
+
+        disabled_tool = Tool[SearchParams, SearchResult](
+            name="search_disabled",
+            description="Search disabled.",
+            handler=_disabled_handler,
+            accepts_overrides=False,
+        )
+
 
         PROMPTS = {
             ("demo", "example"): Prompt(
@@ -90,6 +166,7 @@ def prompt_workspace(tmp_path: Path) -> Iterator[tuple[Path, str]]:
                         title="Example",
                         key="intro",
                         template="Example body",
+                        tools=(search_tool, index_tool),
                     ),
                 ),
             ),
@@ -113,6 +190,18 @@ def prompt_workspace(tmp_path: Path) -> Iterator[tuple[Path, str]]:
                         title="Defaultless",
                         key="intro",
                         template="Defaultless body",
+                    ),
+                ),
+            ),
+            ("demo", "tool_disabled"): Prompt(
+                ns="demo",
+                key="tool_disabled",
+                sections=(
+                    MarkdownSection(
+                        title="Tool Disabled",
+                        key="intro",
+                        template="Tool disabled body",
+                        tools=(disabled_tool,),
                     ),
                 ),
             ),
@@ -171,6 +260,37 @@ def _seed_override(
         prompt_key=descriptor.key,
         tag="latest",
         sections={section_descriptor.path: override},
+    )
+    store.upsert(descriptor, prompt_override)
+    return override
+
+
+def _seed_tool_override(
+    *,
+    store: LocalPromptOverridesStore,
+    prompt_obj: Prompt[object],
+    tool_name: str,
+    description: str,
+    param_descriptions: Mapping[str, str],
+) -> ToolOverride:
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(tool for tool in descriptor.tools if tool.name == tool_name)
+    existing = store.resolve(descriptor, tag="latest")
+    sections = dict(existing.sections) if existing else {}
+    tools = dict(existing.tool_overrides) if existing else {}
+    override = ToolOverride(
+        name=tool_descriptor.name,
+        expected_contract_hash=tool_descriptor.contract_hash,
+        description=description,
+        param_descriptions=dict(param_descriptions),
+    )
+    tools[tool_name] = override
+    prompt_override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections=sections,
+        tool_overrides=tools,
     )
     store.upsert(descriptor, prompt_override)
     return override
@@ -1103,6 +1223,1195 @@ def test_remove_section_override_uses_now_when_stat_missing_on_delete(
     )
 
     assert result.updated_at == sentinel
+
+
+def test_fetch_tool_override_returns_override(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    seeded = _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="search_docs",
+        description="Override search",
+        param_descriptions={"query": "Override query"},
+    )
+
+    config = _build_config(workspace, module_name)
+    snapshot = fetch_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+    )
+
+    expected_path = config.overrides_dir / "demo" / "example" / "latest.json"
+
+    assert isinstance(snapshot, ToolOverrideSnapshot)
+    assert snapshot.override_description == seeded.description
+    assert snapshot.description == seeded.description
+    assert snapshot.override_param_descriptions == seeded.param_descriptions
+    assert snapshot.param_descriptions["query"] == "Override query"
+    assert snapshot.default_description == "Search the documentation."
+    assert snapshot.default_param_descriptions == {"query": "Search query"}
+    assert snapshot.backing_file_path == expected_path
+
+
+def test_fetch_tool_override_returns_defaults_when_missing_override(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    store = _build_store(workspace)
+    _ = _load_prompt(module_name, ("demo", "example"))
+
+    config = _build_config(workspace, module_name)
+    snapshot = fetch_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+    )
+
+    assert snapshot.override_description is None
+    assert snapshot.description == "Search the documentation."
+    assert snapshot.param_descriptions == {"query": "Search query"}
+
+
+def test_fetch_tool_override_raises_when_tool_missing(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    store = _build_store(workspace)
+    config = _build_config(workspace, module_name)
+
+    with pytest.raises(ToolNotFoundError):
+        fetch_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="missing",
+        )
+
+
+def test_fetch_tool_override_raises_when_tool_overrides_disabled(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    store = _build_store(workspace)
+    config = _build_config(workspace, module_name)
+
+    with pytest.raises(ToolOverridesUnavailableError):
+        fetch_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="tool_disabled",
+            tag="latest",
+            tool_name="search_disabled",
+        )
+
+
+def test_fetch_tool_override_maps_store_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+
+    class FailingStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, tag: str = "latest"
+        ) -> PromptOverride | None:
+            raise PromptOverridesError("boom")
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = FailingStore()
+
+    with pytest.raises(ToolOverrideResolutionError):
+        fetch_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+        )
+
+
+def test_fetch_tool_override_raises_when_descriptor_missing(
+    prompt_workspace: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, module_name = prompt_workspace
+    store = _build_store(workspace)
+    config = _build_config(workspace, module_name)
+
+    def _stub_descriptor(descriptor: PromptDescriptor, tool_name: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "weakincentives.cli.wink_overrides._find_tool_descriptor",
+        _stub_descriptor,
+    )
+
+    with pytest.raises(ToolOverridesUnavailableError):
+        fetch_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+        )
+
+
+def test_apply_tool_override_persists_payload(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    result = apply_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        description="Override search",
+        param_descriptions={"query": "Override query"},
+        expected_contract_hash=tool_descriptor.contract_hash,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        confirm=True,
+    )
+
+    override = store.resolve(descriptor, tag="latest")
+    assert override is not None
+    persisted = override.tool_overrides["search_docs"]
+
+    assert isinstance(result, ToolOverrideMutationResult)
+    assert persisted.description == "Override search"
+    assert persisted.param_descriptions == {"query": "Override query"}
+    assert result.override_description == "Override search"
+    assert result.description == "Override search"
+    assert result.param_descriptions == {"query": "Override query"}
+
+
+def test_apply_tool_override_requires_confirm(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override search",
+            param_descriptions={},
+            expected_contract_hash=tool_descriptor.contract_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=False,
+        )
+
+
+def test_apply_tool_override_raises_when_tool_missing(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(ToolNotFoundError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="missing",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash="hash",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_rejects_disabled_tool(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(ToolOverridesUnavailableError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="tool_disabled",
+            tag="latest",
+            tool_name="search_disabled",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash="hash",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_rejects_missing_descriptor(
+    prompt_workspace: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    def _stub_descriptor(descriptor: PromptDescriptor, tool_name: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "weakincentives.cli.wink_overrides._find_tool_descriptor",
+        _stub_descriptor,
+    )
+
+    with pytest.raises(ToolOverridesUnavailableError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash="hash",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_rejects_descriptor_version_mismatch(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash=tool_descriptor.contract_hash,
+            descriptor_version=-1,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_requires_expected_hash(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash=None,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_validates_contract_hash(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash="invalid",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_rejects_invalid_param_mapping(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions={1: "bad"},
+            expected_contract_hash=tool_descriptor.contract_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_rejects_non_mapping_param_descriptions(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions=[("query", "value")],
+            expected_contract_hash=tool_descriptor.contract_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_preserves_existing_overrides(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="index_docs",
+        description="Index override",
+        param_descriptions={"document_id": "Override id"},
+    )
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    _ = apply_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        description="Override search",
+        param_descriptions={"query": "Override query"},
+        expected_contract_hash=tool_descriptor.contract_hash,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        confirm=True,
+    )
+
+    persisted = store.resolve(descriptor, tag="latest")
+    assert persisted is not None
+    assert "index_docs" in persisted.tool_overrides
+
+
+def test_apply_tool_override_maps_resolve_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    class FailingStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, tag: str = "latest"
+        ) -> PromptOverride | None:
+            raise PromptOverridesError("boom")
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = FailingStore()
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash=tool_descriptor.contract_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_maps_upsert_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    class FailingStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, tag: str = "latest"
+        ) -> PromptOverride | None:
+            return PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=tag,
+            )
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise PromptOverridesError("boom")
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = FailingStore()
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash=tool_descriptor.contract_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_detects_missing_persisted_tool(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    class MissingPersistedStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, tag: str = "latest"
+        ) -> PromptOverride | None:
+            return PromptOverride(ns=descriptor.ns, prompt_key=descriptor.key, tag=tag)
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            return PromptOverride(
+                ns=descriptor.ns, prompt_key=descriptor.key, tag=override.tag
+            )
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = MissingPersistedStore()
+
+    with pytest.raises(ToolOverrideApplyError):
+        apply_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            description="Override",
+            param_descriptions={},
+            expected_contract_hash=tool_descriptor.contract_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_tool_override_uses_now_when_stat_missing(
+    prompt_workspace: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    sentinel = datetime(2030, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(wink_overrides_module, "_stat_timestamp", lambda _path: None)
+    monkeypatch.setattr(wink_overrides_module, "_now", lambda: sentinel)
+
+    result = apply_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        description="Override",
+        param_descriptions={},
+        expected_contract_hash=tool_descriptor.contract_hash,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        confirm=True,
+    )
+
+    assert result.updated_at == sentinel
+
+
+def test_remove_tool_override_removes_entry(prompt_workspace: tuple[Path, str]) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="search_docs",
+        description="Override search",
+        param_descriptions={"query": "Override query"},
+    )
+
+    result = remove_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    override = store.resolve(descriptor, tag="latest")
+    assert override is None or "search_docs" not in override.tool_overrides
+    assert result.override_description is None
+    assert result.description == "Search the documentation."
+    assert result.warnings == ()
+
+
+def test_remove_tool_override_warns_when_missing(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    result = remove_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert result.warnings == (
+        "No override found for tool search_docs. Nothing to remove.",
+    )
+    assert result.description == "Search the documentation."
+
+
+def test_remove_tool_override_warns_when_tool_absent_from_override(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="index_docs",
+        description="Override index",
+        param_descriptions={"document_id": "Override id"},
+    )
+
+    result = remove_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert result.warnings == (
+        "No override found for tool search_docs. Nothing to remove.",
+    )
+
+
+def test_remove_tool_override_warns_when_delete_missing_file(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    class MissingDeleteStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, tag: str = "latest"
+        ) -> PromptOverride | None:
+            override = PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=tag,
+                tool_overrides={},
+            )
+            override.tool_overrides["search_docs"] = ToolOverride(
+                name="search_docs",
+                expected_contract_hash=tool_descriptor.contract_hash,
+                description="Override",
+                param_descriptions={},
+            )
+            return override
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise FileNotFoundError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = MissingDeleteStore()
+
+    result = remove_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert result.warnings == (
+        "Override file missing while removing tool override. Nothing to delete.",
+    )
+
+
+def test_remove_tool_override_maps_delete_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    class FailingDeleteStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, tag: str = "latest"
+        ) -> PromptOverride | None:
+            override = PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=tag,
+                tool_overrides={},
+            )
+            override.tool_overrides["search_docs"] = ToolOverride(
+                name="search_docs",
+                expected_contract_hash=tool_descriptor.contract_hash,
+                description="Override",
+                param_descriptions={},
+            )
+            return override
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise PromptOverridesError("boom")
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = FailingDeleteStore()
+
+    with pytest.raises(ToolOverrideRemoveError):
+        remove_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_tool_override_preserves_other_entries(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="search_docs",
+        description="Override search",
+        param_descriptions={"query": "Override query"},
+    )
+    _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="index_docs",
+        description="Override index",
+        param_descriptions={"document_id": "Override id"},
+    )
+
+    _ = remove_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    persisted = store.resolve(descriptor, tag="latest")
+    assert persisted is not None
+    assert "index_docs" in persisted.tool_overrides
+
+
+def test_remove_tool_override_rejects_missing_descriptor(
+    prompt_workspace: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    def _stub_descriptor(descriptor: PromptDescriptor, tool_name: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "weakincentives.cli.wink_overrides._find_tool_descriptor",
+        _stub_descriptor,
+    )
+
+    with pytest.raises(ToolOverridesUnavailableError):
+        remove_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_tool_override_uses_now_when_stat_missing(
+    prompt_workspace: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="search_docs",
+        description="Override search",
+        param_descriptions={"query": "Override query"},
+    )
+    _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="index_docs",
+        description="Override index",
+        param_descriptions={"document_id": "Override id"},
+    )
+
+    sentinel = datetime(2030, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(wink_overrides_module, "_stat_timestamp", lambda _path: None)
+    monkeypatch.setattr(wink_overrides_module, "_now", lambda: sentinel)
+
+    result = remove_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert result.updated_at == sentinel
+
+
+def test_remove_tool_override_validates_descriptor_version(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(ToolOverrideRemoveError):
+        remove_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            descriptor_version=-1,
+        )
+
+
+def test_remove_tool_override_uses_now_when_stat_missing_on_delete(
+    prompt_workspace: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    _seed_tool_override(
+        store=store,
+        prompt_obj=prompt_obj,
+        tool_name="search_docs",
+        description="Override search",
+        param_descriptions={"query": "Override query"},
+    )
+
+    sentinel = datetime(2035, 5, 5, tzinfo=UTC)
+    monkeypatch.setattr(wink_overrides_module, "_stat_timestamp", lambda _path: None)
+    monkeypatch.setattr(wink_overrides_module, "_now", lambda: sentinel)
+
+    result = remove_tool_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        tool_name="search_docs",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert result.updated_at == sentinel
+
+
+def test_remove_tool_override_maps_store_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+
+    class FailingStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, tag: str = "latest"
+        ) -> PromptOverride | None:
+            raise PromptOverridesError("boom")
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = FailingStore()
+
+    with pytest.raises(ToolOverrideRemoveError):
+        remove_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_tool_override_maps_upsert_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+
+    tool_descriptor = next(
+        tool for tool in descriptor.tools if tool.name == "search_docs"
+    )
+
+    class FailingStore(PromptOverridesStore):
+        def __init__(self) -> None:
+            self.upsert_calls = 0
+
+        def resolve(
+            self, descriptor: PromptDescriptor, tag: str = "latest"
+        ) -> PromptOverride | None:
+            override = PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=tag,
+                tool_overrides={},
+            )
+            override.tool_overrides["search_docs"] = ToolOverride(
+                name="search_docs",
+                expected_contract_hash=tool_descriptor.contract_hash,
+                description="Override",
+                param_descriptions={},
+            )
+            override.tool_overrides["index_docs"] = ToolOverride(
+                name="index_docs",
+                expected_contract_hash=next(
+                    tool.contract_hash
+                    for tool in descriptor.tools
+                    if tool.name == "index_docs"
+                ),
+                description="Other override",
+                param_descriptions={},
+            )
+            return override
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            self.upsert_calls += 1
+            raise PromptOverridesError("boom")
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = FailingStore()
+
+    with pytest.raises(ToolOverrideRemoveError):
+        remove_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="search_docs",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+    assert store.upsert_calls == 1
+
+
+def test_remove_tool_override_rejects_disabled_tool(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(ToolOverridesUnavailableError):
+        remove_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="tool_disabled",
+            tag="latest",
+            tool_name="search_disabled",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_tool_override_rejects_missing_tool(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(ToolNotFoundError):
+        remove_tool_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            tool_name="missing",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_collect_tool_param_descriptions_returns_empty_when_params_not_dataclass(
+    prompt_workspace: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _workspace, module_name = prompt_workspace
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    tool = prompt_obj.sections[0].section.tools()[0]
+    original = tool.params_type
+    monkeypatch.setattr(tool, "params_type", object, raising=False)
+
+    descriptions = wink_overrides_module._collect_tool_param_descriptions(tool)
+
+    assert descriptions == {}
+    monkeypatch.setattr(tool, "params_type", original, raising=False)
+
+
+def test_find_tool_descriptor_returns_none(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    _workspace, module_name = prompt_workspace
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+
+    result = wink_overrides_module._find_tool_descriptor(descriptor, "missing")
+
+    assert result is None
 
 
 def test_extract_override_body_returns_none_when_section_missing() -> None:
