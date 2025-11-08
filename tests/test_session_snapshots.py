@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import types
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -23,7 +24,6 @@ import pytest
 
 from weakincentives.runtime.session import snapshots
 from weakincentives.runtime.session.snapshots import (
-    SNAPSHOT_SCHEMA_VERSION,
     Snapshot,
     SnapshotRestoreError,
     SnapshotSerializationError,
@@ -47,6 +47,22 @@ def make_snapshot_payload() -> dict[str, object]:
         slices={SnapshotItem: (SnapshotItem(1),)},
     )
     return json.loads(snapshot.to_json())
+
+
+def make_snapshot_payload_with(**mutations: object) -> str:
+    """Return the snapshot payload with overrides serialized to JSON."""
+
+    payload = deepcopy(make_snapshot_payload())
+    payload.update(mutations)
+    return json.dumps(payload)
+
+
+def make_snapshot_payload_with_slice_mutation(**entry_overrides: object) -> str:
+    payload = make_snapshot_payload()
+    slices = cast(list[object], payload["slices"])
+    base_entry = cast(dict[str, object], deepcopy(slices[0]))
+    base_entry.update(entry_overrides)
+    return make_snapshot_payload_with(slices=[base_entry])
 
 
 def test_normalize_snapshot_state_validates_keys() -> None:
@@ -136,71 +152,29 @@ def test_snapshot_to_json_surfaces_serialization_errors(
         snapshot.to_json()
 
 
-def test_snapshot_from_json_error_branches() -> None:
+@pytest.mark.parametrize(
+    "raw_payload",
+    [
+        "{",
+        json.dumps([]),
+        make_snapshot_payload_with(version="2"),
+        make_snapshot_payload_with(created_at=123),
+        make_snapshot_payload_with(created_at="not-a-timestamp"),
+        make_snapshot_payload_with(slices={}),
+        make_snapshot_payload_with(slices=[1]),
+        make_snapshot_payload_with_slice_mutation(slice_type=1),
+        make_snapshot_payload_with_slice_mutation(
+            slice_type="builtins:int",
+            item_type="builtins:int",
+        ),
+        make_snapshot_payload_with_slice_mutation(items={"not": "a list"}),
+        make_snapshot_payload_with_slice_mutation(items=[{}]),
+        make_snapshot_payload_with_slice_mutation(items=["not-a-mapping"]),
+    ],
+)
+def test_snapshot_from_json_error_branches(raw_payload: str) -> None:
     with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json("{")
-
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps([]))
-
-    payload = make_snapshot_payload()
-    payload["version"] = "2"
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-
-    payload = make_snapshot_payload()
-    payload["version"] = SNAPSHOT_SCHEMA_VERSION
-    payload["created_at"] = 123
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-    payload["created_at"] = "not-a-timestamp"
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-
-    payload = make_snapshot_payload()
-    payload["created_at"] = make_snapshot_payload()["created_at"]
-    payload["slices"] = {}
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-    payload["slices"] = [1]
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-
-    payload = make_snapshot_payload()
-    slices = cast(list[object], payload["slices"])
-    bad_entry = cast(dict[str, object], slices[0])
-    bad_entry["slice_type"] = 1
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-
-    payload = make_snapshot_payload()
-    slices = cast(list[object], payload["slices"])
-    bad_entry = cast(dict[str, object], slices[0])
-    bad_entry["slice_type"] = "builtins:int"
-    bad_entry["item_type"] = "builtins:int"
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-
-    payload = make_snapshot_payload()
-    slices = cast(list[object], payload["slices"])
-    bad_entry = cast(dict[str, object], slices[0])
-    bad_entry["items"] = {"not": "a list"}
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-
-    payload = make_snapshot_payload()
-    slices = cast(list[object], payload["slices"])
-    bad_entry = cast(dict[str, object], slices[0])
-    bad_entry["items"] = [{}]
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
-
-    payload = make_snapshot_payload()
-    slices = cast(list[object], payload["slices"])
-    bad_entry = cast(dict[str, object], slices[0])
-    bad_entry["items"] = ["not-a-mapping"]
-    with pytest.raises(SnapshotRestoreError):
-        Snapshot.from_json(json.dumps(payload))
+        Snapshot.from_json(raw_payload)
 
 
 def test_snapshot_from_json_success_sets_timezone() -> None:
