@@ -24,6 +24,7 @@ from typing import Any, TypeGuard, cast, override
 
 from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
+from .dataclasses import is_dataclass_instance
 
 SNAPSHOT_SCHEMA_VERSION = "1"
 
@@ -50,7 +51,7 @@ def normalize_snapshot_state(
 
         items: list[SupportsDataclass] = []
         for value in values:
-            if not _is_dataclass_instance(value):
+            if not is_dataclass_instance(value):
                 raise ValueError(
                     f"Slice {slice_type.__qualname__} contains non-dataclass value"
                 )
@@ -115,10 +116,6 @@ def _infer_item_type(
 
 def _is_dataclass_type(value: object) -> TypeGuard[type[SupportsDataclass]]:
     return isinstance(value, type) and is_dataclass(value)
-
-
-def _is_dataclass_instance(value: object) -> TypeGuard[SupportsDataclass]:
-    return is_dataclass(value) and not isinstance(value, type)
 
 
 @dataclass(slots=True, frozen=True)
