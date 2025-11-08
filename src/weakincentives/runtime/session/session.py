@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, is_dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, cast, override
@@ -24,6 +24,7 @@ from ...prompt._types import SupportsDataclass
 from ..events import EventBus, PromptExecuted, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
+from .dataclasses import is_dataclass_instance
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append
 from .snapshots import (
@@ -218,9 +219,10 @@ class Session(SessionProtocol):
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
         payload = event.result.value
-        dataclass_payload: SupportsDataclass | None = None
-        if _is_dataclass_instance(payload):
-            dataclass_payload = cast(SupportsDataclass, payload)
+        if not is_dataclass_instance(payload):
+            dataclass_payload: SupportsDataclass | None = None
+        else:
+            dataclass_payload = cast(SupportsDataclass, payload)  # pyright: ignore[reportUnnecessaryCast]
 
         data = ToolData(value=dataclass_payload, source=event)
         self._dispatch_data_event(_TOOL_DATA_TYPE, data)
@@ -230,15 +232,15 @@ class Session(SessionProtocol):
 
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
         output = event.result.output
-        if _is_dataclass_instance(output):
-            dataclass_output = cast(SupportsDataclass, output)
+        if is_dataclass_instance(output):
+            dataclass_output = cast(SupportsDataclass, output)  # pyright: ignore[reportUnnecessaryCast]
             data = PromptData(value=dataclass_output, source=event)
             self._dispatch_data_event(type(dataclass_output), data)
             return
         if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
             for item in cast(Iterable[object], output):
-                if _is_dataclass_instance(item):
-                    dataclass_item = cast(SupportsDataclass, item)
+                if is_dataclass_instance(item):
+                    dataclass_item = cast(SupportsDataclass, item)  # pyright: ignore[reportUnnecessaryCast]
                     data = PromptData(value=dataclass_item, source=event)
                     self._dispatch_data_event(type(dataclass_item), data)
 
@@ -300,10 +302,6 @@ class Session(SessionProtocol):
             self._subscriptions_attached = True
             bus.subscribe(ToolInvoked, self._on_tool_invoked)
             bus.subscribe(PromptExecuted, self._on_prompt_executed)
-
-
-def _is_dataclass_instance(value: object) -> bool:
-    return is_dataclass(value) and not isinstance(value, type)
 
 
 __all__ = [
