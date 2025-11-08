@@ -27,7 +27,7 @@ from weakincentives.prompt.overrides import (
     hash_json,
     hash_text,
 )
-from weakincentives.serde.dataclass_serde import schema
+from weakincentives.serde.schema import schema
 
 
 @dataclass

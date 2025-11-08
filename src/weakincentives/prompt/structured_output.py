@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping
 from typing import Any, Final, Literal, cast
 
-from ..serde.dataclass_serde import parse as parse_dataclass
+from ..serde.parse import parse as parse_dataclass
 from .prompt import RenderedPrompt
 
 __all__ = ["ARRAY_WRAPPER_KEY", "OutputParseError", "parse_structured_output"]
