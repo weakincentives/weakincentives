@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -37,6 +37,9 @@ from weakincentives.runtime.session import (
     upsert_by,
 )
 from weakincentives.runtime.session.session import _append_tool_data
+
+if TYPE_CHECKING:
+    from tests.conftest import SessionFactory
 
 
 @dataclass(slots=True, frozen=True)
@@ -83,9 +86,8 @@ def make_prompt_event(output: object) -> PromptExecuted:
     )
 
 
-def test_tool_invoked_appends_payload_once() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
 
     event = make_tool_event(1)
     first_result = bus.publish(event)
@@ -96,11 +98,12 @@ def test_tool_invoked_appends_payload_once() -> None:
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
 
 
-def test_prompt_executed_emits_multiple_dataclasses() -> None:
+def test_prompt_executed_emits_multiple_dataclasses(
+    session_factory: SessionFactory,
+) -> None:
     outputs = [ExampleOutput(text="first"), ExampleOutput(text="second")]
 
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session, bus = session_factory()
 
     result = bus.publish(make_prompt_event(outputs))
 
@@ -108,7 +111,7 @@ def test_prompt_executed_emits_multiple_dataclasses() -> None:
     assert session.select_all(ExampleOutput) == tuple(outputs)
 
 
-def test_reducers_run_in_registration_order() -> None:
+def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> None:
     @dataclass(slots=True, frozen=True)
     class FirstSlice:
         value: str
@@ -117,8 +120,7 @@ def test_reducers_run_in_registration_order() -> None:
     class SecondSlice:
         value: str
 
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session, bus = session_factory()
 
     call_order: list[str] = []
 
@@ -155,9 +157,10 @@ def test_reducers_run_in_registration_order() -> None:
     assert result.ok
 
 
-def test_default_append_used_when_no_custom_reducer() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_default_append_used_when_no_custom_reducer(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
 
     result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
@@ -165,9 +168,8 @@ def test_default_append_used_when_no_custom_reducer() -> None:
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="hello"),)
 
 
-def test_non_dataclass_payloads_are_ignored() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
 
     event = make_tool_event(1)
     non_dataclass_event = ToolInvoked(
@@ -188,9 +190,8 @@ def test_non_dataclass_payloads_are_ignored() -> None:
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
 
 
-def test_upsert_by_replaces_matching_keys() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
 
     session.register_reducer(ExamplePayload, upsert_by(lambda payload: payload.value))
 
@@ -207,9 +208,10 @@ def test_upsert_by_replaces_matching_keys() -> None:
     )
 
 
-def test_replace_latest_keeps_only_newest_value() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_replace_latest_keeps_only_newest_value(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
 
     session.register_reducer(ExamplePayload, replace_latest)
 
@@ -221,9 +223,8 @@ def test_replace_latest_keeps_only_newest_value() -> None:
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=2),)
 
 
-def test_tool_data_slice_records_failures() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
 
     bus.publish(make_tool_event(1))
 
@@ -247,9 +248,8 @@ def test_tool_data_slice_records_failures() -> None:
     assert tool_events[1].source.result.success is False
 
 
-def test_append_tool_data_appends_tool_data() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_append_tool_data_appends_tool_data(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
     tool_event = make_tool_event(1)
     tool_data = ToolData(value=ExamplePayload(value=1), source=tool_event)
 
@@ -258,9 +258,8 @@ def test_append_tool_data_appends_tool_data() -> None:
     assert appended == (tool_data,)
 
 
-def test_selector_helpers_delegate_to_session() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_selector_helpers_delegate_to_session(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
 
     assert select_latest(session, ExampleOutput) is None
 
@@ -279,9 +278,10 @@ def test_selector_helpers_delegate_to_session() -> None:
     ) == (ExampleOutput(text="first"),)
 
 
-def test_reducer_failure_leaves_previous_slice_unchanged() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_reducer_failure_leaves_previous_slice_unchanged(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
 
     session.register_reducer(ExampleOutput, append)
 
@@ -308,9 +308,8 @@ def test_reducer_failure_leaves_previous_slice_unchanged() -> None:
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
 
 
-def test_snapshot_round_trip_restores_state() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
     second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
@@ -332,13 +331,14 @@ def test_snapshot_round_trip_restores_state() -> None:
     assert session.select_all(ExampleOutput) == original_state
 
 
-def test_snapshot_preserves_custom_reducer_behavior() -> None:
+def test_snapshot_preserves_custom_reducer_behavior(
+    session_factory: SessionFactory,
+) -> None:
     @dataclass(slots=True, frozen=True)
     class Summary:
         entries: tuple[str, ...]
 
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session, bus = session_factory()
 
     def aggregate(
         slice_values: tuple[Summary, ...],
@@ -371,9 +371,10 @@ def test_snapshot_preserves_custom_reducer_behavior() -> None:
     assert third_result.ok
 
 
-def test_snapshot_rollback_requires_registered_slices() -> None:
-    bus = InProcessEventBus()
-    source = Session(bus=bus)
+def test_snapshot_rollback_requires_registered_slices(
+    session_factory: SessionFactory,
+) -> None:
+    source, bus = session_factory()
     result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
     assert result.ok
@@ -387,17 +388,18 @@ def test_snapshot_rollback_requires_registered_slices() -> None:
     assert target.select_all(ExampleOutput) == ()
 
 
-def test_snapshot_rejects_non_dataclass_values() -> None:
-    session = Session(bus=InProcessEventBus())
+def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
     session.seed_slice(str, ("value",))
 
     with pytest.raises(SnapshotSerializationError):
         session.snapshot()
 
 
-def test_clone_preserves_state_and_reducer_registration() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus, session_id="source", created_at="now")
+def test_clone_preserves_state_and_reducer_registration(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory(session_id="source", created_at="now")
 
     session.register_reducer(ExampleOutput, replace_latest)
 
@@ -424,9 +426,10 @@ def test_clone_preserves_state_and_reducer_registration() -> None:
     assert clone.select_all(ExampleOutput)[-1] == ExampleOutput(text="second")
 
 
-def test_clone_attaches_to_new_bus_when_provided() -> None:
-    source_bus = InProcessEventBus()
-    session = Session(bus=source_bus)
+def test_clone_attaches_to_new_bus_when_provided(
+    session_factory: SessionFactory,
+) -> None:
+    session, source_bus = session_factory()
 
     source_bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
