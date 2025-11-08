@@ -14,13 +14,15 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, Prompt, Tool
+from weakincentives.prompt import MarkdownSection, Prompt, PromptLike, Tool
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -813,10 +815,11 @@ def test_seed_sections_missing_section_raises(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
-    prompt._section_nodes = []
+    class _EmptyPrompt:
+        sections: tuple[object, ...] = ()
 
     with pytest.raises(PromptOverridesError):
-        store._seed_sections(prompt, descriptor)
+        store._seed_sections(cast(PromptLike, _EmptyPrompt()), descriptor)
 
 
 def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
@@ -824,11 +827,14 @@ def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
-    for node in getattr(prompt, "_section_nodes", []):
-        node.section.original_body_template = lambda: None
+    with ExitStack() as stack:
+        for node in prompt.sections:
+            stack.enter_context(
+                patch.object(node.section, "original_body_template", return_value=None)
+            )
 
-    with pytest.raises(PromptOverridesError):
-        store._seed_sections(prompt, descriptor)
+        with pytest.raises(PromptOverridesError):
+            store._seed_sections(prompt, descriptor)
 
 
 def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
@@ -836,7 +842,7 @@ def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
-    for node in getattr(prompt, "_section_nodes", []):
+    for node in prompt.sections:
         node.section._tools = ()
 
     with pytest.raises(PromptOverridesError):
