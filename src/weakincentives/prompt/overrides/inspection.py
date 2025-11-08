@@ -41,7 +41,7 @@ class _InspectableLocalStore(LocalPromptOverridesStore):
     """Expose internal path resolution for read-only inspection helpers."""
 
     def overrides_dir(self) -> Path:
-        return super()._overrides_dir()
+        return self._filesystem.overrides_dir()
 
 
 def resolve_overrides_root(

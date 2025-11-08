@@ -21,7 +21,6 @@ from typing import Any, cast
 import pytest
 
 from weakincentives.prompt import MarkdownSection, Prompt, Tool
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptDescriptor,
@@ -29,6 +28,13 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
     SectionOverride,
     ToolOverride,
+)
+from weakincentives.prompt.overrides._fs import OverrideFilesystem
+from weakincentives.prompt.overrides.validation import (
+    load_sections,
+    load_tools,
+    seed_sections,
+    seed_tools,
 )
 
 
@@ -162,12 +168,7 @@ def test_root_detection_manual_traversal(
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    from weakincentives.prompt.overrides import local_store as store_module
-
-    def _raise_file_not_found(*_args: object, **_kwargs: object) -> None:
-        raise FileNotFoundError
-
-    monkeypatch.setattr(store_module.subprocess, "run", _raise_file_not_found)
+    monkeypatch.setattr(OverrideFilesystem, "_git_toplevel", lambda _self: None)
     monkeypatch.chdir(nested)
 
     store = LocalPromptOverridesStore()
@@ -227,38 +228,35 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
 def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
-    store = LocalPromptOverridesStore(root_path=tmp_path)
     section = descriptor.sections[0]
     section_key = "/".join(section.path)
 
-    assert store._load_sections(None, descriptor) == {}
-    assert store._load_sections({}, descriptor) == {}
+    assert load_sections(None, descriptor) == {}
+    assert load_sections({}, descriptor) == {}
 
     with pytest.raises(PromptOverridesError):
-        store._load_sections(
+        load_sections(
             cast(Mapping[str, object], ["invalid"]),
             descriptor,
         )
 
     with pytest.raises(PromptOverridesError):
-        store._load_sections(
-            {section_key: {"expected_hash": 123, "body": "Body"}}, descriptor
-        )
+        load_sections({section_key: {"expected_hash": 123, "body": "Body"}}, descriptor)
 
     with pytest.raises(PromptOverridesError):
-        store._load_sections({section_key: "invalid"}, descriptor)
+        load_sections({section_key: "invalid"}, descriptor)
 
     with pytest.raises(PromptOverridesError):
-        store._load_sections(
+        load_sections(
             {section_key: {"expected_hash": section.content_hash, "body": 123}},
             descriptor,
         )
 
     with pytest.raises(PromptOverridesError):
-        store._load_sections(cast(Mapping[str, object], []), descriptor)
+        load_sections(cast(Mapping[str, object], []), descriptor)
 
     with pytest.raises(PromptOverridesError):
-        store._load_sections(
+        load_sections(
             cast(Mapping[str, object], {1: {}}),
             descriptor,
         )
@@ -272,8 +270,8 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
     override_path = _override_path(tmp_path, descriptor)
     override_path.parent.mkdir(parents=True, exist_ok=True)
 
-    assert store._load_tools(None, descriptor) == {}
-    assert store._load_tools({}, descriptor) == {}
+    assert load_tools(None, descriptor) == {}
+    assert load_tools({}, descriptor) == {}
 
     base_payload = {
         "version": 1,
@@ -347,19 +345,19 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
         store.resolve(descriptor)
 
     with pytest.raises(PromptOverridesError):
-        store._load_tools(cast(Mapping[str, object], []), descriptor)
+        load_tools(cast(Mapping[str, object], []), descriptor)
 
     with pytest.raises(PromptOverridesError):
-        store._load_tools(
+        load_tools(
             cast(Mapping[str, object], {1: {}}),
             descriptor,
         )
 
     with pytest.raises(PromptOverridesError):
-        store._load_tools({tool.name: "invalid"}, descriptor)
+        load_tools({tool.name: "invalid"}, descriptor)
 
     with pytest.raises(PromptOverridesError):
-        store._load_tools(
+        load_tools(
             {tool.name: {"expected_contract_hash": 123}},
             descriptor,
         )
@@ -685,16 +683,10 @@ def test_root_detection_git_command_success(
 
     prompt = _build_prompt()
 
-    from weakincentives.prompt.overrides import local_store as store_module
-
-    @dataclass
-    class _Result:
-        stdout: str
-
     monkeypatch.setattr(
-        store_module.subprocess,
-        "run",
-        lambda *_args, **_kwargs: _Result(str(repo_root)),
+        OverrideFilesystem,
+        "_git_toplevel",
+        lambda _self: repo_root,
     )
     monkeypatch.chdir(nested)
 
@@ -714,13 +706,7 @@ def test_root_detection_without_git_raises(
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    from weakincentives.prompt.overrides import local_store as store_module
-
-    monkeypatch.setattr(
-        store_module.subprocess,
-        "run",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(FileNotFoundError()),
-    )
+    monkeypatch.setattr(OverrideFilesystem, "_git_toplevel", lambda _self: None)
     monkeypatch.chdir(nested)
 
     store = LocalPromptOverridesStore()
@@ -740,14 +726,7 @@ def test_git_toplevel_empty_output_falls_back(
 
     prompt = _build_prompt()
 
-    from weakincentives.prompt.overrides import local_store as store_module
-
-    class _BlankResult:
-        stdout = ""
-
-    monkeypatch.setattr(
-        store_module.subprocess, "run", lambda *_a, **_k: _BlankResult()
-    )
+    monkeypatch.setattr(OverrideFilesystem, "_git_toplevel", lambda _self: None)
     monkeypatch.chdir(nested)
 
     store = LocalPromptOverridesStore()
@@ -811,41 +790,38 @@ def test_resolve_header_validation_errors(tmp_path: Path) -> None:
 def test_seed_sections_missing_section_raises(tmp_path: Path) -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
-    store = LocalPromptOverridesStore(root_path=tmp_path)
 
     prompt._section_nodes = []
 
     with pytest.raises(PromptOverridesError):
-        store._seed_sections(prompt, descriptor)
+        seed_sections(prompt, descriptor)
 
 
 def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
+    _ = tmp_path
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
-    store = LocalPromptOverridesStore(root_path=tmp_path)
 
     for node in getattr(prompt, "_section_nodes", []):
         node.section.original_body_template = lambda: None
 
     with pytest.raises(PromptOverridesError):
-        store._seed_sections(prompt, descriptor)
+        seed_sections(prompt, descriptor)
 
 
 def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
+    _ = tmp_path
     prompt = _build_prompt_with_tool()
     descriptor = PromptDescriptor.from_prompt(prompt)
-    store = LocalPromptOverridesStore(root_path=tmp_path)
 
     for node in getattr(prompt, "_section_nodes", []):
         node.section._tools = ()
 
     with pytest.raises(PromptOverridesError):
-        store._seed_tools(prompt, descriptor)
+        seed_tools(prompt, descriptor)
 
 
 def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
-    store = LocalPromptOverridesStore(root_path=tmp_path)
-
     @dataclass
     class _PlainParams:
         value: str
@@ -860,11 +836,21 @@ def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
         handler=None,
     )
 
+    prompt = Prompt(
+        ns="tests/versioning",
+        key="plain-metadata",
+        sections=[
+            MarkdownSection[_GreetingParams](
+                title="Example",
+                template="Example body for ${subject}.",
+                key="example",
+                tools=[tool],
+            )
+        ],
+    )
+    descriptor = PromptDescriptor.from_prompt(prompt)
     tool.params_type = str
 
-    assert (
-        store._collect_param_descriptions(
-            cast(Tool[SupportsDataclass, SupportsDataclass], tool)
-        )
-        == {}
-    )
+    overrides = seed_tools(prompt, descriptor)
+
+    assert overrides[tool.name].param_descriptions == {}
