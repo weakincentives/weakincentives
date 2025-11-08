@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Protocol
 
-from ...serde.dataclass_serde import schema
+from ...serde.schema import schema
 from .._types import SupportsDataclass
 from ..tool import Tool
 

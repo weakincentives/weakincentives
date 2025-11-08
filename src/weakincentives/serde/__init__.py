@@ -12,6 +12,8 @@
 
 """Stdlib dataclass serde utilities."""
 
-from .dataclass_serde import clone, dump, parse, schema
+from .dump import clone, dump
+from .parse import parse
+from .schema import schema
 
 __all__ = ["clone", "dump", "parse", "schema"]

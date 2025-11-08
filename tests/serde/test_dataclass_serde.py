@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import importlib
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
@@ -33,6 +34,20 @@ from weakincentives.serde.dataclass_serde import (
     _ordered_values,
     _ParseConfig,
 )
+
+parse_module = importlib.import_module("weakincentives.serde.parse")
+
+
+def test_module_exports_align_with_public_api() -> None:
+    from weakincentives.serde.dump import clone as module_clone
+    from weakincentives.serde.dump import dump as module_dump
+    from weakincentives.serde.parse import parse as module_parse
+    from weakincentives.serde.schema import schema as module_schema
+
+    assert clone is module_clone
+    assert dump is module_dump
+    assert parse is module_parse
+    assert schema is module_schema
 
 
 class Color(Enum):
@@ -1082,13 +1097,14 @@ def test_union_without_matching_type_reports_error(
         aliases=None,
     )
 
-    original_get_args = serde_module.get_args
+    original_get_args = parse_module.get_args
 
     def fake_get_args(typ: object) -> tuple[object, ...]:
         if typ is union_type:
             return (type(None),)
         return original_get_args(typ)
 
+    monkeypatch.setattr(parse_module, "get_args", fake_get_args)
     monkeypatch.setattr(serde_module, "get_args", fake_get_args)
 
     with pytest.raises(TypeError) as exc:
