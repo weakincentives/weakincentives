@@ -18,18 +18,23 @@ import importlib
 import sys
 from collections.abc import Iterator, Mapping
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import dedent
 from typing import Protocol, cast
 
 import pytest
 
+import weakincentives.cli.wink_overrides as wink_overrides_module
 from weakincentives.cli.config import MCPServerConfig
 from weakincentives.cli.wink_overrides import (
     PROMPT_DESCRIPTOR_VERSION,
     PromptNotFoundError,
     PromptRegistryImportError,
     SectionNotFoundError,
+    SectionOverrideApplyError,
+    SectionOverrideMutationResult,
+    SectionOverrideRemoveError,
     SectionOverrideResolutionError,
     SectionOverrideSnapshot,
     SectionOverridesUnavailableError,
@@ -45,7 +50,9 @@ from weakincentives.cli.wink_overrides import (
     _parse_section_path,
     _split_namespace,
     _validate_identifier,
+    apply_section_override,
     fetch_section_override,
+    remove_section_override,
 )
 from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import (
@@ -381,6 +388,721 @@ def test_fetch_section_override_maps_import_errors(tmp_path: Path) -> None:
             tag="latest",
             section_path="intro",
         )
+
+
+def test_apply_section_override_persists_body(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    result = apply_section_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        section_path="intro",
+        body="Updated body",
+        expected_hash=section_descriptor.content_hash,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        confirm=True,
+    )
+
+    assert isinstance(result, SectionOverrideMutationResult)
+    assert result.override_body == "Updated body"
+    assert result.section_path == section_descriptor.path
+    assert result.expected_hash == section_descriptor.content_hash
+    assert result.descriptor_version == PROMPT_DESCRIPTOR_VERSION
+    assert result.backing_file_path.exists()
+    assert result.updated_at is not None
+    assert result.updated_at.tzinfo is UTC
+
+    persisted = store.resolve(descriptor, tag="latest")
+    assert persisted is not None
+    assert persisted.sections[section_descriptor.path].body == result.override_body
+
+
+def test_apply_section_override_requires_confirm(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    with pytest.raises(SectionOverrideApplyError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash=section_descriptor.content_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=False,
+        )
+
+
+def test_apply_section_override_raises_when_section_missing(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    with pytest.raises(SectionNotFoundError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="missing",
+            body="Updated body",
+            expected_hash=section_descriptor.content_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_section_override_rejects_disabled_section(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(SectionOverridesUnavailableError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="disabled",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash="placeholder",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_section_override_rejects_missing_descriptor(
+    prompt_workspace: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    monkeypatch.setattr(
+        wink_overrides_module,
+        "_find_section_descriptor",
+        lambda _descriptor, _path: None,
+    )
+
+    with pytest.raises(SectionOverridesUnavailableError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash=section_descriptor.content_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_section_override_rejects_descriptor_version_mismatch(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    with pytest.raises(SectionOverrideApplyError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash=section_descriptor.content_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION + 1,
+            confirm=True,
+        )
+
+
+def test_apply_section_override_requires_expected_hash(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(SectionOverrideApplyError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash=None,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_section_override_maps_resolve_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+
+    class ResolveErrorStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, *, tag: str = "latest"
+        ) -> PromptOverride | None:
+            raise PromptOverridesError("boom")
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = ResolveErrorStore()
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    with pytest.raises(SectionOverrideApplyError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash=section_descriptor.content_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_section_override_maps_upsert_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+
+    class UpsertErrorStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, *, tag: str = "latest"
+        ) -> PromptOverride | None:
+            return None
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise PromptOverridesError("boom")
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = UpsertErrorStore()
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    with pytest.raises(SectionOverrideApplyError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash=section_descriptor.content_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_section_override_detects_missing_persisted_section(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+
+    class MissingPersistedStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, *, tag: str = "latest"
+        ) -> PromptOverride | None:
+            return None
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            return PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=override.tag,
+                sections={},
+            )
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = MissingPersistedStore()
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    with pytest.raises(SectionOverrideApplyError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash=section_descriptor.content_hash,
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_apply_section_override_uses_now_when_stat_missing(
+    prompt_workspace: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    sentinel = wink_overrides_module.datetime(2024, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(wink_overrides_module, "_stat_timestamp", lambda _path: None)
+    monkeypatch.setattr(wink_overrides_module, "_now", lambda: sentinel)
+
+    result = apply_section_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        section_path="intro",
+        body="Updated body",
+        expected_hash=section_descriptor.content_hash,
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        confirm=True,
+    )
+
+    assert result.updated_at == sentinel
+
+
+def test_apply_section_override_rejects_hash_mismatch(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(SectionOverrideApplyError):
+        apply_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            body="Updated body",
+            expected_hash="not-a-real-hash",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+            confirm=True,
+        )
+
+
+def test_remove_section_override_deletes_file_when_empty(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+    _seed_override(store=store, prompt_obj=prompt_obj, body="Custom body")
+
+    result = remove_section_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        section_path="intro",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert isinstance(result, SectionOverrideMutationResult)
+    assert result.override_body is None
+    assert result.warnings == ()
+    assert result.expected_hash == section_descriptor.content_hash
+    assert result.descriptor_version == PROMPT_DESCRIPTOR_VERSION
+    assert result.updated_at is not None
+    assert result.updated_at.tzinfo is UTC
+    assert not result.backing_file_path.exists()
+
+    persisted = store.resolve(descriptor, tag="latest")
+    assert persisted is None
+
+
+def test_remove_section_override_warns_when_missing(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    descriptor = PromptDescriptor.from_prompt(prompt_obj)
+    section_descriptor = next(section for section in descriptor.sections)
+
+    result = remove_section_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        section_path="intro",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert isinstance(result, SectionOverrideMutationResult)
+    assert result.override_body is None
+    assert result.warnings
+    assert result.expected_hash == section_descriptor.content_hash
+    assert result.descriptor_version == PROMPT_DESCRIPTOR_VERSION
+    assert result.updated_at is None
+    assert not result.backing_file_path.exists()
+
+    persisted = store.resolve(descriptor, tag="latest")
+    assert persisted is None
+
+
+def test_remove_section_override_raises_when_section_missing(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(SectionNotFoundError):
+        remove_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="missing",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_section_override_rejects_disabled_section(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(SectionOverridesUnavailableError):
+        remove_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="disabled",
+            tag="latest",
+            section_path="intro",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_section_override_rejects_missing_descriptor(
+    prompt_workspace: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    monkeypatch.setattr(
+        wink_overrides_module,
+        "_find_section_descriptor",
+        lambda _descriptor, _path: None,
+    )
+
+    with pytest.raises(SectionOverridesUnavailableError):
+        remove_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_section_override_rejects_descriptor_version_mismatch(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+
+    with pytest.raises(SectionOverrideRemoveError):
+        remove_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION + 1,
+        )
+
+
+def test_remove_section_override_maps_resolve_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+
+    class ResolveErrorStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, *, tag: str = "latest"
+        ) -> PromptOverride | None:
+            raise PromptOverridesError("boom")
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = ResolveErrorStore()
+
+    with pytest.raises(SectionOverrideRemoveError):
+        remove_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_section_override_maps_upsert_errors(
+    prompt_workspace: tuple[Path, str],
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+
+    class UpsertErrorStore(PromptOverridesStore):
+        def resolve(
+            self, descriptor: PromptDescriptor, *, tag: str = "latest"
+        ) -> PromptOverride | None:
+            return PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=tag,
+                sections={
+                    ("intro",): SectionOverride(
+                        expected_hash="hash-1",
+                        body="Body",
+                    ),
+                    ("other",): SectionOverride(
+                        expected_hash="hash-2",
+                        body="Other",
+                    ),
+                },
+            )
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            raise PromptOverridesError("boom")
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = UpsertErrorStore()
+
+    with pytest.raises(SectionOverrideRemoveError):
+        remove_section_override(
+            config=config,
+            store=store,
+            ns="demo",
+            prompt="example",
+            tag="latest",
+            section_path="intro",
+            descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+        )
+
+
+def test_remove_section_override_updates_existing_overrides(
+    prompt_workspace: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+
+    class MultiSectionStore(PromptOverridesStore):
+        def __init__(self) -> None:
+            self.persisted: PromptOverride | None = None
+
+        def resolve(
+            self, descriptor: PromptDescriptor, *, tag: str = "latest"
+        ) -> PromptOverride | None:
+            return PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=tag,
+                sections={
+                    ("intro",): SectionOverride(
+                        expected_hash="hash-1",
+                        body="Custom body",
+                    ),
+                    ("other",): SectionOverride(
+                        expected_hash="hash-2",
+                        body="Other body",
+                    ),
+                },
+            )
+
+        def upsert(
+            self, descriptor: PromptDescriptor, override: PromptOverride
+        ) -> PromptOverride:
+            self.persisted = override
+            return override
+
+        def delete(self, *, ns: str, prompt_key: str, tag: str) -> None:
+            raise NotImplementedError
+
+        def seed_if_necessary(
+            self, prompt: object, *, tag: str = "latest"
+        ) -> PromptOverride:
+            raise NotImplementedError
+
+    store = MultiSectionStore()
+    sentinel = datetime(2025, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(wink_overrides_module, "_stat_timestamp", lambda _path: None)
+    monkeypatch.setattr(wink_overrides_module, "_now", lambda: sentinel)
+
+    result = remove_section_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        section_path="intro",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert isinstance(store.persisted, PromptOverride)
+    assert ("intro",) not in store.persisted.sections
+    assert result.updated_at == sentinel
+
+
+def test_now_truncates_to_milliseconds() -> None:
+    timestamp = wink_overrides_module._now()
+
+    assert timestamp.tzinfo is UTC
+    assert timestamp.microsecond % 1000 == 0
+
+
+def test_remove_section_override_uses_now_when_stat_missing_on_delete(
+    prompt_workspace: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, module_name = prompt_workspace
+    config = _build_config(workspace, module_name)
+    store = _build_store(workspace)
+    prompt_obj = _load_prompt(module_name, ("demo", "example"))
+    _seed_override(store=store, prompt_obj=prompt_obj, body="Custom body")
+
+    sentinel = datetime(2030, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(wink_overrides_module, "_stat_timestamp", lambda _path: None)
+    monkeypatch.setattr(wink_overrides_module, "_now", lambda: sentinel)
+
+    result = remove_section_override(
+        config=config,
+        store=store,
+        ns="demo",
+        prompt="example",
+        tag="latest",
+        section_path="intro",
+        descriptor_version=PROMPT_DESCRIPTOR_VERSION,
+    )
+
+    assert result.updated_at == sentinel
 
 
 def test_extract_override_body_returns_none_when_section_missing() -> None:
