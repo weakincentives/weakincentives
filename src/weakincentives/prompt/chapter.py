@@ -19,9 +19,10 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar, Final, cast
+from typing import Any, Final, cast
 
 from ._types import SupportsDataclass
+from .generic_params_specializer import GenericParamsSpecializer
 from .section import Section
 
 _CHAPTER_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -38,7 +39,7 @@ class ChaptersExpansionPolicy(StrEnum):
 
 
 @dataclass
-class Chapter[ParamsT: SupportsDataclass]:
+class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer):
     """Container grouping sections under a shared visibility boundary."""
 
     key: str
@@ -50,8 +51,6 @@ class Chapter[ParamsT: SupportsDataclass]:
     _enabled_callable: Callable[[ParamsT | None], bool] | None = field(
         init=False, repr=False, default=None
     )
-
-    _params_type: ClassVar[type[SupportsDataclass] | None] = None
 
     def __post_init__(self) -> None:
         params_candidate = getattr(self.__class__, "_params_type", None)
@@ -105,19 +104,6 @@ class Chapter[ParamsT: SupportsDataclass]:
             raise TypeError("Chapter parameters are required for enabled predicates.")
         return bool(self._enabled_callable(params))
 
-    @classmethod
-    def __class_getitem__(cls, item: object) -> type[Chapter[SupportsDataclass]]:
-        params_type = cls._normalize_generic_argument(item)
-        specialized = cast(
-            "type[Chapter[SupportsDataclass]]",
-            type(cls.__name__, (cls,), {}),
-        )
-        specialized.__name__ = cls.__name__
-        specialized.__qualname__ = cls.__qualname__
-        specialized.__module__ = cls.__module__
-        specialized._params_type = cast(type[SupportsDataclass], params_type)
-        return specialized
-
     @staticmethod
     def _normalize_key(key: str) -> str:
         normalized = key.strip().lower()
@@ -126,12 +112,6 @@ class Chapter[ParamsT: SupportsDataclass]:
         if not _CHAPTER_KEY_PATTERN.match(normalized):
             raise ValueError("Chapter key must match ^[a-z0-9][a-z0-9._-]{0,63}$.")
         return normalized
-
-    @staticmethod
-    def _normalize_generic_argument(item: object) -> object:
-        if isinstance(item, tuple):
-            raise TypeError("Chapter[...] expects a single type argument.")
-        return item
 
     @staticmethod
     def _normalize_enabled(

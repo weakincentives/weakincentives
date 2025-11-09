@@ -16,22 +16,21 @@ import inspect
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
 
 from ._types import SupportsDataclass
+from .generic_params_specializer import GenericParamsSpecializer
 
 _SECTION_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^[a-z0-9][a-z0-9._-]{0,63}$"
 )
 
 
-class Section[ParamsT: SupportsDataclass](ABC):
+class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer, ABC):
     """Abstract building block for prompt content."""
-
-    _params_type: ClassVar[type[SupportsDataclass] | None] = None
 
     def __init__(
         self,
@@ -100,19 +99,6 @@ class Section[ParamsT: SupportsDataclass](ABC):
 
         return None
 
-    @classmethod
-    def __class_getitem__(cls, item: object) -> type[Section[SupportsDataclass]]:
-        params_type = cls._normalize_generic_argument(item)
-        specialized = cast(
-            "type[Section[SupportsDataclass]]",
-            type(cls.__name__, (cls,), {}),
-        )
-        specialized.__name__ = cls.__name__
-        specialized.__qualname__ = cls.__qualname__
-        specialized.__module__ = cls.__module__
-        specialized._params_type = cast(type[SupportsDataclass], params_type)
-        return specialized
-
     @staticmethod
     def _normalize_key(key: str) -> str:
         normalized = key.strip().lower()
@@ -121,12 +107,6 @@ class Section[ParamsT: SupportsDataclass](ABC):
         if not _SECTION_KEY_PATTERN.match(normalized):
             raise ValueError("Section key must match ^[a-z0-9][a-z0-9._-]{0,63}$.")
         return normalized
-
-    @staticmethod
-    def _normalize_generic_argument(item: object) -> object:
-        if isinstance(item, tuple):
-            raise TypeError("Section[...] expects a single type argument.")
-        return item
 
     @staticmethod
     def _normalize_tools(
