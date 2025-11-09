@@ -17,6 +17,10 @@ from dataclasses import dataclass
 import pytest
 
 from weakincentives.prompt import Section
+from weakincentives.prompt._normalization import (
+    COMPONENT_KEY_PATTERN,
+    normalize_component_key,
+)
 
 
 @dataclass
@@ -49,11 +53,26 @@ def test_section_key_normalization_and_validation() -> None:
 
     assert section.key == "spacing.out"
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as excinfo:
         ExampleSection(title="Invalid", key="")
 
-    with pytest.raises(ValueError):
+    assert str(excinfo.value) == "Section key must be a non-empty string."
+
+    with pytest.raises(ValueError) as excinfo:
+        normalize_component_key("", owner="Section")
+
+    assert str(excinfo.value) == "Section key must be a non-empty string."
+
+    with pytest.raises(ValueError) as excinfo:
         ExampleSection(title="Bad", key="Invalid Key")
+
+    expected_message = f"Section key must match {COMPONENT_KEY_PATTERN.pattern}."
+    assert str(excinfo.value) == expected_message
+
+    with pytest.raises(ValueError) as excinfo:
+        normalize_component_key("Invalid Key", owner="Section")
+
+    assert str(excinfo.value) == expected_message
 
 
 def test_section_original_body_template_default_is_none() -> None:
