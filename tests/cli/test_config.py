@@ -156,13 +156,18 @@ def test_load_config_uses_default_path(
     assert config.listen_port == 6543
 
 
-def test_load_config_handles_missing_default_with_env(tmp_path: Path) -> None:
+def test_load_config_handles_missing_default_with_env(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
     workspace_root = tmp_path / "workspace"
     overrides_dir = tmp_path / "overrides"
     env = {
         "WINK_WORKSPACE_ROOT": str(workspace_root),
         "WINK_OVERRIDES_DIR": str(overrides_dir),
     }
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
 
     config = load_config(None, env=env)
 
