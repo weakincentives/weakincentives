@@ -25,6 +25,7 @@ from weakincentives.prompt import (
     Prompt,
     PromptValidationError,
 )
+from weakincentives.prompt._predicate_utils import normalize_enabled_predicate
 from weakincentives.prompt._normalization import (
     COMPONENT_KEY_PATTERN,
     normalize_component_key,
@@ -268,6 +269,10 @@ def test_chapter_without_params_defaults_to_none() -> None:
 
 
 def test_chapter_without_params_accepts_parameterless_enabled_callable() -> None:
+    predicate = normalize_enabled_predicate(lambda: False, None)
+
+    assert predicate is not None
+    assert predicate(None) is False
     chapter = Chapter(key="static", title="Static", enabled=lambda: False)
 
     assert chapter.is_enabled(None) is False
@@ -292,6 +297,15 @@ def test_chapter_without_params_enabled_callable_handles_non_inspectable_callabl
     chapter = Chapter(key="static", title="Static", enabled=bool)
 
     assert chapter.is_enabled(None) is False
+
+
+def test_chapter_enabled_normalization_shared_helper() -> None:
+    predicate = normalize_enabled_predicate(lambda: True, None)
+    chapter_predicate = Chapter._normalize_enabled(lambda: True, None)
+
+    assert predicate is not None
+    assert chapter_predicate is not None
+    assert predicate(None) is chapter_predicate(None)
 
 
 def test_chapter_without_params_rejects_defaults() -> None:

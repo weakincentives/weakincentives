@@ -17,6 +17,10 @@ from dataclasses import dataclass
 import pytest
 
 from weakincentives.prompt import Section
+from weakincentives.prompt._predicate_utils import (
+    callable_requires_positional_argument,
+    normalize_enabled_predicate,
+)
 from weakincentives.prompt._normalization import (
     COMPONENT_KEY_PATTERN,
     normalize_component_key,
@@ -118,6 +122,10 @@ def test_plain_section_allows_absence_of_params() -> None:
 
 
 def test_plain_section_accepts_parameterless_enabled_callable() -> None:
+    predicate = normalize_enabled_predicate(lambda: False, None)
+
+    assert predicate is not None
+    assert predicate(None) is False
     section = PlainSection(title="Plain", key="plain", enabled=lambda: False)
 
     assert section.is_enabled(None) is False
@@ -140,6 +148,20 @@ def test_plain_section_parameterless_enabled_handles_non_inspectable_callable() 
     section = PlainSection(title="Plain", key="plain", enabled=bool)
 
     assert section.is_enabled(None) is False
+
+
+def test_section_enabled_normalization_shared_helper() -> None:
+    predicate = normalize_enabled_predicate(lambda: True, None)
+    section_predicate = Section._normalize_enabled(lambda: True, None)
+
+    assert predicate is not None
+    assert section_predicate is not None
+    assert predicate(None) is section_predicate(None)
+
+
+def test_callable_requires_positional_argument_inspects_signatures() -> None:
+    assert callable_requires_positional_argument(lambda value: value is not None)
+    assert not callable_requires_positional_argument(lambda: True)
 
 
 def test_section_without_params_rejects_defaults() -> None:
