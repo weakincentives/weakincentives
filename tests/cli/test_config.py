@@ -156,6 +156,31 @@ def test_load_config_uses_default_path(
     assert config.listen_port == 6543
 
 
+def test_load_config_reads_path_from_environment(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "wink.toml"
+    config_path.write_text(
+        dedent(
+            """
+            workspace_root = "/workspace"
+            overrides_dir = "/overrides"
+            listen_host = "0.0.0.0"
+            listen_port = 7777
+            """
+        ).strip()
+    )
+
+    env = {"WINK_CONFIG": str(config_path)}
+
+    config = load_config(None, env=env)
+
+    assert config.workspace_root == Path("/workspace")
+    assert config.overrides_dir == Path("/overrides")
+    assert config.listen_host == "0.0.0.0"
+    assert config.listen_port == 7777
+
+
 def test_load_config_handles_missing_default_with_env(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

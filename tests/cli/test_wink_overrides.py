@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import sys
 from collections.abc import Iterator, Mapping
@@ -29,6 +30,8 @@ import weakincentives.cli.wink_overrides as wink_overrides_module
 from weakincentives.cli.config import MCPServerConfig
 from weakincentives.cli.wink_overrides import (
     PROMPT_DESCRIPTOR_VERSION,
+    OverrideListEntry,
+    OverridesInspectionError,
     PromptNotFoundError,
     PromptRegistryImportError,
     SectionNotFoundError,
@@ -46,6 +49,7 @@ from weakincentives.cli.wink_overrides import (
     ToolOverrideSnapshot,
     ToolOverridesUnavailableError,
     _build_override_file_path,
+    _build_override_list_entry,
     _coerce_prompt,
     _extract_override_body,
     _find_section_descriptor,
@@ -61,6 +65,7 @@ from weakincentives.cli.wink_overrides import (
     apply_tool_override,
     fetch_section_override,
     fetch_tool_override,
+    list_overrides,
     remove_section_override,
     remove_tool_override,
 )
@@ -74,6 +79,7 @@ from weakincentives.prompt.overrides import (
     SectionOverride,
     ToolOverride,
 )
+from weakincentives.prompt.overrides.inspection import OverrideFileMetadata
 
 
 class _PromptModule(Protocol):
@@ -241,6 +247,204 @@ def _build_store(workspace: Path) -> LocalPromptOverridesStore:
         root_path=workspace,
         overrides_relative_path=overrides_relative,
     )
+
+
+def test_list_overrides_returns_metadata(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    overrides_root = workspace / ".wink" / "overrides" / "demo" / "example"
+    overrides_root.mkdir(parents=True)
+
+    file_path = overrides_root / "latest.json"
+    file_path.write_text(
+        '{"sections": {"intro": {}}, "tools": {"search": {}}}',
+        encoding="utf-8",
+    )
+
+    config = MCPServerConfig(
+        workspace_root=workspace,
+        overrides_dir=Path(".wink/overrides"),
+    )
+
+    entries = list_overrides(config=config)
+
+    assert entries
+    [entry] = entries
+    assert isinstance(entry, OverrideListEntry)
+    assert entry.ns == "demo"
+    assert entry.prompt == "example"
+    assert entry.tag == "latest"
+    assert entry.section_count == 1
+    assert entry.tool_count == 1
+    assert entry.backing_file_path == file_path.resolve()
+
+    expected_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+    assert entry.content_hash == expected_hash
+
+    expected_timestamp = wink_overrides_module._truncate_to_milliseconds(
+        datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
+    )
+    assert entry.updated_at == expected_timestamp
+
+
+def test_list_overrides_applies_namespace_filter(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    config = MCPServerConfig(
+        workspace_root=workspace,
+        overrides_dir=Path(".wink/overrides"),
+    )
+
+    first = workspace / ".wink" / "overrides" / "demo" / "example"
+    second = workspace / ".wink" / "overrides" / "other" / "sample"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / "latest.json").write_text(
+        '{"sections": {}, "tools": {}}', encoding="utf-8"
+    )
+    (second / "latest.json").write_text(
+        '{"sections": {}, "tools": {}}', encoding="utf-8"
+    )
+
+    entries = list_overrides(config=config, namespace="demo")
+
+    assert len(entries) == 1
+    assert entries[0].ns == "demo"
+    assert entries[0].prompt == "example"
+
+
+def test_list_overrides_treats_blank_namespace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    config = MCPServerConfig(
+        workspace_root=workspace,
+        overrides_dir=Path(".wink/overrides"),
+    )
+
+    first = workspace / ".wink" / "overrides" / "demo" / "example"
+    second = workspace / ".wink" / "overrides" / "other" / "sample"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / "latest.json").write_text(
+        '{"sections": {}, "tools": {}}', encoding="utf-8"
+    )
+    (second / "latest.json").write_text(
+        '{"sections": {}, "tools": {}}', encoding="utf-8"
+    )
+
+    entries = list_overrides(config=config, namespace="   ")
+
+    pairs = sorted((entry.ns, entry.prompt) for entry in entries)
+    assert pairs == [("demo", "example"), ("other", "sample")]
+
+
+def test_list_overrides_supports_absolute_directory(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    overrides_root = tmp_path / "overrides"
+    path = overrides_root / "demo" / "example"
+    path.mkdir(parents=True)
+    file_path = path / "latest.json"
+    file_path.write_text('{"sections": {}, "tools": {}}', encoding="utf-8")
+
+    config = MCPServerConfig(
+        workspace_root=workspace,
+        overrides_dir=overrides_root,
+    )
+
+    entries = list_overrides(config=config)
+
+    assert len(entries) == 1
+    assert entries[0].backing_file_path == file_path.resolve()
+
+
+def test_list_overrides_wraps_iterator_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    config = MCPServerConfig(
+        workspace_root=workspace,
+        overrides_dir=Path(".wink/overrides"),
+    )
+
+    def fake_iter_override_files(**_: object) -> Iterator[OverrideFileMetadata]:
+        raise PromptOverridesError("boom")
+
+    monkeypatch.setattr(
+        wink_overrides_module, "iter_override_files", fake_iter_override_files
+    )
+
+    with pytest.raises(OverridesInspectionError):
+        list_overrides(config=config)
+
+
+def test_list_overrides_wraps_prompt_errors(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    config = MCPServerConfig(
+        workspace_root=workspace,
+        overrides_dir=Path(".wink/overrides"),
+    )
+
+    overrides_root = workspace / ".wink" / "overrides" / "demo" / "example"
+    overrides_root.mkdir(parents=True)
+    (overrides_root / "latest.json").write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(OverridesInspectionError):
+        list_overrides(config=config)
+
+
+def test_list_overrides_wraps_value_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    config = MCPServerConfig(
+        workspace_root=workspace,
+        overrides_dir=Path(".wink/overrides"),
+    )
+
+    metadata = OverrideFileMetadata(
+        path=Path("invalid.json"),
+        relative_segments=("demo",),
+        modified_time=0.0,
+        content_hash="hash",
+        section_count=0,
+        tool_count=0,
+    )
+
+    def fake_iter_override_files(**_: object) -> Iterator[OverrideFileMetadata]:
+        return iter([metadata])
+
+    monkeypatch.setattr(
+        wink_overrides_module, "iter_override_files", fake_iter_override_files
+    )
+
+    with pytest.raises(OverridesInspectionError):
+        list_overrides(config=config)
+
+
+def test_build_override_list_entry_requires_namespace_segments() -> None:
+    class FalseySegments(tuple[str, ...]):
+        def __new__(cls, items: tuple[str, ...]) -> FalseySegments:
+            return super().__new__(cls, items)
+
+        def __getitem__(self, index: slice | int) -> object:
+            result = super().__getitem__(index)
+            if isinstance(index, slice):
+                return FalseySegments(cast(tuple[str, ...], result))
+            return result
+
+        def __bool__(self) -> bool:
+            return False
+
+    metadata = OverrideFileMetadata(
+        path=Path("invalid.json"),
+        relative_segments=FalseySegments(("demo", "example", "latest.json")),
+        modified_time=0.0,
+        content_hash="hash",
+        section_count=0,
+        tool_count=0,
+    )
+
+    with pytest.raises(ValueError):
+        _build_override_list_entry(metadata)
 
 
 def _seed_override(

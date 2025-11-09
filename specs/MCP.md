@@ -35,6 +35,9 @@ while remaining portable across runtimes.
   launches.
 - Emit structured, single-line logs to stdout/stderr, map failures onto MCP
   error semantics, and return process exit code `0` on graceful shutdowns.
+- Provide a sample configuration (`specs/wink.sample.toml`) that demonstrates
+  common listener, environment, and authentication settings alongside
+  environment-variable overrides for unattended deployments.
 
 ## MCP server runtime
 
@@ -109,20 +112,6 @@ disrupting the base MCP workflow.
 
 ## Implementation status
 
-Outstanding work items tracked here until the MCP server ships:
-
-- Add the FastMCP + anyio dependencies (and any runtime glue) to the `wink`
-  optional extra so installing `weakincentives[wink]` brings up the full stack.
-- Simplify the CLI to launch directly as `wink [GLOBAL OPTIONS]` with no `mcp`
-  subcommand, and ensure the entry point calls into the new runtime.
-- Replace the `run_mcp_server` stub with a real FastMCP server that wires up
-  configuration loading, prompt registries, the overrides store, and shutdown
-  handling under anyio.
-- Register the MCP tool definitions (`wink.list_overrides`, `wink.get_*`,
-  `wink.write_*`, `wink.delete_*`) with FastMCP, delegating to the existing
-  helper functions and surfacing MCP-compliant error payloads.
-- Implement the `wink.list_overrides` helper plus any remaining store adapters,
-  covering the metadata contract required by the spec.
-- Document and check in a sample configuration file that demonstrates
-  `--config`, environment overrides, and listener/auth settings for common MCP
-  clients.
+The wink MCP runtime, tool registry, and sample configuration are implemented
+and available in the repository. Refer to `specs/wink.sample.toml` for a
+ready-to-use configuration template.

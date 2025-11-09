@@ -1,0 +1,20 @@
+# Example wink MCP server configuration
+#
+# Launch with:
+#   wink --config ~/.config/wink/config.toml
+# or override at runtime via environment variables such as:
+#   WINK_CONFIG=~/another-config.toml
+#   WINK_OVERRIDES_DIR=~/workspace/.wink/overrides
+#   WINK_ENV=production
+
+workspace_root = "~/workspace"
+overrides_dir = ".wink/overrides"
+prompt_registry_modules = ["my_app.prompts"]
+environment = "development"
+
+[listen]
+host = "127.0.0.1"
+port = 8765
+
+[auth.tokens]
+editor = "replace-with-a-secret-token"

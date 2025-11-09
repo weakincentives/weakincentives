@@ -26,6 +26,7 @@ from typing import Any, Protocol, cast
 
 from ..prompt import Prompt
 from ..prompt.overrides import (
+    OverrideFileMetadata,
     PromptDescriptor,
     PromptLike,
     PromptOverride,
@@ -35,6 +36,7 @@ from ..prompt.overrides import (
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
+    iter_override_files,
 )
 from ..prompt.tool import Tool
 from .config import MCPServerConfig
@@ -59,6 +61,10 @@ class _SectionNodeProtocol(Protocol):
 
 class WinkOverridesError(Exception):
     """Base class for wink override helper failures."""
+
+
+class OverridesInspectionError(WinkOverridesError):
+    """Raised when prompt override metadata cannot be inspected."""
 
 
 class PromptRegistryImportError(WinkOverridesError):
@@ -182,6 +188,20 @@ class ToolOverrideRemoveError(WinkOverridesError):
 
 
 @dataclass(frozen=True, slots=True)
+class OverrideListEntry:
+    """Summary metadata for a persisted prompt override."""
+
+    ns: str
+    prompt: str
+    tag: str
+    section_count: int
+    tool_count: int
+    content_hash: str
+    backing_file_path: Path
+    updated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class SectionOverrideSnapshot:
     """Structured representation of a section override lookup."""
 
@@ -256,6 +276,40 @@ class SectionOverrideApplyError(WinkOverridesError):
 
 class SectionOverrideRemoveError(WinkOverridesError):
     """Raised when removing a section override fails."""
+
+
+def list_overrides(
+    *, config: MCPServerConfig, namespace: str | None = None
+) -> tuple[OverrideListEntry, ...]:
+    """Return override metadata filtered by optional ``namespace``."""
+
+    overrides_root = _resolve_overrides_root(config)
+    namespace_filter = namespace.strip() if namespace else None
+    if namespace_filter == "":
+        namespace_filter = None
+
+    try:
+        metadata_iter = iter_override_files(overrides_root=overrides_root)
+    except PromptOverridesError as error:
+        raise OverridesInspectionError(
+            f"Failed to inspect override files: {overrides_root}"
+        ) from error
+
+    entries: list[OverrideListEntry] = []
+    try:
+        for metadata in metadata_iter:
+            entry = _build_override_list_entry(metadata)
+            if namespace_filter is not None and entry.ns != namespace_filter:
+                continue
+            entries.append(entry)
+    except PromptOverridesError as error:
+        raise OverridesInspectionError(
+            f"Failed to inspect override files: {overrides_root}"
+        ) from error
+    except ValueError as error:
+        raise OverridesInspectionError(str(error)) from error
+
+    return tuple(entries)
 
 
 def fetch_section_override(
@@ -1053,13 +1107,50 @@ def _collect_tool_param_descriptions(tool: Tool[Any, Any]) -> dict[str, str]:
 def _build_override_file_path(
     config: MCPServerConfig, ns: str, prompt_key: str, tag: str
 ) -> Path:
-    base = config.overrides_dir
-    if not base.is_absolute():
-        base = (config.workspace_root / base).resolve()
+    base = _resolve_overrides_root(config)
     segments = _split_namespace(ns)
     prompt_component = _validate_identifier(prompt_key, "prompt key")
     tag_component = _validate_identifier(tag, "tag")
     return base.joinpath(*segments, prompt_component, f"{tag_component}.json")
+
+
+def _build_override_list_entry(metadata: OverrideFileMetadata) -> OverrideListEntry:
+    segments = metadata.relative_segments
+    if len(segments) < 3:
+        msg = f"Override file path must include namespace and prompt: {metadata.path}"
+        raise ValueError(msg)
+
+    prompt_segment = segments[-2]
+    tag_segment = segments[-1]
+
+    prompt_key = _validate_identifier(prompt_segment, "prompt key")
+    tag = Path(tag_segment).stem
+    tag_component = _validate_identifier(tag, "tag")
+
+    namespace_segments = segments[:-2]
+    if not namespace_segments:
+        msg = f"Override file path missing namespace segments: {metadata.path}"
+        raise ValueError(msg)
+
+    ns = "/".join(
+        _validate_identifier(segment, "namespace segment")
+        for segment in namespace_segments
+    )
+
+    updated_at = _truncate_to_milliseconds(
+        datetime.fromtimestamp(metadata.modified_time, tz=UTC)
+    )
+
+    return OverrideListEntry(
+        ns=ns,
+        prompt=prompt_key,
+        tag=tag_component,
+        section_count=metadata.section_count,
+        tool_count=metadata.tool_count,
+        content_hash=metadata.content_hash,
+        backing_file_path=metadata.path,
+        updated_at=updated_at,
+    )
 
 
 def _split_namespace(ns: str) -> tuple[str, ...]:
@@ -1081,6 +1172,13 @@ def _validate_identifier(value: str, label: str) -> str:
             f"{label.capitalize()} must match pattern {_IDENTIFIER_PATTERN}."
         )
     return stripped
+
+
+def _resolve_overrides_root(config: MCPServerConfig) -> Path:
+    base = config.overrides_dir
+    if base.is_absolute():
+        return base.resolve()
+    return (config.workspace_root / base).resolve()
 
 
 @contextmanager
@@ -1118,6 +1216,8 @@ def _truncate_to_milliseconds(value: datetime) -> datetime:
 
 __all__ = [
     "PROMPT_DESCRIPTOR_VERSION",
+    "OverrideListEntry",
+    "OverridesInspectionError",
     "PromptNotFoundError",
     "PromptRegistryImportError",
     "SectionNotFoundError",
@@ -1139,6 +1239,7 @@ __all__ = [
     "apply_tool_override",
     "fetch_section_override",
     "fetch_tool_override",
+    "list_overrides",
     "remove_section_override",
     "remove_tool_override",
 ]

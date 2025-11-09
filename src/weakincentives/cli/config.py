@@ -26,6 +26,7 @@ import yaml
 
 DEFAULT_CONFIG_PATH = Path("~/.config/wink/config.toml")
 
+ENV_CONFIG_PATH = "WINK_CONFIG"
 ENV_WORKSPACE_ROOT = "WINK_WORKSPACE_ROOT"
 ENV_OVERRIDES_DIR = "WINK_OVERRIDES_DIR"
 ENV_ENVIRONMENT = "WINK_ENV"
@@ -91,7 +92,10 @@ def load_config(
         config_data: dict[str, object] = dict(path)
         config_path: Path | None = None
     else:
-        config_path = path if path is not None else DEFAULT_CONFIG_PATH.expanduser()
+        config_path = _resolve_config_path(
+            path=path,
+            env=env_map,
+        )
         config_data = _load_config_file(config_path)
 
     config = _normalise_config(config_data)
@@ -99,6 +103,17 @@ def load_config(
     config = _apply_cli_overrides(config=config, overrides=cli_overrides)
 
     return _build_config(config=config, config_path=config_path)
+
+
+def _resolve_config_path(*, path: Path | None, env: Mapping[str, str]) -> Path:
+    if path is not None:
+        return path.expanduser()
+
+    env_path = env.get(ENV_CONFIG_PATH)
+    if env_path:
+        return Path(env_path).expanduser()
+
+    return DEFAULT_CONFIG_PATH.expanduser()
 
 
 def _load_config_file(path: Path) -> dict[str, object]:
