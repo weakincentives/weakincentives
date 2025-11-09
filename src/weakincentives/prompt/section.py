@@ -12,15 +12,15 @@
 
 from __future__ import annotations
 
-import inspect
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+from typing import TYPE_CHECKING, ClassVar, Final, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
 
+from ._predicate_utils import normalize_enabled_predicate
 from ._types import SupportsDataclass
 
 _SECTION_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -149,40 +149,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
         enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None,
         params_type: type[SupportsDataclass] | None,
     ) -> Callable[[ParamsT | None], bool] | None:
-        if enabled is None:
-            return None
-        if params_type is None and not _callable_requires_positional_argument(enabled):
-            zero_arg = cast(Callable[[], bool], enabled)
-
-            def _without_params(_: ParamsT | None) -> bool:
-                return bool(zero_arg())
-
-            return _without_params
-
-        coerced = cast(Callable[[ParamsT], bool], enabled)
-
-        def _with_params(value: ParamsT | None) -> bool:
-            return bool(coerced(cast(ParamsT, value)))
-
-        return _with_params
-
-
-def _callable_requires_positional_argument(callback: Callable[..., Any]) -> bool:
-    try:
-        signature = inspect.signature(callback)
-    except (TypeError, ValueError):
-        return True
-    for parameter in signature.parameters.values():
-        if (
-            parameter.kind
-            in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-            and parameter.default is inspect.Signature.empty
-        ):
-            return True
-    return False
+        return normalize_enabled_predicate(enabled, params_type)
 
 
 __all__ = ["Section"]

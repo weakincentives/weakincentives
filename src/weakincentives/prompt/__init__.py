@@ -14,6 +14,10 @@
 
 from __future__ import annotations
 
+from ._predicate_utils import (
+    callable_requires_positional_argument,
+    normalize_enabled_predicate,
+)
 from ._types import SupportsDataclass
 from .chapter import Chapter, ChaptersExpansionPolicy
 from .composition import (
@@ -85,7 +89,9 @@ __all__ = [
     "ToolHandler",
     "ToolOverride",
     "ToolResult",
+    "callable_requires_positional_argument",
     "hash_json",
     "hash_text",
+    "normalize_enabled_predicate",
     "parse_structured_output",
 ]

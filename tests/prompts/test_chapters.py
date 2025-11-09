@@ -24,6 +24,7 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptValidationError,
+    normalize_enabled_predicate,
 )
 
 
@@ -288,6 +289,17 @@ def test_chapter_without_params_enabled_callable_handles_non_inspectable_callabl
     chapter = Chapter(key="static", title="Static", enabled=bool)
 
     assert chapter.is_enabled(None) is False
+
+
+def test_chapter_enabled_normalization_matches_helper() -> None:
+    def toggle() -> bool:
+        return True
+
+    normalized = normalize_enabled_predicate(toggle, params_type=None)
+    chapter = Chapter(key="helper", title="Helper", enabled=toggle)
+
+    assert normalized is not None
+    assert chapter.is_enabled(None) is normalized(None)
 
 
 def test_chapter_without_params_rejects_defaults() -> None:

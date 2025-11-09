@@ -16,7 +16,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompt import Section
+from weakincentives.prompt import (
+    Section,
+    callable_requires_positional_argument,
+    normalize_enabled_predicate,
+)
 
 
 @dataclass
@@ -121,6 +125,24 @@ def test_plain_section_parameterless_enabled_handles_non_inspectable_callable() 
     section = PlainSection(title="Plain", key="plain", enabled=bool)
 
     assert section.is_enabled(None) is False
+
+
+def test_section_enabled_normalization_matches_helper() -> None:
+    def toggle() -> bool:
+        return False
+
+    normalized = normalize_enabled_predicate(toggle, params_type=None)
+    section = PlainSection(title="Plain", key="plain", enabled=toggle)
+
+    assert normalized is not None
+    assert section.is_enabled(None) is normalized(None)
+
+
+def test_callable_requires_positional_argument_round_trip() -> None:
+    assert (
+        callable_requires_positional_argument(lambda value: value is not None) is True
+    )
+    assert callable_requires_positional_argument(lambda: True) is False
 
 
 def test_section_without_params_rejects_defaults() -> None:
