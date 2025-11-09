@@ -20,14 +20,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 if TYPE_CHECKING:
     from .tool import Tool
 
+from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass
 
 
-class Section[ParamsT: SupportsDataclass](ABC):
+class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC):
     """Abstract building block for prompt content."""
 
-    _params_type: ClassVar[type[SupportsDataclass] | None] = None
+    _generic_owner_name: ClassVar[str | None] = "Section"
 
     def __init__(
         self,
@@ -96,28 +97,9 @@ class Section[ParamsT: SupportsDataclass](ABC):
 
         return None
 
-    @classmethod
-    def __class_getitem__(cls, item: object) -> type[Section[SupportsDataclass]]:
-        params_type = cls._normalize_generic_argument(item)
-        specialized = cast(
-            "type[Section[SupportsDataclass]]",
-            type(cls.__name__, (cls,), {}),
-        )
-        specialized.__name__ = cls.__name__
-        specialized.__qualname__ = cls.__qualname__
-        specialized.__module__ = cls.__module__
-        specialized._params_type = cast(type[SupportsDataclass], params_type)
-        return specialized
-
     @staticmethod
     def _normalize_key(key: str) -> str:
         return normalize_component_key(key, owner="Section")
-
-    @staticmethod
-    def _normalize_generic_argument(item: object) -> object:
-        if isinstance(item, tuple):
-            raise TypeError("Section[...] expects a single type argument.")
-        return item
 
     @staticmethod
     def _normalize_tools(
