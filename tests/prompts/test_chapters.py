@@ -25,6 +25,10 @@ from weakincentives.prompt import (
     Prompt,
     PromptValidationError,
 )
+from weakincentives.prompt._normalization import (
+    COMPONENT_KEY_PATTERN,
+    normalize_component_key,
+)
 
 
 @dataclass
@@ -331,10 +335,26 @@ def test_chapter_is_enabled_requires_params_when_predicate_defined() -> None:
 
 
 def test_chapter_key_normalization_enforces_format() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as excinfo:
         Chapter[ChapterOneParams]._normalize_key("")
-    with pytest.raises(ValueError):
+
+    assert str(excinfo.value) == "Chapter key must be a non-empty string."
+
+    with pytest.raises(ValueError) as excinfo:
+        normalize_component_key("", owner="Chapter")
+
+    assert str(excinfo.value) == "Chapter key must be a non-empty string."
+
+    with pytest.raises(ValueError) as excinfo:
         Chapter[ChapterOneParams]._normalize_key("Invalid Key")
+
+    expected_message = f"Chapter key must match {COMPONENT_KEY_PATTERN.pattern}."
+    assert str(excinfo.value) == expected_message
+
+    with pytest.raises(ValueError) as excinfo:
+        normalize_component_key("Invalid Key", owner="Chapter")
+
+    assert str(excinfo.value) == expected_message
 
 
 def test_chapter_rejects_tuple_generic_arguments() -> None:

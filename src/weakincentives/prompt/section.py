@@ -13,19 +13,15 @@
 from __future__ import annotations
 
 import inspect
-import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
 
+from ._normalization import normalize_component_key
 from ._types import SupportsDataclass
-
-_SECTION_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-z0-9][a-z0-9._-]{0,63}$"
-)
 
 
 class Section[ParamsT: SupportsDataclass](ABC):
@@ -115,12 +111,7 @@ class Section[ParamsT: SupportsDataclass](ABC):
 
     @staticmethod
     def _normalize_key(key: str) -> str:
-        normalized = key.strip().lower()
-        if not normalized:
-            raise ValueError("Section key must be a non-empty string.")
-        if not _SECTION_KEY_PATTERN.match(normalized):
-            raise ValueError("Section key must match ^[a-z0-9][a-z0-9._-]{0,63}$.")
-        return normalized
+        return normalize_component_key(key, owner="Section")
 
     @staticmethod
     def _normalize_generic_argument(item: object) -> object:

@@ -15,18 +15,14 @@
 from __future__ import annotations
 
 import inspect
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar, Final, cast
+from typing import Any, ClassVar, cast
 
+from ._normalization import normalize_component_key
 from ._types import SupportsDataclass
 from .section import Section
-
-_CHAPTER_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^[a-z0-9][a-z0-9._-]{0,63}$"
-)
 
 
 class ChaptersExpansionPolicy(StrEnum):
@@ -120,12 +116,7 @@ class Chapter[ParamsT: SupportsDataclass]:
 
     @staticmethod
     def _normalize_key(key: str) -> str:
-        normalized = key.strip().lower()
-        if not normalized:
-            raise ValueError("Chapter key must be a non-empty string.")
-        if not _CHAPTER_KEY_PATTERN.match(normalized):
-            raise ValueError("Chapter key must match ^[a-z0-9][a-z0-9._-]{0,63}$.")
-        return normalized
+        return normalize_component_key(key, owner="Chapter")
 
     @staticmethod
     def _normalize_generic_argument(item: object) -> object:
