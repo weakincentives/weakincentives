@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, cast
 
+from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass
 from .section import Section
@@ -34,7 +35,7 @@ class ChaptersExpansionPolicy(StrEnum):
 
 
 @dataclass
-class Chapter[ParamsT: SupportsDataclass]:
+class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
     """Container grouping sections under a shared visibility boundary."""
 
     key: str
@@ -47,7 +48,7 @@ class Chapter[ParamsT: SupportsDataclass]:
         init=False, repr=False, default=None
     )
 
-    _params_type: ClassVar[type[SupportsDataclass] | None] = None
+    _generic_owner_name: ClassVar[str | None] = "Chapter"
 
     def __post_init__(self) -> None:
         params_candidate = getattr(self.__class__, "_params_type", None)
@@ -101,28 +102,9 @@ class Chapter[ParamsT: SupportsDataclass]:
             raise TypeError("Chapter parameters are required for enabled predicates.")
         return bool(self._enabled_callable(params))
 
-    @classmethod
-    def __class_getitem__(cls, item: object) -> type[Chapter[SupportsDataclass]]:
-        params_type = cls._normalize_generic_argument(item)
-        specialized = cast(
-            "type[Chapter[SupportsDataclass]]",
-            type(cls.__name__, (cls,), {}),
-        )
-        specialized.__name__ = cls.__name__
-        specialized.__qualname__ = cls.__qualname__
-        specialized.__module__ = cls.__module__
-        specialized._params_type = cast(type[SupportsDataclass], params_type)
-        return specialized
-
     @staticmethod
     def _normalize_key(key: str) -> str:
         return normalize_component_key(key, owner="Chapter")
-
-    @staticmethod
-    def _normalize_generic_argument(item: object) -> object:
-        if isinstance(item, tuple):
-            raise TypeError("Chapter[...] expects a single type argument.")
-        return item
 
     @staticmethod
     def _normalize_enabled(

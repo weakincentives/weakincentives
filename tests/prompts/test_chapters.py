@@ -358,9 +358,19 @@ def test_chapter_key_normalization_enforces_format() -> None:
 
 
 def test_chapter_rejects_tuple_generic_arguments() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError) as excinfo:
         bad_args = (ChapterOneParams, ToggleParams)
         Chapter[bad_args]  # type: ignore[index]
+
+    assert str(excinfo.value) == "Chapter[...] expects a single type argument."
+
+
+def test_chapter_specialization_preserves_metadata() -> None:
+    specialized = Chapter[ChapterOneParams]
+
+    assert specialized.__module__ == Chapter.__module__
+    assert specialized.__qualname__ == Chapter.__qualname__
+    assert specialized.__name__ == Chapter.__name__
 
 
 def test_prompt_rejects_non_chapter_instances() -> None:

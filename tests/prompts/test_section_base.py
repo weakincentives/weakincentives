@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import pytest
 
 from weakincentives.prompt import Section
+from weakincentives.prompt._generic_params_specializer import GenericParamsSpecializer
 from weakincentives.prompt._normalization import (
     COMPONENT_KEY_PATTERN,
     normalize_component_key,
@@ -26,6 +27,11 @@ from weakincentives.prompt._normalization import (
 @dataclass
 class ExampleParams:
     value: str = "hello"
+
+
+@dataclass
+class GenericParams:
+    value: str = "generic"
 
 
 class ExampleSection(Section[ExampleParams]):
@@ -148,5 +154,39 @@ def test_section_without_params_rejects_defaults() -> None:
 
 
 def test_section_rejects_multiple_type_arguments() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError) as excinfo:
         Section.__class_getitem__((int, str))
+
+    assert str(excinfo.value) == "Section[...] expects a single type argument."
+
+
+def test_section_specialization_preserves_metadata() -> None:
+    specialized = Section[ExampleParams]
+
+    assert specialized.__module__ == Section.__module__
+    assert specialized.__qualname__ == Section.__qualname__
+    assert specialized.__name__ == Section.__name__
+
+
+def test_generic_params_specializer_defaults_to_class_name() -> None:
+    with pytest.raises(TypeError) as excinfo:
+        bad_args = (GenericParams, GenericParams)
+        GenericParamsSpecializer.__class_getitem__(bad_args)
+
+    assert (
+        str(excinfo.value)
+        == "GenericParamsSpecializer[...] expects a single type argument."
+    )
+
+
+def test_generic_params_specializer_fallbacks_to_component_name() -> None:
+    class NamelessSpecializer(GenericParamsSpecializer[GenericParams]):
+        pass
+
+    NamelessSpecializer.__name__ = ""
+
+    with pytest.raises(TypeError) as excinfo:
+        bad_args = (GenericParams, GenericParams)
+        NamelessSpecializer.__class_getitem__(bad_args)
+
+    assert str(excinfo.value) == "Component[...] expects a single type argument."
