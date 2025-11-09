@@ -51,6 +51,9 @@ litellm = [
 wink = [
     "mcp>=1.0.0",
     "pyyaml>=6.0.2",
+    "pydantic>=2.12.3",
+    "starlette>=0.50.0",
+    "uvicorn>=0.38.0",
 ]
 
 [project.scripts]

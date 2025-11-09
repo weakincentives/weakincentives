@@ -2175,7 +2175,10 @@ openai = [
 ]
 wink = [
     { name = "mcp" },
+    { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "starlette" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -2198,7 +2201,10 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.79.0" },
     { name = "mcp", marker = "extra == 'wink'", specifier = ">=1.0.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.6.1" },
+    { name = "pydantic", marker = "extra == 'wink'", specifier = ">=2.12.3" },
     { name = "pyyaml", marker = "extra == 'wink'", specifier = ">=6.0.2" },
+    { name = "starlette", marker = "extra == 'wink'", specifier = ">=0.50.0" },
+    { name = "uvicorn", marker = "extra == 'wink'", specifier = ">=0.38.0" },
 ]
 provides-extras = ["asteval", "litellm", "openai", "wink"]
 
