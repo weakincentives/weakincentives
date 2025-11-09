@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -791,7 +791,7 @@ def test_seed_sections_missing_section_raises(tmp_path: Path) -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    prompt._section_nodes = []
+    prompt._registry_snapshot = replace(prompt._registry_snapshot, sections=())
 
     with pytest.raises(PromptOverridesError):
         seed_sections(prompt, descriptor)
@@ -802,8 +802,9 @@ def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    for node in getattr(prompt, "_section_nodes", []):
-        node.section.original_body_template = lambda: None
+    for node in prompt.sections:
+        section = cast(Any, node.section)
+        section.original_body_template = lambda: None
 
     with pytest.raises(PromptOverridesError):
         seed_sections(prompt, descriptor)
@@ -814,8 +815,9 @@ def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
     prompt = _build_prompt_with_tool()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    for node in getattr(prompt, "_section_nodes", []):
-        node.section._tools = ()
+    for node in prompt.sections:
+        section = cast(Any, node.section)
+        section._tools = ()
 
     with pytest.raises(PromptOverridesError):
         seed_tools(prompt, descriptor)
