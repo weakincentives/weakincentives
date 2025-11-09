@@ -15,8 +15,9 @@ all state transitions are pure functions driven by the event stream.
 1. **Pure reducers** – State transitions are pure
    `(tuple[T, ...], DataEvent[T], *, context=ReducerContext) -> tuple[T, ...]`
    functions. Reducers run synchronously on the publisher thread.
-1. **Event bus integration** – Sessions subscribe to `ToolInvoked` and `PromptExecuted`
-   from `weakincentives.runtime.events`. They ignore every other event type.
+1. **Event bus integration** – Sessions subscribe to `PromptRendered`, `ToolInvoked`,
+   and `PromptExecuted` from `weakincentives.runtime.events`. They ignore every
+   other event type.
 1. **Default behavior that works** – Without custom reducers, the Session appends new
    dataclass values (deduping by equality) and keeps results immutable.
 1. **Flexible slices** – Reducers may manage a slice whose element type differs from
@@ -24,8 +25,8 @@ all state transitions are pure functions driven by the event stream.
 
 ## Terminology
 
-- `DataEvent[T]` – Normalized wrapper around `ToolInvoked` payloads and
-  `PromptExecuted` outputs whose value is a dataclass of type `T`.
+- `DataEvent[T]` – Normalized wrapper around `PromptRendered`, `ToolInvoked`, and
+  `PromptExecuted` payloads whose value is a dataclass of type `T`.
 - **Slice** – The tuple of accumulated dataclass instances managed for a reducer.
   The slice element type may be the same as `T` or a separate dataclass.
 - **Reducer** – A pure function responsible for producing a new slice when a
@@ -35,6 +36,7 @@ all state transitions are pure functions driven by the event stream.
 
 ```python
 from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.runtime.events import PromptExecuted, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import ReducerContext
 
 @dataclass(slots=True, frozen=True)
@@ -47,7 +49,7 @@ class PromptData(Generic[T]):
     value: T
     source: PromptExecuted
 
-DataEvent = ToolData | PromptData[SupportsDataclass]
+DataEvent = ToolData | PromptData[SupportsDataclass] | PromptRendered
 
 class TypedReducer(Protocol[S]):
     def __call__(
@@ -100,7 +102,8 @@ class Session:
     def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]: ...
 ```
 
-- Constructing with a bus subscribes to `ToolInvoked` and `PromptExecuted` immediately.
+- Constructing with a bus subscribes to `PromptRendered`, `ToolInvoked`, and
+  `PromptExecuted` immediately.
 - Multiple reducers may register for the same data type; they run in registration
   order and each maintains its own slice.
 - `slice_type` defaults to `data_type`. When provided it controls the tuple type the
@@ -137,6 +140,8 @@ These helpers delegate to `Session.select_all` and perform no caching.
 
 ## Event Handling Rules
 
+1. On `PromptRendered`, dispatch the rendered prompt event directly so reducers
+   can persist prompt metadata alongside later outputs.
 1. On `ToolInvoked`, record the `ToolData` event regardless of success. When
    `result.value` is a dataclass, also dispatch the same `ToolData` to the payload's
    concrete type.

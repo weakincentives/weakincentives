@@ -13,13 +13,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.prompt.tool import ToolResult
-from weakincentives.runtime.events import InProcessEventBus, PromptExecuted, ToolInvoked
+from weakincentives.runtime.events import (
+    InProcessEventBus,
+    PromptExecuted,
+    PromptRendered,
+    ToolInvoked,
+)
 from weakincentives.runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -86,6 +92,24 @@ def make_prompt_event(output: object) -> PromptExecuted:
     )
 
 
+def make_prompt_rendered(
+    *,
+    rendered_prompt: str,
+    session_id: str | None = None,
+    params_value: int = 1,
+) -> PromptRendered:
+    return PromptRendered(
+        prompt_ns="example",
+        prompt_key="example",
+        prompt_name="Example",
+        adapter="adapter",
+        session_id=session_id,
+        render_inputs=(ExampleParams(value=params_value),),
+        rendered_prompt=rendered_prompt,
+        created_at=datetime.now(UTC),
+    )
+
+
 def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
@@ -96,6 +120,25 @@ def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> N
     assert first_result.ok
     assert second_result.ok
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
+
+
+def test_prompt_rendered_appends_start_event(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    event = make_prompt_rendered(
+        rendered_prompt="Rendered prompt text",
+        session_id="session-1",
+    )
+
+    result = bus.publish(event)
+
+    assert result.ok
+    lifecycle = session.select_all(PromptRendered)
+    assert lifecycle == (event,)
+    assert lifecycle[0].rendered_prompt == "Rendered prompt text"
+    assert lifecycle[0].value is event
 
 
 def test_prompt_executed_emits_multiple_dataclasses(

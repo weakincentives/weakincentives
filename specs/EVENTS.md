@@ -35,6 +35,19 @@ Events live under `weakincentives.runtime.events` and follow the same convention
 ASCII-friendly field names). The minimal spec keeps payloads strictly typed; provider-specific metadata can be added in
 follow-on patches once concrete types are defined.
 
+### `PromptRendered`
+
+Published immediately after rendering completes and before the adapter dispatches a request to the provider. Fields:
+
+- `prompt_ns: str` – namespace of the prompt instance.
+- `prompt_key: str` – key identifying the prompt within the namespace.
+- `prompt_name: str | None` – human readable label when provided.
+- `adapter: str` – adapter identifier preparing to execute the call.
+- `session_id: str | None` – session identifier threading through the orchestration layer.
+- `render_inputs: tuple[SupportsDataclass, ...]` – dataclass params used for rendering.
+- `rendered_prompt: str` – fully rendered prompt text as dispatched to the provider.
+- `created_at: datetime` – timestamp captured before handing off to the provider SDK.
+
 ### `PromptExecuted`
 
 Emitted exactly once per successful adapter evaluation, after all tool invocations and response parsing finish. Fields:
