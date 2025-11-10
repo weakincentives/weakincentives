@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Final, Literal, cast
 
 from ..serde.parse import parse as parse_dataclass
@@ -56,64 +56,20 @@ def parse_structured_output[PayloadT](
         raise OutputParseError("Prompt does not declare structured output.")
 
     payload = _extract_json_payload(output_text, dataclass_type)
-    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
+    try:
+        parsed = parse_dataclass_payload(
+            dataclass_type,
+            container,
+            payload,
+            allow_extra_keys=allow_extra_keys,
+            object_error="Expected top-level JSON object.",
+            array_error="Expected top-level JSON array.",
+            array_item_error="Array item at index {index} is not an object.",
+        )
+    except (TypeError, ValueError) as error:
+        raise OutputParseError(str(error), dataclass_type=dataclass_type) from error
 
-    if container == "object":
-        if not isinstance(payload, Mapping):
-            raise OutputParseError(
-                "Expected top-level JSON object.",
-                dataclass_type=dataclass_type,
-            )
-        try:
-            mapping_payload = cast(Mapping[str, object], payload)
-            parsed = parse_dataclass(
-                dataclass_type,
-                mapping_payload,
-                extra=extra_mode,
-            )
-        except (TypeError, ValueError) as error:
-            raise OutputParseError(str(error), dataclass_type=dataclass_type) from error
-        return cast(PayloadT, parsed)
-
-    if container == "array":
-        if isinstance(payload, Mapping):
-            if ARRAY_WRAPPER_KEY not in payload:
-                raise OutputParseError(
-                    "Expected top-level JSON array.",
-                    dataclass_type=dataclass_type,
-                )
-            payload = cast(Mapping[str, object], payload)[ARRAY_WRAPPER_KEY]
-        if not isinstance(payload, list):
-            raise OutputParseError(
-                "Expected top-level JSON array.",
-                dataclass_type=dataclass_type,
-            )
-        payload_list = cast(list[object], payload)
-        parsed_items: list[Any] = []
-        for index, item in enumerate(payload_list):
-            if not isinstance(item, Mapping):
-                raise OutputParseError(
-                    f"Array item at index {index} is not an object.",
-                    dataclass_type=dataclass_type,
-                )
-            try:
-                mapping_item = cast(Mapping[str, object], item)
-                parsed_item = parse_dataclass(
-                    dataclass_type,
-                    mapping_item,
-                    extra=extra_mode,
-                )
-            except (TypeError, ValueError) as error:
-                raise OutputParseError(
-                    str(error), dataclass_type=dataclass_type
-                ) from error
-            parsed_items.append(parsed_item)
-        return cast(PayloadT, parsed_items)
-
-    raise OutputParseError(
-        "Unknown output container declared.",
-        dataclass_type=dataclass_type,
-    )
+    return cast(PayloadT, parsed)
 
 
 def _extract_json_payload(text: str, dataclass_type: type[Any]) -> object:
@@ -149,3 +105,48 @@ def _extract_json_payload(text: str, dataclass_type: type[Any]) -> object:
         "No JSON object or array found in assistant message.",
         dataclass_type=dataclass_type,
     )
+
+
+def parse_dataclass_payload(
+    dataclass_type: type[Any],
+    container: Literal["object", "array"],
+    payload: object,
+    *,
+    allow_extra_keys: bool | None,
+    object_error: str,
+    array_error: str,
+    array_item_error: str,
+) -> object:
+    if container not in {"object", "array"}:
+        raise TypeError("Unknown output container declared.")
+
+    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
+
+    if container == "object":
+        if not isinstance(payload, Mapping):
+            raise TypeError(object_error)
+        mapping_payload = cast(Mapping[str, object], payload)
+        return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
+
+    if isinstance(payload, Mapping):
+        mapping_payload = cast(Mapping[str, object], payload)
+        if ARRAY_WRAPPER_KEY not in mapping_payload:
+            raise TypeError(array_error)
+        payload = mapping_payload[ARRAY_WRAPPER_KEY]
+    if not isinstance(payload, Sequence) or isinstance(
+        payload, (str, bytes, bytearray)
+    ):
+        raise TypeError(array_error)
+    sequence_payload = cast(Sequence[object], payload)
+    parsed_items: list[Any] = []
+    for index, item in enumerate(sequence_payload):
+        if not isinstance(item, Mapping):
+            raise TypeError(array_item_error.format(index=index))
+        mapping_item = cast(Mapping[str, object], item)
+        parsed_item = parse_dataclass(
+            dataclass_type,
+            mapping_item,
+            extra=extra_mode,
+        )
+        parsed_items.append(parsed_item)
+    return parsed_items
