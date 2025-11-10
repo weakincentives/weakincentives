@@ -497,7 +497,8 @@ Selectors expose reducer output so you can ship audit logs without extra
 plumbing. Planning reducers keep only the latest `Plan`; register a custom
 reducer before `PlanningToolsSection` if you need history. See
 [Session State](specs/SESSIONS.md) and
-[Session Snapshots](specs/SESSION_SNAPSHOTS.md) for selector and rollback rules.
+[Snapshot Capture and Rollback](specs/SESSIONS.md#snapshot-capture-and-rollback)
+for selector and rollback rules.
 
 ```python
 from weakincentives.runtime.session import select_latest
