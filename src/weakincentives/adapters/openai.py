@@ -128,6 +128,7 @@ class OpenAIAdapter:
         session: SessionProtocol,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
+        render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
 
         has_structured_output = (
             getattr(prompt, "_output_type", None) is not None
@@ -194,6 +195,7 @@ class OpenAIAdapter:
             prompt=prompt,
             prompt_name=prompt_name,
             rendered=rendered,
+            render_inputs=render_inputs,
             initial_messages=[{"role": "system", "content": rendered.text}],
             parse_output=parse_output,
             bus=bus,

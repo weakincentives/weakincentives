@@ -1726,6 +1726,7 @@ def test_litellm_adapter_delegates_to_shared_runner(
 
     expected_rendered = prompt.render(params, inject_output_instructions=False)
     assert captured["rendered"] == expected_rendered
+    assert captured["render_inputs"] == (params,)
     assert captured["initial_messages"] == [
         {"role": "system", "content": expected_rendered.text}
     ]
