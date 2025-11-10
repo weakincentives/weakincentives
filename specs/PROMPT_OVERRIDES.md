@@ -93,6 +93,11 @@ prompt-exposed tools.
 
 ```python
 @dataclass(slots=True)
+class SectionOverride:
+    expected_hash: str
+    body: str
+
+@dataclass(slots=True)
 class ToolOverride:
     name: str
     expected_contract_hash: str
@@ -104,14 +109,15 @@ class PromptOverride:
     ns: str
     prompt_key: str
     tag: str
-    overrides: dict[tuple[str, ...], str]  # SectionPath -> replacement body
+    sections: dict[tuple[str, ...], SectionOverride] = field(default_factory=dict)
     tool_overrides: dict[str, ToolOverride] = field(default_factory=dict)
 ```
 
 Rules:
 
-1. Each dict entry in `overrides` represents the new body template to use when
-   the lookup key matches.
+1. Each dict entry in `sections` represents the new body template to use when
+   the lookup key matches. Section overrides always store the descriptor hash in
+   `expected_hash` alongside the replacement body text.
 1. Replacement templates may hash to any value after application; descriptors
    continue to publish the in-code hash.
 1. Tool overrides are keyed by tool name. They apply only when the stored
