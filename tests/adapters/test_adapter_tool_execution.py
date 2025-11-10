@@ -479,6 +479,9 @@ def test_adapter_tool_execution_rolls_back_session(
         data_type: type[SupportsDataclass],
         event: ReducerEvent,
     ) -> None:
+        if data_type is not ToolPayload:
+            original_dispatch(data_type, event)
+            return
         original_dispatch(data_type, event)
         raise RuntimeError("Reducer crashed")
 

@@ -102,6 +102,9 @@ class PromptExecuted:
     prompt_name: str
     adapter: str
     result: PromptResponse[object]
+    session_id: str | None
+    created_at: datetime
+    value: SupportsDataclass | None = None
 
 
 @dataclass(slots=True, frozen=True)

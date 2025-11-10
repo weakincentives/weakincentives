@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import cast
 
 import pytest
@@ -26,7 +27,6 @@ from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import (
     ReducerContext,
     Session,
-    ToolData,
     build_reducer_context,
     select_all,
     select_latest,
@@ -54,16 +54,18 @@ from weakincentives.tools.planning import (
 )
 
 
-def _make_tool_data(name: str, value: SupportsDataclass) -> ToolData:
+def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
     result = ToolResult(message="ok", value=value)
-    event = ToolInvoked(
+    return ToolInvoked(
         prompt_name="test",
         adapter="adapter",
         name=name,
         params=value,
         result=cast(ToolResult[object], result),
+        session_id="session-example",
+        created_at=datetime.now(UTC),
+        value=value,
     )
-    return ToolData(value=value, source=event)
 
 
 def _make_reducer_context() -> ReducerContext:
@@ -645,19 +647,19 @@ def test_read_plan_reports_empty_steps() -> None:
 
 
 def test_reducers_ignore_events_without_plan() -> None:
-    add_event = _make_tool_data(
+    add_event = _make_tool_event(
         "planning_add_step",
         AddStep(steps=(NewPlanStep(title="draft"),)),
     )
-    update_event = _make_tool_data(
+    update_event = _make_tool_event(
         "planning_update_step",
         UpdateStep(step_id="S001", title="rename"),
     )
-    mark_event = _make_tool_data(
+    mark_event = _make_tool_event(
         "planning_mark_step",
         MarkStep(step_id="S001", status="done"),
     )
-    clear_event = _make_tool_data("planning_clear_plan", ClearPlan())
+    clear_event = _make_tool_event("planning_clear_plan", ClearPlan())
 
     context = _make_reducer_context()
 

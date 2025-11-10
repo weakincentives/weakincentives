@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Protocol, cast, override
 
 from ...prompt._types import SupportsDataclass
@@ -89,6 +90,9 @@ class ToolInvoked:
     name: str
     params: SupportsDataclass
     result: ToolResult[object]
+    session_id: str | None
+    created_at: datetime
+    value: SupportsDataclass | None = None
     call_id: str | None = None
 
 

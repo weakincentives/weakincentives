@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, cast
 
@@ -98,6 +99,13 @@ class RecordingAdapter(ProviderAdapter[Any]):
                     prompt_name=prompt_name,
                     adapter="recording",
                     result=cast(PromptResponse[object], response),
+                    session_id=getattr(session, "session_id", None),
+                    created_at=datetime.now(UTC),
+                    value=(
+                        cast(SupportsDataclass, response.output)
+                        if response.output is not None and is_dataclass(response.output)
+                        else None
+                    ),
                 )
             )
             return response
