@@ -27,7 +27,6 @@ from .events import (
 from .logging import StructuredLogger, configure_logging, get_logger
 from .session import (
     DataEvent,
-    PromptData,
     ReducerContext,
     ReducerContextProtocol,
     ReducerEvent,
@@ -37,7 +36,6 @@ from .session import (
     SnapshotProtocol,
     SnapshotRestoreError,
     SnapshotSerializationError,
-    ToolData,
     TypedReducer,
     append,
     build_reducer_context,
@@ -54,7 +52,6 @@ __all__ = [
     "HandlerFailure",
     "InProcessEventBus",
     "NullEventBus",
-    "PromptData",
     "PromptExecuted",
     "PublishResult",
     "ReducerContext",
@@ -67,7 +64,6 @@ __all__ = [
     "SnapshotRestoreError",
     "SnapshotSerializationError",
     "StructuredLogger",
-    "ToolData",
     "ToolInvoked",
     "TypedReducer",
     "append",

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -27,7 +28,7 @@ from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import EventBus, InProcessEventBus, ToolInvoked
-from weakincentives.runtime.session import Session, ToolData
+from weakincentives.runtime.session import Session
 
 
 @dataclass(slots=True)
@@ -92,6 +93,9 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
         params=params,
         result=cast(ToolResult[object], result),
         call_id=str(index),
+        session_id="threaded-session",
+        created_at=datetime.now(UTC),
+        value=result_payload,
     )
     bus.publish(event)
 
@@ -112,6 +116,9 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         params=params,
         result=cast(ToolResult[object], tool_result),
         call_id="999",
+        session_id="threaded-session",
+        created_at=datetime.now(UTC),
+        value=result_payload,
     )
 
     publish_result = bus.publish(event)
@@ -131,9 +138,9 @@ def test_session_collects_tool_data_across_threads() -> None:
         for future in futures:
             future.result()
 
-    tool_data = session.select_all(ToolData)
+    tool_data = session.select_all(ToolInvoked)
     assert len(tool_data) == total_events
-    assert {data.source.call_id for data in tool_data} == {
+    assert {data.call_id for data in tool_data} == {
         str(index) for index in range(total_events)
     }
 

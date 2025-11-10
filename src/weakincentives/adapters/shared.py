@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 
@@ -327,12 +327,21 @@ def execute_tool_call(
         raise RuntimeError("Tool parameters were not parsed.")
 
     snapshot = session.snapshot()
+    session_id = getattr(session, "session_id", None)
+    tool_value = tool_result.value
+    dataclass_value: SupportsDataclass | None = None
+    if tool_value is not None and is_dataclass(tool_value):
+        dataclass_value = tool_value
+
     invocation = ToolInvoked(
         prompt_name=prompt_name,
         adapter=adapter_name,
         name=tool_name,
         params=tool_params,
         result=cast(ToolResult[object], tool_result),
+        session_id=session_id,
+        created_at=datetime.now(UTC),
+        value=dataclass_value,
         call_id=call_id,
     )
     publish_result = bus.publish(invocation)
@@ -823,11 +832,18 @@ class ConversationRunner[OutputT]:
             tool_results=tuple(self._tool_events),
             provider_payload=self._provider_payload,
         )
+        prompt_value: SupportsDataclass | None = None
+        if output is not None and is_dataclass(output):
+            prompt_value = cast(SupportsDataclass, output)
+
         publish_result = self.bus.publish(
             PromptExecuted(
                 prompt_name=self.prompt_name,
                 adapter=self.adapter_name,
                 result=cast(PromptResponse[object], response_payload),
+                session_id=getattr(self.session, "session_id", None),
+                created_at=datetime.now(UTC),
+                value=prompt_value,
             )
         )
         if not publish_result.ok:

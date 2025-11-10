@@ -12,13 +12,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from weakincentives.adapters.core import PromptResponse
+from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
     InProcessEventBus,
@@ -33,16 +34,13 @@ from weakincentives.runtime.session import (
     Snapshot,
     SnapshotRestoreError,
     SnapshotSerializationError,
-    ToolData,
     append,
-    build_reducer_context,
     replace_latest,
     select_all,
     select_latest,
     select_where,
     upsert_by,
 )
-from weakincentives.runtime.session.session import _append_tool_data
 
 if TYPE_CHECKING:
     from tests.conftest import SessionFactory
@@ -64,9 +62,10 @@ class ExampleOutput:
 
 
 def make_tool_event(value: int) -> ToolInvoked:
+    payload = ExamplePayload(value=value)
     tool_result = cast(
         ToolResult[object],
-        ToolResult(message="ok", value=ExamplePayload(value=value)),
+        ToolResult(message="ok", value=payload),
     )
     return ToolInvoked(
         prompt_name="example",
@@ -74,6 +73,9 @@ def make_tool_event(value: int) -> ToolInvoked:
         name="tool",
         params=ExampleParams(value=value),
         result=tool_result,
+        session_id="session-example",
+        created_at=datetime.now(UTC),
+        value=payload,
     )
 
 
@@ -85,10 +87,18 @@ def make_prompt_event(output: object) -> PromptExecuted:
         tool_results=(),
         provider_payload=None,
     )
+    prompt_value = (
+        cast(SupportsDataclass, output)
+        if output is not None and is_dataclass(output)
+        else None
+    )
     return PromptExecuted(
         prompt_name="example",
         adapter="adapter",
         result=response,
+        session_id="session-example",
+        created_at=datetime.now(UTC),
+        value=prompt_value,
     )
 
 
@@ -120,6 +130,28 @@ def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> N
     assert first_result.ok
     assert second_result.ok
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
+
+
+def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    payload = ExamplePayload(value=7)
+    enriched_event = ToolInvoked(
+        prompt_name="example",
+        adapter="adapter",
+        name="tool",
+        params=ExampleParams(value=7),
+        result=cast(ToolResult[object], ToolResult(message="ok", value=payload)),
+        session_id="session-example",
+        created_at=datetime.now(UTC),
+        value=None,
+    )
+
+    bus.publish(enriched_event)
+
+    tool_events = session.select_all(ToolInvoked)
+    assert tool_events[0].value == payload
+    assert session.select_all(ExamplePayload) == (payload,)
 
 
 def test_prompt_rendered_appends_start_event(
@@ -211,6 +243,37 @@ def test_default_append_used_when_no_custom_reducer(
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="hello"),)
 
 
+def test_prompt_executed_enriches_missing_value(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    output = ExampleOutput(text="filled")
+    enriched_event = PromptExecuted(
+        prompt_name="example",
+        adapter="adapter",
+        result=cast(
+            PromptResponse[object],
+            PromptResponse(
+                prompt_name="example",
+                text="done",
+                output=output,
+                tool_results=(),
+                provider_payload=None,
+            ),
+        ),
+        session_id="session-example",
+        created_at=datetime.now(UTC),
+        value=None,
+    )
+
+    bus.publish(enriched_event)
+
+    prompt_events = session.select_all(PromptExecuted)
+    assert prompt_events[0].value == output
+    assert session.select_all(ExampleOutput) == (output,)
+
+
 def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
@@ -223,6 +286,9 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
         result=cast(
             ToolResult[object], ToolResult(message="ok", value="not a dataclass")
         ),
+        session_id="session-example",
+        created_at=datetime.now(UTC),
+        value=None,
     )
 
     first_result = bus.publish(event)
@@ -281,24 +347,17 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
         name="tool",
         params=ExampleParams(value=2),
         result=failure,
+        session_id="session-example",
+        created_at=datetime.now(UTC),
+        value=None,
     )
     bus.publish(failure_event)
 
-    tool_events = session.select_all(ToolData)
+    tool_events = session.select_all(ToolInvoked)
     assert len(tool_events) == 2
     assert tool_events[0].value == ExamplePayload(value=1)
     assert tool_events[1].value is None
-    assert tool_events[1].source.result.success is False
-
-
-def test_append_tool_data_appends_tool_data(session_factory: SessionFactory) -> None:
-    session, bus = session_factory()
-    tool_event = make_tool_event(1)
-    tool_data = ToolData(value=ExamplePayload(value=1), source=tool_event)
-
-    context = build_reducer_context(session=session, event_bus=bus)
-    appended = _append_tool_data((), cast(ReducerEvent, tool_data), context=context)
-    assert appended == (tool_data,)
+    assert tool_events[1].result.success is False
 
 
 def test_selector_helpers_delegate_to_session(session_factory: SessionFactory) -> None:

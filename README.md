@@ -252,7 +252,7 @@ one. Downstream sections can inspect this slice with
 ```python
 from dataclasses import dataclass
 
-from weakincentives.runtime.session import ToolData
+from weakincentives.runtime.events import ToolInvoked
 
 
 @dataclass
@@ -263,12 +263,15 @@ class ReviewedSymbol:
 
 def track_reviewed_symbols(
     reviewed: tuple[ReviewedSymbol, ...],
-    event: ToolData,
+    event: ToolInvoked,
+    *,
+    context: object,
 ) -> tuple[ReviewedSymbol, ...]:
+    del context
     if event.value is None or not isinstance(event.value, SymbolSearchResult):
         return reviewed
 
-    params = event.source.params
+    params = event.params
     reviewed_symbol = ReviewedSymbol(
         query=params.query,
         matches=event.value.matches,

@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, cast, override
@@ -37,42 +37,27 @@ from .snapshots import (
 logger: StructuredLogger = get_logger(__name__, context={"component": "session"})
 
 
-@dataclass(slots=True, frozen=True)
-class ToolData:
-    """Wrapper containing tool payloads and their originating event."""
-
-    value: SupportsDataclass | None
-    source: ToolInvoked
-
-
-_TOOL_DATA_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolData)
-
-
-def _append_tool_data(
-    slice_values: tuple[ToolData, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[ToolData, ...]:
-    del context
-    tool_data = cast(ToolData, event)
-    return (*slice_values, tool_data)
-
-
-@dataclass(slots=True, frozen=True)
-class PromptData[T: SupportsDataclass]:
-    """Wrapper containing prompt outputs and their originating event."""
-
-    value: T
-    source: PromptExecuted
-
-
-type DataEvent = ToolData | PromptData[SupportsDataclass] | PromptRendered
+type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
 
 
 _PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
     type[SupportsDataclass], PromptRendered
 )
+_TOOL_INVOKED_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolInvoked)
+_PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
+    type[SupportsDataclass], PromptExecuted
+)
+
+
+def _append_event(
+    slice_values: tuple[SupportsDataclass, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContextProtocol,
+) -> tuple[SupportsDataclass, ...]:
+    del context
+    appended = cast(SupportsDataclass, event)
+    return (*slice_values, appended)
 
 
 @dataclass(slots=True)
@@ -173,6 +158,12 @@ class Session(SessionProtocol):
 
         with self._lock:
             state_snapshot = dict(self._state)
+        for ephemeral in (
+            _TOOL_INVOKED_TYPE,
+            _PROMPT_EXECUTED_TYPE,
+            _PROMPT_RENDERED_TYPE,
+        ):
+            _ = state_snapshot.pop(ephemeral, None)
         try:
             normalized: Mapping[type[Any], tuple[Any, ...]] = normalize_snapshot_state(
                 cast(Mapping[object, tuple[object, ...]], state_snapshot)
@@ -227,31 +218,48 @@ class Session(SessionProtocol):
         self._handle_prompt_rendered(start_event)
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
-        payload = event.result.value
-        if not is_dataclass_instance(payload):
-            dataclass_payload: SupportsDataclass | None = None
-        else:
-            dataclass_payload = cast(SupportsDataclass, payload)  # pyright: ignore[reportUnnecessaryCast]
+        normalized_event = event
+        payload = event.value if event.value is not None else event.result.value
+        if event.value is None and is_dataclass_instance(payload):
+            normalized_event = replace(event, value=payload)
 
-        data = ToolData(value=dataclass_payload, source=event)
-        self._dispatch_data_event(_TOOL_DATA_TYPE, data)
+        self._dispatch_data_event(
+            _TOOL_INVOKED_TYPE,
+            cast(ReducerEvent, normalized_event),
+        )
 
-        if dataclass_payload is not None:
-            self._dispatch_data_event(type(dataclass_payload), data)
+        if normalized_event.value is not None:
+            self._dispatch_data_event(
+                type(normalized_event.value),
+                cast(ReducerEvent, normalized_event),
+            )
 
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
+        normalized_event = event
         output = event.result.output
-        if is_dataclass_instance(output):
-            dataclass_output = cast(SupportsDataclass, output)  # pyright: ignore[reportUnnecessaryCast]
-            data = PromptData(value=dataclass_output, source=event)
-            self._dispatch_data_event(type(dataclass_output), data)
+        if event.value is None and is_dataclass_instance(output):
+            normalized_event = replace(event, value=output)
+
+        self._dispatch_data_event(
+            _PROMPT_EXECUTED_TYPE,
+            cast(ReducerEvent, normalized_event),
+        )
+
+        if normalized_event.value is not None:
+            self._dispatch_data_event(
+                type(normalized_event.value),
+                cast(ReducerEvent, normalized_event),
+            )
             return
+
         if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
             for item in cast(Iterable[object], output):
                 if is_dataclass_instance(item):
-                    dataclass_item = cast(SupportsDataclass, item)  # pyright: ignore[reportUnnecessaryCast]
-                    data = PromptData(value=dataclass_item, source=event)
-                    self._dispatch_data_event(type(dataclass_item), data)
+                    enriched_event = replace(normalized_event, value=item)
+                    self._dispatch_data_event(
+                        type(item),
+                        cast(ReducerEvent, enriched_event),
+                    )
 
     def _handle_prompt_rendered(self, event: PromptRendered) -> None:
         self._dispatch_data_event(
@@ -267,47 +275,48 @@ class Session(SessionProtocol):
         with self._lock:
             registrations = list(self._reducers.get(data_type, ()))
             if not registrations:
-                if data_type is _TOOL_DATA_TYPE:
-                    registrations = [
-                        _ReducerRegistration(
-                            reducer=cast(TypedReducer[Any], _append_tool_data),
-                            slice_type=ToolData,
-                        )
-                    ]
+                default_reducer: TypedReducer[Any]
+                if data_type in {_TOOL_INVOKED_TYPE, _PROMPT_EXECUTED_TYPE}:
+                    default_reducer = cast(TypedReducer[Any], _append_event)
                 else:
-                    registrations = [
-                        _ReducerRegistration(
-                            reducer=cast(TypedReducer[Any], append),
-                            slice_type=data_type,
-                        )
-                    ]
+                    default_reducer = cast(TypedReducer[Any], append)
+                registrations = [
+                    _ReducerRegistration(
+                        reducer=default_reducer,
+                        slice_type=data_type,
+                    )
+                ]
             event_bus = self._bus
 
         context = build_reducer_context(session=self, event_bus=event_bus)
 
         for registration in registrations:
             slice_type = registration.slice_type
-            with self._lock:
-                previous = self._state.get(slice_type, ())
-            try:
-                result = registration.reducer(previous, event, context=context)
-            except Exception:  # log and continue
-                reducer_name = getattr(
-                    registration.reducer, "__qualname__", repr(registration.reducer)
-                )
-                logger.exception(
-                    "Reducer application failed.",
-                    event="session_reducer_failed",
-                    context={
-                        "reducer": reducer_name,
-                        "data_type": data_type.__qualname__,
-                        "slice_type": slice_type.__qualname__,
-                    },
-                )
-                continue
-            normalized = tuple(result)
-            with self._lock:
-                self._state[slice_type] = normalized
+            while True:
+                with self._lock:
+                    previous = self._state.get(slice_type, ())
+                try:
+                    result = registration.reducer(previous, event, context=context)
+                except Exception:  # log and continue
+                    reducer_name = getattr(
+                        registration.reducer, "__qualname__", repr(registration.reducer)
+                    )
+                    logger.exception(
+                        "Reducer application failed.",
+                        event="session_reducer_failed",
+                        context={
+                            "reducer": reducer_name,
+                            "data_type": data_type.__qualname__,
+                            "slice_type": slice_type.__qualname__,
+                        },
+                    )
+                    break
+                normalized = tuple(result)
+                with self._lock:
+                    current = self._state.get(slice_type, ())
+                    if current is previous or current == normalized:
+                        self._state[slice_type] = normalized
+                        break
 
     def _attach_to_bus(self, bus: EventBus) -> None:
         with self._lock:
@@ -322,8 +331,6 @@ class Session(SessionProtocol):
 
 __all__ = [
     "DataEvent",
-    "PromptData",
     "Session",
-    "ToolData",
     "TypedReducer",
 ]

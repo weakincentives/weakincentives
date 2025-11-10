@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Protocol, TypeVar, cast
 
 from weakincentives.adapters.core import (
@@ -91,6 +92,9 @@ def invoke_tool(
         name=tool.name,
         params=params,
         result=cast(ToolResult[object], result),
+        session_id=getattr(session, "session_id", None),
+        created_at=datetime.now(UTC),
+        value=cast(SupportsDataclass | None, result.value),
     )
     publish_result = bus.publish(event)
     assert publish_result.ok
