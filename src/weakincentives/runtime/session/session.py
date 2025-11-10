@@ -21,7 +21,7 @@ from threading import RLock
 from typing import Any, cast, override
 
 from ...prompt._types import SupportsDataclass
-from ..events import EventBus, PromptExecuted, ToolInvoked
+from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
@@ -67,7 +67,12 @@ class PromptData[T: SupportsDataclass]:
     source: PromptExecuted
 
 
-type DataEvent = ToolData | PromptData[SupportsDataclass]
+type DataEvent = ToolData | PromptData[SupportsDataclass] | PromptRendered
+
+
+_PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
+    type[SupportsDataclass], PromptRendered
+)
 
 
 @dataclass(slots=True)
@@ -217,6 +222,10 @@ class Session(SessionProtocol):
         prompt_event = cast(PromptExecuted, event)
         self._handle_prompt_executed(prompt_event)
 
+    def _on_prompt_rendered(self, event: object) -> None:
+        start_event = cast(PromptRendered, event)
+        self._handle_prompt_rendered(start_event)
+
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
         payload = event.result.value
         if not is_dataclass_instance(payload):
@@ -243,6 +252,12 @@ class Session(SessionProtocol):
                     dataclass_item = cast(SupportsDataclass, item)  # pyright: ignore[reportUnnecessaryCast]
                     data = PromptData(value=dataclass_item, source=event)
                     self._dispatch_data_event(type(dataclass_item), data)
+
+    def _handle_prompt_rendered(self, event: PromptRendered) -> None:
+        self._dispatch_data_event(
+            _PROMPT_RENDERED_TYPE,
+            cast(ReducerEvent, event),
+        )
 
     def _dispatch_data_event(
         self, data_type: type[SupportsDataclass], event: ReducerEvent
@@ -302,6 +317,7 @@ class Session(SessionProtocol):
             self._subscriptions_attached = True
             bus.subscribe(ToolInvoked, self._on_tool_invoked)
             bus.subscribe(PromptExecuted, self._on_prompt_executed)
+            bus.subscribe(PromptRendered, self._on_prompt_rendered)
 
 
 __all__ = [

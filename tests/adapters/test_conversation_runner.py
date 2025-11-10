@@ -35,6 +35,7 @@ from weakincentives.runtime.events import (
     EventBus,
     HandlerFailure,
     PromptExecuted,
+    PromptRendered,
     PublishResult,
     ToolInvoked,
 )
@@ -90,8 +91,15 @@ def serialize_tool_message(
 
 
 class RecordingBus(EventBus):
-    def __init__(self, *, fail_tool: bool = False, fail_prompt: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_rendered: bool = False,
+        fail_tool: bool = False,
+        fail_prompt: bool = False,
+    ) -> None:
         self.events: list[object] = []
+        self.fail_rendered = fail_rendered
         self.fail_tool = fail_tool
         self.fail_prompt = fail_prompt
 
@@ -102,6 +110,8 @@ class RecordingBus(EventBus):
 
     def publish(self, event: object) -> PublishResult:
         self.events.append(event)
+        if self.fail_rendered and isinstance(event, PromptRendered):
+            return self._failure_result(event, "prompt rendered publish failure")
         if self.fail_tool and isinstance(event, ToolInvoked):
             return self._failure_result(event, "reducer failure")
         if self.fail_prompt and isinstance(event, PromptExecuted):
@@ -130,6 +140,7 @@ def build_runner(
     parse_output: bool = False,
     response_format: Mapping[str, Any] | None = None,
     session: SessionProtocol | None = None,
+    render_inputs: tuple[SupportsDataclass, ...] | None = None,
 ) -> ConversationRunner[object]:
     prompt = Prompt(ns="tests", key="example")
     session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
@@ -139,6 +150,7 @@ def build_runner(
         prompt=prompt,
         prompt_name="example",
         rendered=rendered,
+        render_inputs=render_inputs if render_inputs is not None else (),
         initial_messages=[{"role": "system", "content": rendered.text}],
         parse_output=parse_output,
         bus=bus,
@@ -170,6 +182,61 @@ def test_conversation_runner_success() -> None:
     assert response.output is None
     assert isinstance(bus.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
+
+
+def test_conversation_runner_publishes_prompt_rendered_event() -> None:
+    rendered = RenderedPrompt(
+        text="system",
+        output_type=None,
+        container=None,
+        allow_extra_keys=None,
+    )
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
+    provider = ProviderStub(responses)
+    bus = RecordingBus()
+    params = EchoParams(value="hello")
+
+    runner = build_runner(
+        rendered=rendered,
+        provider=provider,
+        bus=bus,
+        render_inputs=(params,),
+    )
+    runner.run()
+
+    assert provider.calls
+    assert bus.events and isinstance(bus.events[0], PromptRendered)
+    event = cast(PromptRendered, bus.events[0])
+    assert event.rendered_prompt == "system"
+    assert event.render_inputs == (params,)
+    assert event.prompt_ns == "tests"
+    assert event.prompt_key == "example"
+
+
+def test_conversation_runner_continues_on_prompt_rendered_publish_failure() -> None:
+    rendered = RenderedPrompt(
+        text="system",
+        output_type=None,
+        container=None,
+        allow_extra_keys=None,
+    )
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
+    provider = ProviderStub(responses)
+    bus = RecordingBus(fail_rendered=True)
+    params = EchoParams(value="blocked")
+
+    runner = build_runner(
+        rendered=rendered,
+        provider=provider,
+        bus=bus,
+        render_inputs=(params,),
+    )
+    response = runner.run()
+
+    assert response.text == "Hello"
+    assert provider.calls
+    assert bus.events and isinstance(bus.events[0], PromptRendered)
+    assert isinstance(bus.events[-1], PromptExecuted)
 
 
 def test_conversation_runner_raises_on_prompt_publish_failure() -> None:

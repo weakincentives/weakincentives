@@ -123,6 +123,7 @@ def test_run_conversation_requires_message_payload() -> None:
             prompt=prompt,
             prompt_name="example",
             rendered=rendered,
+            render_inputs=(),
             initial_messages=[{"role": "system", "content": rendered.text}],
             parse_output=False,
             bus=bus,

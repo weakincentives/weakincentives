@@ -14,6 +14,7 @@
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import cast
 
 import pytest
@@ -25,6 +26,7 @@ from weakincentives.runtime.events import (
     InProcessEventBus,
     NullEventBus,
     PromptExecuted,
+    PromptRendered,
     PublishResult,
     ToolInvoked,
 )
@@ -85,6 +87,26 @@ def test_publish_without_subscribers_returns_success_result() -> None:
     assert result.errors == ()
     assert result.handled_count == 0
     result.raise_if_errors()
+
+
+def test_publish_prompt_rendered_returns_success() -> None:
+    bus = InProcessEventBus()
+
+    event = PromptRendered(
+        prompt_ns="demo",
+        prompt_key="greeting",
+        prompt_name="Demo Prompt",
+        adapter="test",
+        session_id="session-1",
+        render_inputs=(_Params(value=1),),
+        rendered_prompt="Render result",
+        created_at=datetime.now(UTC),
+    )
+
+    result = bus.publish(event)
+
+    assert result.ok
+    assert result.errors == ()
 
 
 def test_in_process_bus_delivers_in_order() -> None:

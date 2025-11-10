@@ -18,6 +18,7 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
 
 from ..prompt._types import SupportsDataclass
@@ -29,7 +30,13 @@ from ..prompt.structured_output import (
     parse_structured_output,
 )
 from ..prompt.tool import Tool, ToolContext, ToolResult
-from ..runtime.events import EventBus, HandlerFailure, PromptExecuted, ToolInvoked
+from ..runtime.events import (
+    EventBus,
+    HandlerFailure,
+    PromptExecuted,
+    PromptRendered,
+    ToolInvoked,
+)
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse, schema
 from ..tools.errors import ToolValidationError
@@ -577,6 +584,7 @@ class ConversationRunner[OutputT]:
     prompt: Prompt[OutputT]
     prompt_name: str
     rendered: RenderedPrompt[OutputT]
+    render_inputs: tuple[SupportsDataclass, ...]
     initial_messages: list[dict[str, Any]]
     parse_output: bool
     bus: EventBus
@@ -667,6 +675,38 @@ class ConversationRunner[OutputT]:
             and self.rendered.output_type is not None
             and self.rendered.container is not None
         )
+
+        publish_result = self.bus.publish(
+            PromptRendered(
+                prompt_ns=self.prompt.ns,
+                prompt_key=self.prompt.key,
+                prompt_name=self.prompt.name,
+                adapter=self.adapter_name,
+                session_id=getattr(self.session, "session_id", None),
+                render_inputs=self.render_inputs,
+                rendered_prompt=self.rendered.text,
+                created_at=datetime.now(UTC),
+            )
+        )
+        if not publish_result.ok:
+            failure_handlers = [
+                getattr(failure.handler, "__qualname__", repr(failure.handler))
+                for failure in publish_result.errors
+            ]
+            self._log.error(
+                "Prompt rendered publish failed.",
+                event="prompt_rendered_publish_failed",
+                context={
+                    "failure_count": len(publish_result.errors),
+                    "failed_handlers": failure_handlers,
+                },
+            )
+        else:
+            self._log.debug(
+                "Prompt rendered event published.",
+                event="prompt_rendered_published",
+                context={"handler_count": publish_result.handled_count},
+            )
 
     def _handle_tool_calls(
         self,
@@ -827,6 +867,7 @@ def run_conversation[
     prompt: Prompt[OutputT],
     prompt_name: str,
     rendered: RenderedPrompt[OutputT],
+    render_inputs: tuple[SupportsDataclass, ...],
     initial_messages: list[dict[str, Any]],
     parse_output: bool,
     bus: EventBus,
@@ -851,6 +892,7 @@ def run_conversation[
         prompt=prompt,
         prompt_name=prompt_name,
         rendered=rendered,
+        render_inputs=render_inputs,
         initial_messages=initial_messages,
         parse_output=parse_output,
         bus=bus,

@@ -15,9 +15,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from threading import RLock
 from typing import TYPE_CHECKING
 
+from ...prompt._types import SupportsDataclass
 from ..logging import StructuredLogger, get_logger
 from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
 
@@ -102,12 +104,33 @@ class PromptExecuted:
     result: PromptResponse[object]
 
 
+@dataclass(slots=True, frozen=True)
+class PromptRendered:
+    """Event emitted immediately before dispatching a rendered prompt."""
+
+    prompt_ns: str
+    prompt_key: str
+    prompt_name: str | None
+    adapter: str
+    session_id: str | None
+    render_inputs: tuple[SupportsDataclass, ...]
+    rendered_prompt: str
+    created_at: datetime
+
+    @property
+    def value(self) -> SupportsDataclass:
+        """Expose the dataclass instance for reducer compatibility."""
+
+        return self
+
+
 __all__ = [
     "EventBus",
     "HandlerFailure",
     "InProcessEventBus",
     "NullEventBus",
     "PromptExecuted",
+    "PromptRendered",
     "PublishResult",
     "ToolInvoked",
 ]
