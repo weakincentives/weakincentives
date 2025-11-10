@@ -24,6 +24,7 @@ from weakincentives.prompt.overrides import (
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
+    filter_override_for_descriptor,
     hash_json,
     hash_text,
 )
@@ -236,7 +237,20 @@ class _RecordingOverridesStore(PromptOverridesStore):
         tag: str = "latest",
     ) -> PromptOverride | None:
         self.calls.append((descriptor, tag))
-        return self.override
+        if self.override is None:
+            return None
+        filtered_sections, filtered_tools = filter_override_for_descriptor(
+            descriptor, self.override
+        )
+        if not filtered_sections and not filtered_tools:
+            return None
+        return PromptOverride(
+            ns=descriptor.ns,
+            prompt_key=descriptor.key,
+            tag=self.override.tag,
+            sections=filtered_sections,
+            tool_overrides=filtered_tools,
+        )
 
     def upsert(
         self,
