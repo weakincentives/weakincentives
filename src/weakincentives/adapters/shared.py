@@ -201,161 +201,6 @@ def parse_tool_arguments(
     return arguments
 
 
-def execute_tool_call(
-    *,
-    adapter_name: str,
-    adapter: ProviderAdapter[Any],
-    prompt: Prompt[Any],
-    rendered_prompt: RenderedPrompt[Any] | None,
-    tool_call: ProviderToolCall,
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsDataclass]],
-    bus: EventBus,
-    session: SessionProtocol,
-    prompt_name: str,
-    provider_payload: dict[str, Any] | None,
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
-    parse_arguments: ToolArgumentsParser,
-    logger_override: StructuredLogger | None = None,
-) -> tuple[ToolInvoked, ToolResult[SupportsDataclass]]:
-    """Execute a provider tool call and publish the resulting event."""
-
-    function = tool_call.function
-    tool_name = function.name
-    tool = tool_registry.get(tool_name)
-    if tool is None:
-        raise PromptEvaluationError(
-            f"Unknown tool '{tool_name}' requested by provider.",
-            prompt_name=prompt_name,
-            phase="tool",
-            provider_payload=provider_payload,
-        )
-    handler = tool.handler
-    if handler is None:
-        raise PromptEvaluationError(
-            f"Tool '{tool_name}' does not have a registered handler.",
-            prompt_name=prompt_name,
-            phase="tool",
-            provider_payload=provider_payload,
-        )
-
-    arguments_mapping = parse_arguments(
-        function.arguments,
-        prompt_name=prompt_name,
-        provider_payload=provider_payload,
-    )
-
-    call_id = getattr(tool_call, "id", None)
-    log = (logger_override or logger).bind(
-        adapter=adapter_name,
-        prompt=prompt_name,
-        tool=tool_name,
-        call_id=call_id,
-    )
-    tool_params: SupportsDataclass | None = None
-    tool_result: ToolResult[SupportsDataclass]
-    try:
-        try:
-            parsed_params = parse(tool.params_type, arguments_mapping, extra="forbid")
-        except (TypeError, ValueError) as error:
-            tool_params = cast(
-                SupportsDataclass,
-                _RejectedToolParams(
-                    raw_arguments=dict(arguments_mapping),
-                    error=str(error),
-                ),
-            )
-            raise ToolValidationError(str(error)) from error
-
-        tool_params = cast(SupportsDataclass, parsed_params)
-        context = ToolContext(
-            prompt=prompt,
-            rendered_prompt=rendered_prompt,
-            adapter=adapter,
-            session=session,
-            event_bus=bus,
-        )
-        tool_result = handler(tool_params, context=context)
-    except ToolValidationError as error:
-        if tool_params is None:  # pragma: no cover - defensive
-            tool_params = cast(
-                SupportsDataclass,
-                _RejectedToolParams(
-                    raw_arguments=dict(arguments_mapping),
-                    error=str(error),
-                ),
-            )
-        log.warning(
-            "Tool validation failed.",
-            event="tool_validation_failed",
-            context={"reason": str(error)},
-        )
-        tool_result = ToolResult(
-            message=f"Tool validation failed: {error}",
-            value=None,
-            success=False,
-        )
-    except Exception as error:  # propagate message via ToolResult
-        log.exception(
-            "Tool handler raised an unexpected exception.",
-            event="tool_handler_exception",
-            context={"provider_payload": provider_payload},
-        )
-        tool_result = ToolResult(
-            message=f"Tool '{tool_name}' execution failed: {error}",
-            value=None,
-            success=False,
-        )
-    else:
-        log.info(
-            "Tool handler completed.",
-            event="tool_handler_completed",
-            context={
-                "success": tool_result.success,
-                "has_value": tool_result.value is not None,
-            },
-        )
-
-    if tool_params is None:  # pragma: no cover - defensive
-        raise RuntimeError("Tool parameters were not parsed.")
-
-    snapshot = session.snapshot()
-    invocation = ToolInvoked(
-        prompt_name=prompt_name,
-        adapter=adapter_name,
-        name=tool_name,
-        params=tool_params,
-        result=cast(ToolResult[object], tool_result),
-        call_id=call_id,
-    )
-    publish_result = bus.publish(invocation)
-    if not publish_result.ok:
-        session.rollback(snapshot)
-        log.warning(
-            "Session rollback triggered after publish failure.",
-            event="session_rollback_due_to_publish_failure",
-        )
-        failure_handlers = [
-            getattr(failure.handler, "__qualname__", repr(failure.handler))
-            for failure in publish_result.errors
-        ]
-        log.error(
-            "Tool event publish failed.",
-            event="tool_event_publish_failed",
-            context={
-                "failure_count": len(publish_result.errors),
-                "failed_handlers": failure_handlers,
-            },
-        )
-        tool_result.message = format_publish_failures(publish_result.errors)
-    else:
-        log.debug(
-            "Tool event published.",
-            event="tool_event_published",
-            context={"handler_count": publish_result.handled_count},
-        )
-    return invocation, tool_result
-
-
 def build_json_schema_response_format(
     rendered: RenderedPrompt[Any], prompt_name: str
 ) -> dict[str, Any] | None:
@@ -690,6 +535,152 @@ class ConversationRunner[OutputT]:
             and self.rendered.container is not None
         )
 
+    def _execute_tool_call(
+        self, tool_call: ProviderToolCall
+    ) -> tuple[ToolInvoked, ToolResult[SupportsDataclass]]:
+        """Execute a provider tool call and publish the resulting event."""
+
+        function = tool_call.function
+        tool_name = function.name
+        tool = self._tool_registry.get(tool_name)
+        if tool is None:
+            raise PromptEvaluationError(
+                f"Unknown tool '{tool_name}' requested by provider.",
+                prompt_name=self.prompt_name,
+                phase="tool",
+                provider_payload=self._provider_payload,
+            )
+        handler = tool.handler
+        if handler is None:
+            raise PromptEvaluationError(
+                f"Tool '{tool_name}' does not have a registered handler.",
+                prompt_name=self.prompt_name,
+                phase="tool",
+                provider_payload=self._provider_payload,
+            )
+
+        arguments_mapping = self.parse_arguments(
+            function.arguments,
+            prompt_name=self.prompt_name,
+            provider_payload=self._provider_payload,
+        )
+
+        call_id = getattr(tool_call, "id", None)
+        log = getattr(self, "_log", None)
+        if log is None:
+            log = (self.logger_override or logger).bind(
+                adapter=self.adapter_name,
+                prompt=self.prompt_name,
+            )
+            self._log = log
+        log = log.bind(tool=tool_name, call_id=call_id)
+
+        tool_params: SupportsDataclass | None = None
+        tool_result: ToolResult[SupportsDataclass]
+        try:
+            try:
+                parsed_params = parse(
+                    tool.params_type, arguments_mapping, extra="forbid"
+                )
+            except (TypeError, ValueError) as error:
+                tool_params = cast(
+                    SupportsDataclass,
+                    _RejectedToolParams(
+                        raw_arguments=dict(arguments_mapping),
+                        error=str(error),
+                    ),
+                )
+                raise ToolValidationError(str(error)) from error
+
+            tool_params = cast(SupportsDataclass, parsed_params)
+            context = ToolContext(
+                prompt=self.prompt,
+                rendered_prompt=self.rendered,
+                adapter=self.adapter,
+                session=self.session,
+                event_bus=self.bus,
+            )
+            tool_result = handler(tool_params, context=context)
+        except ToolValidationError as error:
+            if tool_params is None:  # pragma: no cover - defensive
+                tool_params = cast(
+                    SupportsDataclass,
+                    _RejectedToolParams(
+                        raw_arguments=dict(arguments_mapping),
+                        error=str(error),
+                    ),
+                )
+            _ = log.warning(
+                "Tool validation failed.",
+                event="tool_validation_failed",
+                context={"reason": str(error)},
+            )
+            tool_result = ToolResult(
+                message=f"Tool validation failed: {error}",
+                value=None,
+                success=False,
+            )
+        except Exception as error:  # propagate message via ToolResult
+            _ = log.exception(
+                "Tool handler raised an unexpected exception.",
+                event="tool_handler_exception",
+                context={"provider_payload": self._provider_payload},
+            )
+            tool_result = ToolResult(
+                message=f"Tool '{tool_name}' execution failed: {error}",
+                value=None,
+                success=False,
+            )
+        else:
+            _ = log.info(
+                "Tool handler completed.",
+                event="tool_handler_completed",
+                context={
+                    "success": tool_result.success,
+                    "has_value": tool_result.value is not None,
+                },
+            )
+
+        if tool_params is None:  # pragma: no cover - defensive
+            raise RuntimeError("Tool parameters were not parsed.")
+
+        snapshot = self.session.snapshot()
+        invocation = ToolInvoked(
+            prompt_name=self.prompt_name,
+            adapter=self.adapter_name,
+            name=tool_name,
+            params=tool_params,
+            result=cast(ToolResult[object], tool_result),
+            call_id=call_id,
+        )
+        publish_result = self.bus.publish(invocation)
+        if not publish_result.ok:
+            self.session.rollback(snapshot)
+            _ = log.warning(
+                "Session rollback triggered after publish failure.",
+                event="session_rollback_due_to_publish_failure",
+            )
+            failure_handlers = [
+                getattr(failure.handler, "__qualname__", repr(failure.handler))
+                for failure in publish_result.errors
+            ]
+            _ = log.error(
+                "Tool event publish failed.",
+                event="tool_event_publish_failed",
+                context={
+                    "failure_count": len(publish_result.errors),
+                    "failed_handlers": failure_handlers,
+                },
+            )
+            tool_result.message = self.format_publish_failures(publish_result.errors)
+        else:
+            _ = log.debug(
+                "Tool event published.",
+                event="tool_event_published",
+                context={"handler_count": publish_result.handled_count},
+            )
+        return invocation, tool_result
+
     def _handle_tool_calls(
         self,
         message: object,
@@ -713,21 +704,7 @@ class ConversationRunner[OutputT]:
         )
 
         for tool_call in tool_calls:
-            invocation, tool_result = execute_tool_call(
-                adapter_name=self.adapter_name,
-                adapter=self.adapter,
-                prompt=self.prompt,
-                rendered_prompt=self.rendered,
-                tool_call=tool_call,
-                tool_registry=self._tool_registry,
-                bus=self.bus,
-                session=self.session,
-                prompt_name=self.prompt_name,
-                provider_payload=self._provider_payload,
-                format_publish_failures=self.format_publish_failures,
-                parse_arguments=self.parse_arguments,
-                logger_override=self.logger_override,
-            )
+            invocation, tool_result = self._execute_tool_call(tool_call)
             self._tool_events.append(invocation)
 
             tool_message = {
@@ -838,6 +815,18 @@ class ConversationRunner[OutputT]:
             },
         )
         return response_payload
+
+
+def execute_tool_call(  # pragma: no cover - thin compatibility wrapper
+    *, runner: ConversationRunner[Any], tool_call: ProviderToolCall
+) -> tuple[ToolInvoked, ToolResult[SupportsDataclass]]:
+    """Delegate to :meth:`ConversationRunner._execute_tool_call`."""
+
+    executor = cast(
+        Callable[[ProviderToolCall], tuple[ToolInvoked, ToolResult[SupportsDataclass]]],
+        runner._execute_tool_call,  # pyright: ignore[reportPrivateUsage]
+    )
+    return executor(tool_call)  # pragma: no cover
 
 
 def run_conversation[
