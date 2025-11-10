@@ -275,5 +275,5 @@ captured verbatim, highlighting the behavioural difference from expression mode.
 ## Documentation
 
 - Update `docs/` with a short guide referencing this spec once the tool ships.
-- Add the tool to `specs/TOOLS.md` examples when ready so new contributors see
+- Add the tool to `specs/TOOLS_RUNTIME.md` examples when ready so new contributors see
   how custom tools integrate into prompts.
