@@ -171,7 +171,7 @@ must populate that field before dispatching calls.
 Tools are typed callables that return structured results. Add lightweight
 helpers alongside the built-in suites—in this case, a symbol searcher that reads
 from a repo mounted at `/srv/agent-repo`. Review the
-[Tool Runtime Specification](specs/TOOLS_RUNTIME.md) to match the handler,
+[Tool Runtime Specification](specs/TOOLS.md) to match the handler,
 `ToolContext`, and `ToolResult` contracts.
 
 ```python
