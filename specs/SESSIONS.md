@@ -30,6 +30,10 @@ all state transitions are pure functions driven by the event stream.
   The slice element type may be the same as `T` or a separate dataclass.
 - **Reducer** – A pure function responsible for producing a new slice when a
   matching `DataEvent[T]` arrives.
+- **Snapshot** – An immutable value object that captures the mapping of slice
+  types to their tuples plus metadata such as timestamps.
+- **Snapshot tuple** – The tuple stored for a specific slice within a snapshot;
+  it mirrors the reducer-managed slice tuple at capture time.
 
 ## Data Model
 
@@ -98,6 +102,21 @@ class Session:
     ) -> None: ...
 
     def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]: ...
+
+    def snapshot(self) -> Snapshot: ...
+
+    def rollback(self, snapshot: Snapshot) -> None: ...
+
+
+@dataclass(slots=True, frozen=True)
+class Snapshot:
+    created_at: datetime
+    slices: Mapping[type[Any], tuple[Any, ...]]
+
+    def to_json(self) -> str: ...
+
+    @classmethod
+    def from_json(cls, raw: str) -> Snapshot: ...
 ```
 
 - Constructing with a bus subscribes to `ToolInvoked` and `PromptExecuted` immediately.
@@ -110,6 +129,10 @@ class Session:
   and reducer registrations. Passing `bus`, `session_id`, or `created_at` overrides
   the copied metadata; omitted parameters reuse the original values. Clones attach
   to the provided event bus without modifying the original session subscription.
+- `snapshot()` captures the immutable slice mapping without blocking event
+  publication and returns a value object representing the captured state.
+- `rollback()` replaces the Session's slice mapping with the tuples stored in the
+  provided snapshot without emitting new events.
 
 ### Reducers
 
@@ -147,6 +170,48 @@ These helpers delegate to `Session.select_all` and perform no caching.
    If no reducer exists, use the default append reducer.
 1. Reducer failures are caught and logged; the slice stays unchanged.
 
+## Snapshot Capture and Rollback
+
+Snapshots add time-travel support so callers can capture the Session's slice
+mapping, serialize it for storage or transport, and later roll the Session back to
+that exact point. They behave as immutable value objects—copying, storing, and
+restoring a snapshot never mutates the original payload or the Session's event
+subscriptions. Reducer registrations, event bus wiring, and pending dispatch
+state stay outside the snapshot because they are inherent to the Session
+instance.
+
+### Serialization Strategy
+
+Snapshots serialize to JSON using only primitive types. Persist metadata fields
+(`created_at` as a timezone-aware ISO 8601 string plus an API version) alongside
+the captured slices. Each slice entry serializes as a dictionary containing
+`"slice_type"`, `"item_type"`, and `"items"`. Type fields use the fully qualified
+`"package.module:Class"` form, and items rely on the existing dataclass serde
+helpers (`src/weakincentives/serde/`). Reducer slices whose element type differs
+from the incoming dataclass must still record the item type explicitly. The
+`Snapshot.to_json()` and `Snapshot.from_json()` helpers round-trip the payload; the
+deserialized snapshot must compare equal to the original.
+
+### State Capture Semantics
+
+1. `snapshot()` reads the immutable slice mapping and packages it into a new
+   `Snapshot` without requiring defensive copies or synchronization.
+1. Active reducers finish before capture completes; events published afterward are
+   excluded. Callers should snapshot only after their own dispatch loop completes
+   to avoid missing in-flight updates.
+1. `rollback()` replaces the current slice mapping with the tuples stored in the
+   snapshot. Slices present in the Session but absent from the snapshot clear to
+   empty tuples. Reducer registrations persist and continue receiving events with
+   their restored tuples.
+
+### Error Handling
+
+- `snapshot()` raises `SnapshotSerializationError` when encountering unsupported
+  slice types or unserializable payloads and leaves the Session unchanged.
+- `rollback()` raises `SnapshotRestoreError` if the snapshot schema version is
+  incompatible or if referenced slice types were never registered. On failure the
+  Session state remains untouched.
+
 ## Testing Checklist
 
 - Publishing `ToolInvoked` / `PromptExecuted` populates the correct slice exactly once.
@@ -155,6 +220,13 @@ These helpers delegate to `Session.select_all` and perform no caching.
 - Non-dataclass payloads populate the generic `ToolData` slice while leaving
   dataclass-specific slices untouched.
 - Reducers may register a distinct `slice_type` and still receive the correct tuple.
+- `Session.snapshot()` / `Session.rollback()` round-trip keeps slice tuples and
+  timestamps consistent (timestamp deltas tolerated when comparing equality if
+  necessary).
+- Reducers registered before snapshot capture remain functional after rollback
+  and continue processing future events with the restored tuples.
+- Snapshot serialization and restore failures raise the documented exceptions and
+  leave Session state untouched.
 
 ## Usage Sketch
 
