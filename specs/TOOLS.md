@@ -1,12 +1,17 @@
 # Tool Runtime Specification
 
-## Overview
+## Introduction
 
-Prompt sections now contribute structured tooling directly through their definitions. This
-spec documents the full runtime contract—from how tools register against a prompt, to the
-context objects injected into handlers, through to the failure semantics adapters must
-expose to large language models (LLMs). Treat this file as the single source of truth for
-tool affordances.
+Large language model runtimes expect prompts to advertise structured "tools" (a.k.a.
+function calls) that can be invoked mid-interaction. The prompt abstraction now allows
+every `Section` to contribute tools directly through a shared interface, eliminating the
+need for a dedicated `ToolsSection`. This keeps instructions and callable affordances
+co-located while reusing the existing section hierarchy for ordering and enablement.
+
+This combined runtime specification documents the full contract—from how tools register
+against a prompt, to the context objects injected into handlers, through to the failure
+semantics adapters must expose to large language models (LLMs). Treat it as the single
+source of truth for tool affordances.
 
 The runtime focuses on three pillars:
 
@@ -17,9 +22,24 @@ The runtime focuses on three pillars:
 1. **Failure Semantics** – the uniform success/failure contract that handlers and
    adapters honor.
 
+## Goals
+
+- **Section-first integration** – keep tooling within the section hierarchy so enablement
+  and ordering align with rendered instructions.
+- **Single source of truth** – co-locate tool contracts with the prompts that introduce
+  them instead of maintaining ad-hoc registries.
+- **Type-safe tooling** – lean on dataclass-based params and result payloads so schema
+  issues surface before a request reaches an LLM.
+- **Deterministic exposure** – present a stable, machine-readable tool list so adapters
+  negotiate provider payloads without guesswork.
+- **Unified context contract** – describe the immutable metadata handlers expect through
+  `ToolContext` to keep orchestration predictable.
+- **Predictable failure semantics** – document shared success/failure handling so tool
+  adapters never abort evaluation unexpectedly.
+
 ## Registration Lifecycle
 
-### Goals
+### Registration Goals
 
 - **Section-first integration** – any `Section` can register tools so enablement logic and
   ordering remain consistent with the rendered prompt.
@@ -254,10 +274,3 @@ handlers cooperate through a consistent contract so the LLM can recover graceful
 - Adapters never abort evaluation solely because a tool handler failed.
 - Unit tests assert the `success` semantics and nullable values.
 - Documentation (including this file and adapter specs) references the contract.
-
-## Migration Notes
-
-- Replace references to legacy tooling specs with this document.
-- Ensure built-in sections and adapters adopt the `context` keyword argument.
-- Update telemetry and reducers to respect the `success` flag when recording tool
-  outcomes.
