@@ -25,6 +25,7 @@ from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     OutputParseError,
+    parse_dataclass_payload,
     parse_structured_output,
 )
 from ..prompt.tool import Tool, ToolContext, ToolResult
@@ -413,38 +414,15 @@ def parse_schema_constrained_payload(
     if dataclass_type is None or container is None:
         raise TypeError("Prompt does not declare structured output.")
 
-    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
-
-    if container == "object":
-        if not isinstance(payload, Mapping):
-            raise TypeError("Expected provider payload to be a JSON object.")
-        return parse(
-            dataclass_type, cast(Mapping[str, object], payload), extra=extra_mode
-        )
-
-    if container == "array":
-        if isinstance(payload, Mapping):
-            if ARRAY_WRAPPER_KEY not in payload:
-                raise TypeError("Expected provider payload to be a JSON array.")
-            payload = cast(Mapping[str, object], payload)[ARRAY_WRAPPER_KEY]
-        if not isinstance(payload, Sequence) or isinstance(
-            payload, (str, bytes, bytearray)
-        ):
-            raise TypeError("Expected provider payload to be a JSON array.")
-        parsed_items: list[object] = []
-        sequence_payload = cast(Sequence[object], payload)
-        for index, item in enumerate(sequence_payload):
-            if not isinstance(item, Mapping):
-                raise TypeError(f"Array item at index {index} is not an object.")
-            parsed_item = parse(
-                dataclass_type,
-                cast(Mapping[str, object], item),
-                extra=extra_mode,
-            )
-            parsed_items.append(parsed_item)
-        return parsed_items
-
-    raise TypeError("Unknown output container declared.")
+    return parse_dataclass_payload(
+        dataclass_type,
+        container,
+        payload,
+        allow_extra_keys=allow_extra_keys,
+        object_error="Expected provider payload to be a JSON object.",
+        array_error="Expected provider payload to be a JSON array.",
+        array_item_error="Array item at index {index} is not an object.",
+    )
 
 
 def message_text_content(content: object) -> str:
