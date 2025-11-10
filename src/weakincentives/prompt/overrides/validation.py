@@ -23,6 +23,7 @@ from ..tool import Tool
 from .versioning import (
     PromptDescriptor,
     PromptLike,
+    PromptOverride,
     PromptOverridesError,
     SectionDescriptor,
     SectionOverride,
@@ -66,6 +67,26 @@ def _tool_descriptor_index(
     descriptor: PromptDescriptor,
 ) -> dict[str, ToolDescriptor]:
     return {tool.name: tool for tool in descriptor.tools}
+
+
+def _format_section_path(path: tuple[str, ...]) -> str:
+    return "/".join(path)
+
+
+def _log_mismatched_override_metadata(
+    descriptor: PromptDescriptor,
+    override: PromptOverride,
+) -> None:
+    _LOGGER.debug(
+        "Skipping override due to descriptor metadata mismatch.",
+        event="prompt_override_mismatched_descriptor",
+        context={
+            "expected_ns": descriptor.ns,
+            "expected_key": descriptor.key,
+            "override_ns": override.ns,
+            "override_key": override.prompt_key,
+        },
+    )
 
 
 @overload
@@ -264,6 +285,50 @@ def load_sections(
     return overrides
 
 
+def filter_override_for_descriptor(
+    descriptor: PromptDescriptor,
+    override: PromptOverride,
+) -> tuple[dict[tuple[str, ...], SectionOverride], dict[str, ToolOverride]]:
+    if override.ns != descriptor.ns or override.prompt_key != descriptor.key:
+        _log_mismatched_override_metadata(descriptor, override)
+        return {}, {}
+
+    descriptor_sections = _section_descriptor_index(descriptor)
+    descriptor_tools = _tool_descriptor_index(descriptor)
+
+    filtered_sections: dict[tuple[str, ...], SectionOverride] = {}
+    for path, section_override in override.sections.items():
+        normalized_section = _normalize_section_override(
+            path=path,
+            descriptor_section=descriptor_sections.get(path),
+            expected_hash=section_override.expected_hash,
+            body=section_override.body,
+            strict=False,
+            path_display=_format_section_path(path),
+            body_error_message="Section override body must be a string.",
+        )
+        if normalized_section is not None:
+            filtered_sections[path] = normalized_section
+
+    filtered_tools: dict[str, ToolOverride] = {}
+    for name, tool_override in override.tool_overrides.items():
+        normalized_tool = _normalize_tool_override(
+            name=name,
+            descriptor_tool=descriptor_tools.get(name),
+            expected_hash=tool_override.expected_contract_hash,
+            description=tool_override.description,
+            param_descriptions=tool_override.param_descriptions,
+            strict=False,
+            description_error_message="Tool description override must be a string when set.",
+            param_mapping_error_message="Tool param_descriptions must be a mapping when provided.",
+            param_entry_error_message="Tool param description entries must be strings.",
+        )
+        if normalized_tool is not None:
+            filtered_tools[name] = normalized_tool
+
+    return filtered_sections, filtered_tools
+
+
 def load_tools(
     payload: object | None,
     descriptor: PromptDescriptor,
@@ -449,6 +514,7 @@ def _collect_param_descriptions(
 
 __all__ = [
     "FORMAT_VERSION",
+    "filter_override_for_descriptor",
     "load_sections",
     "load_tools",
     "seed_sections",

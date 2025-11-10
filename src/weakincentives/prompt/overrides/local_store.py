@@ -20,6 +20,7 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ._fs import OverrideFilesystem
 from .validation import (
     FORMAT_VERSION,
+    filter_override_for_descriptor,
     load_sections,
     load_tools,
     seed_sections,
@@ -100,7 +101,19 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         sections = load_sections(payload.get("sections"), descriptor)
         tools = load_tools(payload.get("tools"), descriptor)
 
-        if not sections and not tools:
+        raw_override = PromptOverride(
+            ns=descriptor.ns,
+            prompt_key=descriptor.key,
+            tag=tag,
+            sections=sections,
+            tool_overrides=tools,
+        )
+
+        filtered_sections, filtered_tools = filter_override_for_descriptor(
+            descriptor, raw_override
+        )
+
+        if not filtered_sections and not filtered_tools:
             _LOGGER.debug(
                 "No applicable overrides remain after validation.",
                 event="prompt_override_empty",
@@ -116,8 +129,8 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             ns=descriptor.ns,
             prompt_key=descriptor.key,
             tag=tag,
-            sections=sections,
-            tool_overrides=tools,
+            sections=filtered_sections,
+            tool_overrides=filtered_tools,
         )
         _LOGGER.info(
             "Resolved prompt override.",
@@ -126,8 +139,8 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "ns": descriptor.ns,
                 "prompt_key": descriptor.key,
                 "tag": normalized_tag,
-                "section_count": len(sections),
-                "tool_count": len(tools),
+                "section_count": len(filtered_sections),
+                "tool_count": len(filtered_tools),
             },
         )
         return override

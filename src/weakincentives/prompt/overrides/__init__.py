@@ -20,6 +20,7 @@ from .inspection import (
     resolve_overrides_root,
 )
 from .local_store import LocalPromptOverridesStore
+from .validation import filter_override_for_descriptor
 from .versioning import (
     PromptDescriptor,
     PromptLike,
@@ -46,6 +47,7 @@ __all__ = [
     "SectionOverride",
     "ToolDescriptor",
     "ToolOverride",
+    "filter_override_for_descriptor",
     "hash_json",
     "hash_text",
     "iter_override_files",

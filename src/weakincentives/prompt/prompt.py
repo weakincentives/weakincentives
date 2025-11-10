@@ -189,32 +189,12 @@ class Prompt[OutputT]:
 
         overrides: dict[SectionPath, str] = {}
         tool_overrides: dict[str, ToolOverride] = {}
-        if (
-            override is not None
-            and override.ns == descriptor.ns
-            and override.prompt_key == descriptor.key
-        ):
-            descriptor_index = {
-                section.path: section.content_hash for section in descriptor.sections
+        if override is not None:
+            overrides = {
+                path: section_override.body
+                for path, section_override in override.sections.items()
             }
-            for path, section_override in override.sections.items():
-                descriptor_hash = descriptor_index.get(path)
-                if (
-                    descriptor_hash is not None
-                    and section_override.expected_hash == descriptor_hash
-                ):
-                    overrides[path] = section_override.body
-            if override.tool_overrides:
-                descriptor_tool_index = {
-                    tool.name: tool.contract_hash for tool in descriptor.tools
-                }
-                for name, tool_override in override.tool_overrides.items():
-                    descriptor_hash = descriptor_tool_index.get(name)
-                    if (
-                        descriptor_hash is not None
-                        and tool_override.expected_contract_hash == descriptor_hash
-                    ):
-                        tool_overrides[name] = tool_override
+            tool_overrides = dict(override.tool_overrides)
 
         param_lookup = self._renderer.build_param_lookup(params)
         return self._renderer.render(
