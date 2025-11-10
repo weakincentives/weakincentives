@@ -178,7 +178,7 @@ from a repo mounted at `/srv/agent-repo`. Review the
 from dataclasses import dataclass
 from pathlib import Path
 
-from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.prompt import Tool, ToolResult
 
 
 @dataclass

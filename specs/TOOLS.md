@@ -49,24 +49,28 @@ The runtime focuses on three pillars:
 
 `Tool[ParamsT, ResultT]` instances describe callable affordances:
 
-- `name: str` – ASCII-only lowercase letters, digits, or underscores (≤64 characters).
+- `name: str` – lowercase ASCII letters, digits, underscores, or hyphens (≤64 characters).
   Names must be unique per rendered prompt; collisions raise `PromptValidationError`.
 - `description: str` – 1–200 character ASCII summary presented to the LLM.
-- `handler: Callable[[ParamsT], ToolResult[ResultT]] | None` – optional runtime hook that
+- `handler: ToolHandler[ParamsT, ResultT] | None` – optional runtime hook that
   must accept a positional `params` argument **and** a keyword-only
   `context: ToolContext` parameter. When provided the handler returns a `ToolResult`.
-- `accepts_overrides: bool` – opt-in flag that determines whether tooling participates in
-  automatic override pipelines. Built-in sections typically default to `False` until the
-  contracts stabilize.
+- `accepts_overrides: bool` – flag that determines whether tooling participates in
+  automatic override pipelines. Tools opt in by default (`True`), and sections can disable
+  overrides on a case-by-case basis when contracts are still stabilizing.
 
 Handlers follow the canonical signature:
 
 ```python
-from weakincentives.prompt.tools import ToolContext, ToolResult
+from weakincentives.prompt import ToolContext, ToolHandler, ToolResult
 
 def handle_tool(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]:
     ...
 ```
+
+The `ToolHandler` protocol enforces this calling convention at type-check time, ensuring
+implementations always accept the keyword-only `context` parameter and annotate their
+return value with `ToolResult[ResultT]`.
 
 ### Section Integration
 
@@ -173,7 +177,7 @@ from typing import Any
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.prompt.prompt import Prompt, RenderedPrompt
 from weakincentives.runtime.events import EventBus
-from weakincentives.runtime.session.session import Session
+from weakincentives.runtime.session.protocols import SessionProtocol
 
 
 @dataclass(slots=True, frozen=True)
@@ -181,7 +185,7 @@ class ToolContext:
     prompt: Prompt[Any]
     rendered_prompt: RenderedPrompt[Any] | None
     adapter: ProviderAdapter[Any]
-    session: Session
+    session: SessionProtocol
     event_bus: EventBus
 ```
 
