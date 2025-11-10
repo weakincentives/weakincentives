@@ -526,10 +526,9 @@ if vfs_snapshot:
 Persist optimizer output so the runtime can swap in tuned sections without a
 redeploy. `LocalPromptOverridesStore` is the default choice: it discovers the
 workspace root, enforces descriptors, and reads JSON overrides from
-`.weakincentives/prompts/overrides/`. Pair the
-[Local Prompt Overrides Store](specs/LOCAL_PROMPT_OVERRIDES_STORE.md) and
-[Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md) specs to keep
-namespace, key, and tag hashes aligned.
+`.weakincentives/prompts/overrides/`. Refer to the
+[Prompt Overrides specification](specs/PROMPT_OVERRIDES.md) to keep namespace,
+key, and tag hashes aligned.
 
 ```python
 from pathlib import Path
@@ -596,8 +595,7 @@ print(rendered_with_override.text)
 
 The overrides store writes atomically to
 `.weakincentives/prompts/overrides/{ns}/{prompt_key}/{tag}.json` inside the
-workspace described in the
-[Local Prompt Overrides Store Specification](specs/LOCAL_PROMPT_OVERRIDES_STORE.md).
+workspace described in the [Prompt Overrides specification](specs/PROMPT_OVERRIDES.md).
 Optimizers and prompt engineers can still drop JSON overrides into that tree by
 hand—checked into source control or generated during evaluations—without
 subclassing `PromptOverridesStore`. Because sections expose stable `(ns, key, path)` identifiers, overrides stay scoped to the intended content so teams can
@@ -613,9 +611,9 @@ You now have a deterministic reviewer that:
    harnesses.
 
 Run it inside a worker, bot, or scheduler; the captured session state keeps each
-evaluation replayable. For long-lived deployments, follow
-[Tool-Aware Prompt Versioning](specs/TOOL_AWARE_PROMPT_VERSIONING.md) to keep
-overrides and tool descriptors in sync.
+evaluation replayable. For long-lived deployments, follow the
+[Prompt Overrides specification](specs/PROMPT_OVERRIDES.md) to keep overrides
+and tool descriptors in sync.
 
 ## Logging
 
