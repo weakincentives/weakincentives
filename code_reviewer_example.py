@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Interactive example that mounts the sunfish repo for agent exploration."""
+"""Minimal interactive code reviewer showcasing the core toolkit."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ import sys
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import RLock
 from types import MethodType
 from typing import Any, Protocol, cast
 
@@ -107,15 +106,6 @@ class ReviewResponse:
     next_steps: list[str]
 
 
-@dataclass(slots=True, frozen=True)
-class ToolCallLog:
-    name: str
-    prompt_name: str
-    message: str
-    value: dict[str, Any] | None
-    call_id: str | None
-
-
 class SupportsReviewEvaluate(Protocol):
     def evaluate(
         self,
@@ -163,24 +153,18 @@ def _configure_logging() -> None:
 def main() -> None:
     """Launch the interactive code review walkthrough."""
 
-    # High-level walkthrough for running a local code review loop. See AGENTS.md
-    # for workflow expectations around prompt overrides and tooling etiquette.
     _configure_logging()
-    print("Launching sunfish code review session with planning and VFS tooling...")
-    print("- test-repositories/sunfish mounted under virtual path 'sunfish/'.")
-    print(
-        "- Available commands: 'history' (tool log), 'plan' (current plan),"
-        " 'exit' to quit."
-    )
-    print("- Python evaluation tool enabled for quick calculations and scripts.")
-    print("- Subagent delegation tool available for parallelizable review tasks.")
-
     override_tag = _resolve_override_tag()
-    print(
-        "- Prompt overrides load from '.weakincentives/prompts/overrides' "
-        f"with tag '{override_tag}'."
-    )
-    print(f"- Set {PROMPT_OVERRIDES_TAG_ENV} to switch override tags at runtime.")
+    intro = textwrap.dedent(
+        f"""
+        Launching sunfish code review session.
+        - test-repositories/sunfish mounted under virtual path 'sunfish/'.
+        - Tools: planning, subagents, VFS, and Python evaluation.
+        - Commands: 'history' (tool log), 'plan' (latest plan), 'exit' to quit.
+        - Prompt overrides tag: '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
+        """
+    ).strip()
+    print(intro)
 
     session = SunfishReviewSession(
         build_adapter(),
@@ -204,7 +188,6 @@ def main() -> None:
         if lowered == "plan":
             print(session.render_plan_snapshot())
             continue
-        session.reset()
         answer = session.evaluate(prompt)
         print(f"Agent: {answer}")
 
@@ -279,11 +262,11 @@ class SunfishReviewSession:
             base_prompt,
         )
         self._prompt = base_prompt
-        self._history: list[ToolCallLog] = []
-        self._history_lock = RLock()
+        self._tool_log: list[dict[str, str | None]] = []
         self._bus.subscribe(ToolInvoked, self._on_tool_invoked)
 
     def evaluate(self, request: str) -> str:
+        self._session.reset()
         response = self._adapter.evaluate(
             self._prompt,
             ReviewTurnParams(request=request),
@@ -298,26 +281,29 @@ class SunfishReviewSession:
         return "(no response from assistant)"
 
     def reset(self) -> None:
-        """Clear session state before starting a new review turn."""
+        """Clear session state before running a new turn."""
 
         self._session.reset()
 
     def render_tool_history(self) -> str:
-        with self._history_lock:
-            if not self._history:
-                return "No tool calls recorded yet."
-            history_snapshot = tuple(self._history)
+        if not self._tool_log:
+            return "No tool calls recorded yet."
 
         lines: list[str] = []
-        for index, record in enumerate(history_snapshot, start=1):
-            lines.append(
-                f"{index}. {record.name} ({record.prompt_name}) → {record.message}"
-            )
-            if record.call_id:
-                lines.append(f"   call_id: {record.call_id}")
-            if record.value:
-                payload_dump = json.dumps(record.value, ensure_ascii=False)
-                lines.append(f"   payload: {payload_dump}")
+        for index, record in enumerate(self._tool_log, start=1):
+            name = record["name"] or "?"
+            prompt_name = record["prompt"] or "?"
+            result = record["result"] or ""
+            lines.append(f"{index}. {name} ({prompt_name}) → {result}")
+            params = record.get("params")
+            if params:
+                lines.append(f"   params: {params}")
+            payload = record.get("payload")
+            if payload:
+                lines.append(f"   payload: {payload}")
+            call_id = record.get("call_id")
+            if call_id:
+                lines.append(f"   call_id: {call_id}")
         return "\n".join(lines)
 
     def render_plan_snapshot(self) -> str:
@@ -337,44 +323,42 @@ class SunfishReviewSession:
     def _on_tool_invoked(self, event: object) -> None:
         tool_event = cast(ToolInvoked, event)
 
-        serialized_params = dump(tool_event.params, exclude_none=True)
-        raw_value = tool_event.result.value
-        payload: dict[str, object] | None
-        if raw_value is None:
-            payload = None
+        params_repr = _format_for_log(
+            dump(tool_event.params, exclude_none=True),
+        )
+        message = _truncate_for_log(tool_event.result.message or "")
+        payload = tool_event.result.value
+        payload_repr: str | None
+        if payload is None:
+            payload_repr = None
         else:
             try:
-                payload = dump(raw_value, exclude_none=True)
+                payload_repr = _format_for_log(
+                    dump(payload, exclude_none=True),
+                )
             except TypeError:
-                if isinstance(raw_value, tuple):
-                    try:
-                        payload = {
-                            "children": [
-                                dump(item, exclude_none=True) for item in raw_value
-                            ]
-                        }
-                    except TypeError:
-                        payload = {"value": raw_value}
-                else:
-                    payload = {"value": raw_value}
-        params_repr = _format_for_log(serialized_params)
-        message = _truncate_for_log(tool_event.result.message or "")
-        with self._history_lock:
-            print(
-                f"[tool] {tool_event.name} called with {params_repr}\n       → {message}"
-            )
-            if payload:
-                payload_repr = _format_for_log(payload)
-                print(f"       payload: {payload_repr}")
+                payload_repr = _format_for_log({"value": payload})
 
-            record = ToolCallLog(
-                name=tool_event.name,
-                prompt_name=tool_event.prompt_name,
-                message=tool_event.result.message,
-                value=payload,
-                call_id=tool_event.call_id,
-            )
-            self._history.append(record)
+        lines = [
+            f"{tool_event.name} ({tool_event.prompt_name})",
+            f"  params: {params_repr}",
+            f"  result: {message}",
+        ]
+        if payload_repr is not None:
+            lines.append(f"  payload: {payload_repr}")
+
+        formatted = "\n".join(lines)
+        print(f"[tool] {formatted}")
+        self._tool_log.append(
+            {
+                "name": tool_event.name,
+                "prompt": tool_event.prompt_name,
+                "params": params_repr,
+                "result": message,
+                "payload": payload_repr,
+                "call_id": tool_event.call_id,
+            }
+        )
 
 
 def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
