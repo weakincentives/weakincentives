@@ -1,132 +1,153 @@
-# Tool Registration Specification
+# Tool Runtime Specification
 
 ## Introduction
 
-Large language model runtimes expect prompts to advertise structured "tools" (a.k.a. function calls) that can be invoked
-mid-interaction. The prompt abstraction now allows every `Section` to contribute tools directly through a shared
-interface, eliminating the need for a dedicated `ToolsSection`. This keeps instructions and callable affordances
+Large language model runtimes expect prompts to advertise structured "tools" (a.k.a.
+function calls) that can be invoked mid-interaction. The prompt abstraction now allows
+every `Section` to contribute tools directly through a shared interface, eliminating the
+need for a dedicated `ToolsSection`. This keeps instructions and callable affordances
 co-located while reusing the existing section hierarchy for ordering and enablement.
+
+This combined runtime specification documents the full contract—from how tools register
+against a prompt, to the context objects injected into handlers, through to the failure
+semantics adapters must expose to large language models (LLMs). Treat it as the single
+source of truth for tool affordances.
+
+The runtime focuses on three pillars:
+
+1. **Registration Lifecycle** – how sections declare tools and how prompts validate and
+   expose them.
+1. **Context Injection** – the immutable metadata bundle threaded into every handler
+   invocation.
+1. **Failure Semantics** – the uniform success/failure contract that handlers and
+   adapters honor.
 
 ## Goals
 
-- **Section-First Integration**: Allow tools to live inside the existing section hierarchy so ordering and enablement stay
-  consistent with the rest of the prompt.
-- **Single Source of Truth**: Co-locate tool contracts with the prompt that introduces them, removing ad-hoc external
-  registries.
-- **Type-Safe Tooling**: Retain the dataclass-first approach to argument validation so schema issues surface before a
-  request reaches an LLM.
-- **Deterministic Exposure**: Provide stable, machine-readable tool definitions that downstream adapters can map onto
-  OpenAI or Anthropic clients without guessing.
+- **Section-first integration** – keep tooling within the section hierarchy so enablement
+  and ordering align with rendered instructions.
+- **Single source of truth** – co-locate tool contracts with the prompts that introduce
+  them instead of maintaining ad-hoc registries.
+- **Type-safe tooling** – lean on dataclass-based params and result payloads so schema
+  issues surface before a request reaches an LLM.
+- **Deterministic exposure** – present a stable, machine-readable tool list so adapters
+  negotiate provider payloads without guesswork.
+- **Unified context contract** – describe the immutable metadata handlers expect through
+  `ToolContext` to keep orchestration predictable.
+- **Predictable failure semantics** – document shared success/failure handling so tool
+  adapters never abort evaluation unexpectedly.
 
-## Guiding Principles
+## Registration Lifecycle
 
-- **Explicit Contracts**: Tool names, parameter shapes, and summaries are declared statically in code.
-- **Composable Structure**: Any section can expose tools; the prompt collects their contents in render order while
-  honoring enablement predicates.
-- **Strict Validation**: Duplicate tool names, missing required fields, or parameter mismatches raise
-  `PromptValidationError` during construction.
-- **Runtime Agnostic**: The prompt layer stops at describing tools; adapter layers handle provider-specific payloads and
-  execution semantics.
+### Registration Goals
 
-## Core Concepts
+- **Section-first integration** – any `Section` can register tools so enablement logic and
+  ordering remain consistent with the rendered prompt.
+- **Single source of truth** – tool definitions live alongside the sections that document
+  them; no out-of-band registry exists.
+- **Typed contracts** – dataclass-based params and result payloads keep schemas explicit
+  and validated before requests reach an LLM.
+- **Deterministic exposure** – rendered prompts surface a stable, machine-readable tuple
+  of tools in declaration order.
 
-### `ToolResult` Dataclass
+### Key Structures
 
-Tools return structured data that pairs a language-model-facing message with typed value metadata. `ToolResult[PayloadT]`
-instances capture that response tuple, and every tool handler returns one directly:
+#### `ToolResult`
 
-- `message: str` – short textual reply returned to the LLM.
-- `value: PayloadT | None` – strongly typed result produced by the tool's business logic. Successful handlers should
-  populate the documented dataclass; failures must set this to `None` unless they expose a structured error payload.
-- `success: bool` – flag indicating whether the handler completed normally. Downstream adapters rely on this field (not
-  payload shape) to detect failures.
-- `exclude_value_from_context: bool` – when true, adapters omit the `value` payload from the provider-facing tool message.
-  This helps keep large or sensitive payloads out of the token context while still returning them to orchestrators through
-  the `ToolResult`. Handlers should enable this when the payload is only needed for local bookkeeping.
+`ToolResult[PayloadT]` models the data returned to both orchestrators and the LLM:
 
-### `Tool` Dataclass
+- `message: str` – short textual reply forwarded to the model.
+- `value: PayloadT | None` – typed payload produced by the handler. Successful executions
+  return the documented dataclass; failures must set this to `None` unless they emit a
+  structured error payload.
+- `success: bool` – indicates whether the handler completed normally. Downstream reducers
+  rely on this flag instead of inspecting `value`.
+- `exclude_value_from_context: bool` – when `True`, adapters omit the payload from the
+  provider-facing tool message while still returning it out-of-band.
 
-`Tool[ParamsT, ResultT]` instances describe callable affordances. They carry:
+#### `Tool`
 
-- `name: str` – unique identifier scoped to a single prompt instance. Validation enforces ASCII-only lowercase letters,
-  digits, or underscores with length ≤ 64 characters for SDK compatibility.
-- `description: str` – concise model-facing summary. We constrain summaries to ASCII, strip surrounding whitespace, and
-  require 1–200 characters so payloads stay portable.
-- `handler: Callable[[ParamsT], ToolResult[ResultT]] | None` – optional runtime hook surfaced to orchestration layers.
-  Handlers must accept a positional `params: ParamsT` argument **and** a keyword-only
-  `context: ToolContext` parameter. When provided they must return a
-  `ToolResult[ResultT]`. See `specs/TOOL_CONTEXT.md` for the full context contract.
-- `accepts_overrides: bool` – opt-in flag for the automatic override pipeline. Defaults to `True`, but built-in tooling
-  defaults to `False` so optimization experiments ignore them until the contracts stabilize. Built-in sections pass their
-  own `accepts_overrides` value down to every tool they register so the entire suite opts in together when deployments are ready.
+`Tool[ParamsT, ResultT]` instances describe callable affordances:
+
+- `name: str` – lowercase ASCII letters, digits, underscores, or hyphens (≤64 characters).
+  Names must be unique per rendered prompt; collisions raise `PromptValidationError`.
+- `description: str` – 1–200 character ASCII summary presented to the LLM.
+- `handler: ToolHandler[ParamsT, ResultT] | None` – optional runtime hook that
+  must accept a positional `params` argument **and** a keyword-only
+  `context: ToolContext` parameter. When provided the handler returns a `ToolResult`.
+- `accepts_overrides: bool` – flag that determines whether tooling participates in
+  automatic override pipelines. Tools opt in by default (`True`), and sections can disable
+  overrides on a case-by-case basis when contracts are still stabilizing.
+
+Handlers follow the canonical signature:
 
 ```python
+from weakincentives.prompt import ToolContext, ToolHandler, ToolResult
+
 def handle_tool(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]:
     ...
 ```
 
-Parameter and result dataclasses inherit the same validation rules as section params: every placeholder referenced in
-markdown must exist on the dataclass, and required fields without defaults must be supplied when rendering. Tools bind the
-dataclass *types* through their generic parameters—no redundant instance plumbing lives in the prompt configuration.
+The `ToolHandler` protocol enforces this calling convention at type-check time, ensuring
+implementations always accept the keyword-only `context` parameter and annotate their
+return value with `ToolResult[ResultT]`.
 
-### Section Tool Registration
+### Section Integration
 
-`Section.__init__` accepts an optional `tools` sequence. Sections normalize the sequence into a tuple, validate each entry
-is a `Tool`, and expose the collection via `Section.tools()`. Because every section shares this capability, authors can:
+`Section.__init__` accepts an optional `tools` sequence. Sections normalize, validate, and
+expose that collection via `Section.tools()`. Because every section supports the same
+interface, authors can:
 
-- Attach tools to existing `MarkdownSection`s without creating new subclasses.
-- Associate tools with otherwise minimal sections that only emit headings or act as grouping nodes.
-- Allow child sections to contribute additional tooling while parent enablement gates the entire branch.
+- Attach tools to existing `MarkdownSection`s without inventing bespoke subclasses.
+- Register tooling on otherwise minimal sections that only emit headings or act as
+  grouping nodes.
+- Allow child sections to contribute additional tooling while parent enablement gates the
+  branch.
 
-## Prompt Integration
+### Prompt Rendering
 
-`Prompt` continues to accept an ordered tree of sections alongside its required `ns` and `key` identifiers. During
-initialization it walks the tree depth-first, validating all tools contributed by each section:
+`Prompt` continues to accept an ordered tree of sections. During initialization it walks
+that tree depth-first to validate all contributed tools:
 
-1. Validation enforces unique tool names across the entire prompt; composite prompts must coordinate naming themselves
-   until hierarchical namespaces are introduced.
-1. Parameter and result dataclasses may repeat across tools to encourage reuse.
-1. Declaration order is cached so callers can retrieve tools without re-traversing the tree.
+1. Duplicate names trigger `PromptValidationError`.
+1. Parameter and result dataclasses reuse existing placeholder validation rules—required
+   fields must be supplied when rendering.
+1. Declaration order is cached so callers can retrieve tools without re-traversing the
+   tree.
 
-`Prompt.render(...)` still returns the rendered markdown string, accepting dataclass overrides exactly as before. The
-resulting `RenderedPrompt` now exposes a `.tools` property that surfaces an ordered tuple of `Tool` objects contributed by
-enabled sections, honoring section-level defaults and enablement rules. The object also exposes
-`.tool_param_descriptions`, a mapping of tool name to field description overrides sourced from the override system.
-Callers no longer re-traverse the prompt tree to resolve tooling; they rely on the rendered instance for both markdown
-and tool metadata.
+`Prompt.render(...)` returns a `RenderedPrompt` containing both the rendered markdown and
+an ordered tuple of `Tool` instances contributed by enabled sections. The rendered object
+also exposes `.tool_param_descriptions`, a mapping of tool name to parameter description
+overrides sourced from the override system.
 
-## Runtime Execution
+### Runtime Responsibilities
 
-Sections only document callable capabilities. Higher-level orchestration code is responsible for invoking the appropriate
-handler when an LLM emits a tool call, passing the params dataclass instance and injecting the
-[`ToolContext`](TOOL_CONTEXT.md) keyword argument. Handlers return a
-`ToolResult[result_type]` directly, setting `success=False` and `value=None` when they cannot satisfy the contract. The
-prompt layer remains side effect free—it surfaces handlers and `result_type` metadata without executing them. The package
-provides no sync/async bridging helpers; orchestrators decide when to `await` or call handlers directly.
+Sections merely document tools; they never execute handlers. Orchestrators are
+responsible for:
 
-## Example
+- Creating the appropriate params dataclass instance when an LLM invokes a tool.
+- Injecting the [`ToolContext`](#context-injection) keyword argument.
+- Propagating the resulting `ToolResult` back to both the session reducers and the LLM.
+
+### Example
 
 ```python
 from dataclasses import dataclass, field
-from weakincentives.prompt import Prompt, MarkdownSection, Tool, ToolContext, ToolResult
+
+from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+
 
 @dataclass
 class LookupParams:
     entity_id: str = field(metadata={"description": "Global identifier to fetch"})
     include_related: bool = field(default=False)
 
+
 @dataclass
 class LookupResult:
     entity_id: str
     document_url: str
 
-@dataclass
-class GuidanceParams:
-    primary_tool: str
-
-@dataclass
-class ToolDescriptionParams:
-    primary_tool: str = "lookup_entity"
 
 def lookup_handler(
     params: LookupParams, *, context: ToolContext
@@ -135,62 +156,121 @@ def lookup_handler(
     message = f"Fetched entity {result.entity_id}."
     return ToolResult(message=message, value=result)
 
+
 lookup_tool = Tool[LookupParams, LookupResult](
     name="lookup_entity",
     description="Fetch structured information for a given entity id.",
     handler=lookup_handler,
 )
 
-tooling_overview = Prompt(
+prompt = Prompt(
     ns="examples/tooling",
     key="tools_overview",
     name="tools_overview",
     sections=[
-        MarkdownSection[GuidanceParams](
+        MarkdownSection(
             title="Guidance",
-            template="""
-            Use tools when you need up-to-date context. Prefer ${primary_tool} for critical lookups.
-            """,
-            children=[
-                MarkdownSection[ToolDescriptionParams](
-                    title="Available Tools",
-                    template="""
-                    Invoke ${primary_tool} whenever you need fresh entity context.
-                    """,
-                    tools=[lookup_tool],
-                    default_params=ToolDescriptionParams(),
-                )
-            ],
+            template="Use tools when you need up-to-date context.",
+            tools=[lookup_tool],
         )
     ],
 )
 
-rendered = tooling_overview.render(
-    GuidanceParams(primary_tool="lookup_entity"),
-    ToolDescriptionParams(),
-)
+rendered = prompt.render()
 markdown = rendered.text
 tools = rendered.tools
 assert tools[0].name == "lookup_entity"
 ```
 
-In the example the nested `MarkdownSection` documents the tooling guidance while registering the `lookup_entity` tool. Because
-sections own their tool collections directly, no additional subclasses are needed to describe a toolbox.
+## Context Injection
 
-### Reference Implementations
+Tool handlers receive an immutable snapshot of the surrounding runtime via `ToolContext`.
+The dataclass surfaces only the objects the orchestrator already maintains while
+executing a tool call.
 
-- `weakincentives.tools.asteval.AstevalSection` exposes a sandboxed Python
-  evaluation tool that captures stdout/stderr, parses JSON-provided globals, and
-  applies resolved VFS writes in a single tool invocation. The module
-  demonstrates integrating helper functions (`read_text`, `write_text`) and
-  templated write content with the shared `VirtualFileSystem` reducers.
+### Data Model
 
-## Validation and Error Handling
+```python
+from dataclasses import dataclass
+from typing import Any
 
-- Construction failures raise `PromptValidationError` with contextual data (`section path`, `tool.name`, parameter
-  dataclass).
-- Rendering without required tool parameters raises `PromptRenderError`, mirroring existing section behavior.
-- Registering two tools with the same name triggers `PromptValidationError` to preserve lookup determinism.
-- Handler references that fail to declare `params: ParamsT` and `*, context: ToolContext`
-  raise `PromptValidationError` during prompt validation.
-- Disabled sections contribute neither markdown nor entries in `RenderedPrompt.tools`.
+from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.prompt.prompt import Prompt, RenderedPrompt
+from weakincentives.runtime.events import EventBus
+from weakincentives.runtime.session.protocols import SessionProtocol
+
+
+@dataclass(slots=True, frozen=True)
+class ToolContext:
+    prompt: Prompt[Any]
+    rendered_prompt: RenderedPrompt[Any] | None
+    adapter: ProviderAdapter[Any]
+    session: SessionProtocol
+    event_bus: EventBus
+```
+
+- `prompt` – the prompt instance currently executing. Handlers may inspect the section
+  tree or helper methods when they need to mirror instructions.
+- `rendered_prompt` – the `RenderedPrompt` generated for the outer call. Some adapters
+  render lazily; in that case the value is `None` until rendering completes.
+- `adapter` – the provider adapter orchestrating the outer request. Handlers can reuse it
+  to execute nested prompts while sharing retry, tracing, and serialization behaviour.
+- `session` – the active session instance, ensuring delegated work records against the
+  same reducers.
+- `event_bus` – the telemetry bus used for in-process events. Tools reuse it when
+  publishing events for nested prompts or custom instrumentation.
+
+### Construction Flow
+
+1. The orchestrator renders (or prepares to render) the prompt and determines the active
+   tool call.
+1. Immediately before invoking the handler it builds a `ToolContext`, supplying the
+   prompt, rendered prompt (if available), adapter, session, and event bus.
+1. The handler executes with the `context` keyword argument.
+1. After invocation the context instance is discarded; no references are reused across
+   tool calls.
+
+### Safety and Determinism
+
+- The dataclass is frozen; handlers must not mutate the stored objects.
+- Adapters should continue redacting sensitive provider payloads before attaching them to
+  the prompt or session.
+- Nested prompt calls must publish their events through the shared bus so the session
+  state remains coherent.
+
+## Failure Semantics
+
+Tool execution must never abort the surrounding prompt evaluation. Instead, adapters and
+handlers cooperate through a consistent contract so the LLM can recover gracefully.
+
+### ToolResult Contract
+
+- `success=True` indicates a normal payload; `success=False` signals any failure.
+- Successful executions return the documented result dataclass via `value`.
+- Failures set `value=None` unless the tool emits an explicit error payload. The
+  `message` string still contains human-readable guidance.
+- Session reducers and telemetry respect `success` when recording outcomes.
+
+### Adapter Behaviour
+
+- Wrap all handler exceptions—validation errors and unexpected exceptions alike—and
+  convert them into `ToolResult(success=False, value=None, message="…")` responses.
+- Forward the failure message back to the LLM as a `role: "tool"` message so the model
+  can decide how to proceed.
+- Log or attach the original exception for observability but avoid raising
+  `PromptEvaluationError` for tool-level issues. Short-circuit only when provider
+  communication fails or prompt parsing is impossible.
+
+### Session and Telemetry
+
+- Session reducers must tolerate `ToolResult.value is None` without dropping events.
+- `ToolInvoked` events continue to fire even when tools fail; reducers may track separate
+  slices for failures if desired.
+- Consider dedicated failure events in the future, but the `success` flag suffices for the
+  current design.
+
+### Acceptance Checklist
+
+- Adapters never abort evaluation solely because a tool handler failed.
+- Unit tests assert the `success` semantics and nullable values.
+- Documentation (including this file and adapter specs) references the contract.

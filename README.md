@@ -171,14 +171,14 @@ must populate that field before dispatching calls.
 Tools are typed callables that return structured results. Add lightweight
 helpers alongside the built-in suites—in this case, a symbol searcher that reads
 from a repo mounted at `/srv/agent-repo`. Review the
-[Tool Registration](specs/TOOLS.md) and [Tool Error Handling](specs/TOOL_ERROR_HANDLING.md)
-specs to match the handler and `ToolResult` contracts.
+[Tool Runtime Specification](specs/TOOLS.md) to match the handler,
+`ToolContext`, and `ToolResult` contracts.
 
 ```python
 from dataclasses import dataclass
 from pathlib import Path
 
-from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.prompt import Tool, ToolResult
 
 
 @dataclass
