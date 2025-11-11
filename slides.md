@@ -11,7 +11,7 @@ class: lead
 ## Typed building blocks for side-effect-free background agents
 
 ```python
-from weakincentives import Prompt, MarkdownSection
+from weakincentives import Prompt
 
 print(Prompt.__mro__[0].__name__)
 ```
@@ -20,20 +20,14 @@ ______________________________________________________________________
 
 ## Quickstart
 
-1. Install the core package, then add extras when you need adapters:
-   ```bash
-   uv add weakincentives "weakincentives[openai]"
-   ```
-1. Sync the repo with all extras to mirror CI:
-   ```bash
-   uv sync --all-extras
-   ```
-1. Run `code_reviewer_example.py` to see sessions, prompts, and tools working together.
+1. Install the core package and extras when needed: `uv add weakincentives 'weakincentives[openai]'`
+1. Mirror CI locally: `uv sync --all-extras`
+1. Run `code_reviewer_example.py` to see prompts, sessions, and tools in action.
 
 ```python
 from weakincentives.logging import configure_logging
 
-configure_logging(level="INFO")
+configure_logging("INFO")
 ```
 
 ______________________________________________________________________
@@ -49,11 +43,8 @@ from weakincentives.events import InProcessEventBus, ToolInvoked
 from weakincentives.session import Session, ToolData, append
 
 bus = InProcessEventBus()
-session = Session(bus=bus)
-session.register_reducer(ToolData, append())
-
+Session(bus=bus).register_reducer(ToolData, append())
 bus.publish(ToolInvoked(tool_name="search", arguments={"query": "mdformat"}))
-print(session.select_all(ToolData))
 ```
 
 ______________________________________________________________________
@@ -69,22 +60,21 @@ from dataclasses import dataclass
 
 from weakincentives.prompt import MarkdownSection, Prompt
 
-@dataclass(slots=True)
+@dataclass
 class ReviewParams:
     repository: str
-    target_branch: str
 
-review_body = MarkdownSection[
-    ReviewParams
-](
-    title="Code Review",
+Prompt[str](
+    ns="demo",
     key="review",
-    template="""Repository: ${repository}\nBranch: ${target_branch}""",
+    sections=[
+        MarkdownSection[ReviewParams](
+            title="Review",
+            key="review",
+            template="Repo: ${repository}",
+        )
+    ],
 )
-
-prompt = Prompt[str](ns="demo", key="review", sections=[review_body])
-rendered = prompt.render(ReviewParams(repository="weakincentives", target_branch="main"))
-print(rendered.text)
 ```
 
 ______________________________________________________________________
@@ -98,26 +88,12 @@ ______________________________________________________________________
 ```python
 from pathlib import Path
 
-from weakincentives.tools import (
-    HostMount,
-    PlanningToolsSection,
-    VfsPath,
-    VfsToolsSection,
-)
+from weakincentives.tools import PlanningToolsSection, VfsToolsSection
 
-diff_root = Path("/srv/agent-mounts")
-vfs_section = VfsToolsSection(
-    allowed_host_roots=(diff_root,),
-    mounts=(
-        HostMount(
-            host_path="octo_widgets/cache-layer.diff",
-            mount_path=VfsPath(("diffs", "cache-layer.diff")),
-        ),
-    ),
-)
-planning_section = PlanningToolsSection()
+planning = PlanningToolsSection()
+vfs = VfsToolsSection(allowed_host_roots=(Path("/srv"),))
 
-print((planning_section.key, vfs_section.key))
+print(planning.key, vfs.key)
 ```
 
 ______________________________________________________________________
@@ -129,12 +105,8 @@ ______________________________________________________________________
 - `VfsToolsSection` enforces allowlists for host paths and patches.
 
 ```python
-from weakincentives.tools import PlanningToolsSection
-
 section = PlanningToolsSection()
-tool_names = tuple(tool.name for tool in section.tools)
-
-print(tool_names[:3])
+print([tool.name for tool in section.tools])
 ```
 
 ______________________________________________________________________
@@ -149,10 +121,8 @@ ______________________________________________________________________
 from weakincentives.prompt.local_prompt_overrides_store import LocalPromptOverridesStore
 from weakincentives.prompt.versioning import PromptDescriptor
 
-store = LocalPromptOverridesStore()
 descriptor = PromptDescriptor(ns="demo", key="review")
-override = store.resolve(descriptor)
-print(override)
+override = LocalPromptOverridesStore().resolve(descriptor)
 ```
 
 ______________________________________________________________________
@@ -164,37 +134,12 @@ ______________________________________________________________________
 - Swapping adapters preserves the same runtime contract.
 
 ```python
-from dataclasses import dataclass
-
-from weakincentives.adapters.core import PromptResponse
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.events import InProcessEventBus
-from weakincentives.prompt import MarkdownSection, Prompt
-from weakincentives.session import Session
 
-@dataclass(slots=True)
-class ReviewParams:
-    repository: str
-    target_branch: str
-
-review_body = MarkdownSection[ReviewParams](
-    title="Code Review",
-    key="review",
-    template="Repository: ${repository}\nBranch: ${target_branch}",
-)
-prompt = Prompt[str](ns="demo", key="review", sections=[review_body])
-
+# prompt, params, bus, and session come from the prior setup
 adapter = OpenAIAdapter(model="gpt-4.1-mini")
-bus = InProcessEventBus()
-session = Session(bus=bus)
-
-response: PromptResponse[str] = adapter.evaluate(
-    prompt,
-    ReviewParams(repository="weakincentives", target_branch="main"),
-    bus=bus,
-    session=session,
-)
-print(response.output)
+response = adapter.evaluate(prompt, params, bus=bus, session=session)
+print(response.output[:60])
 ```
 
 ______________________________________________________________________
