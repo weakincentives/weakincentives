@@ -39,22 +39,26 @@ follow-on patches once concrete types are defined.
 
 Published immediately after rendering completes and before the adapter dispatches a request to the provider. Fields:
 
+- `event_id: UUID` – immutable identifier generated with `uuid4()` when the event is constructed.
 - `prompt_ns: str` – namespace of the prompt instance.
 - `prompt_key: str` – key identifying the prompt within the namespace.
 - `prompt_name: str | None` – human readable label when provided.
 - `adapter: str` – adapter identifier preparing to execute the call.
-- `session_id: str | None` – session identifier threading through the orchestration layer.
+- `session_id: UUID | None` – session identifier threading through the orchestration layer.
 - `render_inputs: tuple[SupportsDataclass, ...]` – dataclass params used for rendering.
 - `rendered_prompt: str` – fully rendered prompt text as dispatched to the provider.
-- `created_at: datetime` – timestamp captured before handing off to the provider SDK.
+- `created_at: datetime` – timezone-aware timestamp captured before handing off to the provider SDK.
 
 ### `PromptExecuted`
 
 Emitted exactly once per successful adapter evaluation, after all tool invocations and response parsing finish. Fields:
 
+- `event_id: UUID` – immutable identifier generated with `uuid4()` when the event is constructed.
 - `prompt_name: str` – logical name taken from the `Prompt` instance.
 - `adapter: str` – identifier for the adapter emitting the event (e.g. `openai`, `anthropic`).
 - `result: PromptResponse[Any]` – the structured result returned to the caller.
+- `session_id: UUID | None` – session identifier threading through the orchestration layer.
+- `created_at: datetime` – timezone-aware timestamp captured immediately after evaluation completes.
 
 Adapters SHOULD reuse the `PromptResponse` object they already produce to avoid redundant allocations. Provider-specific
 metadata is intentionally excluded from this minimal event until we have a concrete, typed schema to expose.
@@ -64,12 +68,15 @@ metadata is intentionally excluded from this minimal event until we have a concr
 Emitted every time an adapter executes a tool handler. The dataclass mirrors the information returned through
 `PromptResponse.tool_results` so aggregated tooling data stays consistent across APIs:
 
+- `event_id: UUID` – immutable identifier generated with `uuid4()` when the event is constructed.
 - `prompt_name: str` – name of the prompt that requested the tool invocation.
 - `adapter: str` – adapter identifier.
 - `name: str` – tool identifier provided by the prompt.
 - `params: SupportsDataclass` – dataclass instance passed to the tool handler.
 - `result: ToolResult[Any]` – structured return value from the handler.
 - `call_id: str | None` – provider-specific correlation identifier when available.
+- `session_id: UUID | None` – session identifier threading through the orchestration layer.
+- `created_at: datetime` – timezone-aware timestamp captured immediately after the handler returns.
 
 Adapters SHOULD publish `ToolInvoked` immediately after the handler returns. A failure is signalled via
 `result.success=False`, and in that case `result.value` MAY be `None`.

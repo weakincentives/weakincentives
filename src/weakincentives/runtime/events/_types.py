@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, cast, override
+from uuid import UUID, uuid4
 
 from ...prompt._types import SupportsDataclass
 from ...prompt.tool_result import ToolResult
@@ -90,10 +91,11 @@ class ToolInvoked:
     name: str
     params: SupportsDataclass
     result: ToolResult[object]
-    session_id: str | None
+    session_id: UUID | None
     created_at: datetime
     value: SupportsDataclass | None = None
     call_id: str | None = None
+    event_id: UUID = field(default_factory=uuid4)
 
 
 __all__ = [
