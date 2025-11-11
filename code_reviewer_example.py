@@ -204,6 +204,7 @@ def main() -> None:
         if lowered == "plan":
             print(session.render_plan_snapshot())
             continue
+        session.reset()
         answer = session.evaluate(prompt)
         print(f"Agent: {answer}")
 
@@ -295,6 +296,11 @@ class SunfishReviewSession:
         if response.text:
             return response.text
         return "(no response from assistant)"
+
+    def reset(self) -> None:
+        """Clear session state before starting a new review turn."""
+
+        self._session.reset()
 
     def render_tool_history(self) -> str:
         with self._history_lock:

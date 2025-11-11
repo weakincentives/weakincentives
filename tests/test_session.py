@@ -504,6 +504,24 @@ def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) 
         session.snapshot()
 
 
+def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    session.register_reducer(ExampleOutput, append)
+
+    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    assert first_result.ok
+    assert session.select_all(ExampleOutput)
+
+    session.reset()
+
+    assert session.select_all(ExampleOutput) == ()
+
+    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    assert second_result.ok
+    assert session.select_all(ExampleOutput) == (ExampleOutput(text="second"),)
+
+
 def test_clone_preserves_state_and_reducer_registration(
     session_factory: SessionFactory,
 ) -> None:

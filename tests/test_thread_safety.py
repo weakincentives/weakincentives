@@ -217,3 +217,21 @@ def test_sunfish_review_session_records_history_concurrently(tmp_path: Path) -> 
     assert recorded_names == {f"example-{index}" for index in range(total_events)}
     recorded_indexes = {int(entry.split(". ", 1)[0]) for entry in entries}
     assert recorded_indexes == set(range(1, total_events + 1))
+
+
+def test_sunfish_review_session_reset_clears_runtime_state(tmp_path: Path) -> None:
+    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
+    session = SunfishReviewSession(
+        adapter=_StubAdapter(),
+        overrides_store=overrides_store,
+        override_tag="reset",
+    )
+
+    runtime_session = session._session
+    runtime_session.seed_slice(str, ("value",))
+
+    assert runtime_session.select_all(str) == ("value",)
+
+    session.reset()
+
+    assert runtime_session.select_all(str) == ()

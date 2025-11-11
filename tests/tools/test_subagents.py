@@ -524,6 +524,9 @@ def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
         def rollback(self, snapshot: SnapshotProtocol) -> None:
             raise NotImplementedError
 
+        def reset(self) -> None:
+            raise NotImplementedError
+
     prompt, rendered = _build_parent_prompt()
     adapter = RecordingAdapter()
     bus = InProcessEventBus()
