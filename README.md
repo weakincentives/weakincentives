@@ -6,39 +6,36 @@ heavy dependencies. Optional adapters snap in when you need a model provider.
 
 ## What's novel?
 
-- **Observable session state with reducer support.** A Redux-like session state
-  manager keeps every tool invocation and prompt interaction observable,
-  replayable, and ready for automation while an in-process event bus publishes
-  `ToolInvoked` and `PromptExecuted` events. Built-in planning, virtual
-  filesystem, and Python-eval sections register reducers, enforce
-  domain-specific validation, and expose guided Markdown so stateful runs stay
-  deterministic.
-- **Composable prompt blueprints with strict contracts.** Prompt composition
-  primitives let you assemble deterministic, typed sections into reusable
-  blueprints. Prompt objects compose trees of dataclass-backed sections, render
-  Markdown with validated placeholders, and automatically surface tool
-  contracts so every render stays predictable.
-- **Chapter-driven visibility controls.** Chapters group sections into coarse
-  visibility boundaries so adapters decide when prompt regions enter the model
-  context. They default to the closed state, keeping sensitive or off-topic
-  material hidden until runtime policies open them. Expansion strategies and
-  lifecycle guidance live in [Chapters Specification](specs/CHAPTERS.md).
-- **Override-friendly workflows that scale into optimization.** First-class
-  support for prompt overrides lays the groundwork for an optimizer that plugs
-  into your development cycle. Prompt definitions ship with hash-based
-  descriptors plus on-disk overrides that stay in sync through schema
-  validation and Git-root discovery. Prompt optimizers become important as your
-  evaluation suite matures, but they are not a day-one requirement—start by
-  writing prompts manually and add automation once you have robust evals.
-- **Provider adapters that standardize tool negotiation.** Provider adapters
-  share a conversation loop that negotiates tool calls, applies JSON-schema
-  response formats, and normalizes structured payloads, making the runtime
-  model-agnostic.
+- **Observable session state with reducer hooks.** A Redux-like session ledger
+  and in-process event bus keep every tool call and prompt render replayable.
+  Built-in planning, virtual filesystem, and Python-evaluation sections ship
+  with reducers that enforce domain rules while emitting structured telemetry.
+  See [Session State](specs/SESSIONS.md), [Prompt Event Emission](specs/EVENTS.md),
+  [Planning Tools](specs/PLANNING_TOOL.md), [Virtual Filesystem Tools](specs/VFS_TOOLS.md),
+  and [Asteval Integration](specs/ASTEVAL.md).
+- **Composable prompt blueprints with strict contracts.** Dataclass-backed
+  sections compose into reusable blueprints that render validated Markdown and
+  expose tool contracts automatically. Specs: [Prompt Overview](specs/PROMPTS.md),
+  [Prompt Composition](specs/PROMPTS_COMPOSITION.md), and
+  [Structured Output](specs/STRUCTURED_OUTPUT.md).
+- **Chapter-driven visibility controls.** Chapters gate when prompt regions
+  enter the model context, defaulting to closed until runtime policies open
+  them. Expansion strategies and lifecycle guidance live in
+  [Chapters Specification](specs/CHAPTERS.md).
+- **Override-friendly workflows that scale into optimization.** Prompt
+  definitions ship with hash-based descriptors and on-disk overrides that stay
+  in sync through schema validation and Git-root discovery, laying the
+  groundwork for iterative optimization. Review
+  [Prompt Overrides](specs/PROMPT_OVERRIDES.md) for the full contract.
+- **Provider adapters standardize tool negotiation.** Shared conversation
+  loops negotiate tool calls, apply JSON-schema response formats, and normalize
+  structured payloads so the runtime stays model-agnostic. See
+  [Adapter Specification](specs/ADAPTERS.md) and provider-specific docs such as
+  [LiteLLM Adapter](specs/LITE_LLM_ADAPTER.md).
 - **Local-first, deterministic execution.** Everything runs locally without
-  mandatory APIs or hosted services, and every render stays
-  version-control-friendly so diffs capture intent instead of churn. The
-  code-review example ties it together with override-aware prompts, session
-  telemetry, and replayable tooling for deterministic agent runs.
+  hosted dependencies, and prompt renders stay diff-friendly so version control
+  captures intent instead of churn. The code-review example ties it together
+  with override-aware prompts, session telemetry, and replayable tooling.
 
 ## Requirements
 
