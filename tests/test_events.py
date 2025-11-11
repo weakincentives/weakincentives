@@ -62,6 +62,7 @@ def test_null_event_bus_is_noop() -> None:
             result=make_prompt_response("demo"),
             session_id="session-1",
             created_at=datetime.now(UTC),
+            duration_ms=0.0,
             value=None,
         )
     )
@@ -83,6 +84,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
         result=make_prompt_response("demo"),
         session_id="session-1",
         created_at=datetime.now(UTC),
+        duration_ms=0.0,
         value=None,
     )
 
@@ -92,6 +94,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
     assert result.handlers_invoked == ()
     assert result.errors == ()
     assert result.handled_count == 0
+    assert event.duration_ms == 0.0
     result.raise_if_errors()
 
 
@@ -136,6 +139,7 @@ def test_in_process_bus_delivers_in_order() -> None:
         result=make_prompt_response("demo"),
         session_id="session-1",
         created_at=datetime.now(UTC),
+        duration_ms=0.0,
         value=None,
     )
     result = bus.publish(event)
@@ -170,6 +174,7 @@ def test_in_process_bus_isolates_handler_exceptions(
         result=make_prompt_response("demo"),
         session_id="session-1",
         created_at=datetime.now(UTC),
+        duration_ms=0.0,
         value=None,
     )
     with caplog.at_level(logging.ERROR, logger="weakincentives.runtime.events"):
@@ -210,6 +215,7 @@ def test_publish_result_raise_if_errors() -> None:
             result=make_prompt_response("demo"),
             session_id="session-1",
             created_at=datetime.now(UTC),
+            duration_ms=0.0,
             value=None,
         )
     )
@@ -248,6 +254,7 @@ def test_tool_invoked_event_fields() -> None:
         call_id="abc123",
         session_id="session-123",
         created_at=datetime.now(UTC),
+        duration_ms=42.0,
         value=_Payload(value="data"),
     )
 
@@ -261,3 +268,4 @@ def test_tool_invoked_event_fields() -> None:
     assert isinstance(event.value, _Payload)
     assert event.result is result
     assert event.call_id == "abc123"
+    assert event.duration_ms == 42.0

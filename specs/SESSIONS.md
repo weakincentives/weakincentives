@@ -27,8 +27,9 @@ all state transitions are pure functions driven by the event stream.
 
 - `DataEvent[T]` – Events dispatched to reducers. `ToolInvoked` and
   `PromptExecuted` provide a `.value` field that may reference a dataclass payload
-  or `None`. `PromptRendered` exposes itself via `.value` to align with the same
-  reducer contract.
+  or `None`. Both event types also expose `duration_ms`, capturing execution latency
+  metadata that reducers MAY record but MUST otherwise treat as read-only. `PromptRendered`
+  exposes itself via `.value` to align with the same reducer contract.
 - **Slice** – The tuple of accumulated dataclass instances managed for a reducer.
   The slice element type may be the same as `T` or a separate dataclass.
 - **Reducer** – A pure function responsible for producing a new slice when a

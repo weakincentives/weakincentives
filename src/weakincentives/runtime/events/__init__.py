@@ -104,6 +104,7 @@ class PromptExecuted:
     result: PromptResponse[object]
     session_id: str | None
     created_at: datetime
+    duration_ms: float
     value: SupportsDataclass | None = None
 
 

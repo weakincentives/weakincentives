@@ -95,6 +95,7 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
         call_id=str(index),
         session_id="threaded-session",
         created_at=datetime.now(UTC),
+        duration_ms=float(index),
         value=result_payload,
     )
     bus.publish(event)
@@ -118,6 +119,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         call_id="999",
         session_id="threaded-session",
         created_at=datetime.now(UTC),
+        duration_ms=99.9,
         value=result_payload,
     )
 
@@ -143,6 +145,7 @@ def test_session_collects_tool_data_across_threads() -> None:
     assert {data.call_id for data in tool_data} == {
         str(index) for index in range(total_events)
     }
+    assert all(isinstance(data.duration_ms, float) for data in tool_data)
 
     result_slice = session.select_all(ExampleResult)
     assert len(result_slice) == total_events

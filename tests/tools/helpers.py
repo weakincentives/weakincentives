@@ -94,6 +94,7 @@ def invoke_tool(
         result=cast(ToolResult[object], result),
         session_id=getattr(session, "session_id", None),
         created_at=datetime.now(UTC),
+        duration_ms=0.0,
         value=cast(SupportsDataclass | None, result.value),
     )
     publish_result = bus.publish(event)

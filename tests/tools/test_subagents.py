@@ -101,6 +101,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
                     result=cast(PromptResponse[object], response),
                     session_id=getattr(session, "session_id", None),
                     created_at=datetime.now(UTC),
+                    duration_ms=0.0,
                     value=(
                         cast(SupportsDataclass, response.output)
                         if response.output is not None and is_dataclass(response.output)

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
@@ -260,6 +261,8 @@ def execute_tool_call(
         call_id=call_id,
     )
     tool_params: SupportsDataclass | None = None
+    handler_start: float | None = None
+    duration_ms = 0.0
     tool_result: ToolResult[SupportsDataclass]
     try:
         try:
@@ -282,7 +285,9 @@ def execute_tool_call(
             session=session,
             event_bus=bus,
         )
+        handler_start = time.perf_counter()
         tool_result = handler(tool_params, context=context)
+        duration_ms = (time.perf_counter() - handler_start) * 1000
     except ToolValidationError as error:
         if tool_params is None:  # pragma: no cover - defensive
             tool_params = cast(
@@ -313,6 +318,8 @@ def execute_tool_call(
             value=None,
             success=False,
         )
+        if handler_start is not None:
+            duration_ms = (time.perf_counter() - handler_start) * 1000
     else:
         log.info(
             "Tool handler completed.",
@@ -341,6 +348,7 @@ def execute_tool_call(
         result=cast(ToolResult[object], tool_result),
         session_id=session_id,
         created_at=datetime.now(UTC),
+        duration_ms=duration_ms,
         value=dataclass_value,
         call_id=call_id,
     )
@@ -622,6 +630,7 @@ class ConversationRunner[OutputT]:
     _provider_payload: dict[str, Any] | None = field(init=False, default=None)
     _next_tool_choice: ToolChoice = field(init=False)
     _should_parse_structured_output: bool = field(init=False)
+    _prompt_start_time: float = field(init=False, default=0.0)
 
     def run(self) -> PromptResponse[OutputT]:
         """Execute the conversation loop and return the final response."""
@@ -658,6 +667,7 @@ class ConversationRunner[OutputT]:
     def _prepare_payload(self) -> None:
         """Initialize execution state prior to the provider loop."""
 
+        self._prompt_start_time = time.perf_counter()
         self._messages = list(self.initial_messages)
         self._log = (self.logger_override or logger).bind(
             adapter=self.adapter_name,
@@ -843,6 +853,11 @@ class ConversationRunner[OutputT]:
                 result=cast(PromptResponse[object], response_payload),
                 session_id=getattr(self.session, "session_id", None),
                 created_at=datetime.now(UTC),
+                duration_ms=(
+                    (time.perf_counter() - self._prompt_start_time) * 1000
+                    if self._prompt_start_time
+                    else 0.0
+                ),
                 value=prompt_value,
             )
         )

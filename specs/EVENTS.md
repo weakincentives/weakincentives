@@ -55,6 +55,8 @@ Emitted exactly once per successful adapter evaluation, after all tool invocatio
 - `prompt_name: str` – logical name taken from the `Prompt` instance.
 - `adapter: str` – identifier for the adapter emitting the event (e.g. `openai`, `anthropic`).
 - `result: PromptResponse[Any]` – the structured result returned to the caller.
+- `duration_ms: float` – elapsed wall time in milliseconds measured from prompt dispatch
+  to response finalization using a monotonic clock.
 
 Adapters SHOULD reuse the `PromptResponse` object they already produce to avoid redundant allocations. Provider-specific
 metadata is intentionally excluded from this minimal event until we have a concrete, typed schema to expose.
@@ -70,6 +72,8 @@ Emitted every time an adapter executes a tool handler. The dataclass mirrors the
 - `params: SupportsDataclass` – dataclass instance passed to the tool handler.
 - `result: ToolResult[Any]` – structured return value from the handler.
 - `call_id: str | None` – provider-specific correlation identifier when available.
+- `duration_ms: float` – milliseconds spent executing the handler (or zero when validation
+  fails before invocation) measured via a monotonic clock.
 
 Adapters SHOULD publish `ToolInvoked` immediately after the handler returns. A failure is signalled via
 `result.success=False`, and in that case `result.value` MAY be `None`.

@@ -64,6 +64,7 @@ def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
         result=cast(ToolResult[object], result),
         session_id="session-example",
         created_at=datetime.now(UTC),
+        duration_ms=0.0,
         value=value,
     )
 
@@ -663,6 +664,7 @@ def test_reducers_ignore_events_without_plan() -> None:
 
     context = _make_reducer_context()
 
+    assert add_event.duration_ms == 0.0
     assert _add_step_reducer((), add_event, context=context) == ()
     assert _update_step_reducer((), update_event, context=context) == ()
     assert _mark_step_reducer((), mark_event, context=context) == ()

@@ -75,6 +75,7 @@ def make_tool_event(value: int) -> ToolInvoked:
         result=tool_result,
         session_id="session-example",
         created_at=datetime.now(UTC),
+        duration_ms=1.23,
         value=payload,
     )
 
@@ -98,6 +99,7 @@ def make_prompt_event(output: object) -> PromptExecuted:
         result=response,
         session_id="session-example",
         created_at=datetime.now(UTC),
+        duration_ms=2.34,
         value=prompt_value,
     )
 
@@ -129,6 +131,8 @@ def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> N
 
     assert first_result.ok
     assert second_result.ok
+    tool_events = session.select_all(ToolInvoked)
+    assert tool_events and tool_events[0].duration_ms == pytest.approx(1.23)
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
 
 
@@ -144,6 +148,7 @@ def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) ->
         result=cast(ToolResult[object], ToolResult(message="ok", value=payload)),
         session_id="session-example",
         created_at=datetime.now(UTC),
+        duration_ms=7.89,
         value=None,
     )
 
@@ -151,6 +156,7 @@ def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) ->
 
     tool_events = session.select_all(ToolInvoked)
     assert tool_events[0].value == payload
+    assert tool_events[0].duration_ms == pytest.approx(7.89)
     assert session.select_all(ExamplePayload) == (payload,)
 
 
@@ -184,6 +190,8 @@ def test_prompt_executed_emits_multiple_dataclasses(
 
     assert result.ok
     assert session.select_all(ExampleOutput) == tuple(outputs)
+    prompt_events = session.select_all(PromptExecuted)
+    assert prompt_events and prompt_events[0].duration_ms == pytest.approx(2.34)
 
 
 def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> None:
@@ -240,6 +248,8 @@ def test_default_append_used_when_no_custom_reducer(
     result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
     assert result.ok
+    prompt_events = session.select_all(PromptExecuted)
+    assert prompt_events and prompt_events[0].duration_ms == pytest.approx(2.34)
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="hello"),)
 
 
@@ -264,6 +274,7 @@ def test_prompt_executed_enriches_missing_value(
         ),
         session_id="session-example",
         created_at=datetime.now(UTC),
+        duration_ms=5.67,
         value=None,
     )
 
@@ -271,6 +282,7 @@ def test_prompt_executed_enriches_missing_value(
 
     prompt_events = session.select_all(PromptExecuted)
     assert prompt_events[0].value == output
+    assert prompt_events[0].duration_ms == pytest.approx(5.67)
     assert session.select_all(ExampleOutput) == (output,)
 
 
@@ -288,6 +300,7 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
         ),
         session_id="session-example",
         created_at=datetime.now(UTC),
+        duration_ms=4.56,
         value=None,
     )
 
@@ -349,6 +362,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
         result=failure,
         session_id="session-example",
         created_at=datetime.now(UTC),
+        duration_ms=9.01,
         value=None,
     )
     bus.publish(failure_event)
@@ -358,6 +372,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
     assert tool_events[0].value == ExamplePayload(value=1)
     assert tool_events[1].value is None
     assert tool_events[1].result.success is False
+    assert tool_events[1].duration_ms == pytest.approx(9.01)
 
 
 def test_selector_helpers_delegate_to_session(session_factory: SessionFactory) -> None:

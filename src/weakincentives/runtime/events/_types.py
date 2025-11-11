@@ -92,6 +92,7 @@ class ToolInvoked:
     result: ToolResult[object]
     session_id: str | None
     created_at: datetime
+    duration_ms: float
     value: SupportsDataclass | None = None
     call_id: str | None = None
 
