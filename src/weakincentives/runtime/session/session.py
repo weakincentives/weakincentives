@@ -162,6 +162,18 @@ class Session(SessionProtocol):
             self._state[slice_type] = tuple(values)
 
     @override
+    def reset(self) -> None:
+        """Clear all stored slices while preserving reducer registrations."""
+
+        with self._lock:
+            slice_types = set(self._state)
+            for registrations in self._reducers.values():
+                for registration in registrations:
+                    slice_types.add(registration.slice_type)
+
+            self._state = dict.fromkeys(slice_types, ())
+
+    @override
     def snapshot(self) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state."""
 

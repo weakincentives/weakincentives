@@ -28,5 +28,7 @@ class SessionProtocol(Protocol):
 
     def rollback(self, snapshot: SnapshotProtocol) -> None: ...
 
+    def reset(self) -> None: ...
+
 
 __all__ = ["SessionProtocol", "SnapshotProtocol"]

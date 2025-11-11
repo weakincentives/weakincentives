@@ -376,6 +376,9 @@ class SessionStub(SessionProtocol):
     def rollback(self, snapshot: SnapshotProtocol) -> None:
         self.rollbacks.append(snapshot)
 
+    def reset(self) -> None:
+        pass
+
 
 def test_conversation_runner_rolls_back_on_publish_failure() -> None:
     tool = Tool[EchoParams, EchoPayload](
