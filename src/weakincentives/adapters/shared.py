@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from uuid import uuid4
 
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt, RenderedPrompt
@@ -343,6 +344,7 @@ def execute_tool_call(
         created_at=datetime.now(UTC),
         value=dataclass_value,
         call_id=call_id,
+        event_id=uuid4(),
     )
     publish_result = bus.publish(invocation)
     if not publish_result.ok:
@@ -695,6 +697,7 @@ class ConversationRunner[OutputT]:
                 render_inputs=self.render_inputs,
                 rendered_prompt=self.rendered.text,
                 created_at=datetime.now(UTC),
+                event_id=uuid4(),
             )
         )
         if not publish_result.ok:
@@ -844,6 +847,7 @@ class ConversationRunner[OutputT]:
                 session_id=getattr(self.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 value=prompt_value,
+                event_id=uuid4(),
             )
         )
         if not publish_result.ok:

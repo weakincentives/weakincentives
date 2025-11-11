@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, is_dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -46,6 +47,9 @@ if TYPE_CHECKING:
     from tests.conftest import SessionFactory
 
 
+DEFAULT_SESSION_ID = uuid4()
+
+
 @dataclass(slots=True, frozen=True)
 class ExampleParams:
     value: int
@@ -73,7 +77,7 @@ def make_tool_event(value: int) -> ToolInvoked:
         name="tool",
         params=ExampleParams(value=value),
         result=tool_result,
-        session_id="session-example",
+        session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=payload,
     )
@@ -96,7 +100,7 @@ def make_prompt_event(output: object) -> PromptExecuted:
         prompt_name="example",
         adapter="adapter",
         result=response,
-        session_id="session-example",
+        session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=prompt_value,
     )
@@ -105,7 +109,7 @@ def make_prompt_event(output: object) -> PromptExecuted:
 def make_prompt_rendered(
     *,
     rendered_prompt: str,
-    session_id: str | None = None,
+    session_id: UUID | None = None,
     params_value: int = 1,
 ) -> PromptRendered:
     return PromptRendered(
@@ -130,6 +134,7 @@ def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> N
     assert first_result.ok
     assert second_result.ok
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
+    assert isinstance(event.event_id, UUID)
 
 
 def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) -> None:
@@ -142,7 +147,7 @@ def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) ->
         name="tool",
         params=ExampleParams(value=7),
         result=cast(ToolResult[object], ToolResult(message="ok", value=payload)),
-        session_id="session-example",
+        session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=None,
     )
@@ -161,7 +166,7 @@ def test_prompt_rendered_appends_start_event(
 
     event = make_prompt_rendered(
         rendered_prompt="Rendered prompt text",
-        session_id="session-1",
+        session_id=uuid4(),
     )
 
     result = bus.publish(event)
@@ -171,6 +176,7 @@ def test_prompt_rendered_appends_start_event(
     assert lifecycle == (event,)
     assert lifecycle[0].rendered_prompt == "Rendered prompt text"
     assert lifecycle[0].value is event
+    assert isinstance(event.event_id, UUID)
 
 
 def test_prompt_executed_emits_multiple_dataclasses(
@@ -262,7 +268,7 @@ def test_prompt_executed_enriches_missing_value(
                 provider_payload=None,
             ),
         ),
-        session_id="session-example",
+        session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=None,
     )
@@ -286,7 +292,7 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
         result=cast(
             ToolResult[object], ToolResult(message="ok", value="not a dataclass")
         ),
-        session_id="session-example",
+        session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=None,
     )
@@ -347,7 +353,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
         name="tool",
         params=ExampleParams(value=2),
         result=failure,
-        session_id="session-example",
+        session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=None,
     )
@@ -501,7 +507,11 @@ def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) 
 def test_clone_preserves_state_and_reducer_registration(
     session_factory: SessionFactory,
 ) -> None:
-    session, bus = session_factory(session_id="source", created_at="now")
+    provided_session_id = uuid4()
+    provided_created_at = datetime.now(UTC)
+    session, bus = session_factory(
+        session_id=provided_session_id, created_at=provided_created_at
+    )
 
     session.register_reducer(ExampleOutput, replace_latest)
 
@@ -511,8 +521,8 @@ def test_clone_preserves_state_and_reducer_registration(
     clone_bus = InProcessEventBus()
     clone = session.clone(bus=clone_bus)
 
-    assert clone.session_id == "source"
-    assert clone.created_at == "now"
+    assert clone.session_id == provided_session_id
+    assert clone.created_at == provided_created_at
     assert clone.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
     assert clone._reducers.keys() == session._reducers.keys()
@@ -536,10 +546,14 @@ def test_clone_attaches_to_new_bus_when_provided(
     source_bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     target_bus = InProcessEventBus()
-    clone = session.clone(bus=target_bus, session_id="clone", created_at="later")
+    clone_session_id = uuid4()
+    clone_created_at = datetime.now(UTC)
+    clone = session.clone(
+        bus=target_bus, session_id=clone_session_id, created_at=clone_created_at
+    )
 
-    assert clone.session_id == "clone"
-    assert clone.created_at == "later"
+    assert clone.session_id == clone_session_id
+    assert clone.created_at == clone_created_at
     assert clone.select_all(ExampleOutput) == session.select_all(ExampleOutput)
 
     target_bus.publish(make_prompt_event(ExampleOutput(text="from clone")))
@@ -550,3 +564,11 @@ def test_clone_attaches_to_new_bus_when_provided(
     source_bus.publish(make_prompt_event(ExampleOutput(text="original")))
 
     assert session.select_all(ExampleOutput)[-1] == ExampleOutput(text="original")
+
+
+def test_session_requires_timezone_aware_created_at() -> None:
+    bus = InProcessEventBus()
+    naive_timestamp = datetime.now()
+
+    with pytest.raises(ValueError):
+        Session(bus=bus, created_at=naive_timestamp)

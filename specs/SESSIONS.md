@@ -17,7 +17,8 @@ all state transitions are pure functions driven by the event stream.
    functions. Reducers run synchronously on the publisher thread.
 1. **Event bus integration** – Sessions subscribe to `PromptRendered`, `ToolInvoked`,
    and `PromptExecuted` from `weakincentives.runtime.events`. They ignore every
-   other event type.
+   other event type. Each session and event carries a UUID identifier plus a
+   timezone-aware creation timestamp for downstream correlation.
 1. **Default behavior that works** – Without custom reducers, the Session appends new
    dataclass values (deduping by equality) and keeps results immutable.
 1. **Flexible slices** – Reducers may manage a slice whose element type differs from
@@ -75,15 +76,15 @@ src/weakincentives/session/
 ```python
 class Session:
     def __init__(self, *, bus: EventBus,
-                 session_id: str | None = None,
-                 created_at: str | None = None) -> None: ...
+                 session_id: UUID | None = None,
+                 created_at: datetime | None = None) -> None: ...
 
     def clone(
         self,
         *,
         bus: EventBus,
-        session_id: str | None = None,
-        created_at: str | None = None,
+        session_id: UUID | None = None,
+        created_at: datetime | None = None,
     ) -> "Session": ...
 
     def register_reducer[T, S](
@@ -123,6 +124,9 @@ class Snapshot:
   and reducer registrations. Passing `bus`, `session_id`, or `created_at` overrides
   the copied metadata; omitted parameters reuse the original values. Clones attach
   to the provided event bus without modifying the original session subscription.
+- When callers omit `session_id` or `created_at`, the constructor automatically
+  generates a UUID (`uuid4()`) and captures `datetime.now(UTC)` respectively. The
+  timestamp MUST be timezone-aware; naive datetimes raise `ValueError`.
 - `snapshot()` captures the immutable slice mapping without blocking event
   publication and returns a value object representing the captured state.
 - `rollback()` replaces the Session's slice mapping with the tuples stored in the

@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, cast, override
+from uuid import UUID, uuid4
 
 from ...prompt._types import SupportsDataclass
 from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
@@ -73,12 +74,20 @@ class Session(SessionProtocol):
         self,
         *,
         bus: EventBus,
-        session_id: str | None = None,
-        created_at: str | None = None,
+        session_id: UUID | None = None,
+        created_at: datetime | None = None,
     ) -> None:
         super().__init__()
-        self.session_id = session_id
-        self.created_at = created_at
+        resolved_session_id = session_id if session_id is not None else uuid4()
+        resolved_created_at = (
+            created_at if created_at is not None else datetime.now(UTC)
+        )
+        if resolved_created_at.tzinfo is None:
+            msg = "Session created_at must be timezone-aware."
+            raise ValueError(msg)
+
+        self.session_id: UUID = resolved_session_id
+        self.created_at: datetime = resolved_created_at.astimezone(UTC)
         self._bus: EventBus = bus
         self._reducers: dict[type[SupportsDataclass], list[_ReducerRegistration]] = {}
         self._state: dict[type[Any], tuple[Any, ...]] = {}
@@ -90,8 +99,8 @@ class Session(SessionProtocol):
         self,
         *,
         bus: EventBus,
-        session_id: str | None = None,
-        created_at: str | None = None,
+        session_id: UUID | None = None,
+        created_at: datetime | None = None,
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
 

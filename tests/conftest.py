@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Protocol
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -24,8 +26,8 @@ class SessionFactory(Protocol):
     def __call__(
         self,
         *,
-        session_id: str | None = None,
-        created_at: str | None = None,
+        session_id: UUID | None = None,
+        created_at: datetime | None = None,
     ) -> tuple[Session, InProcessEventBus]:
         """Return a newly constructed session and bus pair."""
 
@@ -36,11 +38,19 @@ def session_factory() -> SessionFactory:
 
     def factory(
         *,
-        session_id: str | None = None,
-        created_at: str | None = None,
+        session_id: UUID | None = None,
+        created_at: datetime | None = None,
     ) -> tuple[Session, InProcessEventBus]:
         bus = InProcessEventBus()
-        session = Session(bus=bus, session_id=session_id, created_at=created_at)
+        resolved_session_id = session_id if session_id is not None else uuid4()
+        resolved_created_at = (
+            created_at if created_at is not None else datetime.now(UTC)
+        )
+        session = Session(
+            bus=bus,
+            session_id=resolved_session_id,
+            created_at=resolved_created_at,
+        )
         return session, bus
 
     return factory

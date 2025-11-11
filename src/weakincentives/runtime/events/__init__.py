@@ -14,10 +14,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from threading import RLock
 from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 from ...prompt._types import SupportsDataclass
 from ..logging import StructuredLogger, get_logger
@@ -102,9 +103,10 @@ class PromptExecuted:
     prompt_name: str
     adapter: str
     result: PromptResponse[object]
-    session_id: str | None
+    session_id: UUID | None
     created_at: datetime
     value: SupportsDataclass | None = None
+    event_id: UUID = field(default_factory=uuid4)
 
 
 @dataclass(slots=True, frozen=True)
@@ -115,10 +117,11 @@ class PromptRendered:
     prompt_key: str
     prompt_name: str | None
     adapter: str
-    session_id: str | None
+    session_id: UUID | None
     render_inputs: tuple[SupportsDataclass, ...]
     rendered_prompt: str
     created_at: datetime
+    event_id: UUID = field(default_factory=uuid4)
 
     @property
     def value(self) -> SupportsDataclass:

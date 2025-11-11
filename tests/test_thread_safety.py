@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 from code_reviewer_example import ReviewResponse, SunfishReviewSession
 from weakincentives.adapters import PromptResponse
@@ -29,6 +30,8 @@ from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOve
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
+
+THREAD_SESSION_ID = uuid4()
 
 
 @dataclass(slots=True)
@@ -93,7 +96,7 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
         params=params,
         result=cast(ToolResult[object], result),
         call_id=str(index),
-        session_id="threaded-session",
+        session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
         value=result_payload,
     )
@@ -116,7 +119,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         params=params,
         result=cast(ToolResult[object], tool_result),
         call_id="999",
-        session_id="threaded-session",
+        session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
         value=result_payload,
     )

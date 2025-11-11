@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -60,7 +61,7 @@ def test_null_event_bus_is_noop() -> None:
             prompt_name="demo",
             adapter="test",
             result=make_prompt_response("demo"),
-            session_id="session-1",
+            session_id=uuid4(),
             created_at=datetime.now(UTC),
             value=None,
         )
@@ -81,7 +82,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
         prompt_name="demo",
         adapter="test",
         result=make_prompt_response("demo"),
-        session_id="session-1",
+        session_id=uuid4(),
         created_at=datetime.now(UTC),
         value=None,
     )
@@ -93,6 +94,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
     assert result.errors == ()
     assert result.handled_count == 0
     result.raise_if_errors()
+    assert isinstance(event.event_id, UUID)
 
 
 def test_publish_prompt_rendered_returns_success() -> None:
@@ -103,7 +105,7 @@ def test_publish_prompt_rendered_returns_success() -> None:
         prompt_key="greeting",
         prompt_name="Demo Prompt",
         adapter="test",
-        session_id="session-1",
+        session_id=uuid4(),
         render_inputs=(_Params(value=1),),
         rendered_prompt="Render result",
         created_at=datetime.now(UTC),
@@ -113,6 +115,7 @@ def test_publish_prompt_rendered_returns_success() -> None:
 
     assert result.ok
     assert result.errors == ()
+    assert isinstance(event.event_id, UUID)
 
 
 def test_in_process_bus_delivers_in_order() -> None:
@@ -134,7 +137,7 @@ def test_in_process_bus_delivers_in_order() -> None:
         prompt_name="demo",
         adapter="test",
         result=make_prompt_response("demo"),
-        session_id="session-1",
+        session_id=uuid4(),
         created_at=datetime.now(UTC),
         value=None,
     )
@@ -145,6 +148,7 @@ def test_in_process_bus_delivers_in_order() -> None:
     assert result.errors == ()
     assert result.ok
     assert result.handled_count == 2
+    assert isinstance(event.event_id, UUID)
 
 
 def test_in_process_bus_isolates_handler_exceptions(
@@ -168,7 +172,7 @@ def test_in_process_bus_isolates_handler_exceptions(
         prompt_name="demo",
         adapter="test",
         result=make_prompt_response("demo"),
-        session_id="session-1",
+        session_id=uuid4(),
         created_at=datetime.now(UTC),
         value=None,
     )
@@ -208,7 +212,7 @@ def test_publish_result_raise_if_errors() -> None:
             prompt_name="demo",
             adapter="test",
             result=make_prompt_response("demo"),
-            session_id="session-1",
+            session_id=uuid4(),
             created_at=datetime.now(UTC),
             value=None,
         )
@@ -246,7 +250,7 @@ def test_tool_invoked_event_fields() -> None:
         params=_Params(value=1),
         result=result,
         call_id="abc123",
-        session_id="session-123",
+        session_id=uuid4(),
         created_at=datetime.now(UTC),
         value=_Payload(value="data"),
     )
@@ -256,8 +260,9 @@ def test_tool_invoked_event_fields() -> None:
     assert event.name == "tool"
     assert isinstance(event.params, _Params)
     assert event.params.value == 1
-    assert event.session_id == "session-123"
+    assert isinstance(event.session_id, UUID)
     assert isinstance(event.created_at, datetime)
     assert isinstance(event.value, _Payload)
     assert event.result is result
     assert event.call_id == "abc123"
+    assert isinstance(event.event_id, UUID)

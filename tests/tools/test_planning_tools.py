@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import cast
+from uuid import uuid4
 
 import pytest
 
@@ -62,7 +63,7 @@ def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
         name=name,
         params=value,
         result=cast(ToolResult[object], result),
-        session_id="session-example",
+        session_id=uuid4(),
         created_at=datetime.now(UTC),
         value=value,
     )
