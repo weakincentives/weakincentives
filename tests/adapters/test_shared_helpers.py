@@ -18,6 +18,7 @@ from typing import Any, cast
 
 import pytest
 
+from tests.helpers.events import NullEventBus
 from weakincentives.adapters import PromptEvaluationError, shared
 from weakincentives.adapters.core import (
     PromptResponse,
@@ -27,7 +28,7 @@ from weakincentives.adapters.core import (
 from weakincentives.prompt import Prompt
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.runtime.events import EventBus, NullEventBus
+from weakincentives.runtime.events import EventBus
 from weakincentives.runtime.session import Session
 
 

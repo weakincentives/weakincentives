@@ -61,6 +61,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         WeirdResponse,
         simple_handler,
     )
+from tests.helpers.events import NullEventBus
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -75,7 +76,6 @@ from weakincentives.runtime.events import (
     EventBus,
     HandlerFailure,
     InProcessEventBus,
-    NullEventBus,
     PromptExecuted,
     ToolInvoked,
 )

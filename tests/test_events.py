@@ -20,12 +20,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from tests.helpers.events import NullEventBus
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
     HandlerFailure,
     InProcessEventBus,
-    NullEventBus,
     PromptExecuted,
     PromptRendered,
     PublishResult,

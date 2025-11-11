@@ -17,9 +17,9 @@ to provide thread-based synchronization only.
   locking. Concurrent calls to `subscribe` and `publish` can race, and a handler
   mutating the registry while the bus iterates over it will trigger
   `RuntimeError` or silently skip subscribers.
-- `NullEventBus` is effectively stateless and thread-safe today, but a unified
-  interface should still guarantee that all bus implementations are safe to use
-  from multiple threads.
+- The test helper `tests.helpers.events.NullEventBus` is effectively stateless
+  and thread-safe today, but a unified interface should still guarantee that
+  all bus implementations are safe to use from multiple threads.
 
 ### Session State Store
 

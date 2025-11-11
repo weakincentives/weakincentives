@@ -20,10 +20,10 @@ from typing import cast
 
 import pytest
 
+from tests.helpers.events import NullEventBus
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
-from weakincentives.runtime.events import NullEventBus
 from weakincentives.runtime.session import Session
 
 pytest.importorskip("openai")

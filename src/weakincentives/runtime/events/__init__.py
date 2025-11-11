@@ -40,22 +40,6 @@ def _describe_handler(handler: EventHandler) -> str:
 logger: StructuredLogger = get_logger(__name__, context={"component": "event_bus"})
 
 
-class NullEventBus:
-    """Event bus implementation that discards all events."""
-
-    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
-        """No-op subscription hook."""
-
-    def publish(self, event: object) -> PublishResult:
-        """Drop the provided event instance."""
-
-        return PublishResult(
-            event=event,
-            handlers_invoked=(),
-            errors=(),
-        )
-
-
 class InProcessEventBus:
     """Process-local event bus that delivers events synchronously."""
 
@@ -134,7 +118,6 @@ __all__ = [
     "EventBus",
     "HandlerFailure",
     "InProcessEventBus",
-    "NullEventBus",
     "PromptExecuted",
     "PromptRendered",
     "PublishResult",
