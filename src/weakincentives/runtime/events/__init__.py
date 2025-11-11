@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from threading import RLock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...prompt._types import SupportsDataclass
 from ..logging import StructuredLogger, get_logger
@@ -108,6 +108,22 @@ class PromptExecuted:
 
 
 @dataclass(slots=True, frozen=True)
+class PromptExecutionFailed:
+    """Event emitted when a prompt evaluation fails."""
+
+    prompt_ns: str
+    prompt_key: str
+    prompt_name: str | None
+    adapter: str
+    session_id: str | None
+    phase: str
+    exception_type: str
+    exception_message: str
+    created_at: datetime
+    provider_payload: dict[str, Any] | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class PromptRendered:
     """Event emitted immediately before dispatching a rendered prompt."""
 
@@ -133,6 +149,7 @@ __all__ = [
     "InProcessEventBus",
     "NullEventBus",
     "PromptExecuted",
+    "PromptExecutionFailed",
     "PromptRendered",
     "PublishResult",
     "ToolInvoked",

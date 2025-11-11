@@ -35,6 +35,7 @@ from weakincentives.runtime.events import (
     EventBus,
     HandlerFailure,
     PromptExecuted,
+    PromptExecutionFailed,
     PromptRendered,
     PublishResult,
     ToolInvoked,
@@ -97,11 +98,13 @@ class RecordingBus(EventBus):
         fail_rendered: bool = False,
         fail_tool: bool = False,
         fail_prompt: bool = False,
+        fail_prompt_failure: bool = False,
     ) -> None:
         self.events: list[object] = []
         self.fail_rendered = fail_rendered
         self.fail_tool = fail_tool
         self.fail_prompt = fail_prompt
+        self.fail_prompt_failure = fail_prompt_failure
 
     def subscribe(
         self, event_type: type[object], handler: EventHandler
@@ -116,6 +119,8 @@ class RecordingBus(EventBus):
             return self._failure_result(event, "reducer failure")
         if self.fail_prompt and isinstance(event, PromptExecuted):
             return self._failure_result(event, "prompt publish failure")
+        if self.fail_prompt_failure and isinstance(event, PromptExecutionFailed):
+            return self._failure_result(event, "prompt failure publish failure")
         return PublishResult(event=event, handlers_invoked=(), errors=())
 
     @staticmethod
@@ -256,8 +261,81 @@ def test_conversation_runner_raises_on_prompt_publish_failure() -> None:
         runner.run()
 
     assert "prompt publish failure" in str(exc_info.value)
-    assert isinstance(bus.events[-1], PromptExecuted)
+    assert isinstance(bus.events[-2], PromptExecuted)
+    failure_event = cast(PromptExecutionFailed, bus.events[-1])
+    assert isinstance(failure_event, PromptExecutionFailed)
+    assert failure_event.phase == "unexpected"
+    assert failure_event.exception_type == "ExceptionGroup"
+    assert "prompt publish failure" in failure_event.exception_message
+    assert failure_event.provider_payload == {
+        "choices": [{"message": {"content": "Hello"}}]
+    }
     assert provider.calls[0]["messages"][0]["content"] == "system"
+
+
+def test_conversation_runner_logs_prompt_failure_publish_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rendered = RenderedPrompt(
+        text="system",
+        output_type=None,
+        container=None,
+        allow_extra_keys=None,
+    )
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
+    provider = ProviderStub(responses)
+    bus = RecordingBus(fail_prompt=True, fail_prompt_failure=True)
+
+    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
+
+    with (
+        caplog.at_level("ERROR", logger="weakincentives.adapters.shared"),
+        pytest.raises(ExceptionGroup),
+    ):
+        runner.run()
+
+    messages = [record.message for record in caplog.records]
+    assert "Prompt failure event publish failed." in messages
+    assert isinstance(bus.events[-2], PromptExecuted)
+    assert isinstance(bus.events[-1], PromptExecutionFailed)
+
+
+def test_conversation_runner_records_blank_exception_message() -> None:
+    rendered = RenderedPrompt(
+        text="system",
+        output_type=None,
+        container=None,
+        allow_extra_keys=None,
+    )
+
+    class RaisingProvider:
+        def __call__(
+            self,
+            messages: list[dict[str, Any]],
+            tool_specs: Sequence[Mapping[str, Any]],
+            tool_choice: ToolChoice | None,
+            response_format: Mapping[str, Any] | None,
+        ) -> DummyResponse:
+            del messages, tool_specs, tool_choice, response_format
+            raise PromptEvaluationError(
+                "",
+                prompt_name="example",
+                phase="provider",
+            )
+
+    bus = RecordingBus()
+    runner = build_runner(
+        rendered=rendered,
+        provider=cast(ProviderStub, RaisingProvider()),
+        bus=bus,
+    )
+
+    with pytest.raises(PromptEvaluationError):
+        runner.run()
+
+    failure_event = cast(PromptExecutionFailed, bus.events[-1])
+    assert failure_event.exception_message == "PromptEvaluationError"
+    assert failure_event.phase == "provider"
 
 
 @dataclass

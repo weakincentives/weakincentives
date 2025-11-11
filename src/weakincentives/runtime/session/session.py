@@ -21,7 +21,13 @@ from threading import RLock
 from typing import Any, cast, override
 
 from ...prompt._types import SupportsDataclass
-from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
+from ..events import (
+    EventBus,
+    PromptExecuted,
+    PromptExecutionFailed,
+    PromptRendered,
+    ToolInvoked,
+)
 from ..logging import StructuredLogger, get_logger
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
@@ -37,7 +43,7 @@ from .snapshots import (
 logger: StructuredLogger = get_logger(__name__, context={"component": "session"})
 
 
-type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
+type DataEvent = PromptExecuted | PromptExecutionFailed | PromptRendered | ToolInvoked
 
 
 _PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
@@ -46,6 +52,9 @@ _PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
 _TOOL_INVOKED_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolInvoked)
 _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
     type[SupportsDataclass], PromptExecuted
+)
+_PROMPT_FAILED_TYPE: type[SupportsDataclass] = cast(
+    type[SupportsDataclass], PromptExecutionFailed
 )
 
 
@@ -213,6 +222,10 @@ class Session(SessionProtocol):
         prompt_event = cast(PromptExecuted, event)
         self._handle_prompt_executed(prompt_event)
 
+    def _on_prompt_execution_failed(self, event: object) -> None:
+        failed_event = cast(PromptExecutionFailed, event)
+        self._handle_prompt_failed(failed_event)
+
     def _on_prompt_rendered(self, event: object) -> None:
         start_event = cast(PromptRendered, event)
         self._handle_prompt_rendered(start_event)
@@ -264,6 +277,12 @@ class Session(SessionProtocol):
     def _handle_prompt_rendered(self, event: PromptRendered) -> None:
         self._dispatch_data_event(
             _PROMPT_RENDERED_TYPE,
+            cast(ReducerEvent, event),
+        )
+
+    def _handle_prompt_failed(self, event: PromptExecutionFailed) -> None:
+        self._dispatch_data_event(
+            _PROMPT_FAILED_TYPE,
             cast(ReducerEvent, event),
         )
 
@@ -326,6 +345,7 @@ class Session(SessionProtocol):
             self._subscriptions_attached = True
             bus.subscribe(ToolInvoked, self._on_tool_invoked)
             bus.subscribe(PromptExecuted, self._on_prompt_executed)
+            bus.subscribe(PromptExecutionFailed, self._on_prompt_execution_failed)
             bus.subscribe(PromptRendered, self._on_prompt_rendered)
 
 

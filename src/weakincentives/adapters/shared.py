@@ -34,6 +34,7 @@ from ..runtime.events import (
     EventBus,
     HandlerFailure,
     PromptExecuted,
+    PromptExecutionFailed,
     PromptRendered,
     ToolInvoked,
 )
@@ -626,34 +627,58 @@ class ConversationRunner[OutputT]:
     def run(self) -> PromptResponse[OutputT]:
         """Execute the conversation loop and return the final response."""
 
-        self._prepare_payload()
+        def _execute_loop() -> PromptResponse[OutputT]:
+            self._prepare_payload()
 
-        while True:
-            response = self.call_provider(
-                self._messages,
-                self._tool_specs,
-                self._next_tool_choice if self._tool_specs else None,
-                self.response_format,
-            )
-
-            self._provider_payload = extract_payload(response)
-            choice = self.select_choice(response)
-            message = getattr(choice, "message", None)
-            if message is None:
-                raise PromptEvaluationError(
-                    "Provider response did not include a message payload.",
-                    prompt_name=self.prompt_name,
-                    phase="response",
-                    provider_payload=self._provider_payload,
+            while True:
+                response = self.call_provider(
+                    self._messages,
+                    self._tool_specs,
+                    self._next_tool_choice if self._tool_specs else None,
+                    self.response_format,
                 )
 
-            tool_calls_sequence = getattr(message, "tool_calls", None)
-            tool_calls = list(tool_calls_sequence or [])
+                self._provider_payload = extract_payload(response)
+                choice = self.select_choice(response)
+                message = getattr(choice, "message", None)
+                if message is None:
+                    raise PromptEvaluationError(
+                        "Provider response did not include a message payload.",
+                        prompt_name=self.prompt_name,
+                        phase="response",
+                        provider_payload=self._provider_payload,
+                    )
 
-            if not tool_calls:
-                return self._finalize_response(message)
+                tool_calls_sequence = getattr(message, "tool_calls", None)
+                tool_calls = list(tool_calls_sequence or [])
 
-            self._handle_tool_calls(message, tool_calls)
+                if not tool_calls:
+                    return self._finalize_response(message)
+
+                self._handle_tool_calls(message, tool_calls)
+
+        try:
+            return _execute_loop()
+        except PromptEvaluationError as error:
+            self._publish_prompt_failure(
+                phase=error.phase,
+                exception_type=error.__class__.__name__,
+                exception_message=error.message,
+                provider_payload=(
+                    error.provider_payload
+                    if error.provider_payload is not None
+                    else getattr(self, "_provider_payload", None)
+                ),
+            )
+            raise
+        except Exception as error:
+            self._publish_prompt_failure(
+                phase="unexpected",
+                exception_type=error.__class__.__name__,
+                exception_message=str(error),
+                provider_payload=getattr(self, "_provider_payload", None),
+            )
+            raise
 
     def _prepare_payload(self) -> None:
         """Initialize execution state prior to the provider loop."""
@@ -717,6 +742,9 @@ class ConversationRunner[OutputT]:
                 context={"handler_count": publish_result.handled_count},
             )
 
+    def _get_logger(self) -> StructuredLogger:
+        return getattr(self, "_log", self.logger_override or logger)
+
     def _handle_tool_calls(
         self,
         message: object,
@@ -769,6 +797,67 @@ class ConversationRunner[OutputT]:
             tool_choice_mapping = cast(Mapping[str, object], self._next_tool_choice)
             if tool_choice_mapping.get("type") == "function":
                 self._next_tool_choice = "auto"
+
+    def _publish_prompt_failure(
+        self,
+        *,
+        phase: str,
+        exception_type: str,
+        exception_message: str,
+        provider_payload: dict[str, Any] | None,
+    ) -> None:
+        message = exception_message.strip()
+        if not message:
+            message = exception_type
+        payload = provider_payload
+        if payload is None:
+            payload = getattr(self, "_provider_payload", None)
+
+        log = self._get_logger()
+        log.error(
+            "Prompt execution failed.",
+            event="prompt_execution_failed",
+            context={
+                "phase": phase,
+                "exception_type": exception_type,
+                "has_provider_payload": payload is not None,
+            },
+        )
+
+        event = PromptExecutionFailed(
+            prompt_ns=self.prompt.ns,
+            prompt_key=self.prompt.key,
+            prompt_name=self.prompt.name,
+            adapter=self.adapter_name,
+            session_id=getattr(self.session, "session_id", None),
+            phase=phase,
+            exception_type=exception_type,
+            exception_message=message,
+            provider_payload=payload,
+            created_at=datetime.now(UTC),
+        )
+
+        publish_result = self.bus.publish(event)
+        if not publish_result.ok:
+            failure_handlers = [
+                getattr(failure.handler, "__qualname__", repr(failure.handler))
+                for failure in publish_result.errors
+            ]
+            log.error(
+                "Prompt failure event publish failed.",
+                event="prompt_failure_publish_failed",
+                context={
+                    "failure_count": len(publish_result.errors),
+                    "failed_handlers": failure_handlers,
+                },
+            )
+            return
+
+        log.debug(
+            "Prompt failure event published.",
+            event="prompt_failure_event_published",
+            context={"handler_count": publish_result.handled_count},
+        )
 
     def _finalize_response(self, message: object) -> PromptResponse[OutputT]:
         """Assemble and publish the final prompt response."""
