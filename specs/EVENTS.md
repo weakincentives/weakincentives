@@ -21,13 +21,12 @@ prompt execution observable inside a single process.
   dispatch. Implementations MAY batch or queue under the hood but MUST deliver callbacks on the publishing thread by
   default.
 - Subscriptions are type-scoped. Handlers receive concrete event dataclasses, not envelopes or loosely typed dictionaries.
-- The module ships with two ready-made implementations:
-  - `NullEventBus` satisfies the interface and drops every event. Callers can pass it to adapter evaluations when
-    telemetry is not required.
-  - `InProcessEventBus` stores handlers in a per-type registry and iterates over a snapshot on publish. It guarantees
-    in-order delivery and isolates subscriber exceptions by logging and continuing.
-- Callers MUST provide an `EventBus` instance for each adapter evaluation. There is no module-level default; pass
-  `NullEventBus()` to opt out of telemetry or wire up a custom bus scoped to the current request.
+- The module ships with an in-process implementation: `InProcessEventBus` stores handlers in a per-type registry and
+  iterates over a snapshot on publish. It guarantees in-order delivery and isolates subscriber exceptions by logging
+  and continuing.
+- Tests use `tests.helpers.events.NullEventBus` to satisfy the interface while discarding telemetry.
+- Callers MUST provide an `EventBus` instance for each adapter evaluation. There is no module-level default; provide
+  `InProcessEventBus()` or a custom implementation scoped to the current request.
 
 ## Event Dataclasses
 
@@ -157,8 +156,8 @@ the core synchronous semantics.
 ### EventBus Contract Changes
 
 - Update the `EventBus` protocol so `publish` returns `PublishResult` instead of `None`.
-- `NullEventBus.publish` returns a `PublishResult` with the provided event, an empty handler snapshot, zero `handled_count`,
-  and no errors.
+- The test helper `tests.helpers.events.NullEventBus.publish` returns a `PublishResult` with the provided event, an empty
+  handler snapshot, zero `handled_count`, and no errors.
 - `InProcessEventBus.publish` collects a snapshot of handlers for the event type before iterating, preserving the current
   isolation guarantee.
   - On each handler invocation:
@@ -184,7 +183,7 @@ the core synchronous semantics.
 - Update existing tests that interact with the event bus (adapters, sessions, tools) to either assert `.ok` where
   appropriate or to ignore the return value explicitly so static type checkers remain satisfied. Helper utilities may
   need `assert bus.publish(...).ok` or assignment to `_` to avoid unused-value linting depending on context.
-- Consider adding a smoke test ensuring that `NullEventBus.publish` returns a result object with `handled_count == 0` and
-  no errors.
+- Consider adding a smoke test ensuring that `tests.helpers.events.NullEventBus.publish` returns a result object with
+  `handled_count == 0` and no errors.
 - Add targeted coverage in adapter/session tests to assert that a publish result with errors triggers the expected
   aggregated logging or, when configured, a propagated `ExceptionGroup` via `raise_if_errors()`.

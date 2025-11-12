@@ -59,8 +59,9 @@ provided `Prompt` instance.
   introduce provider-specific extensions.
 - `parse_output`: When `True`, adapters call `parse_structured_output` on the final message if the prompt declares structured
   output; disable to keep only the raw text.
-- `bus`: Evaluation-scoped event dispatcher supplied by the caller. Pass `NullEventBus()` to discard telemetry or reuse a
-  shared bus when coordinating multiple adapters within the same request.
+- `bus`: Evaluation-scoped event dispatcher supplied by the caller. Provide an `InProcessEventBus()` or a custom
+  implementation, reusing a shared bus when coordinating multiple adapters within the same request. Tests can rely on
+  `tests.helpers.events.NullEventBus()` to discard telemetry.
 
 ### `PromptResponse`
 
