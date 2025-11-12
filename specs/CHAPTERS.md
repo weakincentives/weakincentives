@@ -63,13 +63,10 @@ they may reveal chapter content during evaluation.
 ```python
 class ChaptersExpansionPolicy(StrEnum):
     ALL_INCLUDED = "all_included"         # open every chapter before rendering
-    LLM_TOOL = "llm_tool"                 # allow the model to request chapters via tool calls
     INTENT_CLASSIFIER = "intent_classifier"  # use classifier heuristics tied to goal section content
 ```
 
 - `ALL_INCLUDED` trades privacy for completeness by rendering every chapter.
-- `LLM_TOOL` keeps chapters closed initially but registers a tool that lets the
-  large language model request additional chapters by key at runtime.
 - `INTENT_CLASSIFIER` runs a deterministic gate (rules or secondary model)
   before rendering to open only chapters aligned with the goal section context.
 
@@ -111,8 +108,6 @@ class ProviderAdapter(Protocol):
    open:
    - `ALL_INCLUDED`: every chapter opens without additional adjudication and is
      the default when callers omit the argument.
-   - `LLM_TOOL`: the adapter exposes a tool that lets the model request
-     additional chapters during evaluation.
    - `INTENT_CLASSIFIER`: the adapter uses a deterministic classifier (rule-
      based or model-driven) anchored on the `goal_section_key` content to decide
      which chapters to open before rendering.

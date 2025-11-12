@@ -30,7 +30,6 @@ class ChaptersExpansionPolicy(StrEnum):
     """Strategies describing how adapters may open prompt chapters."""
 
     ALL_INCLUDED = "all_included"
-    LLM_TOOL = "llm_tool"
     INTENT_CLASSIFIER = "intent_classifier"
 
 

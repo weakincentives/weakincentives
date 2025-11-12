@@ -156,11 +156,11 @@ def test_expand_chapters_requires_params_when_predicate_present() -> None:
         prompt.expand_chapters(ChaptersExpansionPolicy.ALL_INCLUDED)
 
 
-def test_expand_chapters_rejects_unknown_policy() -> None:
+def test_expand_chapters_rejects_intent_classifier_until_supported() -> None:
     prompt = build_chapter_prompt()
 
     with pytest.raises(NotImplementedError):
-        prompt.expand_chapters(ChaptersExpansionPolicy.LLM_TOOL)
+        prompt.expand_chapters(ChaptersExpansionPolicy.INTENT_CLASSIFIER)
 
 
 def test_expand_chapters_rejects_unknown_param_key() -> None:
