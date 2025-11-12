@@ -21,7 +21,7 @@ import pytest
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 
-pytest_plugins = ["tests.plugins.threadstress"]
+pytest_plugins = ("tests.plugins.threadstress", "tests.plugins.dataclass_serde",)
 
 
 class SessionFactory(Protocol):
