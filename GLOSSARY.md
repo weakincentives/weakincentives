@@ -24,11 +24,14 @@ dataclasses without third-party dependencies. They enable predictable payloads
 for prompts, tools, and sessions. Detailed contract in
 [Dataclass Serde Utilities](specs/DATACLASS_SERDE.md).
 
-## Deadlines
+## Limits
 
-Adapters accept a caller-supplied wall-clock deadline that applies to the entire
-evaluation, including nested subagents and tool calls. Enforcement semantics are
-defined in the [Deadlines specification](specs/DEADLINES.md).
+Adapters accept caller-supplied execution limits that apply to the entire
+evaluation, including nested subagents and tool calls. Hosts may combine
+wall-clock deadlines with token budgets to bound cost. Enforcement semantics are
+defined in the [Limits specification](specs/LIMITS.md), including the
+`TokensUsed` events that expose live usage snapshots to sessions and
+telemetry consumers.
 
 ## Event Bus
 

@@ -21,18 +21,20 @@ prompt execution observable inside a single process.
   dispatch. Implementations MAY batch or queue under the hood but MUST deliver callbacks on the publishing thread by
   default.
 - Subscriptions are type-scoped. Handlers receive concrete event dataclasses, not envelopes or loosely typed dictionaries.
-- The module ships with an in-process implementation: `InProcessEventBus` stores handlers in a per-type registry and
-  iterates over a snapshot on publish. It guarantees in-order delivery and isolates subscriber exceptions by logging
-  and continuing.
-- Tests use `tests.helpers.events.NullEventBus` to satisfy the interface while discarding telemetry.
-- Callers MUST provide an `EventBus` instance for each adapter evaluation. There is no module-level default; provide
-  `InProcessEventBus()` or a custom implementation scoped to the current request.
+- The module ships with two ready-made implementations:
+  - `NullEventBus` satisfies the interface and drops every event. Callers can pass it to adapter evaluations when
+    telemetry is not required.
+  - `InProcessEventBus` stores handlers in a per-type registry and iterates over a snapshot on publish. It guarantees
+    in-order delivery and isolates subscriber exceptions by logging and continuing.
+- Callers MUST provide an `EventBus` instance for each adapter evaluation. There is no module-level default; pass
+  `NullEventBus()` to opt out of telemetry or wire up a custom bus scoped to the current request.
 
 ## Event Dataclasses
 
 Events live under `weakincentives.runtime.events` and follow the same conventions as other core dataclasses (frozen, typed,
 ASCII-friendly field names). The minimal spec keeps payloads strictly typed; provider-specific metadata can be added in
-follow-on patches once concrete types are defined.
+follow-on patches once concrete types are defined. Token accounting introduces an additional telemetry event so sessions and
+observers can mirror the live ledger state without bespoke hooks.
 
 ### `PromptRendered`
 
@@ -79,6 +81,26 @@ Emitted every time an adapter executes a tool handler. The dataclass mirrors the
 
 Adapters SHOULD publish `ToolInvoked` immediately after the handler returns. A failure is signalled via
 `result.success=False`, and in that case `result.value` MAY be `None`.
+
+### `TokensUsed`
+
+Published any time the token ledger reserves or consumes usage on behalf of an adapter evaluation. The event carries a
+complete snapshot of the ledger after applying the mutation so observers, including the active `Session`, can record token
+usage without additional queries. Fields:
+
+- `event_id: UUID` – immutable identifier generated with `uuid4()` when the event is constructed.
+- `adapter: str` – adapter identifier whose ledger mutated.
+- `session_id: UUID | None` – session identifier threading through the orchestration layer.
+- `created_at: datetime` – timezone-aware timestamp captured immediately after applying the mutation.
+- `mutation: Literal["reserve", "consume", "release"]` – mutation type applied to the ledger. `reserve` covers optimistic
+  deductions, `consume` reconciles actual usage, and `release` rolls back a reservation after a failed call.
+- `aggregate: TokenTotals` – aggregate ledger totals after applying the mutation. `TokenTotals` is a frozen, slot-based
+  dataclass with `total`, `input`, and `output` integer fields (all zero or positive).
+- `providers: Mapping[str, TokenTotals]` – per-provider totals keyed by adapter slug. Missing providers imply zero usage.
+
+`TokenTotals.total` MUST equal `TokenTotals.input + TokenTotals.output`. Implementations MAY store additional metadata on the
+ledger but MUST NOT extend the event surface without updating this specification. Sessions capture `TokensUsed`
+events via a dedicated slice so downstream tooling can inspect historical usage.
 
 ## Delivery Semantics
 
