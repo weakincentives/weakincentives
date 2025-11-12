@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,7 +34,18 @@ def main() -> int:
         str(project_root),
     ]
 
-    result = subprocess.run(command, capture_output=True, text=True)
+    env = os.environ.copy()
+    if sys.platform == "darwin":
+        base_lib_dir = Path(sys.base_prefix) / "lib"
+        if base_lib_dir.exists():
+            fallback_var = "DYLD_FALLBACK_LIBRARY_PATH"
+            existing = env.get(fallback_var)
+            fallback_parts = [str(base_lib_dir)]
+            if existing:
+                fallback_parts.append(existing)
+            env[fallback_var] = ":".join(fallback_parts)
+
+    result = subprocess.run(command, capture_output=True, text=True, env=env)
     output = f"{result.stdout}{result.stderr}".strip()
 
     if (result.returncode != 0 or "warning" in output.lower()) and output:

@@ -2165,6 +2165,7 @@ wheels = [
 
 [[package]]
 name = "weakincentives"
+version = "0.6.0"
 source = { editable = "." }
 
 [package.optional-dependencies]

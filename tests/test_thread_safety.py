@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
+import pytest
+
 from code_reviewer_example import ReviewResponse, SunfishReviewSession
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import SessionProtocol
@@ -128,12 +130,16 @@ def test_session_attach_to_bus_is_idempotent() -> None:
     assert publish_result.handled_count == 1
 
 
-def test_session_collects_tool_data_across_threads() -> None:
+@pytest.mark.threadstress(min_workers=2, max_workers=8)
+def test_session_collects_tool_data_across_threads(
+    threadstress_workers: int,
+) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
 
-    total_events = 64
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    max_workers = threadstress_workers
+    total_events = max(16, max_workers * 8)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(_publish_tool_event, bus, index)
             for index in range(total_events)
@@ -152,7 +158,10 @@ def test_session_collects_tool_data_across_threads() -> None:
     assert {value.value for value in result_slice} == set(range(total_events))
 
 
-def test_local_prompt_overrides_store_seed_is_thread_safe(tmp_path: Path) -> None:
+@pytest.mark.threadstress(min_workers=2, max_workers=6)
+def test_local_prompt_overrides_store_seed_is_thread_safe(
+    threadstress_workers: int, tmp_path: Path
+) -> None:
     store = LocalPromptOverridesStore(root_path=tmp_path)
     section = _DummySection(template="Hello, ${name}!")
     prompt = _DummyPrompt(
@@ -164,8 +173,9 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(tmp_path: Path) -> Non
     def seed() -> PromptOverride:
         return store.seed_if_necessary(prompt, tag="concurrent")
 
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = [executor.submit(seed) for _ in range(12)]
+    max_workers = threadstress_workers
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(seed) for _ in range(max_workers * 2)]
         overrides = [future.result() for future in futures]
 
     expected_path = (
@@ -191,7 +201,10 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(tmp_path: Path) -> Non
         assert override.sections == first_sections
 
 
-def test_sunfish_review_session_records_history_concurrently(tmp_path: Path) -> None:
+@pytest.mark.threadstress(min_workers=2, max_workers=5)
+def test_sunfish_review_session_records_history_concurrently(
+    threadstress_workers: int, tmp_path: Path
+) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     session = SunfishReviewSession(
         adapter=_StubAdapter(),
@@ -199,8 +212,9 @@ def test_sunfish_review_session_records_history_concurrently(tmp_path: Path) -> 
         override_tag="threads",
     )
 
-    total_events = 20
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    max_workers = threadstress_workers
+    total_events = max(max_workers * 4, max_workers)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(_publish_tool_event, session._bus, index)
             for index in range(total_events)

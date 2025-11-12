@@ -62,6 +62,9 @@ Prefer `make check` before every commit; git hooks will call the same pipeline.
 ## Testing & Quality Expectations
 
 - Pytest is configured in `pyproject.toml` to collect coverage on `src/weakincentives` and fail if coverage dips below 80%.
+- Threaded regression tests use a `threadstress` plugin that repeats marked tests with randomized `ThreadPoolExecutor` sizes.\
+  Use `uv run pytest --threadstress-iterations=<n>` to increase the number of runs and
+  `--threadstress-max-workers=<n>` to clamp the worker range when debugging or cranking up CI stress.
 - Type hints are part of the public contract (`py.typed`). Keep new code fully typed and run `make typecheck` when touching typing-sensitive areas.
 - Lean on the type checker and existing type annotations—prefer static guarantees over defensive `isinstance` checks or attribute existence guards unless they are semantically required.
 - Ruff is both the formatter and the linter. Obey the default line length of 88 and the Python target version `py314`.
