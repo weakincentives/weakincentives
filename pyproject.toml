@@ -75,6 +75,7 @@ dev = [
     "pytest>=8.4.2",
     "pytest-timeout>=2.3.1",
     "pytest-cov>=6.0.0",
+    "pytest-randomly>=3.16.0",
     "pip-audit>=2.7.3",
     "ruff>=0.14.1",
     "pyright>=1.1.389",
