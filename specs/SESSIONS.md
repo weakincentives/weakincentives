@@ -16,9 +16,10 @@ all state transitions are pure functions driven by the event stream.
    `(tuple[T, ...], DataEvent[T], *, context=ReducerContext) -> tuple[T, ...]`
    functions. Reducers run synchronously on the publisher thread.
 1. **Event bus integration** – Sessions subscribe to `PromptRendered`, `ToolInvoked`,
-   and `PromptExecuted` from `weakincentives.runtime.events`. They ignore every
-   other event type. Each session and event carries a UUID identifier plus a
-   timezone-aware creation timestamp for downstream correlation.
+   `PromptExecuted`, and `TokenLedgerUpdated` from `weakincentives.runtime.events`.
+   They ignore every other event type. Each session and event carries a UUID
+   identifier plus a timezone-aware creation timestamp for downstream
+   correlation.
 1. **Default behavior that works** – Without custom reducers, the Session appends new
    dataclass values (deduping by equality) and keeps results immutable.
 1. **Flexible slices** – Reducers may manage a slice whose element type differs from
@@ -42,10 +43,15 @@ all state transitions are pure functions driven by the event stream.
 ## Data Model
 
 ```python
-from weakincentives.runtime.events import PromptExecuted, PromptRendered, ToolInvoked
+from weakincentives.runtime.events import (
+    PromptExecuted,
+    PromptRendered,
+    TokenLedgerUpdated,
+    ToolInvoked,
+)
 from weakincentives.runtime.session import ReducerContext
 
-DataEvent = ToolInvoked | PromptExecuted | PromptRendered
+DataEvent = ToolInvoked | PromptExecuted | PromptRendered | TokenLedgerUpdated
 
 class TypedReducer(Protocol[S]):
     def __call__(
@@ -167,6 +173,11 @@ These helpers delegate to `Session.select_all` and perform no caching.
    response contains dataclass outputs, re-dispatch the event with `.value`
    populated for each dataclass item (cloning the event when multiple payloads
    exist).
+1. On `TokenLedgerUpdated`, dispatch the event to its dedicated slice. Reducers
+   MAY maintain derived aggregates such as running balances or limit breaches by
+   reading the `TokenLedgerUpdated.aggregate` and `.providers` totals. The
+   default append reducer keeps the chronological history intact for downstream
+   inspection.
 1. Every normalized `DataEvent` is passed to the reducer chain registered for its
    target type. Each reducer operates on the tuple registered for its `slice_type`.
    If no reducer exists, use the default append reducer.
