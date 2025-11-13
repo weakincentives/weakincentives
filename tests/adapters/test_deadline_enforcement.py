@@ -25,6 +25,8 @@ import pytest
 from weakincentives import deadlines
 from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
+    PROMPT_EVALUATION_PHASE_REQUEST,
+    PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
@@ -84,7 +86,7 @@ def test_raise_tool_deadline_error() -> None:
             prompt_name="test", tool_name="tool", deadline=deadline
         )
     error = cast(PromptEvaluationError, excinfo.value)
-    assert error.phase == "deadline"
+    assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
     assert error.provider_payload == {
         "deadline_expires_at": deadline.expires_at.isoformat()
     }
@@ -116,7 +118,7 @@ def test_conversation_runner_raise_deadline_error() -> None:
         deadline=deadline,
     )
     with pytest.raises(PromptEvaluationError):
-        runner._raise_deadline_error("expired")
+        runner._raise_deadline_error("expired", phase=PROMPT_EVALUATION_PHASE_REQUEST)
 
 
 def test_conversation_runner_detects_expired_deadline(
@@ -154,7 +156,9 @@ def test_conversation_runner_detects_expired_deadline(
         lambda: anchor + timedelta(seconds=10),
     )
     with pytest.raises(PromptEvaluationError):
-        runner._ensure_deadline_remaining("expired")
+        runner._ensure_deadline_remaining(
+            "expired", phase=PROMPT_EVALUATION_PHASE_REQUEST
+        )
 
 
 def test_execute_tool_call_raises_when_deadline_expired(
@@ -206,7 +210,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
             logger_override=None,
         )
     error = cast(PromptEvaluationError, excinfo.value)
-    assert error.phase == "deadline"
+    assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
 def test_run_conversation_replaces_rendered_deadline() -> None:

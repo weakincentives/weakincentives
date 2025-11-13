@@ -23,6 +23,8 @@ import pytest
 
 from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
+    PROMPT_EVALUATION_PHASE_RESPONSE,
+    PROMPT_EVALUATION_PHASE_TOOL,
     PromptResponse,
     ProviderAdapter,
     SessionProtocol,
@@ -886,7 +888,7 @@ def test_openai_adapter_raises_when_tool_handler_missing() -> None:
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    assert err.value.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
 def test_openai_adapter_handles_tool_call_without_arguments() -> None:
@@ -1016,7 +1018,7 @@ def test_openai_adapter_raises_when_structured_output_missing_json() -> None:
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "response"
+    assert err.value.phase == PROMPT_EVALUATION_PHASE_RESPONSE
 
 
 def test_openai_adapter_raises_on_invalid_parsed_payload() -> None:
@@ -1049,7 +1051,7 @@ def test_openai_adapter_raises_on_invalid_parsed_payload() -> None:
 
     exc = err.value
     assert isinstance(exc, PromptEvaluationError)
-    assert exc.phase == "response"
+    assert exc.phase == PROMPT_EVALUATION_PHASE_RESPONSE
 
 
 def test_openai_message_text_content_handles_structured_parts() -> None:
@@ -1268,7 +1270,7 @@ def test_openai_adapter_raises_for_unknown_tool() -> None:
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    assert err.value.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
 def test_openai_adapter_handles_invalid_tool_params() -> None:
@@ -1546,7 +1548,7 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    assert err.value.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
 def test_openai_adapter_delegates_to_shared_runner(

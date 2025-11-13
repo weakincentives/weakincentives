@@ -28,7 +28,12 @@ from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
 from ._provider_protocols import ProviderChoice, ProviderCompletionResponse
 from ._tool_messages import serialize_tool_message
-from .core import PromptEvaluationError, PromptResponse, SessionProtocol
+from .core import (
+    PROMPT_EVALUATION_PHASE_REQUEST,
+    PromptEvaluationError,
+    PromptResponse,
+    SessionProtocol,
+)
 from .shared import (
     ToolChoice,
     build_json_schema_response_format,
@@ -139,7 +144,7 @@ class OpenAIAdapter:
             raise PromptEvaluationError(
                 "Deadline expired before evaluation started.",
                 prompt_name=prompt_name,
-                phase="preflight",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 provider_payload=deadline_provider_payload(deadline),
             )
 
@@ -195,7 +200,7 @@ class OpenAIAdapter:
                 raise PromptEvaluationError(
                     "OpenAI request failed.",
                     prompt_name=prompt_name,
-                    phase="request",
+                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 ) from error
 
         def _select_choice(response: object) -> ProviderChoice:

@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
@@ -64,18 +64,35 @@ class PromptEvaluationError(RuntimeError):
         message: str,
         *,
         prompt_name: str,
-        phase: str,
+        phase: PromptEvaluationPhase,
         provider_payload: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.prompt_name = prompt_name
-        self.phase = phase
+        self.phase: PromptEvaluationPhase = phase
         self.provider_payload = provider_payload
 
 
+PromptEvaluationPhase = Literal["request", "response", "tool"]
+"""Phases where a prompt evaluation error can occur."""
+
+PROMPT_EVALUATION_PHASE_REQUEST: PromptEvaluationPhase = "request"
+"""Prompt evaluation failed while issuing the provider request."""
+
+PROMPT_EVALUATION_PHASE_RESPONSE: PromptEvaluationPhase = "response"
+"""Prompt evaluation failed while handling the provider response."""
+
+PROMPT_EVALUATION_PHASE_TOOL: PromptEvaluationPhase = "tool"
+"""Prompt evaluation failed while handling a tool invocation."""
+
+
 __all__ = [
+    "PROMPT_EVALUATION_PHASE_REQUEST",
+    "PROMPT_EVALUATION_PHASE_RESPONSE",
+    "PROMPT_EVALUATION_PHASE_TOOL",
     "PromptEvaluationError",
+    "PromptEvaluationPhase",
     "PromptResponse",
     "ProviderAdapter",
     "SessionProtocol",
