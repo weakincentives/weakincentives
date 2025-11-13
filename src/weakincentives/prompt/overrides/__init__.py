@@ -22,6 +22,7 @@ from .inspection import (
 from .local_store import LocalPromptOverridesStore
 from .validation import filter_override_for_descriptor
 from .versioning import (
+    HexDigest,
     PromptDescriptor,
     PromptLike,
     PromptOverride,
@@ -31,11 +32,13 @@ from .versioning import (
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
+    ensure_hex_digest,
     hash_json,
     hash_text,
 )
 
 __all__ = [
+    "HexDigest",
     "LocalPromptOverridesStore",
     "OverrideFileMetadata",
     "PromptDescriptor",
@@ -47,6 +50,7 @@ __all__ = [
     "SectionOverride",
     "ToolDescriptor",
     "ToolOverride",
+    "ensure_hex_digest",
     "filter_override_for_descriptor",
     "hash_json",
     "hash_text",

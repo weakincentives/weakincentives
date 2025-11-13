@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from .local_store import LocalPromptOverridesStore
-from .versioning import PromptOverridesError
+from .versioning import HexDigest, PromptOverridesError
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +32,7 @@ class OverrideFileMetadata:
     path: Path
     relative_segments: tuple[str, ...]
     modified_time: float
-    content_hash: str
+    content_hash: HexDigest
     section_count: int
     tool_count: int
 
@@ -129,7 +129,7 @@ def _build_metadata(file_path: Path, overrides_root: Path) -> OverrideFileMetada
     tools = cast(dict[str, Any], tools_obj)
 
     relative_segments = file_path.resolve().relative_to(overrides_root).parts
-    content_hash = sha256(raw).hexdigest()
+    content_hash = HexDigest(sha256(raw).hexdigest())
 
     return OverrideFileMetadata(
         path=file_path.resolve(),
