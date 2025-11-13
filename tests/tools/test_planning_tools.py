@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.prompt import SupportsDataclass
@@ -59,7 +60,7 @@ def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
     result = ToolResult(message="ok", value=value)
     return ToolInvoked(
         prompt_name="test",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         name=name,
         params=value,
         result=cast(ToolResult[object], result),

@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Any, cast
 
+from tests.helpers.adapters import RECORDING_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, RecapParams
@@ -101,7 +102,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
             bus.publish(
                 PromptExecuted(
                     prompt_name=prompt_name,
-                    adapter="recording",
+                    adapter=RECORDING_ADAPTER_NAME,
                     result=cast(PromptResponse[object], response),
                     session_id=getattr(session, "session_id", None),
                     created_at=datetime.now(UTC),

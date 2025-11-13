@@ -25,6 +25,7 @@ from uuid import uuid4
 import pytest
 
 from code_reviewer_example import ReviewResponse, SunfishReviewSession
+from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.deadlines import Deadline
@@ -95,7 +96,7 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
     result = ToolResult(message=f"ok-{index}", value=result_payload)
     event = ToolInvoked(
         prompt_name="test",
-        adapter="unit",
+        adapter=UNIT_TEST_ADAPTER_NAME,
         name=f"example-{index}",
         params=params,
         result=cast(ToolResult[object], result),
@@ -118,7 +119,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
     tool_result = ToolResult(message="ok", value=result_payload)
     event = ToolInvoked(
         prompt_name="test",
-        adapter="unit",
+        adapter=UNIT_TEST_ADAPTER_NAME,
         name="example-idempotent",
         params=params,
         result=cast(ToolResult[object], tool_result),

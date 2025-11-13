@@ -30,6 +30,7 @@ from ._provider_protocols import ProviderChoice, ProviderCompletionResponse
 from ._tool_messages import serialize_tool_message
 from .core import PromptEvaluationError, PromptResponse, SessionProtocol
 from .shared import (
+    OPENAI_ADAPTER_NAME,
     ToolChoice,
     build_json_schema_response_format,
     deadline_provider_payload,
@@ -205,7 +206,7 @@ class OpenAIAdapter:
             )
 
         return run_conversation(
-            adapter_name="openai",
+            adapter_name=OPENAI_ADAPTER_NAME,
             adapter=cast("ProviderAdapter[OutputT]", self),
             prompt=prompt,
             prompt_name=prompt_name,

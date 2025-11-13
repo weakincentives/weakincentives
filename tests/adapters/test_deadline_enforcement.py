@@ -22,6 +22,7 @@ from typing import Any, cast
 
 import pytest
 
+from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives import deadlines
 from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
@@ -97,7 +98,7 @@ def test_conversation_runner_raise_deadline_error() -> None:
     session: SessionProtocol = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
     runner = shared.ConversationRunner[BodyResult](
-        adapter_name="test",
+        adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
         prompt_name="deadline",
@@ -130,7 +131,7 @@ def test_conversation_runner_detects_expired_deadline(
     monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
     runner = shared.ConversationRunner[BodyResult](
-        adapter_name="test",
+        adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
         prompt_name="deadline",
@@ -190,7 +191,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
     )
     with pytest.raises(PromptEvaluationError) as excinfo:
         shared.execute_tool_call(
-            adapter_name="test",
+            adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[BodyResult], object()),
             prompt=prompt,
             rendered_prompt=rendered,
@@ -235,7 +236,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         return cast(shared.ProviderChoice, response.choices[0])
 
     result = shared.run_conversation(
-        adapter_name="test",
+        adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
         prompt_name="deadline",

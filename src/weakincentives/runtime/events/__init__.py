@@ -25,6 +25,7 @@ from ..logging import StructuredLogger, get_logger
 from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
 
 if TYPE_CHECKING:
+    from ...adapters._names import AdapterName
     from ...adapters.core import PromptResponse
 
 
@@ -85,7 +86,7 @@ class PromptExecuted:
     """Event emitted after an adapter finishes evaluating a prompt."""
 
     prompt_name: str
-    adapter: str
+    adapter: AdapterName
     result: PromptResponse[object]
     session_id: UUID | None
     created_at: datetime
@@ -100,7 +101,7 @@ class PromptRendered:
     prompt_ns: str
     prompt_key: str
     prompt_name: str | None
-    adapter: str
+    adapter: AdapterName
     session_id: UUID | None
     render_inputs: tuple[SupportsDataclass, ...]
     rendered_prompt: str

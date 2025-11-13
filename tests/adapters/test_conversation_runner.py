@@ -19,6 +19,7 @@ from typing import Any, cast
 
 import pytest
 
+from tests.helpers.adapters import DUMMY_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PromptEvaluationError,
     PromptResponse,
@@ -147,7 +148,7 @@ def build_runner(
     prompt = Prompt(ns="tests", key="example")
     session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
     return ConversationRunner[object](
-        adapter_name="dummy",
+        adapter_name=DUMMY_ADAPTER_NAME,
         adapter=DummyAdapter(),
         prompt=prompt,
         prompt_name="example",

@@ -10,28 +10,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Integration adapters for optional third-party providers."""
+"""Semantic adapter name definitions shared across provider integrations."""
 
 from __future__ import annotations
 
-from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
-from .core import (
-    PromptEvaluationError,
-    PromptResponse,
-    ProviderAdapter,
-    SessionProtocol,
-)
+from typing import Final, Literal
+
+AdapterName = Literal["openai", "litellm"]
+"""Recognized adapter identifiers for provider integrations."""
+
+OPENAI_ADAPTER_NAME: Final[AdapterName] = "openai"
+"""Canonical label for the OpenAI adapter."""
+
+LITELLM_ADAPTER_NAME: Final[AdapterName] = "litellm"
+"""Canonical label for the LiteLLM adapter."""
 
 __all__ = [
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
     "AdapterName",
-    "PromptEvaluationError",
-    "PromptResponse",
-    "ProviderAdapter",
-    "SessionProtocol",
 ]
-
-
-def __dir__() -> list[str]:
-    return sorted({*globals().keys(), *(__all__)})

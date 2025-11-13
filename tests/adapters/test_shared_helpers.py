@@ -18,6 +18,7 @@ from typing import Any, cast
 
 import pytest
 
+from tests.helpers.adapters import TEST_ADAPTER_NAME
 from tests.helpers.events import NullEventBus
 from weakincentives.adapters import PromptEvaluationError, shared
 from weakincentives.adapters.core import (
@@ -121,7 +122,7 @@ def test_run_conversation_requires_message_payload() -> None:
 
     with pytest.raises(PromptEvaluationError):
         shared.run_conversation(
-            adapter_name="test",
+            adapter_name=TEST_ADAPTER_NAME,
             adapter=adapter,
             prompt=prompt,
             prompt_name="example",
