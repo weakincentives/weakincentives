@@ -32,7 +32,12 @@ from ._provider_protocols import (
     ProviderCompletionResponse,
 )
 from ._tool_messages import serialize_tool_message
-from .core import PromptEvaluationError, PromptResponse, SessionProtocol
+from .core import (
+    PROMPT_EVALUATION_PHASE_REQUEST,
+    PromptEvaluationError,
+    PromptResponse,
+    SessionProtocol,
+)
 from .shared import (
     ToolChoice,
     build_json_schema_response_format,
@@ -140,7 +145,7 @@ class LiteLLMAdapter:
             raise PromptEvaluationError(
                 "Deadline expired before evaluation started.",
                 prompt_name=prompt_name,
-                phase="preflight",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 provider_payload=deadline_provider_payload(deadline),
             )
         has_structured_output = (
@@ -194,7 +199,7 @@ class LiteLLMAdapter:
                 raise PromptEvaluationError(
                     "LiteLLM request failed.",
                     prompt_name=prompt_name,
-                    phase="request",
+                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 ) from error
 
         def _select_choice(response: object) -> ProviderChoice:

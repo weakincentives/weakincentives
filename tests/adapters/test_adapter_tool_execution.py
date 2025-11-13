@@ -47,7 +47,11 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     )
 
 from weakincentives import deadlines
-from weakincentives.adapters.core import PromptEvaluationError
+from weakincentives.adapters.core import (
+    PROMPT_EVALUATION_PHASE_REQUEST,
+    PROMPT_EVALUATION_PHASE_TOOL,
+    PromptEvaluationError,
+)
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
@@ -286,7 +290,7 @@ def test_adapter_tool_deadline_exceeded(
         )
 
     error = cast(PromptEvaluationError, excinfo.value)
-    assert error.phase == "deadline"
+    assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
     payload = error.provider_payload
     assert isinstance(payload, dict)
     assert payload.get("deadline_expires_at") == deadline.expires_at.isoformat()
@@ -334,7 +338,7 @@ def test_adapter_deadline_preflight_rejection(
         )
 
     error = cast(PromptEvaluationError, excinfo.value)
-    assert error.phase == "preflight"
+    assert error.phase == PROMPT_EVALUATION_PHASE_REQUEST
     assert error.provider_payload == {
         "deadline_expires_at": deadline.expires_at.isoformat()
     }

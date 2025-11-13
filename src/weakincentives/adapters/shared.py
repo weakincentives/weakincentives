@@ -50,7 +50,15 @@ from ._provider_protocols import (
     ProviderMessage,
     ProviderToolCall,
 )
-from .core import PromptEvaluationError, PromptResponse, SessionProtocol
+from .core import (
+    PROMPT_EVALUATION_PHASE_REQUEST,
+    PROMPT_EVALUATION_PHASE_RESPONSE,
+    PROMPT_EVALUATION_PHASE_TOOL,
+    PromptEvaluationError,
+    PromptEvaluationPhase,
+    PromptResponse,
+    SessionProtocol,
+)
 
 if TYPE_CHECKING:
     from ..adapters.core import ProviderAdapter
@@ -96,7 +104,7 @@ def _raise_tool_deadline_error(
     raise PromptEvaluationError(
         f"Deadline expired before executing tool '{tool_name}'.",
         prompt_name=prompt_name,
-        phase="deadline",
+        phase=PROMPT_EVALUATION_PHASE_TOOL,
         provider_payload=deadline_provider_payload(deadline),
     )
 
@@ -163,7 +171,7 @@ def first_choice(response: object, *, prompt_name: str) -> object:
         raise PromptEvaluationError(
             "Provider response did not include any choices.",
             prompt_name=prompt_name,
-            phase="response",
+            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
     sequence_choices = cast(Sequence[object], choices)
     try:
@@ -172,7 +180,7 @@ def first_choice(response: object, *, prompt_name: str) -> object:
         raise PromptEvaluationError(
             "Provider response did not include any choices.",
             prompt_name=prompt_name,
-            phase="response",
+            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         ) from error
 
 
@@ -206,14 +214,14 @@ def parse_tool_arguments(
         raise PromptEvaluationError(
             "Failed to decode tool call arguments.",
             prompt_name=prompt_name,
-            phase="tool",
+            phase=PROMPT_EVALUATION_PHASE_TOOL,
             provider_payload=provider_payload,
         ) from error
     if not isinstance(parsed, Mapping):
         raise PromptEvaluationError(
             "Tool call arguments must be a JSON object.",
             prompt_name=prompt_name,
-            phase="tool",
+            phase=PROMPT_EVALUATION_PHASE_TOOL,
             provider_payload=provider_payload,
         )
     parsed_mapping = cast(Mapping[Any, Any], parsed)
@@ -223,7 +231,7 @@ def parse_tool_arguments(
             raise PromptEvaluationError(
                 "Tool call arguments must use string keys.",
                 prompt_name=prompt_name,
-                phase="tool",
+                phase=PROMPT_EVALUATION_PHASE_TOOL,
                 provider_payload=provider_payload,
             )
         arguments[key] = value
@@ -256,7 +264,7 @@ def execute_tool_call(
         raise PromptEvaluationError(
             f"Unknown tool '{tool_name}' requested by provider.",
             prompt_name=prompt_name,
-            phase="tool",
+            phase=PROMPT_EVALUATION_PHASE_TOOL,
             provider_payload=provider_payload,
         )
     handler = tool.handler
@@ -264,7 +272,7 @@ def execute_tool_call(
         raise PromptEvaluationError(
             f"Tool '{tool_name}' does not have a registered handler.",
             prompt_name=prompt_name,
-            phase="tool",
+            phase=PROMPT_EVALUATION_PHASE_TOOL,
             provider_payload=provider_payload,
         )
 
@@ -335,7 +343,7 @@ def execute_tool_call(
         raise PromptEvaluationError(
             str(error) or f"Tool '{tool_name}' exceeded the deadline.",
             prompt_name=prompt_name,
-            phase="deadline",
+            phase=PROMPT_EVALUATION_PHASE_TOOL,
             provider_payload=deadline_provider_payload(deadline),
         ) from error
     except Exception as error:  # propagate message via ToolResult
@@ -662,19 +670,23 @@ class ConversationRunner[OutputT]:
     _next_tool_choice: ToolChoice = field(init=False)
     _should_parse_structured_output: bool = field(init=False)
 
-    def _raise_deadline_error(self, message: str) -> None:
+    def _raise_deadline_error(
+        self, message: str, *, phase: PromptEvaluationPhase
+    ) -> NoReturn:
         raise PromptEvaluationError(
             message,
             prompt_name=self.prompt_name,
-            phase="deadline",
+            phase=phase,
             provider_payload=deadline_provider_payload(self.deadline),
         )
 
-    def _ensure_deadline_remaining(self, message: str) -> None:
+    def _ensure_deadline_remaining(
+        self, message: str, *, phase: PromptEvaluationPhase
+    ) -> None:
         if self.deadline is None:
             return
         if self.deadline.remaining() <= timedelta(0):
-            self._raise_deadline_error(message)
+            self._raise_deadline_error(message, phase=phase)
 
     def run(self) -> PromptResponse[OutputT]:
         """Execute the conversation loop and return the final response."""
@@ -682,7 +694,10 @@ class ConversationRunner[OutputT]:
         self._prepare_payload()
 
         while True:
-            self._ensure_deadline_remaining("Deadline expired before provider request.")
+            self._ensure_deadline_remaining(
+                "Deadline expired before provider request.",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            )
             response = self.call_provider(
                 self._messages,
                 self._tool_specs,
@@ -697,7 +712,7 @@ class ConversationRunner[OutputT]:
                 raise PromptEvaluationError(
                     "Provider response did not include a message payload.",
                     prompt_name=self.prompt_name,
-                    phase="response",
+                    phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                     provider_payload=self._provider_payload,
                 )
 
@@ -797,7 +812,8 @@ class ConversationRunner[OutputT]:
         for tool_call in tool_calls:
             tool_name = getattr(tool_call.function, "name", "tool")
             self._ensure_deadline_remaining(
-                f"Deadline expired before executing tool '{tool_name}'."
+                f"Deadline expired before executing tool '{tool_name}'.",
+                phase=PROMPT_EVALUATION_PHASE_TOOL,
             )
             invocation, tool_result = execute_tool_call(
                 adapter_name=self.adapter_name,
@@ -834,7 +850,8 @@ class ConversationRunner[OutputT]:
         """Assemble and publish the final prompt response."""
 
         self._ensure_deadline_remaining(
-            "Deadline expired while finalizing provider response."
+            "Deadline expired while finalizing provider response.",
+            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
         final_text = message_text_content(getattr(message, "content", None))
         output: OutputT | None = None
@@ -852,7 +869,7 @@ class ConversationRunner[OutputT]:
                     raise PromptEvaluationError(
                         str(error),
                         prompt_name=self.prompt_name,
-                        phase="response",
+                        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                         provider_payload=self._provider_payload,
                     ) from error
             else:
@@ -865,14 +882,14 @@ class ConversationRunner[OutputT]:
                         raise PromptEvaluationError(
                             error.message,
                             prompt_name=self.prompt_name,
-                            phase="response",
+                            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                             provider_payload=self._provider_payload,
                         ) from error
                 else:
                     raise PromptEvaluationError(
                         "Provider response did not include structured output.",
                         prompt_name=self.prompt_name,
-                        phase="response",
+                        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                         provider_payload=self._provider_payload,
                     )
             if output is not None:

@@ -22,7 +22,12 @@ from typing import Any, TypeVar, cast
 import pytest
 
 from weakincentives.adapters import PromptEvaluationError, PromptResponse, shared
-from weakincentives.adapters.core import ProviderAdapter, SessionProtocol
+from weakincentives.adapters.core import (
+    PROMPT_EVALUATION_PHASE_RESPONSE,
+    PROMPT_EVALUATION_PHASE_TOOL,
+    ProviderAdapter,
+    SessionProtocol,
+)
 from weakincentives.prompt.structured_output import ARRAY_WRAPPER_KEY
 
 try:
@@ -1062,7 +1067,7 @@ def test_litellm_adapter_raises_when_tool_handler_missing() -> None:
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    assert err.value.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
 def test_litellm_adapter_raises_when_tool_not_registered() -> None:
@@ -1101,7 +1106,7 @@ def test_litellm_adapter_raises_when_tool_not_registered() -> None:
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    assert err.value.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
 def test_litellm_adapter_handles_invalid_tool_params() -> None:
@@ -1381,7 +1386,7 @@ def test_litellm_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "tool"
+    assert err.value.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
 def test_litellm_adapter_propagates_parse_errors_for_structured_output() -> None:
@@ -1428,7 +1433,7 @@ def test_litellm_adapter_propagates_parse_errors_for_structured_output() -> None
         )
 
     assert isinstance(err.value, PromptEvaluationError)
-    assert err.value.phase == "response"
+    assert err.value.phase == PROMPT_EVALUATION_PHASE_RESPONSE
 
 
 def test_litellm_adapter_raises_when_structured_output_missing() -> None:
@@ -1461,7 +1466,7 @@ def test_litellm_adapter_raises_when_structured_output_missing() -> None:
 
     exc = err.value
     assert isinstance(exc, PromptEvaluationError)
-    assert exc.phase == "response"
+    assert exc.phase == PROMPT_EVALUATION_PHASE_RESPONSE
     assert "structured output" in str(exc)
 
 
@@ -1495,7 +1500,7 @@ def test_litellm_adapter_raises_on_invalid_parsed_payload() -> None:
 
     exc = err.value
     assert isinstance(exc, PromptEvaluationError)
-    assert exc.phase == "response"
+    assert exc.phase == PROMPT_EVALUATION_PHASE_RESPONSE
 
 
 def test_litellm_message_text_content_handles_structured_parts() -> None:
