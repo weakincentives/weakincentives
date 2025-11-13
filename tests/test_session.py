@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, is_dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
@@ -20,6 +21,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from weakincentives.adapters.core import PromptResponse
+from weakincentives.dbc import dbc_enabled
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
@@ -384,6 +386,40 @@ def test_selector_helpers_delegate_to_session(session_factory: SessionFactory) -
     assert select_where(
         session, ExampleOutput, lambda value: value.text == "first"
     ) == (ExampleOutput(text="first"),)
+
+
+def test_selector_helpers_respect_dbc_purity(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+
+    with dbc_enabled():
+        assert select_all(session, ExampleOutput) == (
+            ExampleOutput(text="first"),
+            ExampleOutput(text="second"),
+        )
+        assert select_latest(session, ExampleOutput) == ExampleOutput(text="second")
+        assert select_where(
+            session, ExampleOutput, lambda value: value.text.startswith("f")
+        ) == (ExampleOutput(text="first"),)
+
+
+def test_select_where_logs_violate_purity_contract(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+
+    logger = logging.getLogger(__name__)
+
+    def predicate(value: ExampleOutput) -> bool:
+        logger.warning("Saw %s", value)
+        return True
+
+    with dbc_enabled(), pytest.raises(AssertionError):
+        select_where(session, ExampleOutput, predicate)
 
 
 def test_reducer_failure_leaves_previous_slice_unchanged(
