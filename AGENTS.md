@@ -71,6 +71,16 @@ Prefer `make check` before every commit; git hooks will call the same pipeline.
 - Lint runs enable `I`, `UP`, `B`, `SIM`, `C4`, `ANN`, `RET`, `RSE`, `PTH`, and `ISC` rule families; fix or explicitly justify any violations when contributing.
 - Tool handlers must populate the new `ToolResult.success` flag—set `success=False` and leave `value=None` (or a structured error payload) when a handler fails so adapters and reducers can reason about the outcome.
 
+## Design by Contract Framework
+
+- Read `specs/DBC.md` before adding or modifying library code that encodes behavioural expectations.
+- Use the helpers in `weakincentives.dbc` to capture preconditions, postconditions, invariants, and purity requirements whenever they clarify intent.
+- `@require`/`@ensure` should guard public functions that rely on specific argument shapes or return guarantees.
+- `@ensure` adds `result` or `exception` keyword arguments to the predicate scope so decorators can reason about outcomes without reshaping the positional signature.
+- Wrap stateful classes such as reducers or session managers with `@invariant` and mark helper methods with `skip_invariant` when those checks would add noise.
+- Mark utility functions that should remain side-effect free with `@pure`; the pytest plugin enables enforcement automatically during `make test` / `make check`.
+- When contributing new modules, prefer adding the relevant decorators from the outset so downstream agents inherit strong contracts without needing refactors.
+
 ## TDD Workflow Recipe
 
 - Read the relevant spec in `specs/` and any prior plans to anchor scope, capture target module paths, and list the concrete behaviors you will validate.
