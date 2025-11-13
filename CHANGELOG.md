@@ -4,8 +4,8 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- Added a `wink` optional extra that bundles the MCP server dependencies and
-  exposes the `wink` CLI entry point for launching the server.
+- Removed the wink MCP server scaffolding and optional dependency. The `wink`
+  CLI now ships as a lightweight placeholder for future development.
 
 ## v0.6.0 - 2025-11-05
 

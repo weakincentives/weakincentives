@@ -48,10 +48,6 @@ openai = [
 litellm = [
     "litellm>=1.79.0",
 ]
-wink = [
-    "mcp>=1.0.0",
-    "pyyaml>=6.0.2",
-]
 
 [project.scripts]
 wink = "weakincentives.cli.wink:main"

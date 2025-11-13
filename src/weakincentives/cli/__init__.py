@@ -14,9 +14,9 @@
 
 from __future__ import annotations
 
-from . import config, wink
+from . import wink
 
-__all__ = ["config", "wink"]
+__all__ = ["wink"]
 
 
 def __dir__() -> list[str]:

@@ -44,12 +44,6 @@ LiteLLM SDK. It keeps evaluation, tooling, and structured-output semantics in
 lock-step with the reference adapter. See the
 [LiteLLM Adapter specification](specs/LITE_LLM_ADAPTER.md).
 
-## MCP Server (`wink`)
-
-The `wink` extra ships a FastMCP-based server that exposes prompt override
-workflows over the Model Context Protocol. Packaging, runtime expectations, and
-tool wiring live in the [MCP specification](specs/MCP.md).
-
 ## Native OpenAI Structured Outputs
 
 Enhancements to the OpenAI adapter that attach JSON Schema derived from prompt
