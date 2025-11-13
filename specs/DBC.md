@@ -53,9 +53,10 @@ def withdraw(account: Account, amount: int) -> None:
 ### `@ensure`
 
 `@ensure` declares postconditions. Callables receive the original arguments and
-keyword arguments plus the return value (or raised exception object). Decorators
-should support both simple boolean functions and more advanced callables that
-return `(bool, message)` tuples for custom diagnostics.
+keyword arguments plus the return value (or raised exception object) via the
+`result` or `exception` keyword. Decorators should support both simple boolean
+functions and more advanced callables that return `(bool, message)` tuples for
+custom diagnostics.
 
 ```python
 @ensure(lambda amount, result: result.balance >= 0)

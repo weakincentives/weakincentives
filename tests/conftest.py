@@ -22,6 +22,7 @@ from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 
 pytest_plugins = (
+    "tests.plugins.dbc",
     "tests.plugins.dataclass_serde",
     "tests.plugins.threadstress",
 )
