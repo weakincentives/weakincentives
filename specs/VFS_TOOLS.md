@@ -2,10 +2,12 @@
 
 ## Overview
 
-The virtual filesystem tool suite gives agents a deterministic, session-scoped surface for file reads and writes without
-touching the host disk. It supports lightweight workspace snapshots: list directories, inspect file metadata, edit file
-contents, and preload selected host folders during initialisation while the session stays isolated. Snapshots are
-copy-on-write, start empty automatically, and disappear when the session ends; no state persists across conversations.
+The virtual filesystem tool suite gives agents a deterministic, session-scoped surface for file reads and writes backed by
+an orchestrator-managed temporary directory on disk. The directory is created on first use, isolated per session, and
+eligible to be mounted into downstream containers when the runtime needs to share the staged workspace. Agents can list
+directories, inspect file metadata, edit file contents, and preload selected host folders during initialisation while the
+session stays isolated from the primary host filesystem. Snapshots are copy-on-write, start empty automatically, and
+disappear when the session ends; no state persists across conversations beyond the orchestrator's snapshot copies.
 
 ## Module Surface
 
@@ -19,12 +21,19 @@ copy-on-write, start empty automatically, and disappear when the session ends; n
 
 - `VfsToolsSection` resolves the active `Session` from the `ToolContext` passed to each tool handler.
 - The section initialises reducers lazily the first time it encounters a session: it registers `replace_latest` for the
-  `VirtualFileSystem` slice, installs the write/delete reducers, and seeds the slice with the mount snapshot.
+  `VirtualFileSystem` slice, installs the write/delete reducers, and seeds the slice with the mount snapshot. During this
+  pass it also provisions a per-session temporary directory on disk (under the operating system's default temporary
+  directory) and records the absolute path alongside the snapshot metadata so other components can mount it when needed.
 - Reducers always clone the current `VirtualFileSystem` before applying changes to keep snapshots immutable to callers.
 - Orchestrators retrieve the active snapshot with `select_latest(session, VirtualFileSystem)` and should treat `None`
-  as an empty filesystem until the first write occurs.
+  as an empty filesystem until the first write occurs. When callers need direct disk access they should consult the
+  stored temporary directory path and mount it into subprocess containers explicitly.
+- Creating a session snapshot clones the temporary directory into a snapshot artifact before persisting the
+  `VirtualFileSystem` payload. Restoring from a snapshot copies that artifact into a fresh temporary directory and
+  updates the stored path so follow-up writes act on new files without mutating the saved snapshot.
 - Host folder mounts configured on the section are materialised when the section is constructed and merged into the
-  initial snapshot for every session during lazy initialisation.
+  initial snapshot for every session during lazy initialisation. Mounted files are streamed into the session's temporary
+  directory so the virtual filesystem view matches the on-disk representation.
 - Tool handlers run normalization and validation outside the reducer, returning informative status messages alongside
   the params dataclass used for the update.
 
@@ -32,7 +41,8 @@ copy-on-write, start empty automatically, and disappear when the session ends; n
 
 Schemas are frozen dataclasses and store normalized POSIX-style paths. Paths are relative, ASCII-only, and split into
 segments that exclude `.` and `..`. Handlers collapse duplicate slashes and reject empty segments so reducers can trust
-the canonical form.
+the canonical form. File payloads are tracked as raw bytes with an accompanying `encoding` hint so tool handlers can
+serialise text directly and fall back to base64 (or other codecs) for binary content.
 
 ```python
 from __future__ import annotations
@@ -41,7 +51,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
 
-FileEncoding = Literal["utf-8"]
+FileEncoding = Literal["utf-8", "binary"] | str | None
 WriteMode = Literal["create", "overwrite", "append"]
 
 
@@ -54,7 +64,7 @@ class VfsPath:
 @dataclass(slots=True, frozen=True)
 class VfsFile:
     path: VfsPath
-    content: str
+    content: bytes
     encoding: FileEncoding
     size_bytes: int
     version: int
@@ -64,6 +74,7 @@ class VfsFile:
 
 @dataclass(slots=True, frozen=True)
 class VirtualFileSystem:
+    root_path: str
     files: tuple[VfsFile, ...] = field(default_factory=tuple)
 
 
@@ -80,9 +91,9 @@ class ReadFile:
 @dataclass(slots=True, frozen=True)
 class WriteFile:
     path: VfsPath
-    content: str
+    content: bytes
     mode: WriteMode = "create"
-    encoding: FileEncoding = "utf-8"
+    encoding: FileEncoding | None = "utf-8"
 
 
 @dataclass(slots=True, frozen=True)
@@ -106,18 +117,21 @@ agents.
 Implementation detail notes:
 
 - `VirtualFileSystem.files` stores files as a tuple sorted lexicographically by path segments for stable diffs.
+- `VirtualFileSystem.root_path` records the absolute path to the session-scoped temporary directory on disk.
 - Reducers maintain monotonically increasing `version` numbers per file per snapshot. When `WriteFile.mode` is
   `append`, the reducer concatenates new content and increments the version.
 - `created_at` and `updated_at` are stored as timezone-aware UTC timestamps (truncated to millisecond precision). The
   reducer sets both timestamps during creation and only `updated_at` on subsequent writes.
-- If no snapshot exists when a tool runs, reducers start from an empty `VirtualFileSystem()` instance automatically.
+- If no snapshot exists when a tool runs, reducers start from an empty `VirtualFileSystem` snapshot automatically.
 - The suite enforces size and path guards:
-  - Maximum content length per write: 48_000 characters.
+  - Maximum content length per write: 48_000 characters for UTF-8 text; binary writes enforce the same limit on decoded
+    bytes.
   - Maximum path depth: 16 segments; maximum segment length: 80 characters.
-  - File content must be valid UTF-8 text; path segments remain ASCII-only.
+  - File content is stored as raw bytes on disk. The `encoding` hint records how the payload should be interpreted when
+    serialising results (`utf-8` by default, `binary` or `None` for arbitrary bytes). Path segments remain ASCII-only.
 - Each `HostMount` requires an ASCII `host_path`, resolves it against an allow-listed root configured by the
   orchestrator, normalises it to an absolute path, and rejects traversal outside the approved surface. Included files
-  are streamed into memory, decoded as UTF-8, filtered through the glob include/exclude lists, and mounted under
+  are streamed into memory as bytes, filtered through the glob include/exclude lists, and mounted under
   `mount_path` (or the host relative path when `mount_path` is `None`). Existing VFS entries at the target paths are
   overwritten, directory structures merge, and `max_bytes` caps the aggregate content pulled from disk. Mounting occurs
   once during `VfsToolsSection` initialisation.
@@ -134,8 +148,8 @@ Every tool validates its parameters and raises `ToolValidationError` on failure.
 | Tool | Summary | Parameters | Result | Behaviour highlights |
 | ---- | ------- | ---------- | ------ | -------------------- |
 | `vfs.list_directory` | Enumerate directory contents | `ListDirectory` | `dict` | Returns a JSON-serialisable summary with files and directories for the given path; raises if the path resolves to a file. |
-| `vfs.read_file` | Retrieve file contents | `ReadFile` | `dict` | Returns content, version, size, and timestamps; raises if path missing. |
-| `vfs.write_file` | Create or modify a file | `WriteFile` | `WriteFile` | Validates mode (`create`, `overwrite`, `append`), trims trailing whitespace only when explicitly requested by caller, and updates version/timestamps. |
+| `vfs.read_file` | Retrieve file contents | `ReadFile` | `dict` | Returns content, encoding, version, size, and timestamps; binary payloads are base64-encoded when serialised. Raises if path missing. |
+| `vfs.write_file` | Create or modify a file | `WriteFile` | `WriteFile` | Accepts text or binary payloads, validates size after decoding, honours the encoding hint, and updates version/timestamps. |
 | `vfs.delete_entry` | Remove file(s) | `DeleteEntry` | `DeleteEntry` | Deletes the matching file or directory subtree; no-op when nothing matches if `allow_missing` flag is passed (future extension). |
 
 ## Prompt Template Guidance
@@ -149,8 +163,8 @@ Every tool validates its parameters and raises `ToolValidationError` on failure.
    output volume.
 1. Fetch file contents with `vfs.read_file` when context is needed, and operate on the returned version to avoid stale
    edits.
-1. Apply edits with `vfs.write_file`, keeping updates concise and UTF-8-only; prefer overwriting complete files instead
-   of issuing multiple appends unless streaming logs.
+1. Apply edits with `vfs.write_file`, keeping updates concise. Binary payloads are supported but should remain small and
+   intentional; prefer overwriting complete files instead of issuing multiple appends unless streaming logs.
 1. Clean up obsolete files or directories via `vfs.delete_entry` once work completes to keep the snapshot tight.
 1. Avoid mirroring large repositories or binary assets; orchestrated host mounts should stay focused, and the enforced
    size limit still applies.

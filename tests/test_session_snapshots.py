@@ -18,11 +18,18 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 import pytest
 
-from weakincentives.runtime.session import snapshots
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import (
+    Session,
+    replace_latest,
+    select_latest,
+    snapshots,
+)
 from weakincentives.runtime.session.snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -32,6 +39,7 @@ from weakincentives.runtime.session.snapshots import (
     _resolve_type,
     normalize_snapshot_state,
 )
+from weakincentives.tools.vfs import VfsFile, VfsPath, VirtualFileSystem
 
 
 @dataclass(slots=True, frozen=True)
@@ -150,6 +158,63 @@ def test_snapshot_to_json_surfaces_serialization_errors(
 
     with pytest.raises(SnapshotSerializationError):
         snapshot.to_json()
+
+
+def test_snapshot_clones_and_restores_vfs(tmp_path: Path) -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    root = tmp_path / "vfs"
+    nested = root / "docs"
+    nested.mkdir(parents=True)
+    original_file = nested / "note.txt"
+    original_file.write_text("hello", encoding="utf-8")
+
+    vfs_file = VfsFile(
+        path=VfsPath(("docs", "note.txt")),
+        content=b"hello",
+        encoding="utf-8",
+        size_bytes=5,
+        version=1,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    snapshot_state = VirtualFileSystem(root_path=str(root), files=(vfs_file,))
+    session.register_reducer(VirtualFileSystem, replace_latest)
+    session.seed_slice(VirtualFileSystem, (snapshot_state,))
+
+    snapshot = session.snapshot()
+    cloned_vfs = cast(VirtualFileSystem, snapshot.slices[VirtualFileSystem][0])
+    cloned_root = Path(cloned_vfs.root_path)
+    assert cloned_root != root
+    assert (cloned_root / "docs" / "note.txt").read_text(encoding="utf-8") == "hello"
+
+    original_file.write_text("changed", encoding="utf-8")
+    assert (cloned_root / "docs" / "note.txt").read_text(encoding="utf-8") == "hello"
+
+    session.rollback(snapshot)
+    restored = select_latest(session, VirtualFileSystem)
+    assert restored is not None
+    restored_root = Path(restored.root_path)
+    assert restored_root != cloned_root
+    assert (restored_root / "docs" / "note.txt").read_text(encoding="utf-8") == "hello"
+
+
+def test_snapshot_handles_missing_vfs_root(tmp_path: Path) -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    missing_root = tmp_path / "missing"
+    session.register_reducer(VirtualFileSystem, replace_latest)
+    session.seed_slice(
+        VirtualFileSystem,
+        (VirtualFileSystem(root_path=str(missing_root), files=()),),
+    )
+
+    snapshot = session.snapshot()
+    cloned_vfs = cast(VirtualFileSystem, snapshot.slices[VirtualFileSystem][0])
+    cloned_root = Path(cloned_vfs.root_path)
+    assert cloned_root.exists()
+    assert list(cloned_root.iterdir()) == []
 
 
 @pytest.mark.parametrize(

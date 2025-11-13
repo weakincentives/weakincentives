@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -26,7 +28,7 @@ from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session, select_latest
+from weakincentives.runtime.session import ReducerEvent, Session, select_latest
 from weakincentives.tools import (
     AstevalSection,
     EvalFileRead,
@@ -37,6 +39,7 @@ from weakincentives.tools import (
     ListDirectory,
     ListDirectoryResult,
     ToolValidationError,
+    VfsFile,
     VfsPath,
     VfsToolsSection,
     VirtualFileSystem,
@@ -79,6 +82,11 @@ def _setup_sections() -> tuple[
     bus = InProcessEventBus()
     session = Session(bus=bus)
     vfs_section = VfsToolsSection()
+    list_tool = cast(
+        Tool[ListDirectory, ListDirectoryResult],
+        find_tool(vfs_section, "vfs_list_directory"),
+    )
+    invoke_tool(bus, list_tool, ListDirectory(), session=session)
     section = AstevalSection()
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
     return session, bus, vfs_section, tool
@@ -163,7 +171,7 @@ def test_statements_mode_reads_and_writes() -> None:
     invoke_tool(
         bus,
         write_tool,
-        WriteFile(path=VfsPath(("docs", "info.txt")), content="sample text"),
+        WriteFile(path=VfsPath(("docs", "info.txt")), content=b"sample text"),
         session=session,
     )
 
@@ -206,7 +214,7 @@ def test_statements_mode_reads_and_writes() -> None:
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     written = {file.path.segments: file.content for file in snapshot.files}
-    assert written["output", "summary.txt"] == "Report: hello"
+    assert written["output", "summary.txt"] == b"Report: hello"
 
 
 def test_helper_write_appends() -> None:
@@ -234,7 +242,7 @@ def test_helper_write_appends() -> None:
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
-    assert files["logs", "activity.log"] == "started-continued"
+    assert files["logs", "activity.log"] == b"started-continued"
 
 
 def test_invalid_globals_raise() -> None:
@@ -518,7 +526,7 @@ def test_create_mode_rejects_existing_file() -> None:
     invoke_tool(
         bus,
         write_tool,
-        WriteFile(path=existing_path, content="original"),
+        WriteFile(path=existing_path, content=b"original"),
         session=session,
     )
 
@@ -538,7 +546,7 @@ def test_create_mode_rejects_existing_file() -> None:
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
-    assert files[existing_path.segments] == "original"
+    assert files[existing_path.segments] == b"original"
 
 
 def test_append_requires_existing_file() -> None:
@@ -575,7 +583,7 @@ def test_overwrite_updates_existing_file() -> None:
     invoke_tool(
         bus,
         write_tool,
-        WriteFile(path=path, content="old"),
+        WriteFile(path=path, content=b"old"),
         session=session,
     )
 
@@ -593,7 +601,7 @@ def test_overwrite_updates_existing_file() -> None:
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
-    assert files[path.segments] == "updated"
+    assert files[path.segments] == b"updated"
 
 
 def test_message_summarizes_multiple_writes() -> None:
@@ -724,7 +732,7 @@ def test_write_text_conflict_with_read_path() -> None:
         Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
     )
     path = VfsPath(("docs", "info.txt"))
-    invoke_tool(bus, write_tool, WriteFile(path=path, content="seed"), session=session)
+    invoke_tool(bus, write_tool, WriteFile(path=path, content=b"seed"), session=session)
 
     params = EvalParams(
         code="write_text('docs/info.txt', 'data')",
@@ -867,3 +875,78 @@ def test_execute_with_timeout_propagates_error(
 def test_merge_globals_combines_mappings() -> None:
     merged = asteval_module._merge_globals({"alpha": 1}, {"beta": 2})
     assert merged == {"alpha": 1, "beta": 2}
+
+
+def test_decode_vfs_text_requires_utf8() -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    file = VfsFile(
+        path=VfsPath(("binary.bin",)),
+        content=b"\xff",
+        encoding="binary",
+        size_bytes=1,
+        version=1,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    with pytest.raises(ToolValidationError):
+        asteval_module._decode_vfs_text(file)
+
+
+def test_write_vfs_bytes_failure_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "vfs"
+    root.mkdir()
+    target = root / "fail.txt"
+    original_write_bytes = Path.write_bytes
+
+    def fail_write_bytes(self: Path, data: bytes) -> int:
+        if self == target:
+            raise OSError("boom")
+        return original_write_bytes(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", fail_write_bytes)
+
+    with pytest.raises(ToolValidationError):
+        asteval_module._write_vfs_bytes(root, VfsPath(("fail.txt",)), b"data")
+
+
+def test_evaluate_requires_vfs_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(asteval_module, "_load_asteval_module", lambda: asteval_module)
+    section = AstevalSection()
+    eval_tool = find_tool(section, "evaluate_python")
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    with pytest.raises(
+        ToolValidationError, match="Virtual filesystem is not initialized"
+    ):
+        invoke_tool(
+            bus,
+            eval_tool,
+            EvalParams(code="1 + 1", mode="expr"),
+            session=session,
+        )
+
+
+def test_eval_result_reducer_requires_state() -> None:
+    reducer = asteval_module._make_eval_result_reducer()
+    event = cast(
+        ReducerEvent,
+        SimpleNamespace(
+            value=EvalResult(
+                value_repr=None,
+                stdout="",
+                stderr="",
+                globals={},
+                reads=(),
+                writes=(),
+            )
+        ),
+    )
+    context = cast(
+        ToolContext,
+        SimpleNamespace(session=Session(bus=InProcessEventBus())),
+    )
+    with pytest.raises(RuntimeError):
+        reducer((), event, context=context)

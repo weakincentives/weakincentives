@@ -14,9 +14,12 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import RLock
 from typing import Any, cast, override
 from uuid import UUID, uuid4
@@ -37,6 +40,10 @@ from .snapshots import (
 )
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "session"})
+
+
+_VFS_SNAPSHOT_PREFIX = "weakincentives-vfs-snapshot-"
+_VFS_RUNTIME_PREFIX = "weakincentives-vfs-session-"
 
 
 type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
@@ -212,7 +219,8 @@ class Session(SessionProtocol):
             raise SnapshotSerializationError(msg) from error
 
         created_at = datetime.now(UTC)
-        return Snapshot(created_at=created_at, slices=normalized)
+        slices = _clone_snapshot_slices(normalized)
+        return Snapshot(created_at=created_at, slices=slices)
 
     @override
     def rollback(self, snapshot: SnapshotProtocol) -> None:
@@ -232,7 +240,11 @@ class Session(SessionProtocol):
         with self._lock:
             new_state: dict[type[Any], tuple[Any, ...]] = dict(self._state)
             for slice_type in registered_slices:
-                new_state[slice_type] = snapshot.slices.get(slice_type, ())
+                values = snapshot.slices.get(slice_type, ())
+                new_state[slice_type] = _restore_snapshot_slice(
+                    slice_type,
+                    values,
+                )
 
             self._state = new_state
 
@@ -366,6 +378,64 @@ class Session(SessionProtocol):
             bus.subscribe(ToolInvoked, self._on_tool_invoked)
             bus.subscribe(PromptExecuted, self._on_prompt_executed)
             bus.subscribe(PromptRendered, self._on_prompt_rendered)
+
+
+def _clone_snapshot_slices(
+    slices: Mapping[type[Any], tuple[Any, ...]],
+) -> Mapping[type[Any], tuple[SupportsDataclass, ...]]:
+    cloned: dict[type[Any], tuple[SupportsDataclass, ...]] = {}
+    for slice_type, values in slices.items():
+        if _is_vfs_slice(slice_type):
+            typed_values = cast(tuple[SupportsDataclass, ...], values)
+            cloned[slice_type] = tuple(
+                _clone_vfs_snapshot(value) for value in typed_values
+            )
+        else:
+            cloned[slice_type] = cast(tuple[SupportsDataclass, ...], values)
+    return cloned
+
+
+def _restore_snapshot_slice(
+    slice_type: type[Any], values: tuple[Any, ...]
+) -> tuple[SupportsDataclass, ...]:
+    if not _is_vfs_slice(slice_type):
+        return cast(tuple[SupportsDataclass, ...], values)
+    typed_values = cast(tuple[SupportsDataclass, ...], values)
+    return tuple(_restore_vfs_snapshot(value) for value in typed_values)
+
+
+def _clone_vfs_snapshot(value: SupportsDataclass) -> SupportsDataclass:
+    root = Path(getattr(value, "root_path", ""))
+    destination = Path(tempfile.mkdtemp(prefix=_VFS_SNAPSHOT_PREFIX))
+    _copy_vfs_tree(root, destination)
+    return replace(value, root_path=str(destination))
+
+
+def _restore_vfs_snapshot(value: SupportsDataclass) -> SupportsDataclass:
+    root = Path(getattr(value, "root_path", ""))
+    destination = Path(tempfile.mkdtemp(prefix=_VFS_RUNTIME_PREFIX))
+    _copy_vfs_tree(root, destination)
+    return replace(value, root_path=str(destination))
+
+
+def _is_vfs_slice(slice_type: type[Any]) -> bool:
+    return (
+        slice_type.__module__ == "weakincentives.tools.vfs"
+        and slice_type.__name__ == "VirtualFileSystem"
+    )
+
+
+def _copy_vfs_tree(source: Path, destination: Path) -> None:
+    _ = destination.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        return
+    for item in source.rglob("*"):
+        target = destination / item.relative_to(source)
+        if item.is_dir():
+            _ = target.mkdir(parents=True, exist_ok=True)
+            continue
+        _ = target.parent.mkdir(parents=True, exist_ok=True)
+        _ = shutil.copy2(item, target)
 
 
 __all__ = [

@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import dataclasses
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import MISSING
@@ -28,9 +30,9 @@ from typing import get_args as typing_get_args
 from uuid import UUID
 
 from ._utils import (
-    _UNION_TYPE,
     _AnyType,
     _apply_constraints,
+    _is_union_type,
     _merge_annotated_meta,
     _ParseConfig,
     _set_extras,
@@ -50,6 +52,17 @@ def _bool_from_str(value: str) -> bool:
     raise TypeError(f"Cannot interpret '{value}' as boolean")
 
 
+def _coerce_bytes(value: object, path: str) -> bytes:
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, str):
+        try:
+            return base64.b64decode(value.encode("ascii"))
+        except (binascii.Error, ValueError) as error:
+            raise ValueError(f"{path}: invalid base64 encoding for bytes") from error
+    raise TypeError(f"{path}: expected base64-encoded string for bytes")
+
+
 def _coerce_to_type(
     value: object,
     typ: object,
@@ -64,7 +77,7 @@ def _coerce_to_type(
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
-    if origin is _UNION_TYPE:
+    if _is_union_type(base_type, origin):
         if (
             config.coerce
             and isinstance(value, str)
@@ -100,6 +113,15 @@ def _coerce_to_type(
 
     if value is None:
         raise TypeError(f"{path}: value cannot be None")
+
+    if base_type is bytes or base_type is bytearray:
+        data = _coerce_bytes(value, path)
+        coerced: object = data if base_type is bytes else bytearray(data)
+        return _apply_constraints(coerced, merged_meta, path)
+    if isinstance(base_type, type) and issubclass(base_type, (bytes, bytearray)):
+        data = _coerce_bytes(value, path)
+        coerced = data if base_type is bytes else bytearray(data)
+        return _apply_constraints(coerced, merged_meta, path)
 
     if origin is Literal:
         literals = get_args(base_type)

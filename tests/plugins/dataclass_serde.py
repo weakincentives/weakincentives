@@ -128,7 +128,7 @@ def _make_vfs_file() -> vfs_tools.VfsFile:
     now = datetime.now(UTC)
     return vfs_tools.VfsFile(
         path=_make_vfs_path(),
-        content="Hello, world!",
+        content=b"Hello, world!",
         encoding="utf-8",
         size_bytes=13,
         version=1,
@@ -138,7 +138,9 @@ def _make_vfs_file() -> vfs_tools.VfsFile:
 
 
 def _make_virtual_file_system() -> vfs_tools.VirtualFileSystem:
-    return vfs_tools.VirtualFileSystem(files=(_make_vfs_file(),))
+    return vfs_tools.VirtualFileSystem(
+        root_path="/tmp/weakincentives-vfs", files=(_make_vfs_file(),)
+    )
 
 
 def _make_list_directory() -> vfs_tools.ListDirectory:
@@ -160,7 +162,7 @@ def _make_read_file() -> vfs_tools.ReadFile:
 def _make_write_file() -> vfs_tools.WriteFile:
     return vfs_tools.WriteFile(
         path=_make_vfs_path(),
-        content="import this",
+        content=b"import this",
         mode="overwrite",
         encoding="utf-8",
     )

@@ -5,8 +5,9 @@
 This document defines how to embed the [asteval](https://github.com/lmfit/asteval)
 interpreter inside the weakincentives tool stack so language models can evaluate
 small Python expressions. The tool executes inside the agent runtime and
-operates entirely on the in-memory Virtual File System (VFS) snapshot described
-in `specs/VFS_TOOLS.md`. It exposes a single read–eval–print surface that
+operates against the disk-backed Virtual File System (VFS) snapshot described
+in `specs/VFS_TOOLS.md`, using the per-session temporary directory that lives in
+the operating system's default temp location. It exposes a single read–eval–print surface that
 accepts an expression string, optional helper definitions, and an optional list
 of read/write file operations to run before or after evaluation.
 
@@ -200,6 +201,9 @@ The tool operates against the session's `VirtualFileSystem` snapshot:
 - Writes execute through the existing reducer from `VfsToolsSection`. The
   handler enqueues `WriteFile` operations and dispatches them via
   `session.reduce(replace_latest, VirtualFileSystem, updated_snapshot)`.
+  Because the VFS is disk-backed, these writes land on the session's temporary
+  directory under the OS-managed temp root; handlers must not fall back to the
+  orchestrator workspace when persisting results.
 - Writes obey the same guards as native VFS tools: UTF-8 text only, max 48_000
   characters, depth ≤ 16, segment length ≤ 80.
 - When `write_text` helper is used inside code, it reuses the same queueing path

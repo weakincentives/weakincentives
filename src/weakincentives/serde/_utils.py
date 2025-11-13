@@ -26,6 +26,18 @@ MISSING_SENTINEL: Final[object] = object()
 _UNION_TYPE = type(int | str)
 
 
+def _is_union_type(base_type: object, origin: object) -> bool:
+    """Return True when the provided type represents a typing-based union."""
+
+    if origin is _UNION_TYPE:
+        return True
+    base_cls = base_type.__class__
+    return (
+        base_cls.__module__ == "typing"
+        and base_cls.__qualname__ == "_UnionGenericAlias"
+    )
+
+
 class _ExtrasDescriptor:
     """Descriptor storing extras for slotted dataclasses."""
 
@@ -228,6 +240,7 @@ __all__ = [
     "_ExtrasDescriptor",
     "_ParseConfig",
     "_apply_constraints",
+    "_is_union_type",
     "_merge_annotated_meta",
     "_ordered_values",
     "_set_extras",

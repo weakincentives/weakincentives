@@ -26,7 +26,12 @@ from pathlib import Path
 from typing import Literal, get_args, get_origin, get_type_hints
 from uuid import UUID
 
-from ._utils import _UNION_TYPE, _AnyType, _merge_annotated_meta, _ordered_values
+from ._utils import (
+    _AnyType,
+    _is_union_type,
+    _merge_annotated_meta,
+    _ordered_values,
+)
 
 
 def _schema_constraints(meta: Mapping[str, object]) -> dict[str, object]:
@@ -162,7 +167,7 @@ def _schema_for_type(
             "type": "object",
             "additionalProperties": _schema_for_type(value_type, None, alias_generator),
         }
-    elif origin is _UNION_TYPE:
+    elif _is_union_type(base_type, origin):
         subschemas = []
         includes_null = False
         base_schema_ref: Mapping[str, object] | None = None

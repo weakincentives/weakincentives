@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -36,14 +37,16 @@ from ..runtime.session import (
 )
 from .errors import ToolValidationError
 
-FileEncoding = str
+FileEncoding = Literal["utf-8", "binary"] | str | None
 WriteMode = Literal["create", "overwrite", "append"]
 
 _ASCII: Final[str] = "ascii"
-_DEFAULT_ENCODING: Final[FileEncoding] = "utf-8"
+_DEFAULT_ENCODING: Final[str] = "utf-8"
+_BINARY_ENCODING: Final[str] = "binary"
 _MAX_WRITE_LENGTH: Final[int] = 48_000
 _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_SEGMENT_LENGTH: Final[int] = 80
+_TEMP_DIR_PREFIX: Final[str] = "weakincentives-vfs-"
 _VFS_SECTION_TEMPLATE: Final[str] = (
     "The virtual filesystem starts empty unless host mounts are configured."
     " Use it to stage edits before applying them to the host workspace.\n"
@@ -84,15 +87,21 @@ class VfsFile:
     path: VfsPath = field(
         metadata={"description": "Location of the file within the virtual filesystem."}
     )
-    content: str = field(
+    content: bytes = field(
         metadata={
             "description": (
-                "UTF-8 text content of the file. Binary data is not supported."
+                "Raw byte content of the file. Encoding hints describe how to"
+                " interpret the payload when rendering to text."
             )
         }
     )
     encoding: FileEncoding = field(
-        metadata={"description": "Name of the codec used to decode the file contents."}
+        metadata={
+            "description": (
+                "Name of the codec used to decode the file contents. Use 'utf-8'"
+                " for text, 'binary' or None for arbitrary bytes."
+            )
+        }
     )
     size_bytes: int = field(
         metadata={"description": "Size of the encoded file on disk, in bytes."}
@@ -118,6 +127,11 @@ class VfsFile:
 class VirtualFileSystem:
     """Immutable snapshot of the virtual filesystem state."""
 
+    root_path: str = field(
+        metadata={
+            "description": "Absolute path to the session's disk-backed workspace root."
+        }
+    )
     files: tuple[VfsFile, ...] = field(
         default_factory=tuple,
         metadata={
@@ -176,10 +190,10 @@ class WriteFile:
             "description": "Target path to create or modify within the virtual filesystem."
         }
     )
-    content: str = field(
+    content: bytes = field(
         metadata={
             "description": (
-                "UTF-8 text to write. Content is limited to 48k characters per call."
+                "Raw byte payload to write. Content is limited to 48k bytes per call."
             )
         }
     )
@@ -196,7 +210,8 @@ class WriteFile:
         default=_DEFAULT_ENCODING,
         metadata={
             "description": (
-                "Encoding name for the provided content. Defaults to UTF-8."
+                "Encoding hint for the provided content. Defaults to UTF-8 text; "
+                "set to 'binary' or None for raw bytes."
             )
         },
     )
@@ -287,7 +302,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         accepts_overrides: bool = False,
     ) -> None:
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
-        self._mount_snapshot = _materialize_mounts(mounts, allowed_roots)
+        self._mount_files = _materialize_mounts(mounts, allowed_roots)
         self._configured_sessions: WeakSet[Session] = WeakSet()
 
         tools = _build_tools(
@@ -315,8 +330,14 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         return session
 
     def _initialize_session(self, session: Session) -> None:
+        root = _create_session_root()
+        _sync_mounts_to_disk(root, self._mount_files)
+        initial_snapshot = VirtualFileSystem(
+            root_path=str(root),
+            files=tuple(self._mount_files),
+        )
         session.register_reducer(VirtualFileSystem, replace_latest)
-        session.seed_slice(VirtualFileSystem, (self._mount_snapshot,))
+        session.seed_slice(VirtualFileSystem, (initial_snapshot,))
         session.register_reducer(
             WriteFile,
             _make_write_reducer(),
@@ -330,7 +351,9 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 
     def latest_snapshot(self, session: Session) -> VirtualFileSystem:
         snapshot = select_latest(session, VirtualFileSystem)
-        return snapshot or VirtualFileSystem()
+        if snapshot is None:
+            raise ToolValidationError("Virtual filesystem not initialized for session.")
+        return snapshot
 
 
 def _build_tools(
@@ -436,9 +459,8 @@ class _VfsToolSuite:
     ) -> ToolResult[WriteFile]:
         session = self._section.ensure_session(context)
         path = _normalize_required_path(params.path)
-        if params.encoding != _DEFAULT_ENCODING:
-            raise ToolValidationError("Only UTF-8 encoding is supported.")
-        content = _normalize_content(params.content)
+        encoding = _normalize_encoding(params.encoding)
+        payload = _normalize_content(params.content, encoding)
         mode = params.mode
         snapshot = self._section.latest_snapshot(session)
         existing = _find_file(snapshot.files, path)
@@ -446,8 +468,26 @@ class _VfsToolSuite:
             raise ToolValidationError("File already exists; use overwrite or append.")
         if mode in {"overwrite", "append"} and existing is None:
             raise ToolValidationError("File does not exist for the requested mode.")
-        normalized = WriteFile(path=path, content=content, mode=mode)
-        message = _format_write_file_message(path, content, mode)
+        if mode == "append" and existing is not None:
+            final_content = existing.content + payload
+            prior_encoding = existing.encoding
+            message_size = len(payload)
+        else:
+            final_content = payload
+            prior_encoding = existing.encoding if existing is not None else None
+            message_size = len(final_content)
+        resolved_encoding = encoding if encoding is not None else prior_encoding
+        root = Path(snapshot.root_path)
+        _write_bytes_to_disk(root, path, final_content)
+        normalized = WriteFile(
+            path=path,
+            content=final_content,
+            mode=mode,
+            encoding=resolved_encoding,
+        )
+        message = _format_write_file_message(
+            path, message_size, mode, resolved_encoding
+        )
         return ToolResult(message=message, value=normalized)
 
     def delete_entry(
@@ -464,16 +504,44 @@ class _VfsToolSuite:
         deleted_count = len(matches)
         if deleted_count == 0:
             raise ToolValidationError("No files matched the provided path.")
+        root = Path(snapshot.root_path)
+        _delete_files_from_disk(root, matches)
         normalized = DeleteEntry(path=path)
         message = _format_delete_message(path, matches)
         return ToolResult(message=message, value=normalized)
 
 
-def _normalize_content(content: str) -> str:
+def _normalize_encoding(encoding: FileEncoding) -> FileEncoding:
+    if encoding is None:
+        return None
+    normalized = encoding.strip()
+    if not normalized:
+        return None
+    _ensure_ascii(normalized, "encoding")
+    lowered = normalized.lower()
+    if lowered == _DEFAULT_ENCODING:
+        return _DEFAULT_ENCODING
+    if lowered == _BINARY_ENCODING:
+        return _BINARY_ENCODING
+    return lowered
+
+
+def _normalize_content(content: bytes, encoding: FileEncoding) -> bytes:
+    if encoding == _DEFAULT_ENCODING:
+        try:
+            decoded = content.decode(_DEFAULT_ENCODING)
+        except UnicodeDecodeError as error:
+            raise ToolValidationError(
+                "Content is not valid UTF-8 for the requested encoding."
+            ) from error
+        if len(decoded) > _MAX_WRITE_LENGTH:
+            raise ToolValidationError(
+                "Content exceeds maximum length of 48,000 characters."
+            )
+        return content
+
     if len(content) > _MAX_WRITE_LENGTH:
-        raise ToolValidationError(
-            "Content exceeds maximum length of 48,000 characters."
-        )
+        raise ToolValidationError("Content exceeds maximum length of 48,000 bytes.")
     return content
 
 
@@ -560,17 +628,29 @@ def _format_directory_message(
 
 def _format_read_file_message(file: VfsFile) -> str:
     path_label = _format_path(file.path)
-    return f"Read file {path_label}."
+    encoding = file.encoding or _BINARY_ENCODING
+    return (
+        f"Read file {path_label} (size={file.size_bytes} bytes, encoding={encoding})."
+    )
 
 
-def _format_write_file_message(path: VfsPath, _content: str, mode: WriteMode) -> str:
+def _format_write_file_message(
+    path: VfsPath, size_bytes: int, mode: WriteMode, encoding: FileEncoding
+) -> str:
     path_label = _format_path(path)
     action = {
         "create": "create",
         "overwrite": "overwrite",
         "append": "append",
     }[mode]
-    return f"Staged {action} for {path_label}."
+    encoding_label = encoding or _BINARY_ENCODING
+    if mode == "append":
+        size_label = f"appended {size_bytes} bytes"
+    else:
+        size_label = f"{size_bytes} bytes"
+    return (
+        f"Staged {action} for {path_label} ({size_label}, encoding={encoding_label})."
+    )
 
 
 def _format_delete_message(path: VfsPath, files: Sequence[VfsFile]) -> str:
@@ -592,17 +672,16 @@ def _normalize_root(path: os.PathLike[str] | str) -> Path:
 
 def _materialize_mounts(
     mounts: Sequence[HostMount], allowed_roots: Sequence[Path]
-) -> VirtualFileSystem:
+) -> tuple[VfsFile, ...]:
     if not mounts:
-        return VirtualFileSystem()
+        return ()
 
     aggregated: dict[tuple[str, ...], VfsFile] = {}
     for mount in mounts:
         loaded = _load_mount(mount, allowed_roots)
         for file in loaded:
             aggregated[file.path.segments] = file
-    files = tuple(sorted(aggregated.values(), key=lambda file: file.path.segments))
-    return VirtualFileSystem(files=files)
+    return tuple(sorted(aggregated.values(), key=lambda file: file.path.segments))
 
 
 def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFile, ...]:
@@ -635,12 +714,15 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
             continue
 
         try:
-            content = path.read_text(encoding=_DEFAULT_ENCODING)
-        except UnicodeDecodeError as error:  # pragma: no cover - defensive guard
-            raise ToolValidationError("Mounted file must be valid UTF-8.") from error
+            content = path.read_bytes()
         except OSError as error:
             raise ToolValidationError(f"Failed to read mounted file {path}.") from error
-        size = len(content.encode(_DEFAULT_ENCODING))
+        try:
+            _ = content.decode(_DEFAULT_ENCODING)
+            encoding: FileEncoding = _DEFAULT_ENCODING
+        except UnicodeDecodeError:
+            encoding = _BINARY_ENCODING
+        size = len(content)
         if mount.max_bytes is not None and consumed_bytes + size > mount.max_bytes:
             raise ToolValidationError("Host mount exceeded the configured byte budget.")
         consumed_bytes += size
@@ -650,7 +732,7 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
         file = VfsFile(
             path=normalized_path,
             content=content,
-            encoding=_DEFAULT_ENCODING,
+            encoding=encoding,
             size_bytes=size,
             version=1,
             created_at=timestamp,
@@ -695,6 +777,56 @@ def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
             yield current / name
 
 
+def _create_session_root() -> Path:
+    return Path(tempfile.mkdtemp(prefix=_TEMP_DIR_PREFIX))
+
+
+def _sync_mounts_to_disk(root: Path, files: Sequence[VfsFile]) -> None:
+    for file in files:
+        _write_bytes_to_disk(root, file.path, file.content)
+
+
+def _write_bytes_to_disk(root: Path, path: VfsPath, content: bytes) -> None:
+    target = _resolve_disk_path(root, path)
+    try:
+        _ = target.parent.mkdir(parents=True, exist_ok=True)
+        _ = target.write_bytes(content)
+    except OSError as error:
+        raise ToolValidationError(f"Failed to write VFS file {target}.") from error
+
+
+def _delete_files_from_disk(root: Path, files: Sequence[VfsFile]) -> None:
+    for file in files:
+        target = _resolve_disk_path(root, file.path)
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise ToolValidationError(f"Failed to delete VFS file {target}.") from error
+        _prune_empty_parents(root, target.parent)
+
+
+def _resolve_disk_path(root: Path, path: VfsPath) -> Path:
+    return root.joinpath(*path.segments)
+
+
+def _prune_empty_parents(root: Path, path: Path) -> None:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return
+    parts = relative.parts
+    for index in range(len(parts), 0, -1):
+        current = root.joinpath(*parts[:index])
+        if not current.exists():
+            continue
+        try:
+            current.rmdir()
+        except OSError:
+            break
+
+
 def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
     def reducer(
         slice_values: tuple[VirtualFileSystem, ...],
@@ -703,29 +835,29 @@ def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
         context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
         del context
-        previous = slice_values[-1] if slice_values else VirtualFileSystem()
+        if not slice_values:
+            raise RuntimeError("Virtual filesystem reducer invoked without state.")
+        previous = slice_values[-1]
         params = cast(WriteFile, event.value)
         timestamp = _now()
         files = list(previous.files)
         existing_index = _index_of(files, params.path)
         existing = files[existing_index] if existing_index is not None else None
-        if params.mode == "append" and existing is not None:
-            content = existing.content + params.content
-            created_at = existing.created_at
-            version = existing.version + 1
-        elif existing is not None:
-            content = params.content
+        if existing is not None:
             created_at = existing.created_at
             version = existing.version + 1
         else:
-            content = params.content
             created_at = timestamp
             version = 1
-        size = len(content.encode(_DEFAULT_ENCODING))
+        content = params.content
+        resolved_encoding = params.encoding
+        if resolved_encoding is None and existing is not None:
+            resolved_encoding = existing.encoding
+        size = len(content)
         updated_file = VfsFile(
             path=params.path,
             content=content,
-            encoding=_DEFAULT_ENCODING,
+            encoding=resolved_encoding,
             size_bytes=size,
             version=version,
             created_at=_truncate_to_milliseconds(created_at),
@@ -735,7 +867,7 @@ def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
             del files[existing_index]
         files.append(updated_file)
         files.sort(key=lambda file: file.path.segments)
-        snapshot = VirtualFileSystem(files=tuple(files))
+        snapshot = VirtualFileSystem(root_path=previous.root_path, files=tuple(files))
         return (snapshot,)
 
     return reducer
@@ -749,7 +881,9 @@ def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
         context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
         del context
-        previous = slice_values[-1] if slice_values else VirtualFileSystem()
+        if not slice_values:
+            raise RuntimeError("Virtual filesystem reducer invoked without state.")
+        previous = slice_values[-1]
         params = cast(DeleteEntry, event.value)
         target = params.path.segments
         files = [
@@ -758,7 +892,7 @@ def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
             if not _is_path_prefix(file.path.segments, target)
         ]
         files.sort(key=lambda file: file.path.segments)
-        snapshot = VirtualFileSystem(files=tuple(files))
+        snapshot = VirtualFileSystem(root_path=previous.root_path, files=tuple(files))
         return (snapshot,)
 
     return reducer

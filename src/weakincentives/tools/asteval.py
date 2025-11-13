@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequenc
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib import import_module
+from pathlib import Path
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast
 from weakref import WeakSet
@@ -89,7 +90,7 @@ _EVAL_TEMPLATE: Final[str] = (
     "Use the Python evaluation tool for quick calculations and one-off scripts.\n"
     "- Keep code concise (<=2,000 characters) and prefer expression mode unless you need statements.\n"
     "- Pre-load files via `reads`, or call `read_text(path)` inside code to fetch VFS files.\n"
-    "- Stage edits with `write_text(path, content, mode)` or declare them in `writes`. Content must be ASCII.\n"
+    "- Stage edits with `write_text(path, content, mode)` or declare them in `writes`. Content must be UTF-8 text.\n"
     "- Globals accept JSON-encoded strings and are parsed before execution.\n"
     "- Execution stops after five seconds; design code to finish quickly.\n\n"
     "Expression mode returns the repr of the final expression and skips stdout unless you print explicitly:\n"
@@ -326,6 +327,13 @@ def _require_file(snapshot: VirtualFileSystem, path: VfsPath) -> VfsFile:
     raise ToolValidationError("File does not exist in the virtual filesystem.")
 
 
+def _decode_vfs_text(file: VfsFile) -> str:
+    try:
+        return file.content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ToolValidationError("VFS file is not valid UTF-8 text.") from error
+
+
 def _normalize_code(code: str) -> str:
     if len(code) > _MAX_CODE_LENGTH:
         raise ToolValidationError("Code exceeds maximum length of 2,000 characters.")
@@ -339,7 +347,6 @@ def _normalize_code(code: str) -> str:
 def _normalize_write(write: EvalFileWrite) -> EvalFileWrite:
     path = _normalize_vfs_path(write.path)
     content = write.content
-    _ensure_ascii(content, "write content")
     if len(content) > _MAX_WRITE_LENGTH:
         raise ToolValidationError(
             "Content exceeds maximum length of 48,000 characters."
@@ -412,11 +419,23 @@ def _summarize_writes(writes: Sequence[EvalFileWrite]) -> str | None:
     return f"writes={total} file(s): {preview_paths}"
 
 
+def _write_vfs_bytes(root: Path, path: VfsPath, content: bytes) -> None:
+    target = root.joinpath(*path.segments)
+    try:
+        _ = target.parent.mkdir(parents=True, exist_ok=True)
+        _ = target.write_bytes(content)
+    except OSError as error:
+        raise ToolValidationError(
+            f"Failed to persist evaluation write to {target}."
+        ) from error
+
+
 def _apply_writes(
     snapshot: VirtualFileSystem, writes: Iterable[EvalFileWrite]
 ) -> VirtualFileSystem:
     files = list(snapshot.files)
     timestamp = _now()
+    root = Path(snapshot.root_path)
     for write in writes:
         existing_index = next(
             (index for index, file in enumerate(files) if file.path == write.path),
@@ -427,19 +446,21 @@ def _apply_writes(
             raise ToolValidationError("File already exists; use overwrite or append.")
         if write.mode in {"overwrite", "append"} and existing is None:
             raise ToolValidationError("File does not exist for the requested mode.")
+        payload = write.content.encode("utf-8")
         if write.mode == "append" and existing is not None:
-            content = existing.content + write.content
+            content = existing.content + payload
             created_at = existing.created_at
             version = existing.version + 1
         elif existing is not None:
-            content = write.content
+            content = payload
             created_at = existing.created_at
             version = existing.version + 1
         else:
-            content = write.content
+            content = payload
             created_at = timestamp
             version = 1
-        size_bytes = len(content.encode("utf-8"))
+        size_bytes = len(content)
+        _write_vfs_bytes(root, write.path, content)
         updated = VfsFile(
             path=write.path,
             content=content,
@@ -453,7 +474,7 @@ def _apply_writes(
             _ = files.pop(existing_index)
         files.append(updated)
     files.sort(key=lambda file: file.path.segments)
-    return VirtualFileSystem(files=tuple(files))
+    return VirtualFileSystem(root_path=snapshot.root_path, files=tuple(files))
 
 
 def _parse_string_path(path: str) -> VfsPath:
@@ -469,7 +490,7 @@ def _build_eval_globals(
     for read in reads:
         alias = _alias_for_path(read.path)
         file = _require_file(snapshot, read.path)
-        values[alias] = file.content
+        values[alias] = _decode_vfs_text(file)
     return values
 
 
@@ -575,7 +596,15 @@ class _AstevalToolSuite:
         if read_paths & write_paths:
             raise ToolValidationError("Reads and writes must not target the same path.")
 
-        snapshot = select_latest(session, VirtualFileSystem) or VirtualFileSystem()
+        snapshot = select_latest(session, VirtualFileSystem)
+        if snapshot is None:
+            message = " ".join(
+                [
+                    "Virtual filesystem is not initialized for this session.",
+                    "Add VfsToolsSection before using the evaluation tool.",
+                ]
+            )
+            raise ToolValidationError(message)
         read_globals = _build_eval_globals(snapshot, reads)
         user_globals = _parse_user_globals(params.globals)
 
@@ -623,7 +652,7 @@ class _AstevalToolSuite:
         def read_text(path: str) -> str:
             normalized = _normalize_vfs_path(_parse_string_path(path))
             file = _require_file(snapshot, normalized)
-            return file.content
+            return _decode_vfs_text(file)
 
         def write_text(path: str, content: str, mode: str = "create") -> None:
             nonlocal pending_write_attempted
@@ -786,7 +815,9 @@ def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
         context: ReducerContextProtocol,
     ) -> tuple[VirtualFileSystem, ...]:
         del context
-        previous = slice_values[-1] if slice_values else VirtualFileSystem()
+        if not slice_values:
+            raise RuntimeError("Virtual filesystem reducer invoked without state.")
+        previous = slice_values[-1]
         value = cast(EvalResult, event.value)
         if not value.writes:
             return (previous,)

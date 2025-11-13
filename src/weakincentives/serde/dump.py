@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, time
@@ -51,6 +52,8 @@ def _serialize(
         return value.isoformat()
     if isinstance(value, (UUID, Decimal, Path)):
         return str(value)
+    if isinstance(value, (bytes, bytearray)):
+        return base64.b64encode(bytes(value)).decode("ascii")
     if isinstance(value, Mapping):
         serialized: dict[object, object] = {}
         for key, item in value.items():
