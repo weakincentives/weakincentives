@@ -13,9 +13,10 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar, overload
 
 from ...serde.schema import schema
 from .._types import SupportsDataclass
@@ -55,12 +56,55 @@ class PromptLike(Protocol):
     def sections(self) -> tuple[SectionNodeLike, ...]: ...
 
 
+_HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+_HexDigestT = TypeVar("_HexDigestT", bound="HexDigest")
+
+
+class HexDigest(str):
+    """A validated lowercase hexadecimal SHA-256 digest."""
+
+    __slots__ = ()
+
+    def __new__(cls: type[_HexDigestT], value: object) -> _HexDigestT:
+        if not isinstance(value, str):
+            msg = "HexDigest value must be a string."
+            raise TypeError(msg)
+        if not _HEX_DIGEST_RE.fullmatch(value):
+            msg = f"Invalid hex digest value: {value!r}"
+            raise ValueError(msg)
+        return str.__new__(cls, value)
+
+
+@overload
+def ensure_hex_digest(value: HexDigest, *, field_name: str) -> HexDigest: ...
+
+
+@overload
+def ensure_hex_digest(value: str, *, field_name: str) -> HexDigest: ...
+
+
+def ensure_hex_digest(value: object, *, field_name: str) -> HexDigest:
+    """Normalize an object to a :class:`HexDigest` with helpful errors."""
+
+    if isinstance(value, HexDigest):
+        return value
+    if isinstance(value, str):
+        try:
+            return HexDigest(value)
+        except ValueError as error:
+            msg = f"{field_name} must be a 64 character lowercase hex digest."
+            raise PromptOverridesError(msg) from error
+    msg = f"{field_name} must be a string."
+    raise PromptOverridesError(msg)
+
+
 @dataclass(slots=True)
 class SectionDescriptor:
     """Hash metadata for a single section within a prompt."""
 
     path: tuple[str, ...]
-    content_hash: str
+    content_hash: HexDigest
 
 
 @dataclass(slots=True)
@@ -69,7 +113,7 @@ class ToolDescriptor:
 
     path: tuple[str, ...]
     name: str
-    contract_hash: str
+    contract_hash: HexDigest
 
 
 @dataclass(slots=True)
@@ -89,7 +133,7 @@ class PromptDescriptor:
             if getattr(node.section, "accepts_overrides", True):
                 template = node.section.original_body_template()
                 if template is not None:
-                    content_hash = sha256(template.encode("utf-8")).hexdigest()
+                    content_hash = hash_text(template)
                     sections.append(SectionDescriptor(node.path, content_hash))
             tool_descriptors = [
                 ToolDescriptor(
@@ -108,7 +152,7 @@ class PromptDescriptor:
 class SectionOverride:
     """Override payload for a prompt section validated by hash."""
 
-    expected_hash: str
+    expected_hash: HexDigest
     body: str
 
 
@@ -117,7 +161,7 @@ class ToolOverride:
     """Description overrides validated against a tool contract hash."""
 
     name: str
-    expected_contract_hash: str
+    expected_contract_hash: HexDigest
     description: str | None = None
     param_descriptions: dict[str, str] = field(
         default_factory=_param_description_mapping_factory
@@ -175,6 +219,7 @@ class PromptOverridesStore(Protocol):
 
 
 __all__ = [
+    "HexDigest",
     "PromptDescriptor",
     "PromptOverride",
     "PromptOverridesError",
@@ -183,10 +228,11 @@ __all__ = [
     "SectionOverride",
     "ToolDescriptor",
     "ToolOverride",
+    "ensure_hex_digest",
 ]
 
 
-def _tool_contract_hash(tool: Tool[Any, Any]) -> str:
+def _tool_contract_hash(tool: Tool[Any, Any]) -> HexDigest:
     description_hash = hash_text(tool.description)
     params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
     if getattr(tool, "result_container", "object") == "array":
@@ -204,11 +250,11 @@ def _tool_contract_hash(tool: Tool[Any, Any]) -> str:
     )
 
 
-def hash_text(value: str) -> str:
-    return sha256(value.encode("utf-8")).hexdigest()
+def hash_text(value: str) -> HexDigest:
+    return HexDigest(sha256(value.encode("utf-8")).hexdigest())
 
 
-def hash_json(value: object) -> str:
+def hash_json(value: object) -> HexDigest:
     canonical = json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     )

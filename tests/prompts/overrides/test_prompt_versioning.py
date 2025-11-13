@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
 
 from weakincentives.prompt import MarkdownSection, Prompt, Section, Tool
 from weakincentives.prompt.overrides import (
@@ -126,7 +125,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
     assert descriptor.sections == [
         SectionDescriptor(
             path=("greeting",),
-            content_hash=sha256(b"Greet ${subject} warmly.").hexdigest(),
+            content_hash=hash_text("Greet ${subject} warmly."),
         )
     ]
     assert descriptor.tools == []
@@ -346,7 +345,7 @@ def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
         tag="latest",
         sections={
             ("other",): SectionOverride(
-                expected_hash="deadbeef",
+                expected_hash=hash_text("deadbeef"),
                 body="Ignore this.",
             )
         },
@@ -450,7 +449,7 @@ def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
         tool_overrides={
             tool.name: ToolOverride(
                 name=tool.name,
-                expected_contract_hash="not-a-match",
+                expected_contract_hash=hash_text("not-a-match"),
                 description="This override should not apply.",
             )
         },
@@ -474,7 +473,7 @@ def test_prompt_override_tool_default_factory_is_isolated() -> None:
     assert successor.tool_overrides == {}
     successor.tool_overrides["example"] = ToolOverride(
         name="example",
-        expected_contract_hash="hash",
+        expected_contract_hash=hash_text("hash"),
     )
 
     assert "example" not in baseline.tool_overrides

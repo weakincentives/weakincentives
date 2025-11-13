@@ -22,6 +22,7 @@ import pytest
 
 from weakincentives.prompt import MarkdownSection, Prompt, Tool
 from weakincentives.prompt.overrides import (
+    HexDigest,
     LocalPromptOverridesStore,
     PromptDescriptor,
     PromptOverride,
@@ -95,6 +96,10 @@ def _override_path(
         override_dir /= segment
     override_dir /= descriptor.key
     return override_dir / f"{tag}.json"
+
+
+VALID_DIGEST = HexDigest("a" * 64)
+OTHER_DIGEST = HexDigest("b" * 64)
 
 
 def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
@@ -209,7 +214,7 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
         "tag": "latest",
         "sections": {
             "/".join(section.path): {
-                "expected_hash": "not-a-match",
+                "expected_hash": str(OTHER_DIGEST),
                 "body": "Cheer loudly.",
             }
         },
@@ -289,7 +294,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
             "description": "desc",
         },
         tool.name: {
-            "expected_contract_hash": "mismatch",
+            "expected_contract_hash": str(OTHER_DIGEST),
             "description": "desc",
             "param_descriptions": {},
         },
@@ -412,7 +417,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                expected_hash="mismatch",
+                expected_hash=OTHER_DIGEST,
                 body="Body",
             )
         },
@@ -465,7 +470,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tool_overrides={
             tool.name: ToolOverride(
                 name=tool.name,
-                expected_contract_hash="mismatch",
+                expected_contract_hash=OTHER_DIGEST,
             )
         },
     )
@@ -545,7 +550,7 @@ def test_upsert_rejects_non_string_section_hash(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                expected_hash=cast(str, 123),
+                expected_hash=cast(Any, 123),
                 body="Body",
             )
         },
@@ -576,7 +581,7 @@ def test_upsert_rejects_non_string_tool_hash(tmp_path: Path) -> None:
         tool_overrides={
             tool.name: ToolOverride(
                 name=tool.name,
-                expected_contract_hash=cast(str, 123),
+                expected_contract_hash=cast(Any, 123),
                 param_descriptions={},
             )
         },
@@ -660,7 +665,7 @@ def test_seed_if_necessary_errors_on_stale_override(tmp_path: Path) -> None:
         "tag": "latest",
         "sections": {
             "/".join(section.path): {
-                "expected_hash": "mismatch",
+                "expected_hash": str(OTHER_DIGEST),
                 "body": "Body",
             }
         },

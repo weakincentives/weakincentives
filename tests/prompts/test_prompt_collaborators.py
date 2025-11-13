@@ -24,7 +24,7 @@ from weakincentives.prompt import (
     SupportsDataclass,
     Tool,
 )
-from weakincentives.prompt.overrides import ToolOverride
+from weakincentives.prompt.overrides import ToolOverride, hash_text
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.rendering import PromptRenderer
 
@@ -137,7 +137,7 @@ def test_renderer_renders_sections_and_tool_overrides() -> None:
         tool_overrides={
             "search": ToolOverride(
                 name="search",
-                expected_contract_hash="hash",
+                expected_contract_hash=hash_text("hash"),
                 description="Updated description.",
                 param_descriptions={"query": "New query."},
             )

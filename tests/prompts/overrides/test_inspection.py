@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from weakincentives.prompt.overrides import (
+    HexDigest,
     PromptOverridesError,
     iter_override_files,
     resolve_overrides_root,
@@ -44,6 +45,8 @@ def test_iter_override_files_yields_metadata(tmp_path: Path) -> None:
     target_dir = overrides_root / "example" / "prompt"
     target_dir.mkdir(parents=True)
     override_path = target_dir / "latest.json"
+    section_hash = "a" * 64
+    tool_hash = "b" * 64
     payload = {
         "version": 1,
         "ns": "example/ns",
@@ -51,14 +54,14 @@ def test_iter_override_files_yields_metadata(tmp_path: Path) -> None:
         "tag": "latest",
         "sections": {
             "section": {
-                "expected_hash": "deadbeef",
+                "expected_hash": section_hash,
                 "body": "replacement",
             }
         },
         "tools": {
             "echo": {
                 "name": "echo",
-                "expected_contract_hash": "feedface",
+                "expected_contract_hash": tool_hash,
             }
         },
     }
@@ -74,7 +77,9 @@ def test_iter_override_files_yields_metadata(tmp_path: Path) -> None:
     assert metadata.section_count == 1
     assert metadata.tool_count == 1
     assert metadata.modified_time == pytest.approx(override_path.stat().st_mtime)
-    assert metadata.content_hash == sha256(override_path.read_bytes()).hexdigest()
+    assert metadata.content_hash == HexDigest(
+        sha256(override_path.read_bytes()).hexdigest()
+    )
 
 
 def test_iter_override_files_handles_missing_directory(tmp_path: Path) -> None:

@@ -21,6 +21,7 @@ from ...runtime.logging import StructuredLogger, get_logger
 from .._types import SupportsDataclass
 from ..tool import Tool
 from .versioning import (
+    HexDigest,
     PromptDescriptor,
     PromptLike,
     PromptOverride,
@@ -29,6 +30,7 @@ from .versioning import (
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
+    ensure_hex_digest,
 )
 
 _LOGGER: StructuredLogger = get_logger(
@@ -136,9 +138,11 @@ def _normalize_section_override(
             context={"path": path_display},
         )
         return None
-    if not isinstance(expected_hash, str):
-        raise PromptOverridesError("Section expected_hash must be a string.")
-    if expected_hash != descriptor_section.content_hash:
+    expected_digest = ensure_hex_digest(
+        cast(HexDigest | str, expected_hash),
+        field_name="Section expected_hash",
+    )
+    if expected_digest != descriptor_section.content_hash:
         if strict:
             raise PromptOverridesError(f"Hash mismatch for section {path_display}.")
         _LOGGER.debug(
@@ -146,15 +150,15 @@ def _normalize_section_override(
             event="prompt_override_stale_section",
             context={
                 "path": path_display,
-                "expected_hash": descriptor_section.content_hash,
-                "found_hash": expected_hash,
+                "expected_hash": str(descriptor_section.content_hash),
+                "found_hash": str(expected_digest),
             },
         )
         return None
     if not isinstance(body, str):
         raise PromptOverridesError(body_error_message)
     return SectionOverride(
-        expected_hash=expected_hash,
+        expected_hash=expected_digest,
         body=body,
     )
 
@@ -210,9 +214,11 @@ def _normalize_tool_override(
             context={"tool": name},
         )
         return None
-    if not isinstance(expected_hash, str):
-        raise PromptOverridesError("Tool expected_contract_hash must be a string.")
-    if expected_hash != descriptor_tool.contract_hash:
+    expected_digest = ensure_hex_digest(
+        cast(HexDigest | str, expected_hash),
+        field_name="Tool expected_contract_hash",
+    )
+    if expected_digest != descriptor_tool.contract_hash:
         if strict:
             raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
         _LOGGER.debug(
@@ -220,8 +226,8 @@ def _normalize_tool_override(
             event="prompt_override_stale_tool",
             context={
                 "tool": name,
-                "expected_hash": descriptor_tool.contract_hash,
-                "found_hash": expected_hash,
+                "expected_hash": str(descriptor_tool.contract_hash),
+                "found_hash": str(expected_digest),
             },
         )
         return None
@@ -242,7 +248,7 @@ def _normalize_tool_override(
         normalized_description = description
     return ToolOverride(
         name=name,
-        expected_contract_hash=expected_hash,
+        expected_contract_hash=expected_digest,
         description=normalized_description,
         param_descriptions=normalized_params,
     )
@@ -428,7 +434,7 @@ def serialize_sections(
     for path, section_override in sections.items():
         key = "/".join(path)
         serialized[key] = {
-            "expected_hash": section_override.expected_hash,
+            "expected_hash": str(section_override.expected_hash),
             "body": section_override.body,
         }
     return serialized
@@ -440,7 +446,7 @@ def serialize_tools(
     serialized: dict[str, dict[str, Any]] = {}
     for name, tool_override in tools.items():
         serialized[name] = {
-            "expected_contract_hash": tool_override.expected_contract_hash,
+            "expected_contract_hash": str(tool_override.expected_contract_hash),
             "description": tool_override.description,
             "param_descriptions": dict(tool_override.param_descriptions),
         }
