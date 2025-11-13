@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, is_dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast, override
 
+from ..deadlines import Deadline
 from ._types import SupportsDataclass
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .registry import RegistrySnapshot, SectionNode
@@ -40,6 +41,7 @@ class RenderedPrompt[OutputT]:
     output_type: type[Any] | None
     container: Literal["object", "array"] | None
     allow_extra_keys: bool | None
+    deadline: Deadline | None = None
     _tools: tuple[Tool[SupportsDataclass, SupportsDataclass], ...] = field(
         default_factory=tuple
     )

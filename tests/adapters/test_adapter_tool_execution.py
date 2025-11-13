@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from types import MethodType
 from typing import Any, cast
 
@@ -45,6 +46,9 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         ToolPayload,
     )
 
+from weakincentives import deadlines
+from weakincentives.adapters.core import PromptEvaluationError
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -62,7 +66,7 @@ from weakincentives.runtime.session import (
     replace_latest,
     select_latest,
 )
-from weakincentives.tools import ToolValidationError
+from weakincentives.tools import DeadlineExceededError, ToolValidationError
 
 
 @dataclass
@@ -199,6 +203,141 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     assert content["message"] == "completed"
     assert content["success"] is True
     assert content["payload"] == {"answer": "policies"}
+
+
+def test_adapter_tool_context_receives_deadline(
+    adapter_harness: AdapterHarness,
+) -> None:
+    captured: list[Deadline | None] = []
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        captured.append(context.deadline)
+        return ToolResult(message="ok", value=ToolPayload(answer=params.query))
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+    prompt = _build_prompt(adapter_harness, tool)
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "policies"}),
+    )
+    responses = _build_responses(
+        tool_call=tool_call,
+        final_message=DummyMessage(content="All done", tool_calls=None),
+    )
+    adapter, _ = adapter_harness.build(responses)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+
+    adapter.evaluate(
+        prompt,
+        ToolParams(query="policies"),
+        bus=bus,
+        session=cast(SessionProtocol, session),
+        deadline=deadline,
+    )
+
+    assert captured == [deadline]
+
+
+def test_adapter_tool_deadline_exceeded(
+    adapter_harness: AdapterHarness,
+) -> None:
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del params, context
+        raise DeadlineExceededError("deadline hit")
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+    prompt = _build_prompt(adapter_harness, tool)
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "policies"}),
+    )
+    responses = _build_responses(
+        tool_call=tool_call,
+        final_message=DummyMessage(content="All done", tool_calls=None),
+    )
+    adapter, _ = adapter_harness.build(responses)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+
+    with pytest.raises(PromptEvaluationError) as excinfo:
+        adapter.evaluate(
+            prompt,
+            ToolParams(query="policies"),
+            bus=bus,
+            session=cast(SessionProtocol, session),
+            deadline=deadline,
+        )
+
+    error = cast(PromptEvaluationError, excinfo.value)
+    assert error.phase == "deadline"
+    payload = error.provider_payload
+    assert isinstance(payload, dict)
+    assert payload.get("deadline_expires_at") == deadline.expires_at.isoformat()
+
+
+def test_adapter_deadline_preflight_rejection(
+    adapter_harness: AdapterHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del params, context
+        return ToolResult(message="ok", value=ToolPayload(answer="policies"))
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+    prompt = _build_prompt(adapter_harness, tool)
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "policies"}),
+    )
+    responses = _build_responses(
+        tool_call=tool_call,
+        final_message=DummyMessage(content="All done", tool_calls=None),
+    )
+    adapter, _ = adapter_harness.build(responses)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5))
+    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor + timedelta(seconds=10))
+
+    with pytest.raises(PromptEvaluationError) as excinfo:
+        adapter.evaluate(
+            prompt,
+            ToolParams(query="policies"),
+            bus=bus,
+            session=cast(SessionProtocol, session),
+            deadline=deadline,
+        )
+
+    error = cast(PromptEvaluationError, excinfo.value)
+    assert error.phase == "preflight"
+    assert error.provider_payload == {
+        "deadline_expires_at": deadline.expires_at.isoformat()
+    }
 
 
 def test_adapter_tool_execution_validation_error(

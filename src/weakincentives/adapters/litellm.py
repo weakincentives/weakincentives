@@ -15,9 +15,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from datetime import timedelta
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
+from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 from ..runtime.events import EventBus
@@ -33,6 +36,7 @@ from .core import PromptEvaluationError, PromptResponse, SessionProtocol
 from .shared import (
     ToolChoice,
     build_json_schema_response_format,
+    deadline_provider_payload,
     first_choice,
     format_publish_failures,
     parse_tool_arguments,
@@ -128,9 +132,17 @@ class LiteLLMAdapter:
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
+        deadline: Deadline | None = None,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
         render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
+        if deadline is not None and deadline.remaining() <= timedelta(0):
+            raise PromptEvaluationError(
+                "Deadline expired before evaluation started.",
+                prompt_name=prompt_name,
+                phase="preflight",
+                provider_payload=deadline_provider_payload(deadline),
+            )
         has_structured_output = (
             getattr(prompt, "_output_type", None) is not None
             and getattr(prompt, "_output_container", None) is not None
@@ -148,6 +160,8 @@ class LiteLLMAdapter:
             )
         else:
             rendered = prompt.render(*params)
+        if deadline is not None:
+            rendered = replace(rendered, deadline=deadline)
         response_format: dict[str, Any] | None = None
         should_parse_structured_output = (
             parse_output
@@ -209,6 +223,7 @@ class LiteLLMAdapter:
             format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=logger,
+            deadline=deadline,
         )
 
 

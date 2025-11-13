@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, is_dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, is_dataclass, replace
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Any, cast
 
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, RecapParams
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
@@ -61,6 +62,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
         self.calls: list[tuple[str, tuple[str, ...]]] = []
         self.sessions: list[Session | None] = []
         self.buses: list[InProcessEventBus] = []
+        self.deadlines: list[Deadline | None] = []
         self._failures = failures or set()
         self._delays = delays or {}
         self._structured_outputs = structured_outputs or {}
@@ -75,6 +77,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
         parse_output: bool = True,
         bus: InProcessEventBus,
         session: Session | None = None,
+        deadline: Deadline | None = None,
     ) -> PromptResponse[Any]:
         del parse_output
         delegation = cast(DelegationParams, params[0])
@@ -86,6 +89,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
             self.calls.append((reason, recap.bullets))
             self.sessions.append(session)
             self.buses.append(bus)
+            self.deadlines.append(deadline)
         if reason in self._failures:
             raise RuntimeError(f"failure: {reason}")
         delay = self._delays.get(reason, 0.0)
@@ -149,7 +153,9 @@ class RecordingAdapter(ProviderAdapter[Any]):
         )
 
 
-def _build_parent_prompt() -> tuple[Prompt[ParentOutput], RenderedPrompt[ParentOutput]]:
+def _build_parent_prompt(
+    *, deadline: Deadline | None = None
+) -> tuple[Prompt[ParentOutput], RenderedPrompt[ParentOutput]]:
     section = MarkdownSection[ParentSectionParams](
         title="Parent",
         key="parent",
@@ -161,6 +167,8 @@ def _build_parent_prompt() -> tuple[Prompt[ParentOutput], RenderedPrompt[ParentO
         sections=(section,),
     )
     rendered = prompt.render(ParentSectionParams(instructions="Document the repo."))
+    if deadline is not None:
+        rendered = replace(rendered, deadline=deadline)
     return prompt, rendered
 
 
@@ -241,6 +249,38 @@ def test_dispatch_subagents_runs_children_in_parallel() -> None:
     ]
     assert all(bus is context.event_bus for bus in adapter.buses)
     assert all(s is session for s in adapter.sessions)
+
+
+def test_dispatch_subagents_propagates_deadline() -> None:
+    parent_deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+    prompt, rendered = _build_parent_prompt(deadline=parent_deadline)
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered,
+        adapter=adapter,
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="one",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=(),
+            ),
+        ),
+    )
+
+    handler = dispatch_subagents.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert adapter.deadlines == [parent_deadline]
 
 
 def test_dispatch_subagents_collects_failures() -> None:

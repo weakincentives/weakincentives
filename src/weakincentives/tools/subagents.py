@@ -22,6 +22,7 @@ from enum import Enum, auto
 from typing import Any, Final, cast, override
 
 from ..adapters.core import PromptResponse
+from ..deadlines import Deadline
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.prompt import Prompt, RenderedPrompt
@@ -180,6 +181,9 @@ def build_dispatch_subagents_tool(
 
         adapter = context.adapter
         parse_output = rendered_parent.container is not None
+        parent_deadline = cast(
+            Deadline | None, getattr(rendered_parent, "deadline", None)
+        )
 
         def _run_child(
             payload: tuple[DelegationParams, SessionProtocol, EventBus],
@@ -194,6 +198,7 @@ def build_dispatch_subagents_tool(
                     parse_output=parse_output,
                     bus=child_bus,
                     session=child_session,
+                    deadline=parent_deadline,
                 )
             except Exception as error:  # pragma: no cover - defensive
                 return SubagentResult(

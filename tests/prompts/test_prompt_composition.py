@@ -13,10 +13,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
 import pytest
 
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     DelegationParams,
     DelegationPrompt,
@@ -255,6 +257,29 @@ def test_delegation_prompt_empty_recap_uses_placeholder() -> None:
     assert "## Recap" in rendered.text
     recap_segment = rendered.text.split("## Recap", 1)[-1]
     assert "- " not in recap_segment
+
+
+def test_delegation_prompt_inherits_deadline() -> None:
+    parent_prompt, _ = _build_parent_prompt()
+    rendered_parent = parent_prompt.render(ParentSectionParams(guidance="signals"))
+    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+    rendered_parent_with_deadline = replace(rendered_parent, deadline=deadline)
+
+    delegation = DelegationPrompt[ParentResult, DelegationPlan](
+        parent_prompt,
+        rendered_parent_with_deadline,
+    )
+
+    rendered_child = delegation.render(
+        DelegationParams(
+            reason="Inspect deadlines.",
+            expected_result="A confirmation.",
+            may_delegate_further="no",
+            recap_lines=("Ensure deadlines propagate.",),
+        )
+    )
+
+    assert rendered_child.deadline is deadline
 
 
 def test_merge_tool_param_descriptions_combines_entries() -> None:

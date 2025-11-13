@@ -1,0 +1,52 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for the :mod:`weakincentives.deadlines` module."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from weakincentives import deadlines
+from weakincentives.deadlines import Deadline
+
+
+def test_deadline_rejects_naive_datetime() -> None:
+    naive = datetime.now()
+    with pytest.raises(ValueError):
+        Deadline(naive)
+
+
+def test_deadline_rejects_past_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
+    anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    with pytest.raises(ValueError):
+        Deadline(anchor - timedelta(seconds=10))
+
+
+def test_deadline_requires_future_second(monkeypatch: pytest.MonkeyPatch) -> None:
+    anchor = datetime(2024, 1, 1, 12, 0, 0, 123456, tzinfo=UTC)
+    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    with pytest.raises(ValueError):
+        Deadline(anchor + timedelta(milliseconds=500))
+
+
+def test_deadline_remaining_uses_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    deadline = Deadline(anchor + timedelta(seconds=30))
+
+    remaining = deadline.remaining(now=anchor + timedelta(seconds=5))
+
+    assert remaining == timedelta(seconds=25)
