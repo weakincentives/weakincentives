@@ -48,7 +48,12 @@ from weakincentives.tools.planning import (
     PlanningStrategy,
     PlanningToolsSection,
 )
-from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
+from weakincentives.tools.vfs import (
+    HostMount,
+    VfsPath,
+    VfsToolsSection,
+    VirtualFileSystem,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
@@ -232,10 +237,9 @@ class SunfishReviewSession:
         self._bus = InProcessEventBus()
         self._session = Session(bus=self._bus)
         base_prompt = build_sunfish_prompt(self._session)
-        for section in base_prompt.sections:
-            if isinstance(section, VfsToolsSection):
-                snapshot = section.latest_snapshot()
-                logging.info("VFS root directory: %s", snapshot.root_path)
+        snapshot = select_latest(self._session, VirtualFileSystem)
+        if snapshot is not None:
+            logging.info("VFS root directory: %s", snapshot.root_path)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = _resolve_override_tag(override_tag)
         try:
