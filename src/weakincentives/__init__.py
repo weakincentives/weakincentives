@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from .adapters import PromptResponse
+from .deadlines import Deadline
 from .prompt import (
     MarkdownSection,
     Prompt,
@@ -28,6 +29,7 @@ from .prompt import (
 from .runtime import StructuredLogger, configure_logging, get_logger
 
 __all__ = [
+    "Deadline",
     "MarkdownSection",
     "Prompt",
     "PromptResponse",

@@ -27,6 +27,7 @@ import pytest
 from code_reviewer_example import ReviewResponse, SunfishReviewSession
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import SessionProtocol
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
@@ -54,6 +55,7 @@ class _StubAdapter:
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
+        deadline: Deadline | None = None,
     ) -> PromptResponse[ReviewResponse]:
         raise NotImplementedError
 

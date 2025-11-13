@@ -25,6 +25,7 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
@@ -110,6 +111,7 @@ def test_run_conversation_requires_message_payload() -> None:
             parse_output: bool = True,
             bus: EventBus,
             session: SessionProtocol,
+            deadline: Deadline | None = None,
         ) -> PromptResponse[object]:
             raise NotImplementedError
 

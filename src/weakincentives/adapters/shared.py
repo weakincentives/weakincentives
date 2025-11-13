@@ -17,11 +17,12 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, is_dataclass
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from dataclasses import dataclass, field, is_dataclass, replace
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
 from uuid import uuid4
 
+from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.structured_output import (
@@ -40,7 +41,7 @@ from ..runtime.events import (
 )
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse, schema
-from ..tools.errors import ToolValidationError
+from ..tools.errors import DeadlineExceededError, ToolValidationError
 from ._provider_protocols import (
     ProviderChoice,
     ProviderCompletionCallable,
@@ -79,6 +80,25 @@ class ToolArgumentsParser(Protocol):
 
 ToolChoice = Literal["auto"] | Mapping[str, Any] | None
 """Supported tool choice directives for provider APIs."""
+
+
+def deadline_provider_payload(deadline: Deadline | None) -> dict[str, Any] | None:
+    """Return a provider payload snippet describing the active deadline."""
+
+    if deadline is None:
+        return None
+    return {"deadline_expires_at": deadline.expires_at.isoformat()}
+
+
+def _raise_tool_deadline_error(
+    *, prompt_name: str, tool_name: str, deadline: Deadline
+) -> NoReturn:
+    raise PromptEvaluationError(
+        f"Deadline expired before executing tool '{tool_name}'.",
+        prompt_name=prompt_name,
+        phase="deadline",
+        provider_payload=deadline_provider_payload(deadline),
+    )
 
 
 def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
@@ -222,6 +242,7 @@ def execute_tool_call(
     session: SessionProtocol,
     prompt_name: str,
     provider_payload: dict[str, Any] | None,
+    deadline: Deadline | None,
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
     parse_arguments: ToolArgumentsParser,
     logger_override: StructuredLogger | None = None,
@@ -276,12 +297,17 @@ def execute_tool_call(
             raise ToolValidationError(str(error)) from error
 
         tool_params = cast(SupportsDataclass, parsed_params)
+        if deadline is not None and deadline.remaining() <= timedelta(0):
+            _raise_tool_deadline_error(
+                prompt_name=prompt_name, tool_name=tool_name, deadline=deadline
+            )
         context = ToolContext(
             prompt=prompt,
             rendered_prompt=rendered_prompt,
             adapter=adapter,
             session=session,
             event_bus=bus,
+            deadline=deadline,
         )
         tool_result = handler(tool_params, context=context)
     except ToolValidationError as error:
@@ -303,6 +329,15 @@ def execute_tool_call(
             value=None,
             success=False,
         )
+    except PromptEvaluationError:
+        raise
+    except DeadlineExceededError as error:
+        raise PromptEvaluationError(
+            str(error) or f"Tool '{tool_name}' exceeded the deadline.",
+            prompt_name=prompt_name,
+            phase="deadline",
+            provider_payload=deadline_provider_payload(deadline),
+        ) from error
     except Exception as error:  # propagate message via ToolResult
         log.exception(
             "Tool handler raised an unexpected exception.",
@@ -544,6 +579,7 @@ __all__ = [
     "_content_part_text",
     "_parsed_payload_from_part",
     "build_json_schema_response_format",
+    "deadline_provider_payload",
     "execute_tool_call",
     "extract_parsed_content",
     "extract_payload",
@@ -611,6 +647,7 @@ class ConversationRunner[OutputT]:
     )
     parse_arguments: ToolArgumentsParser = parse_tool_arguments
     logger_override: StructuredLogger | None = None
+    deadline: Deadline | None = None
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
@@ -625,12 +662,27 @@ class ConversationRunner[OutputT]:
     _next_tool_choice: ToolChoice = field(init=False)
     _should_parse_structured_output: bool = field(init=False)
 
+    def _raise_deadline_error(self, message: str) -> None:
+        raise PromptEvaluationError(
+            message,
+            prompt_name=self.prompt_name,
+            phase="deadline",
+            provider_payload=deadline_provider_payload(self.deadline),
+        )
+
+    def _ensure_deadline_remaining(self, message: str) -> None:
+        if self.deadline is None:
+            return
+        if self.deadline.remaining() <= timedelta(0):
+            self._raise_deadline_error(message)
+
     def run(self) -> PromptResponse[OutputT]:
         """Execute the conversation loop and return the final response."""
 
         self._prepare_payload()
 
         while True:
+            self._ensure_deadline_remaining("Deadline expired before provider request.")
             response = self.call_provider(
                 self._messages,
                 self._tool_specs,
@@ -743,6 +795,10 @@ class ConversationRunner[OutputT]:
         )
 
         for tool_call in tool_calls:
+            tool_name = getattr(tool_call.function, "name", "tool")
+            self._ensure_deadline_remaining(
+                f"Deadline expired before executing tool '{tool_name}'."
+            )
             invocation, tool_result = execute_tool_call(
                 adapter_name=self.adapter_name,
                 adapter=self.adapter,
@@ -754,6 +810,7 @@ class ConversationRunner[OutputT]:
                 session=self.session,
                 prompt_name=self.prompt_name,
                 provider_payload=self._provider_payload,
+                deadline=self.deadline,
                 format_publish_failures=self.format_publish_failures,
                 parse_arguments=self.parse_arguments,
                 logger_override=self.logger_override,
@@ -776,6 +833,9 @@ class ConversationRunner[OutputT]:
     def _finalize_response(self, message: object) -> PromptResponse[OutputT]:
         """Assemble and publish the final prompt response."""
 
+        self._ensure_deadline_remaining(
+            "Deadline expired while finalizing provider response."
+        )
         final_text = message_text_content(getattr(message, "content", None))
         output: OutputT | None = None
         text_value: str | None = final_text or None
@@ -903,15 +963,21 @@ def run_conversation[
     ] = format_publish_failures,
     parse_arguments: ToolArgumentsParser = parse_tool_arguments,
     logger_override: StructuredLogger | None = None,
+    deadline: Deadline | None = None,
 ) -> PromptResponse[OutputT]:
     """Execute a conversational exchange with a provider and return the result."""
+
+    effective_deadline = deadline or rendered.deadline
+    rendered_with_deadline = rendered
+    if effective_deadline is not None and rendered.deadline is not effective_deadline:
+        rendered_with_deadline = replace(rendered, deadline=effective_deadline)
 
     runner = ConversationRunner[OutputT](
         adapter_name=adapter_name,
         adapter=adapter,
         prompt=prompt,
         prompt_name=prompt_name,
-        rendered=rendered,
+        rendered=rendered_with_deadline,
         render_inputs=render_inputs,
         initial_messages=initial_messages,
         parse_output=parse_output,
@@ -926,5 +992,6 @@ def run_conversation[
         format_publish_failures=format_publish_failures,
         parse_arguments=parse_arguments,
         logger_override=logger_override,
+        deadline=effective_deadline,
     )
     return runner.run()

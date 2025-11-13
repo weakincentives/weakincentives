@@ -22,6 +22,7 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
@@ -45,6 +46,7 @@ class _DummyAdapter(ProviderAdapter[Any]):
         parse_output: bool = True,
         bus: InProcessEventBus,
         session: SessionProtocol,
+        deadline: Deadline | None = None,
     ) -> PromptResponse[Any]:
         raise NotImplementedError
 

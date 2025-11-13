@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
+from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
 from ..runtime.session.protocols import SessionProtocol
 
@@ -37,6 +38,7 @@ class ProviderAdapter(Protocol[OutputT]):
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
+        deadline: Deadline | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response."""
 

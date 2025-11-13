@@ -31,6 +31,7 @@ from typing import (
     get_type_hints,
 )
 
+from ..deadlines import Deadline
 from ._types import SupportsDataclass
 from .errors import PromptValidationError
 from .tool_result import ToolResult
@@ -55,6 +56,7 @@ class ToolContext:
     adapter: Any
     session: SessionProtocol
     event_bus: EventBus
+    deadline: Deadline | None = None
 
 
 class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):

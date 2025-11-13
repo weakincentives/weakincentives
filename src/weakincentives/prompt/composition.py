@@ -233,6 +233,9 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
         params.append(recap_params)
 
         rendered = self._prompt.render(*tuple(params))
+        parent_deadline = self._rendered_parent.deadline
+        if parent_deadline is not None and rendered.deadline is not parent_deadline:
+            rendered = replace(rendered, deadline=parent_deadline)
         merged_descriptions = _merge_tool_param_descriptions(
             self._rendered_parent.tool_param_descriptions,
             rendered.tool_param_descriptions,

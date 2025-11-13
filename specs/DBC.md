@@ -111,15 +111,15 @@ utilities, not to provide complete effect tracking.
 
 1. Add `src/weakincentives/dbc/__init__.py` exposing the four decorators and a
    `dbc_active()` helper.
-2. Implement `require`, `ensure`, and `pure` as decorator factories that consult
+1. Implement `require`, `ensure`, and `pure` as decorator factories that consult
    the activation flag and wrap the target with validation logic only when
    active.
-3. For `invariant`, create a class decorator that proxies attribute access and
+1. For `invariant`, create a class decorator that proxies attribute access and
    wraps relevant callables via a metaclass or `__init_subclass__` hook.
-4. Add `tests/test_dbc_contracts.py` exercising happy paths and failure modes.
-5. Ship a pytest plugin (`tests/conftest.py` or `src/weakincentives/testing/dbc.py`)
+1. Add `tests/test_dbc_contracts.py` exercising happy paths and failure modes.
+1. Ship a pytest plugin (`tests/conftest.py` or `src/weakincentives/testing/dbc.py`)
    that flips the activation flag and provides helpful fixtures.
-6. Document opt-in knobs for other environments (e.g., `WEAKINCENTIVES_DBC=1`
+1. Document opt-in knobs for other environments (e.g., `WEAKINCENTIVES_DBC=1`
    environment variable) in `README.md` if needed later.
 
 ## Example Use Cases
@@ -168,4 +168,3 @@ fall below zero after adjustments.
   specific test flows (e.g., fuzzing that intentionally violates contracts).
 - Integrate with static analyzers by emitting metadata describing declared
   preconditions and postconditions.
-
