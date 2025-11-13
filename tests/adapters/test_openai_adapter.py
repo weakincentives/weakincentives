@@ -29,6 +29,7 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
+from weakincentives.adapters.shared import OPENAI_ADAPTER_NAME
 from weakincentives.prompt.structured_output import ARRAY_WRAPPER_KEY
 
 try:
@@ -1593,7 +1594,7 @@ def test_openai_adapter_delegates_to_shared_runner(
     result = _evaluate_with_bus(adapter, prompt, params)
 
     assert result is sentinel
-    assert captured["adapter_name"] == "openai"
+    assert captured["adapter_name"] == OPENAI_ADAPTER_NAME
     assert captured["prompt_name"] == "shared-runner"
 
     expected_rendered = prompt.render(params, inject_output_instructions=False)

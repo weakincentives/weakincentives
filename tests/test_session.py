@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.dbc import dbc_enabled
 from weakincentives.prompt._types import SupportsDataclass
@@ -75,7 +76,7 @@ def make_tool_event(value: int) -> ToolInvoked:
     )
     return ToolInvoked(
         prompt_name="example",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=value),
         result=tool_result,
@@ -100,7 +101,7 @@ def make_prompt_event(output: object) -> PromptExecuted:
     )
     return PromptExecuted(
         prompt_name="example",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         result=response,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -118,7 +119,7 @@ def make_prompt_rendered(
         prompt_ns="example",
         prompt_key="example",
         prompt_name="Example",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         session_id=session_id,
         render_inputs=(ExampleParams(value=params_value),),
         rendered_prompt=rendered_prompt,
@@ -145,7 +146,7 @@ def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) ->
     payload = ExamplePayload(value=7)
     enriched_event = ToolInvoked(
         prompt_name="example",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=7),
         result=cast(ToolResult[object], ToolResult(message="ok", value=payload)),
@@ -259,7 +260,7 @@ def test_prompt_executed_enriches_missing_value(
     output = ExampleOutput(text="filled")
     enriched_event = PromptExecuted(
         prompt_name="example",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         result=cast(
             PromptResponse[object],
             PromptResponse(
@@ -288,7 +289,7 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
     event = make_tool_event(1)
     non_dataclass_event = ToolInvoked(
         prompt_name="example",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=2),
         result=cast(
@@ -351,7 +352,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
     )
     failure_event = ToolInvoked(
         prompt_name="example",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=2),
         result=failure,

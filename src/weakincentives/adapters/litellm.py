@@ -39,6 +39,7 @@ from .core import (
     SessionProtocol,
 )
 from .shared import (
+    LITELLM_ADAPTER_NAME,
     ToolChoice,
     build_json_schema_response_format,
     deadline_provider_payload,
@@ -209,7 +210,7 @@ class LiteLLMAdapter:
             )
 
         return run_conversation(
-            adapter_name="litellm",
+            adapter_name=LITELLM_ADAPTER_NAME,
             adapter=cast("ProviderAdapter[OutputT]", self),
             prompt=prompt,
             prompt_name=prompt_name,

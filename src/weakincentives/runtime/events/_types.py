@@ -17,11 +17,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol, cast, override
+from typing import TYPE_CHECKING, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...prompt._types import SupportsDataclass
 from ...prompt.tool_result import ToolResult
+
+if TYPE_CHECKING:
+    from ...adapters._names import AdapterName
 
 EventHandler = Callable[[object], None]
 
@@ -87,7 +90,7 @@ class ToolInvoked:
     """Event emitted after an adapter executes a tool handler."""
 
     prompt_name: str
-    adapter: str
+    adapter: AdapterName
     name: str
     params: SupportsDataclass
     result: ToolResult[object]

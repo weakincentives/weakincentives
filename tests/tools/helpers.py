@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Protocol, TypeVar, cast
 
+from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
@@ -90,7 +91,7 @@ def invoke_tool(
     result = handler(params, context=_build_context(bus, session))
     event = ToolInvoked(
         prompt_name="test",
-        adapter="adapter",
+        adapter=GENERIC_ADAPTER_NAME,
         name=tool.name,
         params=params,
         result=cast(ToolResult[object], result),

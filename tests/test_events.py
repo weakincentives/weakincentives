@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from tests.helpers.adapters import TEST_ADAPTER_NAME
 from tests.helpers.events import NullEventBus
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.prompt.tool import ToolResult
@@ -59,7 +60,7 @@ def test_null_event_bus_is_noop() -> None:
     result = bus.publish(
         PromptExecuted(
             prompt_name="demo",
-            adapter="test",
+            adapter=TEST_ADAPTER_NAME,
             result=make_prompt_response("demo"),
             session_id=uuid4(),
             created_at=datetime.now(UTC),
@@ -80,7 +81,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
 
     event = PromptExecuted(
         prompt_name="demo",
-        adapter="test",
+        adapter=TEST_ADAPTER_NAME,
         result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
@@ -104,7 +105,7 @@ def test_publish_prompt_rendered_returns_success() -> None:
         prompt_ns="demo",
         prompt_key="greeting",
         prompt_name="Demo Prompt",
-        adapter="test",
+        adapter=TEST_ADAPTER_NAME,
         session_id=uuid4(),
         render_inputs=(_Params(value=1),),
         rendered_prompt="Render result",
@@ -135,7 +136,7 @@ def test_in_process_bus_delivers_in_order() -> None:
 
     event = PromptExecuted(
         prompt_name="demo",
-        adapter="test",
+        adapter=TEST_ADAPTER_NAME,
         result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
@@ -170,7 +171,7 @@ def test_in_process_bus_isolates_handler_exceptions(
 
     event = PromptExecuted(
         prompt_name="demo",
-        adapter="test",
+        adapter=TEST_ADAPTER_NAME,
         result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
@@ -210,7 +211,7 @@ def test_publish_result_raise_if_errors() -> None:
     result = bus.publish(
         PromptExecuted(
             prompt_name="demo",
-            adapter="test",
+            adapter=TEST_ADAPTER_NAME,
             result=make_prompt_response("demo"),
             session_id=uuid4(),
             created_at=datetime.now(UTC),
@@ -245,7 +246,7 @@ def test_tool_invoked_event_fields() -> None:
     result = cast(ToolResult[object], raw_result)
     event = ToolInvoked(
         prompt_name="demo",
-        adapter="test",
+        adapter=TEST_ADAPTER_NAME,
         name="tool",
         params=_Params(value=1),
         result=result,
@@ -256,7 +257,7 @@ def test_tool_invoked_event_fields() -> None:
     )
 
     assert event.prompt_name == "demo"
-    assert event.adapter == "test"
+    assert event.adapter == TEST_ADAPTER_NAME
     assert event.name == "tool"
     assert isinstance(event.params, _Params)
     assert event.params.value == 1

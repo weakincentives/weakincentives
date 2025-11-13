@@ -21,7 +21,12 @@ from typing import Any, TypeVar, cast
 
 import pytest
 
-from weakincentives.adapters import PromptEvaluationError, PromptResponse, shared
+from weakincentives.adapters import (
+    LITELLM_ADAPTER_NAME,
+    PromptEvaluationError,
+    PromptResponse,
+    shared,
+)
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -1726,7 +1731,7 @@ def test_litellm_adapter_delegates_to_shared_runner(
     result = _evaluate_with_bus(adapter, prompt, params)
 
     assert result is sentinel
-    assert captured["adapter_name"] == "litellm"
+    assert captured["adapter_name"] == LITELLM_ADAPTER_NAME
     assert captured["prompt_name"] == "shared-runner"
 
     expected_rendered = prompt.render(params, inject_output_instructions=False)

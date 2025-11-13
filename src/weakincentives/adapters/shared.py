@@ -42,6 +42,7 @@ from ..runtime.events import (
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse, schema
 from ..tools.errors import DeadlineExceededError, ToolValidationError
+from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
 from ._provider_protocols import (
     ProviderChoice,
     ProviderCompletionCallable,
@@ -62,6 +63,7 @@ from .core import (
 
 if TYPE_CHECKING:
     from ..adapters.core import ProviderAdapter
+
 
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "adapters.shared"}
@@ -240,7 +242,7 @@ def parse_tool_arguments(
 
 def execute_tool_call(
     *,
-    adapter_name: str,
+    adapter_name: AdapterName,
     adapter: ProviderAdapter[Any],
     prompt: Prompt[Any],
     rendered_prompt: RenderedPrompt[Any] | None,
@@ -572,6 +574,9 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
 
 
 __all__ = [
+    "LITELLM_ADAPTER_NAME",
+    "OPENAI_ADAPTER_NAME",
+    "AdapterName",
     "ChoiceSelector",
     "ConversationRequest",
     "ConversationRunner",
@@ -634,7 +639,7 @@ class ToolMessageSerializer(Protocol):
 class ConversationRunner[OutputT]:
     """Coordinate a conversational exchange with a provider."""
 
-    adapter_name: str
+    adapter_name: AdapterName
     adapter: ProviderAdapter[OutputT]
     prompt: Prompt[OutputT]
     prompt_name: str
@@ -959,7 +964,7 @@ def run_conversation[
     OutputT,
 ](
     *,
-    adapter_name: str,
+    adapter_name: AdapterName,
     adapter: ProviderAdapter[OutputT],
     prompt: Prompt[OutputT],
     prompt_name: str,
