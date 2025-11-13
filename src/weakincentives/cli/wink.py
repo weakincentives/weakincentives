@@ -16,13 +16,8 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-from pathlib import Path
 
-from ..runtime.logging import (
-    StructuredLogger,
-    configure_logging,
-    get_logger,
-)
+from ..runtime.logging import configure_logging, get_logger
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -34,31 +29,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(level=args.log_level, json_mode=args.json_logs)
     logger = get_logger(__name__)
 
-    handler = getattr(args, "handler", None)
-    if handler is None:  # pragma: no cover - defensive guard
-        parser.print_help()
-        return 2
+    logger.info(
+        "wink CLI placeholder executed.",
+        event="wink.placeholder",
+    )
 
-    return handler(args=args, logger=logger)
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wink",
-        description="Command line interface for the wink MCP server.",
-    )
-
-    _ = parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Path to the wink configuration file.",
-    )
-    _ = parser.add_argument(
-        "--overrides-dir",
-        type=Path,
-        default=None,
-        help="Directory containing override configuration fragments.",
+        description="Placeholder command line interface for future wink features.",
     )
     _ = parser.add_argument(
         "--log-level",
@@ -73,30 +55,4 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit structured JSON logs (disable with --no-json-logs).",
     )
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    mcp_parser = subparsers.add_parser(
-        "mcp",
-        help="Start the wink Model Context Protocol server.",
-    )
-    mcp_parser.set_defaults(handler=_handle_mcp_command)
-
     return parser
-
-
-def _handle_mcp_command(*, args: argparse.Namespace, logger: StructuredLogger) -> int:
-    logger.info(
-        "Starting wink MCP server.",
-        event="wink.mcp.start",
-    )
-    run_mcp_server(
-        config=args.config,
-        overrides_dir=args.overrides_dir,
-    )
-    return 0
-
-
-def run_mcp_server(*, config: Path | None, overrides_dir: Path | None) -> None:
-    """Run the wink MCP server using ``config`` and ``overrides_dir``."""
-
-    raise NotImplementedError("MCP server integration pending.")  # pragma: no cover

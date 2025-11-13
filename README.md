@@ -48,16 +48,11 @@ heavy dependencies. Optional adapters snap in when you need a model provider.
 uv add weakincentives
 # optional tool extras
 uv add "weakincentives[asteval]"
-# optional MCP server
-uv add "weakincentives[wink]"
 # optional provider adapters
 uv add "weakincentives[openai]"
 uv add "weakincentives[litellm]"
-# cloning the repo? use: uv sync --extra asteval --extra openai --extra litellm --extra wink
+# cloning the repo? use: uv sync --extra asteval --extra openai --extra litellm
 ```
-
-Installing the `wink` extra exposes the `wink` CLI entry point so you can host
-the Model Context Protocol server (`wink mcp`) without additional packages.
 
 ## Tutorial: Build a Stateful Code-Reviewing Agent
 
