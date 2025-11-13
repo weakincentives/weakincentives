@@ -10,28 +10,28 @@ heavy dependencies. Optional adapters snap in when you need a model provider.
   and in-process event bus keep every tool call and prompt render replayable.
   Built-in planning, virtual filesystem, and Python-evaluation sections ship
   with reducers that enforce domain rules while emitting structured telemetry.
-  See [Session State](specs/SESSIONS.md), [Prompt Event Emission](specs/EVENTS.md),
-  [Planning Tools](specs/PLANNING_TOOL.md), [Virtual Filesystem Tools](specs/VFS_TOOLS.md),
-  and [Asteval Integration](specs/ASTEVAL.md).
+  See [Session State](https://github.com/weakincentives/weakincentives/blob/main/specs/SESSIONS.md), [Prompt Event Emission](https://github.com/weakincentives/weakincentives/blob/main/specs/EVENTS.md),
+  [Planning Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/PLANNING_TOOL.md), [Virtual Filesystem Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/VFS_TOOLS.md),
+  and [Asteval Integration](https://github.com/weakincentives/weakincentives/blob/main/specs/ASTEVAL.md).
 - **Composable prompt blueprints with strict contracts.** Dataclass-backed
   sections compose into reusable blueprints that render validated Markdown and
-  expose tool contracts automatically. Specs: [Prompt Overview](specs/PROMPTS.md),
-  [Prompt Composition](specs/PROMPTS_COMPOSITION.md), and
-  [Structured Output](specs/STRUCTURED_OUTPUT.md).
+  expose tool contracts automatically. Specs: [Prompt Overview](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS.md),
+  [Prompt Composition](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS_COMPOSITION.md), and
+  [Structured Output](https://github.com/weakincentives/weakincentives/blob/main/specs/STRUCTURED_OUTPUT.md).
 - **Chapter-driven visibility controls.** Chapters gate when prompt regions
   enter the model context, defaulting to closed until runtime policies open
   them. Expansion strategies and lifecycle guidance live in
-  [Chapters Specification](specs/CHAPTERS.md).
+  [Chapters Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/CHAPTERS.md).
 - **Override-friendly workflows that scale into optimization.** Prompt
   definitions ship with hash-based descriptors and on-disk overrides that stay
   in sync through schema validation and Git-root discovery, laying the
   groundwork for iterative optimization. Review
-  [Prompt Overrides](specs/PROMPT_OVERRIDES.md) for the full contract.
+  [Prompt Overrides](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPT_OVERRIDES.md) for the full contract.
 - **Provider adapters standardize tool negotiation.** Shared conversation
   loops negotiate tool calls, apply JSON-schema response formats, and normalize
   structured payloads so the runtime stays model-agnostic. See
-  [Adapter Specification](specs/ADAPTERS.md) and provider-specific docs such as
-  [LiteLLM Adapter](specs/LITE_LLM_ADAPTER.md).
+  [Adapter Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/ADAPTERS.md) and provider-specific docs such as
+  [LiteLLM Adapter](https://github.com/weakincentives/weakincentives/blob/main/specs/LITE_LLM_ADAPTER.md).
 - **Local-first, deterministic execution.** Everything runs locally without
   hosted dependencies, and prompt renders stay diff-friendly so version control
   captures intent instead of churn. The code-review example ties it together
@@ -65,8 +65,8 @@ avoid custom state stores or ad-hoc optimizers.
 
 Typed dataclasses keep inputs and outputs honest so adapters emit consistent
 telemetry and structured responses stay predictable. See
-[Dataclass Serde Utilities](specs/DATACLASS_SERDE.md) and
-[Structured Output via `Prompt[OutputT]`](specs/STRUCTURED_OUTPUT.md) for the
+[Dataclass Serde Utilities](https://github.com/weakincentives/weakincentives/blob/main/specs/DATACLASS_SERDE.md) and
+[Structured Output via `Prompt[OutputT]`](https://github.com/weakincentives/weakincentives/blob/main/specs/STRUCTURED_OUTPUT.md) for the
 validation and JSON-contract details behind this snippet.
 
 ```python
@@ -104,9 +104,9 @@ Mount diffs ahead of time so the agent can read them through the virtual
 filesystem without extra callbacks. Install the `asteval` extra
 (`uv add "weakincentives[asteval]"`) before instantiating `AstevalSection` so the
 sandbox is available at runtime. Specs worth skimming:
-[Session State](specs/SESSIONS.md), [Prompt Event Emission](specs/EVENTS.md),
-[Virtual Filesystem Tools](specs/VFS_TOOLS.md), [Planning Tools](specs/PLANNING_TOOL.md),
-and [Asteval Integration](specs/ASTEVAL.md).
+[Session State](https://github.com/weakincentives/weakincentives/blob/main/specs/SESSIONS.md), [Prompt Event Emission](https://github.com/weakincentives/weakincentives/blob/main/specs/EVENTS.md),
+[Virtual Filesystem Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/VFS_TOOLS.md), [Planning Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/PLANNING_TOOL.md),
+and [Asteval Integration](https://github.com/weakincentives/weakincentives/blob/main/specs/ASTEVAL.md).
 
 ```python
 from pathlib import Path
@@ -163,7 +163,7 @@ must populate that field before dispatching calls.
 Tools are typed callables that return structured results. Add lightweight
 helpers alongside the built-in suites—in this case, a symbol searcher that reads
 from a repo mounted at `/srv/agent-repo`. Review the
-[Tool Runtime Specification](specs/TOOLS.md) to match the handler,
+[Tool Runtime Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/TOOLS.md) to match the handler,
 `ToolContext`, and `ToolResult` contracts.
 
 ```python
@@ -288,9 +288,9 @@ Sections render through `string.Template`, so keep placeholders readable and
 combine guidance with the tool suites into one auditable prompt tree. Long-form
 checklists or escalation playbooks often span many pages and only matter for
 specialized reviews; wrap them in a chapter so adapters can toggle visibility
-based on the user prompt. See the [Prompt Class](specs/PROMPTS.md),
-[Prompt Versioning & Persistence](specs/PROMPTS_VERSIONING.md), and
-[Chapters Specification](specs/CHAPTERS.md) for the rendering, hashing, and
+based on the user prompt. See the [Prompt Class](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS.md),
+[Prompt Versioning & Persistence](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS_VERSIONING.md), and
+[Chapters Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/CHAPTERS.md) for the rendering, hashing, and
 visibility rules that stabilize this structure.
 
 ```python
@@ -446,8 +446,8 @@ event bus; the session wiring above captures `PromptExecuted` and `ToolInvoked`
 events automatically. Pass the chapter-expanded prompt plus the same parameter
 dataclasses you used for rendering so the adapter sees the specialized
 compliance guidance. For payload formats and parsing guarantees see
-[Adapter Evaluation](specs/ADAPTERS.md) and
-[Native OpenAI Structured Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md).
+[Adapter Evaluation](https://github.com/weakincentives/weakincentives/blob/main/specs/ADAPTERS.md) and
+[Native OpenAI Structured Outputs](https://github.com/weakincentives/weakincentives/blob/main/specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md).
 
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter
@@ -491,8 +491,8 @@ with provider context rather than silently degrading.
 Selectors expose reducer output so you can ship audit logs without extra
 plumbing. Planning reducers keep only the latest `Plan`; register a custom
 reducer before `PlanningToolsSection` if you need history. See
-[Session State](specs/SESSIONS.md) and
-[Snapshot Capture and Rollback](specs/SESSIONS.md#snapshot-capture-and-rollback)
+[Session State](https://github.com/weakincentives/weakincentives/blob/main/specs/SESSIONS.md) and
+[Snapshot Capture and Rollback](https://github.com/weakincentives/weakincentives/blob/main/specs/SESSIONS.md#snapshot-capture-and-rollback)
 for selector and rollback rules.
 
 ```python
@@ -523,7 +523,7 @@ Persist optimizer output so the runtime can swap in tuned sections without a
 redeploy. `LocalPromptOverridesStore` is the default choice: it discovers the
 workspace root, enforces descriptors, and reads JSON overrides from
 `.weakincentives/prompts/overrides/`. Refer to the
-[Prompt Overrides specification](specs/PROMPT_OVERRIDES.md) to keep namespace,
+[Prompt Overrides specification](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPT_OVERRIDES.md) to keep namespace,
 key, and tag hashes aligned.
 
 ```python
@@ -591,7 +591,7 @@ print(rendered_with_override.text)
 
 The overrides store writes atomically to
 `.weakincentives/prompts/overrides/{ns}/{prompt_key}/{tag}.json` inside the
-workspace described in the [Prompt Overrides specification](specs/PROMPT_OVERRIDES.md).
+workspace described in the [Prompt Overrides specification](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPT_OVERRIDES.md).
 Optimizers and prompt engineers can still drop JSON overrides into that tree by
 hand—checked into source control or generated during evaluations—without
 subclassing `PromptOverridesStore`. Because sections expose stable `(ns, key, path)` identifiers, overrides stay scoped to the intended content so teams can
@@ -608,7 +608,7 @@ You now have a deterministic reviewer that:
 
 Run it inside a worker, bot, or scheduler; the captured session state keeps each
 evaluation replayable. For long-lived deployments, follow the
-[Prompt Overrides specification](specs/PROMPT_OVERRIDES.md) to keep overrides
+[Prompt Overrides specification](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPT_OVERRIDES.md) to keep overrides
 and tool descriptors in sync.
 
 ## Logging
