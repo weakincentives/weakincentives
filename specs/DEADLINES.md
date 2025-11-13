@@ -9,7 +9,8 @@ all nested work spawned during that evaluation.
 
 ## API Changes
 
-- Extend `ProviderAdapter.evaluate` with a new keyword-only argument:
+- Extend `ProviderAdapter.evaluate` with a dedicated keyword-only argument for
+  deadline enforcement.
 
   ```python
   from datetime import datetime
@@ -35,9 +36,10 @@ all nested work spawned during that evaluation.
     with `phase="preflight"` if the timestamp is missing `tzinfo`, lies in the
     past, or falls within the current second.
 
-- Mirror the new keyword in every public adapter (`openai`, `litellm`, etc.) and
-  thread it through helper layers such as prompt runners, orchestration
-  utilities, and the `ToolContext` dataclass so handlers can inspect the value.
+- Mirror the `deadline` keyword in every public adapter (`openai`, `litellm`,
+  etc.) and thread it through helper layers such as prompt runners,
+  orchestration utilities, and the `ToolContext` dataclass so handlers can
+  inspect the value.
 
 - Introduce a `DeadlineExceededError(RuntimeError)` in `weakincentives.tools.errors`.
   Tools raise it when they cannot finish before the cutoff.
@@ -45,8 +47,8 @@ all nested work spawned during that evaluation.
 ## Deadline Propagation
 
 1. **Rendered Prompt Metadata** – After validation the orchestrator stores the
-   deadline on the rendered prompt instance (`RenderedPrompt.deadline: datetime | None`). All child prompts created during the run inherit this value unless a
-   stricter deadline is provided explicitly.
+   deadline on the rendered prompt instance (`RenderedPrompt.deadline: datetime | None`). All child prompts created during the run inherit this
+   value unless a stricter deadline is provided explicitly.
 1. **Tool Context** – `ToolContext` already exposes the active
    `RenderedPrompt`, so handlers read the deadline from
    `context.rendered_prompt.deadline`. Orchestrators MUST ensure the
