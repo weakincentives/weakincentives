@@ -19,11 +19,15 @@ disappear when the session ends; no state persists across conversations beyond t
 
 ## Session Integration
 
-- `VfsToolsSection` resolves the active `Session` from the `ToolContext` passed to each tool handler.
-- The section initialises reducers lazily the first time it encounters a session: it registers `replace_latest` for the
+- `VfsToolsSection` receives the active `Session` during construction.
+- The section initialises reducers immediately after construction: it registers `replace_latest` for the
   `VirtualFileSystem` slice, installs the write/delete reducers, and seeds the slice with the mount snapshot. During this
   pass it also provisions a per-session temporary directory on disk (under the operating system's default temporary
   directory) and records the absolute path alongside the snapshot metadata so other components can mount it when needed.
+- Tool handlers verify that the `ToolContext.session` supplied at invocation time matches the configured session and raise
+  `ToolValidationError` when adapters attempt to reuse the tools with a different session.
+- If the session state is cleared (for example via `Session.reset()`), the next tool invocation re-provisions a fresh
+  temporary directory and replays the mount initialisation so the VFS remains usable without manual intervention.
 - Reducers always clone the current `VirtualFileSystem` before applying changes to keep snapshots immutable to callers.
 - Orchestrators retrieve the active snapshot with `select_latest(session, VirtualFileSystem)` and should treat `None`
   as an empty filesystem until the first write occurs. When callers need direct disk access they should consult the
@@ -200,6 +204,7 @@ prompt = Prompt(
             template="Use the virtual filesystem to stage edits before applying them to the host workspace.",
         ),
         vfs.VfsToolsSection(
+            session=session,
             mounts=(
                 vfs.HostMount(
                     host_path="docs/",

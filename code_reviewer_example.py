@@ -38,7 +38,6 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import EventBus, InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
@@ -49,12 +48,7 @@ from weakincentives.tools.planning import (
     PlanningStrategy,
     PlanningToolsSection,
 )
-from weakincentives.tools.vfs import (
-    HostMount,
-    VfsPath,
-    VfsToolsSection,
-    VirtualFileSystem,
-)
+from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
@@ -240,17 +234,8 @@ class SunfishReviewSession:
         base_prompt = build_sunfish_prompt(self._session)
         for section in base_prompt.sections:
             if isinstance(section, VfsToolsSection):
-                context = ToolContext(
-                    prompt=None,
-                    rendered_prompt=None,
-                    adapter=None,
-                    session=self._session,
-                    event_bus=self._bus,
-                )
-                vfs_session = section.ensure_session(context)
-                snapshot = select_latest(vfs_session, VirtualFileSystem)
-                if snapshot is not None:
-                    logging.info("VFS root directory: %s", snapshot.root_path)
+                snapshot = section.latest_snapshot()
+                logging.info("VFS root directory: %s", snapshot.root_path)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = _resolve_override_tag(override_tag)
         try:
@@ -419,6 +404,7 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
     )
     subagents_section = SubagentsSection()
     vfs_section = VfsToolsSection(
+        session=session,
         mounts=(
             HostMount(
                 host_path="sunfish",

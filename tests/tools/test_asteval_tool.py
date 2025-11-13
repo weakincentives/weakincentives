@@ -85,7 +85,7 @@ def _setup_sections() -> tuple[
 ]:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    vfs_section = VfsToolsSection()
+    vfs_section = VfsToolsSection(session=session)
     list_tool = cast(
         Tool[ListDirectory, ListDirectoryResult],
         find_tool(vfs_section, "list_directory"),
@@ -647,6 +647,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     vfs_section = VfsToolsSection(
+        session=session,
         mounts=(HostMount(host_path="sunfish", mount_path=VfsPath(("sunfish",))),),
         allowed_host_roots=(root,),
     )

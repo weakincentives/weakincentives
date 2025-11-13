@@ -129,6 +129,7 @@ session = Session(bus=bus)
 diff_root = Path("/srv/agent-mounts")
 diff_root.mkdir(parents=True, exist_ok=True)
 vfs_section = VfsToolsSection(
+    session=session,
     allowed_host_roots=(diff_root,),
     mounts=(
         HostMount(
