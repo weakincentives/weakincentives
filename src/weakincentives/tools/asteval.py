@@ -327,9 +327,21 @@ def _require_file(snapshot: VirtualFileSystem, path: VfsPath) -> VfsFile:
     raise ToolValidationError("File does not exist in the virtual filesystem.")
 
 
-def _decode_vfs_text(file: VfsFile) -> str:
+def _decode_vfs_text(snapshot: VirtualFileSystem, file: VfsFile) -> str:
+    root = Path(snapshot.root_path)
+    target = root.joinpath(*file.path.segments)
     try:
-        return file.content.decode("utf-8")
+        data = target.read_bytes()
+    except FileNotFoundError as error:
+        raise ToolValidationError(
+            "VFS file is missing from the backing directory."
+        ) from error
+    except OSError as error:
+        raise ToolValidationError(
+            f"Failed to load VFS file {target} from disk."
+        ) from error
+    try:
+        return data.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ToolValidationError("VFS file is not valid UTF-8 text.") from error
 
@@ -419,11 +431,13 @@ def _summarize_writes(writes: Sequence[EvalFileWrite]) -> str | None:
     return f"writes={total} file(s): {preview_paths}"
 
 
-def _write_vfs_bytes(root: Path, path: VfsPath, content: bytes) -> None:
+def _write_vfs_bytes(root: Path, path: VfsPath, content: bytes, mode: str) -> None:
     target = root.joinpath(*path.segments)
     try:
         _ = target.parent.mkdir(parents=True, exist_ok=True)
-        _ = target.write_bytes(content)
+        file_mode = "ab" if mode == "append" else "wb"
+        with target.open(file_mode) as buffer:
+            _ = buffer.write(content)
     except OSError as error:
         raise ToolValidationError(
             f"Failed to persist evaluation write to {target}."
@@ -442,28 +456,27 @@ def _apply_writes(
             None,
         )
         existing = files[existing_index] if existing_index is not None else None
-        if write.mode == "create" and existing is not None:
+        mode = write.mode
+        if mode == "create" and existing is not None:
             raise ToolValidationError("File already exists; use overwrite or append.")
-        if write.mode in {"overwrite", "append"} and existing is None:
+        if mode in {"overwrite", "append"} and existing is None:
             raise ToolValidationError("File does not exist for the requested mode.")
         payload = write.content.encode("utf-8")
-        if write.mode == "append" and existing is not None:
-            content = existing.content + payload
+        if mode == "append" and existing is not None:
             created_at = existing.created_at
             version = existing.version + 1
+            size_bytes = existing.size_bytes + len(payload)
         elif existing is not None:
-            content = payload
             created_at = existing.created_at
             version = existing.version + 1
+            size_bytes = len(payload)
         else:
-            content = payload
             created_at = timestamp
             version = 1
-        size_bytes = len(content)
-        _write_vfs_bytes(root, write.path, content)
+            size_bytes = len(payload)
+        _write_vfs_bytes(root, write.path, payload, mode)
         updated = VfsFile(
             path=write.path,
-            content=content,
             encoding="utf-8",
             size_bytes=size_bytes,
             version=version,
@@ -490,7 +503,7 @@ def _build_eval_globals(
     for read in reads:
         alias = _alias_for_path(read.path)
         file = _require_file(snapshot, read.path)
-        values[alias] = _decode_vfs_text(file)
+        values[alias] = _decode_vfs_text(snapshot, file)
     return values
 
 
@@ -652,7 +665,7 @@ class _AstevalToolSuite:
         def read_text(path: str) -> str:
             normalized = _normalize_vfs_path(_parse_string_path(path))
             file = _require_file(snapshot, normalized)
-            return _decode_vfs_text(file)
+            return _decode_vfs_text(snapshot, file)
 
         def write_text(path: str, content: str, mode: str = "create") -> None:
             nonlocal pending_write_attempted

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import shutil
 import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -50,14 +51,14 @@ _TEMP_DIR_PREFIX: Final[str] = "weakincentives-vfs-"
 _VFS_SECTION_TEMPLATE: Final[str] = (
     "The virtual filesystem starts empty unless host mounts are configured."
     " Use it to stage edits before applying them to the host workspace.\n"
-    "1. Use `vfs_list_directory` to inspect directories before reading or writing"
+    "1. Use `list_directory` to inspect directories before reading or writing"
     " specific files; keep listings focused to reduce output.\n"
-    "2. Fetch file contents with `vfs_read_file` and work from the returned version"
+    "2. Fetch file contents with `read_file` and work from the returned version"
     " to avoid conflicts.\n"
-    "3. Create or update files with `vfs_write_file`; supply UTF-8 content up to"
+    "3. Create or update files with `write_file`; supply UTF-8 content up to"
     " 48k characters and prefer overwriting full files unless streaming append"
     " updates.\n"
-    "4. Remove obsolete files or directories with `vfs_delete_entry` to keep the"
+    "4. Remove obsolete files or directories with `delete_file` to keep the"
     " snapshot tidy.\n"
     "5. Host mounts are session-initialization only; agents cannot mount additional"
     " directories later.\n"
@@ -86,14 +87,6 @@ class VfsFile:
 
     path: VfsPath = field(
         metadata={"description": "Location of the file within the virtual filesystem."}
-    )
-    content: bytes = field(
-        metadata={
-            "description": (
-                "Raw byte content of the file. Encoding hints describe how to"
-                " interpret the payload when rendering to text."
-            )
-        }
     )
     encoding: FileEncoding = field(
         metadata={
@@ -159,7 +152,7 @@ class ListDirectory:
 
 @dataclass(slots=True, frozen=True)
 class ListDirectoryResult:
-    """Result payload returned by :func:`vfs_list_directory`."""
+    """Result payload returned by :func:`list_directory`."""
 
     path: VfsPath = field(metadata={"description": "Directory that was enumerated."})
     directories: tuple[str, ...] = field(
@@ -218,12 +211,42 @@ class WriteFile:
 
 
 @dataclass(slots=True, frozen=True)
-class DeleteEntry:
+class FileReadResult:
+    """Payload returned by :func:`read_file` containing metadata and bytes."""
+
+    file: VfsFile = field(
+        metadata={"description": "Metadata describing the requested file at read time."}
+    )
+    content: bytes = field(
+        metadata={
+            "description": (
+                "Raw bytes loaded from disk. Encoding hints on the metadata"
+                " describe how to interpret the payload."
+            )
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class DeleteFile:
     """Parameters for removing a file or directory."""
 
     path: VfsPath = field(
         metadata={"description": "Path to delete from the virtual filesystem."}
     )
+
+
+@dataclass(slots=True, frozen=True)
+class _MountedFile:
+    """Host file captured for mounting into a session-scoped workspace."""
+
+    path: VfsPath
+    source_path: Path
+    encoding: FileEncoding
+    size_bytes: int
+    version: int
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass(slots=True, frozen=True)
@@ -302,7 +325,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         accepts_overrides: bool = False,
     ) -> None:
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
-        self._mount_files = _materialize_mounts(mounts, allowed_roots)
+        self._mounted_files = _materialize_mounts(mounts, allowed_roots)
         self._configured_sessions: WeakSet[Session] = WeakSet()
 
         tools = _build_tools(
@@ -331,10 +354,10 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 
     def _initialize_session(self, session: Session) -> None:
         root = _create_session_root()
-        _sync_mounts_to_disk(root, self._mount_files)
+        mounted_files = _copy_mounts_to_session(root, self._mounted_files)
         initial_snapshot = VirtualFileSystem(
             root_path=str(root),
-            files=tuple(self._mount_files),
+            files=mounted_files,
         )
         session.register_reducer(VirtualFileSystem, replace_latest)
         session.seed_slice(VirtualFileSystem, (initial_snapshot,))
@@ -344,7 +367,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             slice_type=VirtualFileSystem,
         )
         session.register_reducer(
-            DeleteEntry,
+            DeleteFile,
             _make_delete_reducer(),
             slice_type=VirtualFileSystem,
         )
@@ -366,7 +389,7 @@ def _build_tools(
         tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
         (
             Tool[ListDirectory, ListDirectoryResult](
-                name="vfs_list_directory",
+                name="list_directory",
                 description=(
                     "Enumerate files and directories under a relative VFS path. "
                     "Omit the path to list the root."
@@ -374,8 +397,8 @@ def _build_tools(
                 handler=suite.list_directory,
                 accepts_overrides=accepts_overrides,
             ),
-            Tool[ReadFile, VfsFile](
-                name="vfs_read_file",
+            Tool[ReadFile, FileReadResult](
+                name="read_file",
                 description=(
                     "Read the latest version of a file and return its UTF-8 "
                     "contents with metadata."
@@ -384,7 +407,7 @@ def _build_tools(
                 accepts_overrides=accepts_overrides,
             ),
             Tool[WriteFile, WriteFile](
-                name="vfs_write_file",
+                name="write_file",
                 description=(
                     "Create or update a UTF-8 text file. Supply the target path, "
                     "content, and write mode."
@@ -392,13 +415,13 @@ def _build_tools(
                 handler=suite.write_file,
                 accepts_overrides=accepts_overrides,
             ),
-            Tool[DeleteEntry, DeleteEntry](
-                name="vfs_delete_entry",
+            Tool[DeleteFile, DeleteFile](
+                name="delete_file",
                 description=(
                     "Delete a file or directory tree from the virtual filesystem. "
                     "Directories are removed recursively."
                 ),
-                handler=suite.delete_entry,
+                handler=suite.delete_file,
                 accepts_overrides=accepts_overrides,
             ),
         ),
@@ -444,15 +467,18 @@ class _VfsToolSuite:
 
     def read_file(
         self, params: ReadFile, *, context: ToolContext
-    ) -> ToolResult[VfsFile]:
+    ) -> ToolResult[FileReadResult]:
         session = self._section.ensure_session(context)
         path = _normalize_required_path(params.path)
         snapshot = self._section.latest_snapshot(session)
         file = _find_file(snapshot.files, path)
         if file is None:
             raise ToolValidationError("File does not exist in the virtual filesystem.")
+        root = Path(snapshot.root_path)
+        content = _read_bytes_from_disk(root, file.path)
         message = _format_read_file_message(file)
-        return ToolResult(message=message, value=file)
+        result = FileReadResult(file=file, content=content)
+        return ToolResult(message=message, value=result)
 
     def write_file(
         self, params: WriteFile, *, context: ToolContext
@@ -468,31 +494,27 @@ class _VfsToolSuite:
             raise ToolValidationError("File already exists; use overwrite or append.")
         if mode in {"overwrite", "append"} and existing is None:
             raise ToolValidationError("File does not exist for the requested mode.")
-        if mode == "append" and existing is not None:
-            final_content = existing.content + payload
-            prior_encoding = existing.encoding
-            message_size = len(payload)
-        else:
-            final_content = payload
-            prior_encoding = existing.encoding if existing is not None else None
-            message_size = len(final_content)
+        prior_encoding = existing.encoding if existing is not None else None
         resolved_encoding = encoding if encoding is not None else prior_encoding
         root = Path(snapshot.root_path)
-        _write_bytes_to_disk(root, path, final_content)
+        _write_payload_to_disk(root, path, payload, mode)
         normalized = WriteFile(
             path=path,
-            content=final_content,
+            content=payload,
             mode=mode,
             encoding=resolved_encoding,
         )
         message = _format_write_file_message(
-            path, message_size, mode, resolved_encoding
+            path,
+            len(payload),
+            mode,
+            resolved_encoding,
         )
         return ToolResult(message=message, value=normalized)
 
-    def delete_entry(
-        self, params: DeleteEntry, *, context: ToolContext
-    ) -> ToolResult[DeleteEntry]:
+    def delete_file(
+        self, params: DeleteFile, *, context: ToolContext
+    ) -> ToolResult[DeleteFile]:
         session = self._section.ensure_session(context)
         path = _normalize_path(params.path)
         snapshot = self._section.latest_snapshot(session)
@@ -506,7 +528,7 @@ class _VfsToolSuite:
             raise ToolValidationError("No files matched the provided path.")
         root = Path(snapshot.root_path)
         _delete_files_from_disk(root, matches)
-        normalized = DeleteEntry(path=path)
+        normalized = DeleteFile(path=path)
         message = _format_delete_message(path, matches)
         return ToolResult(message=message, value=normalized)
 
@@ -672,11 +694,11 @@ def _normalize_root(path: os.PathLike[str] | str) -> Path:
 
 def _materialize_mounts(
     mounts: Sequence[HostMount], allowed_roots: Sequence[Path]
-) -> tuple[VfsFile, ...]:
+) -> tuple[_MountedFile, ...]:
     if not mounts:
         return ()
 
-    aggregated: dict[tuple[str, ...], VfsFile] = {}
+    aggregated: dict[tuple[str, ...], _MountedFile] = {}
     for mount in mounts:
         loaded = _load_mount(mount, allowed_roots)
         for file in loaded:
@@ -684,7 +706,9 @@ def _materialize_mounts(
     return tuple(sorted(aggregated.values(), key=lambda file: file.path.segments))
 
 
-def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFile, ...]:
+def _load_mount(
+    mount: HostMount, allowed_roots: Sequence[Path]
+) -> tuple[_MountedFile, ...]:
     host_path = mount.host_path.strip()
     if not host_path:
         raise ToolValidationError("Host mount path must not be empty.")
@@ -694,7 +718,7 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
     exclude_patterns = _normalize_globs(mount.exclude_glob, "exclude_glob")
     mount_prefix = _normalize_optional_path(mount.mount_path)
 
-    files: list[VfsFile] = []
+    files: list[_MountedFile] = []
     consumed_bytes = 0
     timestamp = _now()
     for path in _iter_mount_files(resolved_host, mount.follow_symlinks):
@@ -729,16 +753,46 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
 
         segments = mount_prefix.segments + relative.parts
         normalized_path = _normalize_path(VfsPath(segments))
-        file = VfsFile(
+        file = _MountedFile(
             path=normalized_path,
-            content=content,
+            source_path=path,
             encoding=encoding,
             size_bytes=size,
             version=1,
-            created_at=timestamp,
-            updated_at=timestamp,
+            created_at=_truncate_to_milliseconds(timestamp),
+            updated_at=_truncate_to_milliseconds(timestamp),
         )
         files.append(file)
+    return tuple(files)
+
+
+def _copy_mounts_to_session(
+    root: Path, mounts: Sequence[_MountedFile]
+) -> tuple[VfsFile, ...]:
+    if not mounts:
+        return ()
+
+    files: list[VfsFile] = []
+    for mount in mounts:
+        target = _resolve_disk_path(root, mount.path)
+        try:
+            _ = target.parent.mkdir(parents=True, exist_ok=True)
+            _ = shutil.copy2(mount.source_path, target)
+        except OSError as error:
+            raise ToolValidationError(
+                f"Failed to copy mounted file {mount.source_path} into the session."
+            ) from error
+        files.append(
+            VfsFile(
+                path=mount.path,
+                encoding=mount.encoding,
+                size_bytes=mount.size_bytes,
+                version=mount.version,
+                created_at=mount.created_at,
+                updated_at=mount.updated_at,
+            )
+        )
+    files.sort(key=lambda file: file.path.segments)
     return tuple(files)
 
 
@@ -781,18 +835,29 @@ def _create_session_root() -> Path:
     return Path(tempfile.mkdtemp(prefix=_TEMP_DIR_PREFIX))
 
 
-def _sync_mounts_to_disk(root: Path, files: Sequence[VfsFile]) -> None:
-    for file in files:
-        _write_bytes_to_disk(root, file.path, file.content)
-
-
-def _write_bytes_to_disk(root: Path, path: VfsPath, content: bytes) -> None:
+def _write_payload_to_disk(
+    root: Path, path: VfsPath, content: bytes, mode: WriteMode
+) -> None:
     target = _resolve_disk_path(root, path)
+    file_mode = "ab" if mode == "append" else "wb"
     try:
         _ = target.parent.mkdir(parents=True, exist_ok=True)
-        _ = target.write_bytes(content)
+        with target.open(file_mode) as buffer:
+            _ = buffer.write(content)
     except OSError as error:
         raise ToolValidationError(f"Failed to write VFS file {target}.") from error
+
+
+def _read_bytes_from_disk(root: Path, path: VfsPath) -> bytes:
+    target = _resolve_disk_path(root, path)
+    try:
+        return target.read_bytes()
+    except FileNotFoundError as error:
+        raise ToolValidationError(
+            f"File {target} disappeared from the virtual filesystem."
+        ) from error
+    except OSError as error:
+        raise ToolValidationError(f"Failed to read VFS file {target}.") from error
 
 
 def _delete_files_from_disk(root: Path, files: Sequence[VfsFile]) -> None:
@@ -843,6 +908,7 @@ def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
         files = list(previous.files)
         existing_index = _index_of(files, params.path)
         existing = files[existing_index] if existing_index is not None else None
+        mode = params.mode
         if existing is not None:
             created_at = existing.created_at
             version = existing.version + 1
@@ -853,10 +919,12 @@ def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
         resolved_encoding = params.encoding
         if resolved_encoding is None and existing is not None:
             resolved_encoding = existing.encoding
-        size = len(content)
+        if mode == "append" and existing is not None:
+            size = existing.size_bytes + len(content)
+        else:
+            size = len(content)
         updated_file = VfsFile(
             path=params.path,
-            content=content,
             encoding=resolved_encoding,
             size_bytes=size,
             version=version,
@@ -884,7 +952,7 @@ def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
         if not slice_values:
             raise RuntimeError("Virtual filesystem reducer invoked without state.")
         previous = slice_values[-1]
-        params = cast(DeleteEntry, event.value)
+        params = cast(DeleteFile, event.value)
         target = params.path.segments
         files = [
             file
@@ -915,7 +983,8 @@ def _truncate_to_milliseconds(value: datetime) -> datetime:
 
 
 __all__ = [
-    "DeleteEntry",
+    "DeleteFile",
+    "FileReadResult",
     "HostMount",
     "ListDirectory",
     "ListDirectoryResult",

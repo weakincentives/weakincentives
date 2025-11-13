@@ -128,7 +128,6 @@ def _make_vfs_file() -> vfs_tools.VfsFile:
     now = datetime.now(UTC)
     return vfs_tools.VfsFile(
         path=_make_vfs_path(),
-        content=b"Hello, world!",
         encoding="utf-8",
         size_bytes=13,
         version=1,
@@ -168,8 +167,15 @@ def _make_write_file() -> vfs_tools.WriteFile:
     )
 
 
-def _make_delete_entry() -> vfs_tools.DeleteEntry:
-    return vfs_tools.DeleteEntry(path=_make_vfs_path())
+def _make_delete_entry() -> vfs_tools.DeleteFile:
+    return vfs_tools.DeleteFile(path=_make_vfs_path())
+
+
+def _make_file_read_result() -> vfs_tools.FileReadResult:
+    return vfs_tools.FileReadResult(
+        file=_make_vfs_file(),
+        content=b"Hello, world!",
+    )
 
 
 def _make_eval_file_read() -> asteval_tools.EvalFileRead:
@@ -226,8 +232,9 @@ def _discover_vfs() -> dict[type[Any], SupportsFactory]:
         vfs_tools.ListDirectory: _make_list_directory,
         vfs_tools.ListDirectoryResult: _make_list_directory_result,
         vfs_tools.ReadFile: _make_read_file,
+        vfs_tools.FileReadResult: _make_file_read_result,
         vfs_tools.WriteFile: _make_write_file,
-        vfs_tools.DeleteEntry: _make_delete_entry,
+        vfs_tools.DeleteFile: _make_delete_entry,
     }
 
 

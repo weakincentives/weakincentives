@@ -19,7 +19,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import IO, Any, cast
 
 import pytest
 
@@ -45,6 +45,10 @@ from weakincentives.tools import (
     VirtualFileSystem,
     WriteFile,
 )
+
+
+def _snapshot_bytes(snapshot: VirtualFileSystem, file: VfsFile) -> bytes:
+    return Path(snapshot.root_path).joinpath(*file.path.segments).read_bytes()
 
 
 def _assert_success_message(result: ToolResult[EvalResult]) -> None:
@@ -84,7 +88,7 @@ def _setup_sections() -> tuple[
     vfs_section = VfsToolsSection()
     list_tool = cast(
         Tool[ListDirectory, ListDirectoryResult],
-        find_tool(vfs_section, "vfs_list_directory"),
+        find_tool(vfs_section, "list_directory"),
     )
     invoke_tool(bus, list_tool, ListDirectory(), session=session)
     section = AstevalSection()
@@ -165,9 +169,7 @@ def test_expression_mode_success() -> None:
 def test_statements_mode_reads_and_writes() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
-    write_tool = cast(
-        Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
-    )
+    write_tool = cast(Tool[WriteFile, WriteFile], find_tool(vfs_section, "write_file"))
     invoke_tool(
         bus,
         write_tool,
@@ -213,7 +215,9 @@ def test_statements_mode_reads_and_writes() -> None:
 
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
-    written = {file.path.segments: file.content for file in snapshot.files}
+    written = {
+        file.path.segments: _snapshot_bytes(snapshot, file) for file in snapshot.files
+    }
     assert written["output", "summary.txt"] == b"Report: hello"
 
 
@@ -241,7 +245,9 @@ def test_helper_write_appends() -> None:
 
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
-    files = {file.path.segments: file.content for file in snapshot.files}
+    files = {
+        file.path.segments: _snapshot_bytes(snapshot, file) for file in snapshot.files
+    }
     assert files["logs", "activity.log"] == b"started-continued"
 
 
@@ -519,9 +525,7 @@ def test_write_content_length_validation() -> None:
 def test_create_mode_rejects_existing_file() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
-    write_tool = cast(
-        Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
-    )
+    write_tool = cast(Tool[WriteFile, WriteFile], find_tool(vfs_section, "write_file"))
     existing_path = VfsPath(("docs", "info.txt"))
     invoke_tool(
         bus,
@@ -545,7 +549,9 @@ def test_create_mode_rejects_existing_file() -> None:
     _assert_success_message(result)
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
-    files = {file.path.segments: file.content for file in snapshot.files}
+    files = {
+        file.path.segments: _snapshot_bytes(snapshot, file) for file in snapshot.files
+    }
     assert files[existing_path.segments] == b"original"
 
 
@@ -576,9 +582,7 @@ def test_append_requires_existing_file() -> None:
 def test_overwrite_updates_existing_file() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
-    write_tool = cast(
-        Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
-    )
+    write_tool = cast(Tool[WriteFile, WriteFile], find_tool(vfs_section, "write_file"))
     path = VfsPath(("docs", "info.txt"))
     invoke_tool(
         bus,
@@ -600,7 +604,9 @@ def test_overwrite_updates_existing_file() -> None:
     _assert_success_message(result)
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
-    files = {file.path.segments: file.content for file in snapshot.files}
+    files = {
+        file.path.segments: _snapshot_bytes(snapshot, file) for file in snapshot.files
+    }
     assert files[path.segments] == b"updated"
 
 
@@ -646,7 +652,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     )
     list_tool = cast(
         Tool[ListDirectory, ListDirectoryResult],
-        find_tool(vfs_section, "vfs_list_directory"),
+        find_tool(vfs_section, "list_directory"),
     )
     invoke_tool(bus, list_tool, ListDirectory(), session=session)
     section = AstevalSection()
@@ -728,9 +734,7 @@ def test_interpreter_error_surfaces_in_stderr() -> None:
 def test_write_text_conflict_with_read_path() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
-    write_tool = cast(
-        Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
-    )
+    write_tool = cast(Tool[WriteFile, WriteFile], find_tool(vfs_section, "write_file"))
     path = VfsPath(("docs", "info.txt"))
     invoke_tool(bus, write_tool, WriteFile(path=path, content=b"seed"), session=session)
 
@@ -877,19 +881,88 @@ def test_merge_globals_combines_mappings() -> None:
     assert merged == {"alpha": 1, "beta": 2}
 
 
-def test_decode_vfs_text_requires_utf8() -> None:
+def test_decode_vfs_text_requires_utf8(tmp_path: Path) -> None:
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    file = VfsFile(
-        path=VfsPath(("binary.bin",)),
-        content=b"\xff",
-        encoding="binary",
-        size_bytes=1,
-        version=1,
-        created_at=timestamp,
-        updated_at=timestamp,
+    root = tmp_path / "vfs"
+    root.mkdir()
+    (root / "binary.bin").write_bytes(b"\xff")
+    snapshot = VirtualFileSystem(
+        root_path=str(root),
+        files=(
+            VfsFile(
+                path=VfsPath(("binary.bin",)),
+                encoding="binary",
+                size_bytes=1,
+                version=1,
+                created_at=timestamp,
+                updated_at=timestamp,
+            ),
+        ),
     )
+    file = snapshot.files[0]
     with pytest.raises(ToolValidationError):
-        asteval_module._decode_vfs_text(file)
+        asteval_module._decode_vfs_text(snapshot, file)
+
+
+def test_decode_vfs_text_missing_file(tmp_path: Path) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    root = tmp_path / "vfs"
+    root.mkdir()
+    snapshot = VirtualFileSystem(
+        root_path=str(root),
+        files=(
+            VfsFile(
+                path=VfsPath(("ghost.txt",)),
+                encoding="text",
+                size_bytes=0,
+                version=1,
+                created_at=timestamp,
+                updated_at=timestamp,
+            ),
+        ),
+    )
+    file = snapshot.files[0]
+
+    with pytest.raises(
+        ToolValidationError, match="VFS file is missing from the backing directory"
+    ):
+        asteval_module._decode_vfs_text(snapshot, file)
+
+
+def test_decode_vfs_text_disk_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    root = tmp_path / "vfs"
+    root.mkdir()
+    target = root / "fail.txt"
+    target.write_text("data", encoding="utf-8")
+    snapshot = VirtualFileSystem(
+        root_path=str(root),
+        files=(
+            VfsFile(
+                path=VfsPath(("fail.txt",)),
+                encoding="text",
+                size_bytes=4,
+                version=1,
+                created_at=timestamp,
+                updated_at=timestamp,
+            ),
+        ),
+    )
+    file = snapshot.files[0]
+
+    original_read_bytes = Path.read_bytes
+
+    def fail_read_bytes(self: Path) -> bytes:
+        if self == target:
+            raise OSError("boom")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+
+    with pytest.raises(ToolValidationError, match="Failed to load VFS file"):
+        asteval_module._decode_vfs_text(snapshot, file)
 
 
 def test_write_vfs_bytes_failure_propagates(
@@ -898,17 +971,26 @@ def test_write_vfs_bytes_failure_propagates(
     root = tmp_path / "vfs"
     root.mkdir()
     target = root / "fail.txt"
-    original_write_bytes = Path.write_bytes
+    original_open = Path.open
 
-    def fail_write_bytes(self: Path, data: bytes) -> int:
-        if self == target:
+    def fail_open(
+        self: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> IO[Any]:
+        if self == target and any(flag in mode for flag in {"w", "a", "x"}):
             raise OSError("boom")
-        return original_write_bytes(self, data)
+        return original_open(self, mode, buffering, encoding, errors, newline)
 
-    monkeypatch.setattr(Path, "write_bytes", fail_write_bytes)
+    monkeypatch.setattr(Path, "open", fail_open)
 
     with pytest.raises(ToolValidationError):
-        asteval_module._write_vfs_bytes(root, VfsPath(("fail.txt",)), b"data")
+        asteval_module._write_vfs_bytes(
+            root, VfsPath(("fail.txt",)), b"data", "overwrite"
+        )
 
 
 def test_evaluate_requires_vfs_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:

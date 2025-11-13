@@ -172,7 +172,6 @@ def test_snapshot_clones_and_restores_vfs(tmp_path: Path) -> None:
 
     vfs_file = VfsFile(
         path=VfsPath(("docs", "note.txt")),
-        content=b"hello",
         encoding="utf-8",
         size_bytes=5,
         version=1,

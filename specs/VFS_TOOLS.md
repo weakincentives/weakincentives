@@ -64,7 +64,6 @@ class VfsPath:
 @dataclass(slots=True, frozen=True)
 class VfsFile:
     path: VfsPath
-    content: bytes
     encoding: FileEncoding
     size_bytes: int
     version: int
@@ -97,8 +96,14 @@ class WriteFile:
 
 
 @dataclass(slots=True, frozen=True)
-class DeleteEntry:
+class DeleteFile:
     path: VfsPath
+
+
+@dataclass(slots=True, frozen=True)
+class FileReadResult:
+    file: VfsFile
+    content: bytes
 
 
 @dataclass(slots=True, frozen=True)
@@ -119,7 +124,7 @@ Implementation detail notes:
 - `VirtualFileSystem.files` stores files as a tuple sorted lexicographically by path segments for stable diffs.
 - `VirtualFileSystem.root_path` records the absolute path to the session-scoped temporary directory on disk.
 - Reducers maintain monotonically increasing `version` numbers per file per snapshot. When `WriteFile.mode` is
-  `append`, the reducer concatenates new content and increments the version.
+  `append`, the reducer increments the version and updates metadata based on the new payload length.
 - `created_at` and `updated_at` are stored as timezone-aware UTC timestamps (truncated to millisecond precision). The
   reducer sets both timestamps during creation and only `updated_at` on subsequent writes.
 - If no snapshot exists when a tool runs, reducers start from an empty `VirtualFileSystem` snapshot automatically.
@@ -127,15 +132,15 @@ Implementation detail notes:
   - Maximum content length per write: 48_000 characters for UTF-8 text; binary writes enforce the same limit on decoded
     bytes.
   - Maximum path depth: 16 segments; maximum segment length: 80 characters.
-  - File content is stored as raw bytes on disk. The `encoding` hint records how the payload should be interpreted when
-    serialising results (`utf-8` by default, `binary` or `None` for arbitrary bytes). Path segments remain ASCII-only.
+  - File contents are persisted on disk only. Snapshots retain metadata and the encoding hint describing how to
+    interpret bytes when returning a `FileReadResult`. Path segments remain ASCII-only.
 - Each `HostMount` requires an ASCII `host_path`, resolves it against an allow-listed root configured by the
   orchestrator, normalises it to an absolute path, and rejects traversal outside the approved surface. Included files
   are streamed into memory as bytes, filtered through the glob include/exclude lists, and mounted under
   `mount_path` (or the host relative path when `mount_path` is `None`). Existing VFS entries at the target paths are
   overwritten, directory structures merge, and `max_bytes` caps the aggregate content pulled from disk. Mounting occurs
   once during `VfsToolsSection` initialisation.
-- `DeleteEntry` removes files under the exact path. Directories are implicit; removing a directory path deletes all
+- `DeleteFile` removes files under the exact path. Directories are implicit; removing a directory path deletes all
   files with that prefix.
 - Directory listings render shallow entries only (files or immediate directories below the target path). The handler
   performs the projection so reducers only deal with structural updates.
@@ -147,25 +152,25 @@ Every tool validates its parameters and raises `ToolValidationError` on failure.
 
 | Tool | Summary | Parameters | Result | Behaviour highlights |
 | ---- | ------- | ---------- | ------ | -------------------- |
-| `vfs.list_directory` | Enumerate directory contents | `ListDirectory` | `dict` | Returns a JSON-serialisable summary with files and directories for the given path; raises if the path resolves to a file. |
-| `vfs.read_file` | Retrieve file contents | `ReadFile` | `dict` | Returns content, encoding, version, size, and timestamps; binary payloads are base64-encoded when serialised. Raises if path missing. |
-| `vfs.write_file` | Create or modify a file | `WriteFile` | `WriteFile` | Accepts text or binary payloads, validates size after decoding, honours the encoding hint, and updates version/timestamps. |
-| `vfs.delete_entry` | Remove file(s) | `DeleteEntry` | `DeleteEntry` | Deletes the matching file or directory subtree; no-op when nothing matches if `allow_missing` flag is passed (future extension). |
+| `list_directory` | Enumerate directory contents | `ListDirectory` | `dict` | Returns a JSON-serialisable summary with files and directories for the given path; raises if the path resolves to a file. |
+| `read_file` | Retrieve file contents | `ReadFile` | `FileReadResult` | Returns file metadata alongside raw bytes. Binary payloads are base64-encoded when serialised. Raises if the path is missing. |
+| `write_file` | Create or modify a file | `WriteFile` | `WriteFile` | Accepts text or binary payloads, validates size after decoding, honours the encoding hint, and updates version/timestamps. |
+| `delete_file` | Remove file(s) | `DeleteFile` | `DeleteFile` | Deletes the matching file or directory subtree; no-op when nothing matches if `allow_missing` flag is passed (future extension). |
 
 ## Prompt Template Guidance
 
 `VfsToolsSection` emits markdown instructing agents to:
 
 1. Remember the virtual filesystem starts empty aside from any host mounts configured by the orchestrator; create files
-   via `vfs.write_file` when needed.
+   via `write_file` when needed.
 1. Host mounts are configuration-time only; agents cannot import additional host directories during a session.
-1. Use `vfs.list_directory` to explore before reading or writing specific files; keep listings targeted to minimise
+1. Use `list_directory` to explore before reading or writing specific files; keep listings targeted to minimise
    output volume.
-1. Fetch file contents with `vfs.read_file` when context is needed, and operate on the returned version to avoid stale
+1. Fetch file contents with `read_file` when context is needed, and operate on the returned version to avoid stale
    edits.
-1. Apply edits with `vfs.write_file`, keeping updates concise. Binary payloads are supported but should remain small and
+1. Apply edits with `write_file`, keeping updates concise. Binary payloads are supported but should remain small and
    intentional; prefer overwriting complete files instead of issuing multiple appends unless streaming logs.
-1. Clean up obsolete files or directories via `vfs.delete_entry` once work completes to keep the snapshot tight.
+1. Clean up obsolete files or directories via `delete_file` once work completes to keep the snapshot tight.
 1. Avoid mirroring large repositories or binary assets; orchestrated host mounts should stay focused, and the enforced
    size limit still applies.
 
