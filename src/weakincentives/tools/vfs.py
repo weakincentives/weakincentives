@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 import shutil
 import tempfile
 from collections.abc import Iterable, Sequence
@@ -58,7 +59,7 @@ _VFS_SECTION_TEMPLATE: Final[str] = (
     "3. Create or update files with `write_file`; supply UTF-8 content up to"
     " 48k characters and prefer overwriting full files unless streaming append"
     " updates.\n"
-    "4. Remove obsolete files or directories with `delete_file` to keep the"
+    "4. Remove obsolete files or directories with `delete_path` to keep the"
     " snapshot tidy.\n"
     "5. Host mounts are session-initialization only; agents cannot mount additional"
     " directories later.\n"
@@ -148,6 +149,14 @@ class ListDirectory:
             )
         },
     )
+    recursive: bool = field(
+        default=False,
+        metadata={
+            "description": (
+                "When true, return every descendant entry under the directory."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -156,10 +165,25 @@ class ListDirectoryResult:
 
     path: VfsPath = field(metadata={"description": "Directory that was enumerated."})
     directories: tuple[str, ...] = field(
-        metadata={"description": "Child directory names sorted alphabetically."}
+        metadata={
+            "description": (
+                "Directory names sorted alphabetically. Relative paths mirror the"
+                " requested recursion depth."
+            )
+        }
     )
     files: tuple[str, ...] = field(
-        metadata={"description": "Child file names sorted alphabetically."}
+        metadata={
+            "description": (
+                "File names sorted alphabetically. Relative paths mirror the"
+                " requested recursion depth."
+            )
+        }
+    )
+    recursive: bool = field(
+        metadata={
+            "description": "Whether the listing traversed directories recursively."
+        }
     )
 
 
@@ -171,6 +195,24 @@ class ReadFile:
         metadata={
             "description": "Path to the file to read within the virtual filesystem."
         }
+    )
+    start_row: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional 1-indexed row number to start reading from. Omit to"
+                " read from the beginning."
+            )
+        },
+    )
+    end_row: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional 1-indexed row number to stop before. Omit to read"
+                " through the end of the file."
+            )
+        },
     )
 
 
@@ -228,11 +270,86 @@ class FileReadResult:
 
 
 @dataclass(slots=True, frozen=True)
-class DeleteFile:
+class DeletePath:
     """Parameters for removing a file or directory."""
 
     path: VfsPath = field(
         metadata={"description": "Path to delete from the virtual filesystem."}
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class GrepMatch:
+    """Single match returned by :func:`grep_file`."""
+
+    line_number: int = field(
+        metadata={"description": "1-indexed line number containing the primary match."}
+    )
+    line: str = field(
+        metadata={"description": "The matching line rendered with the file's encoding."}
+    )
+    before: tuple[str, ...] = field(
+        metadata={
+            "description": "Lines of context preceding the match in ascending order."
+        }
+    )
+    after: tuple[str, ...] = field(
+        metadata={
+            "description": "Lines of context following the match in ascending order."
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class GrepFile:
+    """Parameters for searching a file for pattern matches."""
+
+    path: VfsPath = field(
+        metadata={
+            "description": "Path to the file to scan within the virtual filesystem."
+        }
+    )
+    pattern: str = field(
+        metadata={
+            "description": (
+                "Regular expression pattern evaluated with Python's default semantics."
+            )
+        }
+    )
+    before: int = field(
+        default=0,
+        metadata={
+            "description": "Number of lines of leading context to capture for each match."
+        },
+    )
+    after: int = field(
+        default=0,
+        metadata={
+            "description": "Number of lines of trailing context to capture for each match."
+        },
+    )
+    case_sensitive: bool = field(
+        default=True,
+        metadata={
+            "description": "If false, the pattern search ignores case distinctions."
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class GrepFileResult:
+    """Collection of regex matches discovered in a file."""
+
+    file: VfsFile = field(
+        metadata={"description": "Metadata describing the scanned file."}
+    )
+    pattern: str = field(
+        metadata={"description": "Regular expression used for matching."}
+    )
+    matches: tuple[GrepMatch, ...] = field(
+        metadata={
+            "description": "Ordered match results including requested context lines."
+        }
     )
 
 
@@ -372,7 +489,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             slice_type=VirtualFileSystem,
         )
         session.register_reducer(
-            DeleteFile,
+            DeletePath,
             _make_delete_reducer(),
             slice_type=VirtualFileSystem,
         )
@@ -415,7 +532,8 @@ def _build_tools(
                 name="list_directory",
                 description=(
                     "Enumerate files and directories under a relative VFS path. "
-                    "Omit the path to list the root."
+                    "Omit the path to list the root or set recursive=true to walk"
+                    " the full tree."
                 ),
                 handler=suite.list_directory,
                 accepts_overrides=accepts_overrides,
@@ -423,8 +541,8 @@ def _build_tools(
             Tool[ReadFile, FileReadResult](
                 name="read_file",
                 description=(
-                    "Read the latest version of a file and return its UTF-8 "
-                    "contents with metadata."
+                    "Read the latest version of a file and return its contents "
+                    "with metadata. Optional row bounds limit the output."
                 ),
                 handler=suite.read_file,
                 accepts_overrides=accepts_overrides,
@@ -438,13 +556,22 @@ def _build_tools(
                 handler=suite.write_file,
                 accepts_overrides=accepts_overrides,
             ),
-            Tool[DeleteFile, DeleteFile](
-                name="delete_file",
+            Tool[DeletePath, DeletePath](
+                name="delete_path",
                 description=(
                     "Delete a file or directory tree from the virtual filesystem. "
                     "Directories are removed recursively."
                 ),
-                handler=suite.delete_file,
+                handler=suite.delete_path,
+                accepts_overrides=accepts_overrides,
+            ),
+            Tool[GrepFile, GrepFileResult](
+                name="grep_file",
+                description=(
+                    "Search for a regular expression in a text file and return "
+                    "matching lines with optional context."
+                ),
+                handler=suite.grep_file,
                 accepts_overrides=accepts_overrides,
             ),
         ),
@@ -474,18 +601,29 @@ class _VfsToolSuite:
             segments = file.path.segments
             if not _is_path_prefix(segments, target.segments):
                 continue
-            next_segment = segments[prefix_length]
-            if len(segments) == prefix_length + 1:
-                file_names.add(next_segment)
+            remainder = segments[prefix_length:]
+            if params.recursive:
+                file_names.add("/".join(remainder))
+                for depth in range(1, len(remainder)):
+                    directory_names.add("/".join(remainder[:depth]))
             else:
-                directory_names.add(next_segment)
+                next_segment = remainder[0]
+                if len(remainder) == 1:
+                    file_names.add(next_segment)
+                else:
+                    directory_names.add(next_segment)
 
         directories = tuple(sorted(directory_names))
         files = tuple(sorted(file_names))
         normalized = ListDirectoryResult(
-            path=target, directories=directories, files=files
+            path=target,
+            directories=directories,
+            files=files,
+            recursive=params.recursive,
         )
-        message = _format_directory_message(target, directories, files)
+        message = _format_directory_message(
+            target, directories, files, recursive=params.recursive
+        )
         return ToolResult(message=message, value=normalized)
 
     def read_file(
@@ -499,7 +637,44 @@ class _VfsToolSuite:
             raise ToolValidationError("File does not exist in the virtual filesystem.")
         root = Path(snapshot.root_path)
         content = _read_bytes_from_disk(root, file.path)
-        message = _format_read_file_message(file)
+        line_range = None
+        if params.start_row is not None or params.end_row is not None:
+            start_row = params.start_row
+            end_row = params.end_row
+            if start_row is not None and start_row < 1:
+                raise ToolValidationError("start_row must be at least 1.")
+            if end_row is not None and end_row < 1:
+                raise ToolValidationError("end_row must be at least 1.")
+            if start_row is not None and end_row is not None and end_row < start_row:
+                raise ToolValidationError(
+                    "end_row must be greater than or equal to start_row."
+                )
+            encoding = file.encoding
+            if encoding in {None, _BINARY_ENCODING}:
+                raise ToolValidationError(
+                    "Row slicing requires a text file with a declared encoding."
+                )
+            text_encoding = cast(str, encoding)
+            try:
+                text = content.decode(text_encoding)
+            except UnicodeDecodeError as error:
+                raise ToolValidationError(
+                    "Failed to decode file using the stored encoding."
+                ) from error
+            lines = text.splitlines(keepends=True)
+            total_rows = len(lines)
+            max_start = total_rows if total_rows > 0 else 1
+            effective_start = start_row if start_row is not None else 1
+            if effective_start > max_start:
+                raise ToolValidationError("start_row exceeds the number of rows.")
+            start_index = (start_row - 1) if start_row is not None else 0
+            exclusive_end = end_row if end_row is not None else total_rows
+            exclusive_end = max(exclusive_end, start_index)
+            exclusive_end = min(exclusive_end, total_rows)
+            selected = lines[start_index:exclusive_end]
+            content = "".join(selected).encode(text_encoding)
+            line_range = (start_row, end_row)
+        message = _format_read_file_message(file, line_range=line_range)
         result = FileReadResult(file=file, content=content)
         return ToolResult(message=message, value=result)
 
@@ -535,9 +710,9 @@ class _VfsToolSuite:
         )
         return ToolResult(message=message, value=normalized)
 
-    def delete_file(
-        self, params: DeleteFile, *, context: ToolContext
-    ) -> ToolResult[DeleteFile]:
+    def delete_path(
+        self, params: DeletePath, *, context: ToolContext
+    ) -> ToolResult[DeletePath]:
         self._section.validate_context_session(context)
         path = _normalize_path(params.path)
         snapshot = self._section.latest_snapshot()
@@ -551,8 +726,63 @@ class _VfsToolSuite:
             raise ToolValidationError("No files matched the provided path.")
         root = Path(snapshot.root_path)
         _delete_files_from_disk(root, matches)
-        normalized = DeleteFile(path=path)
+        normalized = DeletePath(path=path)
         message = _format_delete_message(path, matches)
+        return ToolResult(message=message, value=normalized)
+
+    def grep_file(
+        self, params: GrepFile, *, context: ToolContext
+    ) -> ToolResult[GrepFileResult]:
+        self._section.validate_context_session(context)
+        path = _normalize_required_path(params.path)
+        snapshot = self._section.latest_snapshot()
+        file = _find_file(snapshot.files, path)
+        if file is None:
+            raise ToolValidationError("File does not exist in the virtual filesystem.")
+        encoding = file.encoding
+        if encoding in {None, _BINARY_ENCODING}:
+            raise ToolValidationError(
+                "grep_file requires a text file with a declared encoding."
+            )
+        text_encoding = cast(str, encoding)
+        if params.before < 0 or params.after < 0:
+            raise ToolValidationError("Context line counts must be non-negative.")
+        root = Path(snapshot.root_path)
+        raw_bytes = _read_bytes_from_disk(root, file.path)
+        try:
+            text = raw_bytes.decode(text_encoding)
+        except UnicodeDecodeError as error:
+            raise ToolValidationError(
+                "Failed to decode file using the stored encoding."
+            ) from error
+        flags = 0 if params.case_sensitive else re.IGNORECASE
+        try:
+            pattern = re.compile(params.pattern, flags=flags)
+        except re.error as error:
+            raise ToolValidationError("Invalid regular expression pattern.") from error
+
+        lines = text.splitlines()
+        matches: list[GrepMatch] = []
+        before = params.before
+        after = params.after
+        for index, line in enumerate(lines):
+            if not pattern.search(line):
+                continue
+            start = max(0, index - before)
+            end = min(len(lines), index + after + 1)
+            match = GrepMatch(
+                line_number=index + 1,
+                line=line,
+                before=tuple(lines[start:index]),
+                after=tuple(lines[index + 1 : end]),
+            )
+            matches.append(match)
+        normalized = GrepFileResult(
+            file=file,
+            pattern=params.pattern,
+            matches=tuple(matches),
+        )
+        message = _format_grep_message(path, len(matches), params.pattern)
         return ToolResult(message=message, value=normalized)
 
 
@@ -660,23 +890,46 @@ def _is_path_prefix(path: Sequence[str], prefix: Sequence[str]) -> bool:
 
 
 def _format_directory_message(
-    path: VfsPath, directories: tuple[str, ...], files: tuple[str, ...]
+    path: VfsPath,
+    directories: tuple[str, ...],
+    files: tuple[str, ...],
+    *,
+    recursive: bool,
 ) -> str:
     prefix = _format_path(path)
     subdir_label = "subdir" if len(directories) == 1 else "subdirs"
     file_label = "file" if len(files) == 1 else "files"
+    mode_label = "recursively " if recursive else ""
     return (
-        f"Listed directory {prefix} "
+        f"Listed {mode_label}directory {prefix} "
         f"({len(directories)} {subdir_label}, {len(files)} {file_label})."
     )
 
 
-def _format_read_file_message(file: VfsFile) -> str:
+def _format_read_file_message(
+    file: VfsFile, *, line_range: tuple[int | None, int | None] | None = None
+) -> str:
     path_label = _format_path(file.path)
     encoding = file.encoding or _BINARY_ENCODING
-    return (
-        f"Read file {path_label} (size={file.size_bytes} bytes, encoding={encoding})."
+    message = (
+        f"Read file {path_label} (size={file.size_bytes} bytes, encoding={encoding}"
     )
+    if line_range and any(value is not None for value in line_range):
+        start, end = line_range
+        if start is not None and end is not None:
+            range_label = f"lines {start}-{end}"
+        elif start is not None:
+            range_label = f"from line {start}"
+        else:
+            range_label = f"through line {end}"
+        message = f"{message}; {range_label}"
+    return f"{message})."
+
+
+def _format_grep_message(path: VfsPath, match_count: int, pattern: str) -> str:
+    label = _format_path(path)
+    noun = "match" if match_count == 1 else "matches"
+    return f"Found {match_count} {noun} for pattern {pattern!r} in {label}."
 
 
 def _format_write_file_message(
@@ -975,7 +1228,7 @@ def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
         if not slice_values:
             raise RuntimeError("Virtual filesystem reducer invoked without state.")
         previous = slice_values[-1]
-        params = cast(DeleteFile, event.value)
+        params = cast(DeletePath, event.value)
         target = params.path.segments
         files = [
             file
@@ -1006,8 +1259,11 @@ def _truncate_to_milliseconds(value: datetime) -> datetime:
 
 
 __all__ = [
-    "DeleteFile",
+    "DeletePath",
     "FileReadResult",
+    "GrepFile",
+    "GrepFileResult",
+    "GrepMatch",
     "HostMount",
     "ListDirectory",
     "ListDirectoryResult",

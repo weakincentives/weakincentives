@@ -84,11 +84,22 @@ class VirtualFileSystem:
 @dataclass(slots=True, frozen=True)
 class ListDirectory:
     path: VfsPath | None = None  # None lists root
+    recursive: bool = False
+
+
+@dataclass(slots=True, frozen=True)
+class ListDirectoryResult:
+    path: VfsPath
+    directories: tuple[str, ...]
+    files: tuple[str, ...]
+    recursive: bool
 
 
 @dataclass(slots=True, frozen=True)
 class ReadFile:
     path: VfsPath
+    start_row: int | None = None
+    end_row: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -100,7 +111,7 @@ class WriteFile:
 
 
 @dataclass(slots=True, frozen=True)
-class DeleteFile:
+class DeletePath:
     path: VfsPath
 
 
@@ -108,6 +119,30 @@ class DeleteFile:
 class FileReadResult:
     file: VfsFile
     content: bytes
+
+
+@dataclass(slots=True, frozen=True)
+class GrepMatch:
+    line_number: int
+    line: str
+    before: tuple[str, ...]
+    after: tuple[str, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class GrepFile:
+    path: VfsPath
+    pattern: str
+    before: int = 0
+    after: int = 0
+    case_sensitive: bool = True
+
+
+@dataclass(slots=True, frozen=True)
+class GrepFileResult:
+    file: VfsFile
+    pattern: str
+    matches: tuple[GrepMatch, ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -144,10 +179,13 @@ Implementation detail notes:
   `mount_path` (or the host relative path when `mount_path` is `None`). Existing VFS entries at the target paths are
   overwritten, directory structures merge, and `max_bytes` caps the aggregate content pulled from disk. Mounting occurs
   once during `VfsToolsSection` initialisation.
-- `DeleteFile` removes files under the exact path. Directories are implicit; removing a directory path deletes all
+- `DeletePath` removes files under the exact path. Directories are implicit; removing a directory path deletes all
   files with that prefix.
-- Directory listings render shallow entries only (files or immediate directories below the target path). The handler
-  performs the projection so reducers only deal with structural updates.
+- Directory listings are shallow by default but setting `recursive=True` on `ListDirectory` returns the full subtree as
+  relative paths while preserving stable ordering.
+- `ReadFile` accepts optional `start_row` / `end_row` bounds to stream smaller windows of large files. Slicing requires
+  a declared text encoding.
+- `grep_file` surfaces regex matches with caller-configured context, relying on the stored encoding to decode bytes.
 
 ## Tool Contracts
 
@@ -156,10 +194,11 @@ Every tool validates its parameters and raises `ToolValidationError` on failure.
 
 | Tool | Summary | Parameters | Result | Behaviour highlights |
 | ---- | ------- | ---------- | ------ | -------------------- |
-| `list_directory` | Enumerate directory contents | `ListDirectory` | `dict` | Returns a JSON-serialisable summary with files and directories for the given path; raises if the path resolves to a file. |
-| `read_file` | Retrieve file contents | `ReadFile` | `FileReadResult` | Returns file metadata alongside raw bytes. Binary payloads are base64-encoded when serialised. Raises if the path is missing. |
+| `list_directory` | Enumerate directory contents | `ListDirectory` | `ListDirectoryResult` | Returns a JSON-serialisable summary of child entries. When `recursive=True`, every descendant path is included relative to the requested directory. Raises if the path resolves to a file. |
+| `read_file` | Retrieve file contents | `ReadFile` | `FileReadResult` | Returns file metadata alongside raw bytes. Optional `start_row` / `end_row` bounds stream a subset of text files. Binary payloads are base64-encoded when serialised. Raises if the path is missing. |
 | `write_file` | Create or modify a file | `WriteFile` | `WriteFile` | Accepts text or binary payloads, validates size after decoding, honours the encoding hint, and updates version/timestamps. |
-| `delete_file` | Remove file(s) | `DeleteFile` | `DeleteFile` | Deletes the matching file or directory subtree; no-op when nothing matches if `allow_missing` flag is passed (future extension). |
+| `delete_path` | Remove file(s) | `DeletePath` | `DeletePath` | Deletes the matching file or directory subtree; directories are removed recursively. |
+| `grep_file` | Search file contents | `GrepFile` | `GrepFileResult` | Evaluates a regex against a text file and returns matches with caller-specified leading and trailing context. |
 
 ## Prompt Template Guidance
 
@@ -169,12 +208,14 @@ Every tool validates its parameters and raises `ToolValidationError` on failure.
    via `write_file` when needed.
 1. Host mounts are configuration-time only; agents cannot import additional host directories during a session.
 1. Use `list_directory` to explore before reading or writing specific files; keep listings targeted to minimise
-   output volume.
+   output volume and enable `recursive=true` only when a full tree view is necessary.
 1. Fetch file contents with `read_file` when context is needed, and operate on the returned version to avoid stale
-   edits.
+   edits. Provide row bounds to stream large files when only a slice is required.
 1. Apply edits with `write_file`, keeping updates concise. Binary payloads are supported but should remain small and
    intentional; prefer overwriting complete files instead of issuing multiple appends unless streaming logs.
-1. Clean up obsolete files or directories via `delete_file` once work completes to keep the snapshot tight.
+1. Use `grep_file` to surface targeted context from large files instead of reading the full payload when a pattern
+   search suffices.
+1. Clean up obsolete files or directories via `delete_path` once work completes to keep the snapshot tight.
 1. Avoid mirroring large repositories or binary assets; orchestrated host mounts should stay focused, and the enforced
    size limit still applies.
 

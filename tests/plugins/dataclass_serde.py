@@ -143,7 +143,7 @@ def _make_virtual_file_system() -> vfs_tools.VirtualFileSystem:
 
 
 def _make_list_directory() -> vfs_tools.ListDirectory:
-    return vfs_tools.ListDirectory(path=_make_vfs_path())
+    return vfs_tools.ListDirectory(path=_make_vfs_path(), recursive=True)
 
 
 def _make_list_directory_result() -> vfs_tools.ListDirectoryResult:
@@ -151,11 +151,12 @@ def _make_list_directory_result() -> vfs_tools.ListDirectoryResult:
         path=_make_vfs_path(),
         directories=("docs",),
         files=("notes.txt",),
+        recursive=True,
     )
 
 
 def _make_read_file() -> vfs_tools.ReadFile:
-    return vfs_tools.ReadFile(path=_make_vfs_path())
+    return vfs_tools.ReadFile(path=_make_vfs_path(), start_row=1, end_row=10)
 
 
 def _make_write_file() -> vfs_tools.WriteFile:
@@ -167,14 +168,41 @@ def _make_write_file() -> vfs_tools.WriteFile:
     )
 
 
-def _make_delete_entry() -> vfs_tools.DeleteFile:
-    return vfs_tools.DeleteFile(path=_make_vfs_path())
+def _make_delete_path() -> vfs_tools.DeletePath:
+    return vfs_tools.DeletePath(path=_make_vfs_path())
 
 
 def _make_file_read_result() -> vfs_tools.FileReadResult:
     return vfs_tools.FileReadResult(
         file=_make_vfs_file(),
         content=b"Hello, world!",
+    )
+
+
+def _make_grep_match() -> vfs_tools.GrepMatch:
+    return vfs_tools.GrepMatch(
+        line_number=1,
+        line="match",
+        before=("context",),
+        after=("more",),
+    )
+
+
+def _make_grep_file() -> vfs_tools.GrepFile:
+    return vfs_tools.GrepFile(
+        path=_make_vfs_path(),
+        pattern="todo",
+        before=2,
+        after=1,
+        case_sensitive=False,
+    )
+
+
+def _make_grep_file_result() -> vfs_tools.GrepFileResult:
+    return vfs_tools.GrepFileResult(
+        file=_make_vfs_file(),
+        pattern="todo",
+        matches=(_make_grep_match(),),
     )
 
 
@@ -234,7 +262,10 @@ def _discover_vfs() -> dict[type[Any], SupportsFactory]:
         vfs_tools.ReadFile: _make_read_file,
         vfs_tools.FileReadResult: _make_file_read_result,
         vfs_tools.WriteFile: _make_write_file,
-        vfs_tools.DeleteFile: _make_delete_entry,
+        vfs_tools.DeletePath: _make_delete_path,
+        vfs_tools.GrepMatch: _make_grep_match,
+        vfs_tools.GrepFile: _make_grep_file,
+        vfs_tools.GrepFileResult: _make_grep_file_result,
     }
 
 

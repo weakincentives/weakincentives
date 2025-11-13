@@ -29,8 +29,11 @@ from weakincentives.prompt.tool import ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import ReducerEvent, Session, select_latest
 from weakincentives.tools import (
-    DeleteFile,
+    DeletePath,
     FileReadResult,
+    GrepFile,
+    GrepFileResult,
+    GrepMatch,
     HostMount,
     ListDirectory,
     ListDirectoryResult,
@@ -169,7 +172,7 @@ def test_delete_directory_removes_nested(monkeypatch: pytest.MonkeyPatch) -> Non
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "write_file")
-    delete_tool = find_tool(section, "delete_file")
+    delete_tool = find_tool(section, "delete_path")
 
     invoke_tool(
         bus,
@@ -184,7 +187,7 @@ def test_delete_directory_removes_nested(monkeypatch: pytest.MonkeyPatch) -> Non
         session=session,
     )
 
-    invoke_tool(bus, delete_tool, DeleteFile(path=VfsPath(("src",))), session=session)
+    invoke_tool(bus, delete_tool, DeletePath(path=VfsPath(("src",))), session=session)
 
     snapshot = select_latest(session, VirtualFileSystem)
     assert snapshot is not None
@@ -277,6 +280,53 @@ def test_list_directory_shows_children(monkeypatch: pytest.MonkeyPatch) -> None:
         path=VfsPath(("workspace",)),
         directories=("drafts",),
         files=("notes.md",),
+        recursive=False,
+    )
+
+
+def test_list_directory_recursive(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    list_tool = find_tool(section, "list_directory")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("workspace", "notes.md")), content=b"notes"),
+        session=session,
+    )
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("workspace", "drafts", "todo.md")), content=b"todo"),
+        session=session,
+    )
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(
+            path=VfsPath(("workspace", "archive", "2024", "jan.md")),
+            content=b"jan",
+        ),
+        session=session,
+    )
+
+    result = invoke_tool(
+        bus,
+        list_tool,
+        ListDirectory(path=VfsPath(("workspace",)), recursive=True),
+        session=session,
+    )
+    assert result.value == ListDirectoryResult(
+        path=VfsPath(("workspace",)),
+        directories=("archive", "archive/2024", "drafts"),
+        files=("archive/2024/jan.md", "drafts/todo.md", "notes.md"),
+        recursive=True,
     )
 
 
@@ -306,6 +356,241 @@ def test_read_file_returns_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     assert file.file.version == 1
     assert file.file.created_at == timestamp
     assert file.file.updated_at == timestamp
+
+
+def test_read_file_row_slice_returns_subset(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    content = b"one\ntwo\nthree\nfour\n"
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("table.txt",)), content=content),
+        session=session,
+    )
+
+    result = invoke_tool(
+        bus,
+        read_tool,
+        ReadFile(path=VfsPath(("table.txt",)), start_row=2, end_row=3),
+        session=session,
+    )
+    value = result.value
+    assert isinstance(value, FileReadResult)
+    assert value.content == b"two\nthree\n"
+
+
+def test_read_file_row_slice_rejects_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(
+            path=VfsPath(("image.bin",)),
+            content=b"\x00\x01\x02",
+            encoding="binary",
+        ),
+        session=session,
+    )
+
+    with pytest.raises(ToolValidationError, match="Row slicing requires"):
+        invoke_tool(
+            bus,
+            read_tool,
+            ReadFile(path=VfsPath(("image.bin",)), start_row=1, end_row=2),
+            session=session,
+        )
+
+
+def test_read_file_row_slice_rejects_start_before_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("table.txt",)), content=b"row\n"),
+        session=session,
+    )
+
+    with pytest.raises(ToolValidationError, match="start_row must be at least 1"):
+        invoke_tool(
+            bus,
+            read_tool,
+            ReadFile(path=VfsPath(("table.txt",)), start_row=0, end_row=1),
+            session=session,
+        )
+
+
+def test_read_file_row_slice_rejects_end_before_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("table.txt",)), content=b"row\n"),
+        session=session,
+    )
+
+    with pytest.raises(ToolValidationError, match="end_row must be at least 1"):
+        invoke_tool(
+            bus,
+            read_tool,
+            ReadFile(path=VfsPath(("table.txt",)), start_row=1, end_row=0),
+            session=session,
+        )
+
+
+def test_read_file_row_slice_rejects_end_before_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("table.txt",)), content=b"row1\nrow2\n"),
+        session=session,
+    )
+
+    with pytest.raises(ToolValidationError, match="greater than or equal to start_row"):
+        invoke_tool(
+            bus,
+            read_tool,
+            ReadFile(path=VfsPath(("table.txt",)), start_row=3, end_row=2),
+            session=session,
+        )
+
+
+def test_read_file_row_slice_rejects_missing_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("table.txt",)), content=b"row1\nrow2\n"),
+        session=session,
+    )
+
+    with pytest.raises(ToolValidationError, match="exceeds the number of rows"):
+        invoke_tool(
+            bus,
+            read_tool,
+            ReadFile(path=VfsPath(("table.txt",)), start_row=5, end_row=6),
+            session=session,
+        )
+
+
+def test_read_file_row_slice_handles_empty_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("empty.txt",)), content=b""),
+        session=session,
+    )
+
+    result = invoke_tool(
+        bus,
+        read_tool,
+        ReadFile(path=VfsPath(("empty.txt",)), start_row=1, end_row=1),
+        session=session,
+    )
+    value = result.value
+    assert isinstance(value, FileReadResult)
+    assert value.content == b""
+
+
+def test_read_file_row_slice_message_variants(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("rows.txt",)), content=b"one\ntwo\nthree\n"),
+        session=session,
+    )
+
+    start_only = invoke_tool(
+        bus,
+        read_tool,
+        ReadFile(path=VfsPath(("rows.txt",)), start_row=2),
+        session=session,
+    )
+    assert "from line 2" in start_only.message
+
+    end_only = invoke_tool(
+        bus,
+        read_tool,
+        ReadFile(path=VfsPath(("rows.txt",)), end_row=2),
+        session=session,
+    )
+    assert "through line 2" in end_only.message
 
 
 def test_read_file_missing_disk_entry_errors(
@@ -364,6 +649,214 @@ def test_read_file_disk_error_propagates(monkeypatch: pytest.MonkeyPatch) -> Non
     with pytest.raises(ToolValidationError, match="Failed to read VFS file"):
         invoke_tool(
             bus, read_tool, ReadFile(path=VfsPath(("README.md",))), session=session
+        )
+
+
+def test_read_file_row_slice_decode_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    read_tool = find_tool(section, "read_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("data.txt",)), content=b"line\n"),
+        session=session,
+    )
+    snapshot = section.latest_snapshot()
+    Path(snapshot.root_path, "data.txt").write_bytes(b"\xff\xff")
+
+    with pytest.raises(ToolValidationError, match="Failed to decode"):
+        invoke_tool(
+            bus,
+            read_tool,
+            ReadFile(path=VfsPath(("data.txt",)), start_row=1, end_row=1),
+            session=session,
+        )
+
+
+def test_grep_file_returns_matches_with_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    grep_tool = find_tool(section, "grep_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(
+            path=VfsPath(("poem.txt",)),
+            content=b"roses\nare red\nROSES\nare blue\n",
+        ),
+        session=session,
+    )
+
+    result = invoke_tool(
+        bus,
+        grep_tool,
+        GrepFile(
+            path=VfsPath(("poem.txt",)),
+            pattern="roses",
+            before=1,
+            after=1,
+            case_sensitive=False,
+        ),
+        session=session,
+    )
+    value = result.value
+    assert isinstance(value, GrepFileResult)
+    assert value.pattern == "roses"
+    assert [match.line_number for match in value.matches] == [1, 3]
+    first, second = value.matches
+    assert isinstance(first, GrepMatch)
+    assert first.line == "roses"
+    assert first.before == ()
+    assert first.after == ("are red",)
+    assert second.before == ("are red",)
+    assert second.after == ("are blue",)
+
+
+def test_grep_file_invalid_pattern_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    grep_tool = find_tool(section, "grep_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("poem.txt",)), content=b"roses"),
+        session=session,
+    )
+
+    with pytest.raises(ToolValidationError, match="Invalid regular expression"):
+        invoke_tool(
+            bus,
+            grep_tool,
+            GrepFile(
+                path=VfsPath(("poem.txt",)),
+                pattern="(",
+            ),
+            session=session,
+        )
+
+
+def test_grep_file_requires_text_encoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    grep_tool = find_tool(section, "grep_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(
+            path=VfsPath(("image.bin",)),
+            content=b"\x00\x01",
+            encoding="binary",
+        ),
+        session=session,
+    )
+
+    with pytest.raises(ToolValidationError, match="requires a text file"):
+        invoke_tool(
+            bus,
+            grep_tool,
+            GrepFile(path=VfsPath(("image.bin",)), pattern="00"),
+            session=session,
+        )
+
+
+def test_grep_file_missing_path_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    grep_tool = find_tool(section, "grep_file")
+
+    with pytest.raises(ToolValidationError, match="does not exist"):
+        invoke_tool(
+            bus,
+            grep_tool,
+            GrepFile(path=VfsPath(("missing.txt",)), pattern="todo"),
+            session=session,
+        )
+
+
+def test_grep_file_negative_context_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    grep_tool = find_tool(section, "grep_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("notes.txt",)), content=b"todo"),
+        session=session,
+    )
+
+    with pytest.raises(ToolValidationError, match="Context line counts"):
+        invoke_tool(
+            bus,
+            grep_tool,
+            GrepFile(path=VfsPath(("notes.txt",)), pattern="todo", before=-1),
+            session=session,
+        )
+
+
+def test_grep_file_decode_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    write_tool = find_tool(section, "write_file")
+    grep_tool = find_tool(section, "grep_file")
+
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFile(path=VfsPath(("corrupt.txt",)), content=b"valid"),
+        session=session,
+    )
+    snapshot = section.latest_snapshot()
+    Path(snapshot.root_path, "corrupt.txt").write_bytes(b"\xff\xff")
+
+    with pytest.raises(ToolValidationError, match="Failed to decode"):
+        invoke_tool(
+            bus,
+            grep_tool,
+            GrepFile(path=VfsPath(("corrupt.txt",)), pattern="v"),
+            session=session,
         )
 
 
@@ -472,14 +965,16 @@ def test_delete_requires_existing_path(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
-    delete_tool = find_tool(section, "delete_file")
+    delete_tool = find_tool(section, "delete_path")
     with pytest.raises(ToolValidationError):
         invoke_tool(
-            bus, delete_tool, DeleteFile(path=VfsPath(("missing",))), session=session
+            bus, delete_tool, DeletePath(path=VfsPath(("missing",))), session=session
         )
 
 
-def test_delete_rejects_subpath_without_match(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_delete_path_rejects_subpath_without_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
 
@@ -487,7 +982,7 @@ def test_delete_rejects_subpath_without_match(monkeypatch: pytest.MonkeyPatch) -
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "write_file")
-    delete_tool = find_tool(section, "delete_file")
+    delete_tool = find_tool(section, "delete_path")
 
     invoke_tool(
         bus,
@@ -500,7 +995,7 @@ def test_delete_rejects_subpath_without_match(monkeypatch: pytest.MonkeyPatch) -
         invoke_tool(
             bus,
             delete_tool,
-            DeleteFile(path=VfsPath(("logs", "events.log", "old"))),
+            DeletePath(path=VfsPath(("logs", "events.log", "old"))),
             session=session,
         )
 
@@ -1179,7 +1674,8 @@ def test_prompt_section_exposes_all_tools() -> None:
         "list_directory",
         "read_file",
         "write_file",
-        "delete_file",
+        "delete_path",
+        "grep_file",
     }
     assert all(tool.accepts_overrides is False for tool in section.tools())
     template = section.template
@@ -1350,7 +1846,7 @@ def test_write_file_disk_failure_propagates(
         )
 
 
-def test_delete_file_disk_failure_propagates(
+def test_delete_path_disk_failure_propagates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
@@ -1360,7 +1856,7 @@ def test_delete_file_disk_failure_propagates(
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     write_tool = find_tool(section, "write_file")
-    delete_tool = find_tool(section, "delete_file")
+    delete_tool = find_tool(section, "delete_path")
 
     invoke_tool(
         bus,
@@ -1384,7 +1880,7 @@ def test_delete_file_disk_failure_propagates(
         invoke_tool(
             bus,
             delete_tool,
-            DeleteFile(path=VfsPath(("scratch.txt",))),
+            DeletePath(path=VfsPath(("scratch.txt",))),
             session=session,
         )
 
@@ -1482,7 +1978,7 @@ def test_delete_reducer_requires_state() -> None:
     reducer = vfs_module._make_delete_reducer()
     event = cast(
         ReducerEvent,
-        SimpleNamespace(value=DeleteFile(path=VfsPath(("a",)))),
+        SimpleNamespace(value=DeletePath(path=VfsPath(("a",)))),
     )
     context = cast(
         ToolContext,
