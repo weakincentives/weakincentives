@@ -19,6 +19,7 @@ from dataclasses import dataclass, fields, is_dataclass, replace
 from types import MappingProxyType
 from typing import Any, cast
 
+from ..dbc import invariant
 from ._types import SupportsDataclass
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .section import Section
@@ -104,6 +105,97 @@ class RegistrySnapshot:
         return set(self.params_registry.keys())
 
 
+def _registry_paths_are_registered(
+    registry: PromptRegistry,
+) -> tuple[bool, str] | bool:
+    """Ensure internal registries only reference known section nodes."""
+
+    section_nodes = registry._section_nodes  # pyright: ignore[reportPrivateUsage]
+    node_by_path = {node.path: node for node in section_nodes}
+    defaults_by_path = registry._defaults_by_path  # pyright: ignore[reportPrivateUsage]
+    placeholders = registry._placeholders  # pyright: ignore[reportPrivateUsage]
+    tool_name_registry = registry._tool_name_registry  # pyright: ignore[reportPrivateUsage]
+    defaults_by_type = registry._defaults_by_type  # pyright: ignore[reportPrivateUsage]
+
+    unknown_default_paths = [
+        path for path in defaults_by_path if path not in node_by_path
+    ]
+    if unknown_default_paths:
+        return (
+            False,
+            f"defaults reference unknown paths: {sorted(unknown_default_paths)!r}",
+        )
+
+    for path, default in defaults_by_path.items():
+        node = node_by_path[path]
+        params_type = node.section.param_type
+        if params_type is None:
+            return False, f"section at {path!r} does not accept params but has defaults"
+        if type(default) is not params_type:
+            return False, (
+                "default params type mismatch for path "
+                f"{path!r}: expected {params_type.__name__}, got {type(default).__name__}"
+            )
+
+    unknown_placeholder_paths = [
+        path for path in placeholders if path not in node_by_path
+    ]
+    if unknown_placeholder_paths:
+        return False, (
+            "placeholders reference unknown paths: "
+            f"{sorted(unknown_placeholder_paths)!r}"
+        )
+
+    unknown_tool_paths = [
+        path for path in tool_name_registry.values() if path not in node_by_path
+    ]
+    if unknown_tool_paths:
+        return False, f"tools reference unknown paths: {sorted(unknown_tool_paths)!r}"
+
+    for params_type, default in defaults_by_type.items():
+        if type(default) is not params_type:
+            return False, (
+                "default by type mismatch for "
+                f"{params_type.__name__}: got {type(default).__name__}"
+            )
+
+    return True
+
+
+def _params_registry_is_consistent(
+    registry: PromptRegistry,
+) -> tuple[bool, str] | bool:
+    """Ensure params registry entries point at known nodes with matching types."""
+
+    section_nodes = list(registry._section_nodes)  # pyright: ignore[reportPrivateUsage]
+    params_registry = registry._params_registry  # pyright: ignore[reportPrivateUsage]
+    for params_type, nodes in params_registry.items():
+        for node in nodes:
+            if node not in section_nodes:
+                return False, (
+                    "params registry references unknown node at path "
+                    f"{node.path!r} for {params_type.__name__}"
+                )
+            node_params_type = node.section.param_type
+            if node_params_type is None:
+                return False, (
+                    "params registry references section without params at path "
+                    f"{node.path!r}"
+                )
+            if node_params_type is not params_type:
+                return False, (
+                    "params registry type mismatch for path "
+                    f"{node.path!r}: expected {params_type.__name__}, "
+                    f"found {node_params_type.__name__}"
+                )
+
+    return True
+
+
+@invariant(
+    _registry_paths_are_registered,
+    _params_registry_is_consistent,
+)
 class PromptRegistry:
     """Collect and validate prompt sections prior to rendering."""
 
