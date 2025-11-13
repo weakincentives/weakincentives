@@ -4,8 +4,42 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- Removed the wink MCP server scaffolding and optional dependency. The `wink`
-  CLI now ships as a lightweight placeholder for future development.
+- No changes yet.
+
+## v0.7.0 - 2025-11-13
+
+### Sessions & Contracts
+
+- Introduced `Session.reset()` to clear accumulated slices without removing
+  reducer registrations, making long-lived interactive flows easier to manage.
+- Added a design-by-contract module that exposes `require`, `ensure`,
+  `invariant`, and `pure` decorators along with runtime toggles and a pytest
+  plugin so projects can opt into contract enforcement when debugging.
+- Wrapped the session container with invariants that validate UUID metadata and
+  timezone-aware timestamps, wiring the DbC utilities into the public export
+  surface to keep runtime guarantees consistent across adapters.
+
+### Prompt Authoring & Subagents
+
+- Parameterless prompts, sections, and chapters now accept zero-argument
+  `enabled` callables, keeping declarative gating logic concise.
+- The subagent dispatch tool gained explicit isolation levels that can clone
+  sessions and event buses per delegation when sandboxing is required.
+- Centralized structured output payload parsing into shared helpers used by the
+  prompt runtime and adapters to keep response handling consistent.
+
+### Events & Telemetry
+
+- Replaced the `PromptStarted` lifecycle event with `PromptRendered`, removed
+  wrapper dataclasses, and now emit the rendered prompt plus adapter metadata
+  directly to reducers and subscribers.
+- Assigned stable UUID identifiers to prompt and tool events while enforcing
+  timezone-aware session creation for richer telemetry.
+
+### Tooling & Quality
+
+- Added the `pytest-randomly` plugin to shake out order-dependent test
+  assumptions during development.
 
 ## v0.6.0 - 2025-11-05
 
