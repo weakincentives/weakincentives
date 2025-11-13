@@ -17,12 +17,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TypeVar, cast
 
+from ...dbc import pure
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 
 T = TypeVar("T")
 K = TypeVar("K")
 
 
+@pure
 def append[T](
     slice_values: tuple[T, ...],
     event: ReducerEvent,
@@ -63,9 +65,10 @@ def upsert_by[T, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
             updated.append(value)
         return tuple(updated)
 
-    return reducer
+    return pure(reducer)
 
 
+@pure
 def replace_latest[T](
     slice_values: tuple[T, ...],
     event: ReducerEvent,

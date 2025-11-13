@@ -21,6 +21,7 @@ from threading import RLock
 from typing import Any, cast, override
 from uuid import UUID, uuid4
 
+from ...dbc import invariant
 from ...prompt._types import SupportsDataclass
 from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
 from ..logging import StructuredLogger, get_logger
@@ -67,6 +68,23 @@ class _ReducerRegistration:
     slice_type: type[Any]
 
 
+def _session_id_is_well_formed(session: "Session") -> bool:  # noqa: UP037
+    return len(session.session_id.bytes) == 16
+
+
+def _created_at_has_tz(session: "Session") -> bool:  # noqa: UP037
+    return session.created_at.tzinfo is not None
+
+
+def _created_at_is_utc(session: "Session") -> bool:  # noqa: UP037
+    return session.created_at.tzinfo == UTC
+
+
+@invariant(
+    _session_id_is_well_formed,
+    _created_at_has_tz,
+    _created_at_is_utc,
+)
 class Session(SessionProtocol):
     """Collect dataclass payloads from prompt executions and tool invocations."""
 
