@@ -83,6 +83,61 @@ def test_section_template_mentions_new_surface() -> None:
     assert "rm" in template
 
 
+def test_section_template_includes_host_mount_preview(tmp_path: Path) -> None:
+    allowed_root = tmp_path / "workspace"
+    mount_root = allowed_root / "project"
+    data_dir = mount_root / "docs"
+    data_dir.mkdir(parents=True)
+    (mount_root / "README.md").write_text("hello", encoding="utf-8")
+    (data_dir / "guide.md").write_text("guide", encoding="utf-8")
+
+    section = VfsToolsSection(
+        mounts=(HostMount(host_path="project", mount_path=VfsPath(("mnt",))),),
+        allowed_host_roots=(allowed_root,),
+    )
+
+    template = section.template
+    resolved_path = mount_root.resolve()
+    assert "Configured host mounts:" in template
+    assert f"`{resolved_path}`" in template
+    assert "`README.md`" in template
+    assert "`docs/`" in template
+    assert "`mnt`" in template
+
+
+def test_section_template_marks_empty_directory_mount(tmp_path: Path) -> None:
+    allowed_root = tmp_path / "workspace"
+    empty_dir = allowed_root / "empty"
+    empty_dir.mkdir(parents=True)
+
+    section = VfsToolsSection(
+        mounts=(HostMount(host_path="empty"),),
+        allowed_host_roots=(allowed_root,),
+    )
+
+    template = section.template
+    assert "  Contents: <empty>" in template
+
+
+def test_section_template_truncates_mount_preview(tmp_path: Path) -> None:
+    allowed_root = tmp_path / "workspace"
+    big_dir = allowed_root / "big"
+    big_dir.mkdir(parents=True)
+    limit = vfs_module._MAX_MOUNT_PREVIEW_ENTRIES
+    for index in range(limit + 3):
+        (big_dir / f"file{index:02d}.txt").write_text("sample", encoding="utf-8")
+
+    section = VfsToolsSection(
+        mounts=(HostMount(host_path="big"),),
+        allowed_host_roots=(allowed_root,),
+    )
+
+    template = section.template
+    assert "`file00.txt`" in template
+    assert "`file19.txt`" in template
+    assert "… (+3 more)" in template
+
+
 def test_write_file_creates_snapshot(
     session_and_bus: tuple[Session, InProcessEventBus],
     monkeypatch: pytest.MonkeyPatch,

@@ -46,6 +46,7 @@ _MAX_WRITE_LENGTH: Final[int] = 48_000
 _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_SEGMENT_LENGTH: Final[int] = 80
 _MAX_READ_LIMIT: Final[int] = 2_000
+_MAX_MOUNT_PREVIEW_ENTRIES: Final[int] = 20
 _VFS_SECTION_TEMPLATE: Final[str] = (
     "The virtual filesystem starts empty unless host mounts are configured."
     " Use it to stage edits before applying them to the host workspace.\n"
@@ -169,46 +170,135 @@ class GrepMatch:
 
 @dataclass(slots=True, frozen=True)
 class ListDirectoryParams:
-    path: str | None = None
+    path: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Directory path to list. Provide a relative VFS path or omit to list the root."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class ReadFileParams:
-    file_path: str
-    offset: int = 0
-    limit: int = _MAX_READ_LIMIT
+    file_path: str = field(
+        metadata={
+            "description": "Relative VFS path of the file to read (leading slashes are optional)."
+        }
+    )
+    offset: int = field(
+        default=0,
+        metadata={
+            "description": (
+                "Zero-based line offset where reading should begin. Must be non-negative."
+            )
+        },
+    )
+    limit: int = field(
+        default=_MAX_READ_LIMIT,
+        metadata={
+            "description": (
+                "Maximum number of lines to return. Values are capped at 2,000 lines per request."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class WriteFileParams:
-    file_path: str
-    content: str
+    file_path: str = field(
+        metadata={
+            "description": "Destination VFS path for the new file. Must not already exist."
+        }
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "UTF-8 text that will be written to the file. Content is limited to 48,000 characters."
+            )
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class EditFileParams:
-    file_path: str
-    old_string: str
-    new_string: str
-    replace_all: bool = False
+    file_path: str = field(
+        metadata={
+            "description": "Path to the file that should be edited inside the VFS."
+        }
+    )
+    old_string: str = field(
+        metadata={
+            "description": (
+                "Exact text to search for within the file. At least one occurrence must be present."
+            )
+        }
+    )
+    new_string: str = field(
+        metadata={
+            "description": "Replacement text that will substitute the matched content."
+        }
+    )
+    replace_all: bool = field(
+        default=False,
+        metadata={
+            "description": (
+                "When true, replace every occurrence of `old_string`. Otherwise require a single match."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class GlobParams:
-    pattern: str
-    path: str = "/"
+    pattern: str = field(
+        metadata={
+            "description": ("Shell-style pattern used to match files (e.g. `**/*.py`).")
+        }
+    )
+    path: str = field(
+        default="/",
+        metadata={
+            "description": (
+                "Directory to treat as the search root. Defaults to the VFS root (`/`)."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class GrepParams:
-    pattern: str
-    path: str | None = None
-    glob: str | None = None
+    pattern: str = field(
+        metadata={
+            "description": "Regular expression pattern to search for in matching files."
+        }
+    )
+    path: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional directory path that scopes the search. Defaults to the entire VFS snapshot."
+            )
+        },
+    )
+    glob: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional glob pattern that filters files before applying the regex search."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class RemoveParams:
-    path: str
+    path: str = field(
+        metadata={
+            "description": "Relative VFS path targeting the file or directory that should be removed."
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -243,12 +333,62 @@ class DeleteEntry:
 
 @dataclass(slots=True, frozen=True)
 class HostMount:
+    host_path: str = field(
+        metadata={
+            "description": (
+                "Relative path (within an allowed host root) that should be mirrored into the VFS snapshot."
+            )
+        }
+    )
+    mount_path: VfsPath | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional target path inside the VFS. Defaults to the host-relative path when omitted."
+            )
+        },
+    )
+    include_glob: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": (
+                "Whitelist of glob patterns applied to host files before mounting. Empty means include all files."
+            )
+        },
+    )
+    exclude_glob: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": (
+                "Blacklist of glob patterns that remove host files from the mount after inclusion filtering."
+            )
+        },
+    )
+    max_bytes: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional limit on the total number of bytes that may be imported from the host directory."
+            )
+        },
+    )
+    follow_symlinks: bool = field(
+        default=False,
+        metadata={
+            "description": (
+                "Whether to follow symbolic links when traversing the host directory tree during the mount."
+            )
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class _HostMountPreview:
     host_path: str
-    mount_path: VfsPath | None = None
-    include_glob: tuple[str, ...] = field(default_factory=tuple)
-    exclude_glob: tuple[str, ...] = field(default_factory=tuple)
-    max_bytes: int | None = None
-    follow_symlinks: bool = False
+    resolved_host: Path
+    mount_path: VfsPath
+    entries: tuple[str, ...]
+    is_directory: bool
 
 
 @dataclass(slots=True, frozen=True)
@@ -267,14 +407,16 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         accepts_overrides: bool = False,
     ) -> None:
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
-        self._mount_snapshot = _materialize_mounts(mounts, allowed_roots)
+        self._mount_snapshot, mount_previews = _materialize_mounts(
+            mounts, allowed_roots
+        )
         self._configured_sessions: WeakSet[Session] = WeakSet()
 
         tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
-            template=_VFS_SECTION_TEMPLATE,
+            template=_render_section_template(mount_previews),
             default_params=_VfsSectionParams(),
             tools=tools,
             accepts_overrides=accepts_overrides,
@@ -778,20 +920,54 @@ def _normalize_root(path: os.PathLike[str] | str) -> Path:
 
 def _materialize_mounts(
     mounts: Sequence[HostMount], allowed_roots: Sequence[Path]
-) -> VirtualFileSystem:
+) -> tuple[VirtualFileSystem, tuple[_HostMountPreview, ...]]:
     if not mounts:
-        return VirtualFileSystem()
+        return VirtualFileSystem(), ()
 
     aggregated: dict[tuple[str, ...], VfsFile] = {}
+    previews: list[_HostMountPreview] = []
     for mount in mounts:
-        loaded = _load_mount(mount, allowed_roots)
+        loaded, preview = _load_mount(mount, allowed_roots)
+        previews.append(preview)
         for file in loaded:
             aggregated[file.path.segments] = file
     files = tuple(sorted(aggregated.values(), key=lambda file: file.path.segments))
-    return VirtualFileSystem(files=files)
+    return VirtualFileSystem(files=files), tuple(previews)
 
 
-def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFile, ...]:
+def _render_section_template(previews: Sequence[_HostMountPreview]) -> str:
+    if not previews:
+        return _VFS_SECTION_TEMPLATE
+
+    lines: list[str] = [_VFS_SECTION_TEMPLATE, "", "Configured host mounts:"]
+    for preview in previews:
+        mount_label = _format_path(preview.mount_path)
+        resolved_label = str(preview.resolved_host)
+        lines.append(
+            f"- Host `{resolved_label}` (configured as `{preview.host_path}`) mounted at `{mount_label}`."
+        )
+        if preview.is_directory:
+            contents = _format_mount_entries(preview.entries)
+            lines.append(f"  Contents: {contents}")
+        else:
+            lines.append(f"  File: `{preview.entries[0]}`")
+    return "\n".join(lines)
+
+
+def _format_mount_entries(entries: Sequence[str]) -> str:
+    if not entries:
+        return "<empty>"
+    preview = entries[:_MAX_MOUNT_PREVIEW_ENTRIES]
+    formatted = " ".join(f"`{entry}`" for entry in preview)
+    remaining = len(entries) - len(preview)
+    if remaining > 0:
+        formatted += f" … (+{remaining} more)"
+    return formatted
+
+
+def _load_mount(
+    mount: HostMount, allowed_roots: Sequence[Path]
+) -> tuple[tuple[VfsFile, ...], _HostMountPreview]:
     host_path = mount.host_path.strip()
     if not host_path:
         raise ToolValidationError("Host mount path must not be empty.")
@@ -800,6 +976,14 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
     include_patterns = _normalize_globs(mount.include_glob, "include_glob")
     exclude_patterns = _normalize_globs(mount.exclude_glob, "exclude_glob")
     mount_prefix = _normalize_optional_path(mount.mount_path)
+    preview_entries = _list_mount_entries(resolved_host)
+    preview = _HostMountPreview(
+        host_path=host_path,
+        resolved_host=resolved_host,
+        mount_path=mount_prefix,
+        entries=preview_entries,
+        is_directory=resolved_host.is_dir(),
+    )
 
     files: list[VfsFile] = []
     consumed_bytes = 0
@@ -843,7 +1027,21 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
             updated_at=timestamp,
         )
         files.append(file)
-    return tuple(files)
+    return tuple(files), preview
+
+
+def _list_mount_entries(root: Path) -> tuple[str, ...]:
+    if root.is_file():
+        return (root.name,)
+    try:
+        children = sorted(root.iterdir(), key=lambda path: path.name.lower())
+    except OSError as error:  # pragma: no cover - defensive guard
+        raise ToolValidationError(f"Failed to inspect host mount {root}.") from error
+    labels: list[str] = []
+    for child in children:
+        suffix = "/" if child.is_dir() else ""
+        labels.append(f"{child.name}{suffix}")
+    return tuple(labels)
 
 
 def _resolve_mount_path(host_path: str, allowed_roots: Sequence[Path]) -> Path:
