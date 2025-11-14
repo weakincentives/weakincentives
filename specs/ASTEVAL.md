@@ -62,9 +62,6 @@ from typing import Literal
 from weakincentives.prompt import Tool, ToolResult
 from weakincentives.tools.vfs import VfsPath
 
-ExpressionMode = Literal["expr", "statements"]
-
-
 @dataclass(slots=True, frozen=True)
 class EvalFileRead:
     path: VfsPath
@@ -80,7 +77,6 @@ class EvalFileWrite:
 @dataclass(slots=True, frozen=True)
 class EvalParams:
     code: str
-    mode: ExpressionMode = "expr"
     globals: dict[str, str] = field(default_factory=dict)
     reads: tuple[EvalFileRead, ...] = field(default_factory=tuple)
     writes: tuple[EvalFileWrite, ...] = field(default_factory=tuple)
@@ -108,11 +104,10 @@ directly; no asynchronous facade is provided.
 
 ### Parameter Semantics
 
-- `code` – Python source limited to ≤ 2_000 characters. Validation rejects
-  control characters outside tab/newline.
-- `mode` – `"expr"` returns the expression result and disallows assignments;
-  `"statements"` allows multi-line statements and returns the last expression
-  value if present.
+- `code` – Python source limited to ≤ 2_000 characters. The interpreter executes
+  the payload as a multi-line script and returns the repr of the final
+  expression when present. Validation rejects control characters outside
+  tab/newline.
 - `globals` – Optional dictionary of variable names to JSON strings. Each value
   is decoded with `json.loads` before evaluation so the interpreter receives the
   underlying primitive (e.g. `int`, `float`, `bool`, `None`, `str`) or nested
@@ -169,8 +164,8 @@ directly; no asynchronous facade is provided.
    into the interpreter symtable.
 1. Capture stdout/stderr using `contextlib.redirect_stdout` /
    `redirect_stderr` into `io.StringIO` buffers.
-1. If `mode == "expr"`, call `interpreter.eval(code)`. For statements, use
-   `interpreter(text=code, parse=True)` and return the last expression result if
+1. Execute the payload with `interpreter.eval(code)` so the interpreter parses
+   it as a multi-line script and returns the last expression result when
    present.
 1. On any `asteval` error or Python exception, return a failed `ToolResult` with
    `stderr` populated and `value_repr=None`. The tool should not raise unless a
@@ -216,21 +211,18 @@ The tool operates against the session's `VirtualFileSystem` snapshot:
 - Sections should describe the helper functions (`read_text`, `write_text`) and
   remind models to keep code short to avoid timeouts.
 - Include concrete examples in the section copy so agents know how to invoke the
-  registered tools for both execution modes. Explicitly call out the
-  `"expr"`/`"statements"` toggle in the examples so downstream prompts can copy
-  and adapt them without guesswork.
+  registered tool and what the JSON payload looks like.
 
 ### Example Tool Calls
 
-The section documentation should embed examples for each execution mode so
-consumers can see the full payload shape the dispatcher expects:
+The section documentation should embed an example payload so consumers can see
+the full shape the dispatcher expects:
 
 ```json
 {
   "name": "evaluate_python",
   "arguments": {
-    "code": "2 * (3 + 4)",
-    "mode": "expr",
+    "code": "total = 0\nfor value in range(5):\n    total += value\nprint(total)\ntotal",
     "globals": {},
     "reads": [],
     "writes": []
@@ -238,27 +230,14 @@ consumers can see the full payload shape the dispatcher expects:
 }
 ```
 
-```json
-{
-  "name": "evaluate_python",
-  "arguments": {
-    "code": "total = 0\nfor value in range(5):\n    total += value\nprint(total)",
-    "mode": "statements",
-    "globals": {},
-    "reads": [],
-    "writes": []
-  }
-}
-```
-
-Accompany the statement-mode example with copy explaining that the final
-expression result (when present) is surfaced through `value_repr` while stdout is
-captured verbatim, highlighting the behavioural difference from expression mode.
+Accompany the example with copy explaining that stdout/stderr are captured and
+that the final expression result, when present, is surfaced through
+`value_repr`.
 
 ## Telemetry & Logging
 
 - Emit debug logs (structured dictionaries) for each evaluation run containing:
-  `{"event": "asteval.run", "mode": mode, "stdout_len": len(stdout), "stderr_len": len(stderr), "write_count": len(writes)}`.
+  `{"event": "asteval.run", "stdout_len": len(stdout), "stderr_len": len(stderr), "write_count": len(writes)}`.
 - Log truncated `code` (first 200 characters) for observability while avoiding
   leaking full scripts.
 
@@ -266,8 +245,8 @@ captured verbatim, highlighting the behavioural difference from expression mode.
 
 - Unit tests cover validation failures (bad paths, oversized code, invalid JSON
   globals, overlapping writes).
-- Functional tests run both expression and statement modes, verifying stdout,
-  stderr, globals persistence, and VFS read/write behaviour.
+- Functional tests exercise single-line expressions and multi-line scripts,
+  verifying stdout, stderr, globals persistence, and VFS read/write behaviour.
 - Include a regression test demonstrating timeout handling by evaluating an
   infinite loop and confirming the tool returns a timeout error without side
   effects.

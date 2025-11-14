@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import ast
 import builtins
 import contextlib
 import io
@@ -42,8 +41,6 @@ from ..runtime.session import (
 )
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
-
-ExpressionMode = Literal["expr", "statements"]
 
 _LOGGER: StructuredLogger = get_logger(__name__, context={"component": "tools.asteval"})
 
@@ -87,31 +84,28 @@ _SAFE_GLOBALS: Final[Mapping[str, object]] = MappingProxyType(
 
 _EVAL_TEMPLATE: Final[str] = (
     "Use the Python evaluation tool for quick calculations and one-off scripts.\n"
-    "- Keep code concise (<=2,000 characters) and prefer expression mode unless you need statements.\n"
-    "- Pre-load files via `reads`, or call `read_text(path)` inside code to fetch VFS files.\n"
-    "- Stage edits with `write_text(path, content, mode)` or declare them in `writes`. Content must be ASCII.\n"
-    "- Globals accept JSON-encoded strings and are parsed before execution.\n"
-    "- Execution stops after five seconds; design code to finish quickly.\n\n"
-    "Expression mode returns the repr of the final expression and skips stdout unless you print explicitly:\n"
+    "- Scripts run in a sandbox with a narrow set of safe builtins (abs, len, max, min,\n"
+    "  print, range, round, sum, str) plus math/statistics helpers. Import statements\n"
+    "  and other blocked nodes are stripped, so networking and host filesystem access\n"
+    "  are unavailable.\n"
+    "- Keep code concise (<=2,000 characters) and avoid control characters other than\n"
+    "  newlines or tabs.\n"
+    "- Pre-load files via `reads`, or call `read_text(path)` inside code to fetch VFS\n"
+    "  files. Paths must be relative, use <=16 segments of <=80 ASCII characters, and\n"
+    "  may not target a read and write in the same call.\n"
+    "- Stage edits with `write_text(path, content, mode)` or declare them in `writes`.\n"
+    "  Content must be ASCII, <=48k characters, and choose from modes create,\n"
+    "  overwrite, or append.\n"
+    "- Globals accept JSON-encoded strings keyed by valid identifiers. Payloads are\n"
+    "  parsed before execution; invalid JSON or names raise a validation error.\n"
+    "- Execution stops after five seconds. Stdout/stderr are captured and truncated to\n"
+    "  4,096 characters, and the repr of the final expression is returned when present.\n\n"
+    "The tool executes multi-line scripts, captures stdout, and returns the repr of the final expression when present:\n"
     "```json\n"
     "{\n"
     '  "name": "evaluate_python",\n'
     '  "arguments": {\n'
-    '    "code": "2 * (3 + 4)",\n'
-    '    "mode": "expr",\n'
-    '    "globals": {},\n'
-    '    "reads": [],\n'
-    '    "writes": []\n'
-    "  }\n"
-    "}\n"
-    "```\n\n"
-    "Statements mode runs multi-line scripts, captures stdout, and only returns a value if the last line is an expression:\n"
-    "```json\n"
-    "{\n"
-    '  "name": "evaluate_python",\n'
-    '  "arguments": {\n'
-    '    "code": "total = 0\\nfor value in range(5):\\n    total += value\\nprint(total)",\n'
-    '    "mode": "statements",\n'
+    '    "code": "total = 0\\nfor value in range(5):\\n    total += value\\nprint(total)\\ntotal",\n'
     '    "globals": {},\n'
     '    "reads": [],\n'
     '    "writes": []\n'
@@ -177,20 +171,7 @@ class EvalParams:
     """Parameter payload passed to the Python evaluation tool."""
 
     code: str = field(
-        metadata={
-            "description": (
-                "Python expression or script to execute (<=2,000 characters)."
-            )
-        }
-    )
-    mode: ExpressionMode = field(
-        default="expr",
-        metadata={
-            "description": (
-                "Execution mode: 'expr' evaluates a single expression and "
-                "returns its repr, while 'statements' runs a script."
-            )
-        },
+        metadata={"description": "Python script to execute (<=2,000 characters)."}
     )
     globals: dict[str, str] = field(
         default_factory=_str_dict_factory,
@@ -229,7 +210,7 @@ class EvalResult:
         metadata={
             "description": (
                 "String representation of the final expression result. Null when "
-                "statements mode does not produce a value."
+                "no value was produced."
             )
         }
     )
@@ -565,9 +546,6 @@ class _AstevalToolSuite:
     ) -> ToolResult[EvalResult]:
         session = self._section.ensure_session(context)
         code = _normalize_code(params.code)
-        mode = params.mode
-        if mode not in {"expr", "statements"}:
-            raise ToolValidationError("Unsupported evaluation mode.")
         reads = _normalize_reads(params.reads)
         writes = _normalize_writes(params.writes)
         read_paths = {read.path.segments for read in reads}
@@ -611,14 +589,6 @@ class _AstevalToolSuite:
             _ = stdout_buffer.write(actual_end)
             if flush:
                 _ = stdout_buffer.flush()
-
-        if mode == "expr":
-            try:
-                _ = ast.parse(code, mode="eval")
-            except SyntaxError as error:
-                raise ToolValidationError(
-                    "Expression mode requires a single expression."
-                ) from error
 
         def read_text(path: str) -> str:
             normalized = _normalize_vfs_path(_parse_string_path(path))
@@ -767,7 +737,6 @@ class _AstevalToolSuite:
             "Asteval evaluation completed.",
             event="asteval_run",
             context={
-                "mode": mode,
                 "stdout_len": len(stdout),
                 "stderr_len": len(stderr),
                 "write_count": len(final_writes),
