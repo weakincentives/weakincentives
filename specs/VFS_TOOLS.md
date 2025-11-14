@@ -129,29 +129,37 @@ Implementation detail notes:
 ## Tool Contracts
 
 Every tool validates its parameters and raises `ToolValidationError` on failure. Successful invocations publish the new
-`VirtualFileSystem` snapshot via the reducer pipeline.
+`VirtualFileSystem` snapshot via the reducer pipeline. The exposed surface mirrors the DeepAgents filesystem
+implementation so that orchestration layers can reuse the same prompts, backend contracts, and reducer wiring.
 
 | Tool | Summary | Parameters | Result | Behaviour highlights |
 | ---- | ------- | ---------- | ------ | -------------------- |
-| `vfs.list_directory` | Enumerate directory contents | `ListDirectory` | `dict` | Returns a JSON-serialisable summary with files and directories for the given path; raises if the path resolves to a file. |
-| `vfs.read_file` | Retrieve file contents | `ReadFile` | `dict` | Returns content, version, size, and timestamps; raises if path missing. |
-| `vfs.write_file` | Create or modify a file | `WriteFile` | `WriteFile` | Validates mode (`create`, `overwrite`, `append`), trims trailing whitespace only when explicitly requested by caller, and updates version/timestamps. |
-| `vfs.delete_entry` | Remove file(s) | `DeleteEntry` | `DeleteEntry` | Deletes the matching file or directory subtree; no-op when nothing matches if `allow_missing` flag is passed (future extension). |
+| `ls` | List directory entries | `path: str` | `FileInfo[]` | Absolute-style VFS paths resolve relative to the session root (`"/"`). Returns shallow listings with file metadata when available. Raises if the normalised path targets a file. |
+| `read_file` | Read file content | `file_path: str`, `offset: int = 0`, `limit: int = 2000` | `str` | Streams numbered lines starting at `offset` (line-based pagination). Returns a human-readable error string for missing files. Rejects binary content and preserves UTF-8 text only. |
+| `write_file` | Create a new text file | `file_path: str`, `content: str` | `WriteResult` | Create-only semantics: rejects existing targets. Normalises UTF-8 content, enforces size limits, and reports structured errors when validation fails. |
+| `edit_file` | Replace text within an existing file | `file_path: str`, `old_string: str`, `new_string: str`, `replace_all: bool = False` | `EditResult` | Performs exact string substitution. When `replace_all=False`, requires a unique match; otherwise replaces every occurrence. Maintains version counters and timestamps on success. |
+| `glob` | Match files by shell pattern | `pattern: str`, `path: str = "/"` | `FileInfo[]` | Evaluates glob patterns relative to the supplied path (default root). Returns sorted matches with metadata. |
+| `grep` | Search files with a regex | `pattern: str`, `path: Optional[str] = None`, `glob: Optional[str] = None` | `list[GrepMatch] \| str` | Executes regex searches scoped by directory or glob. Invalid regexes return readable error strings. Binary files are skipped, mirroring ripgrep defaults. |
+| `rm` | Remove files or directories | `path: str` | `DeleteResult` | Deletes the specified path. Works on individual files or directories and removes nested entries recursively. Returns structured errors when the path is missing. |
+
+The suite keeps a delete helper internally for reducers (`DeleteEntry`). Tool handlers normalise targets so `DeleteEntry` removes any file directly and prunes directories by recursively deleting files with the matching prefix. The interactive surface now exposes this behaviour through the `rm` command alongside the other DeepAgents-aligned tools above.
 
 ## Prompt Template Guidance
 
 `VfsToolsSection` emits markdown instructing agents to:
 
 1. Remember the virtual filesystem starts empty aside from any host mounts configured by the orchestrator; create files
-   via `vfs.write_file` when needed.
+   via `write_file` and update them with `edit_file` when needed.
 1. Host mounts are configuration-time only; agents cannot import additional host directories during a session.
-1. Use `vfs.list_directory` to explore before reading or writing specific files; keep listings targeted to minimise
+1. Use `ls` and `glob` to explore before reading or writing specific files; keep listings targeted to minimise
    output volume.
-1. Fetch file contents with `vfs.read_file` when context is needed, and operate on the returned version to avoid stale
-   edits.
-1. Apply edits with `vfs.write_file`, keeping updates concise and UTF-8-only; prefer overwriting complete files instead
-   of issuing multiple appends unless streaming logs.
-1. Clean up obsolete files or directories via `vfs.delete_entry` once work completes to keep the snapshot tight.
+1. Fetch file contents with `read_file` when context is needed, and rely on pagination parameters for large files to
+   avoid oversized responses.
+1. Apply edits with `write_file` (create) or `edit_file` (modify), keeping updates concise and UTF-8-only; prefer
+   overwriting complete files instead of issuing multiple appends unless streaming logs.
+1. Remove stale files or directories with `rm`; recursive deletions mirror the reducer's `DeleteEntry` semantics, so double-check targets before issuing the command.
+1. Use `grep` to locate relevant symbols when the project surface grows; remember binary files are skipped by
+   default.
 1. Avoid mirroring large repositories or binary assets; orchestrated host mounts should stay focused, and the enforced
    size limit still applies.
 
