@@ -135,7 +135,7 @@ def test_asteval_section_override_flags_opt_in() -> None:
     assert tool.accepts_overrides is True
 
 
-def test_expression_mode_success() -> None:
+def test_expression_success() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 
     result = invoke_tool(bus, tool, EvalParams(code="1 + 2"), session=session)
@@ -154,7 +154,7 @@ def test_expression_mode_success() -> None:
     assert snapshot is None or not snapshot.files
 
 
-def test_statements_mode_reads_and_writes() -> None:
+def test_multiline_reads_and_writes() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
@@ -174,7 +174,6 @@ def test_statements_mode_reads_and_writes() -> None:
             "summary = greeting + ':' + str(len(content))\n"
             "summary"
         ),
-        mode="statements",
         globals={"greeting": '"hello"'},
         reads=(EvalFileRead(path=VfsPath(("docs", "info.txt"))),),
         writes=(
@@ -214,14 +213,12 @@ def test_helper_write_appends() -> None:
 
     params = EvalParams(
         code="write_text('logs/activity.log', 'started')",
-        mode="statements",
     )
 
     invoke_tool(bus, tool, params, session=session)
 
     params_append = EvalParams(
         code=("write_text('logs/activity.log', '-continued', mode='append')\n'done'"),
-        mode="statements",
     )
 
     result = invoke_tool(bus, tool, params_append, session=session)
@@ -261,7 +258,6 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
 
     params = EvalParams(
         code="1 + 1",
-        mode="statements",
         writes=(
             EvalFileWrite(
                 path=VfsPath(("tmp", "file.txt")),
@@ -288,7 +284,6 @@ def test_stdout_truncation_and_flush() -> None:
     extra = asteval_module._MAX_STREAM_LENGTH + 100
     params = EvalParams(
         code=f"print('A' * {extra}, flush=True)",
-        mode="statements",
     )
 
     result = invoke_tool(bus, tool, params, session=session)
@@ -301,7 +296,7 @@ def test_stdout_truncation_and_flush() -> None:
 def test_print_invalid_sep_reports_error() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 
-    params = EvalParams(code="print('value', sep=0)", mode="statements")
+    params = EvalParams(code="print('value', sep=0)")
 
     result = invoke_tool(bus, tool, params, session=session)
 
@@ -314,7 +309,7 @@ def test_print_invalid_sep_reports_error() -> None:
 def test_print_invalid_end_reports_error() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 
-    params = EvalParams(code="print('value', end=0)", mode="statements")
+    params = EvalParams(code="print('value', end=0)")
 
     result = invoke_tool(bus, tool, params, session=session)
 
@@ -322,27 +317,6 @@ def test_print_invalid_end_reports_error() -> None:
     assert result.value is not None
     payload = result.value
     assert "end must be None or a string." in payload.stderr
-
-
-def test_expression_mode_requires_expression() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
-
-    with pytest.raises(ToolValidationError):
-        invoke_tool(
-            bus,
-            tool,
-            EvalParams(code="value = 1", mode="expr"),
-            session=session,
-        )
-
-
-def test_invalid_mode_rejected() -> None:
-    session, bus, _vfs_section, tool = _setup_sections()
-
-    params = EvalParams(code="0", mode="invalid")
-
-    with pytest.raises(ToolValidationError):
-        invoke_tool(bus, tool, params, session=session)
 
 
 def test_invalid_global_names_raise() -> None:
@@ -607,7 +581,7 @@ def test_message_summarizes_multiple_writes() -> None:
     result = invoke_tool(
         bus,
         tool,
-        EvalParams(code="0", mode="statements", writes=writes),
+        EvalParams(code="0", writes=writes),
         session=session,
     )
 
@@ -647,7 +621,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     result = invoke_tool(
         bus,
         tool,
-        EvalParams(code="read_text('sunfish/README.md')", mode="expr"),
+        EvalParams(code="read_text('sunfish/README.md')"),
         session=session,
     )
 
@@ -663,7 +637,7 @@ def test_write_text_rejects_empty_path() -> None:
     result = invoke_tool(
         bus,
         tool,
-        EvalParams(code="write_text('', 'data')", mode="statements"),
+        EvalParams(code="write_text('', 'data')"),
         session=session,
     )
 
@@ -687,7 +661,7 @@ def test_globals_formatting_covers_primitives() -> None:
     result = invoke_tool(
         bus,
         tool,
-        EvalParams(code=code, mode="statements"),
+        EvalParams(code=code),
         session=session,
     )
 
@@ -707,7 +681,7 @@ def test_interpreter_error_surfaces_in_stderr() -> None:
     result = invoke_tool(
         bus,
         tool,
-        EvalParams(code="unknown_name + 1", mode="statements"),
+        EvalParams(code="unknown_name + 1"),
         session=session,
     )
 
@@ -728,7 +702,6 @@ def test_write_text_conflict_with_read_path() -> None:
 
     params = EvalParams(
         code="write_text('docs/info.txt', 'data')",
-        mode="statements",
         reads=(EvalFileRead(path=path),),
     )
 
@@ -746,7 +719,6 @@ def test_write_text_duplicate_targets() -> None:
 
     params = EvalParams(
         code=("write_text('logs/out.txt', 'a')\nwrite_text('logs/out.txt', 'b')"),
-        mode="statements",
     )
 
     result = invoke_tool(bus, tool, params, session=session)
@@ -760,7 +732,6 @@ def test_missing_template_variable_raises() -> None:
 
     params = EvalParams(
         code="0",
-        mode="statements",
         writes=(
             EvalFileWrite(
                 path=VfsPath(("output", "report.txt")),
@@ -778,7 +749,6 @@ def test_duplicate_final_writes_detected() -> None:
 
     params = EvalParams(
         code="write_text('output/data.txt', 'helper')",
-        mode="statements",
         writes=(
             EvalFileWrite(
                 path=VfsPath(("output", "data.txt")),
@@ -798,7 +768,6 @@ def test_overwrite_requires_existing_file() -> None:
 
     params = EvalParams(
         code="0",
-        mode="statements",
         writes=(
             EvalFileWrite(
                 path=VfsPath(("docs", "missing.txt")),

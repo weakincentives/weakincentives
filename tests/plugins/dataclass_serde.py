@@ -185,7 +185,6 @@ def _make_eval_file_write() -> asteval_tools.EvalFileWrite:
 def _make_eval_params() -> asteval_tools.EvalParams:
     return asteval_tools.EvalParams(
         code="1 + 1",
-        mode="expr",
         reads=(_make_eval_file_read(),),
         writes=(_make_eval_file_write(),),
     )
