@@ -40,20 +40,20 @@ Repository = "https://github.com/weakincentives/weakincentives"
 
 [project.optional-dependencies]
 asteval = [
-    "asteval>=1.0.6",
+    "asteval>=1.0.7",
 ]
 openai = [
-    "openai>=2.6.1",
+    "openai>=2.8.0",
 ]
 litellm = [
-    "litellm>=1.79.0",
+    "litellm>=1.79.3",
 ]
 
 [project.scripts]
 wink = "weakincentives.cli.wink:main"
 
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling>=1.27.0", "hatch-vcs>=0.5.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
@@ -66,17 +66,17 @@ local_scheme = "no-local-version"
 
 [dependency-groups]
 dev = [
-    "bandit>=1.7.8",
-    "deptry>=0.16.3",
-    "pytest>=8.4.2",
-    "pytest-timeout>=2.3.1",
-    "pytest-cov>=6.0.0",
-    "pytest-randomly>=3.16.0",
-    "pip-audit>=2.7.3",
-    "ruff>=0.14.1",
-    "pyright>=1.1.389",
-    "ty>=0.0.1a23",
-    "mdformat>=0.7",
+    "bandit>=1.8.6",
+    "deptry>=0.24.0",
+    "pytest>=9.0.1",
+    "pytest-timeout>=2.4.0",
+    "pytest-cov>=7.0.0",
+    "pytest-randomly>=4.0.1",
+    "pip-audit>=2.9.0",
+    "ruff>=0.14.5",
+    "pyright>=1.1.407",
+    "ty>=0.0.1a26",
+    "mdformat>=1.0.0",
 ]
 
 [tool.ruff]

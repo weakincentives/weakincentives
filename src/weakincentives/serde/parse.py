@@ -264,29 +264,30 @@ def _coerce_to_type(
         raise TypeError(f"{path}: expected bool")
 
     if base_type in {int, float, str, Decimal, UUID, Path, datetime, date, time}:
-        if isinstance(value, base_type):
+        literal_type = cast(type[object], base_type)
+        if isinstance(value, literal_type):
             return _apply_constraints(value, merged_meta, path)
         if not config.coerce:
             raise TypeError(f"{path}: expected {type_name}")
         coerced_value: object | None = None
         try:
-            if base_type is int:
+            if literal_type is int:
                 coerced_value = int(value)
-            elif base_type is float:
+            elif literal_type is float:
                 coerced_value = float(value)
-            elif base_type is str:
+            elif literal_type is str:
                 coerced_value = str(value)
-            elif base_type is Decimal:
+            elif literal_type is Decimal:
                 coerced_value = Decimal(str(value))
-            elif base_type is UUID:
+            elif literal_type is UUID:
                 coerced_value = UUID(str(value))
-            elif base_type is Path:
+            elif literal_type is Path:
                 coerced_value = Path(str(value))
-            elif base_type is datetime:
+            elif literal_type is datetime:
                 coerced_value = datetime.fromisoformat(str(value))
-            elif base_type is date:
+            elif literal_type is date:
                 coerced_value = date.fromisoformat(str(value))
-            elif base_type is time:
+            elif literal_type is time:
                 coerced_value = time.fromisoformat(str(value))
         except Exception as error:
             raise TypeError(
