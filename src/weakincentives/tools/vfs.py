@@ -49,7 +49,8 @@ _MAX_READ_LIMIT: Final[int] = 2_000
 _MAX_MOUNT_PREVIEW_ENTRIES: Final[int] = 20
 _VFS_SECTION_TEMPLATE: Final[str] = (
     "The virtual filesystem starts empty unless host mounts are configured."
-    " Use it to stage edits before applying them to the host workspace.\n"
+    " It is the only filesystem available and will contain files relevant to the task;"
+    " use it as scratch space when necessary.\n"
     "1. Remember the snapshot begins empty aside from configured host mounts.\n"
     "2. Explore with `ls` or `glob` before reading or modifying files.\n"
     "3. Fetch file content with `read_file`; pagination keeps responses focused.\n"
