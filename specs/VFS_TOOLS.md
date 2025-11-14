@@ -15,7 +15,8 @@ copy-on-write, start empty automatically, and disappear when the session ends; n
   optional host folder mounts so orchestrators add the section once per session.
 - Host folder mounts are declared via the `HostMount` dataclass and supplied through the section's `mounts` argument.
   The rendered prompt appends a "Configured host mounts" appendix that previews each mount's root directory (equivalent to
-  running `ls` on the mount source) so agents can see the initial workspace surface.
+  running `ls` on the mount source) so agents can see the initial workspace surface. File mounts render the target
+  filename directly in the list while directory mounts show a single-level listing of child entries.
 
 ## Session Integration
 

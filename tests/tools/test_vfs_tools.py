@@ -105,6 +105,22 @@ def test_section_template_includes_host_mount_preview(tmp_path: Path) -> None:
     assert "`mnt`" in template
 
 
+def test_section_template_handles_file_mount(tmp_path: Path) -> None:
+    allowed_root = tmp_path / "workspace"
+    allowed_root.mkdir(parents=True)
+    (allowed_root / "notes.txt").write_text("hello", encoding="utf-8")
+
+    section = VfsToolsSection(
+        mounts=(HostMount(host_path="notes.txt"),),
+        allowed_host_roots=(allowed_root,),
+    )
+
+    template = section.template
+    assert "Configured host mounts:" in template
+    assert "  Contents: `notes.txt`" in template
+    assert "  File:" not in template
+
+
 def test_section_template_marks_empty_directory_mount(tmp_path: Path) -> None:
     allowed_root = tmp_path / "workspace"
     empty_dir = allowed_root / "empty"

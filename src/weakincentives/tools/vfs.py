@@ -947,11 +947,8 @@ def _render_section_template(previews: Sequence[_HostMountPreview]) -> str:
         lines.append(
             f"- Host `{resolved_label}` (configured as `{preview.host_path}`) mounted at `{mount_label}`."
         )
-        if preview.is_directory:
-            contents = _format_mount_entries(preview.entries)
-            lines.append(f"  Contents: {contents}")
-        else:
-            lines.append(f"  File: `{preview.entries[0]}`")
+        contents = _format_mount_entries(preview.entries)
+        lines.append(f"  Contents: {contents}")
     return "\n".join(lines)
 
 
