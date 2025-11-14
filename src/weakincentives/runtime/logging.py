@@ -167,7 +167,10 @@ def configure_logging(
 
     env = env or os.environ
 
-    resolved_level = _coerce_level(level or env.get(_LOG_LEVEL_ENV) or logging.INFO)
+    if level is not None:
+        resolved_level = _coerce_level(level)
+    else:
+        resolved_level = _coerce_level(env.get(_LOG_LEVEL_ENV))
 
     if json_mode is None:
         format_value = env.get(_LOG_FORMAT_ENV)

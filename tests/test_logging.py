@@ -176,6 +176,17 @@ def test_configure_logging_honors_env_toggle() -> None:
     assert handler.formatter.__class__.__name__ == "_JsonFormatter"
 
 
+def test_configure_logging_explicit_level_overrides_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WEAKINCENTIVES_LOG_LEVEL", "WARNING")
+
+    configure_logging(level=logging.NOTSET, force=True)
+
+    root = logging.getLogger()
+    assert root.level == logging.NOTSET
+
+
 def test_configure_logging_force_installs_json_formatter() -> None:
     configure_logging(level="INFO", json_mode=True, force=True)
 
