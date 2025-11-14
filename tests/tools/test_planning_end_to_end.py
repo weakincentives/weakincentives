@@ -14,7 +14,10 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from tests.tools.helpers import invoke_tool
+from weakincentives.prompt.tool import Tool
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
@@ -36,12 +39,12 @@ def test_planning_end_to_end_flow() -> None:
     section = PlanningToolsSection()
     tools = {tool.name: tool for tool in section.tools()}
 
-    setup_tool = tools["planning_setup_plan"]
-    add_tool = tools["planning_add_step"]
-    update_tool = tools["planning_update_step"]
-    mark_tool = tools["planning_mark_step"]
-    read_tool = tools["planning_read_plan"]
-    clear_tool = tools["planning_clear_plan"]
+    setup_tool = cast(Tool[SetupPlan, SetupPlan], tools["planning_setup_plan"])
+    add_tool = cast(Tool[AddStep, AddStep], tools["planning_add_step"])
+    update_tool = cast(Tool[UpdateStep, UpdateStep], tools["planning_update_step"])
+    mark_tool = cast(Tool[MarkStep, MarkStep], tools["planning_mark_step"])
+    read_tool = cast(Tool[ReadPlan, Plan], tools["planning_read_plan"])
+    clear_tool = cast(Tool[ClearPlan, ClearPlan], tools["planning_clear_plan"])
 
     invoke_tool(
         bus,
