@@ -171,9 +171,7 @@ class EvalParams:
     """Parameter payload passed to the Python evaluation tool."""
 
     code: str = field(
-        metadata={
-            "description": "Python script to execute (<=2,000 characters)."
-        }
+        metadata={"description": "Python script to execute (<=2,000 characters)."}
     )
     globals: dict[str, str] = field(
         default_factory=_str_dict_factory,

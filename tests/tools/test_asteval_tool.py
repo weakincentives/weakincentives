@@ -482,6 +482,20 @@ def test_write_content_length_validation() -> None:
         )
 
 
+def test_write_content_requires_ascii() -> None:
+    session, bus, _vfs_section, tool = _setup_sections()
+
+    write = EvalFileWrite(path=VfsPath(("output", "data.txt")), content="café")
+
+    with pytest.raises(ToolValidationError):
+        invoke_tool(
+            bus,
+            tool,
+            EvalParams(code="0", writes=(write,)),
+            session=session,
+        )
+
+
 def test_create_mode_rejects_existing_file() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
