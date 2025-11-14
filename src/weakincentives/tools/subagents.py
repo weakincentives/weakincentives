@@ -50,23 +50,57 @@ def _default_max_workers() -> int:
 _DEFAULT_MAX_WORKERS: Final[int] = _default_max_workers()
 
 
-@dataclass(slots=True)
+@dataclass(
+    slots=True,
+)
 class DispatchSubagentsParams:
     """Parameters describing the delegations to execute."""
 
-    delegations: tuple[DelegationParams, ...] = field(default_factory=tuple)
+    delegations: tuple[DelegationParams, ...] = field(
+        default_factory=tuple,
+        metadata={
+            "description": (
+                "Ordered delegations to evaluate. Each entry carries the recap "
+                "lines and expected output for a child agent."
+            )
+        },
+    )
 
     def __post_init__(self) -> None:
         self.delegations = tuple(self.delegations)
 
 
-@dataclass(slots=True)
+@dataclass(
+    slots=True,
+)
 class SubagentResult:
     """Outcome captured for an individual delegation."""
 
-    output: str
-    success: bool
-    error: str | None = None
+    output: str = field(
+        metadata={
+            "description": (
+                "Rendered response from the delegated prompt, including parsed "
+                "output when structured modes are enabled."
+            )
+        }
+    )
+    success: bool = field(
+        metadata={
+            "description": (
+                "Flag indicating whether the delegated run completed without "
+                "adapter or rendering errors."
+            )
+        }
+    )
+    error: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional diagnostic message when the delegation fails. Null "
+                "when the run succeeds."
+            )
+        },
+    )
 
 
 def _extract_output_text(response: PromptResponse[Any]) -> str:
@@ -247,7 +281,7 @@ def build_dispatch_subagents_tool(
     )
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class _SubagentsSectionParams:
     """Placeholder params container for the subagents section."""
 

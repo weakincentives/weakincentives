@@ -25,6 +25,7 @@ pytest_plugins = (
     "tests.plugins.dbc",
     "tests.plugins.dataclass_serde",
     "tests.plugins.threadstress",
+    "tests.plugins.tool_contracts",
 )
 
 
