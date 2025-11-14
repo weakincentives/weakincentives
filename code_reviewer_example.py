@@ -266,7 +266,6 @@ class SunfishReviewSession:
         self._bus.subscribe(ToolInvoked, self._on_tool_invoked)
 
     def evaluate(self, request: str) -> str:
-        self._session.reset()
         response = self._adapter.evaluate(
             self._prompt,
             ReviewTurnParams(request=request),
@@ -281,7 +280,7 @@ class SunfishReviewSession:
         return "(no response from assistant)"
 
     def reset(self) -> None:
-        """Clear session state before running a new turn."""
+        """Clear session state so subsequent turns start fresh."""
 
         self._session.reset()
 
