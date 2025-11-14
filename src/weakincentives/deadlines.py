@@ -51,4 +51,8 @@ class Deadline:
         """Return the remaining duration before expiration."""
 
         current = now or _utcnow()
+        if current.tzinfo is None or current.utcoffset() is None:
+            msg = "Deadline remaining now must be timezone-aware."
+            raise ValueError(msg)
+
         return self.expires_at - current

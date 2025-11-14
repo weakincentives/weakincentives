@@ -50,3 +50,14 @@ def test_deadline_remaining_uses_override(monkeypatch: pytest.MonkeyPatch) -> No
     remaining = deadline.remaining(now=anchor + timedelta(seconds=5))
 
     assert remaining == timedelta(seconds=25)
+
+
+def test_deadline_remaining_rejects_naive_datetime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    deadline = Deadline(anchor + timedelta(seconds=30))
+
+    with pytest.raises(ValueError):
+        deadline.remaining(now=datetime(2024, 1, 1, 12, 0))
