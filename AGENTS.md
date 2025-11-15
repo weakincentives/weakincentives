@@ -143,6 +143,10 @@ parsing noise.
   modules rather than bloating existing ones.
 - When adding tools or adapters, also update the relevant registries and ensure
   serde and runtime tests cover the behavior end-to-end.
+- Treat type annotations as the single source of truth for data validation.
+  Model inputs precisely (using `TypeVar` bounds, `TypedDict`s, etc.) instead of
+  layering `isinstance` checks, normalization shims, or redundant guards—assume
+  the type checker runs for every caller.
 
 ## Release & Versioning
 
