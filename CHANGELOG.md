@@ -6,6 +6,51 @@ Release highlights for weakincentives.
 
 - No changes yet.
 
+## v0.8.0 - 2025-11-15
+
+### Prompt Runtime & Overrides
+
+- `Prompt.render` now accepts override stores and tags directly, removing the helper
+  functions by plumbing the parameters through provider adapters and the code review
+  CLI so tagged overrides stay consistent end-to-end.
+- The code reviewer example gained typed request/response dataclasses, a centralized
+  `initialize_code_reviewer_runtime`, plan snapshot rendering, and event-bus driven
+  prompt/tool logging so multi-turn runs stay deterministic and easy to trace.
+
+### Built-in Tools
+
+- The virtual filesystem suite was rewritten to match the DeepAgents contract: new
+  `VfsPath`/`VirtualFileSystem` dataclasses, ASCII/UTF-8 guards, list/glob/grep/edit
+  helpers, host mount previews, and refreshed exports/specs/tests keep VFS sessions
+  deterministic.
+- `SubagentsSection` now renders via the markdown template stack, can opt into prompt
+  overrides, and propagates the overrides flag down to `dispatch_subagents` so
+  delegated prompts respect the same tooling toggles.
+- The ASTEval tool always runs multi-line inputs, dropping the expression-mode toggle
+  while refreshing the section template, serde fixtures, and tests to reflect the
+  simplified contract.
+- Added pytest-powered audits that enforce documentation, slots, tuple defaults, and
+  precise typing on every built-in tool dataclass while relaxing the subagent payload
+  dataclasses so tuple inputs normalize cleanly.
+
+### Runtime & Infrastructure
+
+- `Deadline.remaining` now rejects naive datetime overrides and `configure_logging`
+  differentiates explicit log levels from environment defaults to keep adapters'
+  logging choices intact.
+- Raised dependency minimums, added `pytest-rerunfailures` to the dev stack, refreshed
+  CI workflow pins, and updated planning/serde tests for the stricter type checking.
+- Thread-safety docs/tests were rewritten around the shared session plus overrides
+  store story, retiring the legacy Sunfish session scaffolding and clarifying reducer
+  expectations.
+
+### Documentation
+
+- `AGENTS.md` now mirrors the current repository layout, strict TDD workflow, and DbC
+  expectations so contributors have a single source of truth for the process.
+- The VFS and ASTEval specs were refreshed to describe the expanded file tooling and
+  simplified execution contract, keeping the docs aligned with the new surfaces.
+
 ## v0.7.0 - 2025-11-13
 
 ### Sessions & Contracts
