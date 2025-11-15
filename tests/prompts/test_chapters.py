@@ -441,5 +441,3 @@ def test_expand_chapters_wraps_enabled_errors() -> None:
 
     with pytest.raises(PromptValidationError):
         prompt.expand_chapters(ChaptersExpansionPolicy.ALL_INCLUDED)
-
-

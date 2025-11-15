@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
@@ -40,7 +40,7 @@ class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
     key: str
     title: str
     description: str | None = None
-    sections: Sequence[Section[SupportsDataclass]] | None = ()
+    sections: tuple[Section[Any], ...] = ()
     default_params: ParamsT | None = None
     enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None = None
     _enabled_callable: Callable[[ParamsT | None], bool] | None = field(

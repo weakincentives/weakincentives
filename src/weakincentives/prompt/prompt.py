@@ -19,7 +19,6 @@ from typing import (
     Any,
     ClassVar,
     Literal,
-    TypeVar,
     cast,
     get_args,
     get_origin,
@@ -43,9 +42,6 @@ def _format_specialization_argument(argument: object | None) -> str:
     if isinstance(argument, type):
         return argument.__name__
     return repr(argument)
-
-
-ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
 
 
 class Prompt[OutputT]:
@@ -82,8 +78,8 @@ class Prompt[OutputT]:
         ns: str,
         key: str,
         name: str | None = None,
-        sections: Sequence[Section[SupportsDataclass]] | None = None,
-        chapters: Sequence[Chapter[SupportsDataclass]] | None = None,
+        sections: Sequence[Section[Any]] | None = None,
+        chapters: Sequence[Chapter[Any]] | None = None,
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
     ) -> None:
@@ -97,7 +93,9 @@ class Prompt[OutputT]:
         self.ns = stripped_ns
         self.key = stripped_key
         self.name = name
-        base_sections = tuple(sections or ())
+        base_sections = tuple(
+            cast(Section[SupportsDataclass], section) for section in sections or ()
+        )
         self._base_sections: tuple[Section[SupportsDataclass], ...] = base_sections
         self._sections: tuple[Section[SupportsDataclass], ...] = base_sections
         self._registry = PromptRegistry()
@@ -105,7 +103,9 @@ class Prompt[OutputT]:
         self._allow_extra_keys_requested = allow_extra_keys
 
         seen_chapter_keys: set[str] = set()
-        provided_chapters = tuple(chapters or ())
+        provided_chapters = tuple(
+            cast(Chapter[SupportsDataclass], chapter) for chapter in chapters or ()
+        )
         for chapter in provided_chapters:
             if chapter.key in seen_chapter_keys:
                 raise PromptValidationError(
@@ -244,7 +244,7 @@ class Prompt[OutputT]:
             key_present = chapter.key in provided_lookup
             params = provided_lookup.get(chapter.key)
             if key_present:
-                params = self._normalize_chapter_params(chapter, cast(ParamsT | None, params))
+                params = self._normalize_chapter_params(chapter, params)
             elif chapter.default_params is not None:
                 params = clone_dataclass(chapter.default_params)
 
@@ -266,7 +266,9 @@ class Prompt[OutputT]:
                 if not enabled:
                     continue
 
-            open_sections.extend(chapter.sections)
+            open_sections.extend(
+                cast(tuple[Section[SupportsDataclass], ...], chapter.sections)
+            )
 
         prompt_cls = type(self)
 
@@ -282,9 +284,9 @@ class Prompt[OutputT]:
 
     def _normalize_chapter_params(
         self,
-        chapter: Chapter[ParamsT],
-        params: ParamsT | None,
-    ) -> ParamsT | None:
+        chapter: Chapter[SupportsDataclass],
+        params: SupportsDataclass | None,
+    ) -> SupportsDataclass | None:
         params_type = chapter.param_type
         if params_type is None:
             if params is not None:
