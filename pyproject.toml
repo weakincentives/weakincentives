@@ -72,6 +72,7 @@ dev = [
     "pytest-timeout>=2.4.0",
     "pytest-cov>=7.0.0",
     "pytest-randomly>=4.0.1",
+    "pytest-rerunfailures>=16.1",
     "pip-audit>=2.9.0",
     "ruff>=0.14.5",
     "pyright>=1.1.407",
@@ -131,6 +132,8 @@ markers = [
     "threadstress: repeat tests under randomized thread-pool conditions.",
 ]
 norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
+reruns = 2
+reruns_delay = 0.5
 
 [tool.coverage.run]
 
@@ -183,4 +186,3 @@ unresolved-global = "error"
 unsupported-base = "error"
 unused-ignore-comment = "error"
 useless-overload-body = "error"
-

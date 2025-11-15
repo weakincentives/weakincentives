@@ -132,41 +132,120 @@ class VirtualFileSystem:
 class FileInfo:
     """Metadata describing a directory entry."""
 
-    path: VfsPath
-    kind: Literal["file", "directory"]
-    size_bytes: int | None = None
-    version: int | None = None
-    updated_at: datetime | None = None
+    path: VfsPath = field(
+        metadata={"description": "Normalized VFS path referencing the directory entry."}
+    )
+    kind: Literal["file", "directory"] = field(
+        metadata={
+            "description": (
+                "Entry type; directories surface nested paths while files carry metadata."
+            )
+        }
+    )
+    size_bytes: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "On-disk size for files. Directories omit sizes to avoid redundant traversal."
+            )
+        },
+    )
+    version: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Monotonic file version propagated from the VFS snapshot. Directories omit versions."
+            )
+        },
+    )
+    updated_at: datetime | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Timestamp describing the most recent mutation for files; directories omit the value."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class ReadFileResult:
     """Payload returned from :func:`read_file`."""
 
-    path: VfsPath
-    content: str
-    offset: int
-    limit: int
-    total_lines: int
+    path: VfsPath = field(
+        metadata={"description": "Path of the file that was read inside the VFS."}
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "Formatted slice of the file contents with line numbers applied for clarity."
+            )
+        }
+    )
+    offset: int = field(
+        metadata={
+            "description": (
+                "Zero-based line offset applied to the read window after normalization."
+            )
+        }
+    )
+    limit: int = field(
+        metadata={
+            "description": (
+                "Maximum number of lines returned in this response after clamping to file length."
+            )
+        }
+    )
+    total_lines: int = field(
+        metadata={
+            "description": "Total line count of the file so callers can paginate follow-up reads."
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class GlobMatch:
     """Match returned by the :func:`glob` tool."""
 
-    path: VfsPath
-    size_bytes: int
-    version: int
-    updated_at: datetime
+    path: VfsPath = field(
+        metadata={"description": "Path of the file or directory that matched the glob."}
+    )
+    size_bytes: int = field(
+        metadata={
+            "description": (
+                "File size in bytes captured at snapshot time to help prioritize large assets."
+            )
+        }
+    )
+    version: int = field(
+        metadata={
+            "description": "Monotonic VFS version counter reflecting the latest write to the entry."
+        }
+    )
+    updated_at: datetime = field(
+        metadata={
+            "description": "Timestamp from the snapshot identifying when the entry last changed."
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class GrepMatch:
     """Regex match returned by :func:`grep`."""
 
-    path: VfsPath
-    line_number: int
-    line: str
+    path: VfsPath = field(
+        metadata={
+            "description": "Path of the file containing the regex hit, normalized to the VFS."
+        }
+    )
+    line_number: int = field(
+        metadata={"description": "One-based line number where the regex matched."}
+    )
+    line: str = field(
+        metadata={
+            "description": "Full line content containing the match so callers can review context."
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -304,32 +383,85 @@ class RemoveParams:
 
 @dataclass(slots=True, frozen=True)
 class ListDirectory:
-    path: VfsPath | None = field(default=None)
+    path: VfsPath | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Directory path to enumerate. When omitted the VFS root is listed."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class ListDirectoryResult:
-    path: VfsPath
-    directories: tuple[str, ...]
-    files: tuple[str, ...]
+    path: VfsPath = field(
+        metadata={"description": "Directory that was listed after normalization."}
+    )
+    directories: tuple[str, ...] = field(
+        metadata={
+            "description": (
+                "Immediate child directories contained within the listed path, sorted lexicographically."
+            )
+        }
+    )
+    files: tuple[str, ...] = field(
+        metadata={
+            "description": (
+                "Immediate child files contained within the listed path, sorted lexicographically."
+            )
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class ReadFile:
-    path: VfsPath
+    path: VfsPath = field(
+        metadata={
+            "description": (
+                "Normalized path referencing the file read via :func:`read_file`."
+            )
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class WriteFile:
-    path: VfsPath
-    content: str
-    mode: WriteMode = "create"
-    encoding: FileEncoding = _DEFAULT_ENCODING
+    path: VfsPath = field(
+        metadata={"description": "Destination file path being written inside the VFS."}
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "UTF-8 payload that will be persisted to the target file after validation."
+            )
+        }
+    )
+    mode: WriteMode = field(
+        default="create",
+        metadata={
+            "description": (
+                "Write strategy describing whether the file is newly created, overwritten, or appended."
+            )
+        },
+    )
+    encoding: FileEncoding = field(
+        default=_DEFAULT_ENCODING,
+        metadata={
+            "description": (
+                "Codec used to encode the content when persisting it to the virtual filesystem."
+            )
+        },
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class DeleteEntry:
-    path: VfsPath
+    path: VfsPath = field(
+        metadata={
+            "description": "Path of the file or directory slated for removal from the VFS."
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -385,11 +517,39 @@ class HostMount:
 
 @dataclass(slots=True, frozen=True)
 class _HostMountPreview:
-    host_path: str
-    resolved_host: Path
-    mount_path: VfsPath
-    entries: tuple[str, ...]
-    is_directory: bool
+    host_path: str = field(
+        metadata={
+            "description": (
+                "User-specified relative path identifying the host directory or file to mount."
+            )
+        }
+    )
+    resolved_host: Path = field(
+        metadata={
+            "description": (
+                "Absolute host filesystem path derived from the allowed mount roots."
+            )
+        }
+    )
+    mount_path: VfsPath = field(
+        metadata={
+            "description": "Destination path inside the VFS where the host content will appear."
+        }
+    )
+    entries: tuple[str, ...] = field(
+        metadata={
+            "description": (
+                "Sample of files or directories that will be imported for previewing the mount."
+            )
+        }
+    )
+    is_directory: bool = field(
+        metadata={
+            "description": (
+                "Indicates whether the host path resolves to a directory (True) or a file (False)."
+            )
+        }
+    )
 
 
 @dataclass(slots=True, frozen=True)

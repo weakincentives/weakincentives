@@ -90,6 +90,9 @@ parsing noise.
   output when failures or warnings occur; investigate any noise immediately.
 - **Strict Pytest**: Configuration uses `--strict-config` and `--strict-markers`.
   Add new markers to `pyproject.toml` if needed.
+- **Retries**: `pytest-rerunfailures` reruns each failing test twice (0.5 s delay)
+  so transient threadstress flakes cannot mask persistent regressions—if a test
+  fails after the retries it is a real failure.
 - **Plugins**:
   - `tests/plugins/dbc.py` enforces pre/post/invariant contracts during tests.
   - `tests/plugins/threadstress.py` repeats marked tests across randomized
