@@ -22,9 +22,8 @@ from typing import cast
 import pytest
 
 import weakincentives.tools.vfs as vfs_module
-from tests.tools.helpers import find_tool, invoke_tool
+from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.adapters.core import SessionProtocol
-from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
@@ -396,13 +395,7 @@ def test_requires_session_in_context(
     handler = write_tool.handler
     assert handler is not None
     params = WriteFileParams(file_path="docs/info.txt", content="data")
-    context = ToolContext(
-        prompt=None,
-        rendered_prompt=None,
-        adapter=None,
-        session=cast(SessionProtocol, object()),
-        event_bus=bus,
-    )
+    context = build_tool_context(bus, cast(SessionProtocol, object()))
     with pytest.raises(ToolValidationError, match="Session instance"):
         handler(params, context=context)
 

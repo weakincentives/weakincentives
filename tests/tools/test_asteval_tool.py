@@ -22,9 +22,9 @@ from typing import cast
 import pytest
 
 import weakincentives.tools.asteval as asteval_module
-from tests.tools.helpers import find_tool, invoke_tool
+from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.adapters.core import SessionProtocol
-from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+from weakincentives.prompt.tool import Tool, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
@@ -90,13 +90,7 @@ def test_context_requires_session() -> None:
 
     handler = tool.handler
     assert handler is not None
-    context = ToolContext(
-        prompt=None,
-        rendered_prompt=None,
-        adapter=None,
-        session=cast(SessionProtocol, object()),
-        event_bus=bus,
-    )
+    context = build_tool_context(bus, cast(SessionProtocol, object()))
 
     with pytest.raises(ToolValidationError) as captured:
         handler(EvalParams(code="0"), context=context)
