@@ -28,7 +28,7 @@ class ReducerEvent(Protocol):
     def value(self) -> SupportsDataclass | None: ...
 
 
-S = TypeVar("S")
+S = TypeVar("S", bound=SupportsDataclass)
 
 
 class ReducerContextProtocol(Protocol):

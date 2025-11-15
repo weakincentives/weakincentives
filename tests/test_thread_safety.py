@@ -200,10 +200,11 @@ def test_code_reviewer_session_reset_clears_runtime_state(tmp_path: Path) -> Non
         override_tag="reset",
     )
 
-    session.seed_slice(str, ("value",))
+    seeded_value = ExampleResult(value=1)
+    session.seed_slice(ExampleResult, (seeded_value,))
 
-    assert session.select_all(str) == ("value",)
+    assert session.select_all(ExampleResult) == (seeded_value,)
 
     session.reset()
 
-    assert session.select_all(str) == ()
+    assert session.select_all(ExampleResult) == ()

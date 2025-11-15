@@ -15,17 +15,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar, cast
+from typing import cast
 
 from ...dbc import pure
+from ...prompt._types import SupportsDataclass
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
-
-T = TypeVar("T")
-K = TypeVar("K")
 
 
 @pure
-def append[T](
+def append[T: SupportsDataclass](
     slice_values: tuple[T, ...],
     event: ReducerEvent,
     *,
@@ -40,7 +38,7 @@ def append[T](
     return (*slice_values, value)
 
 
-def upsert_by[T, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
+def upsert_by[T: SupportsDataclass, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
     """Return a reducer that upserts items sharing the same derived key."""
 
     def reducer(
@@ -69,7 +67,7 @@ def upsert_by[T, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
 
 
 @pure
-def replace_latest[T](
+def replace_latest[T: SupportsDataclass](
     slice_values: tuple[T, ...],
     event: ReducerEvent,
     *,

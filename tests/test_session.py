@@ -535,7 +535,10 @@ def test_snapshot_rollback_requires_registered_slices(
 
 def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
-    session.seed_slice(str, ("value",))
+    session.seed_slice(
+        cast(type[SupportsDataclass], str),
+        cast(tuple[SupportsDataclass, ...], ("value",)),
+    )
 
     with pytest.raises(SnapshotSerializationError):
         session.snapshot()
