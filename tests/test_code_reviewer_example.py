@@ -20,7 +20,7 @@ from uuid import uuid4
 
 from pytest import CaptureFixture
 
-from code_reviewer_example import build_code_reviewer_state
+from code_reviewer_example import initialize_code_reviewer_runtime
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 from weakincentives.runtime.events import PromptRendered
@@ -31,7 +31,13 @@ def test_prompt_render_reducer_prints_full_prompt(
     tmp_path: Path,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    _prompt, session, bus = build_code_reviewer_state(
+    (
+        _prompt,
+        session,
+        bus,
+        _store,
+        _tag,
+    ) = initialize_code_reviewer_runtime(
         overrides_store=overrides_store,
         override_tag="prompt-log",
     )

@@ -22,26 +22,17 @@ import textwrap
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import MethodType
-from typing import Any, Protocol, cast
+from typing import cast
 
 from weakincentives.adapters import PromptResponse
-from weakincentives.adapters.core import SessionProtocol
+from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.deadlines import Deadline
-from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
+from weakincentives.prompt import MarkdownSection, Prompt
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
-    PromptOverridesStore,
 )
-from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.runtime.events import (
-    EventBus,
-    InProcessEventBus,
-    PromptRendered,
-    ToolInvoked,
-)
+from weakincentives.runtime.events import InProcessEventBus, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -111,41 +102,18 @@ class ReviewResponse:
     next_steps: list[str]
 
 
-class SupportsReviewEvaluate(Protocol):
-    def evaluate(
-        self,
-        prompt: Prompt[ReviewResponse],
-        *params: SupportsDataclass,
-        parse_output: bool = True,
-        bus: EventBus,
-        session: SessionProtocol,
-        deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
-    ) -> PromptResponse[ReviewResponse]: ...
-
-
 class CodeReviewApp:
     """Owns adapter lifecycle, prompt overrides, and the REPL loop."""
 
-    def __init__(
-        self,
-        adapter: SupportsReviewEvaluate,
-        *,
-        override_tag: str | None = None,
-        overrides_store: LocalPromptOverridesStore | None = None,
-    ) -> None:
+    def __init__(self, adapter: ProviderAdapter[ReviewResponse]) -> None:
         self.adapter = adapter
-        self.override_tag = _resolve_override_tag(override_tag)
-        self.overrides_store = overrides_store or LocalPromptOverridesStore()
         (
             self.prompt,
             self.session,
             self.bus,
-        ) = build_code_reviewer_state(
-            overrides_store=self.overrides_store,
-            override_tag=self.override_tag,
-        )
+            self.overrides_store,
+            self.override_tag,
+        ) = initialize_code_reviewer_runtime()
 
     def run(self) -> None:
         """Start the interactive review session."""
@@ -189,14 +157,14 @@ def main() -> None:
     app.run()
 
 
-def build_adapter() -> SupportsReviewEvaluate:
+def build_adapter() -> ProviderAdapter[ReviewResponse]:
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
     model = os.getenv("OPENAI_MODEL", "gpt-5")
-    return cast(SupportsReviewEvaluate, OpenAIAdapter(model=model))
+    return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
-def build_task_prompt(session: Session) -> Prompt[ReviewResponse]:
+def build_task_prompt() -> Prompt[ReviewResponse]:
     if not TEST_REPOSITORIES_ROOT.exists():
         raise SystemExit(
             f"Expected test repositories under {TEST_REPOSITORIES_ROOT!s},"
@@ -265,41 +233,32 @@ def build_task_prompt(session: Session) -> Prompt[ReviewResponse]:
     )
 
 
-def build_code_reviewer_state(
+def initialize_code_reviewer_runtime(
     *,
     overrides_store: LocalPromptOverridesStore | None = None,
     override_tag: str | None = None,
-) -> tuple[Prompt[ReviewResponse], Session, EventBus]:
-    """Initialize the prompt, session, and bus used by the interactive example."""
-
-    store = overrides_store or LocalPromptOverridesStore()
-    resolved_tag = _resolve_override_tag(override_tag)
+) -> tuple[
+    Prompt[ReviewResponse],
+    Session,
+    InProcessEventBus,
+    LocalPromptOverridesStore,
+    str,
+]:
+    store, resolved_tag = _resolve_prompt_overrides(
+        overrides_store=overrides_store,
+        override_tag=override_tag,
+    )
     bus = InProcessEventBus()
     session = Session(bus=bus)
     session.register_reducer(PromptRendered, append)
     session.register_reducer(PromptRendered, _print_rendered_prompt)
-    base_prompt = build_task_prompt(session)
+    prompt = build_task_prompt()
     try:
-        store.seed_if_necessary(base_prompt, tag=resolved_tag)
+        store.seed_if_necessary(prompt, tag=resolved_tag)
     except PromptOverridesError as exc:  # pragma: no cover - startup validation
         raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
-
-    def render_with_session_overrides(
-        prompt_obj: Prompt[Any],
-        *params: SupportsDataclass,
-        inject_output_instructions: bool | None = None,
-    ) -> RenderedPrompt[Any]:
-        return prompt_obj.render(
-            *params,
-            overrides_store=store,
-            tag=resolved_tag,
-            inject_output_instructions=inject_output_instructions,
-        )
-
-    prompt_with_any = cast(Any, base_prompt)
-    prompt_with_any.render = MethodType(render_with_session_overrides, base_prompt)
     bus.subscribe(ToolInvoked, _log_tool_invocation)
-    return base_prompt, session, bus
+    return prompt, session, bus, store, resolved_tag
 
 
 def _build_intro(override_tag: str) -> str:
@@ -342,6 +301,16 @@ def _resolve_override_tag(tag: str | None = None) -> str:
     candidate = tag or os.getenv(PROMPT_OVERRIDES_TAG_ENV, _DEFAULT_OVERRIDE_TAG)
     normalized = candidate.strip()
     return normalized or _DEFAULT_OVERRIDE_TAG
+
+
+def _resolve_prompt_overrides(
+    *,
+    overrides_store: LocalPromptOverridesStore | None,
+    override_tag: str | None,
+) -> tuple[LocalPromptOverridesStore, str]:
+    store = overrides_store or LocalPromptOverridesStore()
+    resolved_tag = _resolve_override_tag(override_tag)
+    return store, resolved_tag
 
 
 def _configure_logging() -> None:
