@@ -34,8 +34,8 @@ def test_main_logs_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, object]]] = []
 
-        def info(self, message: str, *, event: str) -> None:
-            self.calls.append((message, {"event": event}))
+        def info(self, message: str, *, payload: object) -> None:
+            self.calls.append((message, {"event": getattr(payload, "event", None)}))
 
     fake_logger = FakeLogger()
 

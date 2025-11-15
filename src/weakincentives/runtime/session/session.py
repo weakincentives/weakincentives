@@ -24,7 +24,7 @@ from uuid import UUID, uuid4
 from ...dbc import invariant
 from ...prompt._types import SupportsDataclass
 from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
-from ..logging import StructuredLogger, get_logger
+from ..logging import StructuredLogger, StructuredLogPayload, get_logger
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
 from .protocols import SessionProtocol, SnapshotProtocol
@@ -342,12 +342,14 @@ class Session(SessionProtocol):
                     )
                     logger.exception(
                         "Reducer application failed.",
-                        event="session_reducer_failed",
-                        context={
-                            "reducer": reducer_name,
-                            "data_type": data_type.__qualname__,
-                            "slice_type": slice_type.__qualname__,
-                        },
+                        payload=StructuredLogPayload(
+                            event="session_reducer_failed",
+                            context={
+                                "reducer": reducer_name,
+                                "data_type": data_type.__qualname__,
+                                "slice_type": slice_type.__qualname__,
+                            },
+                        ),
                     )
                     break
                 normalized = tuple(result)

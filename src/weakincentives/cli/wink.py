@@ -17,7 +17,11 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-from ..runtime.logging import configure_logging, get_logger
+from ..runtime.logging import (
+    StructuredLogPayload,
+    configure_logging,
+    get_logger,
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -31,7 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logger.info(
         "wink CLI placeholder executed.",
-        event="wink.placeholder",
+        payload=StructuredLogPayload(event="wink.placeholder", context={}),
     )
 
     return 0

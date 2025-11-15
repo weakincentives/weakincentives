@@ -31,7 +31,11 @@ from weakref import WeakSet
 
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
-from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.logging import (
+    StructuredLogger,
+    StructuredLogPayload,
+    get_logger,
+)
 from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -735,13 +739,15 @@ class _AstevalToolSuite:
 
         _LOGGER.debug(
             "Asteval evaluation completed.",
-            event="asteval_run",
-            context={
-                "stdout_len": len(stdout),
-                "stderr_len": len(stderr),
-                "write_count": len(final_writes),
-                "code_preview": code[:200],
-            },
+            payload=StructuredLogPayload(
+                event="asteval_run",
+                context={
+                    "stdout_len": len(stdout),
+                    "stderr_len": len(stderr),
+                    "write_count": len(final_writes),
+                    "code_preview": code[:200],
+                },
+            ),
         )
 
         return ToolResult(message=message, value=result)

@@ -39,7 +39,11 @@ from ..runtime.events import (
     PromptRendered,
     ToolInvoked,
 )
-from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.logging import (
+    StructuredLogger,
+    StructuredLogPayload,
+    get_logger,
+)
 from ..serde import parse, schema
 from ..tools.errors import DeadlineExceededError, ToolValidationError
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
@@ -286,10 +290,15 @@ def execute_tool_call(
 
     call_id = getattr(tool_call, "id", None)
     log = (logger_override or logger).bind(
-        adapter=adapter_name,
-        prompt=prompt_name,
-        tool=tool_name,
-        call_id=call_id,
+        payload=StructuredLogPayload(
+            event="tool.logger_bound",
+            context={
+                "adapter": adapter_name,
+                "prompt": prompt_name,
+                "tool": tool_name,
+                "call_id": call_id,
+            },
+        )
     )
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsDataclass]
@@ -331,8 +340,10 @@ def execute_tool_call(
             )
         log.warning(
             "Tool validation failed.",
-            event="tool_validation_failed",
-            context={"reason": str(error)},
+            payload=StructuredLogPayload(
+                event="tool_validation_failed",
+                context={"reason": str(error)},
+            ),
         )
         tool_result = ToolResult(
             message=f"Tool validation failed: {error}",
@@ -351,8 +362,10 @@ def execute_tool_call(
     except Exception as error:  # propagate message via ToolResult
         log.exception(
             "Tool handler raised an unexpected exception.",
-            event="tool_handler_exception",
-            context={"provider_payload": provider_payload},
+            payload=StructuredLogPayload(
+                event="tool_handler_exception",
+                context={"provider_payload": provider_payload},
+            ),
         )
         tool_result = ToolResult(
             message=f"Tool '{tool_name}' execution failed: {error}",
@@ -362,11 +375,13 @@ def execute_tool_call(
     else:
         log.info(
             "Tool handler completed.",
-            event="tool_handler_completed",
-            context={
-                "success": tool_result.success,
-                "has_value": tool_result.value is not None,
-            },
+            payload=StructuredLogPayload(
+                event="tool_handler_completed",
+                context={
+                    "success": tool_result.success,
+                    "has_value": tool_result.value is not None,
+                },
+            ),
         )
 
     if tool_params is None:  # pragma: no cover - defensive
@@ -396,7 +411,10 @@ def execute_tool_call(
         session.rollback(snapshot)
         log.warning(
             "Session rollback triggered after publish failure.",
-            event="session_rollback_due_to_publish_failure",
+            payload=StructuredLogPayload(
+                event="session_rollback_due_to_publish_failure",
+                context={},
+            ),
         )
         failure_handlers = [
             getattr(failure.handler, "__qualname__", repr(failure.handler))
@@ -404,18 +422,22 @@ def execute_tool_call(
         ]
         log.error(
             "Tool event publish failed.",
-            event="tool_event_publish_failed",
-            context={
-                "failure_count": len(publish_result.errors),
-                "failed_handlers": failure_handlers,
-            },
+            payload=StructuredLogPayload(
+                event="tool_event_publish_failed",
+                context={
+                    "failure_count": len(publish_result.errors),
+                    "failed_handlers": failure_handlers,
+                },
+            ),
         )
         tool_result.message = format_publish_failures(publish_result.errors)
     else:
         log.debug(
             "Tool event published.",
-            event="tool_event_published",
-            context={"handler_count": publish_result.handled_count},
+            payload=StructuredLogPayload(
+                event="tool_event_published",
+                context={"handler_count": publish_result.handled_count},
+            ),
         )
     return invocation, tool_result
 
@@ -734,16 +756,23 @@ class ConversationRunner[OutputT]:
 
         self._messages = list(self.initial_messages)
         self._log = (self.logger_override or logger).bind(
-            adapter=self.adapter_name,
-            prompt=self.prompt_name,
+            payload=StructuredLogPayload(
+                event="prompt.logger_bound",
+                context={
+                    "adapter": self.adapter_name,
+                    "prompt": self.prompt_name,
+                },
+            )
         )
         self._log.info(
             "Prompt execution started.",
-            event="prompt_execution_started",
-            context={
-                "tool_count": len(self.rendered.tools),
-                "parse_output": self.parse_output,
-            },
+            payload=StructuredLogPayload(
+                event="prompt_execution_started",
+                context={
+                    "tool_count": len(self.rendered.tools),
+                    "parse_output": self.parse_output,
+                },
+            ),
         )
 
         tools = list(self.rendered.tools)
@@ -779,17 +808,21 @@ class ConversationRunner[OutputT]:
             ]
             self._log.error(
                 "Prompt rendered publish failed.",
-                event="prompt_rendered_publish_failed",
-                context={
-                    "failure_count": len(publish_result.errors),
-                    "failed_handlers": failure_handlers,
-                },
+                payload=StructuredLogPayload(
+                    event="prompt_rendered_publish_failed",
+                    context={
+                        "failure_count": len(publish_result.errors),
+                        "failed_handlers": failure_handlers,
+                    },
+                ),
             )
         else:
             self._log.debug(
                 "Prompt rendered event published.",
-                event="prompt_rendered_published",
-                context={"handler_count": publish_result.handled_count},
+                payload=StructuredLogPayload(
+                    event="prompt_rendered_published",
+                    context={"handler_count": publish_result.handled_count},
+                ),
             )
 
     def _handle_tool_calls(
@@ -810,8 +843,10 @@ class ConversationRunner[OutputT]:
 
         self._log.debug(
             "Processing tool calls.",
-            event="prompt_tool_calls_detected",
-            context={"count": len(tool_calls)},
+            payload=StructuredLogPayload(
+                event="prompt_tool_calls_detected",
+                context={"count": len(tool_calls)},
+            ),
         )
 
         for tool_call in tool_calls:
@@ -939,23 +974,27 @@ class ConversationRunner[OutputT]:
             ]
             self._log.error(
                 "Prompt execution publish failed.",
-                event="prompt_execution_publish_failed",
-                context={
-                    "failure_count": len(publish_result.errors),
-                    "failed_handlers": failure_handlers,
-                },
+                payload=StructuredLogPayload(
+                    event="prompt_execution_publish_failed",
+                    context={
+                        "failure_count": len(publish_result.errors),
+                        "failed_handlers": failure_handlers,
+                    },
+                ),
             )
             publish_result.raise_if_errors()
         self._log.info(
             "Prompt execution completed.",
-            event="prompt_execution_succeeded",
-            context={
-                "tool_count": len(self._tool_events),
-                "has_output": output is not None,
-                "text_length": len(text_value or "") if text_value else 0,
-                "structured_output": self._should_parse_structured_output,
-                "handler_count": publish_result.handled_count,
-            },
+            payload=StructuredLogPayload(
+                event="prompt_execution_succeeded",
+                context={
+                    "tool_count": len(self._tool_events),
+                    "has_output": output is not None,
+                    "text_length": len(text_value or "") if text_value else 0,
+                    "structured_output": self._should_parse_structured_output,
+                    "handler_count": publish_result.handled_count,
+                },
+            ),
         )
         return response_payload
 

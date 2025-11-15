@@ -19,10 +19,12 @@ import logging
 import logging.config
 import os
 from collections.abc import Mapping, MutableMapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast, override
+from typing import Any, cast, overload, override
 
 __all__ = [
+    "StructuredLogPayload",
     "StructuredLogger",
     "configure_logging",
     "get_logger",
@@ -40,6 +42,14 @@ _LEVEL_NAMES = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class StructuredLogPayload:
+    """Payload required for structured log events."""
+
+    event: str
+    context: Mapping[str, object]
+
+
 class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
     """Logger adapter enforcing a minimal structured event schema."""
 
@@ -52,60 +62,82 @@ class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
         base_context = dict(context) if context is not None else {}
         super().__init__(logger, base_context)
 
-    def bind(self, **context: object) -> StructuredLogger:
-        """Return a new adapter with ``context`` merged into the baseline payload."""
+    def bind(self, *, payload: StructuredLogPayload) -> StructuredLogger:
+        """Return a new adapter with ``payload.context`` merged into the baseline."""
 
         base_extra = cast(Mapping[str, object], self.extra)
-        merged: dict[str, object] = {**dict(base_extra), **context}
+        merged: dict[str, object] = {
+            **dict(base_extra),
+            **dict(payload.context),
+        }
         return type(self)(self.logger, context=merged)
 
     @override
     def process(
-        self, msg: Any, kwargs: MutableMapping[str, Any]
-    ) -> tuple[Any, MutableMapping[str, Any]]:
-        extra_obj = kwargs.setdefault("extra", {})
-        if extra_obj is None:
-            extra_obj = {}
-            kwargs["extra"] = extra_obj
-        if not isinstance(
-            extra_obj, MutableMapping
-        ):  # pragma: no cover - defensive guard
-            raise TypeError(
-                "Structured logs require a mutable mapping for extra context."
-            )
+        self, msg: Any, kwargs: MutableMapping[str, object]
+    ) -> tuple[Any, MutableMapping[str, object]]:
+        payload_obj = kwargs.pop("payload", None)
+        if payload_obj is None:
+            raise TypeError("Structured logs require a payload argument.")
 
-        extra_mapping = cast(MutableMapping[str, object], extra_obj)
+        payload = cast(StructuredLogPayload, payload_obj)
+        context_payload: dict[str, object] = {
+            **dict(cast(Mapping[str, object], self.extra)),
+            **dict(payload.context),
+        }
 
-        context_payload: dict[str, object] = dict(
-            cast(Mapping[str, object], self.extra)
-        )
+        extra_obj = kwargs.pop("extra", None)
+        if extra_obj is not None:
+            if not isinstance(extra_obj, Mapping):  # pragma: no cover - defensive
+                raise TypeError(
+                    "Structured logs require a mapping for additional extra context."
+                )
+            extra_mapping = cast(Mapping[str, object], extra_obj)
+            for key, value in extra_mapping.items():
+                if key in {"event", "context"}:
+                    continue
+                context_payload[key] = value
 
-        inline_context = kwargs.pop("context", None)
-        if inline_context is not None:
-            if isinstance(inline_context, Mapping):
-                context_payload.update(cast(Mapping[str, object], inline_context))
-            else:  # pragma: no cover - defensive guard
-                raise TypeError("context must be a mapping when provided.")
-
-        for key in tuple(extra_mapping.keys()):
-            if key == "event":
-                continue
-            context_payload[key] = extra_mapping.pop(key)
-
-        event_obj = kwargs.pop("event", None)
-        if event_obj is None:
-            event_obj = extra_mapping.pop("event", None)
-        if not isinstance(event_obj, str):
-            raise TypeError("Structured logs require an 'event' field.")
-
-        extra_mapping.clear()
-        extra_mapping.update(
-            {
-                "event": event_obj,
-                "context": context_payload,
-            }
-        )
+        kwargs["extra"] = {
+            "event": payload.event,
+            "context": context_payload,
+        }
         return msg, kwargs
+
+
+@overload
+def get_logger(
+    name: str,
+    *,
+    context: Mapping[str, object] | None = None,
+) -> StructuredLogger: ...
+
+
+@overload
+def get_logger(
+    name: str,
+    *,
+    logger_override: StructuredLogger,
+    context: Mapping[str, object] | None = None,
+) -> StructuredLogger: ...
+
+
+@overload
+def get_logger(
+    name: str,
+    *,
+    logger_override: logging.Logger,
+    context: Mapping[str, object] | None = None,
+) -> StructuredLogger: ...
+
+
+@overload
+def get_logger(
+    name: str,
+    *,
+    logger_override: logging.LoggerAdapter[logging.Logger],
+    context: Mapping[str, object] | None = None,
+) -> StructuredLogger: ...
 
 
 def get_logger(
@@ -123,28 +155,52 @@ def get_logger(
     """
 
     base_context: dict[str, object] = dict(context or {})
-    base_logger: logging.Logger
-
-    if isinstance(logger_override, StructuredLogger):
-        base_logger = logger_override.logger
-        base_context = {
-            **dict(cast(Mapping[str, object], logger_override.extra)),
-            **base_context,
-        }
-    elif isinstance(logger_override, logging.Logger):
-        base_logger = logger_override
-    elif isinstance(logger_override, logging.LoggerAdapter):
-        base_logger = _unwrap_logger(logger_override)
-        adapter_extra = getattr(logger_override, "extra", None)
-        if isinstance(adapter_extra, Mapping):
-            base_context = {
-                **dict(cast(Mapping[str, object], adapter_extra)),
-                **base_context,
-            }
-    else:
+    if logger_override is None:
         base_logger = logging.getLogger(name)
+    else:
+        base_logger, base_context = _resolve_logger_override(
+            logger_override, base_context
+        )
 
     return StructuredLogger(base_logger, context=base_context)
+
+
+@overload
+def _resolve_logger_override(
+    logger_override: StructuredLogger,
+    base_context: dict[str, object],
+) -> tuple[logging.Logger, dict[str, object]]: ...
+
+
+@overload
+def _resolve_logger_override(
+    logger_override: logging.Logger,
+    base_context: dict[str, object],
+) -> tuple[logging.Logger, dict[str, object]]: ...
+
+
+@overload
+def _resolve_logger_override(
+    logger_override: logging.LoggerAdapter[logging.Logger],
+    base_context: dict[str, object],
+) -> tuple[logging.Logger, dict[str, object]]: ...
+
+
+def _resolve_logger_override(
+    logger_override: logging.Logger | logging.LoggerAdapter[logging.Logger],
+    base_context: dict[str, object],
+) -> tuple[logging.Logger, dict[str, object]]:
+    if isinstance(logger_override, logging.Logger):
+        return logger_override, base_context
+
+    base_logger = _unwrap_logger(logger_override)
+    adapter_extra = getattr(logger_override, "extra", None)
+    if isinstance(adapter_extra, Mapping):
+        base_context = {
+            **dict(cast(Mapping[str, object], adapter_extra)),
+            **base_context,
+        }
+    return base_logger, base_context
 
 
 def configure_logging(

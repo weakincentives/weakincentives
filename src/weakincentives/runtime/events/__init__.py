@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from ...prompt._types import SupportsDataclass
-from ..logging import StructuredLogger, get_logger
+from ..logging import StructuredLogger, StructuredLogPayload, get_logger
 from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
 
 if TYPE_CHECKING:
@@ -66,11 +66,13 @@ class InProcessEventBus:
             except Exception as error:
                 logger.exception(
                     "Error delivering event.",
-                    event="event_delivery_failed",
-                    context={
-                        "handler": _describe_handler(handler),
-                        "event_type": type(event).__name__,
-                    },
+                    payload=StructuredLogPayload(
+                        event="event_delivery_failed",
+                        context={
+                            "handler": _describe_handler(handler),
+                            "event_type": type(event).__name__,
+                        },
+                    ),
                 )
                 failures.append(HandlerFailure(handler=handler, error=error))
 

@@ -35,13 +35,19 @@ from .prompt import (
     ToolResult,
     parse_structured_output,
 )
-from .runtime import StructuredLogger, configure_logging, get_logger
+from .runtime import (
+    StructuredLogger,
+    StructuredLogPayload,
+    configure_logging,
+    get_logger,
+)
 
 __all__ = [
     "Deadline",
     "MarkdownSection",
     "Prompt",
     "PromptResponse",
+    "StructuredLogPayload",
     "StructuredLogger",
     "SupportsDataclass",
     "Tool",
