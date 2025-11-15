@@ -237,6 +237,29 @@ def test_read_file_supports_pagination(
     ]
 
 
+def test_read_file_limit_reports_returned_slice(
+    session_and_bus: tuple[Session, InProcessEventBus],
+) -> None:
+    session, bus = session_and_bus
+    section = VfsToolsSection()
+    _write(
+        session,
+        bus,
+        section,
+        path=("notes.md",),
+        content="\n".join(f"line {index}" for index in range(1, 6)),
+    )
+
+    read_tool = find_tool(section, "read_file")
+    params = ReadFileParams(file_path="notes.md", offset=0, limit=10)
+    result = invoke_tool(bus, read_tool, params, session=session)
+
+    payload = result.value
+    assert isinstance(payload, ReadFileResult)
+    assert payload.limit == 5
+    assert len(payload.content.splitlines()) == 5
+
+
 def test_edit_file_replaces_occurrences(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:

@@ -738,11 +738,12 @@ class _VfsToolSuite:
         ]
         content = "\n".join(numbered)
         message = _format_read_file_message(file, start, end)
+        returned_lines = end - start
         result = ReadFileResult(
             path=file.path,
             content=content,
             offset=start,
-            limit=limit,
+            limit=returned_lines,
             total_lines=total_lines,
         )
         return ToolResult(message=message, value=result)
