@@ -33,13 +33,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
 )
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered, ToolInvoked
-from weakincentives.runtime.session import (
-    ReducerContextProtocol,
-    ReducerEvent,
-    Session,
-    append,
-    select_latest,
-)
+from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
 from weakincentives.tools.asteval import AstevalSection
@@ -250,13 +244,12 @@ def initialize_code_reviewer_runtime(
     )
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    session.register_reducer(PromptRendered, append)
-    session.register_reducer(PromptRendered, _print_rendered_prompt)
     prompt = build_task_prompt()
     try:
         store.seed_if_necessary(prompt, tag=resolved_tag)
     except PromptOverridesError as exc:  # pragma: no cover - startup validation
         raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
+    bus.subscribe(PromptRendered, _print_rendered_prompt)
     bus.subscribe(ToolInvoked, _log_tool_invocation)
     return prompt, session, bus, store, resolved_tag
 
@@ -322,13 +315,7 @@ def _configure_logging() -> None:
     )
 
 
-def _print_rendered_prompt(
-    slice_values: tuple[PromptRendered, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[PromptRendered, ...]:
-    del context
+def _print_rendered_prompt(event: object) -> None:
     prompt_event = cast(PromptRendered, event)
     prompt_label = prompt_event.prompt_name or (
         f"{prompt_event.prompt_ns}:{prompt_event.prompt_key}"
@@ -336,7 +323,6 @@ def _print_rendered_prompt(
     print(f"[prompt] Rendered prompt ({prompt_label})")
     print(prompt_event.rendered_prompt)
     print()
-    return slice_values
 
 
 def _log_tool_invocation(event: object) -> None:
