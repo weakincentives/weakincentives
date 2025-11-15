@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from ._types import SupportsDataclass
 from .markdown import MarkdownSection
 
 __all__ = ["ResponseFormatParams", "ResponseFormatSection"]
@@ -46,7 +47,7 @@ class ResponseFormatSection(MarkdownSection[ResponseFormatParams]):
         self,
         *,
         params: ResponseFormatParams,
-        enabled: Callable[[ResponseFormatParams], bool] | None = None,
+        enabled: Callable[[SupportsDataclass], bool] | None = None,
         accepts_overrides: bool = False,
     ) -> None:
         super().__init__(

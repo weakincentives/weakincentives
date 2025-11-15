@@ -35,7 +35,7 @@ class Chapter[ParamsT]:
     key: str                     # machine-safe identifier, stable across releases
     title: str                   # human-readable heading used in documentation
     description: str | None = None  # optional rationale for auditing tools
-    sections: tuple[Section[Any], ...] = ()  # ordered section payload
+    sections: tuple[Section[SupportsDataclass], ...] = ()  # ordered section payload
     enabled: Callable[[ParamsT], bool] | None = None  # optional fine-grained gate
 ```
 

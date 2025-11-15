@@ -78,8 +78,8 @@ class Prompt[OutputT]:
         ns: str,
         key: str,
         name: str | None = None,
-        sections: Sequence[Section[Any]] | None = None,
-        chapters: Sequence[Chapter[Any]] | None = None,
+        sections: Sequence[Section[SupportsDataclass]] | None = None,
+        chapters: Sequence[Chapter[SupportsDataclass]] | None = None,
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
     ) -> None:
@@ -93,9 +93,7 @@ class Prompt[OutputT]:
         self.ns = stripped_ns
         self.key = stripped_key
         self.name = name
-        base_sections = tuple(
-            cast(Section[SupportsDataclass], section) for section in sections or ()
-        )
+        base_sections = tuple(sections or ())
         self._base_sections: tuple[Section[SupportsDataclass], ...] = base_sections
         self._sections: tuple[Section[SupportsDataclass], ...] = base_sections
         self._registry = PromptRegistry()
@@ -103,9 +101,7 @@ class Prompt[OutputT]:
         self._allow_extra_keys_requested = allow_extra_keys
 
         seen_chapter_keys: set[str] = set()
-        provided_chapters = tuple(
-            cast(Chapter[SupportsDataclass], chapter) for chapter in chapters or ()
-        )
+        provided_chapters = tuple(chapters or ())
         for chapter in provided_chapters:
             if chapter.key in seen_chapter_keys:
                 raise PromptValidationError(
@@ -266,9 +262,7 @@ class Prompt[OutputT]:
                 if not enabled:
                     continue
 
-            open_sections.extend(
-                cast(tuple[Section[SupportsDataclass], ...], chapter.sections)
-            )
+            open_sections.extend(chapter.sections)
 
         prompt_cls = type(self)
 

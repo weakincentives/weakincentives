@@ -23,6 +23,7 @@ from typing import Any, Final, cast, override
 
 from ..adapters.core import PromptResponse
 from ..deadlines import Deadline
+from ..prompt import SupportsDataclass
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
@@ -326,8 +327,8 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
         )
 
     @override
-    def render(self, params: _SubagentsSectionParams | None, depth: int) -> str:
-        if params is None:
+    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+        if not isinstance(params, _SubagentsSectionParams):
             raise PromptRenderError(
                 "Subagents section requires parameters.",
                 dataclass_type=_SubagentsSectionParams,
