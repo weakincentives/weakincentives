@@ -25,8 +25,8 @@ from ..adapters.core import PromptResponse
 from ..deadlines import Deadline
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
+from ..prompt.markdown import MarkdownSection
 from ..prompt.prompt import Prompt, RenderedPrompt
-from ..prompt.section import Section
 from ..prompt.tool import Tool, ToolContext
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
@@ -155,7 +155,9 @@ def _prepare_child_contexts(
 
 
 def build_dispatch_subagents_tool(
-    *, isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.NO_ISOLATION
+    *,
+    isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.NO_ISOLATION,
+    accepts_overrides: bool = False,
 ) -> Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]:
     """Return a configured dispatch tool bound to the desired isolation level."""
 
@@ -277,7 +279,7 @@ def build_dispatch_subagents_tool(
         name="dispatch_subagents",
         description="Run delegated child prompts in parallel.",
         handler=_dispatch_subagents,
-        accepts_overrides=False,
+        accepts_overrides=accepts_overrides,
     )
 
 
@@ -296,26 +298,31 @@ _DELEGATION_BODY: Final[str] = (
 )
 
 
-class SubagentsSection(Section[_SubagentsSectionParams]):
+class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
     """Explain the delegation workflow and expose the dispatch tool."""
 
     def __init__(
         self,
         *,
         isolation_level: SubagentIsolationLevel | None = None,
+        accepts_overrides: bool = False,
     ) -> None:
         effective_level = (
             isolation_level
             if isolation_level is not None
             else SubagentIsolationLevel.NO_ISOLATION
         )
-        tool = build_dispatch_subagents_tool(isolation_level=effective_level)
+        tool = build_dispatch_subagents_tool(
+            isolation_level=effective_level,
+            accepts_overrides=accepts_overrides,
+        )
         super().__init__(
             title="Delegation",
             key="subagents",
+            template=_DELEGATION_BODY,
             default_params=_SubagentsSectionParams(),
             tools=(tool,),
-            accepts_overrides=False,
+            accepts_overrides=accepts_overrides,
         )
 
     @override
@@ -325,8 +332,7 @@ class SubagentsSection(Section[_SubagentsSectionParams]):
                 "Subagents section requires parameters.",
                 dataclass_type=_SubagentsSectionParams,
             )
-        heading = "#" * (depth + 2)
-        return f"{heading} {self.title}\n\n{_DELEGATION_BODY}"
+        return super().render(params, depth)
 
 
 dispatch_subagents = build_dispatch_subagents_tool()
