@@ -58,3 +58,19 @@ def test_subagents_section_rejects_missing_params() -> None:
 
     with pytest.raises(PromptRenderError):
         section.render(None, depth=0)
+
+
+def test_subagents_section_respects_accepts_overrides() -> None:
+    section = SubagentsSection(accepts_overrides=True)
+    tools = section.tools()
+    assert len(tools) == 1
+    tool = tools[0]
+
+    assert section.accepts_overrides is True
+    assert tool.accepts_overrides is True
+
+    params_type = section.param_type
+    assert params_type is not None
+    rendered = section.render(params_type(), depth=1)
+
+    assert rendered.startswith("### Delegation")

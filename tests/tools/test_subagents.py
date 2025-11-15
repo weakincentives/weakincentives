@@ -600,3 +600,11 @@ def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
     assert result.success is False
     assert result.value is None
     assert "cloning" in result.message.lower()
+
+
+def test_build_dispatch_subagents_tool_respects_accepts_overrides() -> None:
+    default_tool = build_dispatch_subagents_tool()
+    overriding_tool = build_dispatch_subagents_tool(accepts_overrides=True)
+
+    assert default_tool.accepts_overrides is False
+    assert overriding_tool.accepts_overrides is True
