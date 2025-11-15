@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -36,7 +37,7 @@ from ..runtime.session import (
 )
 from .errors import ToolValidationError
 
-FileEncoding = str
+FileEncoding = Literal["utf-8"]
 WriteMode = Literal["create", "overwrite", "append"]
 
 _ASCII: Final[str] = "ascii"
@@ -44,22 +45,20 @@ _DEFAULT_ENCODING: Final[FileEncoding] = "utf-8"
 _MAX_WRITE_LENGTH: Final[int] = 48_000
 _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_SEGMENT_LENGTH: Final[int] = 80
+_MAX_READ_LIMIT: Final[int] = 2_000
+_MAX_MOUNT_PREVIEW_ENTRIES: Final[int] = 20
 _VFS_SECTION_TEMPLATE: Final[str] = (
     "The virtual filesystem starts empty unless host mounts are configured."
-    " Use it to stage edits before applying them to the host workspace.\n"
-    "1. Use `vfs_list_directory` to inspect directories before reading or writing"
-    " specific files; keep listings focused to reduce output.\n"
-    "2. Fetch file contents with `vfs_read_file` and work from the returned version"
-    " to avoid conflicts.\n"
-    "3. Create or update files with `vfs_write_file`; supply UTF-8 content up to"
-    " 48k characters and prefer overwriting full files unless streaming append"
-    " updates.\n"
-    "4. Remove obsolete files or directories with `vfs_delete_entry` to keep the"
-    " snapshot tidy.\n"
-    "5. Host mounts are session-initialization only; agents cannot mount additional"
-    " directories later.\n"
-    "6. Avoid mirroring large repositories or binary assets—only UTF-8 text is"
-    " accepted and host mounts remain constrained by their configuration."
+    " It is the only filesystem available and will contain files relevant to the task;"
+    " use it as scratch space when necessary.\n"
+    "1. Remember the snapshot begins empty aside from configured host mounts.\n"
+    "2. Explore with `ls` or `glob` before reading or modifying files.\n"
+    "3. Fetch file content with `read_file`; pagination keeps responses focused.\n"
+    "4. Create files via `write_file` (create-only) and edit them with `edit_file`.\n"
+    "5. Remove files or directories recursively with `rm` when they are no longer needed.\n"
+    "6. Host mounts are fixed at session start; additional directories cannot be mounted later.\n"
+    "7. Avoid mirroring large repositories or binary assets—only UTF-8 text up to 48k characters is accepted.\n"
+    "8. Use `grep` to search for patterns across files when the workspace grows."
 )
 
 
@@ -130,14 +129,265 @@ class VirtualFileSystem:
 
 
 @dataclass(slots=True, frozen=True)
-class ListDirectory:
-    """Parameters for enumerating filesystem entries."""
+class FileInfo:
+    """Metadata describing a directory entry."""
 
+    path: VfsPath = field(
+        metadata={"description": "Normalized VFS path referencing the directory entry."}
+    )
+    kind: Literal["file", "directory"] = field(
+        metadata={
+            "description": (
+                "Entry type; directories surface nested paths while files carry metadata."
+            )
+        }
+    )
+    size_bytes: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "On-disk size for files. Directories omit sizes to avoid redundant traversal."
+            )
+        },
+    )
+    version: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Monotonic file version propagated from the VFS snapshot. Directories omit versions."
+            )
+        },
+    )
+    updated_at: datetime | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Timestamp describing the most recent mutation for files; directories omit the value."
+            )
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class ReadFileResult:
+    """Payload returned from :func:`read_file`."""
+
+    path: VfsPath = field(
+        metadata={"description": "Path of the file that was read inside the VFS."}
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "Formatted slice of the file contents with line numbers applied for clarity."
+            )
+        }
+    )
+    offset: int = field(
+        metadata={
+            "description": (
+                "Zero-based line offset applied to the read window after normalization."
+            )
+        }
+    )
+    limit: int = field(
+        metadata={
+            "description": (
+                "Maximum number of lines returned in this response after clamping to file length."
+            )
+        }
+    )
+    total_lines: int = field(
+        metadata={
+            "description": "Total line count of the file so callers can paginate follow-up reads."
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class GlobMatch:
+    """Match returned by the :func:`glob` tool."""
+
+    path: VfsPath = field(
+        metadata={"description": "Path of the file or directory that matched the glob."}
+    )
+    size_bytes: int = field(
+        metadata={
+            "description": (
+                "File size in bytes captured at snapshot time to help prioritize large assets."
+            )
+        }
+    )
+    version: int = field(
+        metadata={
+            "description": "Monotonic VFS version counter reflecting the latest write to the entry."
+        }
+    )
+    updated_at: datetime = field(
+        metadata={
+            "description": "Timestamp from the snapshot identifying when the entry last changed."
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class GrepMatch:
+    """Regex match returned by :func:`grep`."""
+
+    path: VfsPath = field(
+        metadata={
+            "description": "Path of the file containing the regex hit, normalized to the VFS."
+        }
+    )
+    line_number: int = field(
+        metadata={"description": "One-based line number where the regex matched."}
+    )
+    line: str = field(
+        metadata={
+            "description": "Full line content containing the match so callers can review context."
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class ListDirectoryParams:
+    path: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Directory path to list. Provide a relative VFS path or omit to list the root."
+            )
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class ReadFileParams:
+    file_path: str = field(
+        metadata={
+            "description": "Relative VFS path of the file to read (leading slashes are optional)."
+        }
+    )
+    offset: int = field(
+        default=0,
+        metadata={
+            "description": (
+                "Zero-based line offset where reading should begin. Must be non-negative."
+            )
+        },
+    )
+    limit: int = field(
+        default=_MAX_READ_LIMIT,
+        metadata={
+            "description": (
+                "Maximum number of lines to return. Values are capped at 2,000 lines per request."
+            )
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class WriteFileParams:
+    file_path: str = field(
+        metadata={
+            "description": "Destination VFS path for the new file. Must not already exist."
+        }
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "UTF-8 text that will be written to the file. Content is limited to 48,000 characters."
+            )
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class EditFileParams:
+    file_path: str = field(
+        metadata={
+            "description": "Path to the file that should be edited inside the VFS."
+        }
+    )
+    old_string: str = field(
+        metadata={
+            "description": (
+                "Exact text to search for within the file. At least one occurrence must be present."
+            )
+        }
+    )
+    new_string: str = field(
+        metadata={
+            "description": "Replacement text that will substitute the matched content."
+        }
+    )
+    replace_all: bool = field(
+        default=False,
+        metadata={
+            "description": (
+                "When true, replace every occurrence of `old_string`. Otherwise require a single match."
+            )
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class GlobParams:
+    pattern: str = field(
+        metadata={
+            "description": ("Shell-style pattern used to match files (e.g. `**/*.py`).")
+        }
+    )
+    path: str = field(
+        default="/",
+        metadata={
+            "description": (
+                "Directory to treat as the search root. Defaults to the VFS root (`/`)."
+            )
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class GrepParams:
+    pattern: str = field(
+        metadata={
+            "description": "Regular expression pattern to search for in matching files."
+        }
+    )
+    path: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional directory path that scopes the search. Defaults to the entire VFS snapshot."
+            )
+        },
+    )
+    glob: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "Optional glob pattern that filters files before applying the regex search."
+            )
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class RemoveParams:
+    path: str = field(
+        metadata={
+            "description": "Relative VFS path targeting the file or directory that should be removed."
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class ListDirectory:
     path: VfsPath | None = field(
         default=None,
         metadata={
             "description": (
-                "Directory to inspect. Omit to list the virtual filesystem root."
+                "Directory path to enumerate. When omitted the VFS root is listed."
             )
         },
     )
@@ -145,41 +395,45 @@ class ListDirectory:
 
 @dataclass(slots=True, frozen=True)
 class ListDirectoryResult:
-    """Result payload returned by :func:`vfs_list_directory`."""
-
-    path: VfsPath = field(metadata={"description": "Directory that was enumerated."})
+    path: VfsPath = field(
+        metadata={"description": "Directory that was listed after normalization."}
+    )
     directories: tuple[str, ...] = field(
-        metadata={"description": "Child directory names sorted alphabetically."}
+        metadata={
+            "description": (
+                "Immediate child directories contained within the listed path, sorted lexicographically."
+            )
+        }
     )
     files: tuple[str, ...] = field(
-        metadata={"description": "Child file names sorted alphabetically."}
+        metadata={
+            "description": (
+                "Immediate child files contained within the listed path, sorted lexicographically."
+            )
+        }
     )
 
 
 @dataclass(slots=True, frozen=True)
 class ReadFile:
-    """Parameters for fetching the contents of a file."""
-
     path: VfsPath = field(
         metadata={
-            "description": "Path to the file to read within the virtual filesystem."
+            "description": (
+                "Normalized path referencing the file read via :func:`read_file`."
+            )
         }
     )
 
 
 @dataclass(slots=True, frozen=True)
 class WriteFile:
-    """Parameters for creating or updating a file."""
-
     path: VfsPath = field(
-        metadata={
-            "description": "Target path to create or modify within the virtual filesystem."
-        }
+        metadata={"description": "Destination file path being written inside the VFS."}
     )
     content: str = field(
         metadata={
             "description": (
-                "UTF-8 text to write. Content is limited to 48k characters per call."
+                "UTF-8 payload that will be persisted to the target file after validation."
             )
         }
     )
@@ -187,8 +441,7 @@ class WriteFile:
         default="create",
         metadata={
             "description": (
-                "Write strategy: create new file, overwrite existing content, or "
-                "append to the end."
+                "Write strategy describing whether the file is newly created, overwritten, or appended."
             )
         },
     )
@@ -196,7 +449,7 @@ class WriteFile:
         default=_DEFAULT_ENCODING,
         metadata={
             "description": (
-                "Encoding name for the provided content. Defaults to UTF-8."
+                "Codec used to encode the content when persisting it to the virtual filesystem."
             )
         },
     )
@@ -204,22 +457,19 @@ class WriteFile:
 
 @dataclass(slots=True, frozen=True)
 class DeleteEntry:
-    """Parameters for removing a file or directory."""
-
     path: VfsPath = field(
-        metadata={"description": "Path to delete from the virtual filesystem."}
+        metadata={
+            "description": "Path of the file or directory slated for removal from the VFS."
+        }
     )
 
 
 @dataclass(slots=True, frozen=True)
 class HostMount:
-    """Mount configuration used to seed the virtual filesystem."""
-
     host_path: str = field(
         metadata={
             "description": (
-                "Absolute path on the host machine that should be exposed in the "
-                "virtual filesystem."
+                "Relative path (within an allowed host root) that should be mirrored into the VFS snapshot."
             )
         }
     )
@@ -227,8 +477,7 @@ class HostMount:
         default=None,
         metadata={
             "description": (
-                "Optional virtual filesystem destination. Defaults to mirroring "
-                "the host directory name."
+                "Optional target path inside the VFS. Defaults to the host-relative path when omitted."
             )
         },
     )
@@ -236,8 +485,7 @@ class HostMount:
         default_factory=tuple,
         metadata={
             "description": (
-                "Glob patterns that must match for files to be mounted. Empty "
-                "tuple includes everything."
+                "Whitelist of glob patterns applied to host files before mounting. Empty means include all files."
             )
         },
     )
@@ -245,8 +493,7 @@ class HostMount:
         default_factory=tuple,
         metadata={
             "description": (
-                "Glob patterns used to filter files from the mount. Applied after "
-                "includes."
+                "Blacklist of glob patterns that remove host files from the mount after inclusion filtering."
             )
         },
     )
@@ -254,8 +501,7 @@ class HostMount:
         default=None,
         metadata={
             "description": (
-                "Optional byte budget for the mounted tree. Files exceeding the "
-                "limit are skipped."
+                "Optional limit on the total number of bytes that may be imported from the host directory."
             )
         },
     )
@@ -263,16 +509,51 @@ class HostMount:
         default=False,
         metadata={
             "description": (
-                "Whether to resolve symbolic links inside the mounted directory."
+                "Whether to follow symbolic links when traversing the host directory tree during the mount."
             )
         },
     )
 
 
 @dataclass(slots=True, frozen=True)
-class _VfsSectionParams:
-    """Placeholder params container for the VFS tools section."""
+class _HostMountPreview:
+    host_path: str = field(
+        metadata={
+            "description": (
+                "User-specified relative path identifying the host directory or file to mount."
+            )
+        }
+    )
+    resolved_host: Path = field(
+        metadata={
+            "description": (
+                "Absolute host filesystem path derived from the allowed mount roots."
+            )
+        }
+    )
+    mount_path: VfsPath = field(
+        metadata={
+            "description": "Destination path inside the VFS where the host content will appear."
+        }
+    )
+    entries: tuple[str, ...] = field(
+        metadata={
+            "description": (
+                "Sample of files or directories that will be imported for previewing the mount."
+            )
+        }
+    )
+    is_directory: bool = field(
+        metadata={
+            "description": (
+                "Indicates whether the host path resolves to a directory (True) or a file (False)."
+            )
+        }
+    )
 
+
+@dataclass(slots=True, frozen=True)
+class _VfsSectionParams:
     pass
 
 
@@ -287,17 +568,16 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         accepts_overrides: bool = False,
     ) -> None:
         allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
-        self._mount_snapshot = _materialize_mounts(mounts, allowed_roots)
+        self._mount_snapshot, mount_previews = _materialize_mounts(
+            mounts, allowed_roots
+        )
         self._configured_sessions: WeakSet[Session] = WeakSet()
 
-        tools = _build_tools(
-            section=self,
-            accepts_overrides=accepts_overrides,
-        )
+        tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
-            template=_VFS_SECTION_TEMPLATE,
+            template=_render_section_template(mount_previews),
             default_params=_VfsSectionParams(),
             tools=tools,
             accepts_overrides=accepts_overrides,
@@ -307,7 +587,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         session = context.session
         if not isinstance(session, Session):
             raise ToolValidationError(
-                "VfsToolsSection requires ToolContext.session to be a Session instance.",
+                "VfsToolsSection requires ToolContext.session to be a Session instance."
             )
         if session not in self._configured_sessions:
             self._initialize_session(session)
@@ -342,40 +622,46 @@ def _build_tools(
     return cast(
         tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
         (
-            Tool[ListDirectory, ListDirectoryResult](
-                name="vfs_list_directory",
-                description=(
-                    "Enumerate files and directories under a relative VFS path. "
-                    "Omit the path to list the root."
-                ),
+            Tool[ListDirectoryParams, tuple[FileInfo, ...]](
+                name="ls",
+                description="List directory entries under a relative path.",
                 handler=suite.list_directory,
                 accepts_overrides=accepts_overrides,
             ),
-            Tool[ReadFile, VfsFile](
-                name="vfs_read_file",
-                description=(
-                    "Read the latest version of a file and return its UTF-8 "
-                    "contents with metadata."
-                ),
+            Tool[ReadFileParams, ReadFileResult](
+                name="read_file",
+                description="Read UTF-8 file contents with pagination support.",
                 handler=suite.read_file,
                 accepts_overrides=accepts_overrides,
             ),
-            Tool[WriteFile, WriteFile](
-                name="vfs_write_file",
-                description=(
-                    "Create or update a UTF-8 text file. Supply the target path, "
-                    "content, and write mode."
-                ),
+            Tool[WriteFileParams, WriteFile](
+                name="write_file",
+                description="Create a new UTF-8 text file.",
                 handler=suite.write_file,
                 accepts_overrides=accepts_overrides,
             ),
-            Tool[DeleteEntry, DeleteEntry](
-                name="vfs_delete_entry",
-                description=(
-                    "Delete a file or directory tree from the virtual filesystem. "
-                    "Directories are removed recursively."
-                ),
-                handler=suite.delete_entry,
+            Tool[EditFileParams, WriteFile](
+                name="edit_file",
+                description="Replace occurrences of a string within a file.",
+                handler=suite.edit_file,
+                accepts_overrides=accepts_overrides,
+            ),
+            Tool[GlobParams, tuple[GlobMatch, ...]](
+                name="glob",
+                description="Match files beneath a directory using shell patterns.",
+                handler=suite.glob,
+                accepts_overrides=accepts_overrides,
+            ),
+            Tool[GrepParams, tuple[GrepMatch, ...]](
+                name="grep",
+                description="Search files for a regular expression pattern.",
+                handler=suite.grep,
+                accepts_overrides=accepts_overrides,
+            ),
+            Tool[RemoveParams, DeleteEntry](
+                name="rm",
+                description="Remove files or directories recursively.",
+                handler=suite.remove,
                 accepts_overrides=accepts_overrides,
             ),
         ),
@@ -390,79 +676,228 @@ class _VfsToolSuite:
         self._section = section
 
     def list_directory(
-        self, params: ListDirectory, *, context: ToolContext
-    ) -> ToolResult[ListDirectoryResult]:
+        self, params: ListDirectoryParams, *, context: ToolContext
+    ) -> ToolResult[tuple[FileInfo, ...]]:
         session = self._section.ensure_session(context)
-        target = _normalize_optional_path(params.path)
+        path = _normalize_string_path(params.path, allow_empty=True, field="path")
         snapshot = self._section.latest_snapshot(session)
-        if _has_file(snapshot.files, target):
+        if _find_file(snapshot.files, path) is not None:
             raise ToolValidationError("Cannot list a file path; provide a directory.")
 
-        directory_names: set[str] = set()
-        file_names: set[str] = set()
-        prefix_length = len(target.segments)
+        directories: set[tuple[str, ...]] = set()
+        files: list[VfsFile] = []
         for file in snapshot.files:
             segments = file.path.segments
-            if not _is_path_prefix(segments, target.segments):
+            if not _is_path_prefix(segments, path.segments):
                 continue
+            prefix_length = len(path.segments)
             next_segment = segments[prefix_length]
+            subpath = (*path.segments, next_segment)
             if len(segments) == prefix_length + 1:
-                file_names.add(next_segment)
+                files.append(file)
             else:
-                directory_names.add(next_segment)
+                directories.add(subpath)
 
-        directories = tuple(sorted(directory_names))
-        files = tuple(sorted(file_names))
-        normalized = ListDirectoryResult(
-            path=target, directories=directories, files=files
+        entries: list[FileInfo] = [
+            FileInfo(
+                path=file.path,
+                kind="file",
+                size_bytes=file.size_bytes,
+                version=file.version,
+                updated_at=file.updated_at,
+            )
+            for file in files
+            if len(file.path.segments) == len(path.segments) + 1
+        ]
+        entries.extend(
+            FileInfo(path=VfsPath(directory), kind="directory")
+            for directory in directories
         )
-        message = _format_directory_message(target, directories, files)
-        return ToolResult(message=message, value=normalized)
+
+        entries.sort(key=lambda entry: entry.path.segments)
+        message = _format_directory_message(path, entries)
+        return ToolResult(message=message, value=tuple(entries))
 
     def read_file(
-        self, params: ReadFile, *, context: ToolContext
-    ) -> ToolResult[VfsFile]:
+        self, params: ReadFileParams, *, context: ToolContext
+    ) -> ToolResult[ReadFileResult]:
         session = self._section.ensure_session(context)
-        path = _normalize_required_path(params.path)
+        path = _normalize_string_path(params.file_path, field="file_path")
+        offset = _normalize_offset(params.offset)
+        limit = _normalize_limit(params.limit)
+
         snapshot = self._section.latest_snapshot(session)
-        file = _find_file(snapshot.files, path)
-        if file is None:
-            raise ToolValidationError("File does not exist in the virtual filesystem.")
-        message = _format_read_file_message(file)
-        return ToolResult(message=message, value=file)
+        file = _require_file(snapshot.files, path)
+        lines = file.content.splitlines()
+        total_lines = len(lines)
+        start = min(offset, total_lines)
+        end = min(start + limit, total_lines)
+        numbered = [
+            f"{index + 1:>4} | {line}"
+            for index, line in enumerate(lines[start:end], start=start)
+        ]
+        content = "\n".join(numbered)
+        message = _format_read_file_message(file, start, end)
+        returned_lines = end - start
+        result = ReadFileResult(
+            path=file.path,
+            content=content,
+            offset=start,
+            limit=returned_lines,
+            total_lines=total_lines,
+        )
+        return ToolResult(message=message, value=result)
 
     def write_file(
-        self, params: WriteFile, *, context: ToolContext
+        self, params: WriteFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
         session = self._section.ensure_session(context)
-        path = _normalize_required_path(params.path)
-        if params.encoding != _DEFAULT_ENCODING:
-            raise ToolValidationError("Only UTF-8 encoding is supported.")
+        path = _normalize_string_path(params.file_path, field="file_path")
         content = _normalize_content(params.content)
-        mode = params.mode
+
         snapshot = self._section.latest_snapshot(session)
-        existing = _find_file(snapshot.files, path)
-        if mode == "create" and existing is not None:
-            raise ToolValidationError("File already exists; use overwrite or append.")
-        if mode in {"overwrite", "append"} and existing is None:
-            raise ToolValidationError("File does not exist for the requested mode.")
-        normalized = WriteFile(path=path, content=content, mode=mode)
-        message = _format_write_file_message(path, content, mode)
+        if _find_file(snapshot.files, path) is not None:
+            raise ToolValidationError(
+                "File already exists; use edit_file to modify existing content."
+            )
+
+        normalized = WriteFile(path=path, content=content, mode="create")
+        message = _format_write_file_message(path, content, mode="create")
         return ToolResult(message=message, value=normalized)
 
-    def delete_entry(
-        self, params: DeleteEntry, *, context: ToolContext
+    def edit_file(
+        self, params: EditFileParams, *, context: ToolContext
+    ) -> ToolResult[WriteFile]:
+        session = self._section.ensure_session(context)
+        path = _normalize_string_path(params.file_path, field="file_path")
+        snapshot = self._section.latest_snapshot(session)
+        file = _require_file(snapshot.files, path)
+
+        old = params.old_string
+        new = params.new_string
+        if not old:
+            raise ToolValidationError("old_string must not be empty.")
+        if len(old) > _MAX_WRITE_LENGTH or len(new) > _MAX_WRITE_LENGTH:
+            raise ToolValidationError(
+                "Replacement strings must be 48,000 characters or fewer."
+            )
+
+        occurrences = file.content.count(old)
+        if occurrences == 0:
+            raise ToolValidationError("old_string not found in the target file.")
+        if not params.replace_all and occurrences != 1:
+            raise ToolValidationError(
+                "old_string must match exactly once unless replace_all is true."
+            )
+
+        if params.replace_all:
+            replacements = occurrences
+            updated = file.content.replace(old, new)
+        else:
+            replacements = 1
+            updated = file.content.replace(old, new, 1)
+
+        normalized_content = _normalize_content(updated)
+        normalized = WriteFile(
+            path=path,
+            content=normalized_content,
+            mode="overwrite",
+        )
+        message = _format_edit_message(path, replacements)
+        return ToolResult(message=message, value=normalized)
+
+    def glob(
+        self, params: GlobParams, *, context: ToolContext
+    ) -> ToolResult[tuple[GlobMatch, ...]]:
+        session = self._section.ensure_session(context)
+        base = _normalize_string_path(params.path, allow_empty=True, field="path")
+        pattern = params.pattern.strip()
+        if not pattern:
+            raise ToolValidationError("Pattern must not be empty.")
+        _ensure_ascii(pattern, "pattern")
+
+        snapshot = self._section.latest_snapshot(session)
+        matches: list[GlobMatch] = []
+        for file in snapshot.files:
+            if not _is_path_prefix(file.path.segments, base.segments):
+                continue
+            relative_segments = file.path.segments[len(base.segments) :]
+            relative = "/".join(relative_segments)
+            if fnmatch.fnmatchcase(relative, pattern):
+                matches.append(
+                    GlobMatch(
+                        path=file.path,
+                        size_bytes=file.size_bytes,
+                        version=file.version,
+                        updated_at=file.updated_at,
+                    )
+                )
+        matches.sort(key=lambda match: match.path.segments)
+        message = _format_glob_message(base, pattern, matches)
+        return ToolResult(message=message, value=tuple(matches))
+
+    def grep(
+        self, params: GrepParams, *, context: ToolContext
+    ) -> ToolResult[tuple[GrepMatch, ...]]:
+        session = self._section.ensure_session(context)
+        try:
+            pattern = re.compile(params.pattern)
+        except re.error as error:
+            return ToolResult(
+                message=f"Invalid regular expression: {error}",
+                value=None,
+                success=False,
+            )
+
+        base_path: VfsPath | None = None
+        if params.path is not None:
+            base_path = _normalize_string_path(
+                params.path, allow_empty=True, field="path"
+            )
+        glob_pattern = params.glob.strip() if params.glob is not None else None
+        if glob_pattern:
+            _ensure_ascii(glob_pattern, "glob")
+
+        snapshot = self._section.latest_snapshot(session)
+        matches: list[GrepMatch] = []
+        for file in snapshot.files:
+            if base_path is not None and not _is_path_prefix(
+                file.path.segments, base_path.segments
+            ):
+                continue
+            if glob_pattern:
+                relative = (
+                    "/".join(file.path.segments[len(base_path.segments) :])
+                    if base_path is not None
+                    else "/".join(file.path.segments)
+                )
+                if not fnmatch.fnmatchcase(relative, glob_pattern):
+                    continue
+            for index, line in enumerate(file.content.splitlines(), start=1):
+                if pattern.search(line):
+                    matches.append(
+                        GrepMatch(
+                            path=file.path,
+                            line_number=index,
+                            line=line,
+                        )
+                    )
+        matches.sort(key=lambda match: (match.path.segments, match.line_number))
+        message = _format_grep_message(params.pattern, matches)
+        return ToolResult(message=message, value=tuple(matches))
+
+    def remove(
+        self, params: RemoveParams, *, context: ToolContext
     ) -> ToolResult[DeleteEntry]:
         session = self._section.ensure_session(context)
-        path = _normalize_path(params.path)
+        path = _normalize_string_path(params.path, field="path")
         snapshot = self._section.latest_snapshot(session)
-        matches = tuple(
+        matches = [
             file
             for file in snapshot.files
             if _is_path_prefix(file.path.segments, path.segments)
-        )
-        deleted_count = len(matches)
-        if deleted_count == 0:
+        ]
+        if not matches:
             raise ToolValidationError("No files matched the provided path.")
         normalized = DeleteEntry(path=path)
         message = _format_delete_message(path, matches)
@@ -477,17 +912,47 @@ def _normalize_content(content: str) -> str:
     return content
 
 
+def _normalize_offset(offset: int) -> int:
+    if offset < 0:
+        raise ToolValidationError("offset must be non-negative.")
+    return offset
+
+
+def _normalize_limit(limit: int) -> int:
+    if limit <= 0:
+        raise ToolValidationError("limit must be a positive integer.")
+    return min(limit, _MAX_READ_LIMIT)
+
+
+def _normalize_string_path(
+    raw: str | None, *, allow_empty: bool = False, field: str
+) -> VfsPath:
+    if raw is None:
+        if not allow_empty:
+            raise ToolValidationError(f"{field} is required.")
+        return VfsPath(())
+
+    stripped = raw.strip()
+    if not stripped:
+        if allow_empty:
+            return VfsPath(())
+        raise ToolValidationError(f"{field} must not be empty.")
+
+    if stripped.startswith("/"):
+        stripped = stripped.lstrip("/")
+
+    segments = _normalize_segments(stripped.split("/"))
+    if len(segments) > _MAX_PATH_DEPTH:
+        raise ToolValidationError("Path depth exceeds the allowed limit (16 segments).")
+    if not segments and not allow_empty:
+        raise ToolValidationError(f"{field} must reference a file or directory.")
+    return VfsPath(segments)
+
+
 def _normalize_optional_path(path: VfsPath | None) -> VfsPath:
     if path is None:
         return VfsPath(())
     return _normalize_path(path)
-
-
-def _normalize_required_path(path: VfsPath) -> VfsPath:
-    normalized = _normalize_path(path)
-    if not normalized.segments:
-        raise ToolValidationError("Path must reference a file or directory.")
-    return normalized
 
 
 def _normalize_path(path: VfsPath) -> VfsPath:
@@ -528,10 +993,6 @@ def _ensure_ascii(value: str, field: str) -> None:
         ) from error
 
 
-def _has_file(files: Iterable[VfsFile], path: VfsPath) -> bool:
-    return _find_file(files, path) is not None
-
-
 def _find_file(files: Iterable[VfsFile], path: VfsPath) -> VfsFile | None:
     target = path.segments
     for file in files:
@@ -540,37 +1001,66 @@ def _find_file(files: Iterable[VfsFile], path: VfsPath) -> VfsFile | None:
     return None
 
 
+def _require_file(files: Iterable[VfsFile], path: VfsPath) -> VfsFile:
+    file = _find_file(files, path)
+    if file is None:
+        raise ToolValidationError("File does not exist in the virtual filesystem.")
+    return file
+
+
 def _is_path_prefix(path: Sequence[str], prefix: Sequence[str]) -> bool:
     if len(path) < len(prefix):
         return False
     return all(path[index] == prefix[index] for index in range(len(prefix)))
 
 
-def _format_directory_message(
-    path: VfsPath, directories: tuple[str, ...], files: tuple[str, ...]
-) -> str:
+def _format_directory_message(path: VfsPath, entries: Sequence[FileInfo]) -> str:
+    directory_count = sum(1 for entry in entries if entry.kind == "directory")
+    file_count = sum(1 for entry in entries if entry.kind == "file")
     prefix = _format_path(path)
-    subdir_label = "subdir" if len(directories) == 1 else "subdirs"
-    file_label = "file" if len(files) == 1 else "files"
+    subdir_label = "subdir" if directory_count == 1 else "subdirs"
+    file_label = "file" if file_count == 1 else "files"
     return (
-        f"Listed directory {prefix} "
-        f"({len(directories)} {subdir_label}, {len(files)} {file_label})."
+        f"Listed directory {prefix} ("
+        f"{directory_count} {subdir_label}, {file_count} {file_label})."
     )
 
 
-def _format_read_file_message(file: VfsFile) -> str:
+def _format_read_file_message(file: VfsFile, start: int, end: int) -> str:
     path_label = _format_path(file.path)
-    return f"Read file {path_label}."
+    if start == end:
+        return f"Read file {path_label} (no lines returned)."
+    return f"Read file {path_label} (lines {start + 1}-{end})."
 
 
-def _format_write_file_message(path: VfsPath, _content: str, mode: WriteMode) -> str:
+def _format_write_file_message(path: VfsPath, content: str, mode: WriteMode) -> str:
     path_label = _format_path(path)
     action = {
-        "create": "create",
-        "overwrite": "overwrite",
-        "append": "append",
+        "create": "Created",
+        "overwrite": "Updated",
+        "append": "Appended to",
     }[mode]
-    return f"Staged {action} for {path_label}."
+    size = len(content.encode(_DEFAULT_ENCODING))
+    return f"{action} {path_label} ({size} bytes)."
+
+
+def _format_edit_message(path: VfsPath, replacements: int) -> str:
+    path_label = _format_path(path)
+    label = "occurrence" if replacements == 1 else "occurrences"
+    return f"Replaced {replacements} {label} in {path_label}."
+
+
+def _format_glob_message(
+    base: VfsPath, pattern: str, matches: Sequence[GlobMatch]
+) -> str:
+    path_label = _format_path(base)
+    match_label = "match" if len(matches) == 1 else "matches"
+    return f"Found {len(matches)} {match_label} under {path_label} for pattern '{pattern}'."
+
+
+def _format_grep_message(pattern: str, matches: Sequence[GrepMatch]) -> str:
+    match_label = "match" if len(matches) == 1 else "matches"
+    return f"Found {len(matches)} {match_label} for pattern '{pattern}'."
 
 
 def _format_delete_message(path: VfsPath, files: Sequence[VfsFile]) -> str:
@@ -580,7 +1070,7 @@ def _format_delete_message(path: VfsPath, files: Sequence[VfsFile]) -> str:
 
 
 def _format_path(path: VfsPath) -> str:
-    return "/".join(path.segments) or "."
+    return "/".join(path.segments) or "/"
 
 
 def _normalize_root(path: os.PathLike[str] | str) -> Path:
@@ -592,20 +1082,51 @@ def _normalize_root(path: os.PathLike[str] | str) -> Path:
 
 def _materialize_mounts(
     mounts: Sequence[HostMount], allowed_roots: Sequence[Path]
-) -> VirtualFileSystem:
+) -> tuple[VirtualFileSystem, tuple[_HostMountPreview, ...]]:
     if not mounts:
-        return VirtualFileSystem()
+        return VirtualFileSystem(), ()
 
     aggregated: dict[tuple[str, ...], VfsFile] = {}
+    previews: list[_HostMountPreview] = []
     for mount in mounts:
-        loaded = _load_mount(mount, allowed_roots)
+        loaded, preview = _load_mount(mount, allowed_roots)
+        previews.append(preview)
         for file in loaded:
             aggregated[file.path.segments] = file
     files = tuple(sorted(aggregated.values(), key=lambda file: file.path.segments))
-    return VirtualFileSystem(files=files)
+    return VirtualFileSystem(files=files), tuple(previews)
 
 
-def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFile, ...]:
+def _render_section_template(previews: Sequence[_HostMountPreview]) -> str:
+    if not previews:
+        return _VFS_SECTION_TEMPLATE
+
+    lines: list[str] = [_VFS_SECTION_TEMPLATE, "", "Configured host mounts:"]
+    for preview in previews:
+        mount_label = _format_path(preview.mount_path)
+        resolved_label = str(preview.resolved_host)
+        lines.append(
+            f"- Host `{resolved_label}` (configured as `{preview.host_path}`) mounted at `{mount_label}`."
+        )
+        contents = _format_mount_entries(preview.entries)
+        lines.append(f"  Contents: {contents}")
+    return "\n".join(lines)
+
+
+def _format_mount_entries(entries: Sequence[str]) -> str:
+    if not entries:
+        return "<empty>"
+    preview = entries[:_MAX_MOUNT_PREVIEW_ENTRIES]
+    formatted = " ".join(f"`{entry}`" for entry in preview)
+    remaining = len(entries) - len(preview)
+    if remaining > 0:
+        formatted += f" … (+{remaining} more)"
+    return formatted
+
+
+def _load_mount(
+    mount: HostMount, allowed_roots: Sequence[Path]
+) -> tuple[tuple[VfsFile, ...], _HostMountPreview]:
     host_path = mount.host_path.strip()
     if not host_path:
         raise ToolValidationError("Host mount path must not be empty.")
@@ -614,6 +1135,14 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
     include_patterns = _normalize_globs(mount.include_glob, "include_glob")
     exclude_patterns = _normalize_globs(mount.exclude_glob, "exclude_glob")
     mount_prefix = _normalize_optional_path(mount.mount_path)
+    preview_entries = _list_mount_entries(resolved_host)
+    preview = _HostMountPreview(
+        host_path=host_path,
+        resolved_host=resolved_host,
+        mount_path=mount_prefix,
+        entries=preview_entries,
+        is_directory=resolved_host.is_dir(),
+    )
 
     files: list[VfsFile] = []
     consumed_bytes = 0
@@ -657,7 +1186,21 @@ def _load_mount(mount: HostMount, allowed_roots: Sequence[Path]) -> tuple[VfsFil
             updated_at=timestamp,
         )
         files.append(file)
-    return tuple(files)
+    return tuple(files), preview
+
+
+def _list_mount_entries(root: Path) -> tuple[str, ...]:
+    if root.is_file():
+        return (root.name,)
+    try:
+        children = sorted(root.iterdir(), key=lambda path: path.name.lower())
+    except OSError as error:  # pragma: no cover - defensive guard
+        raise ToolValidationError(f"Failed to inspect host mount {root}.") from error
+    labels: list[str] = []
+    for child in children:
+        suffix = "/" if child.is_dir() else ""
+        labels.append(f"{child.name}{suffix}")
+    return tuple(labels)
 
 
 def _resolve_mount_path(host_path: str, allowed_roots: Sequence[Path]) -> Path:
@@ -782,13 +1325,24 @@ def _truncate_to_milliseconds(value: datetime) -> datetime:
 
 __all__ = [
     "DeleteEntry",
+    "EditFileParams",
+    "FileInfo",
+    "GlobMatch",
+    "GlobParams",
+    "GrepMatch",
+    "GrepParams",
     "HostMount",
     "ListDirectory",
+    "ListDirectoryParams",
     "ListDirectoryResult",
     "ReadFile",
+    "ReadFileParams",
+    "ReadFileResult",
+    "RemoveParams",
     "VfsFile",
     "VfsPath",
     "VfsToolsSection",
     "VirtualFileSystem",
     "WriteFile",
+    "WriteFileParams",
 ]

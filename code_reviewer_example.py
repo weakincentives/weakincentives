@@ -19,7 +19,8 @@ import logging
 import os
 import sys
 import textwrap
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, is_dataclass
 from pathlib import Path
 from types import MethodType
 from typing import Any, Protocol, cast
@@ -124,11 +125,31 @@ def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
 
 
 def _format_for_log(payload: object, *, limit: int = _LOG_STRING_LIMIT) -> str:
+    serializable = _coerce_for_log(payload)
     try:
-        rendered = json.dumps(payload, ensure_ascii=False)
+        rendered = json.dumps(serializable, ensure_ascii=False)
     except TypeError:
-        rendered = repr(payload)
+        rendered = repr(serializable)
     return _truncate_for_log(rendered, limit=limit)
+
+
+def _coerce_for_log(payload: object) -> object:
+    """Convert payloads (e.g., dataclasses) into JSON-serializable structures."""
+
+    if payload is None or isinstance(payload, (str, int, float, bool)):
+        return payload
+    if is_dataclass(payload):
+        return dump(payload, exclude_none=True)
+    if isinstance(payload, Mapping):
+        return {str(key): _coerce_for_log(value) for key, value in payload.items()}
+    if isinstance(payload, Sequence) and not isinstance(
+        payload, (str, bytes, bytearray)
+    ):
+        return [_coerce_for_log(item) for item in payload]
+    if isinstance(payload, set):
+        # Sets are not JSON serializable; convert to sorted list for stability.
+        return sorted(_coerce_for_log(item) for item in payload)
+    return str(payload)
 
 
 def _resolve_override_tag(tag: str | None = None) -> str:
@@ -266,7 +287,6 @@ class SunfishReviewSession:
         self._bus.subscribe(ToolInvoked, self._on_tool_invoked)
 
     def evaluate(self, request: str) -> str:
-        self._session.reset()
         response = self._adapter.evaluate(
             self._prompt,
             ReviewTurnParams(request=request),
@@ -281,7 +301,7 @@ class SunfishReviewSession:
         return "(no response from assistant)"
 
     def reset(self) -> None:
-        """Clear session state before running a new turn."""
+        """Clear session state so subsequent turns start fresh."""
 
         self._session.reset()
 

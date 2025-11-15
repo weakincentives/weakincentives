@@ -14,6 +14,9 @@ copy-on-write, start empty automatically, and disappear when the session ends; n
 - `VfsToolsSection` is the public entry point. It wires the tool definitions, prompt copy, reducer registrations, and
   optional host folder mounts so orchestrators add the section once per session.
 - Host folder mounts are declared via the `HostMount` dataclass and supplied through the section's `mounts` argument.
+  The rendered prompt appends a "Configured host mounts" appendix that previews each mount's root directory (equivalent to
+  running `ls` on the mount source) so agents can see the initial workspace surface. File mounts render the target
+  filename directly in the list while directory mounts show a single-level listing of child entries.
 
 ## Session Integration
 
@@ -150,6 +153,8 @@ The suite keeps a delete helper internally for reducers (`DeleteEntry`). Tool ha
 
 1. Remember the virtual filesystem starts empty aside from any host mounts configured by the orchestrator; create files
    via `write_file` and update them with `edit_file` when needed.
+1. Review the "Configured host mounts" appendix for a quick summary of mirrored directories and their top-level contents
+   before issuing exploration commands.
 1. Host mounts are configuration-time only; agents cannot import additional host directories during a session.
 1. Use `ls` and `glob` to explore before reading or writing specific files; keep listings targeted to minimise
    output volume.

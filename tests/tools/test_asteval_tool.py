@@ -41,6 +41,7 @@ from weakincentives.tools import (
     VfsToolsSection,
     VirtualFileSystem,
     WriteFile,
+    WriteFileParams,
 )
 
 
@@ -158,12 +159,12 @@ def test_multiline_reads_and_writes() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
-        Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
+        Tool[WriteFileParams, WriteFile], find_tool(vfs_section, "write_file")
     )
     invoke_tool(
         bus,
         write_tool,
-        WriteFile(path=VfsPath(("docs", "info.txt")), content="sample text"),
+        WriteFileParams(file_path="docs/info.txt", content="sample text"),
         session=session,
     )
 
@@ -500,13 +501,13 @@ def test_create_mode_rejects_existing_file() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
-        Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
+        Tool[WriteFileParams, WriteFile], find_tool(vfs_section, "write_file")
     )
     existing_path = VfsPath(("docs", "info.txt"))
     invoke_tool(
         bus,
         write_tool,
-        WriteFile(path=existing_path, content="original"),
+        WriteFileParams(file_path="docs/info.txt", content="original"),
         session=session,
     )
 
@@ -557,13 +558,13 @@ def test_overwrite_updates_existing_file() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
-        Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
+        Tool[WriteFileParams, WriteFile], find_tool(vfs_section, "write_file")
     )
     path = VfsPath(("docs", "info.txt"))
     invoke_tool(
         bus,
         write_tool,
-        WriteFile(path=path, content="old"),
+        WriteFileParams(file_path="docs/info.txt", content="old"),
         session=session,
     )
 
@@ -626,7 +627,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     )
     list_tool = cast(
         Tool[ListDirectory, ListDirectoryResult],
-        find_tool(vfs_section, "vfs_list_directory"),
+        find_tool(vfs_section, "ls"),
     )
     invoke_tool(bus, list_tool, ListDirectory(), session=session)
     section = AstevalSection()
@@ -709,10 +710,15 @@ def test_write_text_conflict_with_read_path() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
-        Tool[WriteFile, WriteFile], find_tool(vfs_section, "vfs_write_file")
+        Tool[WriteFileParams, WriteFile], find_tool(vfs_section, "write_file")
     )
     path = VfsPath(("docs", "info.txt"))
-    invoke_tool(bus, write_tool, WriteFile(path=path, content="seed"), session=session)
+    invoke_tool(
+        bus,
+        write_tool,
+        WriteFileParams(file_path="docs/info.txt", content="seed"),
+        session=session,
+    )
 
     params = EvalParams(
         code="write_text('docs/info.txt', 'data')",
