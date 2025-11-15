@@ -36,9 +36,11 @@ from .prompt import (
     parse_structured_output,
 )
 from .runtime import StructuredLogger, configure_logging, get_logger
+from .types import JSONValue
 
 __all__ = [
     "Deadline",
+    "JSONValue",
     "MarkdownSection",
     "Prompt",
     "PromptResponse",

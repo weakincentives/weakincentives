@@ -10,26 +10,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Internal typing helpers for the :mod:`weakincentives.prompt` package."""
+"""JSON typing helpers."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import Field
-from typing import Any, ClassVar, Protocol, runtime_checkable
 
 
-type DataclassFieldMapping = Mapping[str, Field[Any]]
+_JSONPrimitive = str | int | float | bool | None
 
 
-@runtime_checkable
-class SupportsDataclass(Protocol):
-    """Protocol satisfied by dataclass types and instances."""
-
-    __dataclass_fields__: ClassVar[DataclassFieldMapping]
+type JSONValue = _JSONPrimitive | Mapping[str, "JSONValue"] | Sequence["JSONValue"]
 
 
-SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass]
-
-
-__all__ = ["SupportsDataclass", "SupportsToolResult", "DataclassFieldMapping"]
+__all__ = ["JSONValue"]

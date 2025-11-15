@@ -41,6 +41,7 @@ from weakincentives.prompt.overrides.versioning import (
     ToolOverride,
 )
 from weakincentives.prompt.tool import Tool
+from weakincentives.types import JSONValue
 
 
 @dataclass(slots=True)
@@ -113,7 +114,7 @@ def test_hex_digest_rejects_non_strings() -> None:
 def test_validate_header_accepts_matching_metadata(tmp_path: Path) -> None:
     prompt, descriptor, _ = _build_prompt_with_tool()
     tag = "latest"
-    payload = {
+    payload: dict[str, JSONValue] = {
         "version": FORMAT_VERSION,
         "ns": prompt.ns,
         "prompt_key": prompt.key,
@@ -126,7 +127,7 @@ def test_validate_header_accepts_matching_metadata(tmp_path: Path) -> None:
 def test_validate_header_rejects_version_mismatch(tmp_path: Path) -> None:
     prompt, descriptor, _ = _build_prompt_with_tool()
     tag = "latest"
-    payload = {
+    payload: dict[str, JSONValue] = {
         "version": 99,
         "ns": prompt.ns,
         "prompt_key": prompt.key,
@@ -144,7 +145,7 @@ def test_load_sections_filters_unknown_entries() -> None:
         sections=[SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST)],
         tools=[],
     )
-    payload = {
+    payload: dict[str, JSONValue] = {
         "intro": {
             "expected_hash": str(VALID_DIGEST),
             "body": "Body",
@@ -167,7 +168,7 @@ def test_load_sections_rejects_invalid_hash_format() -> None:
         sections=[SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST)],
         tools=[],
     )
-    payload = {
+    payload: dict[str, JSONValue] = {
         "intro": {
             "expected_hash": "deadbeef",
             "body": "Body",
@@ -191,7 +192,7 @@ def test_load_tools_filters_unknown_entries() -> None:
             )
         ],
     )
-    payload = {
+    payload: dict[str, JSONValue] = {
         "demo_tool": {
             "expected_contract_hash": str(VALID_DIGEST),
             "description": "Updated",
@@ -220,7 +221,7 @@ def test_load_tools_rejects_invalid_hash_format() -> None:
             )
         ],
     )
-    payload = {
+    payload: dict[str, JSONValue] = {
         "demo_tool": {
             "expected_contract_hash": "deadbeef",
         }

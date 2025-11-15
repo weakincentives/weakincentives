@@ -37,6 +37,7 @@ from weakincentives.prompt.overrides.validation import (
     seed_sections,
     seed_tools,
 )
+from weakincentives.types import JSONValue
 
 
 @dataclass
@@ -207,7 +208,7 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
     section = descriptor.sections[0]
     override_path = _override_path(tmp_path, descriptor)
     override_path.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, Any] = {
+    payload: dict[str, JSONValue] = {
         "version": 1,
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
@@ -220,7 +221,7 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
         },
         "tools": {},
     }
-    sections_payload = cast(dict[str, Any], payload["sections"])
+    sections_payload = cast(dict[str, JSONValue], payload["sections"])
     sections_payload["unknown/path"] = {
         "expected_hash": section.content_hash,
         "body": "Unused.",
@@ -237,11 +238,12 @@ def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
     section_key = "/".join(section.path)
 
     assert load_sections(None, descriptor) == {}
-    assert load_sections({}, descriptor) == {}
+    empty_sections: Mapping[str, JSONValue] = {}
+    assert load_sections(empty_sections, descriptor) == {}
 
     with pytest.raises(PromptOverridesError):
         load_sections(
-            cast(Mapping[str, object], ["invalid"]),
+            cast(Mapping[str, JSONValue], ["invalid"]),
             descriptor,
         )
 
@@ -258,11 +260,11 @@ def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
         )
 
     with pytest.raises(PromptOverridesError):
-        load_sections(cast(Mapping[str, object], []), descriptor)
+        load_sections(cast(Mapping[str, JSONValue], []), descriptor)
 
     with pytest.raises(PromptOverridesError):
         load_sections(
-            cast(Mapping[str, object], {1: {}}),
+            cast(Mapping[str, JSONValue], {1: {}}),
             descriptor,
         )
 
@@ -276,7 +278,8 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
     override_path.parent.mkdir(parents=True, exist_ok=True)
 
     assert load_tools(None, descriptor) == {}
-    assert load_tools({}, descriptor) == {}
+    empty_tools: Mapping[str, JSONValue] = {}
+    assert load_tools(empty_tools, descriptor) == {}
 
     base_payload = {
         "version": 1,
@@ -350,11 +353,11 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
         store.resolve(descriptor)
 
     with pytest.raises(PromptOverridesError):
-        load_tools(cast(Mapping[str, object], []), descriptor)
+        load_tools(cast(Mapping[str, JSONValue], []), descriptor)
 
     with pytest.raises(PromptOverridesError):
         load_tools(
-            cast(Mapping[str, object], {1: {}}),
+            cast(Mapping[str, JSONValue], {1: {}}),
             descriptor,
         )
 
