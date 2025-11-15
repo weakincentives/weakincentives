@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
-from ._types import SupportsDataclass
+from ._types import SupportsDataclass, SupportsToolResult
 
 
 class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC):
@@ -87,7 +87,7 @@ class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC
 
         return set()
 
-    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
+    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
         """Return the tools exposed by this section."""
 
         return self._tools
@@ -104,17 +104,17 @@ class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC
     @staticmethod
     def _normalize_tools(
         tools: Sequence[object] | None,
-    ) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
+    ) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
         if not tools:
             return ()
 
         from .tool import Tool
 
-        normalized: list[Tool[SupportsDataclass, SupportsDataclass]] = []
+        normalized: list[Tool[SupportsDataclass, SupportsToolResult]] = []
         for tool in tools:
             if not isinstance(tool, Tool):
                 raise TypeError("Section tools must be Tool instances.")
-            normalized.append(cast(Tool[SupportsDataclass, SupportsDataclass], tool))
+            normalized.append(cast(Tool[SupportsDataclass, SupportsToolResult], tool))
         return tuple(normalized)
 
     @staticmethod

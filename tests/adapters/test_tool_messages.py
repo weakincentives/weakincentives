@@ -16,7 +16,7 @@ import json
 from typing import cast
 
 from weakincentives.adapters._tool_messages import serialize_tool_message
-from weakincentives.prompt import SupportsDataclass, ToolResult
+from weakincentives.prompt import SupportsToolResult, ToolResult
 
 try:
     from tests.adapters._test_stubs import ToolPayload
@@ -28,7 +28,7 @@ def test_serialize_tool_message_overrides_mapping_payload() -> None:
     result = ToolResult(message="ok", value=None)
 
     serialized = serialize_tool_message(
-        cast(ToolResult[SupportsDataclass], result),
+        cast(ToolResult[SupportsToolResult], result),
         payload={"group": {"value": 1}},
     )
 
@@ -43,7 +43,7 @@ def test_serialize_tool_message_overrides_sequence_payload() -> None:
 
     payload = [ToolPayload(answer="first"), ToolPayload(answer="second")]
     serialized = serialize_tool_message(
-        cast(ToolResult[SupportsDataclass], result),
+        cast(ToolResult[SupportsToolResult], result),
         payload=payload,
     )
 
@@ -62,7 +62,7 @@ def test_serialize_tool_message_skips_payload_when_excluded() -> None:
     )
 
     decoded = json.loads(
-        serialize_tool_message(cast(ToolResult[SupportsDataclass], result))
+        serialize_tool_message(cast(ToolResult[SupportsToolResult], result))
     )
     assert decoded == {"message": "ok", "success": True}
 
@@ -72,7 +72,7 @@ def test_serialize_tool_message_skips_override_payload_when_excluded() -> None:
 
     decoded = json.loads(
         serialize_tool_message(
-            cast(ToolResult[SupportsDataclass], result),
+            cast(ToolResult[SupportsToolResult], result),
             payload={"answer": "hidden"},
         )
     )
@@ -88,7 +88,7 @@ def test_serialize_tool_message_falls_back_to_stringification() -> None:
 
     decoded = json.loads(
         serialize_tool_message(
-            cast(ToolResult[SupportsDataclass], result),
+            cast(ToolResult[SupportsToolResult], result),
             payload=UnknownPayload(),
         )
     )

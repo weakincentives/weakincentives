@@ -16,10 +16,10 @@ import json
 import re
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Protocol, TypeVar, overload
+from typing import Protocol, TypeVar, overload
 
 from ...serde.schema import schema
-from .._types import SupportsDataclass
+from .._types import SupportsDataclass, SupportsToolResult
 from ..tool import Tool
 
 
@@ -38,7 +38,7 @@ def _param_description_mapping_factory() -> dict[str, str]:
 class SectionLike(Protocol):
     def original_body_template(self) -> str | None: ...
 
-    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]: ...
+    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]: ...
 
     accepts_overrides: bool
 
@@ -232,7 +232,7 @@ __all__ = [
 ]
 
 
-def _tool_contract_hash(tool: Tool[Any, Any]) -> HexDigest:
+def _tool_contract_hash(tool: Tool[SupportsDataclass, SupportsToolResult]) -> HexDigest:
     description_hash = hash_text(tool.description)
     params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
     if getattr(tool, "result_container", "object") == "array":

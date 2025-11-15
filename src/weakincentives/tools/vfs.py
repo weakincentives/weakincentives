@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Final, Literal, cast
 from weakref import WeakSet
 
-from ..prompt import SupportsDataclass
+from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..runtime.session import (
@@ -617,10 +617,10 @@ def _build_tools(
     *,
     section: VfsToolsSection,
     accepts_overrides: bool,
-) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
+) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
     suite = _VfsToolSuite(section=section)
     return cast(
-        tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
+        tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
         (
             Tool[ListDirectoryParams, tuple[FileInfo, ...]](
                 name="ls",

@@ -20,7 +20,7 @@ from enum import Enum
 from typing import Final, Literal, cast, override
 from weakref import WeakSet
 
-from ..prompt import SupportsDataclass
+from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
@@ -361,10 +361,10 @@ def _build_tools(
     *,
     section: PlanningToolsSection,
     accepts_overrides: bool,
-) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
+) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
     suite = _PlanningToolSuite(section=section)
     return cast(
-        tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
+        tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
         (
             Tool[SetupPlan, SetupPlan](
                 name="planning_setup_plan",

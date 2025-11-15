@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Literal, cast, overload
 
 from ...runtime.logging import StructuredLogger, get_logger
-from .._types import SupportsDataclass
+from .._types import SupportsDataclass, SupportsToolResult
 from ..tool import Tool
 from .versioning import (
     HexDigest,
@@ -483,7 +483,7 @@ def seed_tools(
 ) -> dict[str, ToolOverride]:
     if not descriptor.tools:
         return {}
-    tool_lookup: dict[str, Tool[SupportsDataclass, SupportsDataclass]] = {}
+    tool_lookup: dict[str, Tool[SupportsDataclass, SupportsToolResult]] = {}
     for node in prompt.sections:
         for tool in node.section.tools():
             tool_lookup[tool.name] = tool
@@ -505,7 +505,7 @@ def seed_tools(
 
 
 def _collect_param_descriptions(
-    tool: Tool[SupportsDataclass, SupportsDataclass],
+    tool: Tool[SupportsDataclass, SupportsToolResult],
 ) -> dict[str, str]:
     params_type = getattr(tool, "params_type", None)
     if not isinstance(params_type, type) or not is_dataclass(params_type):

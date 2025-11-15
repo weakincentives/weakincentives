@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from ._types import SupportsDataclass
+from ._types import SupportsDataclass, SupportsToolResult
 from .chapter import Chapter, ChaptersExpansionPolicy
 from .composition import (
     DelegationParams,
@@ -79,6 +79,7 @@ __all__ = [
     "SectionOverride",
     "SectionPath",
     "SupportsDataclass",
+    "SupportsToolResult",
     "Tool",
     "ToolContext",
     "ToolDescriptor",

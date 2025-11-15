@@ -14,10 +14,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
+from weakincentives.prompt import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.overrides.validation import (
     FORMAT_VERSION,
     load_sections,
@@ -56,12 +57,12 @@ class _Result:
 class _Section:
     template: str
     accepts_overrides: bool = True
-    _tools: tuple[Tool[Any, Any], ...] = ()
+    _tools: tuple[Tool[SupportsDataclass, SupportsToolResult], ...] = ()
 
     def original_body_template(self) -> str | None:
         return self.template
 
-    def tools(self) -> tuple[Tool[Any, Any], ...]:
+    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
         return self._tools
 
 
@@ -92,7 +93,7 @@ def _build_prompt_with_tool() -> tuple[
     )
     section = _Section(
         template="Body template",
-        _tools=(tool,),
+        _tools=(cast(Tool[SupportsDataclass, SupportsToolResult], tool),),
     )
     node = _SectionNode(path=("intro",), section=section)
     prompt = _Prompt(ns="demo", key="example", _section_nodes=(node,))

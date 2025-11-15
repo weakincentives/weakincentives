@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 
@@ -24,4 +25,7 @@ class SupportsDataclass(Protocol):
     __dataclass_fields__: ClassVar[dict[str, Any]]
 
 
-__all__ = ["SupportsDataclass"]
+SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass]
+
+
+__all__ = ["SupportsDataclass", "SupportsToolResult"]
