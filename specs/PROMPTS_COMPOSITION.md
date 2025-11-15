@@ -193,7 +193,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
         )
         parent_section = ParentPromptSection(tools=rendered_parent.tools)
 
-        sections: list[Section[Any]] = [summary_section, parent_section]
+        sections: list[Section[SupportsDataclass]] = [summary_section, parent_section]
 
         self._recap_params: RecapParams | None = None
         if recap_lines:
@@ -291,7 +291,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
             ),
         )
         parent_section = ParentPromptSection(tools=rendered_parent.tools)
-        sections: list[Section[Any]] = [summary_section]
+        sections: list[Section[SupportsDataclass]] = [summary_section]
 
         response_section = self._build_fallback_response_section(rendered_parent)
         if response_section is not None:

@@ -16,14 +16,16 @@ import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any, override
+from typing import Any, TypeVar, override
 
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
 from .section import Section
 
+MarkdownParamsT = TypeVar("MarkdownParamsT", bound=SupportsDataclass, covariant=True)
 
-class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
+
+class MarkdownSection(Section[MarkdownParamsT]):
     """Render markdown content using :class:`string.Template`."""
 
     def __init__(
@@ -32,9 +34,9 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         title: str,
         template: str,
         key: str,
-        default_params: ParamsT | None = None,
-        children: Sequence[object] | None = None,
-        enabled: Callable[[ParamsT], bool] | None = None,
+        default_params: MarkdownParamsT | None = None,
+        children: Sequence[Section[SupportsDataclass]] | None = None,
+        enabled: Callable[[SupportsDataclass], bool] | None = None,
         tools: Sequence[object] | None = None,
         accepts_overrides: bool = True,
     ) -> None:
@@ -50,11 +52,11 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         )
 
     @override
-    def render(self, params: ParamsT | None, depth: int) -> str:
+    def render(self, params: SupportsDataclass | None, depth: int) -> str:
         return self.render_with_template(self.template, params, depth)
 
     def render_with_template(
-        self, template_text: str, params: ParamsT | None, depth: int
+        self, template_text: str, params: SupportsDataclass | None, depth: int
     ) -> str:
         heading_level = "#" * (depth + 2)
         heading = f"{heading_level} {self.title.strip()}"
@@ -87,7 +89,7 @@ class MarkdownSection[ParamsT: SupportsDataclass](Section[ParamsT]):
         return placeholders
 
     @staticmethod
-    def _normalize_params(params: ParamsT | None) -> dict[str, Any]:
+    def _normalize_params(params: SupportsDataclass | None) -> dict[str, Any]:
         if params is None:
             return {}
         if not is_dataclass(params) or isinstance(params, type):

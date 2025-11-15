@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 
@@ -274,7 +275,7 @@ def test_prompt_render_propagates_enabled_errors() -> None:
         title="Guard",
         template="Guard: ${flag}",
         key="guard",
-        enabled=raising_enabled,
+        enabled=cast(Callable[[SupportsDataclass], bool], raising_enabled),
     )
     prompt = Prompt(
         ns="tests/prompts",

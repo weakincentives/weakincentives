@@ -89,8 +89,8 @@ class ParentPromptSection(Section[ParentPromptParams]):
         )
 
     @override
-    def render(self, params: ParentPromptParams | None, depth: int) -> str:
-        if params is None:
+    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+        if not isinstance(params, ParentPromptParams):
             raise PromptRenderError(
                 "Parent prompt section requires parameters.",
                 dataclass_type=ParentPromptParams,
@@ -114,8 +114,8 @@ class RecapSection(Section[RecapParams]):
         super().__init__(title="Recap", key="recap")
 
     @override
-    def render(self, params: RecapParams | None, depth: int) -> str:
-        if params is None:
+    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+        if not isinstance(params, RecapParams):
             raise PromptRenderError(
                 "Recap section requires parameters.",
                 dataclass_type=RecapParams,
@@ -163,7 +163,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
             tools=rendered_parent.tools,
             default_params=ParentPromptParams(body=rendered_parent.text),
         )
-        sections: list[Section[Any]] = [summary_section]
+        sections: list[Section[SupportsDataclass]] = [summary_section]
 
         if include_response_format:
             response_section = self._build_response_format_section(rendered_parent)

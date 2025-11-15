@@ -15,7 +15,7 @@ from __future__ import annotations
 import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
@@ -24,8 +24,12 @@ from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass, SupportsToolResult
 
+SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
-class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC):
+EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
+
+
+class Section(GenericParamsSpecializer[SectionParamsT], ABC):
     """Abstract building block for prompt content."""
 
     _generic_owner_name: ClassVar[str | None] = "Section"
@@ -35,21 +39,23 @@ class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC
         *,
         title: str,
         key: str,
-        default_params: ParamsT | None = None,
-        children: Sequence[object] | None = None,
-        enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None = None,
+        default_params: SectionParamsT | None = None,
+        children: Sequence[Section[SupportsDataclass]] | None = None,
+        enabled: EnabledPredicate | None = None,
         tools: Sequence[object] | None = None,
         accepts_overrides: bool = True,
     ) -> None:
         super().__init__()
         params_candidate = getattr(self.__class__, "_params_type", None)
-        params_type = cast(
-            type[ParamsT] | None,
-            params_candidate if isinstance(params_candidate, type) else None,
+        candidate_type = (
+            params_candidate if isinstance(params_candidate, type) else None
         )
+        params_type = cast(type[SupportsDataclass] | None, candidate_type)
 
-        self.params_type: type[ParamsT] | None = params_type
-        self.param_type: type[ParamsT] | None = params_type
+        self.params_type: type[SectionParamsT] | None = cast(
+            type[SectionParamsT] | None, params_type
+        )
+        self.param_type: type[SectionParamsT] | None = self.params_type
         self.title = title
         self.key = self._normalize_key(key)
         self.default_params = default_params
@@ -59,19 +65,18 @@ class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC
             raise TypeError("Section without parameters cannot define default_params.")
 
         normalized_children: list[Section[SupportsDataclass]] = []
-        for child in children or ():
+        raw_children: Sequence[object] = cast(Sequence[object], children or ())
+        for child in raw_children:
             if not isinstance(child, Section):
                 raise TypeError("Section children must be Section instances.")
             normalized_children.append(cast(Section[SupportsDataclass], child))
-        self.children: tuple[Section[SupportsDataclass], ...] = tuple(
-            normalized_children
-        )
-        self._enabled: Callable[[ParamsT | None], bool] | None = (
+        self.children = tuple(normalized_children)
+        self._enabled: Callable[[SupportsDataclass | None], bool] | None = (
             self._normalize_enabled(enabled, params_type)
         )
         self._tools = self._normalize_tools(tools)
 
-    def is_enabled(self, params: ParamsT | None) -> bool:
+    def is_enabled(self, params: SupportsDataclass | None) -> bool:
         """Return True when the section should render for the given params."""
 
         if self._enabled is None:
@@ -79,7 +84,7 @@ class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC
         return bool(self._enabled(params))
 
     @abstractmethod
-    def render(self, params: ParamsT | None, depth: int) -> str:
+    def render(self, params: SupportsDataclass | None, depth: int) -> str:
         """Produce markdown output for the section at the supplied depth."""
 
     def placeholder_names(self) -> set[str]:
@@ -119,28 +124,28 @@ class Section[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT], ABC
 
     @staticmethod
     def _normalize_enabled(
-        enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None,
+        enabled: EnabledPredicate | None,
         params_type: type[SupportsDataclass] | None,
-    ) -> Callable[[ParamsT | None], bool] | None:
+    ) -> Callable[[SupportsDataclass | None], bool] | None:
         if enabled is None:
             return None
         if params_type is None and not _callable_requires_positional_argument(enabled):
             zero_arg = cast(Callable[[], bool], enabled)
 
-            def _without_params(_: ParamsT | None) -> bool:
+            def _without_params(_: SupportsDataclass | None) -> bool:
                 return bool(zero_arg())
 
             return _without_params
 
-        coerced = cast(Callable[[ParamsT], bool], enabled)
+        coerced = cast(Callable[[SupportsDataclass], bool], enabled)
 
-        def _with_params(value: ParamsT | None) -> bool:
-            return bool(coerced(cast(ParamsT, value)))
+        def _with_params(value: SupportsDataclass | None) -> bool:
+            return bool(coerced(cast(SupportsDataclass, value)))
 
         return _with_params
 
 
-def _callable_requires_positional_argument(callback: Callable[..., Any]) -> bool:
+def _callable_requires_positional_argument(callback: EnabledPredicate) -> bool:
     try:
         signature = inspect.signature(callback)
     except (TypeError, ValueError):

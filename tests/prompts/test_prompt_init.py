@@ -12,11 +12,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, Prompt, PromptValidationError
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptValidationError,
+    SupportsDataclass,
+)
+from weakincentives.prompt.section import Section
 
 
 @dataclass
@@ -205,7 +213,10 @@ def test_text_section_rejects_non_section_children() -> None:
             title="Parent",
             template="${value}",
             key="parent",
-            children=["not a section"],
+            children=cast(
+                Sequence[Section[SupportsDataclass]],
+                ["not a section"],
+            ),
         )
 
     assert "Section instances" in str(exc.value)

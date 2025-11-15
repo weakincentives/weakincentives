@@ -343,8 +343,8 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
 
     @override
-    def render(self, params: _PlanningSectionParams | None, depth: int) -> str:
-        if params is None:
+    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+        if not isinstance(params, _PlanningSectionParams):
             raise PromptRenderError(
                 "Planning tools section requires parameters.",
                 dataclass_type=_PlanningSectionParams,

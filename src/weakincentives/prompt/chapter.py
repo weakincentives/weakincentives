@@ -18,7 +18,7 @@ import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar, cast
+from typing import ClassVar, TypeVar, cast
 
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
@@ -33,17 +33,21 @@ class ChaptersExpansionPolicy(StrEnum):
     INTENT_CLASSIFIER = "intent_classifier"
 
 
+ChapterParamsT = TypeVar("ChapterParamsT", bound=SupportsDataclass, covariant=True)
+EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
+
+
 @dataclass
-class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
+class Chapter(GenericParamsSpecializer[ChapterParamsT]):
     """Container grouping sections under a shared visibility boundary."""
 
     key: str
     title: str
     description: str | None = None
-    sections: tuple[Section[Any], ...] = ()
-    default_params: ParamsT | None = None
-    enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None = None
-    _enabled_callable: Callable[[ParamsT | None], bool] | None = field(
+    sections: tuple[Section[SupportsDataclass], ...] = ()
+    default_params: ChapterParamsT | None = None
+    enabled: EnabledPredicate | None = None
+    _enabled_callable: Callable[[SupportsDataclass | None], bool] | None = field(
         init=False, repr=False, default=None
     )
 
@@ -51,17 +55,15 @@ class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
 
     def __post_init__(self) -> None:
         params_candidate = getattr(self.__class__, "_params_type", None)
-        params_type = cast(
-            type[ParamsT] | None,
-            params_candidate if isinstance(params_candidate, type) else None,
+        candidate_type = (
+            params_candidate if isinstance(params_candidate, type) else None
         )
+        params_type = cast(type[SupportsDataclass] | None, candidate_type)
         self.key = self._normalize_key(self.key)
 
         self.sections = tuple(self.sections or ())
 
-        self._enabled_callable: Callable[[ParamsT | None], bool] | None = (
-            self._normalize_enabled(self.enabled, params_type)
-        )
+        self._enabled_callable = self._normalize_enabled(self.enabled, params_type)
 
         if params_type is None:
             if self.default_params is not None:
@@ -76,18 +78,18 @@ class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
             )
 
     @property
-    def params_type(self) -> type[ParamsT] | None:
+    def params_type(self) -> type[ChapterParamsT] | None:
         params_candidate = getattr(self.__class__, "_params_type", None)
-        return cast(
-            type[ParamsT] | None,
-            params_candidate if isinstance(params_candidate, type) else None,
+        candidate_type = (
+            params_candidate if isinstance(params_candidate, type) else None
         )
+        return cast(type[ChapterParamsT] | None, candidate_type)
 
     @property
-    def param_type(self) -> type[ParamsT] | None:
+    def param_type(self) -> type[ChapterParamsT] | None:
         return self.params_type
 
-    def is_enabled(self, params: ParamsT | None) -> bool:
+    def is_enabled(self, params: SupportsDataclass | None) -> bool:
         """Return True when the chapter should open for the provided params."""
 
         if self._enabled_callable is None:
@@ -102,28 +104,28 @@ class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
 
     @staticmethod
     def _normalize_enabled(
-        enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None,
+        enabled: EnabledPredicate | None,
         params_type: type[SupportsDataclass] | None,
-    ) -> Callable[[ParamsT | None], bool] | None:
+    ) -> Callable[[SupportsDataclass | None], bool] | None:
         if enabled is None:
             return None
         if params_type is None and not _callable_requires_positional_argument(enabled):
             zero_arg = cast(Callable[[], bool], enabled)
 
-            def _without_params(_: ParamsT | None) -> bool:
+            def _without_params(_: SupportsDataclass | None) -> bool:
                 return bool(zero_arg())
 
             return _without_params
 
-        coerced = cast(Callable[[ParamsT], bool], enabled)
+        coerced = cast(Callable[[SupportsDataclass], bool], enabled)
 
-        def _with_params(value: ParamsT | None) -> bool:
-            return bool(coerced(cast(ParamsT, value)))
+        def _with_params(value: SupportsDataclass | None) -> bool:
+            return bool(coerced(cast(SupportsDataclass, value)))
 
         return _with_params
 
 
-def _callable_requires_positional_argument(callback: Callable[..., object]) -> bool:
+def _callable_requires_positional_argument(callback: EnabledPredicate) -> bool:
     try:
         signature = inspect.signature(callback)
     except (TypeError, ValueError):
