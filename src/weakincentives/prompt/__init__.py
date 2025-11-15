@@ -47,6 +47,11 @@ from .overrides import (
     hash_text,
 )
 from .prompt import Prompt
+from .protocols import (
+    PromptProtocol,
+    ProviderAdapterProtocol,
+    RenderedPromptProtocol,
+)
 from .section import Section
 from .structured_output import OutputParseError, parse_structured_output
 from .tool import Tool, ToolContext, ToolHandler
@@ -70,10 +75,13 @@ __all__ = [
     "PromptOverride",
     "PromptOverridesError",
     "PromptOverridesStore",
+    "PromptProtocol",
     "PromptRenderError",
     "PromptValidationError",
+    "ProviderAdapterProtocol",
     "RecapParams",
     "RecapSection",
+    "RenderedPromptProtocol",
     "Section",
     "SectionDescriptor",
     "SectionOverride",

@@ -23,6 +23,7 @@ from ._types import SupportsDataclass
 from .errors import PromptRenderError
 from .markdown import MarkdownSection
 from .prompt import Prompt, RenderedPrompt
+from .protocols import PromptProtocol
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
 
@@ -151,7 +152,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
 
     def __init__(
         self,
-        parent_prompt: Prompt[ParentOutputT],
+        parent_prompt: PromptProtocol[ParentOutputT] | Prompt[ParentOutputT],
         rendered_parent: RenderedPrompt[ParentOutputT],
         *,
         include_response_format: bool = False,

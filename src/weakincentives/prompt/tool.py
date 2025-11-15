@@ -42,6 +42,11 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
 if TYPE_CHECKING:
     from ..runtime.events._types import EventBus
     from ..runtime.session.protocols import SessionProtocol
+    from .protocols import (
+        PromptProtocol,
+        ProviderAdapterProtocol,
+        RenderedPromptProtocol,
+    )
 
 ParamsT_contra = TypeVar("ParamsT_contra", bound=SupportsDataclass, contravariant=True)
 ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
@@ -51,12 +56,21 @@ ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
 class ToolContext:
     """Immutable container exposing prompt execution state to handlers."""
 
-    prompt: Any
-    rendered_prompt: Any
-    adapter: Any
+    prompt: PromptProtocol[Any]
+    rendered_prompt: RenderedPromptProtocol[Any] | None
+    adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     event_bus: EventBus
     deadline: Deadline | None = None
+
+
+def _normalize_specialization(item: object) -> tuple[object, object]:
+    if not isinstance(item, tuple):
+        raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
+    normalized = cast(SequenceABC[object], item)
+    if len(normalized) != 2:
+        raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
+    return normalized[0], normalized[1]
 
 
 class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
@@ -74,7 +88,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     name: str
     description: str
     handler: ToolHandler[ParamsT, ResultT] | None
-    params_type: type[SupportsDataclass] = field(init=False, repr=False)
+    params_type: type[ParamsT] = field(init=False, repr=False)
     result_type: type[SupportsDataclass] = field(init=False, repr=False)
     result_container: Literal["object", "array"] = field(
         init=False,
@@ -84,8 +98,9 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     accepts_overrides: bool = True
 
     def __post_init__(self) -> None:
-        params_type = cast(
-            type[SupportsDataclass] | None, getattr(self, "params_type", None)
+        params_attr = getattr(self, "params_type", None)
+        params_type: type[SupportsDataclass] | None = (
+            params_attr if isinstance(params_attr, type) else None
         )
         raw_result_annotation = getattr(self, "_result_annotation", None)
         if params_type is None or raw_result_annotation is None:
@@ -93,8 +108,10 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
             if origin is not None:  # pragma: no cover - interpreter-specific path
                 args = get_args(origin)
                 if len(args) == 2:
-                    params_type = cast(type[SupportsDataclass], args[0])
-                    raw_result_annotation = args[1]
+                    params_arg, result_arg = args
+                    if isinstance(params_arg, type):
+                        params_type = params_arg
+                        raw_result_annotation = cast(ResultT, result_arg)
         if params_type is None or raw_result_annotation is None:
             raise PromptValidationError(
                 "Tool must be instantiated with concrete type arguments.",
@@ -106,7 +123,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
             params_type,
         )
 
-        self.params_type = params_type
+        self.params_type = cast(type[ParamsT], params_type)
         self.result_type = result_type
         self.result_container = result_container
         self._result_annotation = raw_result_annotation
@@ -356,15 +373,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     def __class_getitem__(
         cls, item: object
     ) -> type[Tool[SupportsDataclass, SupportsToolResult]]:
-        if not isinstance(item, tuple):
-            raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
-        typed_item = cast(tuple[Any, Any], item)
-        try:
-            params_candidate, result_candidate = typed_item
-        except ValueError as error:
-            raise TypeError(
-                "Tool[...] expects two type arguments (ParamsT, ResultT)."
-            ) from error
+        params_candidate, result_candidate = _normalize_specialization(item)
         if not isinstance(params_candidate, type):
             raise TypeError("Tool ParamsT type argument must be a type.")
         params_type = cast(type[SupportsDataclass], params_candidate)
@@ -372,7 +381,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
         class _SpecializedTool(cls):
             def __post_init__(self) -> None:
-                self.params_type = params_type
+                self.params_type = cast(type[ParamsT], params_type)
                 self._result_annotation = result_annotation
                 super().__post_init__()
 

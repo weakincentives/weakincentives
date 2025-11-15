@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
+from typing import TypeVar, cast
 
 import pytest
 
@@ -32,6 +33,15 @@ from weakincentives.prompt import (
     Tool,
 )
 from weakincentives.prompt.composition import _merge_tool_param_descriptions
+from weakincentives.prompt.protocols import PromptProtocol
+
+ParentProtocolT = TypeVar("ParentProtocolT")
+
+
+def _as_prompt_protocol[ParentProtocolT](
+    prompt: Prompt[ParentProtocolT],
+) -> PromptProtocol[ParentProtocolT]:
+    return cast(PromptProtocol[ParentProtocolT], prompt)
 
 
 @dataclass
@@ -95,7 +105,7 @@ def test_delegation_prompt_renders_required_sections() -> None:
     )
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
-        parent_prompt,
+        _as_prompt_protocol(parent_prompt),
         parent_with_descriptions,
     )
 
@@ -136,7 +146,7 @@ def test_delegation_prompt_with_response_format_instructions() -> None:
     )
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
-        parent_prompt,
+        _as_prompt_protocol(parent_prompt),
         rendered_parent,
         include_response_format=True,
     )
@@ -164,7 +174,7 @@ def test_delegation_prompt_allows_explicit_recap_override() -> None:
     rendered_parent = parent_prompt.render(ParentSectionParams(guidance="logs"))
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
-        parent_prompt,
+        _as_prompt_protocol(parent_prompt),
         rendered_parent,
     )
 
@@ -187,7 +197,7 @@ def test_delegation_prompt_requires_specialization() -> None:
     rendered_parent = parent_prompt.render(ParentSectionParams(guidance="clues"))
 
     with pytest.raises(TypeError):
-        DelegationPrompt(parent_prompt, rendered_parent)
+        DelegationPrompt(_as_prompt_protocol(parent_prompt), rendered_parent)
 
 
 def test_delegation_prompt_skips_fallback_when_parent_freeform() -> None:
@@ -205,7 +215,7 @@ def test_delegation_prompt_skips_fallback_when_parent_freeform() -> None:
     assert rendered_parent.container is None
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
-        prompt,
+        _as_prompt_protocol(prompt),
         rendered_parent,
         include_response_format=True,
     )
@@ -241,7 +251,7 @@ def test_delegation_prompt_empty_recap_uses_placeholder() -> None:
     rendered_parent = parent_prompt.render(ParentSectionParams(guidance="signals"))
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
-        parent_prompt,
+        _as_prompt_protocol(parent_prompt),
         rendered_parent,
     )
 
@@ -266,7 +276,7 @@ def test_delegation_prompt_inherits_deadline() -> None:
     rendered_parent_with_deadline = replace(rendered_parent, deadline=deadline)
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
-        parent_prompt,
+        _as_prompt_protocol(parent_prompt),
         rendered_parent_with_deadline,
     )
 

@@ -16,11 +16,10 @@ import json
 import re
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Protocol, TypeVar, overload
+from typing import Literal, Protocol, TypeVar, overload
 
 from ...serde.schema import schema
-from .._types import SupportsDataclass, SupportsToolResult
-from ..tool import Tool
+from .._types import SupportsDataclass
 
 
 def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:
@@ -35,10 +34,19 @@ def _param_description_mapping_factory() -> dict[str, str]:
     return {}
 
 
+class ToolContractProtocol(Protocol):
+    name: str
+    description: str
+    params_type: type[SupportsDataclass]
+    result_type: type[SupportsDataclass]
+    result_container: Literal["object", "array"]
+    accepts_overrides: bool
+
+
 class SectionLike(Protocol):
     def original_body_template(self) -> str | None: ...
 
-    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]: ...
+    def tools(self) -> tuple[ToolContractProtocol, ...]: ...
 
     accepts_overrides: bool
 
@@ -232,7 +240,7 @@ __all__ = [
 ]
 
 
-def _tool_contract_hash(tool: Tool[SupportsDataclass, SupportsToolResult]) -> HexDigest:
+def _tool_contract_hash(tool: ToolContractProtocol) -> HexDigest:
     description_hash = hash_text(tool.description)
     params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
     if getattr(tool, "result_container", "object") == "array":
