@@ -22,6 +22,7 @@ from ..prompt._types import SupportsDataclass
 from ..runtime.session.protocols import SessionProtocol
 
 if TYPE_CHECKING:
+    from ..prompt.overrides import PromptOverridesStore
     from ..prompt.prompt import Prompt
     from ..runtime.events._types import EventBus, ToolInvoked
 
@@ -39,6 +40,8 @@ class ProviderAdapter(Protocol[OutputT]):
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response."""
 
