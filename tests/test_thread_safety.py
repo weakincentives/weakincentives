@@ -24,15 +24,11 @@ from uuid import uuid4
 
 import pytest
 
-from code_reviewer_example import ReviewResponse, SunfishReviewSession
+from code_reviewer_example import build_code_reviewer_state
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
-from weakincentives.adapters import PromptResponse
-from weakincentives.adapters.core import SessionProtocol
-from weakincentives.deadlines import Deadline
-from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.runtime.events import EventBus, InProcessEventBus, ToolInvoked
+from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
 
 THREAD_SESSION_ID = uuid4()
@@ -46,19 +42,6 @@ class ExampleParams:
 @dataclass(slots=True)
 class ExampleResult:
     value: int
-
-
-class _StubAdapter:
-    def evaluate(  # pragma: no cover - not exercised in tests
-        self,
-        prompt: Prompt[ReviewResponse],
-        *params: SupportsDataclass,
-        parse_output: bool = True,
-        bus: EventBus,
-        session: SessionProtocol,
-        deadline: Deadline | None = None,
-    ) -> PromptResponse[ReviewResponse]:
-        raise NotImplementedError
 
 
 @dataclass(slots=True)
@@ -204,51 +187,17 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
         assert override.sections == first_sections
 
 
-@pytest.mark.threadstress(min_workers=2, max_workers=5)
-def test_sunfish_review_session_records_history_concurrently(
-    threadstress_workers: int, tmp_path: Path
-) -> None:
+def test_code_reviewer_session_reset_clears_runtime_state(tmp_path: Path) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    session = SunfishReviewSession(
-        adapter=_StubAdapter(),
-        overrides_store=overrides_store,
-        override_tag="threads",
-    )
-
-    max_workers = threadstress_workers
-    total_events = max(max_workers * 4, max_workers)
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(_publish_tool_event, session._bus, index)
-            for index in range(total_events)
-        ]
-        for future in futures:
-            future.result()
-
-    history = session.render_tool_history()
-    entries = [
-        line for line in history.splitlines() if line and not line.startswith(" ")
-    ]
-    assert len(entries) == total_events
-    recorded_names = {entry.split(". ", 1)[1].split(" ", 1)[0] for entry in entries}
-    assert recorded_names == {f"example-{index}" for index in range(total_events)}
-    recorded_indexes = {int(entry.split(". ", 1)[0]) for entry in entries}
-    assert recorded_indexes == set(range(1, total_events + 1))
-
-
-def test_sunfish_review_session_reset_clears_runtime_state(tmp_path: Path) -> None:
-    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    session = SunfishReviewSession(
-        adapter=_StubAdapter(),
+    _prompt, session, _bus = build_code_reviewer_state(
         overrides_store=overrides_store,
         override_tag="reset",
     )
 
-    runtime_session = session._session
-    runtime_session.seed_slice(str, ("value",))
+    session.seed_slice(str, ("value",))
 
-    assert runtime_session.select_all(str) == ("value",)
+    assert session.select_all(str) == ("value",)
 
     session.reset()
 
-    assert runtime_session.select_all(str) == ()
+    assert session.select_all(str) == ()

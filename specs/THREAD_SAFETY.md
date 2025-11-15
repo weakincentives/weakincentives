@@ -43,7 +43,7 @@ to provide thread-based synchronization only.
 
 ### Code Review Example Sessions
 
-- `SunfishReviewSession` and `CodeReviewSession` both keep mutable state such as
+- The code reviewer example and `CodeReviewSession` both keep mutable state such as
   `_history` lists and override tags that are mutated from event handlers without
   locks. The event bus invokes those handlers synchronously on the publisher
   thread, so cross-thread publish calls would interleave access to these lists.
@@ -109,8 +109,6 @@ to provide thread-based synchronization only.
 
 ### Code Review Sessions
 
-- Protect `_history` and similar mutable attributes with locks, or move the
-  history recording into reducers that run inside the thread-safe `Session`.
 - When printing to stdout from event handlers, serialize writes or route through
   the structured logger so output from concurrent publishers does not interleave.
 - Verify that prompt override seeding runs once per session even if multiple
@@ -122,8 +120,6 @@ to provide thread-based synchronization only.
   shared `Session` and assert that all reducers observe the expected counts.
 - Introduce stress tests for `LocalPromptOverridesStore.seed_if_necessary` that
   call it concurrently and validate the resulting file contents.
-- Exercise `CodeReviewSession.render_tool_history` under concurrent publishes to
-  ensure the history remains sorted and duplicates are not introduced.
 
 Implementing the changes above will let adapters safely share a single session
 and event bus across worker threads, unblock background agents, and document the
