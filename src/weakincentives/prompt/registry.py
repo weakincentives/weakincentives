@@ -20,9 +20,10 @@ from types import MappingProxyType
 from typing import Any, cast
 
 from ..dbc import invariant
-from ._types import SupportsDataclass
+from ._types import SupportsDataclass, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .section import Section
+from .tool import Tool
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,41 +290,50 @@ class PromptRegistry:
                     placeholder=placeholder,
                 )
 
-        self._register_section_tools(section, path)
+        section_tools = cast(tuple[object, ...], section.tools())
+        if section_tools:
+            for tool in section_tools:
+                if not isinstance(tool, Tool):
+                    raise PromptValidationError(
+                        "Section tools must be Tool instances.",
+                        section_path=path,
+                        dataclass_type=params_type,
+                    )
+                typed_tool = cast(Tool[SupportsDataclass, SupportsToolResult], tool)
+                self._register_section_tools(
+                    typed_tool,
+                    path,
+                )
 
         for child in section.children:
             child_path = (*path, child.key)
             self._register_section(child, path=child_path, depth=depth + 1)
 
-    def _register_section_tools(
-        self, section: Section[SupportsDataclass], path: SectionPath
+    def _register_section_tools[
+        ParamsT: SupportsDataclass,
+        ResultT: SupportsToolResult,
+    ](
+        self,
+        tool: Tool[ParamsT, ResultT],
+        path: SectionPath,
     ) -> None:
-        section_tools = section.tools()
-        if not section_tools:
-            return
-
-        for tool in section_tools:
-            params_type = cast(
-                type[SupportsDataclass] | None, getattr(tool, "params_type", None)
+        params_type = tool.params_type
+        if not is_dataclass(params_type):
+            raise PromptValidationError(
+                "Tool parameters must be dataclass types.",
+                section_path=path,
+                dataclass_type=params_type,
             )
-            if not isinstance(params_type, type) or not is_dataclass(params_type):
-                dataclass_type = (
-                    params_type if isinstance(params_type, type) else section.param_type
-                )
-                raise PromptValidationError(
-                    "Tool params_type must be a dataclass type.",
-                    section_path=path,
-                    dataclass_type=dataclass_type,
-                )
-            existing_path = self._tool_name_registry.get(tool.name)
-            if existing_path is not None:
-                raise PromptValidationError(
-                    "Duplicate tool name registered for prompt.",
-                    section_path=path,
-                    dataclass_type=tool.params_type,
-                )
 
-            self._tool_name_registry[tool.name] = path
+        existing_path = self._tool_name_registry.get(tool.name)
+        if existing_path is not None:
+            raise PromptValidationError(
+                "Duplicate tool name registered for prompt.",
+                section_path=path,
+                dataclass_type=tool.params_type,
+            )
+
+        self._tool_name_registry[tool.name] = path
 
     def snapshot(self) -> RegistrySnapshot:
         """Return an immutable snapshot of the registered sections."""

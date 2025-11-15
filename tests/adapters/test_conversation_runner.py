@@ -29,7 +29,7 @@ from weakincentives.adapters.core import (
 from weakincentives.adapters.shared import ConversationRunner, ToolChoice
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, ToolContext
-from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool
@@ -91,7 +91,7 @@ class ProviderStub:
 
 
 def serialize_tool_message(
-    result: ToolResult[SupportsDataclass], *, payload: object | None = None
+    result: ToolResult[SupportsToolResult], *, payload: object | None = None
 ) -> object:
     return {"message": result.message, "payload": payload}
 
@@ -290,7 +290,7 @@ def tool_rendered_prompt(tool: Tool[EchoParams, EchoPayload]) -> RenderedPrompt[
         container=None,
         allow_extra_keys=None,
         _tools=cast(
-            tuple[Tool[SupportsDataclass, SupportsDataclass], ...],
+            tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
             (tool,),
         ),
     )

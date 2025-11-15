@@ -65,6 +65,31 @@ def test_tool_requires_dataclass_parameters(tmp_path: Path) -> None:
     assert "Expected `SupportsDataclass`, found `str`" in result.stdout
 
 
+def test_tool_requires_dataclass_results(tmp_path: Path) -> None:
+    result = _run_ty(
+        """
+        from dataclasses import dataclass
+
+        from weakincentives.prompt import Tool
+
+
+        @dataclass
+        class Params:
+            value: str
+
+
+        Tool[Params, str]
+        """,
+        tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "Expected `SupportsDataclass | Sequence[SupportsDataclass]`, found `str`"
+        in result.stdout
+    )
+
+
 def test_tool_accepts_dataclass_parameters(tmp_path: Path) -> None:
     result = _run_ty(
         """

@@ -17,13 +17,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, is_dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
 from uuid import uuid4
 
 from ..deadlines import Deadline
-from ..prompt._types import SupportsDataclass
+from ..prompt._types import SupportsDataclass, SupportsToolResult
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
@@ -40,6 +40,7 @@ from ..runtime.events import (
     ToolInvoked,
 )
 from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.session.dataclasses import is_dataclass_instance
 from ..serde import parse, schema
 from ..tools.errors import DeadlineExceededError, ToolValidationError
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
@@ -129,7 +130,7 @@ def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
     return f"Reducer errors prevented applying tool result: {joined}"
 
 
-def tool_to_spec(tool: Tool[Any, Any]) -> dict[str, Any]:
+def tool_to_spec(tool: Tool[SupportsDataclass, SupportsToolResult]) -> dict[str, Any]:
     """Return a provider-agnostic tool specification payload."""
 
     parameters_schema = schema(tool.params_type, extra="forbid")
@@ -247,7 +248,7 @@ def execute_tool_call(
     prompt: Prompt[Any],
     rendered_prompt: RenderedPrompt[Any] | None,
     tool_call: ProviderToolCall,
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsDataclass]],
+    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
     bus: EventBus,
     session: SessionProtocol,
     prompt_name: str,
@@ -256,7 +257,7 @@ def execute_tool_call(
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
     parse_arguments: ToolArgumentsParser,
     logger_override: StructuredLogger | None = None,
-) -> tuple[ToolInvoked, ToolResult[SupportsDataclass]]:
+) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
     """Execute a provider tool call and publish the resulting event."""
 
     function = tool_call.function
@@ -292,7 +293,7 @@ def execute_tool_call(
         call_id=call_id,
     )
     tool_params: SupportsDataclass | None = None
-    tool_result: ToolResult[SupportsDataclass]
+    tool_result: ToolResult[SupportsToolResult]
     try:
         try:
             parsed_params = parse(tool.params_type, arguments_mapping, extra="forbid")
@@ -306,7 +307,7 @@ def execute_tool_call(
             )
             raise ToolValidationError(str(error)) from error
 
-        tool_params = cast(SupportsDataclass, parsed_params)
+        tool_params = parsed_params
         if deadline is not None and deadline.remaining() <= timedelta(0):
             _raise_tool_deadline_error(
                 prompt_name=prompt_name, tool_name=tool_name, deadline=deadline
@@ -376,8 +377,8 @@ def execute_tool_call(
     session_id = getattr(session, "session_id", None)
     tool_value = tool_result.value
     dataclass_value: SupportsDataclass | None = None
-    if tool_value is not None and is_dataclass(tool_value):
-        dataclass_value = tool_value
+    if is_dataclass_instance(tool_value):
+        dataclass_value = cast(SupportsDataclass, tool_value)  # pyright: ignore[reportUnnecessaryCast]
 
     invocation = ToolInvoked(
         prompt_name=prompt_name,
@@ -629,7 +630,7 @@ ChoiceSelector = Callable[[object], ProviderChoice]
 class ToolMessageSerializer(Protocol):
     def __call__(
         self,
-        result: ToolResult[SupportsDataclass],
+        result: ToolResult[SupportsToolResult],
         *,
         payload: object | None = ...,
     ) -> object: ...
@@ -664,12 +665,12 @@ class ConversationRunner[OutputT]:
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
-    _tool_registry: dict[str, Tool[SupportsDataclass, SupportsDataclass]] = field(
+    _tool_registry: dict[str, Tool[SupportsDataclass, SupportsToolResult]] = field(
         init=False
     )
     _tool_events: list[ToolInvoked] = field(init=False)
     _tool_message_records: list[
-        tuple[ToolResult[SupportsDataclass], dict[str, Any]]
+        tuple[ToolResult[SupportsToolResult], dict[str, Any]]
     ] = field(init=False)
     _provider_payload: dict[str, Any] | None = field(init=False, default=None)
     _next_tool_choice: ToolChoice = field(init=False)
@@ -918,8 +919,8 @@ class ConversationRunner[OutputT]:
             provider_payload=self._provider_payload,
         )
         prompt_value: SupportsDataclass | None = None
-        if output is not None and is_dataclass(output):
-            prompt_value = cast(SupportsDataclass, output)
+        if is_dataclass_instance(output):
+            prompt_value = cast(SupportsDataclass, output)  # pyright: ignore[reportUnnecessaryCast]
 
         publish_result = self.bus.publish(
             PromptExecuted(

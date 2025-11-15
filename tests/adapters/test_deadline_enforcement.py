@@ -34,7 +34,7 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt
-from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
@@ -180,7 +180,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
         handler=handler,
     )
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclass, SupportsDataclass]], {tool.name: tool}
+        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]], {tool.name: tool}
     )
     call = SimpleNamespace(
         id="call", function=SimpleNamespace(name="echo", arguments='{"content": "hi"}')

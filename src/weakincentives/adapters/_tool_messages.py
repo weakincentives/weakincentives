@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
 from typing import Final, cast
 
-from ..prompt._types import SupportsDataclass
+from ..prompt._types import SupportsToolResult
 from ..prompt.tool import ToolResult
 from ..serde import dump
 
@@ -30,7 +30,7 @@ _UNSET: Final = object()
 
 
 def serialize_tool_message(
-    result: ToolResult[SupportsDataclass], *, payload: object = _UNSET
+    result: ToolResult[SupportsToolResult], *, payload: object = _UNSET
 ) -> str:
     """Return a JSON string summarising a tool invocation for provider APIs."""
 

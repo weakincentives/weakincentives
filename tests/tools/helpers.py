@@ -24,19 +24,19 @@ from weakincentives.adapters.core import (
     SessionProtocol,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import Prompt, SupportsDataclass
+from weakincentives.prompt import Prompt, SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
-ResultT = TypeVar("ResultT", bound=SupportsDataclass)
+ResultT = TypeVar("ResultT", bound=SupportsToolResult)
 
 
 class ToolSection(Protocol):
     """Protocol representing tool sections used in tests."""
 
-    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]:
+    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
         """Return the tools exposed by the section."""
 
 
@@ -69,7 +69,7 @@ def _build_context(bus: InProcessEventBus, session: SessionProtocol) -> ToolCont
 
 def find_tool(
     section: ToolSection, name: str
-) -> Tool[SupportsDataclass, SupportsDataclass]:
+) -> Tool[SupportsDataclass, SupportsToolResult]:
     """Return the tool with the provided name from ``section``."""
 
     for tool in section.tools():
