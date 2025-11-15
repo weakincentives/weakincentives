@@ -19,7 +19,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, is_dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, TypeVar, cast
 from uuid import uuid4
 
 from ..deadlines import Deadline
@@ -50,6 +50,8 @@ from ._provider_protocols import (
     ProviderFunctionCall,
     ProviderMessage,
     ProviderToolCall,
+    ToolArgumentsParser,
+    ToolMessageSerializer,
 )
 from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
@@ -76,16 +78,6 @@ class _RejectedToolParams:
 
     raw_arguments: dict[str, Any]
     error: str
-
-
-class ToolArgumentsParser(Protocol):
-    def __call__(
-        self,
-        arguments_json: str | None,
-        *,
-        prompt_name: str,
-        provider_payload: dict[str, Any] | None,
-    ) -> dict[str, Any]: ...
 
 
 ToolChoice = Literal["auto"] | Mapping[str, Any] | None
@@ -624,15 +616,6 @@ ConversationRequest = Callable[
 
 ChoiceSelector = Callable[[object], ProviderChoice]
 """Callable that extracts the relevant choice from a provider response."""
-
-
-class ToolMessageSerializer(Protocol):
-    def __call__(
-        self,
-        result: ToolResult[SupportsDataclass],
-        *,
-        payload: object | None = ...,
-    ) -> object: ...
 
 
 @dataclass(slots=True)

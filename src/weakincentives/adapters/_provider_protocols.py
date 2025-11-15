@@ -15,7 +15,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Any, Protocol
+
+from ..prompt._types import SupportsDataclass
+from ..prompt.tool_result import ToolResult
 
 __all__ = [
     "ProviderChoice",
@@ -24,6 +27,8 @@ __all__ = [
     "ProviderFunctionCall",
     "ProviderMessage",
     "ProviderToolCall",
+    "ToolArgumentsParser",
+    "ToolMessageSerializer",
 ]
 
 
@@ -67,3 +72,26 @@ class ProviderCompletionCallable(Protocol):
     def __call__(
         self, *args: object, **kwargs: object
     ) -> ProviderCompletionResponse: ...
+
+
+class ToolArgumentsParser(Protocol):
+    """Callable protocol responsible for parsing provider tool arguments."""
+
+    def __call__(
+        self,
+        arguments_json: str | None,
+        *,
+        prompt_name: str,
+        provider_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]: ...
+
+
+class ToolMessageSerializer(Protocol):
+    """Callable protocol responsible for serializing tool messages."""
+
+    def __call__(
+        self,
+        result: ToolResult[SupportsDataclass],
+        *,
+        payload: object | None = ...,
+    ) -> object: ...

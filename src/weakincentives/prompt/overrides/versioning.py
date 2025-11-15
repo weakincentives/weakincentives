@@ -21,6 +21,7 @@ from typing import Any, Protocol, TypeVar, overload
 from ...serde.schema import schema
 from .._types import SupportsDataclass
 from ..tool import Tool
+from ._protocols import PromptLike, SectionLike, SectionNodeLike
 
 
 def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:
@@ -33,27 +34,6 @@ def _tool_override_mapping_factory() -> dict[str, ToolOverride]:
 
 def _param_description_mapping_factory() -> dict[str, str]:
     return {}
-
-
-class SectionLike(Protocol):
-    def original_body_template(self) -> str | None: ...
-
-    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsDataclass], ...]: ...
-
-    accepts_overrides: bool
-
-
-class SectionNodeLike(Protocol):
-    path: tuple[str, ...]
-    section: SectionLike
-
-
-class PromptLike(Protocol):
-    ns: str
-    key: str
-
-    @property
-    def sections(self) -> tuple[SectionNodeLike, ...]: ...
 
 
 _HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -220,12 +200,15 @@ class PromptOverridesStore(Protocol):
 
 __all__ = [
     "HexDigest",
+    "PromptLike",
     "PromptDescriptor",
     "PromptOverride",
     "PromptOverridesError",
     "PromptOverridesStore",
+    "SectionLike",
     "SectionDescriptor",
     "SectionOverride",
+    "SectionNodeLike",
     "ToolDescriptor",
     "ToolOverride",
     "ensure_hex_digest",
