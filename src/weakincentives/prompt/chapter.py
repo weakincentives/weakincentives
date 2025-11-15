@@ -57,12 +57,7 @@ class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
         )
         self.key = self._normalize_key(self.key)
 
-        normalized_sections: list[Section[SupportsDataclass]] = []
-        for section in self.sections or ():
-            if not isinstance(section, Section):  # pyright: ignore[reportUnnecessaryIsInstance]
-                raise TypeError("Chapter sections must be Section instances.")
-            normalized_sections.append(cast(Section[SupportsDataclass], section))
-        self.sections = tuple(normalized_sections)
+        self.sections = tuple(self.sections or ())
 
         self._enabled_callable: Callable[[ParamsT | None], bool] | None = (
             self._normalize_enabled(self.enabled, params_type)
