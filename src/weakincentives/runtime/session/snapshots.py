@@ -24,12 +24,14 @@ from typing import Any, TypeGuard, cast, override
 
 from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
+from .._json import JSONValue
+from ._slice_types import SessionSlice, SessionSliceType
 from .dataclasses import is_dataclass_instance
 
 SNAPSHOT_SCHEMA_VERSION = "1"
 
 
-type SnapshotState = Mapping[type[SupportsDataclass], tuple[SupportsDataclass, ...]]
+type SnapshotState = Mapping[SessionSliceType, SessionSlice]
 
 
 class SnapshotSerializationError(RuntimeError):
@@ -41,16 +43,16 @@ class SnapshotRestoreError(RuntimeError):
 
 
 def normalize_snapshot_state(
-    state: SnapshotState,
+    state: Mapping[SessionSliceType, SessionSlice],
 ) -> SnapshotState:
     """Validate snapshot state and return an immutable copy."""
 
-    normalized: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = {}
+    normalized: dict[SessionSliceType, SessionSlice] = {}
     for slice_key, values in state.items():
         if not _is_dataclass_type(slice_key):
             raise ValueError("Slice keys must be dataclass types")
 
-        slice_type = cast(type[SupportsDataclass], slice_key)  # pyright: ignore[reportUnnecessaryCast]
+        slice_type = slice_key
 
         items: list[SupportsDataclass] = []
         for value in values:
@@ -71,11 +73,11 @@ def normalize_snapshot_state(
     return cast(SnapshotState, types.MappingProxyType(normalized))
 
 
-def _type_identifier(cls: type[Any]) -> str:
+def _type_identifier(cls: SessionSliceType) -> str:
     return f"{cls.__module__}:{cls.__qualname__}"
 
 
-def _resolve_type(identifier: str) -> type[Any]:
+def _resolve_type(identifier: str) -> SessionSliceType:
     module_name, _, qualname = identifier.partition(":")
     if not module_name or not qualname:
         msg = f"Invalid type identifier: {identifier!r}"
@@ -90,7 +92,7 @@ def _resolve_type(identifier: str) -> type[Any]:
     if not isinstance(target, type):
         msg = f"Resolved object for {identifier!r} is not a type"
         raise SnapshotRestoreError(msg)
-    return target
+    return cast(SessionSliceType, target)
 
 
 def _ensure_timezone(dt: datetime) -> datetime:
@@ -100,8 +102,8 @@ def _ensure_timezone(dt: datetime) -> datetime:
 
 
 def _infer_item_type(
-    slice_type: type[SupportsDataclass], values: tuple[SupportsDataclass, ...]
-) -> type[SupportsDataclass]:
+    slice_type: SessionSliceType, values: SessionSlice
+) -> SessionSliceType:
     if values:
         first_value = values[0]
         first_type = type(first_value)
@@ -126,14 +128,14 @@ class SnapshotSlicePayload:
 
     slice_type: str
     item_type: str
-    items: tuple[Mapping[str, object], ...]
+    items: tuple[Mapping[str, JSONValue], ...]
 
     @classmethod
     def from_object(cls, obj: object) -> SnapshotSlicePayload:
         if not isinstance(obj, Mapping):
             raise SnapshotRestoreError("Slice entry must be an object")
 
-        entry = cast(Mapping[str, object], obj)
+        entry = cast(Mapping[str, JSONValue], obj)
         slice_identifier = entry.get("slice_type")
         item_identifier = entry.get("item_type")
 
@@ -146,12 +148,12 @@ class SnapshotSlicePayload:
         if not isinstance(items_obj_raw, list):
             raise SnapshotRestoreError("Slice items must be a list")
 
-        items_obj = cast(list[object], items_obj_raw)
-        items: list[Mapping[str, object]] = []
+        items_obj = items_obj_raw
+        items: list[Mapping[str, JSONValue]] = []
         for item in items_obj:
             if not isinstance(item, Mapping):
                 raise SnapshotRestoreError("Slice items must be objects")
-            items.append(cast(Mapping[str, object], item))
+            items.append(cast(Mapping[str, JSONValue], item))
 
         return cls(
             slice_type=slice_identifier,
@@ -171,14 +173,14 @@ class SnapshotPayload:
     @classmethod
     def from_json(cls, raw: str) -> SnapshotPayload:
         try:
-            payload_obj = json.loads(raw)
+            payload_obj: JSONValue = json.loads(raw)
         except json.JSONDecodeError as error:
             raise SnapshotRestoreError("Invalid snapshot JSON") from error
 
         if not isinstance(payload_obj, Mapping):
             raise SnapshotRestoreError("Snapshot payload must be an object")
 
-        payload = cast(Mapping[str, object], payload_obj)
+        payload = cast(Mapping[str, JSONValue], payload_obj)
         version = payload.get("version")
         if not isinstance(version, str):
             raise SnapshotRestoreError("Snapshot version must be a string")
@@ -191,7 +193,7 @@ class SnapshotPayload:
         if not isinstance(slices_obj, list):
             raise SnapshotRestoreError("Snapshot slices must be a list")
 
-        slices_source = cast(list[object], slices_obj)
+        slices_source = slices_obj
         slices = tuple(
             SnapshotSlicePayload.from_object(entry) for entry in slices_source
         )
@@ -211,7 +213,7 @@ class Snapshot:
     )
 
     def __post_init__(self) -> None:
-        normalized: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = {
+        normalized: dict[SessionSliceType, SessionSlice] = {
             slice_type: tuple(values) for slice_type, values in self.slices.items()
         }
         object.__setattr__(self, "created_at", _ensure_timezone(self.created_at))
@@ -234,13 +236,15 @@ class Snapshot:
     def to_json(self) -> str:
         """Serialize the snapshot to a JSON string."""
 
-        payload_slices: list[dict[str, object]] = []
+        payload_slices: list[dict[str, JSONValue]] = []
         for slice_type, values in sorted(
             self.slices.items(), key=lambda item: _type_identifier(item[0])
         ):
             item_type = _infer_item_type(slice_type, values)
             try:
-                serialized_items = [dump(value) for value in values]
+                serialized_items = [
+                    cast(Mapping[str, JSONValue], dump(value)) for value in values
+                ]
             except Exception as error:
                 msg = f"Failed to serialize slice {slice_type.__qualname__}"
                 raise SnapshotSerializationError(msg) from error
@@ -253,7 +257,7 @@ class Snapshot:
                 }
             )
 
-        payload: dict[str, object] = {
+        payload: dict[str, JSONValue] = {
             "version": SNAPSHOT_SCHEMA_VERSION,
             "created_at": self.created_at.isoformat(),
             "slices": payload_slices,
@@ -278,7 +282,7 @@ class Snapshot:
         except ValueError as error:
             raise SnapshotRestoreError("Invalid created_at timestamp") from error
 
-        restored: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = {}
+        restored: dict[SessionSliceType, SessionSlice] = {}
         for entry in payload.slices:
             slice_type_candidate = _resolve_type(entry.slice_type)
             item_type_candidate = _resolve_type(entry.item_type)

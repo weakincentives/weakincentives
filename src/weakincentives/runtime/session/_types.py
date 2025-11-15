@@ -14,11 +14,13 @@
 
 from __future__ import annotations
 
-from typing import Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from ...prompt._types import SupportsDataclass
 from ..events import EventBus
-from .protocols import SessionProtocol
+
+if TYPE_CHECKING:
+    from .protocols import SessionProtocol
 
 
 class ReducerEvent(Protocol):
@@ -50,4 +52,4 @@ class TypedReducer(Protocol[S]):
     ) -> tuple[S, ...]: ...
 
 
-__all__ = ["ReducerEvent", "TypedReducer"]
+__all__ = ["ReducerContextProtocol", "ReducerEvent", "TypedReducer"]

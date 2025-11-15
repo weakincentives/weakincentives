@@ -25,6 +25,7 @@ from ...dbc import invariant
 from ...prompt._types import SupportsDataclass
 from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
 from ..logging import StructuredLogger, get_logger
+from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
 from .protocols import SessionProtocol, SnapshotProtocol
@@ -51,7 +52,7 @@ _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
     type[SupportsDataclass], PromptExecuted
 )
 
-EMPTY_SLICE: tuple[SupportsDataclass, ...] = ()
+EMPTY_SLICE: SessionSlice = ()
 
 
 def _append_event(
@@ -68,7 +69,7 @@ def _append_event(
 @dataclass(slots=True)
 class _ReducerRegistration:
     reducer: TypedReducer[Any]
-    slice_type: type[SupportsDataclass]
+    slice_type: SessionSliceType
 
 
 def _session_id_is_well_formed(session: "Session") -> bool:  # noqa: UP037
@@ -110,8 +111,8 @@ class Session(SessionProtocol):
         self.session_id: UUID = resolved_session_id
         self.created_at: datetime = resolved_created_at.astimezone(UTC)
         self._bus: EventBus = bus
-        self._reducers: dict[type[SupportsDataclass], list[_ReducerRegistration]] = {}
-        self._state: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = {}
+        self._reducers: dict[SessionSliceType, list[_ReducerRegistration]] = {}
+        self._state: dict[SessionSliceType, SessionSlice] = {}
         self._lock = RLock()
         self._subscriptions_attached = False
         self._attach_to_bus(bus)
@@ -153,14 +154,14 @@ class Session(SessionProtocol):
 
     def register_reducer[S: SupportsDataclass](
         self,
-        data_type: type[SupportsDataclass],
+        data_type: SessionSliceType,
         reducer: TypedReducer[S],
         *,
         slice_type: type[S] | None = None,
     ) -> None:
         """Register a reducer for the provided data type."""
 
-        target_slice_type: type[SupportsDataclass] = (
+        target_slice_type: SessionSliceType = (
             data_type if slice_type is None else slice_type
         )
         registration = _ReducerRegistration(
@@ -191,7 +192,7 @@ class Session(SessionProtocol):
         """Clear all stored slices while preserving reducer registrations."""
 
         with self._lock:
-            slice_types = set(self._state)
+            slice_types: set[SessionSliceType] = set(self._state)
             for registrations in self._reducers.values():
                 for registration in registrations:
                     slice_types.add(registration.slice_type)
@@ -203,9 +204,7 @@ class Session(SessionProtocol):
         """Capture an immutable snapshot of the current session state."""
 
         with self._lock:
-            state_snapshot: dict[
-                type[SupportsDataclass], tuple[SupportsDataclass, ...]
-            ] = dict(self._state)
+            state_snapshot: dict[SessionSliceType, SessionSlice] = dict(self._state)
         for ephemeral in (
             _TOOL_INVOKED_TYPE,
             _PROMPT_EXECUTED_TYPE,
@@ -237,17 +236,15 @@ class Session(SessionProtocol):
             raise SnapshotRestoreError(msg)
 
         with self._lock:
-            new_state: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = (
-                dict(self._state)
-            )
+            new_state: dict[SessionSliceType, SessionSlice] = dict(self._state)
             for slice_type in registered_slices:
                 new_state[slice_type] = snapshot.slices.get(slice_type, EMPTY_SLICE)
 
             self._state = new_state
 
-    def _registered_slice_types(self) -> set[type[SupportsDataclass]]:
+    def _registered_slice_types(self) -> set[SessionSliceType]:
         with self._lock:
-            types: set[type[SupportsDataclass]] = set(self._state)
+            types: set[SessionSliceType] = set(self._state)
             for registrations in self._reducers.values():
                 for registration in registrations:
                     types.add(registration.slice_type)
@@ -316,7 +313,7 @@ class Session(SessionProtocol):
         )
 
     def _dispatch_data_event(
-        self, data_type: type[SupportsDataclass], event: ReducerEvent
+        self, data_type: SessionSliceType, event: ReducerEvent
     ) -> None:
         from .reducer_context import build_reducer_context
 
