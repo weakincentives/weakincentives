@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
@@ -33,6 +33,7 @@ from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
     SnapshotSerializationError,
+    SnapshotState,
     normalize_snapshot_state,
 )
 
@@ -50,6 +51,8 @@ _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
     type[SupportsDataclass], PromptExecuted
 )
 
+EMPTY_SLICE: tuple[SupportsDataclass, ...] = ()
+
 
 def _append_event(
     slice_values: tuple[SupportsDataclass, ...],
@@ -65,7 +68,7 @@ def _append_event(
 @dataclass(slots=True)
 class _ReducerRegistration:
     reducer: TypedReducer[Any]
-    slice_type: type[Any]
+    slice_type: type[SupportsDataclass]
 
 
 def _session_id_is_well_formed(session: "Session") -> bool:  # noqa: UP037
@@ -108,7 +111,7 @@ class Session(SessionProtocol):
         self.created_at: datetime = resolved_created_at.astimezone(UTC)
         self._bus: EventBus = bus
         self._reducers: dict[type[SupportsDataclass], list[_ReducerRegistration]] = {}
-        self._state: dict[type[Any], tuple[Any, ...]] = {}
+        self._state: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = {}
         self._lock = RLock()
         self._subscriptions_attached = False
         self._attach_to_bus(bus)
@@ -148,7 +151,7 @@ class Session(SessionProtocol):
 
         return clone
 
-    def register_reducer[S](
+    def register_reducer[S: SupportsDataclass](
         self,
         data_type: type[SupportsDataclass],
         reducer: TypedReducer[S],
@@ -157,7 +160,9 @@ class Session(SessionProtocol):
     ) -> None:
         """Register a reducer for the provided data type."""
 
-        target_slice_type: type[Any] = data_type if slice_type is None else slice_type
+        target_slice_type: type[SupportsDataclass] = (
+            data_type if slice_type is None else slice_type
+        )
         registration = _ReducerRegistration(
             reducer=cast(TypedReducer[Any], reducer),
             slice_type=target_slice_type,
@@ -165,15 +170,17 @@ class Session(SessionProtocol):
         with self._lock:
             bucket = self._reducers.setdefault(data_type, [])
             bucket.append(registration)
-            _ = self._state.setdefault(target_slice_type, ())
+            _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
 
-    def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]:
+    def select_all[S: SupportsDataclass](self, slice_type: type[S]) -> tuple[S, ...]:
         """Return the tuple slice maintained for the provided type."""
 
         with self._lock:
-            return cast(tuple[S, ...], self._state.get(slice_type, ()))
+            return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
 
-    def seed_slice[S](self, slice_type: type[S], values: Iterable[S]) -> None:
+    def seed_slice[S: SupportsDataclass](
+        self, slice_type: type[S], values: Iterable[S]
+    ) -> None:
         """Initialize or replace the stored tuple for the provided type."""
 
         with self._lock:
@@ -189,14 +196,16 @@ class Session(SessionProtocol):
                 for registration in registrations:
                     slice_types.add(registration.slice_type)
 
-            self._state = dict.fromkeys(slice_types, ())
+            self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
 
     @override
     def snapshot(self) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state."""
 
         with self._lock:
-            state_snapshot = dict(self._state)
+            state_snapshot: dict[
+                type[SupportsDataclass], tuple[SupportsDataclass, ...]
+            ] = dict(self._state)
         for ephemeral in (
             _TOOL_INVOKED_TYPE,
             _PROMPT_EXECUTED_TYPE,
@@ -204,9 +213,7 @@ class Session(SessionProtocol):
         ):
             _ = state_snapshot.pop(ephemeral, None)
         try:
-            normalized: Mapping[type[Any], tuple[Any, ...]] = normalize_snapshot_state(
-                cast(Mapping[object, tuple[object, ...]], state_snapshot)
-            )
+            normalized: SnapshotState = normalize_snapshot_state(state_snapshot)
         except ValueError as error:
             msg = "Unable to serialize session slices"
             raise SnapshotSerializationError(msg) from error
@@ -230,15 +237,17 @@ class Session(SessionProtocol):
             raise SnapshotRestoreError(msg)
 
         with self._lock:
-            new_state: dict[type[Any], tuple[Any, ...]] = dict(self._state)
+            new_state: dict[type[SupportsDataclass], tuple[SupportsDataclass, ...]] = (
+                dict(self._state)
+            )
             for slice_type in registered_slices:
-                new_state[slice_type] = snapshot.slices.get(slice_type, ())
+                new_state[slice_type] = snapshot.slices.get(slice_type, EMPTY_SLICE)
 
             self._state = new_state
 
-    def _registered_slice_types(self) -> set[type[Any]]:
+    def _registered_slice_types(self) -> set[type[SupportsDataclass]]:
         with self._lock:
-            types: set[type[Any]] = set(self._state)
+            types: set[type[SupportsDataclass]] = set(self._state)
             for registrations in self._reducers.values():
                 for registration in registrations:
                     types.add(registration.slice_type)
@@ -333,7 +342,7 @@ class Session(SessionProtocol):
             slice_type = registration.slice_type
             while True:
                 with self._lock:
-                    previous = self._state.get(slice_type, ())
+                    previous = self._state.get(slice_type, EMPTY_SLICE)
                 try:
                     result = registration.reducer(previous, event, context=context)
                 except Exception:  # log and continue
@@ -352,7 +361,7 @@ class Session(SessionProtocol):
                     break
                 normalized = tuple(result)
                 with self._lock:
-                    current = self._state.get(slice_type, ())
+                    current = self._state.get(slice_type, EMPTY_SLICE)
                     if current is previous or current == normalized:
                         self._state[slice_type] = normalized
                         break

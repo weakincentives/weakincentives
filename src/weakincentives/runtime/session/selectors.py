@@ -17,18 +17,23 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ...dbc import pure
+from ...prompt._types import SupportsDataclass
 from .session import Session
 
 
 @pure
-def select_all[T](session: Session, slice_type: type[T]) -> tuple[T, ...]:
+def select_all[T: SupportsDataclass](
+    session: Session, slice_type: type[T]
+) -> tuple[T, ...]:
     """Return the entire slice for the provided type."""
 
     return session.select_all(slice_type)
 
 
 @pure
-def select_latest[T](session: Session, slice_type: type[T]) -> T | None:
+def select_latest[T: SupportsDataclass](
+    session: Session, slice_type: type[T]
+) -> T | None:
     """Return the most recent item in the slice, if any."""
 
     values = session.select_all(slice_type)
@@ -38,8 +43,10 @@ def select_latest[T](session: Session, slice_type: type[T]) -> T | None:
 
 
 @pure
-def select_where[T](
-    session: Session, slice_type: type[T], predicate: Callable[[T], bool]
+def select_where[T: SupportsDataclass](
+    session: Session,
+    slice_type: type[T],
+    predicate: Callable[[T], bool],
 ) -> tuple[T, ...]:
     """Return items that satisfy the predicate."""
 

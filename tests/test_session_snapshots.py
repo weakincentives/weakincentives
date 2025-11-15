@@ -27,6 +27,7 @@ from weakincentives.runtime.session.snapshots import (
     Snapshot,
     SnapshotRestoreError,
     SnapshotSerializationError,
+    SnapshotState,
     _ensure_timezone,
     _infer_item_type,
     _resolve_type,
@@ -67,12 +68,12 @@ def make_snapshot_payload_with_slice_mutation(**entry_overrides: object) -> str:
 
 def test_normalize_snapshot_state_validates_keys() -> None:
     with pytest.raises(ValueError):
-        normalize_snapshot_state({"not a type": ()})
+        normalize_snapshot_state(cast(SnapshotState, {"not a type": ()}))
 
 
 def test_normalize_snapshot_state_rejects_nondataclass_values() -> None:
     with pytest.raises(ValueError):
-        normalize_snapshot_state({SnapshotItem: ("value",)})
+        normalize_snapshot_state(cast(SnapshotState, {SnapshotItem: ("value",)}))
 
 
 def test_normalize_snapshot_state_reports_serialization_errors(
@@ -158,6 +159,7 @@ def test_snapshot_to_json_surfaces_serialization_errors(
         "{",
         json.dumps([]),
         make_snapshot_payload_with(version="2"),
+        make_snapshot_payload_with(version=2),
         make_snapshot_payload_with(created_at=123),
         make_snapshot_payload_with(created_at="not-a-timestamp"),
         make_snapshot_payload_with(slices={}),
