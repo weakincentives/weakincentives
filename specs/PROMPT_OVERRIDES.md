@@ -126,8 +126,7 @@ Rules:
    descriptions.
 1. Overrides are valid only when `expected_hash` (sections) or
    `expected_contract_hash` (tools) matches the descriptor entry.
-1. Callers render prompts with overrides via `Prompt.render_with_overrides`,
-   which should:
+1. Callers render prompts with overrides via `Prompt.render`, which should:
    - Build the prompt descriptor and resolve overrides.
    - Substitute section bodies whose hashes match the descriptor.
    - Copy tools with replacement descriptions when provided, capture
@@ -307,7 +306,7 @@ Responsibilities:
 1. **Bootstrap** – Enumerate descriptors for all prompts and publish them to the
    optimization service. The service stores overrides keyed by
    `(ns, prompt_key, section_path, expected_hash)` and tagged as desired.
-1. **Runtime** – Call `prompt.render_with_overrides(..., overrides_store=store, tag=...)`. Overrides whose lookup key matches replace the in-code bodies; the
+1. **Runtime** – Call `prompt.render(..., overrides_store=store, tag=...)`. Overrides whose lookup key matches replace the in-code bodies; the
    rest are ignored. Tool overrides apply when their contract hashes match.
 1. **Author workflow** – Developers edit prompt bodies in source control. Hash
    changes automatically invalidate stale overrides because the lookup keys no
@@ -334,7 +333,7 @@ Responsibilities:
     clobber existing files, including a case where the prompt body differs from
     cached descriptor state to prove the method reads from the `Prompt`
     instance.
-- Integration tests wiring the store into `Prompt.render_with_overrides` to
+- Integration tests wiring the store into `Prompt.render` to
   ensure mutations appear during subsequent renders.
 
 ## Non-Goals

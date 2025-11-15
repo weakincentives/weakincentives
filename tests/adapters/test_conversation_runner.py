@@ -30,6 +30,7 @@ from weakincentives.adapters.shared import ConversationRunner, ToolChoice
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, ToolContext
 from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
@@ -58,6 +59,8 @@ class DummyAdapter(ProviderAdapter[object]):
         bus: EventBus,
         session: SessionProtocol | None = None,
         deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
     ) -> PromptResponse[object]:
         raise NotImplementedError
 

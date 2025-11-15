@@ -163,38 +163,27 @@ class Prompt[OutputT]:
     def render(
         self,
         *params: SupportsDataclass,
-        inject_output_instructions: bool | None = None,
-    ) -> RenderedPrompt[OutputT]:
-        """Render the prompt using provided parameter dataclass instances."""
-
-        param_lookup = self._renderer.build_param_lookup(params)
-        return self._renderer.render(
-            param_lookup,
-            inject_output_instructions=inject_output_instructions,
-        )
-
-    def render_with_overrides(
-        self,
-        *params: SupportsDataclass,
-        overrides_store: PromptOverridesStore,
+        overrides_store: PromptOverridesStore | None = None,
         tag: str = "latest",
         inject_output_instructions: bool | None = None,
     ) -> RenderedPrompt[OutputT]:
-        """Render the prompt using overrides supplied by an overrides store."""
+        """Render the prompt and apply overrides when an overrides store is supplied."""
 
-        from .overrides import PromptDescriptor
+        overrides: dict[SectionPath, str] | None = None
+        tool_overrides: dict[str, ToolOverride] | None = None
 
-        descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
-        override = overrides_store.resolve(descriptor=descriptor, tag=tag)
+        if overrides_store is not None:
+            from .overrides import PromptDescriptor
 
-        overrides: dict[SectionPath, str] = {}
-        tool_overrides: dict[str, ToolOverride] = {}
-        if override is not None:
-            overrides = {
-                path: section_override.body
-                for path, section_override in override.sections.items()
-            }
-            tool_overrides = dict(override.tool_overrides)
+            descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
+            override = overrides_store.resolve(descriptor=descriptor, tag=tag)
+
+            if override is not None:
+                overrides = {
+                    path: section_override.body
+                    for path, section_override in override.sections.items()
+                }
+                tool_overrides = dict(override.tool_overrides)
 
         param_lookup = self._renderer.build_param_lookup(params)
         return self._renderer.render(

@@ -47,6 +47,7 @@ from .shared import (
 
 if TYPE_CHECKING:
     from ..adapters.core import ProviderAdapter
+    from ..prompt.overrides import PromptOverridesStore
 
 _ERROR_MESSAGE: Final[str] = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -137,6 +138,8 @@ class OpenAIAdapter:
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
         render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
@@ -163,10 +166,16 @@ class OpenAIAdapter:
         if should_disable_instructions:
             rendered = prompt.render(
                 *params,
+                overrides_store=overrides_store,
+                tag=overrides_tag,
                 inject_output_instructions=False,
             )
         else:
-            rendered = prompt.render(*params)
+            rendered = prompt.render(
+                *params,
+                overrides_store=overrides_store,
+                tag=overrides_tag,
+            )
         if deadline is not None:
             rendered = replace(rendered, deadline=deadline)
         response_format: dict[str, Any] | None = None

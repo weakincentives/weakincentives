@@ -28,10 +28,12 @@ from typing import Any, Protocol, cast
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
+    PromptOverridesStore,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.events import (
@@ -117,6 +119,9 @@ class SupportsReviewEvaluate(Protocol):
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
+        deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
     ) -> PromptResponse[ReviewResponse]: ...
 
 
@@ -169,6 +174,8 @@ class CodeReviewApp:
             ReviewTurnParams(request=user_prompt),
             bus=self.bus,
             session=self.session,
+            overrides_store=self.overrides_store,
+            overrides_tag=self.override_tag,
         )
         return _render_response_payload(response)
 
@@ -282,7 +289,7 @@ def build_code_reviewer_state(
         *params: SupportsDataclass,
         inject_output_instructions: bool | None = None,
     ) -> RenderedPrompt[Any]:
-        return prompt_obj.render_with_overrides(
+        return prompt_obj.render(
             *params,
             overrides_store=store,
             tag=resolved_tag,

@@ -276,7 +276,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         raise NotImplementedError
 
 
-def test_prompt_render_with_overrides_applies_matching_sections() -> None:
+def test_prompt_render_applies_matching_sections() -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
     section = descriptor.sections[0]
@@ -295,7 +295,7 @@ def test_prompt_render_with_overrides_applies_matching_sections() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    rendered = prompt.render_with_overrides(
+    rendered = prompt.render(
         _GreetingParams(subject="Operators"),
         overrides_store=store,
         tag="experiment",
@@ -306,7 +306,7 @@ def test_prompt_render_with_overrides_applies_matching_sections() -> None:
     assert rendered.tool_param_descriptions == {}
 
 
-def test_prompt_render_with_overrides_respects_section_acceptance() -> None:
+def test_prompt_render_respects_section_acceptance() -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
     section = descriptor.sections[0]
@@ -327,7 +327,7 @@ def test_prompt_render_with_overrides_respects_section_acceptance() -> None:
 
     prompt.sections[0].section.accepts_overrides = False
 
-    rendered = prompt.render_with_overrides(
+    rendered = prompt.render(
         _GreetingParams(subject="Operators"),
         overrides_store=store,
         tag="experiment",
@@ -336,7 +336,7 @@ def test_prompt_render_with_overrides_respects_section_acceptance() -> None:
     assert "Greet Operators warmly." in rendered.text
 
 
-def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
+def test_prompt_render_ignores_non_matching_override() -> None:
     prompt = _build_prompt()
 
     override = PromptOverride(
@@ -352,7 +352,7 @@ def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    rendered = prompt.render_with_overrides(
+    rendered = prompt.render(
         _GreetingParams(subject="Operators"),
         overrides_store=store,
     )
@@ -360,11 +360,11 @@ def test_prompt_render_with_overrides_ignores_non_matching_override() -> None:
     assert "Greet Operators warmly." in rendered.text
 
 
-def test_prompt_render_with_overrides_handles_missing_override() -> None:
+def test_prompt_render_handles_missing_override() -> None:
     prompt = _build_prompt()
     store = _RecordingOverridesStore(None)
 
-    rendered = prompt.render_with_overrides(
+    rendered = prompt.render(
         _GreetingParams(subject="Operators"),
         overrides_store=store,
     )
@@ -394,7 +394,7 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    rendered = prompt.render_with_overrides(
+    rendered = prompt.render(
         _GreetingParams(subject="Operators"),
         overrides_store=store,
     )
@@ -429,7 +429,7 @@ def test_prompt_render_with_tool_overrides_respects_acceptance() -> None:
 
     prompt.sections[0].section.tools()[0].accepts_overrides = False
 
-    rendered = prompt.render_with_overrides(
+    rendered = prompt.render(
         _GreetingParams(subject="Operators"),
         overrides_store=store,
     )
@@ -456,7 +456,7 @@ def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    rendered = prompt.render_with_overrides(
+    rendered = prompt.render(
         _GreetingParams(subject="Operators"),
         overrides_store=store,
     )

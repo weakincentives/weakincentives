@@ -26,6 +26,7 @@ from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, RecapParams
 from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
@@ -79,6 +80,8 @@ class RecordingAdapter(ProviderAdapter[Any]):
         bus: InProcessEventBus,
         session: Session | None = None,
         deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
     ) -> PromptResponse[Any]:
         del parse_output
         delegation = cast(DelegationParams, params[0])

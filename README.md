@@ -574,7 +574,7 @@ custom_override = PromptOverride(
 
 persisted_override = overrides_store.upsert(descriptor, custom_override)
 
-rendered_with_override = review_prompt.render_with_overrides(
+rendered_with_override = review_prompt.render(
     PullRequestContext(
         repository="octo/widgets",
         title="Add caching layer",

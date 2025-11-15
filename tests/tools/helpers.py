@@ -25,6 +25,7 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, SupportsDataclass
+from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 
@@ -48,6 +49,8 @@ class _DummyAdapter(ProviderAdapter[Any]):
         bus: InProcessEventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
     ) -> PromptResponse[Any]:
         raise NotImplementedError
 
