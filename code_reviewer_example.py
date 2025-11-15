@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Minimal interactive code reviewer showcasing the core toolkit."""
+"""Interactive walkthrough showcasing a minimalist code review agent."""
 
 from __future__ import annotations
 
@@ -20,35 +20,37 @@ import os
 import sys
 import textwrap
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, is_dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MethodType
 from typing import Any, Protocol, cast
 
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import SessionProtocol
-from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.prompt import (
-    MarkdownSection,
-    Prompt,
-    SupportsDataclass,
-)
+from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.runtime.events import EventBus, InProcessEventBus, ToolInvoked
-from weakincentives.runtime.session import Session, select_latest
+from weakincentives.runtime.events import (
+    EventBus,
+    InProcessEventBus,
+    PromptRendered,
+    ToolInvoked,
+)
+from weakincentives.runtime.session import (
+    ReducerContextProtocol,
+    ReducerEvent,
+    Session,
+    append,
+    select_latest,
+)
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
 from weakincentives.tools.asteval import AstevalSection
-from weakincentives.tools.planning import (
-    Plan,
-    PlanningStrategy,
-    PlanningToolsSection,
-)
+from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -118,278 +120,82 @@ class SupportsReviewEvaluate(Protocol):
     ) -> PromptResponse[ReviewResponse]: ...
 
 
-def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
-    if len(text) <= limit:
-        return text
-    return f"{text[: limit - 1]}…"
-
-
-def _format_for_log(payload: object, *, limit: int = _LOG_STRING_LIMIT) -> str:
-    serializable = _coerce_for_log(payload)
-    try:
-        rendered = json.dumps(serializable, ensure_ascii=False)
-    except TypeError:
-        rendered = repr(serializable)
-    return _truncate_for_log(rendered, limit=limit)
-
-
-def _coerce_for_log(payload: object) -> object:
-    """Convert payloads (e.g., dataclasses) into JSON-serializable structures."""
-
-    if payload is None or isinstance(payload, (str, int, float, bool)):
-        return payload
-    if is_dataclass(payload):
-        return dump(payload, exclude_none=True)
-    if isinstance(payload, Mapping):
-        return {str(key): _coerce_for_log(value) for key, value in payload.items()}
-    if isinstance(payload, Sequence) and not isinstance(
-        payload, (str, bytes, bytearray)
-    ):
-        return [_coerce_for_log(item) for item in payload]
-    if isinstance(payload, set):
-        # Sets are not JSON serializable; convert to sorted list for stability.
-        return sorted(_coerce_for_log(item) for item in payload)
-    return str(payload)
-
-
-def _resolve_override_tag(tag: str | None = None) -> str:
-    """Normalize the override tag used for prompt renders."""
-
-    candidate = tag or os.getenv(PROMPT_OVERRIDES_TAG_ENV, _DEFAULT_OVERRIDE_TAG)
-    normalized = candidate.strip()
-    return normalized or _DEFAULT_OVERRIDE_TAG
-
-
-def _configure_logging() -> None:
-    """Ensure INFO level logging is emitted to stdout."""
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
-        force=True,
-    )
-
-
-def main() -> None:
-    """Launch the interactive code review walkthrough."""
-
-    _configure_logging()
-    override_tag = _resolve_override_tag()
-    intro = textwrap.dedent(
-        f"""
-        Launching sunfish code review session.
-        - test-repositories/sunfish mounted under virtual path 'sunfish/'.
-        - Tools: planning, subagents, VFS, and Python evaluation.
-        - Commands: 'history' (tool log), 'plan' (latest plan), 'exit' to quit.
-        - Prompt overrides tag: '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-        """
-    ).strip()
-    print(intro)
-
-    session = SunfishReviewSession(
-        build_adapter(),
-        override_tag=override_tag,
-    )
-    print("Type a review prompt to begin.")
-    while True:
-        try:
-            prompt = input("Review prompt: ").strip()
-        except EOFError:  # pragma: no cover - interactive convenience
-            break
-        if not prompt:
-            print("Goodbye.")
-            break
-        lowered = prompt.lower()
-        if lowered in {"exit", "quit"}:
-            break
-        if lowered == "history":
-            print(session.render_tool_history())
-            continue
-        if lowered == "plan":
-            print(session.render_plan_snapshot())
-            continue
-        answer = session.evaluate(prompt)
-        print(f"Agent: {answer}")
-
-
-def build_adapter() -> SupportsReviewEvaluate:
-    provider = os.getenv("CODE_REVIEW_EXAMPLE_PROVIDER", "openai").strip().lower()
-    if provider == "openai":
-        if "OPENAI_API_KEY" not in os.environ:
-            raise SystemExit("Set OPENAI_API_KEY before running this example.")
-        model = os.getenv("OPENAI_MODEL", "gpt-5")
-        return cast(SupportsReviewEvaluate, OpenAIAdapter(model=model))
-    if provider == "litellm":
-        api_key = os.getenv("LITELLM_API_KEY")
-        if api_key is None:
-            raise SystemExit("Set LITELLM_API_KEY before running this example.")
-        completion_kwargs: dict[str, Any] = {"api_key": api_key}
-        base_url = os.getenv("LITELLM_BASE_URL")
-        if base_url:
-            completion_kwargs["api_base"] = base_url
-        model = os.getenv("LITELLM_MODEL", "gpt-5")
-        return cast(
-            SupportsReviewEvaluate,
-            LiteLLMAdapter(model=model, completion_kwargs=completion_kwargs),
-        )
-    raise SystemExit(
-        "Supported providers: 'openai' (default) or 'litellm'."
-        " Set CODE_REVIEW_EXAMPLE_PROVIDER accordingly."
-    )
-
-
-class SunfishReviewSession:
-    """Interactive session that records tool calls and plan snapshots."""
+class CodeReviewApp:
+    """Owns adapter lifecycle, prompt overrides, and the REPL loop."""
 
     def __init__(
         self,
         adapter: SupportsReviewEvaluate,
         *,
-        overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
+        overrides_store: LocalPromptOverridesStore | None = None,
     ) -> None:
-        self._adapter = adapter
-        self._bus = InProcessEventBus()
-        self._session = Session(bus=self._bus)
-        base_prompt = build_sunfish_prompt(self._session)
-        self._overrides_store = overrides_store or LocalPromptOverridesStore()
-        self._override_tag = _resolve_override_tag(override_tag)
-        try:
-            self._overrides_store.seed_if_necessary(
-                base_prompt,
-                tag=self._override_tag,
-            )
-        except PromptOverridesError as exc:
-            raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
-
-        # Prompt overrides let you iterate on copy without touching versioned prompts;
-        # see specs/PROMPTS.md for guardrails around tagging and persistence.
-        def render_with_session_overrides(
-            prompt_obj: Prompt[Any],
-            *params: SupportsDataclass,
-            inject_output_instructions: bool | None = None,
-        ) -> RenderedPrompt[Any]:
-            return prompt_obj.render_with_overrides(
-                *params,
-                overrides_store=self._overrides_store,
-                tag=self._override_tag,
-                inject_output_instructions=inject_output_instructions,
-            )
-
-        prompt_with_any = cast(Any, base_prompt)
-        prompt_with_any.render = MethodType(
-            render_with_session_overrides,
-            base_prompt,
+        self.adapter = adapter
+        self.override_tag = _resolve_override_tag(override_tag)
+        self.overrides_store = overrides_store or LocalPromptOverridesStore()
+        (
+            self.prompt,
+            self.session,
+            self.bus,
+        ) = build_code_reviewer_state(
+            overrides_store=self.overrides_store,
+            override_tag=self.override_tag,
         )
-        self._prompt = base_prompt
-        self._tool_log: list[dict[str, str | None]] = []
-        self._bus.subscribe(ToolInvoked, self._on_tool_invoked)
 
-    def evaluate(self, request: str) -> str:
-        response = self._adapter.evaluate(
-            self._prompt,
-            ReviewTurnParams(request=request),
-            bus=self._bus,
-            session=self._session,
-        )
-        if response.output is not None:
-            rendered_output = dump(response.output, exclude_none=True)
-            return json.dumps(rendered_output, ensure_ascii=False, indent=2)
-        if response.text:
-            return response.text
-        return "(no response from assistant)"
+    def run(self) -> None:
+        """Start the interactive review session."""
 
-    def reset(self) -> None:
-        """Clear session state so subsequent turns start fresh."""
-
-        self._session.reset()
-
-    def render_tool_history(self) -> str:
-        if not self._tool_log:
-            return "No tool calls recorded yet."
-
-        lines: list[str] = []
-        for index, record in enumerate(self._tool_log, start=1):
-            name = record["name"] or "?"
-            prompt_name = record["prompt"] or "?"
-            result = record["result"] or ""
-            lines.append(f"{index}. {name} ({prompt_name}) → {result}")
-            params = record.get("params")
-            if params:
-                lines.append(f"   params: {params}")
-            payload = record.get("payload")
-            if payload:
-                lines.append(f"   payload: {payload}")
-            call_id = record.get("call_id")
-            if call_id:
-                lines.append(f"   call_id: {call_id}")
-        return "\n".join(lines)
-
-    def render_plan_snapshot(self) -> str:
-        plan = select_latest(self._session, Plan)
-        if plan is None:
-            return "No active plan."
-
-        lines = [f"Objective: {plan.objective} (status: {plan.status})"]
-        for step in plan.steps:
-            notes = "; ".join(step.notes) if step.notes else ""
-            suffix = f" — notes: {notes}" if notes else ""
-            if step.details:
-                suffix = f" — details: {step.details}{suffix}"
-            lines.append(f"- {step.step_id} [{step.status}] {step.title}{suffix}")
-        return "\n".join(lines)
-
-    def _on_tool_invoked(self, event: object) -> None:
-        tool_event = cast(ToolInvoked, event)
-
-        params_repr = _format_for_log(
-            dump(tool_event.params, exclude_none=True),
-        )
-        message = _truncate_for_log(tool_event.result.message or "")
-        payload = tool_event.result.value
-        payload_repr: str | None
-        if payload is None:
-            payload_repr = None
-        else:
+        print(_build_intro(self.override_tag))
+        print("Type a review prompt to begin. (Type 'exit' to quit.)")
+        while True:
             try:
-                payload_repr = _format_for_log(
-                    dump(payload, exclude_none=True),
-                )
-            except TypeError:
-                payload_repr = _format_for_log({"value": payload})
+                user_prompt = input("Review prompt: ").strip()
+            except EOFError:  # pragma: no cover - interactive convenience
+                print()
+                break
+            if not user_prompt:
+                break
+            if user_prompt.lower() in {"exit", "quit"}:
+                break
+            answer = self._evaluate_turn(user_prompt)
+            print(f"Agent: {answer}")
+            print("Plan snapshot:")
+            print(_render_plan_snapshot(self.session))
+        print("Goodbye.")
 
-        lines = [
-            f"{tool_event.name} ({tool_event.prompt_name})",
-            f"  params: {params_repr}",
-            f"  result: {message}",
-        ]
-        if payload_repr is not None:
-            lines.append(f"  payload: {payload_repr}")
-
-        formatted = "\n".join(lines)
-        print(f"[tool] {formatted}")
-        self._tool_log.append(
-            {
-                "name": tool_event.name,
-                "prompt": tool_event.prompt_name,
-                "params": params_repr,
-                "result": message,
-                "payload": payload_repr,
-                "call_id": tool_event.call_id,
-            }
+    def _evaluate_turn(self, user_prompt: str) -> str:
+        response = self.adapter.evaluate(
+            self.prompt,
+            ReviewTurnParams(request=user_prompt),
+            bus=self.bus,
+            session=self.session,
         )
+        return _render_response_payload(response)
 
 
-def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
+def main() -> None:
+    """Entry point used by the Codex CLI harness."""
+
+    _configure_logging()
+    adapter = build_adapter()
+    app = CodeReviewApp(adapter)
+    app.run()
+
+
+def build_adapter() -> SupportsReviewEvaluate:
+    if "OPENAI_API_KEY" not in os.environ:
+        raise SystemExit("Set OPENAI_API_KEY before running this example.")
+    model = os.getenv("OPENAI_MODEL", "gpt-5")
+    return cast(SupportsReviewEvaluate, OpenAIAdapter(model=model))
+
+
+def build_task_prompt(session: Session) -> Prompt[ReviewResponse]:
     if not TEST_REPOSITORIES_ROOT.exists():
         raise SystemExit(
             f"Expected test repositories under {TEST_REPOSITORIES_ROOT!s},"
             " but the directory is missing."
         )
 
-    # Prompt layout mirrors the design captured in specs/PROMPTS.md; update the spec
-    # first when changing section ordering or required fields.
     guidance_section = MarkdownSection[ReviewGuidance](
         title="Code Review Brief",
         template=textwrap.dedent(
@@ -450,6 +256,166 @@ def build_sunfish_prompt(session: Session) -> Prompt[ReviewResponse]:
             user_turn_section,
         ),
     )
+
+
+def build_code_reviewer_state(
+    *,
+    overrides_store: LocalPromptOverridesStore | None = None,
+    override_tag: str | None = None,
+) -> tuple[Prompt[ReviewResponse], Session, EventBus]:
+    """Initialize the prompt, session, and bus used by the interactive example."""
+
+    store = overrides_store or LocalPromptOverridesStore()
+    resolved_tag = _resolve_override_tag(override_tag)
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.register_reducer(PromptRendered, append)
+    session.register_reducer(PromptRendered, _print_rendered_prompt)
+    base_prompt = build_task_prompt(session)
+    try:
+        store.seed_if_necessary(base_prompt, tag=resolved_tag)
+    except PromptOverridesError as exc:  # pragma: no cover - startup validation
+        raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
+
+    def render_with_session_overrides(
+        prompt_obj: Prompt[Any],
+        *params: SupportsDataclass,
+        inject_output_instructions: bool | None = None,
+    ) -> RenderedPrompt[Any]:
+        return prompt_obj.render_with_overrides(
+            *params,
+            overrides_store=store,
+            tag=resolved_tag,
+            inject_output_instructions=inject_output_instructions,
+        )
+
+    prompt_with_any = cast(Any, base_prompt)
+    prompt_with_any.render = MethodType(render_with_session_overrides, base_prompt)
+    bus.subscribe(ToolInvoked, _log_tool_invocation)
+    return base_prompt, session, bus
+
+
+def _build_intro(override_tag: str) -> str:
+    return textwrap.dedent(
+        f"""
+        Launching example code reviewer agent.
+        - test-repositories/sunfish mounted under virtual path 'sunfish/'.
+        - Tools: planning, subagents, VFS, and Python evaluation.
+        - Command: 'exit' to quit.
+        - Prompt overrides tag: '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
+        """
+    ).strip()
+
+
+def _render_plan_snapshot(session: Session) -> str:
+    plan = select_latest(session, Plan)
+    if plan is None:
+        return "No active plan."
+
+    lines = [f"Objective: {plan.objective} (status: {plan.status})"]
+    for step in plan.steps:
+        notes = "; ".join(step.notes) if step.notes else ""
+        suffix = f" — notes: {notes}" if notes else ""
+        if step.details:
+            suffix = f" — details: {step.details}{suffix}"
+        lines.append(f"- {step.step_id} [{step.status}] {step.title}{suffix}")
+    return "\n".join(lines)
+
+
+def _render_response_payload(response: PromptResponse[ReviewResponse]) -> str:
+    if response.output is not None:
+        rendered_output = dump(response.output, exclude_none=True)
+        return json.dumps(rendered_output, ensure_ascii=False, indent=2)
+    if response.text:
+        return response.text
+    return "(no response from assistant)"
+
+
+def _resolve_override_tag(tag: str | None = None) -> str:
+    candidate = tag or os.getenv(PROMPT_OVERRIDES_TAG_ENV, _DEFAULT_OVERRIDE_TAG)
+    normalized = candidate.strip()
+    return normalized or _DEFAULT_OVERRIDE_TAG
+
+
+def _configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+        force=True,
+    )
+
+
+def _print_rendered_prompt(
+    slice_values: tuple[PromptRendered, ...],
+    event: ReducerEvent,
+    *,
+    context: ReducerContextProtocol,
+) -> tuple[PromptRendered, ...]:
+    del context
+    prompt_event = cast(PromptRendered, event)
+    prompt_label = prompt_event.prompt_name or (
+        f"{prompt_event.prompt_ns}:{prompt_event.prompt_key}"
+    )
+    print(f"[prompt] Rendered prompt ({prompt_label})")
+    print(prompt_event.rendered_prompt)
+    print()
+    return slice_values
+
+
+def _log_tool_invocation(event: object) -> None:
+    tool_event = cast(ToolInvoked, event)
+    params_repr = _format_for_log(dump(tool_event.params, exclude_none=True))
+    result_message = _truncate_for_log(tool_event.result.message or "")
+    payload_repr: str | None = None
+    payload = tool_event.result.value
+    if payload is not None:
+        try:
+            payload_repr = _format_for_log(dump(payload, exclude_none=True))
+        except TypeError:
+            payload_repr = _format_for_log({"value": payload})
+
+    lines = [
+        f"{tool_event.name} ({tool_event.prompt_name})",
+        f"  params: {params_repr}",
+        f"  result: {result_message}",
+    ]
+    if payload_repr is not None:
+        lines.append(f"  payload: {payload_repr}")
+
+    print("[tool] " + "\n".join(lines))
+
+
+def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 1]}…"
+
+
+def _format_for_log(payload: object, *, limit: int = _LOG_STRING_LIMIT) -> str:
+    serializable = _coerce_for_log(payload)
+    try:
+        rendered = json.dumps(serializable, ensure_ascii=False)
+    except TypeError:
+        rendered = repr(serializable)
+    return _truncate_for_log(rendered, limit=limit)
+
+
+def _coerce_for_log(payload: object) -> object:
+    if payload is None or isinstance(payload, (str, int, float, bool)):
+        return payload
+    if isinstance(payload, Mapping):
+        return {str(key): _coerce_for_log(value) for key, value in payload.items()}
+    if isinstance(payload, Sequence) and not isinstance(
+        payload,
+        (str, bytes, bytearray),
+    ):
+        return [_coerce_for_log(item) for item in payload]
+    if hasattr(payload, "__dataclass_fields__"):
+        return dump(payload, exclude_none=True)
+    if isinstance(payload, set):
+        return sorted(_coerce_for_log(item) for item in payload)
+    return str(payload)
 
 
 if __name__ == "__main__":
