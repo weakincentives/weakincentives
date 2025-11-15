@@ -20,9 +20,15 @@ import logging.config
 import os
 from collections.abc import Mapping, MutableMapping
 from datetime import UTC, datetime
-from typing import Any, cast, override
+from typing import Any, Protocol, cast, override
+
+from ._json import JSONValue
+
+type StructuredLogPayload = Mapping[str, JSONValue]
 
 __all__ = [
+    "JSONValue",
+    "StructuredLogPayload",
     "StructuredLogger",
     "configure_logging",
     "get_logger",
@@ -47,43 +53,41 @@ class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
         self,
         logger: logging.Logger,
         *,
-        context: Mapping[str, object] | None = None,
+        context: StructuredLogPayload | None = None,
     ) -> None:
-        base_context = dict(context) if context is not None else {}
+        base_context: dict[str, JSONValue] = (
+            dict(context) if context is not None else {}
+        )
         super().__init__(logger, base_context)
+        self._context: dict[str, JSONValue] = base_context
 
-    def bind(self, **context: object) -> StructuredLogger:
+    def bind(self, **context: JSONValue) -> StructuredLogger:
         """Return a new adapter with ``context`` merged into the baseline payload."""
 
-        base_extra = cast(Mapping[str, object], self.extra)
-        merged: dict[str, object] = {**dict(base_extra), **context}
+        merged: dict[str, JSONValue] = {**dict(self._context), **context}
         return type(self)(self.logger, context=merged)
 
     @override
     def process(
-        self, msg: Any, kwargs: MutableMapping[str, Any]
-    ) -> tuple[Any, MutableMapping[str, Any]]:
-        extra_obj = kwargs.setdefault("extra", {})
-        if extra_obj is None:
-            extra_obj = {}
-            kwargs["extra"] = extra_obj
-        if not isinstance(
-            extra_obj, MutableMapping
-        ):  # pragma: no cover - defensive guard
+        self, msg: Any, kwargs: MutableMapping[str, object]
+    ) -> tuple[Any, MutableMapping[str, object]]:
+        extra_value = kwargs.setdefault("extra", {})
+        if extra_value is None:
+            extra_mapping: MutableMapping[str, JSONValue] = {}
+            kwargs["extra"] = extra_mapping
+        elif isinstance(extra_value, MutableMapping):
+            extra_mapping = cast(MutableMapping[str, JSONValue], extra_value)
+        else:  # pragma: no cover - defensive guard
             raise TypeError(
                 "Structured logs require a mutable mapping for extra context."
             )
 
-        extra_mapping = cast(MutableMapping[str, object], extra_obj)
-
-        context_payload: dict[str, object] = dict(
-            cast(Mapping[str, object], self.extra)
-        )
+        context_payload: dict[str, JSONValue] = dict(self._context)
 
         inline_context = kwargs.pop("context", None)
         if inline_context is not None:
             if isinstance(inline_context, Mapping):
-                context_payload.update(cast(Mapping[str, object], inline_context))
+                context_payload.update(cast(StructuredLogPayload, inline_context))
             else:  # pragma: no cover - defensive guard
                 raise TypeError("context must be a mapping when provided.")
 
@@ -114,7 +118,7 @@ def get_logger(
     logger_override: logging.Logger
     | logging.LoggerAdapter[logging.Logger]
     | None = None,
-    context: Mapping[str, object] | None = None,
+    context: StructuredLogPayload | None = None,
 ) -> StructuredLogger:
     """Return a :class:`StructuredLogger` scoped to ``name``.
 
@@ -122,23 +126,23 @@ def get_logger(
     logger and merges its contextual ``extra`` payload when available.
     """
 
-    base_context: dict[str, object] = dict(context or {})
+    base_context: dict[str, JSONValue] = dict(context or {})
     base_logger: logging.Logger
 
     if isinstance(logger_override, StructuredLogger):
         base_logger = logger_override.logger
         base_context = {
-            **dict(cast(Mapping[str, object], logger_override.extra)),
+            **dict(cast(StructuredLogPayload, logger_override.extra)),
             **base_context,
         }
     elif isinstance(logger_override, logging.Logger):
         base_logger = logger_override
     elif isinstance(logger_override, logging.LoggerAdapter):
-        base_logger = _unwrap_logger(logger_override)
+        base_logger = _unwrap_logger(cast(_SupportsNestedLogger, logger_override))
         adapter_extra = getattr(logger_override, "extra", None)
         if isinstance(adapter_extra, Mapping):
             base_context = {
-                **dict(cast(Mapping[str, object], adapter_extra)),
+                **dict(cast(StructuredLogPayload, adapter_extra)),
                 **base_context,
             }
     else:
@@ -214,12 +218,16 @@ def configure_logging(
     )
 
 
+class _SupportsNestedLogger(Protocol):
+    logger: logging.Logger | logging.LoggerAdapter[logging.Logger]
+
+
 class _JsonFormatter(logging.Formatter):
     """Formatter that renders structured records as compact JSON."""
 
     @override
     def format(self, record: logging.LogRecord) -> str:
-        payload: dict[str, Any] = {
+        payload: dict[str, JSONValue] = {
             "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
@@ -236,7 +244,7 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=_json_default, separators=(",", ":"))
 
 
-def _json_default(value: Any) -> Any:  # noqa: ANN401
+def _json_default(value: object) -> JSONValue:
     """Fallback serializer returning ``repr`` for unsupported values."""
 
     return repr(value)
@@ -245,13 +253,15 @@ def _json_default(value: Any) -> Any:  # noqa: ANN401
 _JSON_FORMATTER_CLASS = _JsonFormatter
 
 
-def _unwrap_logger(adapter: logging.LoggerAdapter[Any]) -> logging.Logger:
+def _unwrap_logger(adapter: _SupportsNestedLogger) -> logging.Logger:
     """Return the underlying :class:`logging.Logger` from an adapter."""
 
-    logger_obj = adapter.logger
-    if not isinstance(logger_obj, logging.Logger):  # pragma: no cover - defensive guard
-        raise TypeError("LoggerAdapter.logger must be a logging.Logger instance.")
-    return logger_obj
+    logger_value = cast(object, adapter.logger)
+    if isinstance(logger_value, logging.LoggerAdapter):
+        return _unwrap_logger(cast(_SupportsNestedLogger, logger_value))
+    if isinstance(logger_value, logging.Logger):
+        return logger_value
+    raise TypeError("LoggerAdapter.logger must be a logging.Logger instance.")
 
 
 def _coerce_level(level: int | str | None) -> int:
