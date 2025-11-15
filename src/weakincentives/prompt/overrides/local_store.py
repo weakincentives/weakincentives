@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, override
+from typing import cast, override
 
 from ...runtime.logging import StructuredLogger, get_logger
+from ...types import JSONValue
 from ._fs import OverrideFilesystem
 from .validation import (
     FORMAT_VERSION,
@@ -87,10 +88,10 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 )
                 return None
 
-            payload: dict[str, Any]
+            payload: dict[str, JSONValue]
             try:
                 with file_path.open("r", encoding="utf-8") as handle:
-                    payload = json.load(handle)
+                    payload = cast(dict[str, JSONValue], json.load(handle))
             except json.JSONDecodeError as error:
                 raise PromptOverridesError(
                     f"Failed to parse prompt override JSON: {file_path}"
@@ -98,8 +99,10 @@ class LocalPromptOverridesStore(PromptOverridesStore):
 
         validate_header(payload, descriptor, normalized_tag, file_path)
 
-        sections = load_sections(payload.get("sections"), descriptor)
-        tools = load_tools(payload.get("tools"), descriptor)
+        sections_payload = payload.get("sections")
+        sections = load_sections(sections_payload, descriptor)
+        tools_payload = payload.get("tools")
+        tools = load_tools(tools_payload, descriptor)
 
         raw_override = PromptOverride(
             ns=descriptor.ns,

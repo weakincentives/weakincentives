@@ -12,12 +12,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Any, Literal, cast, overload
+from typing import Literal, cast, overload
 
 from ...runtime.logging import StructuredLogger, get_logger
+from ...types import JSONValue
 from .._types import SupportsDataclass, SupportsToolResult
 from ..tool import Tool
 from .versioning import (
@@ -40,7 +41,7 @@ FORMAT_VERSION = 1
 
 
 def validate_header(
-    payload: Mapping[str, Any],
+    payload: Mapping[str, JSONValue],
     descriptor: PromptDescriptor,
     tag: str,
     file_path: Path,
@@ -96,8 +97,8 @@ def _normalize_section_override(
     *,
     path: tuple[str, ...],
     descriptor_section: SectionDescriptor | None,
-    expected_hash: object,
-    body: object,
+    expected_hash: JSONValue,
+    body: JSONValue,
     strict: Literal[True],
     path_display: str,
     body_error_message: str,
@@ -109,8 +110,8 @@ def _normalize_section_override(
     *,
     path: tuple[str, ...],
     descriptor_section: SectionDescriptor | None,
-    expected_hash: object,
-    body: object,
+    expected_hash: JSONValue,
+    body: JSONValue,
     strict: Literal[False],
     path_display: str,
     body_error_message: str,
@@ -121,8 +122,8 @@ def _normalize_section_override(
     *,
     path: tuple[str, ...],
     descriptor_section: SectionDescriptor | None,
-    expected_hash: object,
-    body: object,
+    expected_hash: JSONValue,
+    body: JSONValue,
     strict: bool,
     path_display: str,
     body_error_message: str,
@@ -168,9 +169,9 @@ def _normalize_tool_override(
     *,
     name: str,
     descriptor_tool: ToolDescriptor | None,
-    expected_hash: object,
-    description: object,
-    param_descriptions: object,
+    expected_hash: JSONValue,
+    description: JSONValue,
+    param_descriptions: JSONValue,
     strict: Literal[True],
     description_error_message: str,
     param_mapping_error_message: str,
@@ -183,9 +184,9 @@ def _normalize_tool_override(
     *,
     name: str,
     descriptor_tool: ToolDescriptor | None,
-    expected_hash: object,
-    description: object,
-    param_descriptions: object,
+    expected_hash: JSONValue,
+    description: JSONValue,
+    param_descriptions: JSONValue,
     strict: Literal[False],
     description_error_message: str,
     param_mapping_error_message: str,
@@ -197,9 +198,9 @@ def _normalize_tool_override(
     *,
     name: str,
     descriptor_tool: ToolDescriptor | None,
-    expected_hash: object,
-    description: object,
-    param_descriptions: object,
+    expected_hash: JSONValue,
+    description: JSONValue,
+    param_descriptions: JSONValue,
     strict: bool,
     description_error_message: str,
     param_mapping_error_message: str,
@@ -237,9 +238,10 @@ def _normalize_tool_override(
         param_descriptions = {}
     if not isinstance(param_descriptions, Mapping):
         raise PromptOverridesError(param_mapping_error_message)
+    mapping_params = cast(Mapping[str, JSONValue], param_descriptions)
     normalized_params: dict[str, str] = {}
-    for key, value in cast(Mapping[object, object], param_descriptions).items():
-        if not isinstance(key, str) or not isinstance(value, str):
+    for key, value in mapping_params.items():
+        if not isinstance(value, str):
             raise PromptOverridesError(param_entry_error_message)
         normalized_params[key] = value
     if description is None:
@@ -255,7 +257,7 @@ def _normalize_tool_override(
 
 
 def load_sections(
-    payload: object | None,
+    payload: JSONValue | None,
     descriptor: PromptDescriptor,
 ) -> dict[tuple[str, ...], SectionOverride]:
     if payload is None:
@@ -264,17 +266,18 @@ def load_sections(
         raise PromptOverridesError("Sections payload must be a mapping.")
     if not payload:
         return {}
-    mapping_payload = cast(Mapping[object, object], payload)
+    mapping_payload = cast(Mapping[object, JSONValue], payload)
+    mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
     descriptor_index = _section_descriptor_index(descriptor)
     overrides: dict[tuple[str, ...], SectionOverride] = {}
-    for path_key_obj, section_payload_raw in mapping_payload.items():
-        if not isinstance(path_key_obj, str):
+    for path_key_raw, section_payload_raw in mapping_entries:
+        if not isinstance(path_key_raw, str):
             raise PromptOverridesError("Section keys must be strings.")
-        path_key = path_key_obj
+        path_key = path_key_raw
         path = tuple(part for part in path_key.split("/") if part)
         if not isinstance(section_payload_raw, Mapping):
             raise PromptOverridesError("Section payload must be an object.")
-        section_payload = cast(Mapping[str, object], section_payload_raw)
+        section_payload = cast(Mapping[str, JSONValue], section_payload_raw)
         expected_hash = section_payload.get("expected_hash")
         body = section_payload.get("body")
         section_override = _normalize_section_override(
@@ -336,7 +339,7 @@ def filter_override_for_descriptor(
 
 
 def load_tools(
-    payload: object | None,
+    payload: JSONValue | None,
     descriptor: PromptDescriptor,
 ) -> dict[str, ToolOverride]:
     if payload is None:
@@ -345,16 +348,17 @@ def load_tools(
         raise PromptOverridesError("Tools payload must be a mapping.")
     if not payload:
         return {}
-    mapping_payload = cast(Mapping[object, object], payload)
+    mapping_payload = cast(Mapping[object, JSONValue], payload)
+    mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
     descriptor_index = _tool_descriptor_index(descriptor)
     overrides: dict[str, ToolOverride] = {}
-    for tool_name_obj, tool_payload_raw in mapping_payload.items():
-        if not isinstance(tool_name_obj, str):
+    for tool_name_raw, tool_payload_raw in mapping_entries:
+        if not isinstance(tool_name_raw, str):
             raise PromptOverridesError("Tool names must be strings.")
-        tool_name = tool_name_obj
+        tool_name = tool_name_raw
         if not isinstance(tool_payload_raw, Mapping):
             raise PromptOverridesError("Tool payload must be an object.")
-        tool_payload = cast(Mapping[str, object], tool_payload_raw)
+        tool_payload = cast(Mapping[str, JSONValue], tool_payload_raw)
         expected_hash = tool_payload.get("expected_contract_hash")
         description = tool_payload.get("description")
         param_payload = tool_payload.get("param_descriptions")
@@ -385,8 +389,8 @@ def validate_sections_for_write(
         normalized_section = _normalize_section_override(
             path=path,
             descriptor_section=descriptor_index.get(path),
-            expected_hash=cast(Any, section_override).expected_hash,
-            body=cast(Any, section_override).body,
+            expected_hash=section_override.expected_hash,
+            body=section_override.body,
             strict=True,
             path_display=path_display,
             body_error_message=(
@@ -409,9 +413,9 @@ def validate_tools_for_write(
         normalized_tool = _normalize_tool_override(
             name=name,
             descriptor_tool=descriptor_index.get(name),
-            expected_hash=cast(Any, tool_override).expected_contract_hash,
-            description=cast(Any, tool_override).description,
-            param_descriptions=cast(Any, tool_override).param_descriptions,
+            expected_hash=tool_override.expected_contract_hash,
+            description=tool_override.description,
+            param_descriptions=tool_override.param_descriptions,
             strict=True,
             description_error_message=(
                 f"Tool description override must be a string for {name}."
@@ -442,8 +446,8 @@ def serialize_sections(
 
 def serialize_tools(
     tools: Mapping[str, ToolOverride],
-) -> dict[str, dict[str, Any]]:
-    serialized: dict[str, dict[str, Any]] = {}
+) -> dict[str, dict[str, JSONValue]]:
+    serialized: dict[str, dict[str, JSONValue]] = {}
     for name, tool_override in tools.items():
         serialized[name] = {
             "expected_contract_hash": str(tool_override.expected_contract_hash),

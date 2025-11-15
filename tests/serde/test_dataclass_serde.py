@@ -34,6 +34,7 @@ from weakincentives.serde.dataclass_serde import (
     _ordered_values,
     _ParseConfig,
 )
+from weakincentives.types import JSONValue
 
 parse_module = importlib.import_module("weakincentives.serde.parse")
 
@@ -409,9 +410,9 @@ def test_parse_literal_bool_strings() -> None:
 
 
 def test_schema_literal_bool_includes_boolean_type() -> None:
-    schema_payload = cast(dict[str, Any], schema(LiteralBoolModel))
-    properties = cast(dict[str, Any], schema_payload["properties"])
-    flag_schema = cast(dict[str, Any], properties["flag"])
+    schema_payload = cast(dict[str, JSONValue], schema(LiteralBoolModel))
+    properties = cast(dict[str, JSONValue], schema_payload["properties"])
+    flag_schema = cast(dict[str, JSONValue], properties["flag"])
     assert flag_schema["enum"] == [True, False]
     assert flag_schema["type"] == "boolean"
 
