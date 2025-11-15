@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from ._protocols import PromptLike, SectionLike, SectionNodeLike
 from .inspection import (
     OverrideFileMetadata,
     iter_override_files,
@@ -24,7 +25,6 @@ from .validation import filter_override_for_descriptor
 from .versioning import (
     HexDigest,
     PromptDescriptor,
-    PromptLike,
     PromptOverride,
     PromptOverridesError,
     PromptOverridesStore,
@@ -46,8 +46,10 @@ __all__ = [
     "PromptOverride",
     "PromptOverridesError",
     "PromptOverridesStore",
+    "SectionLike",
     "SectionDescriptor",
     "SectionOverride",
+    "SectionNodeLike",
     "ToolDescriptor",
     "ToolOverride",
     "ensure_hex_digest",

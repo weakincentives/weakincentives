@@ -18,6 +18,7 @@ from typing import Any, override
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ._fs import OverrideFilesystem
+from ._protocols import PromptLike
 from .validation import (
     FORMAT_VERSION,
     filter_override_for_descriptor,
@@ -33,7 +34,6 @@ from .validation import (
 )
 from .versioning import (
     PromptDescriptor,
-    PromptLike,
     PromptOverride,
     PromptOverridesError,
     PromptOverridesStore,
