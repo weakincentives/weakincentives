@@ -27,7 +27,6 @@ from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.prompt import Prompt, RenderedPrompt
-from ..prompt.section import Section
 from ..prompt.tool import Tool, ToolContext
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
