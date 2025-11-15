@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-
 _JSONPrimitive = str | int | float | bool | None
 
 

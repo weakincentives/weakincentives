@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from pathlib import Path
 from typing import cast, override
 
@@ -101,11 +100,9 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         validate_header(payload, descriptor, normalized_tag, file_path)
 
         sections_payload = payload.get("sections")
-        sections = load_sections(
-            cast(Mapping[str, JSONValue] | None, sections_payload), descriptor
-        )
+        sections = load_sections(sections_payload, descriptor)
         tools_payload = payload.get("tools")
-        tools = load_tools(cast(Mapping[str, JSONValue] | None, tools_payload), descriptor)
+        tools = load_tools(tools_payload, descriptor)
 
         raw_override = PromptOverride(
             ns=descriptor.ns,

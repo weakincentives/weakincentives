@@ -116,7 +116,9 @@ def _extract_json_payload(
 
 
 @overload
-def parse_dataclass_payload(
+def parse_dataclass_payload[
+    DataclassT: SupportsDataclass,
+](
     dataclass_type: type[DataclassT],
     container: Literal["object"],
     payload: JSONValue,
@@ -129,7 +131,9 @@ def parse_dataclass_payload(
 
 
 @overload
-def parse_dataclass_payload(
+def parse_dataclass_payload[
+    DataclassT: SupportsDataclass,
+](
     dataclass_type: type[DataclassT],
     container: Literal["array"],
     payload: JSONValue,
@@ -141,7 +145,9 @@ def parse_dataclass_payload(
 ) -> list[DataclassT]: ...
 
 
-def parse_dataclass_payload(
+def parse_dataclass_payload[
+    DataclassT: SupportsDataclass,
+](
     dataclass_type: type[DataclassT],
     container: Literal["object", "array"],
     payload: JSONValue,
@@ -160,10 +166,7 @@ def parse_dataclass_payload(
         if not isinstance(payload, Mapping):
             raise TypeError(object_error)
         mapping_payload = cast(Mapping[str, JSONValue], payload)
-        return cast(
-            DataclassT,
-            parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode),
-        )
+        return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
 
     if isinstance(payload, Mapping):
         mapping_payload = cast(Mapping[str, JSONValue], payload)
@@ -180,13 +183,10 @@ def parse_dataclass_payload(
         if not isinstance(item, Mapping):
             raise TypeError(array_item_error.format(index=index))
         mapping_item = cast(Mapping[str, JSONValue], item)
-        parsed_item = cast(
-            DataclassT,
-            parse_dataclass(
-                dataclass_type,
-                mapping_item,
-                extra=extra_mode,
-            ),
+        parsed_item = parse_dataclass(
+            dataclass_type,
+            mapping_item,
+            extra=extra_mode,
         )
         parsed_items.append(parsed_item)
     return parsed_items

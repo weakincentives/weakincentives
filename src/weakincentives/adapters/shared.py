@@ -43,6 +43,7 @@ from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.dataclasses import is_dataclass_instance
 from ..serde import parse, schema
 from ..tools.errors import DeadlineExceededError, ToolValidationError
+from ..types import JSONValue
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
 from ._provider_protocols import (
     ProviderChoice,
@@ -467,7 +468,7 @@ def build_json_schema_response_format(
 
 
 def parse_schema_constrained_payload(
-    payload: object, rendered: RenderedPrompt[Any]
+    payload: JSONValue, rendered: RenderedPrompt[Any]
 ) -> object:
     """Parse structured provider payloads constrained by prompt schema."""
 
@@ -869,7 +870,9 @@ class ConversationRunner[OutputT]:
                 try:
                     output = cast(
                         OutputT,
-                        parse_schema_constrained_payload(parsed_payload, self.rendered),
+                        parse_schema_constrained_payload(
+                            cast(JSONValue, parsed_payload), self.rendered
+                        ),
                     )
                 except (TypeError, ValueError) as error:
                     raise PromptEvaluationError(

@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Literal, cast, overload
@@ -238,9 +238,10 @@ def _normalize_tool_override(
         param_descriptions = {}
     if not isinstance(param_descriptions, Mapping):
         raise PromptOverridesError(param_mapping_error_message)
+    mapping_params = cast(Mapping[str, JSONValue], param_descriptions)
     normalized_params: dict[str, str] = {}
-    for key, value in cast(Mapping[str, JSONValue], param_descriptions).items():
-        if not isinstance(key, str) or not isinstance(value, str):
+    for key, value in mapping_params.items():
+        if not isinstance(value, str):
             raise PromptOverridesError(param_entry_error_message)
         normalized_params[key] = value
     if description is None:
@@ -256,7 +257,7 @@ def _normalize_tool_override(
 
 
 def load_sections(
-    payload: Mapping[str, JSONValue] | None,
+    payload: JSONValue | None,
     descriptor: PromptDescriptor,
 ) -> dict[tuple[str, ...], SectionOverride]:
     if payload is None:
@@ -265,12 +266,14 @@ def load_sections(
         raise PromptOverridesError("Sections payload must be a mapping.")
     if not payload:
         return {}
-    mapping_payload = cast(Mapping[str, JSONValue], payload)
+    mapping_payload = cast(Mapping[object, JSONValue], payload)
+    mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
     descriptor_index = _section_descriptor_index(descriptor)
     overrides: dict[tuple[str, ...], SectionOverride] = {}
-    for path_key, section_payload_raw in mapping_payload.items():
-        if not isinstance(path_key, str):
+    for path_key_raw, section_payload_raw in mapping_entries:
+        if not isinstance(path_key_raw, str):
             raise PromptOverridesError("Section keys must be strings.")
+        path_key = path_key_raw
         path = tuple(part for part in path_key.split("/") if part)
         if not isinstance(section_payload_raw, Mapping):
             raise PromptOverridesError("Section payload must be an object.")
@@ -336,7 +339,7 @@ def filter_override_for_descriptor(
 
 
 def load_tools(
-    payload: Mapping[str, JSONValue] | None,
+    payload: JSONValue | None,
     descriptor: PromptDescriptor,
 ) -> dict[str, ToolOverride]:
     if payload is None:
@@ -345,12 +348,14 @@ def load_tools(
         raise PromptOverridesError("Tools payload must be a mapping.")
     if not payload:
         return {}
-    mapping_payload = cast(Mapping[str, JSONValue], payload)
+    mapping_payload = cast(Mapping[object, JSONValue], payload)
+    mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
     descriptor_index = _tool_descriptor_index(descriptor)
     overrides: dict[str, ToolOverride] = {}
-    for tool_name, tool_payload_raw in mapping_payload.items():
-        if not isinstance(tool_name, str):
+    for tool_name_raw, tool_payload_raw in mapping_entries:
+        if not isinstance(tool_name_raw, str):
             raise PromptOverridesError("Tool names must be strings.")
+        tool_name = tool_name_raw
         if not isinstance(tool_payload_raw, Mapping):
             raise PromptOverridesError("Tool payload must be an object.")
         tool_payload = cast(Mapping[str, JSONValue], tool_payload_raw)

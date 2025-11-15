@@ -242,10 +242,7 @@ def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
     assert load_sections(empty_sections, descriptor) == {}
 
     with pytest.raises(PromptOverridesError):
-        load_sections(
-            cast(Mapping[str, JSONValue], ["invalid"]),
-            descriptor,
-        )
+        load_sections(cast(JSONValue, ["invalid"]), descriptor)
 
     with pytest.raises(PromptOverridesError):
         load_sections({section_key: {"expected_hash": 123, "body": "Body"}}, descriptor)
@@ -260,13 +257,10 @@ def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
         )
 
     with pytest.raises(PromptOverridesError):
-        load_sections(cast(Mapping[str, JSONValue], []), descriptor)
+        load_sections(cast(JSONValue, []), descriptor)
 
     with pytest.raises(PromptOverridesError):
-        load_sections(
-            cast(Mapping[str, JSONValue], {1: {}}),
-            descriptor,
-        )
+        load_sections(cast(JSONValue, {1: {}}), descriptor)
 
 
 def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
@@ -353,13 +347,10 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
         store.resolve(descriptor)
 
     with pytest.raises(PromptOverridesError):
-        load_tools(cast(Mapping[str, JSONValue], []), descriptor)
+        load_tools(cast(JSONValue, []), descriptor)
 
     with pytest.raises(PromptOverridesError):
-        load_tools(
-            cast(Mapping[str, JSONValue], {1: {}}),
-            descriptor,
-        )
+        load_tools(cast(JSONValue, {1: {}}), descriptor)
 
     with pytest.raises(PromptOverridesError):
         load_tools({tool.name: "invalid"}, descriptor)

@@ -14,12 +14,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import Field
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
-
-type DataclassFieldMapping = Mapping[str, Field[Any]]
+type DataclassFieldMapping = dict[str, Field[Any]]
 
 
 @runtime_checkable
@@ -32,4 +31,4 @@ class SupportsDataclass(Protocol):
 SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass]
 
 
-__all__ = ["SupportsDataclass", "SupportsToolResult", "DataclassFieldMapping"]
+__all__ = ["DataclassFieldMapping", "SupportsDataclass", "SupportsToolResult"]
