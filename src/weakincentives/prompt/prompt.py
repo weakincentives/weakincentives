@@ -14,7 +14,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+)
 
 from ._types import SupportsDataclass
 from .chapter import Chapter, ChaptersExpansionPolicy
@@ -34,6 +43,9 @@ def _format_specialization_argument(argument: object | None) -> str:
     if isinstance(argument, type):
         return argument.__name__
     return repr(argument)
+
+
+ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)
 
 
 class Prompt[OutputT]:
@@ -70,8 +82,8 @@ class Prompt[OutputT]:
         ns: str,
         key: str,
         name: str | None = None,
-        sections: Sequence[Section[Any]] | None = None,
-        chapters: Sequence[Chapter[Any]] | None = None,
+        sections: Sequence[Section[SupportsDataclass]] | None = None,
+        chapters: Sequence[Chapter[SupportsDataclass]] | None = None,
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
     ) -> None:
@@ -85,36 +97,23 @@ class Prompt[OutputT]:
         self.ns = stripped_ns
         self.key = stripped_key
         self.name = name
-        base_sections: list[Section[SupportsDataclass]] = [
-            cast(Section[SupportsDataclass], section) for section in sections or ()
-        ]
-        self._base_sections: tuple[Section[SupportsDataclass], ...] = tuple(
-            base_sections
-        )
-        self._sections: tuple[Section[SupportsDataclass], ...] = tuple(base_sections)
+        base_sections = tuple(sections or ())
+        self._base_sections: tuple[Section[SupportsDataclass], ...] = base_sections
+        self._sections: tuple[Section[SupportsDataclass], ...] = base_sections
         self._registry = PromptRegistry()
         self.placeholders: dict[SectionPath, set[str]] = {}
         self._allow_extra_keys_requested = allow_extra_keys
 
-        normalized_chapters: list[Chapter[SupportsDataclass]] = []
         seen_chapter_keys: set[str] = set()
-        for chapter in chapters or ():
-            if not isinstance(chapter, Chapter):  # pyright: ignore[reportUnnecessaryIsInstance]
-                raise PromptValidationError(
-                    "Prompt chapters must be Chapter instances.",
-                    section_path=(getattr(chapter, "key", "?"),),
-                )
-            normalized = cast(Chapter[SupportsDataclass], chapter)
-            if normalized.key in seen_chapter_keys:
+        provided_chapters = tuple(chapters or ())
+        for chapter in provided_chapters:
+            if chapter.key in seen_chapter_keys:
                 raise PromptValidationError(
                     "Prompt chapters must use unique keys.",
-                    section_path=(normalized.key,),
+                    section_path=(chapter.key,),
                 )
-            seen_chapter_keys.add(normalized.key)
-            normalized_chapters.append(normalized)
-        self._chapters: tuple[Chapter[SupportsDataclass], ...] = tuple(
-            normalized_chapters
-        )
+            seen_chapter_keys.add(chapter.key)
+        self._chapters: tuple[Chapter[SupportsDataclass], ...] = provided_chapters
         self._chapter_key_registry: dict[str, Chapter[SupportsDataclass]] = {
             chapter.key: chapter for chapter in self._chapters
         }
@@ -245,7 +244,7 @@ class Prompt[OutputT]:
             key_present = chapter.key in provided_lookup
             params = provided_lookup.get(chapter.key)
             if key_present:
-                params = self._normalize_chapter_params(chapter, params)
+                params = self._normalize_chapter_params(chapter, cast(ParamsT | None, params))
             elif chapter.default_params is not None:
                 params = clone_dataclass(chapter.default_params)
 
@@ -257,7 +256,7 @@ class Prompt[OutputT]:
                         dataclass_type=chapter.param_type,
                     )
                 try:
-                    enabled = chapter.is_enabled(cast(Any, params))
+                    enabled = chapter.is_enabled(params)
                 except Exception as error:
                     raise PromptValidationError(
                         "Chapter enabled predicate failed.",
@@ -283,9 +282,9 @@ class Prompt[OutputT]:
 
     def _normalize_chapter_params(
         self,
-        chapter: Chapter[SupportsDataclass],
-        params: SupportsDataclass | None,
-    ) -> SupportsDataclass | None:
+        chapter: Chapter[ParamsT],
+        params: ParamsT | None,
+    ) -> ParamsT | None:
         params_type = chapter.param_type
         if params_type is None:
             if params is not None:
@@ -295,9 +294,9 @@ class Prompt[OutputT]:
                 )
             return None
 
-        if not isinstance(params, params_type) or not is_dataclass(params):
+        if params is None:
             raise PromptValidationError(
-                "Chapter parameters must be instances of the declared dataclass.",
+                "Chapter requires parameters.",
                 section_path=(chapter.key,),
                 dataclass_type=params_type,
             )

@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar, cast
+from typing import ClassVar, cast
 
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
@@ -40,7 +40,7 @@ class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
     key: str
     title: str
     description: str | None = None
-    sections: tuple[Section[Any], ...] = ()
+    sections: Sequence[Section[SupportsDataclass]] | None = ()
     default_params: ParamsT | None = None
     enabled: Callable[[ParamsT], bool] | Callable[[], bool] | None = None
     _enabled_callable: Callable[[ParamsT | None], bool] | None = field(
@@ -57,12 +57,7 @@ class Chapter[ParamsT: SupportsDataclass](GenericParamsSpecializer[ParamsT]):
         )
         self.key = self._normalize_key(self.key)
 
-        normalized_sections: list[Section[SupportsDataclass]] = []
-        for section in self.sections or ():
-            if not isinstance(section, Section):  # pyright: ignore[reportUnnecessaryIsInstance]
-                raise TypeError("Chapter sections must be Section instances.")
-            normalized_sections.append(cast(Section[SupportsDataclass], section))
-        self.sections = tuple(normalized_sections)
+        self.sections = tuple(self.sections or ())
 
         self._enabled_callable: Callable[[ParamsT | None], bool] | None = (
             self._normalize_enabled(self.enabled, params_type)

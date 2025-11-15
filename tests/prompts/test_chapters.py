@@ -156,6 +156,26 @@ def test_expand_chapters_requires_params_when_predicate_present() -> None:
         prompt.expand_chapters(ChaptersExpansionPolicy.ALL_INCLUDED)
 
 
+def test_expand_chapters_rejects_explicit_none_params() -> None:
+    chapter = Chapter[ChapterOneParams](
+        key="requires",
+        title="Requires",
+        sections=(),
+    )
+    prompt = Prompt(
+        ns="tests.prompts",
+        key="missing-explicit",
+        sections=(),
+        chapters=(chapter,),
+    )
+
+    with pytest.raises(PromptValidationError):
+        prompt.expand_chapters(
+            ChaptersExpansionPolicy.ALL_INCLUDED,
+            chapter_params={"requires": None},
+        )
+
+
 def test_expand_chapters_rejects_intent_classifier_until_supported() -> None:
     prompt = build_chapter_prompt()
 
@@ -301,15 +321,6 @@ def test_chapter_without_params_rejects_defaults() -> None:
         )
 
 
-def test_chapter_rejects_non_section_payloads() -> None:
-    with pytest.raises(TypeError):
-        Chapter[ChapterOneParams](
-            key="bad",
-            title="Bad",
-            sections=("not-a-section",),  # type: ignore[arg-type]
-        )
-
-
 def test_chapter_validates_default_param_type() -> None:
     with pytest.raises(TypeError):
         Chapter[ChapterOneParams](
@@ -373,16 +384,6 @@ def test_chapter_specialization_preserves_metadata() -> None:
     assert specialized.__name__ == Chapter.__name__
 
 
-def test_prompt_rejects_non_chapter_instances() -> None:
-    with pytest.raises(PromptValidationError):
-        Prompt(
-            ns="tests.prompts",
-            key="invalid-chapter",
-            sections=(),
-            chapters=(object(),),  # type: ignore[arg-type]
-        )
-
-
 def test_prompt_rejects_duplicate_chapter_keys() -> None:
     chapter = Chapter[ChapterOneParams](
         key="duplicate",
@@ -442,21 +443,3 @@ def test_expand_chapters_wraps_enabled_errors() -> None:
         prompt.expand_chapters(ChaptersExpansionPolicy.ALL_INCLUDED)
 
 
-def test_expand_chapters_validates_parameter_types() -> None:
-    chapter = Chapter[ChapterOneParams](
-        key="type-guard",
-        title="Type Guard",
-        sections=(),
-    )
-    prompt = Prompt(
-        ns="tests.prompts",
-        key="type-prompt",
-        sections=(),
-        chapters=(chapter,),
-    )
-
-    with pytest.raises(PromptValidationError):
-        prompt.expand_chapters(
-            ChaptersExpansionPolicy.ALL_INCLUDED,
-            chapter_params={"type-guard": ToggleParams(include=True)},
-        )
