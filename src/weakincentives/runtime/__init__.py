@@ -23,7 +23,12 @@ from .events import (
     PublishResult,
     ToolInvoked,
 )
-from .logging import StructuredLogger, configure_logging, get_logger
+from .logging import (
+    StructuredLogger,
+    StructuredLogPayload,
+    configure_logging,
+    get_logger,
+)
 from .session import (
     DataEvent,
     ReducerContext,
@@ -61,6 +66,7 @@ __all__ = [
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
+    "StructuredLogPayload",
     "StructuredLogger",
     "ToolInvoked",
     "TypedReducer",

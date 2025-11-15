@@ -4,7 +4,9 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- No changes yet.
+- Introduced :class:`StructuredLogPayload` and updated `StructuredLogger` to require
+  the typed payload plus explicit `context` bindings, simplifying logging call sites
+  and enabling better static typing across the runtime and adapter surfaces.
 
 ## v0.8.0 - 2025-11-15
 

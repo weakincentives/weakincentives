@@ -17,7 +17,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal, cast, overload
 
-from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.logging import StructuredLogger, StructuredLogPayload, get_logger
 from .._types import SupportsDataclass, SupportsToolResult
 from ..tool import Tool
 from .versioning import (
@@ -81,13 +81,15 @@ def _log_mismatched_override_metadata(
 ) -> None:
     _LOGGER.debug(
         "Skipping override due to descriptor metadata mismatch.",
-        event="prompt_override_mismatched_descriptor",
-        context={
-            "expected_ns": descriptor.ns,
-            "expected_key": descriptor.key,
-            "override_ns": override.ns,
-            "override_key": override.prompt_key,
-        },
+        payload=StructuredLogPayload(
+            event="prompt_override_mismatched_descriptor",
+            context={
+                "expected_ns": descriptor.ns,
+                "expected_key": descriptor.key,
+                "override_ns": override.ns,
+                "override_key": override.prompt_key,
+            },
+        ),
     )
 
 
@@ -134,8 +136,10 @@ def _normalize_section_override(
             )
         _LOGGER.debug(
             "Skipping unknown override section path.",
-            event="prompt_override_unknown_section",
-            context={"path": path_display},
+            payload=StructuredLogPayload(
+                event="prompt_override_unknown_section",
+                context={"path": path_display},
+            ),
         )
         return None
     expected_digest = ensure_hex_digest(
@@ -147,12 +151,14 @@ def _normalize_section_override(
             raise PromptOverridesError(f"Hash mismatch for section {path_display}.")
         _LOGGER.debug(
             "Skipping stale section override.",
-            event="prompt_override_stale_section",
-            context={
-                "path": path_display,
-                "expected_hash": str(descriptor_section.content_hash),
-                "found_hash": str(expected_digest),
-            },
+            payload=StructuredLogPayload(
+                event="prompt_override_stale_section",
+                context={
+                    "path": path_display,
+                    "expected_hash": str(descriptor_section.content_hash),
+                    "found_hash": str(expected_digest),
+                },
+            ),
         )
         return None
     if not isinstance(body, str):
@@ -210,8 +216,10 @@ def _normalize_tool_override(
             raise PromptOverridesError(f"Unknown tool override: {name}")
         _LOGGER.debug(
             "Skipping unknown tool override.",
-            event="prompt_override_unknown_tool",
-            context={"tool": name},
+            payload=StructuredLogPayload(
+                event="prompt_override_unknown_tool",
+                context={"tool": name},
+            ),
         )
         return None
     expected_digest = ensure_hex_digest(
@@ -223,12 +231,14 @@ def _normalize_tool_override(
             raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
         _LOGGER.debug(
             "Skipping stale tool override.",
-            event="prompt_override_stale_tool",
-            context={
-                "tool": name,
-                "expected_hash": str(descriptor_tool.contract_hash),
-                "found_hash": str(expected_digest),
-            },
+            payload=StructuredLogPayload(
+                event="prompt_override_stale_tool",
+                context={
+                    "tool": name,
+                    "expected_hash": str(descriptor_tool.contract_hash),
+                    "found_hash": str(expected_digest),
+                },
+            ),
         )
         return None
     if description is not None and not isinstance(description, str):

@@ -18,6 +18,7 @@ import pytest
 
 from weakincentives import cli
 from weakincentives.cli import wink
+from weakincentives.runtime.logging import StructuredLogPayload
 
 
 def test_cli_namespace_lists_wink_module() -> None:
@@ -32,10 +33,10 @@ def test_main_logs_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class FakeLogger:
         def __init__(self) -> None:
-            self.calls: list[tuple[str, dict[str, object]]] = []
+            self.calls: list[tuple[str, StructuredLogPayload]] = []
 
-        def info(self, message: str, *, event: str) -> None:
-            self.calls.append((message, {"event": event}))
+        def info(self, message: str, *, payload: StructuredLogPayload) -> None:
+            self.calls.append((message, payload))
 
     fake_logger = FakeLogger()
 
@@ -58,5 +59,8 @@ def test_main_logs_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls["configure"] == {"level": "DEBUG", "json_mode": False}
     assert calls["logger_name"] == "weakincentives.cli.wink"
     assert fake_logger.calls == [
-        ("wink CLI placeholder executed.", {"event": "wink.placeholder"})
+        (
+            "wink CLI placeholder executed.",
+            StructuredLogPayload(event="wink.placeholder", context={}),
+        )
     ]

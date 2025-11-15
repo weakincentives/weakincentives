@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import Any, override
 
-from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.logging import StructuredLogger, StructuredLogPayload, get_logger
 from ._fs import OverrideFilesystem
 from .validation import (
     FORMAT_VERSION,
@@ -78,12 +78,14 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             if not file_path.exists():
                 _LOGGER.debug(
                     "Override file not found.",
-                    event="prompt_override_missing",
-                    context={
-                        "ns": descriptor.ns,
-                        "prompt_key": descriptor.key,
-                        "tag": normalized_tag,
-                    },
+                    payload=StructuredLogPayload(
+                        event="prompt_override_missing",
+                        context={
+                            "ns": descriptor.ns,
+                            "prompt_key": descriptor.key,
+                            "tag": normalized_tag,
+                        },
+                    ),
                 )
                 return None
 
@@ -116,12 +118,14 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         if not filtered_sections and not filtered_tools:
             _LOGGER.debug(
                 "No applicable overrides remain after validation.",
-                event="prompt_override_empty",
-                context={
-                    "ns": descriptor.ns,
-                    "prompt_key": descriptor.key,
-                    "tag": normalized_tag,
-                },
+                payload=StructuredLogPayload(
+                    event="prompt_override_empty",
+                    context={
+                        "ns": descriptor.ns,
+                        "prompt_key": descriptor.key,
+                        "tag": normalized_tag,
+                    },
+                ),
             )
             return None
 
@@ -134,14 +138,16 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         )
         _LOGGER.info(
             "Resolved prompt override.",
-            event="prompt_override_resolved",
-            context={
-                "ns": descriptor.ns,
-                "prompt_key": descriptor.key,
-                "tag": normalized_tag,
-                "section_count": len(filtered_sections),
-                "tool_count": len(filtered_tools),
-            },
+            payload=StructuredLogPayload(
+                event="prompt_override_resolved",
+                context={
+                    "ns": descriptor.ns,
+                    "prompt_key": descriptor.key,
+                    "tag": normalized_tag,
+                    "section_count": len(filtered_sections),
+                    "tool_count": len(filtered_tools),
+                },
+            ),
         )
         return override
 
@@ -193,14 +199,16 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         )
         _LOGGER.info(
             "Persisted prompt override.",
-            event="prompt_override_persisted",
-            context={
-                "ns": descriptor.ns,
-                "prompt_key": descriptor.key,
-                "tag": normalized_tag,
-                "section_count": len(validated_sections),
-                "tool_count": len(validated_tools),
-            },
+            payload=StructuredLogPayload(
+                event="prompt_override_persisted",
+                context={
+                    "ns": descriptor.ns,
+                    "prompt_key": descriptor.key,
+                    "tag": normalized_tag,
+                    "section_count": len(validated_sections),
+                    "tool_count": len(validated_tools),
+                },
+            ),
         )
         return persisted
 
@@ -224,12 +232,14 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             except FileNotFoundError:
                 _LOGGER.debug(
                     "No override file to delete.",
-                    event="prompt_override_delete_missing",
-                    context={
-                        "ns": ns,
-                        "prompt_key": prompt_key,
-                        "tag": normalized_tag,
-                    },
+                    payload=StructuredLogPayload(
+                        event="prompt_override_delete_missing",
+                        context={
+                            "ns": ns,
+                            "prompt_key": prompt_key,
+                            "tag": normalized_tag,
+                        },
+                    ),
                 )
 
     @override

@@ -66,26 +66,30 @@ exception paths where execution continues after capturing the error.
 
 ## Structured Context Delivery
 
-Always pass structured fields via the logger's `extra` mapping (or the
+Always pass structured fields via :class:`StructuredLogPayload` (or the
 repository's helper wrappers) instead of formatting them into the message
 string. This keeps the message stable while downstream collectors receive the
 full context payload.
 
 ```python
+from weakincentives.runtime.logging import StructuredLogPayload
+
 logger.info(
     "Tool execution completed",
-    extra={
-        "event": "tool.run",
-        "prompt_name": prompt.name,
-        "adapter": adapter_id,
-        "tool": tool.name,
-        "mode": tool.mode,
-    },
+    payload=StructuredLogPayload(
+        event="tool.run",
+        context={
+            "prompt_name": prompt.name,
+            "adapter": adapter_id,
+            "tool": tool.name,
+            "mode": tool.mode,
+        },
+    ),
 )
 ```
 
 When reporting exceptions, continue using `logging.exception` (or
-`logger.exception`) and include the same `extra` mapping so the structured
+`logger.exception`) and include the same payload so the structured
 fields propagate alongside the traceback.
 
 ## Error Handling Expectations

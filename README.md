@@ -619,11 +619,18 @@ metadata to every record without manual dictionary plumbing. Call
 bind logger instances wherever you need telemetry:
 
 ```python
-from weakincentives.runtime.logging import configure_logging, get_logger
+from weakincentives.runtime.logging import (
+    StructuredLogPayload,
+    configure_logging,
+    get_logger,
+)
 
 configure_logging(json_mode=True)
-logger = get_logger("demo").bind(component="cli")
-logger.info("boot", event="demo.start", context={"attempt": 1})
+logger = get_logger("demo").bind(context={"component": "cli"})
+logger.info(
+    "boot",
+    payload=StructuredLogPayload(event="demo.start", context={"attempt": 1}),
+)
 ```
 
 The helper respects any existing root handlers—omit `force=True` if your

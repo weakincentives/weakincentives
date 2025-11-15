@@ -26,6 +26,7 @@ import pytest
 
 from weakincentives.runtime.logging import (
     StructuredLogger,
+    StructuredLogPayload,
     _coerce_level,
     _unwrap_logger,
     configure_logging,
@@ -69,12 +70,18 @@ def reset_logging_state() -> Iterator[None]:
 
 
 def test_structured_logger_emits_structured_records() -> None:
-    logger = get_logger("tests.logging").bind(component="unit-test")
+    logger = get_logger("tests.logging").bind(context={"component": "unit-test"})
     base_logger = logger.logger
     base_logger.setLevel(logging.INFO)
 
     with _capture(base_logger) as records:
-        logger.info("structured", event="tests.event", context={"attempt": 1})
+        logger.info(
+            "structured",
+            payload=StructuredLogPayload(
+                event="tests.event",
+                context={"attempt": 1},
+            ),
+        )
 
     assert len(records) == 1
     record = records[0]
@@ -83,18 +90,27 @@ def test_structured_logger_emits_structured_records() -> None:
     assert record.getMessage() == "structured"
 
 
-def test_structured_logger_handles_none_extra_and_merges_mapping() -> None:
-    logger = get_logger("tests.logging.extra")
+def test_structured_logger_merges_payload_context() -> None:
+    logger = get_logger("tests.logging.extra", context={"base": True})
     base_logger = logger.logger
     base_logger.setLevel(logging.INFO)
 
     with _capture(base_logger) as records:
-        logger.info("none-extra", event="tests.none", extra=None)
-        logger.info("with-extra", extra={"event": "tests.extra", "count": 2})
+        logger.info(
+            "none-extra",
+            payload=StructuredLogPayload(event="tests.none", context={}),
+        )
+        logger.info(
+            "with-extra",
+            payload=StructuredLogPayload(
+                event="tests.extra",
+                context={"count": 2},
+            ),
+        )
 
     assert [record.event for record in records] == ["tests.none", "tests.extra"]
-    assert records[0].context == {}
-    assert records[1].context == {"count": 2}
+    assert records[0].context == {"base": True}
+    assert records[1].context == {"base": True, "count": 2}
 
 
 def test_get_logger_preserves_override_context() -> None:
@@ -126,12 +142,23 @@ def test_get_logger_merges_standard_logger_adapter_context() -> None:
     assert logger.extra == {"source": "adapter"}
 
 
+def test_get_logger_handles_non_mapping_logger_adapter_context() -> None:
+    base = logging.getLogger("adapter-non-mapping")
+    adapter = logging.LoggerAdapter(base, {"source": "adapter"})
+    adapter.extra = object()  # type: ignore[assignment]
+
+    logger = get_logger("ignored", logger_override=adapter, context={"key": "value"})
+
+    assert logger.logger is base
+    assert logger.extra == {"key": "value"}
+
+
 def _raise_runtime_error() -> None:
     raise RuntimeError("boom")
 
 
 def test_structured_logger_exception_logging_includes_context() -> None:
-    logger = get_logger("tests.exception").bind(component="runner")
+    logger = get_logger("tests.exception").bind(context={"component": "runner"})
     base_logger = logger.logger
     base_logger.setLevel(logging.INFO)
 
@@ -139,7 +166,13 @@ def test_structured_logger_exception_logging_includes_context() -> None:
         try:
             _raise_runtime_error()
         except RuntimeError:
-            logger.exception("failed", event="tests.error", context={"prompt": "demo"})
+            logger.exception(
+                "failed",
+                payload=StructuredLogPayload(
+                    event="tests.error",
+                    context={"prompt": "demo"},
+                ),
+            )
 
     assert len(records) == 1
     record = records[0]
@@ -153,7 +186,7 @@ def test_structured_logger_requires_event_metadata() -> None:
     logger.logger.setLevel(logging.INFO)
 
     with pytest.raises(TypeError):
-        logger.info("missing-event", extra={"detail": True})
+        logger.info("missing-event")
 
 
 def test_configure_logging_respects_existing_handlers() -> None:
@@ -235,10 +268,16 @@ def test_configure_logging_json_mode_emits_structured_output(
 
     configure_logging(json_mode=True, force=True)
 
-    logger = get_logger("tests.logging.json").bind(component="json-test")
+    logger = get_logger("tests.logging.json").bind(context={"component": "json-test"})
     logger.logger.setLevel(logging.INFO)
 
-    logger.info("payload", event="tests.json", context={"key": "value"})
+    logger.info(
+        "payload",
+        payload=StructuredLogPayload(
+            event="tests.json",
+            context={"key": "value"},
+        ),
+    )
 
     root = logging.getLogger()
     handler = root.handlers[0]
