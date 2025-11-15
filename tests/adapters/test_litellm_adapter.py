@@ -17,7 +17,7 @@ import types
 from collections.abc import Mapping
 from importlib import import_module as std_import_module
 from types import MethodType
-from typing import Any, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast
 
 import pytest
 
@@ -33,7 +33,10 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
-from weakincentives.prompt.structured_output import ARRAY_WRAPPER_KEY
+from weakincentives.prompt.structured_output import (
+    ARRAY_WRAPPER_KEY,
+    StructuredOutputSpec,
+)
 
 try:
     from tests.adapters._test_stubs import (
@@ -1642,12 +1645,7 @@ def test_litellm_build_json_schema_response_format_returns_none_for_plain_prompt
 def test_litellm_parse_schema_constrained_payload_requires_structured_prompt() -> None:
     module = cast(Any, _reload_module())
 
-    rendered = RenderedPrompt(
-        text="",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
-    )
+    rendered = RenderedPrompt(text="")
 
     with pytest.raises(TypeError):
         module.parse_schema_constrained_payload({}, rendered)
@@ -1680,9 +1678,11 @@ def test_litellm_parse_schema_constrained_payload_rejects_unknown_container() ->
 
     rendered = RenderedPrompt(
         text="",
-        output_type=StructuredAnswer,
-        container="invalid",  # type: ignore[arg-type]
-        allow_extra_keys=False,
+        structured_output=StructuredOutputSpec(
+            dataclass_type=StructuredAnswer,
+            container=cast(Literal["object", "array"], "invalid"),
+            allow_extra_keys=False,
+        ),
     )
 
     with pytest.raises(TypeError):

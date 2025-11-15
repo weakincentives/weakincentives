@@ -31,6 +31,7 @@ from .registry import PromptRegistry, RegistrySnapshot, SectionNode, clone_datac
 from .rendering import PromptRenderer, RenderedPrompt
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
+from .structured_output import StructuredOutputSpec
 
 if TYPE_CHECKING:
     from .overrides import PromptLike, PromptOverridesStore, ToolOverride
@@ -114,21 +115,15 @@ class Prompt[OutputT]:
             chapter.key: chapter for chapter in self._chapters
         }
 
-        self._output_type: type[Any] | None
-        self._output_container: Literal["object", "array"] | None
-        self._allow_extra_keys: bool | None
-        (
-            self._output_type,
-            self._output_container,
-            self._allow_extra_keys,
-        ) = self._resolve_output_spec(allow_extra_keys)
+        self._structured_output: StructuredOutputSpec[SupportsDataclass] | None
+        self._structured_output = self._resolve_output_spec(allow_extra_keys)
 
         self.inject_output_instructions = inject_output_instructions
 
         self._registry.register_sections(self._sections)
 
         self._response_section: ResponseFormatSection | None = None
-        if self._output_type is not None and self._output_container is not None:
+        if self._structured_output is not None:
             response_params = self._build_response_format_params()
             response_section = ResponseFormatSection(
                 params=response_params,
@@ -147,11 +142,9 @@ class Prompt[OutputT]:
             path: set(names) for path, names in snapshot.placeholders.items()
         }
 
-        self._renderer = PromptRenderer(
+        self._renderer: PromptRenderer[OutputT] = PromptRenderer(
             registry=snapshot,
-            output_type=self._output_type,
-            output_container=self._output_container,
-            allow_extra_keys=self._allow_extra_keys,
+            structured_output=self._structured_output,
             response_section=self._response_section,
         )
 
@@ -195,6 +188,12 @@ class Prompt[OutputT]:
     @property
     def param_types(self) -> set[type[SupportsDataclass]]:
         return self._registry_snapshot.param_types
+
+    @property
+    def structured_output(self) -> StructuredOutputSpec[SupportsDataclass] | None:
+        """Resolved structured output declaration, when present."""
+
+        return self._structured_output
 
     @property
     def chapters(self) -> tuple[Chapter[SupportsDataclass], ...]:
@@ -300,7 +299,7 @@ class Prompt[OutputT]:
 
     def _resolve_output_spec(
         self, allow_extra_keys: bool
-    ) -> tuple[type[Any] | None, Literal["object", "array"] | None, bool | None]:
+    ) -> StructuredOutputSpec[SupportsDataclass] | None:
         candidate = getattr(type(self), "_output_dataclass_candidate", None)
         container = cast(
             Literal["object", "array"] | None,
@@ -308,7 +307,7 @@ class Prompt[OutputT]:
         )
 
         if candidate is None or container is None:
-            return None, None, None
+            return None
 
         if not isinstance(candidate, type):
             candidate_type = cast(type[Any], type(candidate))
@@ -324,20 +323,25 @@ class Prompt[OutputT]:
                 dataclass_type=bad_dataclass,
             )
 
-        dataclass_type = cast(type[Any], candidate)
-        return dataclass_type, container, allow_extra_keys
+        dataclass_type = cast(type[SupportsDataclass], candidate)
+        return StructuredOutputSpec(
+            dataclass_type=dataclass_type,
+            container=container,
+            allow_extra_keys=allow_extra_keys,
+        )
 
     def _build_response_format_params(self) -> ResponseFormatParams:
-        container = self._output_container
-        if container is None:
+        spec = self._structured_output
+        if spec is None:
             raise RuntimeError(
                 "Output container missing during response format construction."
             )
+        container = spec.container
 
         article: Literal["a", "an"] = (
             "an" if container.startswith(("a", "e", "i", "o", "u")) else "a"
         )
-        extra_clause = ". Do not add extra keys." if not self._allow_extra_keys else "."
+        extra_clause = "." if spec.allow_extra_keys else ". Do not add extra keys."
         return ResponseFormatParams(
             article=article,
             container=container,

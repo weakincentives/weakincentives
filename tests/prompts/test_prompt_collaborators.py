@@ -123,9 +123,7 @@ def test_renderer_renders_sections_and_tool_overrides() -> None:
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
         registry=snapshot,
-        output_type=None,
-        output_container=None,
-        allow_extra_keys=None,
+        structured_output=None,
         response_section=None,
     )
 
@@ -154,9 +152,7 @@ def test_renderer_rejects_unregistered_param_types() -> None:
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
         registry=snapshot,
-        output_type=None,
-        output_container=None,
-        allow_extra_keys=None,
+        structured_output=None,
         response_section=None,
     )
 

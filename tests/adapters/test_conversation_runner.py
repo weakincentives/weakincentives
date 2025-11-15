@@ -32,6 +32,7 @@ from weakincentives.prompt import Prompt, ToolContext
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.prompt.structured_output import StructuredOutputSpec
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import (
@@ -171,12 +172,7 @@ def build_runner(
 
 
 def test_conversation_runner_success() -> None:
-    rendered = RenderedPrompt(
-        text="system",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
-    )
+    rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
@@ -191,12 +187,7 @@ def test_conversation_runner_success() -> None:
 
 
 def test_conversation_runner_publishes_prompt_rendered_event() -> None:
-    rendered = RenderedPrompt(
-        text="system",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
-    )
+    rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
@@ -220,12 +211,7 @@ def test_conversation_runner_publishes_prompt_rendered_event() -> None:
 
 
 def test_conversation_runner_continues_on_prompt_rendered_publish_failure() -> None:
-    rendered = RenderedPrompt(
-        text="system",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
-    )
+    rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus(fail_rendered=True)
@@ -246,12 +232,7 @@ def test_conversation_runner_continues_on_prompt_rendered_publish_failure() -> N
 
 
 def test_conversation_runner_raises_on_prompt_publish_failure() -> None:
-    rendered = RenderedPrompt(
-        text="system",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
-    )
+    rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus(fail_prompt=True)
@@ -286,9 +267,6 @@ def echo_handler(
 def tool_rendered_prompt(tool: Tool[EchoParams, EchoPayload]) -> RenderedPrompt[object]:
     return RenderedPrompt(
         text="system",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
         _tools=cast(
             tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
             (tool,),
@@ -338,9 +316,11 @@ class StructuredOutput:
 def test_conversation_runner_parses_structured_output() -> None:
     rendered = RenderedPrompt(
         text="system",
-        output_type=StructuredOutput,
-        container="object",
-        allow_extra_keys=False,
+        structured_output=StructuredOutputSpec(
+            dataclass_type=StructuredOutput,
+            container="object",
+            allow_extra_keys=False,
+        ),
     )
     responses = [
         DummyResponse(
@@ -411,12 +391,7 @@ def test_conversation_runner_rolls_back_on_publish_failure() -> None:
 
 
 def test_conversation_runner_requires_message_payload() -> None:
-    rendered = RenderedPrompt(
-        text="system",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
-    )
+    rendered = RenderedPrompt(text="system")
 
     class MissingMessageResponse(DummyResponse):
         def __init__(self) -> None:

@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, is_dataclass, replace
 from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from tests.helpers.adapters import RECORDING_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
@@ -28,6 +28,7 @@ from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, Rec
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.prompt.structured_output import StructuredOutputSpec
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
 from weakincentives.runtime.session import Session
@@ -342,9 +343,11 @@ def test_dispatch_subagents_requires_dataclass_output_type() -> None:
         prompt=prompt,
         rendered_prompt=RenderedPrompt(
             text=rendered.text,
-            output_type=str,
-            container=rendered.container,
-            allow_extra_keys=rendered.allow_extra_keys,
+            structured_output=StructuredOutputSpec(
+                dataclass_type=cast(type[SupportsDataclass], cast(object, str)),
+                container=cast(Literal["object", "array"], rendered.container),
+                allow_extra_keys=bool(rendered.allow_extra_keys),
+            ),
             _tools=rendered.tools,
             _tool_param_descriptions=rendered.tool_param_descriptions,
         ),

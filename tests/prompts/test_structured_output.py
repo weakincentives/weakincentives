@@ -25,6 +25,7 @@ from weakincentives.prompt import (
     parse_structured_output,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.prompt.structured_output import StructuredOutputSpec
 
 
 @dataclass
@@ -404,9 +405,11 @@ def test_parse_structured_output_requires_json_payload() -> None:
 def test_parse_structured_output_rejects_unknown_container() -> None:
     rendered = RenderedPrompt[Summary](
         text="",
-        output_type=Summary,
-        container=cast(Literal["object", "array"], "invalid"),
-        allow_extra_keys=None,
+        structured_output=StructuredOutputSpec(
+            dataclass_type=Summary,
+            container=cast(Literal["object", "array"], "invalid"),
+            allow_extra_keys=False,
+        ),
     )
 
     with pytest.raises(OutputParseError) as exc:

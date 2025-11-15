@@ -17,13 +17,14 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass, field, is_dataclass, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, cast, override
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, override
 
 from ..deadlines import Deadline
 from ._types import SupportsDataclass, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .registry import RegistrySnapshot, SectionNode
 from .response_format import ResponseFormatSection
+from .structured_output import StructuredOutputSpec
 from .tool import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -33,14 +34,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
 
 
+OutputT_co = TypeVar("OutputT_co", covariant=True)
+
+
 @dataclass(frozen=True, slots=True)
-class RenderedPrompt[OutputT]:
+class RenderedPrompt[OutputT_co]:
     """Rendered prompt text paired with structured output metadata."""
 
     text: str
-    output_type: type[Any] | None
-    container: Literal["object", "array"] | None
-    allow_extra_keys: bool | None
+    structured_output: StructuredOutputSpec[SupportsDataclass] | None = None
     deadline: Deadline | None = None
     _tools: tuple[Tool[SupportsDataclass, SupportsToolResult], ...] = field(
         default_factory=tuple
@@ -67,6 +69,30 @@ class RenderedPrompt[OutputT]:
 
         return self._tool_param_descriptions
 
+    @property
+    def output_type(self) -> type[SupportsDataclass] | None:
+        """Return the declared dataclass type for structured output."""
+
+        if self.structured_output is None:
+            return None
+        return self.structured_output.dataclass_type
+
+    @property
+    def container(self) -> Literal["object", "array"] | None:
+        """Return the declared container for structured output."""
+
+        if self.structured_output is None:
+            return None
+        return self.structured_output.container
+
+    @property
+    def allow_extra_keys(self) -> bool | None:
+        """Return whether extra keys are allowed in structured output."""
+
+        if self.structured_output is None:
+            return None
+        return self.structured_output.allow_extra_keys
+
 
 def _freeze_tool_param_descriptions(
     descriptions: Mapping[str, dict[str, str]],
@@ -79,23 +105,22 @@ def _freeze_tool_param_descriptions(
     return MappingProxyType(frozen)
 
 
-class PromptRenderer:
+OutputT = TypeVar("OutputT")
+
+
+class PromptRenderer[OutputT]:
     """Render prompts using a registry snapshot."""
 
     def __init__(
         self,
         *,
         registry: RegistrySnapshot,
-        output_type: type[Any] | None,
-        output_container: Literal["object", "array"] | None,
-        allow_extra_keys: bool | None,
+        structured_output: StructuredOutputSpec[SupportsDataclass] | None,
         response_section: ResponseFormatSection | None,
     ) -> None:
         super().__init__()
         self._registry = registry
-        self._output_type: type[Any] | None = output_type
-        self._output_container: Literal["object", "array"] | None = output_container
-        self._allow_extra_keys: bool | None = allow_extra_keys
+        self._structured_output = structured_output
         self._response_section: ResponseFormatSection | None = response_section
 
     def build_param_lookup(
@@ -133,7 +158,7 @@ class PromptRenderer:
         tool_overrides: Mapping[str, ToolOverride] | None = None,
         *,
         inject_output_instructions: bool | None = None,
-    ) -> RenderedPrompt[Any]:
+    ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclass, SupportsToolResult]] = []
         override_lookup = dict(overrides or {})
@@ -179,11 +204,9 @@ class PromptRenderer:
 
         text = "\n\n".join(rendered_sections)
 
-        return RenderedPrompt[Any](
+        return RenderedPrompt[OutputT](
             text=text,
-            output_type=self._output_type,
-            container=self._output_container,
-            allow_extra_keys=self._allow_extra_keys,
+            structured_output=self._structured_output,
             _tools=tuple(collected_tools),
             _tool_param_descriptions=_freeze_tool_param_descriptions(
                 field_description_patches
@@ -212,7 +235,7 @@ class PromptRenderer:
                 enabled = inject_output_instructions
             else:
                 try:
-                    enabled = node.section.is_enabled(cast(Any, section_params))
+                    enabled = node.section.is_enabled(section_params)
                 except Exception as error:  # pragma: no cover - defensive
                     raise PromptRenderError(
                         "Section enabled predicate failed.",

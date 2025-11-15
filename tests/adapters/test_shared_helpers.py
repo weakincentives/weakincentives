@@ -73,12 +73,7 @@ def test_mapping_to_str_dict_rejects_non_string_keys() -> None:
 
 
 def test_run_conversation_requires_message_payload() -> None:
-    rendered = RenderedPrompt(
-        text="system",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
-    )
+    rendered = RenderedPrompt(text="system")
     bus = NullEventBus()
 
     class DummyChoice:
