@@ -21,13 +21,12 @@ from dataclasses import dataclass, field, is_dataclass
 from enum import Enum, auto
 from typing import Any, Final, cast, override
 
-from ..adapters.core import PromptResponse
-from ..deadlines import Deadline
 from ..prompt import SupportsDataclass
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
-from ..prompt.prompt import Prompt, RenderedPrompt
+from ..prompt.prompt import RenderedPrompt
+from ..prompt.protocols import PromptResponseProtocol
 from ..prompt.tool import Tool, ToolContext
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
@@ -104,7 +103,7 @@ class SubagentResult:
     )
 
 
-def _extract_output_text(response: PromptResponse[Any]) -> str:
+def _extract_output_text(response: PromptResponseProtocol[Any]) -> str:
     if response.text:
         return response.text
     if response.output is not None:
@@ -167,7 +166,7 @@ def build_dispatch_subagents_tool(
         *,
         context: ToolContext,
     ) -> ToolResult[tuple[SubagentResult, ...]]:
-        rendered_parent = cast(RenderedPrompt[Any] | None, context.rendered_prompt)
+        rendered_parent = context.rendered_prompt
         if rendered_parent is None:
             return ToolResult(
                 message="dispatch_subagents requires the parent prompt to be rendered.",
@@ -175,7 +174,7 @@ def build_dispatch_subagents_tool(
                 success=False,
             )
 
-        parent_prompt = cast(Prompt[Any], context.prompt)
+        parent_prompt = context.prompt
         parent_output_type = rendered_parent.output_type
         if not isinstance(parent_output_type, type) or not is_dataclass(
             parent_output_type
@@ -191,7 +190,7 @@ def build_dispatch_subagents_tool(
         )
         delegation_prompt = delegation_prompt_cls(
             parent_prompt,
-            rendered_parent,
+            cast(RenderedPrompt[Any], rendered_parent),
             include_response_format=rendered_parent.container is not None,
         )
 
@@ -218,9 +217,7 @@ def build_dispatch_subagents_tool(
 
         adapter = context.adapter
         parse_output = rendered_parent.container is not None
-        parent_deadline = cast(
-            Deadline | None, getattr(rendered_parent, "deadline", None)
-        )
+        parent_deadline = rendered_parent.deadline
 
         def _run_child(
             payload: tuple[DelegationParams, SessionProtocol, EventBus],

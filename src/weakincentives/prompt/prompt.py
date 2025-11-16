@@ -24,6 +24,7 @@ from typing import (
     get_origin,
 )
 
+from ._overrides_protocols import PromptOverridesStoreProtocol
 from ._types import SupportsDataclass
 from .chapter import Chapter, ChaptersExpansionPolicy
 from .errors import PromptValidationError, SectionPath
@@ -34,7 +35,7 @@ from .section import Section
 from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:
-    from .overrides import PromptLike, PromptOverridesStore, ToolOverride
+    from .overrides import PromptLike, ToolOverride
 
 
 def _format_specialization_argument(argument: object | None) -> str:
@@ -151,7 +152,7 @@ class Prompt[OutputT]:
     def render(
         self,
         *params: SupportsDataclass,
-        overrides_store: PromptOverridesStore | None = None,
+        overrides_store: PromptOverridesStoreProtocol | None = None,
         tag: str = "latest",
         inject_output_instructions: bool | None = None,
     ) -> RenderedPrompt[OutputT]:

@@ -25,6 +25,7 @@ from uuid import uuid4
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass, SupportsToolResult
 from ..prompt.prompt import Prompt, RenderedPrompt
+from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     OutputParseError,
@@ -314,9 +315,9 @@ def execute_tool_call(
                 prompt_name=prompt_name, tool_name=tool_name, deadline=deadline
             )
         context = ToolContext(
-            prompt=prompt,
+            prompt=cast(PromptProtocol[Any], prompt),
             rendered_prompt=rendered_prompt,
-            adapter=adapter,
+            adapter=cast(ProviderAdapterProtocol[Any], adapter),
             session=session,
             event_bus=bus,
             deadline=deadline,

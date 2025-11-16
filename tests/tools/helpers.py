@@ -26,6 +26,7 @@ from weakincentives.adapters.core import (
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.overrides import PromptOverridesStore
+from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 
@@ -55,11 +56,11 @@ class _DummyAdapter(ProviderAdapter[Any]):
         raise NotImplementedError
 
 
-def _build_context(bus: InProcessEventBus, session: SessionProtocol) -> ToolContext:
+def build_tool_context(bus: InProcessEventBus, session: SessionProtocol) -> ToolContext:
     prompt = Prompt(ns="tests", key="tool-context-helper")
-    adapter = cast(ProviderAdapter[Any], _DummyAdapter())
+    adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
     return ToolContext(
-        prompt=prompt,
+        prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=None,
         adapter=adapter,
         session=session,
@@ -91,7 +92,7 @@ def invoke_tool(
 
     handler = tool.handler
     assert handler is not None
-    result = handler(params, context=_build_context(bus, session))
+    result = handler(params, context=build_tool_context(bus, session))
     event = ToolInvoked(
         prompt_name="test",
         adapter=GENERIC_ADAPTER_NAME,

@@ -37,6 +37,7 @@ class OtherResult:
 
 
 _INVALID_CONTEXT_DEFAULT = cast(ToolContext, None)
+_UNSAFE_TOOL = cast(Any, Tool)
 
 
 def _example_handler(
@@ -84,28 +85,28 @@ def test_tool_requires_generic_type_arguments() -> None:
 
 def test_tool_class_getitem_requires_two_type_arguments() -> None:
     with pytest.raises(TypeError):
-        cast(Any, Tool)[ExampleParams]
+        _UNSAFE_TOOL[ExampleParams]
 
 
 def test_tool_class_getitem_requires_type_objects() -> None:
-    specialized = cast(Any, Tool)[ExampleParams, "not-a-type"]
+    specialized = Tool[ExampleParams, "not-a-type"]
 
     with pytest.raises(PromptValidationError):
         specialized(
             name="lookup_entity",
             description="Fetch info",
-            handler=_example_handler,
+            handler=None,
         )
 
 
 def test_tool_class_getitem_requires_params_type_argument() -> None:
     with pytest.raises(TypeError):
-        cast(Any, Tool)["not-a-type", ExampleResult]
+        _UNSAFE_TOOL["not-a-type", ExampleResult]
 
 
 def test_tool_class_getitem_rejects_extra_type_arguments() -> None:
     with pytest.raises(TypeError):
-        cast(Any, Tool)[ExampleParams, ExampleResult, ExampleResult]
+        _UNSAFE_TOOL[ExampleParams, ExampleResult, ExampleResult]
 
 
 def test_tool_subclass_resolves_generic_arguments() -> None:
@@ -222,7 +223,10 @@ def test_tool_rejects_tuple_result_without_ellipsis() -> None:
         Tool[ExampleParams, tuple[ExampleResult, ExampleResult]](
             name="bad_tuple",
             description="Invalid tuple result.",
-            handler=cast(ToolHandler[Any, Any], _example_handler),
+            handler=cast(
+                ToolHandler[ExampleParams, tuple[ExampleResult, ExampleResult]],
+                _example_handler,
+            ),
         )
 
     error = error_info.value
@@ -232,10 +236,10 @@ def test_tool_rejects_tuple_result_without_ellipsis() -> None:
 
 def test_tool_rejects_sequence_result_with_non_type_element() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        cast(Any, Tool)[ExampleParams, tuple[None, ...]](
+        _UNSAFE_TOOL[ExampleParams, tuple[None, ...]](
             name="bad_tuple_element",
             description="Invalid tuple element.",
-            handler=cast(ToolHandler[Any, Any], _example_handler),
+            handler=None,
         )
 
     error = error_info.value
@@ -257,7 +261,9 @@ def test_tool_rejects_handler_with_mismatched_sequence_return() -> None:
         Tool[ExampleParams, tuple[ExampleResult, ...]](
             name="bad_return",
             description="Invalid return annotation.",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(
+                ToolHandler[ExampleParams, tuple[ExampleResult, ...]], handler
+            ),
         )
 
     error = error_info.value
@@ -267,10 +273,10 @@ def test_tool_rejects_handler_with_mismatched_sequence_return() -> None:
 
 def test_tool_class_getitem_rejects_unsupported_result_annotation() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        cast(Any, Tool)[ExampleParams, dict[str, ExampleResult]](
+        _UNSAFE_TOOL[ExampleParams, dict[str, ExampleResult]](
             name="bad_mapping",
             description="Unsupported mapping result.",
-            handler=_example_handler,
+            handler=None,
         )
 
     error = error_info.value
@@ -292,7 +298,9 @@ def test_tool_rejects_handler_with_non_sequence_result_when_sequence_expected() 
         Tool[ExampleParams, tuple[ExampleResult, ...]](
             name="bad_mapping_return",
             description="Handler returns a mapping.",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(
+                ToolHandler[ExampleParams, tuple[ExampleResult, ...]], handler
+            ),
         )
 
     error = error_info.value
@@ -317,7 +325,7 @@ def test_tool_rejects_handler_when_not_callable() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], "not callable"),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], "not callable"),
         )
 
     error = error_info.value
@@ -342,7 +350,7 @@ def test_tool_rejects_handler_missing_param_annotation() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -359,7 +367,7 @@ def test_tool_rejects_handler_with_wrong_param_annotation() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -382,7 +390,7 @@ def test_tool_rejects_handler_with_multiple_params() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -400,7 +408,7 @@ def test_tool_rejects_handler_missing_context_parameter() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -421,7 +429,7 @@ def test_tool_rejects_handler_with_positional_context_parameter() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -442,7 +450,7 @@ def test_tool_rejects_handler_with_keyword_only_param() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -465,7 +473,7 @@ def test_tool_rejects_handler_with_context_default() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -486,7 +494,7 @@ def test_tool_rejects_handler_with_wrong_context_name() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -525,7 +533,7 @@ def test_tool_rejects_handler_missing_return_annotation() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -544,7 +552,7 @@ def test_tool_rejects_handler_missing_context_annotation() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -563,7 +571,7 @@ def test_tool_rejects_handler_with_wrong_context_annotation() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -586,7 +594,7 @@ def test_tool_handler_type_hint_fallback_handles_name_errors() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value
@@ -603,7 +611,7 @@ def test_tool_rejects_handler_with_wrong_return_annotation() -> None:
         Tool[ExampleParams, ExampleResult](
             name="lookup_entity",
             description="Fetch info",
-            handler=cast(ToolHandler[Any, Any], handler),
+            handler=cast(ToolHandler[ExampleParams, ExampleResult], handler),
         )
 
     error = error_info.value

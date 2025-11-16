@@ -21,10 +21,10 @@ from uuid import uuid4
 import pytest
 
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
-from tests.tools.helpers import find_tool, invoke_tool
+from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.prompt import SupportsDataclass
-from weakincentives.prompt.tool import ToolContext, ToolResult
+from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import (
     ReducerContext,
@@ -148,13 +148,7 @@ def test_setup_plan_requires_session_in_context() -> None:
 
     handler = setup_tool.handler
     assert handler is not None
-    context = ToolContext(
-        prompt=None,
-        rendered_prompt=None,
-        adapter=None,
-        session=cast(SessionProtocol, object()),
-        event_bus=bus,
-    )
+    context = build_tool_context(bus, cast(SessionProtocol, object()))
 
     with pytest.raises(ToolValidationError):
         handler(params, context=context)
