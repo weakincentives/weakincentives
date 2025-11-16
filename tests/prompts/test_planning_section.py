@@ -22,17 +22,26 @@ from weakincentives.runtime.session import Session
 from weakincentives.tools import PlanningStrategy, PlanningToolsSection
 
 
-def _make_section(**kwargs: object) -> PlanningToolsSection:
+def _make_section(
+    *,
+    strategy: PlanningStrategy | None = None,
+    accepts_overrides: bool = False,
+) -> PlanningToolsSection:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    return PlanningToolsSection(session=session, **kwargs)
+    if strategy is None:
+        return PlanningToolsSection(
+            session=session, accepts_overrides=accepts_overrides
+        )
+    return PlanningToolsSection(
+        session=session,
+        strategy=strategy,
+        accepts_overrides=accepts_overrides,
+    )
 
 
 def _render_section(strategy: PlanningStrategy | None = None) -> str:
-    if strategy is None:
-        section = _make_section()
-    else:
-        section = _make_section(strategy=strategy)
+    section = _make_section() if strategy is None else _make_section(strategy=strategy)
 
     params = section.default_params
     assert params is not None

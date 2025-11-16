@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,11 +49,20 @@ from weakincentives.tools import (
 
 
 def _make_section(
-    *, session: Session | None = None, **kwargs: object
+    *,
+    session: Session | None = None,
+    mounts: Sequence[HostMount] = (),
+    allowed_host_roots: Sequence[Path | str] = (),
+    accepts_overrides: bool = False,
 ) -> VfsToolsSection:
     if session is None:
         session = Session(bus=InProcessEventBus())
-    return VfsToolsSection(session=session, **kwargs)
+    return VfsToolsSection(
+        session=session,
+        mounts=mounts,
+        allowed_host_roots=allowed_host_roots,
+        accepts_overrides=accepts_overrides,
+    )
 
 
 @pytest.fixture()
@@ -87,6 +97,15 @@ def test_section_template_mentions_new_surface() -> None:
     assert "write_file" in template
     assert "edit_file" in template
     assert "rm" in template
+
+
+def test_section_exposes_session_handle(
+    session_and_bus: tuple[Session, InProcessEventBus],
+) -> None:
+    session, _bus = session_and_bus
+    section = _make_section(session=session)
+
+    assert section.session is session
 
 
 def test_section_template_includes_host_mount_preview(tmp_path: Path) -> None:
