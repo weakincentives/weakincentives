@@ -425,7 +425,7 @@ def execute_tool_call(
 
 def build_json_schema_response_format(
     rendered: RenderedPrompt[Any], prompt_name: str
-) -> dict[str, Any] | None:
+) -> dict[str, JSONValue] | None:
     """Construct a JSON schema response format for structured outputs."""
 
     output_type = rendered.output_type
@@ -440,19 +440,16 @@ def build_json_schema_response_format(
     _ = base_schema.pop("title", None)
 
     if container == "array":
-        schema_payload = cast(
-            dict[str, Any],
-            {
-                "type": "object",
-                "properties": {
-                    ARRAY_WRAPPER_KEY: {
-                        "type": "array",
-                        "items": base_schema,
-                    }
-                },
-                "required": [ARRAY_WRAPPER_KEY],
+        schema_payload: dict[str, JSONValue] = {
+            "type": "object",
+            "properties": {
+                ARRAY_WRAPPER_KEY: {
+                    "type": "array",
+                    "items": base_schema,
+                }
             },
-        )
+            "required": [ARRAY_WRAPPER_KEY],
+        }
         if not allow_extra_keys:
             schema_payload["additionalProperties"] = False
     else:

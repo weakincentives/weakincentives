@@ -22,6 +22,8 @@ from re import Pattern
 from typing import Any as _AnyType
 from typing import Final, Literal, cast, get_args
 
+from ..types import JSONValue
+
 MISSING_SENTINEL: Final[object] = object()
 _UNION_TYPE = type(int | str)
 
@@ -51,7 +53,7 @@ class _ExtrasDescriptor:
 _SLOTTED_EXTRAS: Final[dict[type[object], _ExtrasDescriptor]] = {}
 
 
-def _ordered_values(values: Iterable[object]) -> list[object]:
+def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     """Return a deterministic list of metadata values."""
 
     items = list(values)
@@ -101,11 +103,13 @@ def _merge_annotated_meta(
     return base, merged
 
 
-def _apply_constraints(value: object, meta: Mapping[str, object], path: str) -> object:
+def _apply_constraints[ConstrainedT](
+    value: ConstrainedT, meta: Mapping[str, object], path: str
+) -> ConstrainedT:
     if not meta:
         return value
 
-    result = value
+    result: object = value
     if isinstance(result, str):
         if meta.get("strip"):
             result = result.strip()
@@ -114,7 +118,7 @@ def _apply_constraints(value: object, meta: Mapping[str, object], path: str) -> 
         if meta.get("upper") or meta.get("uppercase"):
             result = result.upper()
 
-    def _normalize_option(option: object) -> object:
+    def _normalize_option(option: JSONValue) -> JSONValue:
         if isinstance(result, str) and isinstance(option, str):
             candidate: str = option
             if meta.get("strip"):
@@ -176,7 +180,7 @@ def _apply_constraints(value: object, meta: Mapping[str, object], path: str) -> 
 
     members = meta.get("in") or meta.get("enum")
     if isinstance(members, Iterable) and not isinstance(members, (str, bytes)):
-        options_iter = cast(Iterable[object], members)
+        options_iter = cast(Iterable[JSONValue], members)
         options = _ordered_values(options_iter)
         normalized_options = [_normalize_option(option) for option in options]
         if result not in normalized_options:
@@ -184,7 +188,7 @@ def _apply_constraints(value: object, meta: Mapping[str, object], path: str) -> 
 
     not_members = meta.get("not_in")
     if isinstance(not_members, Iterable) and not isinstance(not_members, (str, bytes)):
-        forbidden_iter = cast(Iterable[object], not_members)
+        forbidden_iter = cast(Iterable[JSONValue], not_members)
         forbidden = _ordered_values(forbidden_iter)
         normalized_forbidden = [_normalize_option(option) for option in forbidden]
         if result in normalized_forbidden:
@@ -192,16 +196,18 @@ def _apply_constraints(value: object, meta: Mapping[str, object], path: str) -> 
 
     validators = meta.get("validators", meta.get("validate"))
     if validators:
-        callables: Iterable[Callable[[object], object]]
+        callables: Iterable[Callable[[ConstrainedT], ConstrainedT]]
         if isinstance(validators, Iterable) and not isinstance(
             validators, (str, bytes)
         ):
-            callables = cast(Iterable[Callable[[object], object]], validators)
+            callables = cast(
+                Iterable[Callable[[ConstrainedT], ConstrainedT]], validators
+            )
         else:
-            callables = (cast(Callable[[object], object], validators),)
+            callables = (cast(Callable[[ConstrainedT], ConstrainedT], validators),)
         for validator in callables:
             try:
-                result = validator(result)
+                result = validator(cast(ConstrainedT, result))
             except (TypeError, ValueError) as error:
                 raise type(error)(f"{path}: {error}") from error
             except Exception as error:  # pragma: no cover - defensive
@@ -209,15 +215,15 @@ def _apply_constraints(value: object, meta: Mapping[str, object], path: str) -> 
 
     converter = meta.get("convert", meta.get("transform"))
     if converter:
-        converter_fn = cast(Callable[[object], object], converter)
+        converter_fn = cast(Callable[[ConstrainedT], ConstrainedT], converter)
         try:
-            result = converter_fn(result)
+            result = converter_fn(cast(ConstrainedT, result))
         except (TypeError, ValueError) as error:
             raise type(error)(f"{path}: {error}") from error
         except Exception as error:  # pragma: no cover - defensive
             raise ValueError(f"{path}: converter raised {error!r}") from error
 
-    return result
+    return cast(ConstrainedT, result)
 
 
 __all__ = [

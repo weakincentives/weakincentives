@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID
 
+from ..types import JSONValue
 from ._utils import MISSING_SENTINEL, _set_extras
 
 
@@ -34,7 +35,7 @@ def _serialize(
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
-) -> object:
+) -> JSONValue | object:
     if value is None:
         return MISSING_SENTINEL if exclude_none else None
     if dataclasses.is_dataclass(value):
@@ -52,7 +53,7 @@ def _serialize(
     if isinstance(value, (UUID, Decimal, Path)):
         return str(value)
     if isinstance(value, Mapping):
-        serialized: dict[object, object] = {}
+        serialized: dict[object, JSONValue] = {}
         for key, item in value.items():
             item_value = _serialize(
                 item,
@@ -62,28 +63,26 @@ def _serialize(
             )
             if item_value is MISSING_SENTINEL:
                 continue
-            serialized[key] = item_value
+            serialized[key] = cast(JSONValue, item_value)
         return serialized
     if isinstance(value, set):
-        items = [
-            item
-            for item in (
-                _serialize(
-                    member,
-                    by_alias=by_alias,
-                    exclude_none=exclude_none,
-                    alias_generator=alias_generator,
-                )
-                for member in value
+        items: list[JSONValue] = []
+        for member in value:
+            item_value = _serialize(
+                member,
+                by_alias=by_alias,
+                exclude_none=exclude_none,
+                alias_generator=alias_generator,
             )
-            if item is not MISSING_SENTINEL
-        ]
+            if item_value is MISSING_SENTINEL:
+                continue
+            items.append(cast(JSONValue, item_value))
         try:
-            return sorted(items)
+            return sorted(items, key=repr)
         except TypeError:
             return items
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        items = []
+        items: list[JSONValue] = []
         for item in value:
             item_value = _serialize(
                 item,
@@ -93,7 +92,7 @@ def _serialize(
             )
             if item_value is MISSING_SENTINEL:
                 continue
-            items.append(item_value)
+            items.append(cast(JSONValue, item_value))
         return items
     return value
 
@@ -105,13 +104,13 @@ def dump(
     exclude_none: bool = False,
     computed: bool = False,
     alias_generator: Callable[[str], str] | None = None,
-) -> dict[str, object]:
+) -> dict[str, JSONValue]:
     """Serialize a dataclass instance to a JSON-compatible dictionary."""
 
     if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
         raise TypeError("dump() requires a dataclass instance")
 
-    result: dict[str, object] = {}
+    result: dict[str, JSONValue] = {}
     for field in dataclasses.fields(obj):
         field_meta = dict(field.metadata)
         key = field.name
@@ -130,7 +129,7 @@ def dump(
         )
         if serialized is MISSING_SENTINEL:
             continue
-        result[key] = serialized
+        result[key] = cast(JSONValue, serialized)
 
     if computed and hasattr(obj.__class__, "__computed__"):
         computed_fields = cast(
@@ -149,7 +148,7 @@ def dump(
             key = name
             if by_alias and alias_generator is not None:
                 key = alias_generator(name)
-            result[key] = serialized
+            result[key] = cast(JSONValue, serialized)
 
     return result
 

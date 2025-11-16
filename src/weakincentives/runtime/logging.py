@@ -20,16 +20,25 @@ import logging.config
 import os
 from collections.abc import Mapping, MutableMapping
 from datetime import UTC, datetime
-from typing import Any, Protocol, cast, override
+from typing import Protocol, cast, override
 
-from ._json import JSONValue
+from ..types import JSONValue
 
 type StructuredLogPayload = Mapping[str, JSONValue]
+
+
+class SupportsLogMessage(Protocol):
+    """Protocol describing values that logging can stringify."""
+
+    @override
+    def __str__(self) -> str: ...
+
 
 __all__ = [
     "JSONValue",
     "StructuredLogPayload",
     "StructuredLogger",
+    "SupportsLogMessage",
     "configure_logging",
     "get_logger",
 ]
@@ -69,8 +78,8 @@ class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
 
     @override
     def process(
-        self, msg: Any, kwargs: MutableMapping[str, object]
-    ) -> tuple[Any, MutableMapping[str, object]]:
+        self, msg: SupportsLogMessage, kwargs: MutableMapping[str, object]
+    ) -> tuple[SupportsLogMessage, MutableMapping[str, object]]:
         extra_value = kwargs.setdefault("extra", {})
         if extra_value is None:
             extra_mapping: MutableMapping[str, JSONValue] = {}

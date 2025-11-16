@@ -24,13 +24,15 @@ from functools import wraps
 from pathlib import Path
 from typing import ParamSpec, TypeVar, cast
 
+from ..types import ContractResult
+
 P = ParamSpec("P")
 Q = ParamSpec("Q")
 R = TypeVar("R")
 S = TypeVar("S")
 T = TypeVar("T", bound=object)
 
-ContractCallable = Callable[..., object]
+ContractCallable = Callable[..., ContractResult | object]
 
 _ENV_FLAG = "WEAKINCENTIVES_DBC"
 _forced_state: bool | None = None
@@ -82,7 +84,9 @@ def dbc_enabled(active: bool = True) -> Iterator[None]:
         _forced_state = previous
 
 
-def _normalize_contract_result(result: object) -> tuple[bool, str | None]:
+def _normalize_contract_result(
+    result: ContractResult | object,
+) -> tuple[bool, str | None]:
     if isinstance(result, tuple):
         sequence_result = cast(Sequence[object], result)
         if not sequence_result:
