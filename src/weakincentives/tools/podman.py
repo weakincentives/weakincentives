@@ -19,7 +19,9 @@ import posixpath
 import subprocess  # nosec: B404
 import threading
 import time
+import weakref
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -309,6 +311,9 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         self._lock = threading.RLock()
         self._connection_name = connection_name
         self._exec_runner: _ExecRunner = exec_runner or _default_exec_runner
+        self._finalizer = weakref.finalize(
+            self, PodmanToolsSection._cleanup_from_finalizer, weakref.ref(self)
+        )
 
         session.register_reducer(PodmanWorkspace, replace_latest)
 
@@ -425,6 +430,29 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             )
             self._session.seed_slice(PodmanWorkspace, (updated_descriptor,))
 
+    def _teardown_workspace(self) -> None:
+        with self._lock:
+            handle = self._workspace_handle
+            self._workspace_handle = None
+        if handle is None:
+            return
+        try:
+            client = self._client_factory()
+        except Exception:
+            return
+        try:
+            try:
+                container = client.containers.get(handle.descriptor.container_id)
+            except Exception:
+                return
+            with suppress(Exception):
+                container.stop(timeout=1)
+            with suppress(Exception):
+                container.remove(force=True)
+        finally:
+            with suppress(Exception):
+                client.close()
+
     def ensure_workspace(self) -> _WorkspaceHandle:
         return self._ensure_workspace()
 
@@ -444,6 +472,19 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
     @property
     def exec_runner(self) -> _ExecRunner:
         return self._exec_runner
+
+    def close(self) -> None:
+        finalizer = self._finalizer
+        if finalizer.alive:
+            _ = finalizer()
+
+    @staticmethod
+    def _cleanup_from_finalizer(
+        section_ref: weakref.ReferenceType[PodmanToolsSection],
+    ) -> None:
+        section = section_ref()
+        if section is not None:
+            section._teardown_workspace()
 
 
 class _PodmanShellSuite:

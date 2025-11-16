@@ -68,6 +68,8 @@ class _FakeContainer:
         self._queue = queue
         self._readiness_exit_code = readiness_exit_code
         self._return_bytes = return_bytes
+        self.stop_calls = 0
+        self.remove_calls = 0
 
     def start(self, **_: object) -> None:
         self.started = True
@@ -100,6 +102,12 @@ class _FakeContainer:
         if self._return_bytes:
             return response.exit_code, response.stdout.encode()
         return response.exit_code, (response.stdout.encode(), response.stderr.encode())
+
+    def stop(self, timeout: object | None = None) -> None:
+        self.stop_calls += 1
+
+    def remove(self, force: object | None = None) -> None:
+        self.remove_calls += 1
 
 
 class _FakeContainerCollection:
@@ -232,6 +240,130 @@ def test_section_exposes_new_client(
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
 
     assert section.new_client() is client
+
+
+def test_close_stops_and_removes_container(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
+    handler = find_tool(section, "shell_execute").handler
+    assert handler is not None
+    handler(
+        PodmanShellParams(command=("true",)),
+        context=build_tool_context(bus, session),
+    )
+    handle = section._workspace_handle
+    assert handle is not None
+    container = client.containers.get(handle.descriptor.container_id)
+
+    section.close()
+
+    assert container.stop_calls == 1
+    assert container.remove_calls == 1
+    assert section._workspace_handle is None
+
+
+def test_close_is_idempotent(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
+    handler = find_tool(section, "shell_execute").handler
+    assert handler is not None
+    handler(
+        PodmanShellParams(command=("true",)),
+        context=build_tool_context(bus, session),
+    )
+    handle = section._workspace_handle
+    assert handle is not None
+    container = client.containers.get(handle.descriptor.container_id)
+
+    section.close()
+    section.close()
+
+    assert container.stop_calls == 1
+    assert container.remove_calls == 1
+
+
+def test_close_without_workspace(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+
+    section.close()
+
+
+def test_close_handles_client_factory_failure(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
+    handler = find_tool(section, "shell_execute").handler
+    assert handler is not None
+    handler(
+        PodmanShellParams(command=("true",)),
+        context=build_tool_context(bus, session),
+    )
+
+    def _raise() -> _FakePodmanClient:
+        raise RuntimeError("boom")
+
+    section._client_factory = _raise
+
+    section.close()
+
+
+def test_close_handles_missing_container(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
+    handler = find_tool(section, "shell_execute").handler
+    assert handler is not None
+    handler(
+        PodmanShellParams(command=("true",)),
+        context=build_tool_context(bus, session),
+    )
+
+    class _BrokenContainers:
+        def get(self, container_id: str) -> _FakeContainer:
+            raise RuntimeError("missing container")
+
+    class _BrokenClient:
+        def __init__(self) -> None:
+            self.containers = _BrokenContainers()
+            self.images = _FakeImageCollection()
+
+        def close(self) -> None:
+            return None
+
+    section._client_factory = lambda: _BrokenClient()
+
+    section.close()
 
 
 def test_shell_execute_runs_commands_and_stores_workspace(

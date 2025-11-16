@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import cast
 
@@ -56,15 +57,26 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
     handler = tool.handler
     assert handler is not None
 
-    params = PodmanShellParams(
-        command=("sh", "-c", "echo 'hello' > test.txt && cat test.txt"),
-    )
-    result = handler(params, context=build_tool_context(bus, session))
+    container_name: str | None = None
+    try:
+        params = PodmanShellParams(
+            command=("sh", "-c", "echo 'hello' > test.txt && cat test.txt"),
+        )
+        result = handler(params, context=build_tool_context(bus, session))
 
-    assert result.success
-    assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
-    assert "hello" in value.stdout
+        assert result.success
+        assert result.value is not None
+        value = cast(PodmanShellResult, result.value)
+        assert "hello" in value.stdout
+        handle = section._workspace_handle
+        assert handle is not None
+        container_name = handle.descriptor.container_name
+    finally:
+        section.close()
+        if container_name:
+            _wait_for_container_removal(
+                container_name, connection.get("connection_name")
+            )
 
 
 def _resolve_podman_connection() -> dict[str, str | None] | None:
@@ -100,3 +112,23 @@ def _resolve_podman_connection() -> dict[str, str | None] | None:
                 "connection_name": connection.get("Name"),
             }
     return None
+
+
+def _wait_for_container_removal(
+    container_name: str, connection_name: str | None, timeout: float = 10.0
+) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _container_exists(container_name, connection_name):
+            return
+        time.sleep(0.5)
+    raise AssertionError(f"Container {container_name} still exists after cleanup.")
+
+
+def _container_exists(container_name: str, connection_name: str | None) -> bool:
+    cmd = ["podman"]
+    if connection_name:
+        cmd.extend(["--connection", connection_name])
+    cmd.extend(["container", "exists", container_name])
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return result.returncode == 0
