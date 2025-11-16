@@ -27,6 +27,7 @@ from typing import Literal, cast, get_origin, get_type_hints
 from typing import get_args as typing_get_args
 from uuid import UUID
 
+from ..types import JSONValue
 from ._utils import (
     _UNION_TYPE,
     _AnyType,
@@ -171,7 +172,7 @@ def _coerce_to_type(
                 if isinstance(value, str):
                     value = [value]
                 elif isinstance(value, Iterable):
-                    value = list(cast(Iterable[object], value))
+                    value = list(cast(Iterable[JSONValue], value))
                 else:
                     raise TypeError(f"{path}: expected set")
             else:
@@ -185,7 +186,7 @@ def _coerce_to_type(
         if isinstance(value, str):  # pragma: no cover - handled by earlier coercion
             items = [value]
         elif isinstance(value, Iterable):
-            items = list(cast(Iterable[object], value))
+            items = list(cast(Iterable[JSONValue], value))
         else:  # pragma: no cover - defensive guard
             raise TypeError(f"{path}: expected iterable")
         args = get_args(base_type)
@@ -220,7 +221,7 @@ def _coerce_to_type(
         key_type, value_type = (
             get_args(base_type) if get_args(base_type) else (object, object)
         )
-        mapping_value = cast(Mapping[object, object], value)
+        mapping_value = cast(Mapping[JSONValue, JSONValue], value)
         result_dict: dict[object, object] = {}
         for key, item in mapping_value.items():
             coerced_key = _coerce_to_type(key, key_type, None, f"{path} keys", config)

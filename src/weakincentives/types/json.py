@@ -15,11 +15,31 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, TypeVar
 
 _JSONPrimitive = str | int | float | bool | None
 
 
-type JSONValue = _JSONPrimitive | Mapping[str, "JSONValue"] | Sequence["JSONValue"]
+type JSONArray = Sequence["JSONValue"]
+type JSONObject = Mapping[str, "JSONValue"]
+type JSONValue = _JSONPrimitive | JSONObject | JSONArray
+
+type ContractResult = bool | tuple[bool, *tuple[object, ...]] | None
+
+if TYPE_CHECKING:  # pragma: no cover - import guard for typing
+    from ..prompt._types import SupportsDataclass
+
+ParseableDataclassT = TypeVar("ParseableDataclassT", bound="SupportsDataclass")
+JSONObjectT = TypeVar("JSONObjectT", bound=JSONObject)
+JSONArrayT = TypeVar("JSONArrayT", bound=JSONArray)
 
 
-__all__ = ["JSONValue"]
+__all__ = [
+    "ContractResult",
+    "JSONArray",
+    "JSONArrayT",
+    "JSONObject",
+    "JSONObjectT",
+    "JSONValue",
+    "ParseableDataclassT",
+]

@@ -24,7 +24,7 @@ from typing import Any, TypeGuard, cast, override
 
 from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
-from .._json import JSONValue
+from ...types import JSONValue
 from ._slice_types import SessionSlice, SessionSliceType
 from .dataclasses import is_dataclass_instance
 

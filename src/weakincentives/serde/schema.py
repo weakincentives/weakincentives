@@ -23,14 +23,15 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Literal, get_args, get_origin, get_type_hints
+from typing import Literal, cast, get_args, get_origin, get_type_hints
 from uuid import UUID
 
+from ..types import JSONValue
 from ._utils import _UNION_TYPE, _AnyType, _merge_annotated_meta, _ordered_values
 
 
-def _schema_constraints(meta: Mapping[str, object]) -> dict[str, object]:
-    schema_meta: dict[str, object] = {}
+def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
+    schema_meta: dict[str, JSONValue] = {}
     mapping = {
         "ge": "minimum",
         "minimum": "minimum",
@@ -49,17 +50,20 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, object]:
     }
     for key, target in mapping.items():
         if key in meta and target not in schema_meta:
-            schema_meta[target] = meta[key]
+            schema_meta[target] = cast(JSONValue, meta[key])
     members = meta.get("enum") or meta.get("in")
     if isinstance(members, Iterable) and not isinstance(members, (str, bytes)):
-        _ = schema_meta.setdefault("enum", _ordered_values(members))
+        enum_values = _ordered_values(cast(Iterable[JSONValue], members))
+        _ = schema_meta.setdefault("enum", enum_values)
     not_members = meta.get("not_in")
     if (
         isinstance(not_members, Iterable)
         and not isinstance(not_members, (str, bytes))
         and "not" not in schema_meta
     ):
-        schema_meta["not"] = {"enum": _ordered_values(not_members)}
+        schema_meta["not"] = {
+            "enum": _ordered_values(cast(Iterable[JSONValue], not_members))
+        }
     return schema_meta
 
 
@@ -67,12 +71,12 @@ def _schema_for_type(
     typ: object,
     meta: Mapping[str, object] | None,
     alias_generator: Callable[[str], str] | None,
-) -> dict[str, object]:
+) -> dict[str, JSONValue]:
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
     origin = get_origin(base_type)
 
     if base_type is object or base_type is _AnyType:
-        schema_data: dict[str, object] = {}
+        schema_data: dict[str, JSONValue] = {}
     elif dataclasses.is_dataclass(base_type):
         dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
         schema_data = schema(dataclass_type, alias_generator=alias_generator)
@@ -213,7 +217,7 @@ def schema(
     *,
     alias_generator: Callable[[str], str] | None = None,
     extra: Literal["ignore", "forbid", "allow"] = "ignore",
-) -> dict[str, object]:
+) -> dict[str, JSONValue]:
     """Produce a minimal JSON Schema description for a dataclass."""
 
     if not dataclasses.is_dataclass(cls) or not isinstance(cls, type):
@@ -221,7 +225,7 @@ def schema(
     if extra not in {"ignore", "forbid", "allow"}:
         raise ValueError("extra must be one of 'ignore', 'forbid', or 'allow'")
 
-    properties: dict[str, object] = {}
+    properties: dict[str, dict[str, JSONValue]] = {}
     required: list[str] = []
     type_hints = get_type_hints(cls, include_extras=True)
 
@@ -240,7 +244,7 @@ def schema(
         if field.default is MISSING and field.default_factory is MISSING:
             required.append(property_name)
 
-    schema_dict: dict[str, object] = {
+    schema_dict: dict[str, JSONValue] = {
         "title": cls.__name__,
         "type": "object",
         "properties": properties,

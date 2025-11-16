@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
@@ -249,7 +250,7 @@ class LiteralModel:
 # Use literal bools to exercise coercion and schema branches.
 @dataclass
 class LiteralBoolModel:
-    flag: Literal[True, False]  # noqa: RUF038
+    flag: Literal[True, False]
 
 
 @dataclass
@@ -344,7 +345,7 @@ def test_parse_requires_mapping_and_dataclass() -> None:
     with pytest.raises(TypeError):
         parse(int, {})
     with pytest.raises(TypeError):
-        parse(User, [])
+        parse(User, cast(Mapping[str, object], []))
 
 
 def test_parse_strict_type_errors_when_coercion_disabled() -> None:
@@ -410,7 +411,7 @@ def test_parse_literal_bool_strings() -> None:
 
 
 def test_schema_literal_bool_includes_boolean_type() -> None:
-    schema_payload = cast(dict[str, JSONValue], schema(LiteralBoolModel))
+    schema_payload: dict[str, JSONValue] = schema(LiteralBoolModel)
     properties = cast(dict[str, JSONValue], schema_payload["properties"])
     flag_schema = cast(dict[str, JSONValue], properties["flag"])
     assert flag_schema["enum"] == [True, False]
