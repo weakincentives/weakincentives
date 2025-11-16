@@ -158,7 +158,7 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
-def build_task_prompt() -> Prompt[ReviewResponse]:
+def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
     if not TEST_REPOSITORIES_ROOT.exists():
         raise SystemExit(
             f"Expected test repositories under {TEST_REPOSITORIES_ROOT!s},"
@@ -191,10 +191,12 @@ def build_task_prompt() -> Prompt[ReviewResponse]:
         key="code-review-brief",
     )
     planning_section = PlanningToolsSection(
+        session=session,
         strategy=PlanningStrategy.PLAN_ACT_REFLECT,
     )
     subagents_section = SubagentsSection()
     vfs_section = VfsToolsSection(
+        session=session,
         mounts=(
             HostMount(
                 host_path="sunfish",
@@ -206,7 +208,7 @@ def build_task_prompt() -> Prompt[ReviewResponse]:
         ),
         allowed_host_roots=(TEST_REPOSITORIES_ROOT,),
     )
-    asteval_section = AstevalSection()
+    asteval_section = AstevalSection(session=session)
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
@@ -244,7 +246,7 @@ def initialize_code_reviewer_runtime(
     )
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    prompt = build_task_prompt()
+    prompt = build_task_prompt(session=session)
     try:
         store.seed_if_necessary(prompt, tag=resolved_tag)
     except PromptOverridesError as exc:  # pragma: no cover - startup validation

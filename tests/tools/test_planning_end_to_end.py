@@ -36,7 +36,7 @@ from weakincentives.tools import (
 def test_planning_end_to_end_flow() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    section = PlanningToolsSection()
+    section = PlanningToolsSection(session=session)
     tools = {tool.name: tool for tool in section.tools()}
 
     setup_tool = cast(Tool[SetupPlan, SetupPlan], tools["planning_setup_plan"])

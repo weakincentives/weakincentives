@@ -20,14 +20,15 @@ copy-on-write, start empty automatically, and disappear when the session ends; n
 
 ## Session Integration
 
-- `VfsToolsSection` resolves the active `Session` from the `ToolContext` passed to each tool handler.
-- The section initialises reducers lazily the first time it encounters a session: it registers `replace_latest` for the
-  `VirtualFileSystem` slice, installs the write/delete reducers, and seeds the slice with the mount snapshot.
+- `VfsToolsSection` is constructed with the `Session` that backs the tool
+  handlers so state is registered before any tool invocation.
+- Reducers register during construction: `VirtualFileSystem` uses `replace_latest`, the write/delete reducers attach to
+  the same slice, and the mount snapshot seeds the initial state.
 - Reducers always clone the current `VirtualFileSystem` before applying changes to keep snapshots immutable to callers.
 - Orchestrators retrieve the active snapshot with `select_latest(session, VirtualFileSystem)` and should treat `None`
   as an empty filesystem until the first write occurs.
 - Host folder mounts configured on the section are materialised when the section is constructed and merged into the
-  initial snapshot for every session during lazy initialisation.
+  initial snapshot immediately.
 - Tool handlers run normalization and validation outside the reducer, returning informative status messages alongside
   the params dataclass used for the update.
 

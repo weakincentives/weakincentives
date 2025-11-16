@@ -22,8 +22,7 @@ from typing import cast
 import pytest
 
 import weakincentives.tools.vfs as vfs_module
-from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.adapters.core import SessionProtocol
+from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
@@ -46,6 +45,14 @@ from weakincentives.tools import (
     WriteFile,
     WriteFileParams,
 )
+
+
+def _make_section(
+    *, session: Session | None = None, **kwargs: object
+) -> VfsToolsSection:
+    if session is None:
+        session = Session(bus=InProcessEventBus())
+    return VfsToolsSection(session=session, **kwargs)
 
 
 @pytest.fixture()
@@ -74,7 +81,7 @@ def _snapshot(session: Session) -> VirtualFileSystem:
 
 
 def test_section_template_mentions_new_surface() -> None:
-    section = VfsToolsSection()
+    section = _make_section()
     template = section.template
     assert "ls" in template
     assert "write_file" in template
@@ -90,7 +97,7 @@ def test_section_template_includes_host_mount_preview(tmp_path: Path) -> None:
     (mount_root / "README.md").write_text("hello", encoding="utf-8")
     (data_dir / "guide.md").write_text("guide", encoding="utf-8")
 
-    section = VfsToolsSection(
+    section = _make_section(
         mounts=(HostMount(host_path="project", mount_path=VfsPath(("mnt",))),),
         allowed_host_roots=(allowed_root,),
     )
@@ -109,7 +116,7 @@ def test_section_template_handles_file_mount(tmp_path: Path) -> None:
     allowed_root.mkdir(parents=True)
     (allowed_root / "notes.txt").write_text("hello", encoding="utf-8")
 
-    section = VfsToolsSection(
+    section = _make_section(
         mounts=(HostMount(host_path="notes.txt"),),
         allowed_host_roots=(allowed_root,),
     )
@@ -125,7 +132,7 @@ def test_section_template_marks_empty_directory_mount(tmp_path: Path) -> None:
     empty_dir = allowed_root / "empty"
     empty_dir.mkdir(parents=True)
 
-    section = VfsToolsSection(
+    section = _make_section(
         mounts=(HostMount(host_path="empty"),),
         allowed_host_roots=(allowed_root,),
     )
@@ -142,7 +149,7 @@ def test_section_template_truncates_mount_preview(tmp_path: Path) -> None:
     for index in range(limit + 3):
         (big_dir / f"file{index:02d}.txt").write_text("sample", encoding="utf-8")
 
-    section = VfsToolsSection(
+    section = _make_section(
         mounts=(HostMount(host_path="big"),),
         allowed_host_roots=(allowed_root,),
     )
@@ -161,7 +168,7 @@ def test_write_file_creates_snapshot(
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
 
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
 
     params = WriteFileParams(file_path="docs/intro.md", content="hello world")
@@ -185,7 +192,7 @@ def test_ls_lists_directories_and_files(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
 
     _write(session, bus, section, path=("docs", "intro.md"), content="one")
     _write(session, bus, section, path=("docs", "guide", "setup.md"), content="two")
@@ -211,7 +218,7 @@ def test_read_file_supports_pagination(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(
         session,
         bus,
@@ -240,7 +247,7 @@ def test_read_file_limit_reports_returned_slice(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(
         session,
         bus,
@@ -263,7 +270,7 @@ def test_edit_file_replaces_occurrences(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(
         session,
         bus,
@@ -291,7 +298,7 @@ def test_glob_filters_matches(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("docs", "intro.md"), content="a")
     _write(session, bus, section, path=("docs", "guide.md"), content="b")
 
@@ -313,7 +320,7 @@ def test_grep_reports_invalid_pattern(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     grep_tool = find_tool(section, "grep")
 
     params = GrepParams(pattern="[", path=None, glob=None)
@@ -328,7 +335,7 @@ def test_rm_removes_directory_tree(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(
         session, bus, section, path=("src", "pkg", "module.py"), content="print('hi')"
     )
@@ -347,7 +354,7 @@ def test_write_file_rejects_existing_target(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("log.txt",), content="initial")
 
     write_tool = find_tool(section, "write_file")
@@ -363,7 +370,10 @@ def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
     file_path = docs / "intro.md"
     file_path.write_text("hello", encoding="utf-8")
 
-    section = VfsToolsSection(
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = _make_section(
+        session=session,
         mounts=(
             HostMount(
                 host_path="docs",
@@ -374,8 +384,6 @@ def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
         allowed_host_roots=(tmp_path,),
     )
 
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
     list_tool = find_tool(section, "ls")
     params = ListDirectoryParams(path="workspace")
     result = invoke_tool(bus, list_tool, params, session=session)
@@ -386,25 +394,11 @@ def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
     assert entries[0].path.segments == ("workspace", "intro.md")
 
 
-def test_requires_session_in_context(
-    session_and_bus: tuple[Session, InProcessEventBus],
-) -> None:
-    _session, bus = session_and_bus
-    section = VfsToolsSection()
-    write_tool = find_tool(section, "write_file")
-    handler = write_tool.handler
-    assert handler is not None
-    params = WriteFileParams(file_path="docs/info.txt", content="data")
-    context = build_tool_context(bus, cast(SessionProtocol, object()))
-    with pytest.raises(ToolValidationError, match="Session instance"):
-        handler(params, context=context)
-
-
 def test_ls_rejects_file_path(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("notes.md",), content="content")
 
     list_tool = find_tool(section, "ls")
@@ -417,7 +411,7 @@ def test_ls_ignores_unrelated_paths(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("docs", "intro.md"), content="one")
     _write(session, bus, section, path=("logs", "app.log"), content="two")
 
@@ -434,7 +428,7 @@ def test_read_file_negative_offset(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("notes.md",), content="hello")
 
     read_tool = find_tool(section, "read_file")
@@ -447,7 +441,7 @@ def test_read_file_invalid_limit(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("notes.md",), content="hello")
 
     read_tool = find_tool(section, "read_file")
@@ -460,7 +454,7 @@ def test_read_file_returns_empty_slice(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("notes.md",), content="line one")
 
     read_tool = find_tool(section, "read_file")
@@ -476,7 +470,7 @@ def test_read_file_missing_path(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     read_tool = find_tool(section, "read_file")
     params = ReadFileParams(file_path="missing.txt")
     with pytest.raises(ToolValidationError, match="File does not exist"):
@@ -487,7 +481,7 @@ def test_write_file_content_length_limit(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="docs/big.txt", content="x" * 48_001)
     with pytest.raises(ToolValidationError, match="Content exceeds"):
@@ -498,7 +492,7 @@ def test_write_file_rejects_empty_path(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="", content="data")
     with pytest.raises(ToolValidationError, match="file_path must not be empty"):
@@ -509,7 +503,7 @@ def test_write_file_accepts_leading_slash(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="/docs/info.txt", content="data")
     invoke_tool(bus, write_tool, params, session=session)
@@ -521,7 +515,7 @@ def test_write_file_rejects_relative_segments(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="docs/../info.txt", content="data")
     with pytest.raises(ToolValidationError, match=r"may not include '\.' or '\.\.'"):
@@ -532,7 +526,7 @@ def test_write_file_rejects_long_segment(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path=f"{'a' * 81}.txt", content="data")
     with pytest.raises(ToolValidationError, match="80 characters or fewer"):
@@ -543,7 +537,7 @@ def test_write_file_rejects_excessive_depth(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
     deep_segments = "/".join(f"dir{index}" for index in range(20))
     params = WriteFileParams(file_path=f"{deep_segments}/file.txt", content="data")
@@ -555,7 +549,7 @@ def test_edit_file_empty_old_string(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("src", "file.py"), content="print('hi')")
     edit_tool = find_tool(section, "edit_file")
     params = EditFileParams(
@@ -571,7 +565,7 @@ def test_edit_file_requires_existing_pattern(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("src", "file.py"), content="print('hi')")
     edit_tool = find_tool(section, "edit_file")
     params = EditFileParams(
@@ -587,7 +581,7 @@ def test_edit_file_requires_unique_match(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(
         session,
         bus,
@@ -610,7 +604,7 @@ def test_edit_file_single_occurrence_replace(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("src", "file.py"), content="value = 'old'")
     edit_tool = find_tool(section, "edit_file")
     params = EditFileParams(
@@ -628,7 +622,7 @@ def test_edit_file_replacement_length_guard(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("src", "file.py"), content="flag = 1")
     edit_tool = find_tool(section, "edit_file")
     params = EditFileParams(
@@ -645,7 +639,7 @@ def test_glob_requires_pattern(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     glob_tool = find_tool(section, "glob")
     params = GlobParams(pattern="", path="/")
     with pytest.raises(ToolValidationError, match="Pattern must not be empty"):
@@ -656,7 +650,7 @@ def test_glob_filters_with_base_path(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("docs", "intro.md"), content="one")
     _write(session, bus, section, path=("docs", "guide.md"), content="two")
     _write(session, bus, section, path=("notes.txt",), content="three")
@@ -677,7 +671,7 @@ def test_grep_matches_success(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(
         session,
         bus,
@@ -701,7 +695,7 @@ def test_grep_no_matches_message(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     _write(session, bus, section, path=("docs", "intro.md"), content="alpha")
     grep_tool = find_tool(section, "grep")
     params = GrepParams(pattern="z", path="docs")
@@ -714,7 +708,7 @@ def test_rm_requires_existing_path(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
     session, bus = session_and_bus
-    section = VfsToolsSection()
+    section = _make_section(session=session)
     rm_tool = find_tool(section, "rm")
     params = RemoveParams(path="missing")
     with pytest.raises(ToolValidationError, match="No files matched"):
@@ -749,12 +743,16 @@ def test_write_reducer_supports_append() -> None:
 def test_host_mount_requires_allowed_root(tmp_path: Path) -> None:
     missing_root = tmp_path / "missing"
     with pytest.raises(ToolValidationError, match="Allowed host root does not exist"):
-        VfsToolsSection(allowed_host_roots=(missing_root,))
+        VfsToolsSection(
+            session=Session(bus=InProcessEventBus()),
+            allowed_host_roots=(missing_root,),
+        )
 
 
 def test_host_mount_rejects_empty_path(tmp_path: Path) -> None:
     with pytest.raises(ToolValidationError, match="must not be empty"):
         VfsToolsSection(
+            session=Session(bus=InProcessEventBus()),
             mounts=(HostMount(host_path=""),),
             allowed_host_roots=(tmp_path,),
         )
@@ -767,6 +765,7 @@ def test_host_mount_enforces_max_bytes(tmp_path: Path) -> None:
     file_path.write_text("hello", encoding="utf-8")
     with pytest.raises(ToolValidationError, match="byte budget"):
         VfsToolsSection(
+            session=Session(bus=InProcessEventBus()),
             mounts=(HostMount(host_path="docs", max_bytes=1, include_glob=("*.md",)),),
             allowed_host_roots=(tmp_path,),
         )
@@ -775,12 +774,13 @@ def test_host_mount_enforces_max_bytes(tmp_path: Path) -> None:
 def test_host_mount_defaults_to_relative_destination(tmp_path: Path) -> None:
     file_path = tmp_path / "readme.md"
     file_path.write_text("hi", encoding="utf-8")
-    section = VfsToolsSection(
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = _make_section(
+        session=session,
         mounts=(HostMount(host_path="readme.md"),),
         allowed_host_roots=(tmp_path,),
     )
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
     list_tool = find_tool(section, "ls")
     result = invoke_tool(bus, list_tool, ListDirectoryParams(), session=session)
     raw_entries = result.value
@@ -794,7 +794,10 @@ def test_host_mount_glob_normalization(tmp_path: Path) -> None:
     docs.mkdir()
     (docs / "intro.md").write_text("hello", encoding="utf-8")
     (docs / "skip.tmp").write_text("ignore", encoding="utf-8")
-    section = VfsToolsSection(
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = _make_section(
+        session=session,
         mounts=(
             HostMount(
                 host_path="docs",
@@ -804,8 +807,6 @@ def test_host_mount_glob_normalization(tmp_path: Path) -> None:
         ),
         allowed_host_roots=(tmp_path,),
     )
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
     list_tool = find_tool(section, "ls")
     result = invoke_tool(bus, list_tool, ListDirectoryParams(), session=session)
     raw_entries = result.value
@@ -819,7 +820,10 @@ def test_host_mount_exclude_glob_filters_matches(tmp_path: Path) -> None:
     docs.mkdir()
     (docs / "keep.txt").write_text("hello", encoding="utf-8")
     (docs / "skip.log").write_text("ignored", encoding="utf-8")
-    section = VfsToolsSection(
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = _make_section(
+        session=session,
         mounts=(
             HostMount(
                 host_path="docs",
@@ -828,8 +832,6 @@ def test_host_mount_exclude_glob_filters_matches(tmp_path: Path) -> None:
         ),
         allowed_host_roots=(tmp_path,),
     )
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
     list_tool = find_tool(section, "ls")
     result = invoke_tool(bus, list_tool, ListDirectoryParams(), session=session)
 
@@ -904,6 +906,7 @@ def test_host_mount_outside_allowed_root(tmp_path: Path) -> None:
     allowed.mkdir()
     with pytest.raises(ToolValidationError, match="outside the allowed roots"):
         VfsToolsSection(
+            session=Session(bus=InProcessEventBus()),
             mounts=(HostMount(host_path="../forbidden.txt"),),
             allowed_host_roots=(allowed,),
         )
@@ -930,6 +933,7 @@ def test_host_mount_read_error_is_reported(
 
     with pytest.raises(ToolValidationError, match="Failed to read mounted file"):
         VfsToolsSection(
+            session=Session(bus=InProcessEventBus()),
             mounts=(HostMount(host_path="docs"),),
             allowed_host_roots=(tmp_path,),
         )

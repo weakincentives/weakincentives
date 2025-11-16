@@ -22,8 +22,7 @@ from typing import cast
 import pytest
 
 import weakincentives.tools.asteval as asteval_module
-from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.adapters.core import SessionProtocol
+from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.prompt.tool import Tool, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
@@ -79,23 +78,10 @@ def _setup_sections() -> tuple[
 ]:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    vfs_section = VfsToolsSection()
-    section = AstevalSection()
+    vfs_section = VfsToolsSection(session=session)
+    section = AstevalSection(session=session)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
     return session, bus, vfs_section, tool
-
-
-def test_context_requires_session() -> None:
-    _session, bus, _vfs_section, tool = _setup_sections()
-
-    handler = tool.handler
-    assert handler is not None
-    context = build_tool_context(bus, cast(SessionProtocol, object()))
-
-    with pytest.raises(ToolValidationError) as captured:
-        handler(EvalParams(code="0"), context=context)
-
-    assert "requires ToolContext.session" in str(captured.value)
 
 
 def test_missing_dependency_instructs_extra_install(
@@ -113,7 +99,9 @@ def test_missing_dependency_instructs_extra_install(
 
 
 def test_asteval_section_disables_tool_overrides_by_default() -> None:
-    section = AstevalSection()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = AstevalSection(session=session)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
     assert section.accepts_overrides is False
@@ -121,7 +109,10 @@ def test_asteval_section_disables_tool_overrides_by_default() -> None:
 
 
 def test_asteval_section_override_flags_opt_in() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
     section = AstevalSection(
+        session=session,
         accepts_overrides=True,
     )
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -616,6 +607,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     vfs_section = VfsToolsSection(
+        session=session,
         mounts=(HostMount(host_path="sunfish", mount_path=VfsPath(("sunfish",))),),
         allowed_host_roots=(root,),
     )
@@ -624,7 +616,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
         find_tool(vfs_section, "ls"),
     )
     invoke_tool(bus, list_tool, ListDirectory(), session=session)
-    section = AstevalSection()
+    section = AstevalSection(session=session)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
     result = invoke_tool(
