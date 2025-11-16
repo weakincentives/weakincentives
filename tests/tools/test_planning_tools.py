@@ -21,7 +21,7 @@ from uuid import uuid4
 import pytest
 
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
-from tests.tools.helpers import find_tool, invoke_tool
+from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.prompt import SupportsDataclass
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
@@ -73,6 +73,34 @@ def _make_reducer_context() -> ReducerContext:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     return build_reducer_context(session=session, event_bus=bus)
+
+
+def test_planning_tools_reject_mismatched_context_session() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = PlanningToolsSection(session=session)
+    tool = find_tool(section, "planning_setup_plan")
+    handler = tool.handler
+    assert handler is not None
+    mismatched_session = Session(bus=bus)
+    context = build_tool_context(bus, mismatched_session)
+
+    with pytest.raises(RuntimeError, match="session does not match"):
+        handler(SetupPlan(objective="ship"), context=context)
+
+
+def test_planning_tools_reject_mismatched_context_bus() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = PlanningToolsSection(session=session)
+    tool = find_tool(section, "planning_setup_plan")
+    handler = tool.handler
+    assert handler is not None
+    other_bus = InProcessEventBus()
+    context = build_tool_context(other_bus, session)
+
+    with pytest.raises(RuntimeError, match="event bus does not match"):
+        handler(SetupPlan(objective="ship"), context=context)
 
 
 def test_setup_plan_normalizes_payloads() -> None:

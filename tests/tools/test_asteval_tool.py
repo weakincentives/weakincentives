@@ -22,7 +22,7 @@ from typing import cast
 import pytest
 
 import weakincentives.tools.asteval as asteval_module
-from tests.tools.helpers import find_tool, invoke_tool
+from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.prompt.tool import Tool, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
@@ -119,6 +119,28 @@ def test_asteval_section_override_flags_opt_in() -> None:
 
     assert section.accepts_overrides is True
     assert tool.accepts_overrides is True
+
+
+def test_asteval_tool_rejects_mismatched_context_session() -> None:
+    _session, bus, _vfs_section, tool = _setup_sections()
+    handler = tool.handler
+    assert handler is not None
+    mismatched_session = Session(bus=bus)
+    context = build_tool_context(bus, mismatched_session)
+
+    with pytest.raises(RuntimeError, match="session does not match"):
+        handler(EvalParams(code="1"), context=context)
+
+
+def test_asteval_tool_rejects_mismatched_context_bus() -> None:
+    session, _bus, _vfs_section, tool = _setup_sections()
+    handler = tool.handler
+    assert handler is not None
+    other_bus = InProcessEventBus()
+    context = build_tool_context(other_bus, session)
+
+    with pytest.raises(RuntimeError, match="event bus does not match"):
+        handler(EvalParams(code="1"), context=context)
 
 
 def test_expression_success() -> None:

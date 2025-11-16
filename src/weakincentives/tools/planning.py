@@ -30,6 +30,7 @@ from ..runtime.session import (
     replace_latest,
     select_latest,
 )
+from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 
 PlanStatus = Literal["active", "completed", "abandoned"]
@@ -430,6 +431,7 @@ class _PlanningToolSuite:
     def setup_plan(
         self, params: SetupPlan, *, context: ToolContext
     ) -> ToolResult[SetupPlan]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         objective = _normalize_required_text(
             params.objective,
@@ -445,6 +447,7 @@ class _PlanningToolSuite:
         return ToolResult(message=message, value=normalized)
 
     def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[AddStep]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
         plan = _require_plan(session)
@@ -463,6 +466,7 @@ class _PlanningToolSuite:
     def update_step(
         self, params: UpdateStep, *, context: ToolContext
     ) -> ToolResult[UpdateStep]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
         plan = _require_plan(session)
@@ -504,6 +508,7 @@ class _PlanningToolSuite:
     def mark_step(
         self, params: MarkStep, *, context: ToolContext
     ) -> ToolResult[MarkStep]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
         plan = _require_plan(session)
@@ -531,6 +536,7 @@ class _PlanningToolSuite:
     def clear_plan(
         self, params: ClearPlan, *, context: ToolContext
     ) -> ToolResult[ClearPlan]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
         plan = _require_plan(session)
@@ -541,6 +547,7 @@ class _PlanningToolSuite:
 
     def read_plan(self, params: ReadPlan, *, context: ToolContext) -> ToolResult[Plan]:
         del params
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
         plan = select_latest(session, Plan)

@@ -34,6 +34,7 @@ from ..runtime.session import (
     replace_latest,
     select_latest,
 )
+from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 
 FileEncoding = Literal["utf-8"]
@@ -672,6 +673,7 @@ class _VfsToolSuite:
     def list_directory(
         self, params: ListDirectoryParams, *, context: ToolContext
     ) -> ToolResult[tuple[FileInfo, ...]]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         path = _normalize_string_path(params.path, allow_empty=True, field="path")
         snapshot = self._section.latest_snapshot()
@@ -715,6 +717,7 @@ class _VfsToolSuite:
     def read_file(
         self, params: ReadFileParams, *, context: ToolContext
     ) -> ToolResult[ReadFileResult]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         path = _normalize_string_path(params.file_path, field="file_path")
         offset = _normalize_offset(params.offset)
@@ -745,6 +748,7 @@ class _VfsToolSuite:
     def write_file(
         self, params: WriteFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         path = _normalize_string_path(params.file_path, field="file_path")
         content = _normalize_content(params.content)
@@ -762,6 +766,7 @@ class _VfsToolSuite:
     def edit_file(
         self, params: EditFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         path = _normalize_string_path(params.file_path, field="file_path")
         snapshot = self._section.latest_snapshot()
@@ -803,6 +808,7 @@ class _VfsToolSuite:
     def glob(
         self, params: GlobParams, *, context: ToolContext
     ) -> ToolResult[tuple[GlobMatch, ...]]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         base = _normalize_string_path(params.path, allow_empty=True, field="path")
         pattern = params.pattern.strip()
@@ -833,6 +839,7 @@ class _VfsToolSuite:
     def grep(
         self, params: GrepParams, *, context: ToolContext
     ) -> ToolResult[tuple[GrepMatch, ...]]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         try:
             pattern = re.compile(params.pattern)
@@ -883,6 +890,7 @@ class _VfsToolSuite:
     def remove(
         self, params: RemoveParams, *, context: ToolContext
     ) -> ToolResult[DeleteEntry]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         path = _normalize_string_path(params.path, field="path")
         snapshot = self._section.latest_snapshot()

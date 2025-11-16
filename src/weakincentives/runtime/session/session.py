@@ -199,6 +199,12 @@ class Session(SessionProtocol):
 
             self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
 
+    @property
+    def event_bus(self) -> EventBus:
+        """Return the event bus backing this session."""
+
+        return self._bus
+
     @override
     def snapshot(self) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state."""

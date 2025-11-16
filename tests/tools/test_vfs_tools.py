@@ -23,7 +23,7 @@ from typing import cast
 import pytest
 
 import weakincentives.tools.vfs as vfs_module
-from tests.tools.helpers import find_tool, invoke_tool
+from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
@@ -69,6 +69,36 @@ def _make_section(
 def session_and_bus() -> tuple[Session, InProcessEventBus]:
     bus = InProcessEventBus()
     return Session(bus=bus), bus
+
+
+def test_vfs_tools_reject_mismatched_context_session(
+    session_and_bus: tuple[Session, InProcessEventBus],
+) -> None:
+    session, bus = session_and_bus
+    section = _make_section(session=session)
+    tool = find_tool(section, "ls")
+    handler = tool.handler
+    assert handler is not None
+    mismatched_session = Session(bus=bus)
+    context = build_tool_context(bus, mismatched_session)
+
+    with pytest.raises(RuntimeError, match="session does not match"):
+        handler(ListDirectoryParams(), context=context)
+
+
+def test_vfs_tools_reject_mismatched_context_bus(
+    session_and_bus: tuple[Session, InProcessEventBus],
+) -> None:
+    session, _bus = session_and_bus
+    section = _make_section(session=session)
+    tool = find_tool(section, "ls")
+    handler = tool.handler
+    assert handler is not None
+    other_bus = InProcessEventBus()
+    context = build_tool_context(other_bus, session)
+
+    with pytest.raises(RuntimeError, match="event bus does not match"):
+        handler(ListDirectoryParams(), context=context)
 
 
 def _write(

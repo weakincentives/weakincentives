@@ -38,6 +38,7 @@ from ..runtime.session import (
     TypedReducer,
     select_latest,
 )
+from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
@@ -543,6 +544,7 @@ class _AstevalToolSuite:
     def run(
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
+        ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
         code = _normalize_code(params.code)
