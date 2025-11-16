@@ -18,7 +18,6 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Final, Literal, cast, override
-from weakref import WeakSet
 
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.errors import PromptRenderError
@@ -31,6 +30,7 @@ from ..runtime.session import (
     replace_latest,
     select_latest,
 )
+from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 
 PlanStatus = Literal["active", "completed", "abandoned"]
@@ -308,11 +308,13 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
     def __init__(
         self,
         *,
+        session: Session,
         strategy: PlanningStrategy = PlanningStrategy.REACT,
         accepts_overrides: bool = False,
     ) -> None:
         self._strategy = strategy
-        self._configured_sessions: WeakSet[Session] = WeakSet()
+        self._session = session
+        self._initialize_session(session)
 
         tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
         super().__init__(
@@ -324,15 +326,9 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
-    def ensure_session(self, context: ToolContext) -> Session:
-        session = context.session
-        if not isinstance(session, Session):
-            message = "PlanningToolsSection requires ToolContext.session to be a Session instance."
-            raise ToolValidationError(message)
-        if session not in self._configured_sessions:
-            self._initialize_session(session)
-            self._configured_sessions.add(session)
-        return session
+    @property
+    def session(self) -> Session:
+        return self._session
 
     def _initialize_session(self, session: Session) -> None:
         session.register_reducer(Plan, replace_latest)
@@ -435,7 +431,8 @@ class _PlanningToolSuite:
     def setup_plan(
         self, params: SetupPlan, *, context: ToolContext
     ) -> ToolResult[SetupPlan]:
-        _ = self._section.ensure_session(context)
+        ensure_context_uses_session(context=context, session=self._section.session)
+        del context
         objective = _normalize_required_text(
             params.objective,
             field_name="objective",
@@ -450,7 +447,9 @@ class _PlanningToolSuite:
         return ToolResult(message=message, value=normalized)
 
     def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[AddStep]:
-        session = self._section.ensure_session(context)
+        ensure_context_uses_session(context=context, session=self._section.session)
+        del context
+        session = self._section.session
         plan = _require_plan(session)
         _ensure_active(plan, "add steps to")
         normalized_steps = _normalize_new_steps(params.steps)
@@ -467,7 +466,9 @@ class _PlanningToolSuite:
     def update_step(
         self, params: UpdateStep, *, context: ToolContext
     ) -> ToolResult[UpdateStep]:
-        session = self._section.ensure_session(context)
+        ensure_context_uses_session(context=context, session=self._section.session)
+        del context
+        session = self._section.session
         plan = _require_plan(session)
         _ensure_active(plan, "update steps in")
         step_id = params.step_id.strip()
@@ -507,7 +508,9 @@ class _PlanningToolSuite:
     def mark_step(
         self, params: MarkStep, *, context: ToolContext
     ) -> ToolResult[MarkStep]:
-        session = self._section.ensure_session(context)
+        ensure_context_uses_session(context=context, session=self._section.session)
+        del context
+        session = self._section.session
         plan = _require_plan(session)
         if plan.status == "abandoned":
             message = "Cannot mark steps on an abandoned plan."
@@ -533,7 +536,9 @@ class _PlanningToolSuite:
     def clear_plan(
         self, params: ClearPlan, *, context: ToolContext
     ) -> ToolResult[ClearPlan]:
-        session = self._section.ensure_session(context)
+        ensure_context_uses_session(context=context, session=self._section.session)
+        del context
+        session = self._section.session
         plan = _require_plan(session)
         if plan.status == "abandoned":
             message = "Plan already abandoned."
@@ -542,7 +547,9 @@ class _PlanningToolSuite:
 
     def read_plan(self, params: ReadPlan, *, context: ToolContext) -> ToolResult[Plan]:
         del params
-        session = self._section.ensure_session(context)
+        ensure_context_uses_session(context=context, session=self._section.session)
+        del context
+        session = self._section.session
         plan = select_latest(session, Plan)
         if plan is None:
             message = "No plan is currently initialised."

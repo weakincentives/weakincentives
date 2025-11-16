@@ -27,7 +27,6 @@ from datetime import UTC, datetime
 from importlib import import_module
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast
-from weakref import WeakSet
 
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
@@ -39,6 +38,7 @@ from ..runtime.session import (
     TypedReducer,
     select_latest,
 )
+from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
@@ -544,7 +544,9 @@ class _AstevalToolSuite:
     def run(
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
-        session = self._section.ensure_session(context)
+        ensure_context_uses_session(context=context, session=self._section.session)
+        del context
+        session = self._section.session
         code = _normalize_code(params.code)
         reads = _normalize_reads(params.reads)
         writes = _normalize_writes(params.writes)
@@ -768,8 +770,18 @@ def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
 class AstevalSection(MarkdownSection[_AstevalSectionParams]):
     """Prompt section exposing the :mod:`asteval` evaluation tool."""
 
-    def __init__(self, *, accepts_overrides: bool = False) -> None:
-        self._configured_sessions: WeakSet[Session] = WeakSet()
+    def __init__(
+        self,
+        *,
+        session: Session,
+        accepts_overrides: bool = False,
+    ) -> None:
+        self._session = session
+        session.register_reducer(
+            EvalResult,
+            _make_eval_result_reducer(),
+            slice_type=VirtualFileSystem,
+        )
         tool_suite = _AstevalToolSuite(section=self)
         tool = Tool[EvalParams, EvalResult](
             name="evaluate_python",
@@ -790,20 +802,9 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
-    def ensure_session(self, context: ToolContext) -> Session:
-        session = context.session
-        if not isinstance(session, Session):
-            raise ToolValidationError(
-                "AstevalSection requires ToolContext.session to be a Session instance.",
-            )
-        if session not in self._configured_sessions:
-            session.register_reducer(
-                EvalResult,
-                _make_eval_result_reducer(),
-                slice_type=VirtualFileSystem,
-            )
-            self._configured_sessions.add(session)
-        return session
+    @property
+    def session(self) -> Session:
+        return self._session
 
 
 __all__ = [

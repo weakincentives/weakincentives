@@ -70,8 +70,9 @@ following guidance:
 
 ## Backwards Compatibility
 
-- The default constructor path (`PlanningToolsSection()`) must render exactly the
-  existing copy so no external prompts change without opting into a strategy.
+- The default constructor path (`PlanningToolsSection(session=Session(...))`)
+  must render exactly the existing copy so no external prompts change without
+  opting into a strategy.
 - Strategy selection is optional; omitting it maintains current behaviour.
 
 ## Open Questions

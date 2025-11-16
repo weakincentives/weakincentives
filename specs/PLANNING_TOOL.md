@@ -17,7 +17,8 @@ multi-user concepts are exposed.
 
 ## Session Integration
 
-- `PlanningToolsSection` requires `ToolContext.session` to expose a `Session` instance from `weakincentives.runtime.session`.
+- `PlanningToolsSection` must be constructed with a `Session` instance from
+  `weakincentives.runtime.session` so reducers register before any tools run.
 - During initialisation the section registers `replace_latest` for the `Plan` slice so every tool result replaces the
   current plan snapshot automatically.
 - Reducers produce copy-on-write `Plan` instances; every invocation builds a new snapshot that replaces the previous

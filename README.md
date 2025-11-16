@@ -129,6 +129,7 @@ session = Session(bus=bus)
 diff_root = Path("/srv/agent-mounts")
 diff_root.mkdir(parents=True, exist_ok=True)
 vfs_section = VfsToolsSection(
+    session=session,
     allowed_host_roots=(diff_root,),
     mounts=(
         HostMount(
@@ -137,8 +138,8 @@ vfs_section = VfsToolsSection(
         ),
     ),
 )
-planning_section = PlanningToolsSection()
-asteval_section = AstevalSection()
+planning_section = PlanningToolsSection(session=session)
+asteval_section = AstevalSection(session=session)
 
 
 def log_prompt(event: PromptExecuted) -> None:
@@ -154,9 +155,9 @@ bus.subscribe(PromptExecuted, log_prompt)
 Copy unified diff files into `/srv/agent-mounts` before launching the run. The
 host mount resolves `octo_widgets/cache-layer.diff` relative to that directory
 and exposes it to the agent as `diffs/cache-layer.diff` inside the virtual
-filesystem snapshot. `PlanningToolsSection`, `AstevalSection` and `VfsToolsSection` pull the
-active `Session` from `ToolContext.session` during tool execution, so adapters
-must populate that field before dispatching calls.
+filesystem snapshot. `PlanningToolsSection`, `AstevalSection`, and
+`VfsToolsSection` all register reducers when constructed, so wire them up with
+the `Session` you'll pass through `ToolContext` when dispatching tools.
 
 ### 3. Define a symbol search helper tool
 
