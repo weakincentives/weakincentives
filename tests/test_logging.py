@@ -21,11 +21,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from io import StringIO
 from types import TracebackType
+from typing import cast
 
 import pytest
 
 from weakincentives.runtime.logging import (
+    JSONValue,
     StructuredLogger,
+    StructuredLogPayload,
     _coerce_level,
     _unwrap_logger,
     configure_logging,
@@ -126,6 +129,22 @@ def test_get_logger_merges_standard_logger_adapter_context() -> None:
     assert logger.extra == {"source": "adapter"}
 
 
+def test_get_logger_handles_nested_logger_adapter_override() -> None:
+    base = logging.getLogger("nested.base")
+    inner = logging.LoggerAdapter(base, {"inner": True})
+
+    class _NestedAdapter(logging.LoggerAdapter):
+        def __init__(self) -> None:
+            super().__init__(logging.getLogger("outer"), {})
+            self.logger = inner
+
+    nested = _NestedAdapter()
+    logger = get_logger("ignored", logger_override=nested)
+
+    assert logger.logger is base
+    assert logger.extra == {}
+
+
 def _raise_runtime_error() -> None:
     raise RuntimeError("boom")
 
@@ -204,6 +223,11 @@ def test_configure_logging_force_installs_json_formatter() -> None:
         exc_info = (error.__class__, error, traceback)
     assert exc_info is not None
 
+    non_serializable = cast(JSONValue, object())
+    context_payload = cast(
+        StructuredLogPayload, {"key": "value", "object": non_serializable}
+    )
+
     record = root.makeRecord(
         name="tests.force",
         level=logging.INFO,
@@ -215,7 +239,7 @@ def test_configure_logging_force_installs_json_formatter() -> None:
         func=None,
         extra={
             "event": "tests.force",
-            "context": {"key": "value", "object": object()},
+            "context": context_payload,
         },
     )
 
