@@ -56,7 +56,6 @@ _MEMORY_LIMIT: Final[str] = "1g"
 _MISSING_DEPENDENCY_MESSAGE: Final[str] = (
     "Install weakincentives[podman] to enable the Podman tool suite."
 )
-_ExecResult = tuple[int | None, bytes | tuple[bytes, bytes]]
 _PODMAN_TEMPLATE: Final[str] = """\
 Podman Workspace
 ----------------
@@ -78,6 +77,19 @@ class _PodmanClient(Protocol):
 
 
 type _ClientFactory = Callable[[], _PodmanClient]
+
+
+@runtime_checkable
+class _ExecRunner(Protocol):
+    def __call__(
+        self,
+        cmd: list[str],
+        *,
+        input: str | None = None,  # noqa: A002 - matches subprocess API
+        text: bool | None = None,
+        capture_output: bool | None = None,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 @dataclass(slots=True, frozen=True)
@@ -136,6 +148,24 @@ def _default_cache_root() -> Path:
     if override:
         return Path(override).expanduser()
     return Path.home() / ".cache" / "weakincentives" / "podman"
+
+
+def _default_exec_runner(
+    cmd: list[str],
+    *,
+    input: str | None = None,  # noqa: A002 - matches subprocess API
+    text: bool | None = None,
+    capture_output: bool | None = None,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(  # nosec: B603
+        cmd,
+        input=input,
+        text=True if text is None else text,
+        capture_output=True if capture_output is None else capture_output,
+        timeout=timeout,
+    )
+    return cast(subprocess.CompletedProcess[str], completed)
 
 
 def _build_client_factory(
@@ -256,6 +286,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         client_factory: _ClientFactory | None = None,
         clock: Callable[[], datetime] | None = None,
         connection_name: str | None = None,
+        exec_runner: _ExecRunner | None = None,
         accepts_overrides: bool = False,
     ) -> None:
         self._session = session
@@ -277,6 +308,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
         self._connection_name = connection_name
+        self._exec_runner: _ExecRunner = exec_runner or _default_exec_runner
 
         session.register_reducer(PodmanWorkspace, replace_latest)
 
@@ -409,6 +441,10 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
     def connection_name(self) -> str | None:
         return self._connection_name
 
+    @property
+    def exec_runner(self) -> _ExecRunner:
+        return self._exec_runner
+
 
 class _PodmanShellSuite:
     """Handler collection bound to a :class:`PodmanToolsSection`."""
@@ -431,99 +467,14 @@ class _PodmanShellSuite:
         environment = self._section.workspace_environment()
         environment.update(env_overrides)
 
-        if self._section.connection_name:
-            result = self._run_shell_via_cli(
-                params=params,
-                command=command,
-                cwd=cwd,
-                environment=environment,
-                timeout_seconds=timeout_seconds,
-                handle=handle,
-            )
-        else:
-            result = self._run_shell_via_api(
-                params=params,
-                command=command,
-                cwd=cwd,
-                environment=environment,
-                timeout_seconds=timeout_seconds,
-                handle=handle,
-            )
-
-        return result
-
-    def _run_shell_via_api(
-        self,
-        *,
-        params: PodmanShellParams,
-        command: tuple[str, ...],
-        cwd: str,
-        environment: dict[str, str],
-        timeout_seconds: float,
-        handle: _WorkspaceHandle,
-    ) -> ToolResult[PodmanShellResult]:
-        client = self._section.new_client()
-        try:
-            container = client.containers.get(handle.descriptor.container_id)
-        except Exception as error:  # pragma: no cover - transport guard
-            raise ToolValidationError(
-                "Unable to locate Podman workspace; ensure the container is still available."
-            ) from error
-        start = time.perf_counter()
-        try:
-            exit_code, output = cast(
-                _ExecResult,
-                container.exec_run(
-                    list(command),
-                    stdout=True,
-                    stderr=True,
-                    demux=False,
-                    environment=environment,
-                    workdir=cwd,
-                    stdin=bool(params.stdin),
-                ),
-            )
-        except Exception as error:  # pragma: no cover - transport guard
-            raise ToolValidationError(
-                "Podman exec failed; ensure the daemon is reachable."
-            ) from error
-        duration_ms = int((time.perf_counter() - start) * 1_000)
-        self._section.touch_workspace()
-        stdout_raw: bytes = b""
-        stderr_raw: bytes = b""
-        if isinstance(output, tuple):
-            stdout_raw = output[0] or b""
-            stderr_raw = output[1] or b""
-        else:
-            stdout_raw = output or b""
-            stderr_raw = b""
-        stdout_text = stdout_raw.decode("utf-8", errors="replace")
-        stderr_text = stderr_raw.decode("utf-8", errors="replace")
-        stdout_text = stdout_text.rstrip()
-        stderr_text = stderr_text.rstrip()
-        if not params.capture_output:
-            stdout_text = _CAPTURE_DISABLED
-            stderr_text = _CAPTURE_DISABLED
-        else:
-            stdout_text = _truncate_stream(stdout_text)
-            stderr_text = _truncate_stream(stderr_text)
-
-        timed_out = duration_ms > int(timeout_seconds * 1_000)
-        exit_code = exit_code if exit_code is not None else 1
-
-        result = PodmanShellResult(
+        return self._run_shell_via_cli(
+            params=params,
             command=command,
             cwd=cwd,
-            exit_code=exit_code,
-            stdout=stdout_text,
-            stderr=stderr_text,
-            duration_ms=duration_ms,
-            timed_out=timed_out,
+            environment=environment,
+            timeout_seconds=timeout_seconds,
+            handle=handle,
         )
-        message = f"`shell_execute` exited with {exit_code}."
-        if timed_out:
-            message = "`shell_execute` exceeded the configured timeout."
-        return ToolResult(message=message, value=result)
 
     def _run_shell_via_cli(
         self,
@@ -548,9 +499,10 @@ class _PodmanShellSuite:
             exec_cmd.extend(["--env", f"{key}={value}"])
         exec_cmd.append(container_name)
         exec_cmd.extend(command)
+        runner = self._section.exec_runner
         start = time.perf_counter()
         try:
-            completed = subprocess.run(  # nosec: B603
+            completed = runner(  # nosec: B603
                 exec_cmd,
                 input=params.stdin if params.stdin else None,
                 text=True,
@@ -564,16 +516,16 @@ class _PodmanShellSuite:
         except subprocess.TimeoutExpired as error:
             timed_out = True
             exit_code = 124
-            stdout_text = error.stdout or ""
-            stderr_text = error.stderr or ""
+            stdout_text = str(error.stdout or "")
+            stderr_text = str(error.stderr or "")
         except FileNotFoundError as error:
             raise ToolValidationError(
                 "Podman CLI is required to execute commands over SSH connections."
             ) from error
         duration_ms = int((time.perf_counter() - start) * 1_000)
         self._section.touch_workspace()
-        stdout_text_clean = cast(str, stdout_text or "").rstrip()
-        stderr_text_clean = cast(str, stderr_text or "").rstrip()
+        stdout_text_clean = str(stdout_text or "").rstrip()
+        stderr_text_clean = str(stderr_text or "").rstrip()
         if not params.capture_output:
             stdout_text_final = _CAPTURE_DISABLED
             stderr_text_final = _CAPTURE_DISABLED

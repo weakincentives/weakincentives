@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import CompletedProcess
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
@@ -47,8 +48,8 @@ class _ExecCall:
 @dataclass(slots=True)
 class _ExecResponse:
     exit_code: int
-    stdout: bytes = b""
-    stderr: bytes = b""
+    stdout: str = ""
+    stderr: str = ""
 
 
 class _FakeContainer:
@@ -97,8 +98,8 @@ class _FakeContainer:
             raise AssertionError("No queued exec response for command.")
         response = self._queue.pop(0)
         if self._return_bytes:
-            return response.exit_code, response.stdout
-        return response.exit_code, (response.stdout, response.stderr)
+            return response.exit_code, response.stdout.encode()
+        return response.exit_code, (response.stdout.encode(), response.stderr.encode())
 
 
 class _FakeContainerCollection:
@@ -153,12 +154,48 @@ class _FakePodmanClient:
         self._closed = True
 
 
+class _FakeCliRunner:
+    def __init__(self, responses: Sequence[_ExecResponse] | None = None) -> None:
+        self._responses: list[_ExecResponse] = list(
+            responses or (_ExecResponse(exit_code=0),)
+        )
+        self.calls: list[list[str]] = []
+        self.kwargs: list[dict[str, object]] = []
+
+    def __call__(
+        self,
+        cmd: list[str],
+        *,
+        input: str | None = None,  # noqa: A002
+        text: bool | None = None,
+        capture_output: bool | None = None,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        self.calls.append(list(cmd))
+        self.kwargs.append(
+            {
+                "input": input,
+                "text": text,
+                "capture_output": capture_output,
+                "timeout": timeout,
+            }
+        )
+        response = self._responses.pop(0) if self._responses else _ExecResponse(0)
+        return CompletedProcess(
+            cmd,
+            response.exit_code,
+            stdout=response.stdout,
+            stderr=response.stderr,
+        )
+
+
 def _make_section(
     *,
     session: Session,
     client: _FakePodmanClient,
     cache_dir: Path,
     connection_name: str | None = None,
+    runner: Callable[..., CompletedProcess[str]] | None = None,
 ) -> PodmanToolsSection:
     return PodmanToolsSection(
         session=session,
@@ -166,6 +203,7 @@ def _make_section(
         cache_dir=cache_dir,
         base_environment={"PATH": "/usr/bin"},
         connection_name=connection_name,
+        exec_runner=runner,
     )
 
 
@@ -186,20 +224,32 @@ def test_section_registers_shell_tool(
     assert tool.description.startswith("Run a short command")
 
 
+def test_section_exposes_new_client(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+
+    assert section.new_client() is client
+
+
 def test_shell_execute_runs_commands_and_stores_workspace(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    cli_runner = _FakeCliRunner(
+        [_ExecResponse(exit_code=0, stdout="hello world\n", stderr="")]
+    )
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
 
-    client.containers.queue_response(
-        _ExecResponse(exit_code=0, stdout=b"hello world\n", stderr=b"")
-    )
     params = PodmanShellParams(command=("echo", "hello world"))
     result = handler(params, context=build_tool_context(bus, session))
 
@@ -212,8 +262,7 @@ def test_shell_execute_runs_commands_and_stores_workspace(
     assert workspace[-1].image == "python:3.12-bookworm"
     handle = section._workspace_handle
     assert handle is not None
-    container = client.containers.get(handle.descriptor.container_id)
-    assert container.exec_calls[-1].command == ("echo", "hello world")
+    assert cli_runner.calls[-1][-2:] == ["echo", "hello world"]
 
 
 def test_shell_execute_validates_command(
@@ -222,7 +271,9 @@ def test_shell_execute_validates_command(
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=_FakeCliRunner()
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
@@ -238,21 +289,20 @@ def test_shell_execute_merges_environment(
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
 
-    client.containers.queue_response(_ExecResponse(exit_code=0))
     params = PodmanShellParams(command=("printenv",), env={"custom": "value"})
     handler(params, context=build_tool_context(bus, session))
 
-    handle = section._workspace_handle
-    assert handle is not None
-    container = client.containers.get(handle.descriptor.container_id)
-    exec_call = container.exec_calls[-1]
-    assert exec_call.env["PATH"] == "/usr/bin"
-    assert exec_call.env["CUSTOM"] == "value"
+    call = " ".join(cli_runner.calls[-1])
+    assert "PATH=/usr/bin" in call
+    assert "CUSTOM=value" in call
 
 
 def test_shell_execute_respects_capture_flag(
@@ -261,14 +311,16 @@ def test_shell_execute_respects_capture_flag(
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    cli_runner = _FakeCliRunner(
+        [_ExecResponse(exit_code=0, stdout="x" * 40_000, stderr="")]
+    )
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
 
-    client.containers.queue_response(
-        _ExecResponse(exit_code=0, stdout=b"x" * (40_000), stderr=b"")
-    )
     params = PodmanShellParams(command=("cat",), capture_output=False)
     result = handler(params, context=build_tool_context(bus, session))
     assert result.value is not None
@@ -282,20 +334,20 @@ def test_shell_execute_normalizes_cwd(
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
 
-    client.containers.queue_response(_ExecResponse(exit_code=0))
     params = PodmanShellParams(command=("pwd",), cwd="src/docs")
     handler(params, context=build_tool_context(bus, session))
 
-    handle = section._workspace_handle
-    assert handle is not None
-    container = client.containers.get(handle.descriptor.container_id)
-    exec_call = container.exec_calls[-1]
-    assert exec_call.workdir == "/workspace/src/docs"
+    call = cli_runner.calls[-1]
+    idx = call.index("--workdir")
+    assert call[idx + 1] == "/workspace/src/docs"
 
 
 def test_shell_execute_rejects_non_ascii_stdin(
@@ -304,7 +356,9 @@ def test_shell_execute_rejects_non_ascii_stdin(
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=_FakeCliRunner()
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
@@ -319,7 +373,9 @@ def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
     session = Session(bus=bus)
     other_session = Session(bus=bus)
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=_FakeCliRunner()
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
@@ -334,42 +390,27 @@ def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
 def test_shell_execute_cli_fallback(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
+    cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0, stdout="cli output")])
     section = _make_section(
         session=session,
         client=client,
         cache_dir=tmp_path,
         connection_name="podman-machine-default",
+        runner=cli_runner,
     )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
 
-    recorded_cmd: list[str] | None = None
-
-    def _fake_run(
-        cmd: list[str],
-        *,
-        input: str | None = None,  # noqa: A002
-        text: bool | None = None,
-        capture_output: bool | None = None,
-        timeout: float | None = None,
-    ) -> SimpleNamespace:
-        nonlocal recorded_cmd
-        recorded_cmd = list(cmd)
-        return SimpleNamespace(returncode=0, stdout="cli output", stderr="")
-
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
-
     params = PodmanShellParams(command=("echo", "cli"), stdin="payload")
     result = handler(params, context=build_tool_context(bus, session))
 
-    assert recorded_cmd is not None
-    assert recorded_cmd[:3] == ["podman", "--connection", "podman-machine-default"]
-    assert "--interactive" in recorded_cmd
+    call = cli_runner.calls[-1]
+    assert call[:3] == ["podman", "--connection", "podman-machine-default"]
+    assert "--interactive" in call
     assert result.value is not None
     value = cast(PodmanShellResult, result.value)
     assert value.stdout == "cli output"
@@ -378,24 +419,22 @@ def test_shell_execute_cli_fallback(
 def test_shell_execute_cli_capture_disabled(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
+    cli_runner = _FakeCliRunner(
+        [_ExecResponse(exit_code=0, stdout="cli output", stderr="cli err")]
+    )
     section = _make_section(
         session=session,
         client=client,
         cache_dir=tmp_path,
         connection_name="podman-machine-default",
+        runner=cli_runner,
     )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
-
-    def _fake_run(cmd: list[str], **_: object) -> SimpleNamespace:
-        return SimpleNamespace(returncode=0, stdout="cli output", stderr="cli err")
-
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
 
     params = PodmanShellParams(command=("echo", "cli"), capture_output=False)
     result = handler(params, context=build_tool_context(bus, session))
@@ -408,29 +447,32 @@ def test_shell_execute_cli_capture_disabled(
 def test_shell_execute_cli_timeout(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
+
+    def _timeout_runner(
+        cmd: list[str],
+        *,
+        input: str | None = None,  # noqa: A002
+        text: bool | None = None,
+        capture_output: bool | None = None,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(
+            cmd=["podman"], timeout=1.0, output="partial", stderr="error"
+        )
+
     section = _make_section(
         session=session,
         client=client,
         cache_dir=tmp_path,
         connection_name="podman-machine-default",
+        runner=_timeout_runner,
     )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
-
-    def _fake_run(cmd: list[str], **__: object) -> SimpleNamespace:
-        raise subprocess.TimeoutExpired(
-            cmd=["podman"],
-            timeout=1.0,
-            output="partial",
-            stderr="error",
-        )
-
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
 
     params = PodmanShellParams(command=("sleep", "1"))
     result = handler(params, context=build_tool_context(bus, session))
@@ -444,24 +486,30 @@ def test_shell_execute_cli_timeout(
 def test_shell_execute_cli_missing_binary(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
+
+    def _missing_runner(
+        cmd: list[str],
+        *,
+        input: str | None = None,  # noqa: A002
+        text: bool | None = None,
+        capture_output: bool | None = None,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        raise FileNotFoundError("podman not found")
+
     section = _make_section(
         session=session,
         client=client,
         cache_dir=tmp_path,
         connection_name="podman-machine-default",
+        runner=_missing_runner,
     )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
-
-    def _fake_run(cmd: list[str], **__: object) -> SimpleNamespace:
-        raise FileNotFoundError("podman not found")
-
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
 
     with pytest.raises(ToolValidationError):
         handler(
@@ -493,6 +541,44 @@ def test_client_factory_creates_client() -> None:
         assert hasattr(client, "containers")
     finally:
         client.close()
+
+
+def test_default_exec_runner_invokes_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: dict[str, object] = {}
+
+    def _fake_run(
+        args: list[str],
+        *,
+        input: str | None = None,  # noqa: A002
+        text: bool | None = None,
+        capture_output: bool | None = None,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        recorded["args"] = args
+        recorded["input"] = input
+        recorded["text"] = text
+        recorded["capture_output"] = capture_output
+        recorded["timeout"] = timeout
+        return CompletedProcess(args, 0, stdout="ok", stderr="err")
+
+    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+
+    result = podman_module._default_exec_runner(
+        ["echo", "hi"],
+        input="payload",
+        text=True,
+        capture_output=True,
+        timeout=1.5,
+    )
+
+    assert recorded["args"] == ["echo", "hi"]
+    assert recorded["input"] == "payload"
+    assert recorded["text"] is True
+    assert recorded["capture_output"] is True
+    assert recorded["timeout"] == 1.5
+    assert result.stdout == "ok"
 
 
 def test_client_factory_uses_connection_options(
@@ -572,13 +658,16 @@ def test_workspace_reuse_between_calls(
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    cli_runner = _FakeCliRunner(
+        [_ExecResponse(exit_code=0), _ExecResponse(exit_code=0)]
+    )
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
 
-    client.containers.queue_response(_ExecResponse(exit_code=0))
-    client.containers.queue_response(_ExecResponse(exit_code=0))
     handler(
         PodmanShellParams(command=("true",)), context=build_tool_context(bus, session)
     )
@@ -619,41 +708,28 @@ def test_readiness_failure_raises(
         )
 
 
-def test_shell_execute_handles_raw_bytes(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    client.containers.set_return_bytes(True)
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = find_tool(section, "shell_execute")
-    handler = tool.handler
-    assert handler is not None
-
-    client.containers.queue_response(_ExecResponse(exit_code=0, stdout=b"bytes output"))
-    result = handler(
-        PodmanShellParams(command=("true",)), context=build_tool_context(bus, session)
-    )
-    assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
-    assert "bytes output" in value.stdout
-
-
 def test_shell_execute_truncates_output(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    cli_runner = _FakeCliRunner(
+        [
+            _ExecResponse(
+                exit_code=0,
+                stdout="a" * 40_000,
+                stderr="b" * 40_000,
+            )
+        ]
+    )
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
     assert handler is not None
 
-    client.containers.queue_response(
-        _ExecResponse(exit_code=0, stdout=b"a" * 40_000, stderr=b"b" * 40_000)
-    )
     result = handler(
         PodmanShellParams(command=("true",)), context=build_tool_context(bus, session)
     )
@@ -661,36 +737,3 @@ def test_shell_execute_truncates_output(
     value = cast(PodmanShellResult, result.value)
     assert value.stdout.endswith("[truncated]")
     assert value.stderr.endswith("[truncated]")
-
-
-def test_shell_execute_marks_timeout(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = find_tool(section, "shell_execute")
-    handler = tool.handler
-    assert handler is not None
-
-    client.containers.queue_response(_ExecResponse(exit_code=0))
-
-    calls = {"count": 0}
-
-    def _fake_perf_counter() -> float:
-        value = calls["count"]
-        calls["count"] += 2
-        return float(value)
-
-    monkeypatch.setattr(podman_module.time, "perf_counter", _fake_perf_counter)
-
-    result = handler(
-        PodmanShellParams(command=("true",), timeout_seconds=1.0),
-        context=build_tool_context(bus, session),
-    )
-    assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
-    assert value.timed_out
-    assert "exceeded the configured timeout" in result.message
