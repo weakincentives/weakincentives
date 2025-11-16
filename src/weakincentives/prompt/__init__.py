@@ -50,7 +50,7 @@ from .prompt import Prompt
 from .section import Section
 from .structured_output import (
     OutputParseError,
-    StructuredOutputSpec,
+    StructuredOutputConfig,
     parse_structured_output,
 )
 from .tool import Tool, ToolContext, ToolHandler
@@ -82,7 +82,7 @@ __all__ = [
     "SectionDescriptor",
     "SectionOverride",
     "SectionPath",
-    "StructuredOutputSpec",
+    "StructuredOutputConfig",
     "SupportsDataclass",
     "SupportsToolResult",
     "Tool",

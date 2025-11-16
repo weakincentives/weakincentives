@@ -31,7 +31,7 @@ from .registry import PromptRegistry, RegistrySnapshot, SectionNode, clone_datac
 from .rendering import PromptRenderer, RenderedPrompt
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
-from .structured_output import StructuredOutputSpec
+from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:
     from .overrides import PromptLike, PromptOverridesStore, ToolOverride
@@ -115,7 +115,7 @@ class Prompt[OutputT]:
             chapter.key: chapter for chapter in self._chapters
         }
 
-        self._structured_output: StructuredOutputSpec[SupportsDataclass] | None
+        self._structured_output: StructuredOutputConfig[SupportsDataclass] | None
         self._structured_output = self._resolve_output_spec(allow_extra_keys)
 
         self.inject_output_instructions = inject_output_instructions
@@ -190,7 +190,7 @@ class Prompt[OutputT]:
         return self._registry_snapshot.param_types
 
     @property
-    def structured_output(self) -> StructuredOutputSpec[SupportsDataclass] | None:
+    def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
         """Resolved structured output declaration, when present."""
 
         return self._structured_output
@@ -299,7 +299,7 @@ class Prompt[OutputT]:
 
     def _resolve_output_spec(
         self, allow_extra_keys: bool
-    ) -> StructuredOutputSpec[SupportsDataclass] | None:
+    ) -> StructuredOutputConfig[SupportsDataclass] | None:
         candidate = getattr(type(self), "_output_dataclass_candidate", None)
         container = cast(
             Literal["object", "array"] | None,
@@ -324,7 +324,7 @@ class Prompt[OutputT]:
             )
 
         dataclass_type = cast(type[SupportsDataclass], candidate)
-        return StructuredOutputSpec(
+        return StructuredOutputConfig(
             dataclass_type=dataclass_type,
             container=container,
             allow_extra_keys=allow_extra_keys,

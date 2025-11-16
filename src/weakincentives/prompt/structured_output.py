@@ -24,7 +24,7 @@ from ._types import SupportsDataclass
 __all__ = [
     "ARRAY_WRAPPER_KEY",
     "OutputParseError",
-    "StructuredOutputSpec",
+    "StructuredOutputConfig",
     "parse_structured_output",
 ]
 
@@ -39,7 +39,7 @@ DataclassT = TypeVar("DataclassT", bound=SupportsDataclass)
 
 
 @dataclass(frozen=True, slots=True)
-class StructuredOutputSpec[DataclassT]:
+class StructuredOutputConfig[DataclassT]:
     """Resolved structured output declaration for a prompt."""
 
     dataclass_type: type[DataclassT]
@@ -49,7 +49,7 @@ class StructuredOutputSpec[DataclassT]:
 
 class StructuredRenderedPrompt[PayloadT](Protocol):
     @property
-    def structured_output(self) -> StructuredOutputSpec[SupportsDataclass] | None:
+    def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
         """Structured output metadata declared by the prompt."""
 
 
@@ -72,13 +72,13 @@ def parse_structured_output[PayloadT](
 ) -> PayloadT:
     """Parse a model response into the structured output type declared by the prompt."""
 
-    spec = rendered.structured_output
-    if spec is None:
+    config = rendered.structured_output
+    if config is None:
         raise OutputParseError("Prompt does not declare structured output.")
 
-    dataclass_type = spec.dataclass_type
-    container = spec.container
-    allow_extra_keys = spec.allow_extra_keys
+    dataclass_type = config.dataclass_type
+    container = config.container
+    allow_extra_keys = config.allow_extra_keys
     payload = _extract_json_payload(output_text, dataclass_type)
     try:
         parsed = parse_dataclass_payload(

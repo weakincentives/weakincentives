@@ -24,7 +24,7 @@ from ._types import SupportsDataclass, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .registry import RegistrySnapshot, SectionNode
 from .response_format import ResponseFormatSection
-from .structured_output import StructuredOutputSpec
+from .structured_output import StructuredOutputConfig
 from .tool import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -42,7 +42,7 @@ class RenderedPrompt[OutputT_co]:
     """Rendered prompt text paired with structured output metadata."""
 
     text: str
-    structured_output: StructuredOutputSpec[SupportsDataclass] | None = None
+    structured_output: StructuredOutputConfig[SupportsDataclass] | None = None
     deadline: Deadline | None = None
     _tools: tuple[Tool[SupportsDataclass, SupportsToolResult], ...] = field(
         default_factory=tuple
@@ -115,7 +115,7 @@ class PromptRenderer[OutputT]:
         self,
         *,
         registry: RegistrySnapshot,
-        structured_output: StructuredOutputSpec[SupportsDataclass] | None,
+        structured_output: StructuredOutputConfig[SupportsDataclass] | None,
         response_section: ResponseFormatSection | None,
     ) -> None:
         super().__init__()

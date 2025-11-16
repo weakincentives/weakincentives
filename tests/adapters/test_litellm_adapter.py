@@ -35,7 +35,7 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
-    StructuredOutputSpec,
+    StructuredOutputConfig,
 )
 
 try:
@@ -1678,7 +1678,7 @@ def test_litellm_parse_schema_constrained_payload_rejects_unknown_container() ->
 
     rendered = RenderedPrompt(
         text="",
-        structured_output=StructuredOutputSpec(
+        structured_output=StructuredOutputConfig(
             dataclass_type=StructuredAnswer,
             container=cast(Literal["object", "array"], "invalid"),
             allow_extra_keys=False,

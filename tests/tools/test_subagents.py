@@ -28,7 +28,7 @@ from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, Rec
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.prompt.structured_output import StructuredOutputSpec
+from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
 from weakincentives.runtime.session import Session
@@ -343,7 +343,7 @@ def test_dispatch_subagents_requires_dataclass_output_type() -> None:
         prompt=prompt,
         rendered_prompt=RenderedPrompt(
             text=rendered.text,
-            structured_output=StructuredOutputSpec(
+            structured_output=StructuredOutputConfig(
                 dataclass_type=cast(type[SupportsDataclass], cast(object, str)),
                 container=cast(Literal["object", "array"], rendered.container),
                 allow_extra_keys=bool(rendered.allow_extra_keys),

@@ -32,7 +32,7 @@ from weakincentives.prompt import Prompt, ToolContext
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.prompt.structured_output import StructuredOutputSpec
+from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import (
@@ -316,7 +316,7 @@ class StructuredOutput:
 def test_conversation_runner_parses_structured_output() -> None:
     rendered = RenderedPrompt(
         text="system",
-        structured_output=StructuredOutputSpec(
+        structured_output=StructuredOutputConfig(
             dataclass_type=StructuredOutput,
             container="object",
             allow_extra_keys=False,
