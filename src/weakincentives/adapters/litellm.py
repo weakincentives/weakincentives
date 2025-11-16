@@ -152,10 +152,7 @@ class LiteLLMAdapter:
                 phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 provider_payload=deadline_provider_payload(deadline),
             )
-        has_structured_output = (
-            getattr(prompt, "_output_type", None) is not None
-            and getattr(prompt, "_output_container", None) is not None
-        )
+        has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
             parse_output
             and has_structured_output

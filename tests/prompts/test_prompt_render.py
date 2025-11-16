@@ -292,12 +292,7 @@ def test_prompt_render_propagates_enabled_errors() -> None:
 
 
 def test_rendered_prompt_str_returns_text() -> None:
-    rendered = RenderedPrompt(
-        text="Rendered output",
-        output_type=None,
-        container=None,
-        allow_extra_keys=None,
-    )
+    rendered = RenderedPrompt(text="Rendered output")
 
     assert str(rendered) == "Rendered output"
 

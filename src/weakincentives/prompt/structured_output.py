@@ -15,14 +15,18 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from typing import Final, Literal, TypeVar, cast, overload
+from dataclasses import dataclass
+from typing import Any, Final, Literal, Protocol, TypeVar, cast
 
 from ..serde.parse import parse as parse_dataclass
-from ..types import JSONValue
 from ._types import SupportsDataclass
-from .prompt import RenderedPrompt
 
-__all__ = ["ARRAY_WRAPPER_KEY", "OutputParseError", "parse_structured_output"]
+__all__ = [
+    "ARRAY_WRAPPER_KEY",
+    "OutputParseError",
+    "StructuredOutputConfig",
+    "parse_structured_output",
+]
 
 ARRAY_WRAPPER_KEY: Final[str] = "items"
 
@@ -31,8 +35,22 @@ _JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 
 
-PayloadT = TypeVar("PayloadT")
 DataclassT = TypeVar("DataclassT", bound=SupportsDataclass)
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredOutputConfig[DataclassT]:
+    """Resolved structured output declaration for a prompt."""
+
+    dataclass_type: type[DataclassT]
+    container: Literal["object", "array"]
+    allow_extra_keys: bool
+
+
+class StructuredRenderedPrompt[PayloadT](Protocol):
+    @property
+    def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
+        """Structured output metadata declared by the prompt."""
 
 
 class OutputParseError(Exception):
@@ -50,17 +68,17 @@ class OutputParseError(Exception):
 
 
 def parse_structured_output[PayloadT](
-    output_text: str, rendered: RenderedPrompt[PayloadT]
+    output_text: str, rendered: StructuredRenderedPrompt[PayloadT]
 ) -> PayloadT:
     """Parse a model response into the structured output type declared by the prompt."""
 
-    dataclass_type = cast(type[SupportsDataclass] | None, rendered.output_type)
-    container = rendered.container
-    allow_extra_keys = rendered.allow_extra_keys
-
-    if dataclass_type is None or container is None:
+    config = rendered.structured_output
+    if config is None:
         raise OutputParseError("Prompt does not declare structured output.")
 
+    dataclass_type = config.dataclass_type
+    container = config.container
+    allow_extra_keys = config.allow_extra_keys
     payload = _extract_json_payload(output_text, dataclass_type)
     try:
         parsed = parse_dataclass_payload(
@@ -78,14 +96,12 @@ def parse_structured_output[PayloadT](
     return cast(PayloadT, parsed)
 
 
-def _extract_json_payload(
-    text: str, dataclass_type: type[SupportsDataclass]
-) -> JSONValue:
+def _extract_json_payload(text: str, dataclass_type: type[SupportsDataclass]) -> object:
     fenced_match = _JSON_FENCE_PATTERN.search(text)
     if fenced_match is not None:
         block = fenced_match.group(1).strip()
         try:
-            return cast(JSONValue, json.loads(block))
+            return json.loads(block)
         except json.JSONDecodeError as error:
             raise OutputParseError(
                 "Failed to decode JSON from fenced code block.",
@@ -95,7 +111,7 @@ def _extract_json_payload(
     stripped = text.strip()
     if stripped:
         try:
-            return cast(JSONValue, json.loads(stripped))
+            return json.loads(stripped)
         except json.JSONDecodeError:
             pass
 
@@ -107,7 +123,7 @@ def _extract_json_payload(
             payload, _ = decoder.raw_decode(text, index)
         except json.JSONDecodeError:
             continue
-        return cast(JSONValue, payload)
+        return payload
 
     raise OutputParseError(
         "No JSON object or array found in assistant message.",
@@ -115,48 +131,16 @@ def _extract_json_payload(
     )
 
 
-@overload
-def parse_dataclass_payload[
-    DataclassT: SupportsDataclass,
-](
-    dataclass_type: type[DataclassT],
-    container: Literal["object"],
-    payload: JSONValue,
-    *,
-    allow_extra_keys: bool | None,
-    object_error: str,
-    array_error: str,
-    array_item_error: str,
-) -> DataclassT: ...
-
-
-@overload
-def parse_dataclass_payload[
-    DataclassT: SupportsDataclass,
-](
-    dataclass_type: type[DataclassT],
-    container: Literal["array"],
-    payload: JSONValue,
-    *,
-    allow_extra_keys: bool | None,
-    object_error: str,
-    array_error: str,
-    array_item_error: str,
-) -> list[DataclassT]: ...
-
-
-def parse_dataclass_payload[
-    DataclassT: SupportsDataclass,
-](
-    dataclass_type: type[DataclassT],
+def parse_dataclass_payload(
+    dataclass_type: type[SupportsDataclass],
     container: Literal["object", "array"],
-    payload: JSONValue,
+    payload: object,
     *,
-    allow_extra_keys: bool | None,
+    allow_extra_keys: bool,
     object_error: str,
     array_error: str,
     array_item_error: str,
-) -> DataclassT | list[DataclassT]:
+) -> object:
     if container not in {"object", "array"}:
         raise TypeError("Unknown output container declared.")
 
@@ -165,11 +149,11 @@ def parse_dataclass_payload[
     if container == "object":
         if not isinstance(payload, Mapping):
             raise TypeError(object_error)
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
+        mapping_payload = cast(Mapping[str, object], payload)
         return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
 
     if isinstance(payload, Mapping):
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
+        mapping_payload = cast(Mapping[str, object], payload)
         if ARRAY_WRAPPER_KEY not in mapping_payload:
             raise TypeError(array_error)
         payload = mapping_payload[ARRAY_WRAPPER_KEY]
@@ -177,12 +161,12 @@ def parse_dataclass_payload[
         payload, (str, bytes, bytearray)
     ):
         raise TypeError(array_error)
-    sequence_payload = cast(Sequence[JSONValue], payload)
-    parsed_items: list[DataclassT] = []
+    sequence_payload = cast(Sequence[object], payload)
+    parsed_items: list[Any] = []
     for index, item in enumerate(sequence_payload):
         if not isinstance(item, Mapping):
             raise TypeError(array_item_error.format(index=index))
-        mapping_item = cast(Mapping[str, JSONValue], item)
+        mapping_item = cast(Mapping[str, object], item)
         parsed_item = parse_dataclass(
             dataclass_type,
             mapping_item,

@@ -429,7 +429,7 @@ def build_json_schema_response_format(
 
     output_type = rendered.output_type
     container = rendered.container
-    allow_extra_keys = rendered.allow_extra_keys
+    allow_extra_keys = bool(rendered.allow_extra_keys)
 
     if output_type is None or container is None:
         return None
@@ -483,7 +483,7 @@ def parse_schema_constrained_payload(
         dataclass_type,
         container,
         payload,
-        allow_extra_keys=allow_extra_keys,
+        allow_extra_keys=bool(allow_extra_keys),
         object_error="Expected provider payload to be a JSON object.",
         array_error="Expected provider payload to be a JSON array.",
         array_item_error="Array item at index {index} is not an object.",
