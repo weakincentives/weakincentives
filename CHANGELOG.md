@@ -4,7 +4,9 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- No changes yet.
+- Added the Podman `shell_execute` tool behind `PodmanToolsSection`, including a
+  `podman` optional extra, session-backed workspace tracking, unit coverage, and
+  a gated integration test.
 
 ## v0.8.0 - 2025-11-15
 

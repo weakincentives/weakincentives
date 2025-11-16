@@ -37,6 +37,12 @@ from .planning import (
     StepStatus,
     UpdateStep,
 )
+from .podman import (
+    PodmanShellParams,
+    PodmanShellResult,
+    PodmanToolsSection,
+    PodmanWorkspace,
+)
 from .subagents import (
     DispatchSubagentsParams,
     SubagentIsolationLevel,
@@ -97,6 +103,10 @@ __all__ = [
     "PlanStep",
     "PlanningStrategy",
     "PlanningToolsSection",
+    "PodmanShellParams",
+    "PodmanShellResult",
+    "PodmanToolsSection",
+    "PodmanWorkspace",
     "ReadFile",
     "ReadFileParams",
     "ReadFileResult",

@@ -1173,6 +1173,19 @@ wheels = [
 ]
 
 [[package]]
+name = "podman"
+version = "5.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3b/36/070e7bf682ac0868450584df79198c178323e80f73b8fb9b6fec8bde0a65/podman-5.6.0.tar.gz", hash = "sha256:cc5f7aa9562e30f992fc170a48da970a7132be60d8a2e2941e6c17bd0a0b35c9", size = 72832, upload-time = "2025-09-05T09:42:40.071Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0a/9e/8c62f05b104d9f00edbb4c298b152deceb393ea67f0288d89d1139d7a859/podman-5.6.0-py3-none-any.whl", hash = "sha256:967ff8ad8c6b851bc5da1a9410973882d80e235a9410b7d1e931ce0c3324fbe3", size = 88713, upload-time = "2025-09-05T09:42:38.405Z" },
+]
+
+[[package]]
 name = "propcache"
 version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1957,6 +1970,9 @@ litellm = [
 openai = [
     { name = "openai" },
 ]
+podman = [
+    { name = "podman" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1979,8 +1995,9 @@ requires-dist = [
     { name = "asteval", marker = "extra == 'asteval'", specifier = ">=1.0.7" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.79.3" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.8.0" },
+    { name = "podman", marker = "extra == 'podman'", specifier = ">=5.6.0" },
 ]
-provides-extras = ["asteval", "litellm", "openai"]
+provides-extras = ["asteval", "litellm", "openai", "podman"]
 
 [package.metadata.requires-dev]
 dev = [
