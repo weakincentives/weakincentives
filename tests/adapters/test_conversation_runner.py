@@ -37,6 +37,7 @@ from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import (
     EventBus,
+    EventPayload,
     HandlerFailure,
     PromptExecuted,
     PromptRendered,
@@ -57,7 +58,7 @@ class DummyAdapter(ProviderAdapter[object]):
         prompt: Prompt[object],
         *params: SupportsDataclass,
         parse_output: bool = True,
-        bus: EventBus,
+        bus: EventBus[EventPayload],
         session: SessionProtocol | None = None,
         deadline: Deadline | None = None,
         overrides_store: PromptOverridesStore | None = None,
@@ -97,7 +98,7 @@ def serialize_tool_message(
     return {"message": result.message, "payload": payload}
 
 
-class RecordingBus(EventBus):
+class RecordingBus(EventBus[EventPayload]):
     def __init__(
         self,
         *,
@@ -105,17 +106,17 @@ class RecordingBus(EventBus):
         fail_tool: bool = False,
         fail_prompt: bool = False,
     ) -> None:
-        self.events: list[object] = []
+        self.events: list[EventPayload] = []
         self.fail_rendered = fail_rendered
         self.fail_tool = fail_tool
         self.fail_prompt = fail_prompt
 
     def subscribe(
-        self, event_type: type[object], handler: EventHandler
+        self, event_type: type[EventPayload], handler: EventHandler[EventPayload]
     ) -> None:  # pragma: no cover - unused
         del event_type, handler
 
-    def publish(self, event: object) -> PublishResult:
+    def publish(self, event: EventPayload) -> PublishResult[EventPayload]:
         self.events.append(event)
         if self.fail_rendered and isinstance(event, PromptRendered):
             return self._failure_result(event, "prompt rendered publish failure")
@@ -126,8 +127,8 @@ class RecordingBus(EventBus):
         return PublishResult(event=event, handlers_invoked=(), errors=())
 
     @staticmethod
-    def _failure_result(event: object, message: str) -> PublishResult:
-        def failure_handler(_event: object) -> None:  # pragma: no cover - defensive
+    def _failure_result(event: EventPayload, message: str) -> PublishResult[EventPayload]:
+        def failure_handler(_event: EventPayload) -> None:  # pragma: no cover - defensive
             return None
 
         failure = HandlerFailure(handler=failure_handler, error=RuntimeError(message))

@@ -24,7 +24,7 @@ from ..runtime.session.protocols import SessionProtocol
 if TYPE_CHECKING:
     from ..prompt.overrides import PromptOverridesStore
     from ..prompt.prompt import Prompt
-    from ..runtime.events._types import EventBus, ToolInvoked
+    from ..runtime.events._types import EventBus, EventPayload, ToolInvoked
 
 OutputT = TypeVar("OutputT")
 
@@ -37,7 +37,7 @@ class ProviderAdapter(Protocol[OutputT]):
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,
         parse_output: bool = True,
-        bus: EventBus,
+        bus: EventBus[EventPayload],
         session: SessionProtocol,
         deadline: Deadline | None = None,
         overrides_store: PromptOverridesStore | None = None,

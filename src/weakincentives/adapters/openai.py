@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
-from ..runtime.events import EventBus
+from ..runtime.events import EventBus, EventPayload
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
 from ._provider_protocols import ProviderChoice, ProviderCompletionResponse
@@ -135,7 +135,7 @@ class OpenAIAdapter:
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,
         parse_output: bool = True,
-        bus: EventBus,
+        bus: EventBus[EventPayload],
         session: SessionProtocol,
         deadline: Deadline | None = None,
         overrides_store: PromptOverridesStore | None = None,

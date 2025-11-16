@@ -22,7 +22,7 @@ from ._overrides_protocols import PromptOverridesStoreProtocol
 from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..runtime.events._types import EventBus
+    from ..runtime.events._types import EventBus, EventPayload
     from ..runtime.session.protocols import SessionProtocol
 
 PromptOutputT = TypeVar("PromptOutputT", covariant=True)
@@ -87,7 +87,7 @@ class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
         prompt: PromptProtocol[AdapterOutputT],
         *params: SupportsDataclass,
         parse_output: bool = True,
-        bus: EventBus,
+        bus: EventBus[EventPayload],
         session: SessionProtocol,
         deadline: Deadline | None = None,
         overrides_store: PromptOverridesStoreProtocol | None = None,

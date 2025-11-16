@@ -87,6 +87,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.events import (
     EventBus,
+    EventPayload,
     HandlerFailure,
     InProcessEventBus,
     PromptExecuted,
@@ -115,7 +116,7 @@ def _evaluate_with_bus(
     adapter: ProviderAdapter[OutputT],
     prompt: Prompt[OutputT],
     *params: SupportsDataclass,
-    bus: EventBus | None = None,
+    bus: EventBus[EventPayload] | None = None,
     session: SessionProtocol | None = None,
 ) -> PromptResponse[OutputT]:
     target_bus = bus or NullEventBus()

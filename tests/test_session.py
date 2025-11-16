@@ -23,7 +23,7 @@ import pytest
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.dbc import dbc_enabled
-from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
     InProcessEventBus,
@@ -71,7 +71,7 @@ class ExampleOutput:
 def make_tool_event(value: int) -> ToolInvoked:
     payload = ExamplePayload(value=value)
     tool_result = cast(
-        ToolResult[object],
+        ToolResult[SupportsToolResult],
         ToolResult(message="ok", value=payload),
     )
     return ToolInvoked(
@@ -87,12 +87,15 @@ def make_tool_event(value: int) -> ToolInvoked:
 
 
 def make_prompt_event(output: object) -> PromptExecuted:
-    response = PromptResponse(
-        prompt_name="example",
-        text="done",
-        output=output,
-        tool_results=(),
-        provider_payload=None,
+    response = cast(
+        PromptResponse[SupportsToolResult],
+        PromptResponse(
+            prompt_name="example",
+            text="done",
+            output=output,
+            tool_results=(),
+            provider_payload=None,
+        ),
     )
     prompt_value = (
         cast(SupportsDataclass, output)
@@ -149,7 +152,9 @@ def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) ->
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=7),
-        result=cast(ToolResult[object], ToolResult(message="ok", value=payload)),
+        result=cast(
+            ToolResult[SupportsToolResult], ToolResult(message="ok", value=payload)
+        ),
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=None,
@@ -262,7 +267,7 @@ def test_prompt_executed_enriches_missing_value(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         result=cast(
-            PromptResponse[object],
+            PromptResponse[SupportsToolResult],
             PromptResponse(
                 prompt_name="example",
                 text="done",
@@ -293,7 +298,8 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
         name="tool",
         params=ExampleParams(value=2),
         result=cast(
-            ToolResult[object], ToolResult(message="ok", value="not a dataclass")
+            ToolResult[SupportsToolResult],
+            ToolResult(message="ok", value="not a dataclass"),
         ),
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -347,7 +353,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
     bus.publish(make_tool_event(1))
 
     failure = cast(
-        ToolResult[object],
+        ToolResult[SupportsToolResult],
         ToolResult(message="failed", value=None, success=False),
     )
     failure_event = ToolInvoked(

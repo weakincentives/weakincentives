@@ -23,7 +23,7 @@ import pytest
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.adapters.core import SessionProtocol
-from weakincentives.prompt import SupportsDataclass
+from weakincentives.prompt import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import (
@@ -63,7 +63,7 @@ def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
         adapter=GENERIC_ADAPTER_NAME,
         name=name,
         params=value,
-        result=cast(ToolResult[object], result),
+        result=cast(ToolResult[SupportsToolResult], result),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
         value=value,

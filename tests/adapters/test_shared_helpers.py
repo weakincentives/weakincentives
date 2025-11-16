@@ -31,7 +31,7 @@ from weakincentives.prompt import Prompt
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.runtime.events import EventBus
+from weakincentives.runtime.events import EventBus, EventPayload
 from weakincentives.runtime.session import Session
 
 
@@ -106,7 +106,7 @@ def test_run_conversation_requires_message_payload() -> None:
             prompt: Prompt[object],
             *params: SupportsDataclass,
             parse_output: bool = True,
-            bus: EventBus,
+            bus: EventBus[EventPayload],
             session: SessionProtocol,
             deadline: Deadline | None = None,
             overrides_store: PromptOverridesStore | None = None,

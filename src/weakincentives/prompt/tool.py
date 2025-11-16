@@ -40,7 +40,7 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 
 if TYPE_CHECKING:
-    from ..runtime.events._types import EventBus
+    from ..runtime.events._types import EventBus, EventPayload
     from ..runtime.session.protocols import SessionProtocol
     from .protocols import (
         PromptProtocol,
@@ -60,7 +60,7 @@ class ToolContext:
     rendered_prompt: RenderedPromptProtocol[Any] | None
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
-    event_bus: EventBus
+    event_bus: EventBus[EventPayload]
     deadline: Deadline | None = None
 
 

@@ -30,7 +30,7 @@ from ..prompt.protocols import PromptResponseProtocol
 from ..prompt.tool import Tool, ToolContext
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
-from ..runtime.events._types import EventBus
+from ..runtime.events._types import EventBus, EventPayload
 from ..runtime.session.protocols import SessionProtocol
 from ..serde import dump
 
@@ -123,7 +123,7 @@ def _build_error(message: str) -> str:
 def _clone_session(
     session: SessionProtocol,
     *,
-    bus: EventBus,
+    bus: EventBus[EventPayload],
 ) -> SessionProtocol | None:
     clone_method = getattr(session, "clone", None)
     if not callable(clone_method):
@@ -135,13 +135,13 @@ def _prepare_child_contexts(
     *,
     delegations: Iterable[DelegationParams],
     session: SessionProtocol,
-    bus: EventBus,
+    bus: EventBus[EventPayload],
     isolation_level: SubagentIsolationLevel,
-) -> tuple[tuple[SessionProtocol, EventBus], ...] | str:
+) -> tuple[tuple[SessionProtocol, EventBus[EventPayload]], ...] | str:
     if isolation_level is SubagentIsolationLevel.NO_ISOLATION:
         return tuple((session, bus) for _ in delegations)
 
-    child_pairs: list[tuple[SessionProtocol, EventBus]] = []
+    child_pairs: list[tuple[SessionProtocol, EventBus[EventPayload]]] = []
     for _ in delegations:
         child_bus = InProcessEventBus()
         try:
@@ -220,7 +220,7 @@ def build_dispatch_subagents_tool(
         parent_deadline = rendered_parent.deadline
 
         def _run_child(
-            payload: tuple[DelegationParams, SessionProtocol, EventBus],
+            payload: tuple[DelegationParams, SessionProtocol, EventBus[EventPayload]],
         ) -> SubagentResult:
             delegation, child_session, child_bus = payload
             recap = RecapParams(bullets=delegation.recap_lines)

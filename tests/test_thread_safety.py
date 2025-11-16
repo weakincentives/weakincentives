@@ -26,6 +26,7 @@ import pytest
 
 from code_reviewer_example import initialize_code_reviewer_runtime
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
+from weakincentives.prompt._types import SupportsToolResult
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
@@ -82,7 +83,7 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
         adapter=UNIT_TEST_ADAPTER_NAME,
         name=f"example-{index}",
         params=params,
-        result=cast(ToolResult[object], result),
+        result=cast(ToolResult[SupportsToolResult], result),
         call_id=str(index),
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -105,7 +106,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         adapter=UNIT_TEST_ADAPTER_NAME,
         name="example-idempotent",
         params=params,
-        result=cast(ToolResult[object], tool_result),
+        result=cast(ToolResult[SupportsToolResult], tool_result),
         call_id="999",
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),

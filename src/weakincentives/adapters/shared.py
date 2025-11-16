@@ -35,6 +35,7 @@ from ..prompt.structured_output import (
 from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..runtime.events import (
     EventBus,
+    EventPayload,
     HandlerFailure,
     PromptExecuted,
     PromptRendered,
@@ -251,7 +252,7 @@ def execute_tool_call(
     rendered_prompt: RenderedPrompt[Any] | None,
     tool_call: ProviderToolCall,
     tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
-    bus: EventBus,
+    bus: EventBus[EventPayload],
     session: SessionProtocol,
     prompt_name: str,
     provider_payload: dict[str, Any] | None,
@@ -387,7 +388,7 @@ def execute_tool_call(
         adapter=adapter_name,
         name=tool_name,
         params=tool_params,
-        result=cast(ToolResult[object], tool_result),
+        result=cast(ToolResult[SupportsToolResult], tool_result),
         session_id=session_id,
         created_at=datetime.now(UTC),
         value=dataclass_value,
@@ -650,7 +651,7 @@ class ConversationRunner[OutputT]:
     render_inputs: tuple[SupportsDataclass, ...]
     initial_messages: list[dict[str, Any]]
     parse_output: bool
-    bus: EventBus
+    bus: EventBus[EventPayload]
     session: SessionProtocol
     tool_choice: ToolChoice
     response_format: Mapping[str, Any] | None
@@ -930,7 +931,7 @@ class ConversationRunner[OutputT]:
             PromptExecuted(
                 prompt_name=self.prompt_name,
                 adapter=self.adapter_name,
-                result=cast(PromptResponse[object], response_payload),
+                result=cast(PromptResponse[SupportsToolResult], response_payload),
                 session_id=getattr(self.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 value=prompt_value,
@@ -977,7 +978,7 @@ def run_conversation[
     render_inputs: tuple[SupportsDataclass, ...],
     initial_messages: list[dict[str, Any]],
     parse_output: bool,
-    bus: EventBus,
+    bus: EventBus[EventPayload],
     session: SessionProtocol,
     tool_choice: ToolChoice,
     response_format: Mapping[str, Any] | None,

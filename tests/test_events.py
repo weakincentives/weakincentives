@@ -23,6 +23,7 @@ import pytest
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from tests.helpers.events import NullEventBus
 from weakincentives.adapters.core import PromptResponse
+from weakincentives.prompt._types import SupportsToolResult
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
     HandlerFailure,
@@ -34,13 +35,13 @@ from weakincentives.runtime.events import (
 )
 
 
-def make_prompt_response(prompt_name: str) -> PromptResponse[object]:
+def make_prompt_response(prompt_name: str) -> PromptResponse[SupportsToolResult]:
     return cast(
-        PromptResponse[object],
+        PromptResponse[SupportsToolResult],
         PromptResponse(
             prompt_name=prompt_name,
-            text="hello",
-            output="hello",
+            text=None,
+            output=_Payload(value="payload"),
             tool_results=(),
             provider_payload=None,
         ),
@@ -243,7 +244,7 @@ class _Payload:
 
 def test_tool_invoked_event_fields() -> None:
     raw_result = ToolResult(message="ok", value=_Payload(value="data"))
-    result = cast(ToolResult[object], raw_result)
+    result = cast(ToolResult[SupportsToolResult], raw_result)
     event = ToolInvoked(
         prompt_name="demo",
         adapter=TEST_ADAPTER_NAME,

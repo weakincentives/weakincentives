@@ -17,6 +17,8 @@ from __future__ import annotations
 from . import events, session
 from .events import (
     EventBus,
+    EventHandler,
+    EventPayload,
     HandlerFailure,
     InProcessEventBus,
     PromptExecuted,
@@ -48,6 +50,8 @@ from .session import (
 __all__ = [
     "DataEvent",
     "EventBus",
+    "EventHandler",
+    "EventPayload",
     "HandlerFailure",
     "InProcessEventBus",
     "PromptExecuted",

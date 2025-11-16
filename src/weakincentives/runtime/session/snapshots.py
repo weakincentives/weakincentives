@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from importlib import import_module
-from typing import Any, TypeGuard, cast, override
+from typing import TypeGuard, cast, override
 
 from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
@@ -83,7 +83,7 @@ def _resolve_type(identifier: str) -> SessionSliceType:
         msg = f"Invalid type identifier: {identifier!r}"
         raise SnapshotRestoreError(msg)
     module = import_module(module_name)
-    target: Any = module
+    target: object = module
     for part in qualname.split("."):
         target = getattr(target, part, None)
         if target is None:
@@ -131,7 +131,7 @@ class SnapshotSlicePayload:
     items: tuple[Mapping[str, JSONValue], ...]
 
     @classmethod
-    def from_object(cls, obj: object) -> SnapshotSlicePayload:
+    def from_object(cls, obj: JSONValue) -> SnapshotSlicePayload:
         if not isinstance(obj, Mapping):
             raise SnapshotRestoreError("Slice entry must be an object")
 

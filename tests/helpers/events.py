@@ -14,16 +14,21 @@
 
 from __future__ import annotations
 
-from weakincentives.runtime.events import EventHandler, PublishResult
+from weakincentives.runtime.events import EventBus, EventHandler, EventPayload, PublishResult
 
 
-class NullEventBus:
+EventType = EventPayload
+
+
+class NullEventBus(EventBus[EventType]):
     """Event bus implementation that discards all events."""
 
-    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
+    def subscribe(
+        self, event_type: type[EventType], handler: EventHandler[EventType]
+    ) -> None:
         """No-op subscription hook."""
 
-    def publish(self, event: object) -> PublishResult:
+    def publish(self, event: EventType) -> PublishResult[EventType]:
         """Drop the provided event instance."""
 
         return PublishResult(

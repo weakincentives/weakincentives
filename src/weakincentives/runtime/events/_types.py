@@ -17,35 +17,48 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol, cast, override
+from typing import TYPE_CHECKING, Generic, Protocol, TypeVar, cast, override
 from uuid import UUID, uuid4
 
-from ...prompt._types import SupportsDataclass
+from ...prompt._types import SupportsDataclass, SupportsToolResult
 from ...prompt.tool_result import ToolResult
 
 if TYPE_CHECKING:
     from ...adapters._names import AdapterName
 
-EventHandler = Callable[[object], None]
+
+class EventProtocol(Protocol):
+    """Structural type describing non-dataclass event payloads."""
+
+    event_id: UUID
+    created_at: datetime
 
 
-class EventBus(Protocol):
+type EventPayload = SupportsDataclass | EventProtocol
+
+
+EventT = TypeVar("EventT", bound=EventPayload)
+
+EventHandler = Callable[[EventT], None]
+
+
+class EventBus(Protocol[EventT]):
     """Minimal synchronous publish/subscribe abstraction."""
 
-    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
+    def subscribe(self, event_type: type[EventT], handler: EventHandler[EventT]) -> None:
         """Register a handler for the given event type."""
         ...
 
-    def publish(self, event: object) -> PublishResult:
+    def publish(self, event: EventT) -> PublishResult[EventT]:
         """Publish an event instance to subscribers."""
         ...
 
 
 @dataclass(slots=True, frozen=True)
-class HandlerFailure:
+class HandlerFailure(Generic[EventT]):
     """Container describing a handler error captured during publish."""
 
-    handler: EventHandler
+    handler: EventHandler[EventT]
     error: BaseException
 
     @override
@@ -54,12 +67,12 @@ class HandlerFailure:
 
 
 @dataclass(slots=True, frozen=True)
-class PublishResult:
+class PublishResult(Generic[EventT]):
     """Summary of an event publish invocation."""
 
-    event: object
-    handlers_invoked: tuple[EventHandler, ...]
-    errors: tuple[HandlerFailure, ...]
+    event: EventT
+    handlers_invoked: tuple[EventHandler[EventT], ...]
+    errors: tuple[HandlerFailure[EventT], ...]
     handled_count: int = field(init=False)
 
     def __post_init__(self) -> None:
@@ -93,7 +106,7 @@ class ToolInvoked:
     adapter: AdapterName
     name: str
     params: SupportsDataclass
-    result: ToolResult[object]
+    result: ToolResult[SupportsToolResult]
     session_id: UUID | None
     created_at: datetime
     value: SupportsDataclass | None = None
@@ -104,6 +117,8 @@ class ToolInvoked:
 __all__ = [
     "EventBus",
     "EventHandler",
+    "EventPayload",
+    "EventProtocol",
     "HandlerFailure",
     "PublishResult",
     "ToolInvoked",

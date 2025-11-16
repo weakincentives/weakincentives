@@ -98,7 +98,7 @@ def invoke_tool(
         adapter=GENERIC_ADAPTER_NAME,
         name=tool.name,
         params=params,
-        result=cast(ToolResult[object], result),
+        result=cast(ToolResult[SupportsToolResult], result),
         session_id=getattr(session, "session_id", None),
         created_at=datetime.now(UTC),
         value=cast(SupportsDataclass | None, result.value),

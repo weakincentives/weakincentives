@@ -25,7 +25,7 @@ from tests.helpers.adapters import RECORDING_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, RecapParams
-from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
@@ -108,7 +108,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
                 PromptExecuted(
                     prompt_name=prompt_name,
                     adapter=RECORDING_ADAPTER_NAME,
-                    result=cast(PromptResponse[object], response),
+                    result=cast(PromptResponse[SupportsToolResult], response),
                     session_id=getattr(session, "session_id", None),
                     created_at=datetime.now(UTC),
                     value=(

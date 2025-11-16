@@ -18,12 +18,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
-from typing import Any, cast, override
+from typing import Generic, TypeVar, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
 from ...prompt._types import SupportsDataclass
-from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
+from ..events import EventBus, EventPayload, PromptExecuted, PromptRendered, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
@@ -66,10 +66,13 @@ def _append_event(
     return (*slice_values, appended)
 
 
+SliceT = TypeVar("SliceT", bound=SupportsDataclass)
+
+
 @dataclass(slots=True)
-class _ReducerRegistration:
-    reducer: TypedReducer[Any]
-    slice_type: SessionSliceType
+class _ReducerRegistration(Generic[SliceT]):
+    reducer: TypedReducer[SliceT]
+    slice_type: type[SliceT]
 
 
 def _session_id_is_well_formed(session: "Session") -> bool:  # noqa: UP037
@@ -95,7 +98,7 @@ class Session(SessionProtocol):
     def __init__(
         self,
         *,
-        bus: EventBus,
+        bus: EventBus[EventPayload],
         session_id: UUID | None = None,
         created_at: datetime | None = None,
     ) -> None:
@@ -110,8 +113,8 @@ class Session(SessionProtocol):
 
         self.session_id: UUID = resolved_session_id
         self.created_at: datetime = resolved_created_at.astimezone(UTC)
-        self._bus: EventBus = bus
-        self._reducers: dict[SessionSliceType, list[_ReducerRegistration]] = {}
+        self._bus: EventBus[EventPayload] = bus
+        self._reducers: dict[SessionSliceType, list[_ReducerRegistration[SupportsDataclass]]] = {}
         self._state: dict[SessionSliceType, SessionSlice] = {}
         self._lock = RLock()
         self._subscriptions_attached = False
@@ -120,7 +123,7 @@ class Session(SessionProtocol):
     def clone(
         self,
         *,
-        bus: EventBus,
+        bus: EventBus[EventPayload],
         session_id: UUID | None = None,
         created_at: datetime | None = None,
     ) -> Session:
@@ -143,7 +146,7 @@ class Session(SessionProtocol):
             for registration in registrations:
                 clone.register_reducer(
                     data_type,
-                    registration.reducer,
+                    cast(TypedReducer[SupportsDataclass], registration.reducer),
                     slice_type=registration.slice_type,
                 )
 
@@ -161,16 +164,16 @@ class Session(SessionProtocol):
     ) -> None:
         """Register a reducer for the provided data type."""
 
-        target_slice_type: SessionSliceType = (
-            data_type if slice_type is None else slice_type
+        target_slice_type = cast(
+            type[S], data_type if slice_type is None else slice_type
         )
-        registration = _ReducerRegistration(
-            reducer=cast(TypedReducer[Any], reducer),
+        registration: _ReducerRegistration[S] = _ReducerRegistration(
+            reducer=reducer,
             slice_type=target_slice_type,
         )
         with self._lock:
             bucket = self._reducers.setdefault(data_type, [])
-            bucket.append(registration)
+            bucket.append(cast(_ReducerRegistration[SupportsDataclass], registration))
             _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
 
     def select_all[S: SupportsDataclass](self, slice_type: type[S]) -> tuple[S, ...]:
@@ -250,17 +253,14 @@ class Session(SessionProtocol):
                     types.add(registration.slice_type)
             return types
 
-    def _on_tool_invoked(self, event: object) -> None:
-        tool_event = cast(ToolInvoked, event)
-        self._handle_tool_invoked(tool_event)
+    def _on_tool_invoked(self, event: ToolInvoked) -> None:
+        self._handle_tool_invoked(event)
 
-    def _on_prompt_executed(self, event: object) -> None:
-        prompt_event = cast(PromptExecuted, event)
-        self._handle_prompt_executed(prompt_event)
+    def _on_prompt_executed(self, event: PromptExecuted) -> None:
+        self._handle_prompt_executed(event)
 
-    def _on_prompt_rendered(self, event: object) -> None:
-        start_event = cast(PromptRendered, event)
-        self._handle_prompt_rendered(start_event)
+    def _on_prompt_rendered(self, event: PromptRendered) -> None:
+        self._handle_prompt_rendered(event)
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
         normalized_event = event
@@ -270,13 +270,13 @@ class Session(SessionProtocol):
 
         self._dispatch_data_event(
             _TOOL_INVOKED_TYPE,
-            cast(ReducerEvent, normalized_event),
+            normalized_event,
         )
 
         if normalized_event.value is not None:
             self._dispatch_data_event(
                 type(normalized_event.value),
-                cast(ReducerEvent, normalized_event),
+                normalized_event,
             )
 
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
@@ -287,29 +287,29 @@ class Session(SessionProtocol):
 
         self._dispatch_data_event(
             _PROMPT_EXECUTED_TYPE,
-            cast(ReducerEvent, normalized_event),
+            normalized_event,
         )
 
         if normalized_event.value is not None:
             self._dispatch_data_event(
                 type(normalized_event.value),
-                cast(ReducerEvent, normalized_event),
+                normalized_event,
             )
             return
 
         if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
-            for item in cast(Iterable[object], output):
+            for item in cast(Iterable[SupportsDataclass], output):
                 if is_dataclass_instance(item):
                     enriched_event = replace(normalized_event, value=item)
                     self._dispatch_data_event(
                         type(item),
-                        cast(ReducerEvent, enriched_event),
+                        enriched_event,
                     )
 
     def _handle_prompt_rendered(self, event: PromptRendered) -> None:
         self._dispatch_data_event(
             _PROMPT_RENDERED_TYPE,
-            cast(ReducerEvent, event),
+            event,
         )
 
     def _dispatch_data_event(
@@ -320,11 +320,11 @@ class Session(SessionProtocol):
         with self._lock:
             registrations = list(self._reducers.get(data_type, ()))
             if not registrations:
-                default_reducer: TypedReducer[Any]
+                default_reducer: TypedReducer[SupportsDataclass]
                 if data_type in {_TOOL_INVOKED_TYPE, _PROMPT_EXECUTED_TYPE}:
-                    default_reducer = cast(TypedReducer[Any], _append_event)
+                    default_reducer = cast(TypedReducer[SupportsDataclass], _append_event)
                 else:
-                    default_reducer = cast(TypedReducer[Any], append)
+                    default_reducer = cast(TypedReducer[SupportsDataclass], append)
                 registrations = [
                     _ReducerRegistration(
                         reducer=default_reducer,
@@ -363,7 +363,7 @@ class Session(SessionProtocol):
                         self._state[slice_type] = normalized
                         break
 
-    def _attach_to_bus(self, bus: EventBus) -> None:
+    def _attach_to_bus(self, bus: EventBus[EventPayload]) -> None:
         with self._lock:
             if self._subscriptions_attached and self._bus is bus:
                 return

@@ -20,16 +20,27 @@ from threading import RLock
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from ...prompt._types import SupportsDataclass
+from ...prompt._types import SupportsDataclass, SupportsToolResult
 from ..logging import StructuredLogger, get_logger
-from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
+from ._types import (
+    EventBus,
+    EventHandler,
+    EventPayload,
+    EventProtocol,
+    HandlerFailure,
+    PublishResult,
+    ToolInvoked,
+)
 
 if TYPE_CHECKING:
     from ...adapters._names import AdapterName
     from ...adapters.core import PromptResponse
 
 
-def _describe_handler(handler: EventHandler) -> str:
+EventType = EventPayload
+
+
+def _describe_handler(handler: EventHandler[EventType]) -> str:
     module_name = getattr(handler, "__module__", None)
     qualname = getattr(handler, "__qualname__", None)
     if isinstance(qualname, str):
@@ -41,24 +52,26 @@ def _describe_handler(handler: EventHandler) -> str:
 logger: StructuredLogger = get_logger(__name__, context={"component": "event_bus"})
 
 
-class InProcessEventBus:
+class InProcessEventBus(EventBus[EventType]):
     """Process-local event bus that delivers events synchronously."""
 
     def __init__(self) -> None:
         super().__init__()
-        self._handlers: dict[type[object], list[EventHandler]] = {}
+        self._handlers: dict[type[EventType], list[EventHandler[EventType]]] = {}
         self._lock = RLock()
 
-    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
+    def subscribe(
+        self, event_type: type[EventType], handler: EventHandler[EventType]
+    ) -> None:
         with self._lock:
             handlers = self._handlers.setdefault(event_type, [])
             handlers.append(handler)
 
-    def publish(self, event: object) -> PublishResult:
+    def publish(self, event: EventType) -> PublishResult[EventType]:
         with self._lock:
             handlers = tuple(self._handlers.get(type(event), ()))
-        invoked: list[EventHandler] = []
-        failures: list[HandlerFailure] = []
+        invoked: list[EventHandler[EventType]] = []
+        failures: list[HandlerFailure[EventType]] = []
         for handler in handlers:
             invoked.append(handler)
             try:
@@ -87,7 +100,7 @@ class PromptExecuted:
 
     prompt_name: str
     adapter: AdapterName
-    result: PromptResponse[object]
+    result: PromptResponse[SupportsToolResult]
     session_id: UUID | None
     created_at: datetime
     value: SupportsDataclass | None = None
@@ -116,7 +129,10 @@ class PromptRendered:
 
 
 __all__ = [
+    "EventHandler",
     "EventBus",
+    "EventPayload",
+    "EventProtocol",
     "HandlerFailure",
     "InProcessEventBus",
     "PromptExecuted",
