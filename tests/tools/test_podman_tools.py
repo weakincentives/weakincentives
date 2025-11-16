@@ -15,8 +15,9 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import CompletedProcess
 from types import SimpleNamespace
@@ -26,14 +27,26 @@ from uuid import uuid4
 import pytest
 
 import weakincentives.tools.podman as podman_module
+import weakincentives.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 from weakincentives.tools import (
+    EditFileParams,
+    FileInfo,
+    GlobMatch,
+    GlobParams,
+    GrepMatch,
+    GrepParams,
+    ListDirectoryParams,
     PodmanShellParams,
     PodmanShellResult,
     PodmanToolsSection,
     PodmanWorkspace,
+    ReadFileParams,
+    ReadFileResult,
+    RemoveParams,
+    WriteFileParams,
 )
 from weakincentives.tools.errors import ToolValidationError
 
@@ -244,6 +257,17 @@ def test_section_registers_shell_tool(
 
     tool = find_tool(section, "shell_execute")
     assert tool.description.startswith("Run a short command")
+
+
+def test_section_registers_vfs_tool(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+
+    tool = find_tool(section, "ls")
+    assert tool.description.startswith("List directory entries")
 
 
 def test_section_exposes_new_client(
@@ -1087,3 +1111,1094 @@ def test_shell_execute_truncates_output(
     value = cast(PodmanShellResult, result.value)
     assert value.stdout.endswith("[truncated]")
     assert value.stderr.endswith("[truncated]")
+
+
+def test_ls_lists_workspace_files(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    docs = handle.overlay_path / "docs"
+    docs.mkdir(parents=True)
+    (docs / "README.md").write_text("hello world", encoding="utf-8")
+
+    tool = find_tool(section, "ls")
+    handler = tool.handler
+    assert handler is not None
+    result = handler(
+        ListDirectoryParams(path="docs"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value is not None
+    entries = cast(tuple[FileInfo, ...], result.value)
+    assert any(entry.path.segments == ("docs", "README.md") for entry in entries)
+
+
+def test_read_file_returns_numbered_lines(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "notes.txt"
+    target.write_text("first\nsecond\nthird", encoding="utf-8")
+
+    tool = find_tool(section, "read_file")
+    handler = tool.handler
+    assert handler is not None
+    result = handler(
+        ReadFileParams(file_path="notes.txt", limit=2),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value is not None
+    read_result = cast(ReadFileResult, result.value)
+    assert "1 | first" in read_result.content
+    assert "2 | second" in read_result.content
+
+
+def test_write_file_updates_snapshot(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+    tool = find_tool(section, "write_file")
+    handler = tool.handler
+    assert handler is not None
+    result = handler(
+        WriteFileParams(file_path="src/app.py", content="print('hi')"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value is not None
+    call = runner.calls[-1]
+    assert "python3" in call
+
+
+def test_edit_file_invokes_cli(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_text("hello", encoding="utf-8")
+    tool = find_tool(section, "edit_file")
+    handler = tool.handler
+    assert handler is not None
+    handler(
+        EditFileParams(
+            file_path="file.txt",
+            old_string="hello",
+            new_string="hi",
+            replace_all=False,
+        ),
+        context=build_tool_context(bus, session),
+    )
+    call = runner.calls[-1]
+    assert "overwrite" in call
+
+
+def test_glob_matches_files(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    src = handle.overlay_path / "src"
+    src.mkdir()
+    (src / "main.py").write_text("print('hi')", encoding="utf-8")
+    (src / "README.md").write_text("details", encoding="utf-8")
+    tool = find_tool(section, "glob")
+    handler = tool.handler
+    assert handler is not None
+    result = handler(
+        GlobParams(pattern="*.py", path="src"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value is not None
+    matches = cast(tuple[GlobMatch, ...], result.value)
+    assert any(match.path.segments == ("src", "main.py") for match in matches)
+
+
+def test_grep_finds_pattern(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "log.txt"
+    target.write_text("first\nmatch line\nlast", encoding="utf-8")
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+    result = handler(
+        GrepParams(pattern="match", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value is not None
+    grep_matches = cast(tuple[GrepMatch, ...], result.value)
+    assert any(match.line_number == 2 for match in grep_matches)
+
+
+def test_rm_executes_cli(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "temp.txt"
+    target.write_text("data", encoding="utf-8")
+    tool = find_tool(section, "rm")
+    handler = tool.handler
+    assert handler is not None
+    handler(
+        RemoveParams(path="temp.txt"),
+        context=build_tool_context(bus, session),
+    )
+    call = runner.calls[-1]
+    assert "python3" in call
+
+
+def test_exec_runner_property_exposes_runner(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner()
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+
+    assert section.exec_runner is runner
+
+
+def test_container_path_for_root() -> None:
+    assert podman_module._container_path_for(vfs_module.VfsPath(())) == "/workspace"
+
+
+def test_assert_within_overlay_raises_for_outside(tmp_path: Path) -> None:
+    root = tmp_path / "overlay"
+    root.mkdir()
+    outside = root.parent / "other"
+    outside.mkdir()
+    with pytest.raises(ToolValidationError):
+        podman_module._assert_within_overlay(root, outside)
+
+
+def test_assert_within_overlay_handles_missing_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "overlay"
+    root.mkdir()
+    missing = root / "missing" / "child"
+    original = Path.resolve
+
+    def _fake_resolve(self: Path, strict: bool = False) -> Path:
+        if self == missing:
+            raise FileNotFoundError("missing")
+        return original(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _fake_resolve)
+    podman_module._assert_within_overlay(root, missing)
+
+
+def test_compose_child_path_rejects_invalid_segment() -> None:
+    base = vfs_module.VfsPath(("src",))
+    assert podman_module._compose_child_path(base, "..") is None
+
+
+def test_compose_relative_path_rejects_invalid_segments() -> None:
+    base = vfs_module.VfsPath(("src",))
+    relative = Path("..")
+    assert podman_module._compose_relative_path(base, relative) is None
+
+
+def test_iter_workspace_files_handles_missing_dir(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    assert list(podman_module._iter_workspace_files(missing)) == []
+
+
+def test_format_read_message_handles_empty_slice() -> None:
+    path = vfs_module.VfsPath(("docs", "notes.txt"))
+    message = podman_module._format_read_message(path, 0, 0)
+    assert "no lines" in message
+
+
+def test_ls_rejects_file_path(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_text("data", encoding="utf-8")
+    tool = find_tool(section, "ls")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            ListDirectoryParams(path="file.txt"),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_read_file_missing_path(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    tool = find_tool(section, "read_file")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            ReadFileParams(file_path="missing.txt"),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_read_file_rejects_invalid_encoding(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "binary.bin"
+    target.write_bytes(b"\xff")
+    tool = find_tool(section, "read_file")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            ReadFileParams(file_path="binary.bin"),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_write_file_rejects_existing_file(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_text("data", encoding="utf-8")
+    tool = find_tool(section, "write_file")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            WriteFileParams(file_path="file.txt", content="other"),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_edit_file_rejects_long_strings(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    tool = find_tool(section, "edit_file")
+    handler = tool.handler
+    assert handler is not None
+    long_text = "x" * (vfs_module.MAX_WRITE_LENGTH + 1)
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            EditFileParams(
+                file_path="file.txt",
+                old_string=long_text,
+                new_string="short",
+            ),
+            context=build_tool_context(bus, session),
+        )
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            EditFileParams(
+                file_path="file.txt",
+                old_string="short",
+                new_string=long_text,
+            ),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_edit_file_missing_path(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    tool = find_tool(section, "edit_file")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            EditFileParams(
+                file_path="file.txt",
+                old_string="a",
+                new_string="b",
+            ),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_edit_file_rejects_invalid_encoding(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_bytes(b"\xff")
+    tool = find_tool(section, "edit_file")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            EditFileParams(
+                file_path="file.txt",
+                old_string="a",
+                new_string="b",
+            ),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_edit_file_requires_occurrence(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_text("hello", encoding="utf-8")
+    tool = find_tool(section, "edit_file")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            EditFileParams(
+                file_path="file.txt",
+                old_string="missing",
+                new_string="new",
+            ),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_edit_file_requires_unique_match(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_text("foo foo", encoding="utf-8")
+    tool = find_tool(section, "edit_file")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            EditFileParams(
+                file_path="file.txt",
+                old_string="foo",
+                new_string="bar",
+            ),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_edit_file_replace_all_branch(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+    )
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_text("foo foo", encoding="utf-8")
+    tool = find_tool(section, "edit_file")
+    handler = tool.handler
+    assert handler is not None
+
+    handler(
+        EditFileParams(
+            file_path="file.txt",
+            old_string="foo",
+            new_string="bar",
+            replace_all=True,
+        ),
+        context=build_tool_context(bus, session),
+    )
+
+
+def test_glob_rejects_empty_pattern(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    tool = find_tool(section, "glob")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            GlobParams(pattern="   ", path="/"),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_glob_skips_invalid_relative_path(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    outside = section.ensure_workspace().overlay_path.parent / "outside.txt"
+
+    def _fake_iter(_: Path) -> Iterator[Path]:
+        yield outside
+
+    monkeypatch.setattr(podman_module, "_iter_workspace_files", _fake_iter)
+    tool = find_tool(section, "glob")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GlobParams(pattern="*", path="/"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_glob_skips_invalid_composed_path(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_text("data", encoding="utf-8")
+
+    monkeypatch.setattr(
+        podman_module,
+        "_compose_relative_path",
+        lambda *_: None,
+    )
+    tool = find_tool(section, "glob")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GlobParams(pattern="*", path="/"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_glob_skips_invalid_file_info(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "file.txt"
+    target.write_text("data", encoding="utf-8")
+
+    def _raise(self: object, *args: object, **kwargs: object) -> GlobMatch:
+        raise ToolValidationError("boom")
+
+    monkeypatch.setattr(podman_module._PodmanVfsSuite, "_build_glob_match", _raise)
+    tool = find_tool(section, "glob")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GlobParams(pattern="*", path="/"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_glob_honors_result_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "first.txt").write_text("a", encoding="utf-8")
+    (handle.overlay_path / "second.txt").write_text("b", encoding="utf-8")
+    monkeypatch.setattr(podman_module, "_MAX_MATCH_RESULTS", 1)
+    tool = find_tool(section, "glob")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GlobParams(pattern="*.txt", path="/"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value is not None
+    matches = cast(tuple[GlobMatch, ...], result.value)
+    assert len(matches) == 1
+
+
+def test_grep_rejects_invalid_regex(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="[", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+    assert not result.success
+
+
+def test_grep_honors_glob_argument(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "main.py").write_text("match", encoding="utf-8")
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob="*.py"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value is not None
+    matches = cast(tuple[GrepMatch, ...], result.value)
+    assert matches[0].path.segments == ("main.py",)
+
+
+def test_grep_respects_glob_filter(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "notes.txt").write_text("match", encoding="utf-8")
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob="*.py"),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_grep_skips_invalid_relative_path(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    outside = section.ensure_workspace().overlay_path.parent / "outside.txt"
+
+    def _fake_iter(_: Path) -> Iterator[Path]:
+        yield outside
+
+    monkeypatch.setattr(podman_module, "_iter_workspace_files", _fake_iter)
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_grep_skips_invalid_composed_path(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "notes.txt").write_text("match", encoding="utf-8")
+    monkeypatch.setattr(
+        podman_module,
+        "_compose_relative_path",
+        lambda *_: None,
+    )
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_grep_skips_overlay_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "main.txt").write_text("match", encoding="utf-8")
+
+    original = podman_module._assert_within_overlay
+    call_count = {"value": 0}
+
+    def _wrapped(root: Path, candidate: Path) -> None:
+        call_count["value"] += 1
+        if call_count["value"] > 1:
+            raise ToolValidationError("boom")
+        original(root, candidate)
+
+    monkeypatch.setattr(podman_module, "_assert_within_overlay", _wrapped)
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_grep_skips_invalid_file_encoding(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "main.txt"
+    target.write_text("match", encoding="utf-8")
+
+    def _fake_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        raise UnicodeDecodeError("utf-8", b"x", 0, 1, "bad")
+
+    monkeypatch.setattr(Path, "read_text", _fake_read_text)
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_grep_handles_oserror(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "main.txt"
+    target.write_text("match", encoding="utf-8")
+
+    def _fake_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        raise OSError("boom")
+
+    monkeypatch.setattr(Path, "read_text", _fake_read_text)
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value == ()
+
+
+def test_grep_honors_result_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "one.txt").write_text("match", encoding="utf-8")
+    (handle.overlay_path / "two.txt").write_text("match", encoding="utf-8")
+    monkeypatch.setattr(podman_module, "_MAX_MATCH_RESULTS", 1)
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+    assert result.value is not None
+    grep_matches = cast(tuple[GrepMatch, ...], result.value)
+    assert len(grep_matches) == 1
+
+
+def test_remove_rejects_root_and_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    tool = find_tool(section, "rm")
+    handler = tool.handler
+    assert handler is not None
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            RemoveParams(path="/"),
+            context=build_tool_context(bus, session),
+        )
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            RemoveParams(path="missing.txt"),
+            context=build_tool_context(bus, session),
+        )
+
+    original = vfs_module.normalize_string_path
+
+    def _fake(path: str, *, field: str) -> vfs_module.VfsPath:
+        if path == "trigger":
+            return vfs_module.VfsPath(())
+        return original(path, field=field)
+
+    monkeypatch.setattr(vfs_module, "normalize_string_path", _fake)
+    with pytest.raises(ToolValidationError):
+        handler(
+            RemoveParams(path="trigger"),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_remove_handles_cli_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "temp.txt"
+    target.write_text("data", encoding="utf-8")
+    tool = find_tool(section, "rm")
+    handler = tool.handler
+    assert handler is not None
+
+    def _raise(*_: object, **__: object) -> None:
+        raise FileNotFoundError("podman")
+
+    monkeypatch.setattr(section, "run_python_script", _raise)
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            RemoveParams(path="temp.txt"),
+            context=build_tool_context(bus, session),
+        )
+
+    class _Response:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    monkeypatch.setattr(section, "run_python_script", lambda **_: _Response())
+
+    with pytest.raises(ToolValidationError):
+        handler(
+            RemoveParams(path="temp.txt"),
+            context=build_tool_context(bus, session),
+        )
+
+
+def test_build_directory_entries_handles_missing_dir(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    suite = podman_module._PodmanVfsSuite(section=section)
+    result = suite._build_directory_entries(
+        base=vfs_module.VfsPath(()),
+        host_path=tmp_path / "missing",
+        snapshot=vfs_module.VirtualFileSystem(),
+        overlay_root=tmp_path,
+    )
+    assert result == []
+
+
+def test_build_directory_entries_handles_oserror(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    suite = podman_module._PodmanVfsSuite(section=section)
+    host = tmp_path / "dir"
+    host.mkdir()
+
+    def _raise(*_: object, **__: object) -> Iterator[Path]:
+        raise OSError("boom")
+
+    monkeypatch.setattr(Path, "iterdir", _raise)
+    with pytest.raises(ToolValidationError):
+        suite._build_directory_entries(
+            base=vfs_module.VfsPath(()),
+            host_path=host,
+            snapshot=vfs_module.VirtualFileSystem(),
+            overlay_root=tmp_path,
+        )
+
+
+def test_build_directory_entries_skips_invalid_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    suite = podman_module._PodmanVfsSuite(section=section)
+    host = tmp_path / "dir"
+    host.mkdir()
+    (host / "file.txt").write_text("data", encoding="utf-8")
+    monkeypatch.setattr(
+        podman_module,
+        "_compose_child_path",
+        lambda *_: None,
+    )
+    result = suite._build_directory_entries(
+        base=vfs_module.VfsPath(()),
+        host_path=host,
+        snapshot=vfs_module.VirtualFileSystem(),
+        overlay_root=tmp_path,
+    )
+    assert result == []
+
+
+def test_build_directory_entries_handles_directories(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    suite = podman_module._PodmanVfsSuite(section=section)
+    host = tmp_path / "dir"
+    host.mkdir()
+    (host / "nested").mkdir()
+    result = suite._build_directory_entries(
+        base=vfs_module.VfsPath(()),
+        host_path=host,
+        snapshot=vfs_module.VirtualFileSystem(),
+        overlay_root=tmp_path,
+    )
+    assert any(entry.kind == "directory" for entry in result)
+
+
+def test_build_directory_entries_skips_failed_file_info(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    suite = podman_module._PodmanVfsSuite(section=section)
+    host = tmp_path / "dir"
+    host.mkdir()
+    (host / "file.txt").write_text("data", encoding="utf-8")
+
+    def _raise(*_: object, **__: object) -> FileInfo:
+        raise ToolValidationError("boom")
+
+    monkeypatch.setattr(suite, "_build_file_info", _raise)
+    result = suite._build_directory_entries(
+        base=vfs_module.VfsPath(()),
+        host_path=host,
+        snapshot=vfs_module.VirtualFileSystem(),
+        overlay_root=tmp_path,
+    )
+    assert result == []
+
+
+def test_build_glob_match_returns_existing_metadata(tmp_path: Path) -> None:
+    suite = podman_module._PodmanVfsSuite(
+        section=_make_section(
+            session=Session(bus=InProcessEventBus()),
+            client=_FakePodmanClient(),
+            cache_dir=tmp_path,
+        )
+    )
+    path = vfs_module.VfsPath(("src", "main.py"))
+    file = vfs_module.VfsFile(
+        path=path,
+        content="print()",
+        encoding="utf-8",
+        size_bytes=10,
+        version=2,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    snapshot = vfs_module.VirtualFileSystem(files=(file,))
+    host = Path(__file__)
+    result = suite._build_glob_match(
+        target=path,
+        host_path=host,
+        snapshot=snapshot,
+        overlay_root=host.parent,
+    )
+    assert result.version == file.version
+
+
+def test_write_via_container_handles_cli_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    suite = podman_module._PodmanVfsSuite(section=section)
+    path = vfs_module.VfsPath(("file.txt",))
+
+    def _raise(*_: object, **__: object) -> None:
+        raise FileNotFoundError("podman")
+
+    monkeypatch.setattr(section, "run_python_script", _raise)
+    with pytest.raises(ToolValidationError):
+        suite._write_via_container(path=path, content="data", mode="create")
+
+    class _Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    monkeypatch.setattr(section, "run_python_script", lambda **_: _Failed())
+    with pytest.raises(ToolValidationError):
+        suite._write_via_container(path=path, content="data", mode="create")
+
+
+def test_tools_module_missing_attr_raises() -> None:
+    import weakincentives.tools as tools
+
+    with pytest.raises(AttributeError):
+        _ = tools.TOTALLY_UNKNOWN

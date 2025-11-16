@@ -12,7 +12,12 @@
 
 """Public surface for built-in tool suites."""
 
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING
 
 from .asteval import (
     AstevalSection,
@@ -37,12 +42,6 @@ from .planning import (
     StepStatus,
     UpdateStep,
 )
-from .podman import (
-    PodmanShellParams,
-    PodmanShellResult,
-    PodmanToolsSection,
-    PodmanWorkspace,
-)
 from .subagents import (
     DispatchSubagentsParams,
     SubagentIsolationLevel,
@@ -51,6 +50,14 @@ from .subagents import (
     build_dispatch_subagents_tool,
     dispatch_subagents,
 )
+
+if TYPE_CHECKING:
+    from .podman import (
+        PodmanShellParams,
+        PodmanShellResult,
+        PodmanToolsSection,
+        PodmanWorkspace,
+    )
 from .vfs import (
     DeleteEntry,
     EditFileParams,
@@ -128,3 +135,20 @@ __all__ = [
     "build_dispatch_subagents_tool",
     "dispatch_subagents",
 ]
+
+_PODMAN_EXPORTS = {
+    "PodmanShellParams",
+    "PodmanShellResult",
+    "PodmanToolsSection",
+    "PodmanWorkspace",
+}
+
+
+def __getattr__(name: str) -> object:
+    if name in _PODMAN_EXPORTS:
+        module = import_module(f"{__name__}.podman")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)

@@ -1325,7 +1325,26 @@ def _truncate_to_milliseconds(value: datetime) -> datetime:
     return value.replace(microsecond=microsecond, tzinfo=UTC)
 
 
+# Public helper exports reused by Podman tooling.
+MAX_WRITE_LENGTH: Final[int] = _MAX_WRITE_LENGTH
+normalize_string_path = _normalize_string_path
+normalize_path = _normalize_path
+normalize_content = _normalize_content
+normalize_offset = _normalize_offset
+normalize_limit = _normalize_limit
+ensure_ascii = _ensure_ascii
+format_directory_message = _format_directory_message
+format_write_file_message = _format_write_file_message
+format_edit_message = _format_edit_message
+format_glob_message = _format_glob_message
+format_grep_message = _format_grep_message
+find_file = _find_file
+make_write_reducer = _make_write_reducer
+make_delete_reducer = _make_delete_reducer
+
+
 __all__ = [
+    "MAX_WRITE_LENGTH",
     "DeleteEntry",
     "EditFileParams",
     "FileInfo",
@@ -1347,4 +1366,18 @@ __all__ = [
     "VirtualFileSystem",
     "WriteFile",
     "WriteFileParams",
+    "ensure_ascii",
+    "find_file",
+    "format_directory_message",
+    "format_edit_message",
+    "format_glob_message",
+    "format_grep_message",
+    "format_write_file_message",
+    "make_delete_reducer",
+    "make_write_reducer",
+    "normalize_content",
+    "normalize_limit",
+    "normalize_offset",
+    "normalize_path",
+    "normalize_string_path",
 ]

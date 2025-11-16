@@ -28,6 +28,9 @@ from weakincentives.tools import (
     PodmanShellParams,
     PodmanShellResult,
     PodmanToolsSection,
+    ReadFileParams,
+    ReadFileResult,
+    WriteFileParams,
 )
 
 
@@ -37,6 +40,7 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
     connection = PodmanToolsSection.resolve_connection()
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
+    assert connection is not None
     assert connection is not None
     bus = InProcessEventBus()
     session = Session(bus=bus)
@@ -60,6 +64,47 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
         assert result.value is not None
         value = cast(PodmanShellResult, result.value)
         assert "hello" in value.stdout
+        handle = section._workspace_handle
+        assert handle is not None
+        container_name = handle.descriptor.container_name
+    finally:
+        section.close()
+        if container_name:
+            _wait_for_container_removal(container_name, connection_name)
+
+
+@pytest.mark.integration
+@pytest.mark.podman
+def test_podman_vfs_round_trip(tmp_path: Path) -> None:
+    connection = PodmanToolsSection.resolve_connection()
+    if connection is None:
+        pytest.skip("Podman integration requires a running podman machine.")
+    assert connection is not None
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    connection_name = connection.get("connection_name")
+    section = PodmanToolsSection(session=session, cache_dir=tmp_path)
+    container_name: str | None = None
+    try:
+        write_tool = find_tool(section, "write_file")
+        read_tool = find_tool(section, "read_file")
+        write_handler = write_tool.handler
+        read_handler = read_tool.handler
+        assert write_handler is not None
+        assert read_handler is not None
+
+        write_handler(
+            WriteFileParams(file_path="notes.txt", content="hello world"),
+            context=build_tool_context(bus, session),
+        )
+        result = read_handler(
+            ReadFileParams(file_path="notes.txt"),
+            context=build_tool_context(bus, session),
+        )
+        assert result.success
+        assert result.value is not None
+        read_value = cast(ReadFileResult, result.value)
+        assert "hello world" in read_value.content
         handle = section._workspace_handle
         assert handle is not None
         container_name = handle.descriptor.container_name
