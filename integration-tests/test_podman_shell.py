@@ -14,8 +14,6 @@
 
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -36,22 +34,16 @@ from weakincentives.tools import (
 @pytest.mark.integration
 @pytest.mark.podman
 def test_shell_execute_creates_files(tmp_path: Path) -> None:
-    connection = _resolve_podman_connection()
+    connection = PodmanToolsSection.resolve_connection()
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
-
+    assert connection is not None
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    assert connection is not None  # narrow for type-checkers
-    base_url = connection["base_url"]
-    identity = connection["identity"]
-    assert base_url is not None and identity is not None
+    connection_name = connection.get("connection_name")
     section = PodmanToolsSection(
         session=session,
         cache_dir=tmp_path,
-        base_url=base_url,
-        identity=identity,
-        connection_name=connection.get("connection_name"),
     )
     tool = find_tool(section, "shell_execute")
     handler = tool.handler
@@ -74,44 +66,7 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
     finally:
         section.close()
         if container_name:
-            _wait_for_container_removal(
-                container_name, connection.get("connection_name")
-            )
-
-
-def _resolve_podman_connection() -> dict[str, str | None] | None:
-    env_base_url = os.environ.get("PODMAN_BASE_URL")
-    env_identity = os.environ.get("PODMAN_IDENTITY")
-    if env_base_url and env_identity:
-        return {
-            "base_url": env_base_url,
-            "identity": env_identity,
-            "connection_name": os.environ.get("PODMAN_CONNECTION"),
-        }
-
-    try:
-        result = subprocess.run(
-            ["podman", "system", "connection", "list", "--format", "json"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-
-    try:
-        connections = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-
-    for connection in connections:
-        if connection.get("Default"):
-            return {
-                "base_url": connection.get("URI"),
-                "identity": connection.get("Identity"),
-                "connection_name": connection.get("Name"),
-            }
-    return None
+            _wait_for_container_removal(container_name, connection_name)
 
 
 def _wait_for_container_removal(

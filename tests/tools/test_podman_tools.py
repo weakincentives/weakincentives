@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
@@ -204,14 +205,27 @@ def _make_section(
     cache_dir: Path,
     connection_name: str | None = None,
     runner: Callable[..., CompletedProcess[str]] | None = None,
+    auto_connect: bool = False,
 ) -> PodmanToolsSection:
+    exec_runner = runner if runner is not None else _FakeCliRunner()
+    if auto_connect:
+        return PodmanToolsSection(
+            session=session,
+            client_factory=lambda: client,
+            cache_dir=cache_dir,
+            base_environment={"PATH": "/usr/bin"},
+            connection_name=connection_name,
+            exec_runner=exec_runner,
+        )
     return PodmanToolsSection(
         session=session,
         client_factory=lambda: client,
         cache_dir=cache_dir,
         base_environment={"PATH": "/usr/bin"},
         connection_name=connection_name,
-        exec_runner=runner,
+        exec_runner=exec_runner,
+        base_url="ssh://example",
+        identity="/tmp/identity",
     )
 
 
@@ -364,6 +378,210 @@ def test_close_handles_missing_container(
     section._client_factory = lambda: _BrokenClient()
 
     section.close()
+
+
+def test_section_auto_resolves_connection(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0, stdout="auto")])
+    resolved = podman_module._PodmanConnectionInfo(
+        base_url="ssh://detected",
+        identity="/tmp/key",
+        connection_name="auto-conn",
+    )
+
+    def _fake_resolve(
+        *, preferred_name: str | None = None
+    ) -> podman_module._PodmanConnectionInfo | None:
+        return resolved
+
+    monkeypatch.setattr(
+        podman_module,
+        "_resolve_podman_connection",
+        _fake_resolve,
+    )
+
+    section = PodmanToolsSection(
+        session=session,
+        cache_dir=tmp_path,
+        client_factory=lambda: client,
+        base_environment={"PATH": "/usr/bin"},
+        exec_runner=cli_runner,
+    )
+    handler = find_tool(section, "shell_execute").handler
+    assert handler is not None
+
+    handler(
+        PodmanShellParams(command=("true",)),
+        context=build_tool_context(bus, session),
+    )
+
+    assert section.connection_name == "auto-conn"
+
+
+def test_connection_resolution_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PODMAN_BASE_URL", "ssh://env")
+    monkeypatch.setenv("PODMAN_IDENTITY", "/tmp/env")
+    result = podman_module._resolve_podman_connection(preferred_name="custom")
+    assert result is not None
+    assert result.base_url == "ssh://env"
+    assert result.identity == "/tmp/env"
+    assert result.connection_name == "custom"
+
+
+def test_connection_resolution_uses_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PODMAN_BASE_URL", raising=False)
+    monkeypatch.delenv("PODMAN_IDENTITY", raising=False)
+    monkeypatch.delenv("PODMAN_CONNECTION", raising=False)
+    connections = [
+        {
+            "Name": "first",
+            "URI": "ssh://first",
+            "Identity": "/tmp/first",
+            "Default": False,
+        },
+        {
+            "Name": "desired",
+            "URI": "ssh://desired",
+            "Identity": "/tmp/desired",
+            "Default": False,
+        },
+    ]
+
+    def _fake_run(
+        *_: object,
+        **__: object,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(stdout=json.dumps(connections))
+
+    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+
+    result = podman_module._resolve_podman_connection(preferred_name="desired")
+    assert result is not None
+    assert result.base_url == "ssh://desired"
+    assert result.identity == "/tmp/desired"
+    assert result.connection_name == "desired"
+
+
+def test_connection_resolution_handles_cli_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PODMAN_BASE_URL", raising=False)
+    monkeypatch.delenv("PODMAN_IDENTITY", raising=False)
+    monkeypatch.delenv("PODMAN_CONNECTION", raising=False)
+
+    def _fail(*_: object, **__: object) -> None:
+        raise FileNotFoundError("podman")
+
+    monkeypatch.setattr(podman_module.subprocess, "run", _fail)
+
+    assert podman_module._resolve_podman_connection() is None
+
+
+def test_connection_resolution_handles_invalid_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PODMAN_BASE_URL", raising=False)
+    monkeypatch.delenv("PODMAN_IDENTITY", raising=False)
+    monkeypatch.delenv("PODMAN_CONNECTION", raising=False)
+
+    def _fake_run(*_: object, **__: object) -> SimpleNamespace:
+        return SimpleNamespace(stdout="not json")
+
+    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+
+    assert podman_module._resolve_podman_connection() is None
+
+
+def test_connection_resolution_falls_back_to_first_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PODMAN_BASE_URL", raising=False)
+    monkeypatch.delenv("PODMAN_IDENTITY", raising=False)
+    monkeypatch.delenv("PODMAN_CONNECTION", raising=False)
+    connections = [
+        {
+            "Name": "first",
+            "URI": "ssh://first",
+            "Identity": "/tmp/first",
+            "Default": False,
+        },
+        {
+            "Name": "second",
+            "URI": "ssh://second",
+            "Identity": "/tmp/second",
+            "Default": False,
+        },
+    ]
+
+    def _fake_run(*_: object, **__: object) -> SimpleNamespace:
+        return SimpleNamespace(stdout=json.dumps(connections))
+
+    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+
+    result = podman_module._resolve_podman_connection()
+    assert result is not None
+    assert result.connection_name == "first"
+
+
+def test_connection_resolution_missing_requested_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PODMAN_BASE_URL", raising=False)
+    monkeypatch.delenv("PODMAN_IDENTITY", raising=False)
+    monkeypatch.delenv("PODMAN_CONNECTION", raising=False)
+    connections = [
+        {
+            "Name": "first",
+            "URI": "ssh://first",
+            "Identity": "/tmp/first",
+            "Default": False,
+        },
+    ]
+
+    def _fake_run(*_: object, **__: object) -> SimpleNamespace:
+        return SimpleNamespace(stdout=json.dumps(connections))
+
+    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+
+    assert podman_module._resolve_podman_connection(preferred_name="missing") is None
+
+
+def test_resolve_connection_static_handles_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        podman_module,
+        "_resolve_podman_connection",
+        lambda *, preferred_name=None: None,
+    )
+    assert PodmanToolsSection.resolve_connection() is None
+
+
+def test_section_requires_connection_when_detection_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    monkeypatch.setattr(
+        podman_module,
+        "_resolve_podman_connection",
+        lambda *, preferred_name=None: None,
+    )
+    with pytest.raises(ToolValidationError):
+        PodmanToolsSection(
+            session=session,
+            cache_dir=tmp_path,
+            client_factory=lambda: client,
+            base_environment={"PATH": "/usr/bin"},
+            exec_runner=_FakeCliRunner(),
+        )
 
 
 def test_shell_execute_runs_commands_and_stores_workspace(

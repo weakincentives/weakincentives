@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import posixpath
 import subprocess  # nosec: B404
@@ -52,6 +53,9 @@ _MAX_PATH_SEGMENT: Final[int] = 80
 _ASCII: Final[str] = "ascii"
 _CAPTURE_DISABLED: Final[str] = "capture disabled"
 _CACHE_ENV: Final[str] = "WEAKINCENTIVES_CACHE"
+_PODMAN_BASE_URL_ENV: Final[str] = "PODMAN_BASE_URL"
+_PODMAN_IDENTITY_ENV: Final[str] = "PODMAN_IDENTITY"
+_PODMAN_CONNECTION_ENV: Final[str] = "PODMAN_CONNECTION"
 _CPU_PERIOD: Final[int] = 100_000
 _CPU_QUOTA: Final[int] = 100_000
 _MEMORY_LIMIT: Final[str] = "1g"
@@ -145,11 +149,73 @@ class _WorkspaceHandle:
     overlay_path: Path
 
 
+@dataclass(slots=True, frozen=True)
+class _PodmanConnectionInfo:
+    base_url: str | None
+    identity: str | None
+    connection_name: str | None
+
+
 def _default_cache_root() -> Path:
     override = os.environ.get(_CACHE_ENV)
     if override:
         return Path(override).expanduser()
     return Path.home() / ".cache" / "weakincentives" / "podman"
+
+
+def _resolve_podman_connection(
+    *,
+    preferred_name: str | None = None,
+) -> _PodmanConnectionInfo | None:
+    env_base_url = os.environ.get(_PODMAN_BASE_URL_ENV)
+    env_identity = os.environ.get(_PODMAN_IDENTITY_ENV)
+    env_connection = os.environ.get(_PODMAN_CONNECTION_ENV)
+    if env_base_url or env_identity:
+        return _PodmanConnectionInfo(
+            base_url=env_base_url,
+            identity=env_identity,
+            connection_name=preferred_name or env_connection,
+        )
+    resolved_name = preferred_name or env_connection
+    return _connection_from_cli(resolved_name)
+
+
+def _connection_from_cli(
+    connection_name: str | None,
+) -> _PodmanConnectionInfo | None:
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["podman", "system", "connection", "list", "--format", "json"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    try:
+        connections = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    candidate: dict[str, Any] | None = None
+    if connection_name:
+        for entry in connections:
+            if entry.get("Name") == connection_name:
+                candidate = entry
+                break
+    else:
+        for entry in connections:
+            if entry.get("Default"):
+                candidate = entry
+                break
+        if candidate is None and connections:
+            candidate = connections[0]
+    if candidate is None:
+        return None
+    return _PodmanConnectionInfo(
+        base_url=candidate.get("URI"),
+        identity=candidate.get("Identity"),
+        connection_name=candidate.get("Name"),
+    )
 
 
 def _default_exec_runner(
@@ -293,9 +359,31 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
     ) -> None:
         self._session = session
         self._image = image
+        env_connection = os.environ.get(_PODMAN_CONNECTION_ENV)
+        preferred_connection = connection_name or env_connection
+        resolved_connection: _PodmanConnectionInfo | None = None
+        if base_url is None or identity is None:
+            resolved_connection = _resolve_podman_connection(
+                preferred_name=preferred_connection
+            )
+        if base_url is None and resolved_connection is not None:
+            base_url = resolved_connection.base_url
+        if identity is None and resolved_connection is not None:
+            identity = resolved_connection.identity
+        if connection_name is None:
+            if resolved_connection is not None:
+                connection_name = resolved_connection.connection_name
+            else:
+                connection_name = env_connection
+        if base_url is None:
+            message = (
+                "Podman connection could not be resolved. Configure `podman system connection` {}"
+            ).format("or set PODMAN_BASE_URL/PODMAN_IDENTITY.")
+            raise ToolValidationError(message)
+        identity_str = str(identity) if identity is not None else None
         self._client_factory = client_factory or _build_client_factory(
             base_url=base_url,
-            identity=str(identity) if identity is not None else None,
+            identity=identity_str,
         )
         self._base_env = tuple(
             sorted((base_environment or {}).items(), key=lambda item: item[0])
@@ -340,6 +428,19 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
     @property
     def session(self) -> Session:
         return self._session
+
+    @staticmethod
+    def resolve_connection(
+        connection_name: str | None = None,
+    ) -> dict[str, str | None] | None:
+        resolved = _resolve_podman_connection(preferred_name=connection_name)
+        if resolved is None:
+            return None
+        return {
+            "base_url": resolved.base_url,
+            "identity": resolved.identity,
+            "connection_name": resolved.connection_name,
+        }
 
     def _ensure_workspace(self) -> _WorkspaceHandle:
         with self._lock:
