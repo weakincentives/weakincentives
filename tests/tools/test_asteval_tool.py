@@ -698,6 +698,26 @@ def test_globals_formatting_covers_primitives() -> None:
     assert payload.globals["value"].startswith("!repr:")
 
 
+def test_eval_helper_passthrough_functions() -> None:
+    path = VfsPath(("docs", "notes.txt"))
+    read = EvalFileRead(path=path)
+    write = EvalFileWrite(path=path, content="value", mode="create")
+
+    reads = asteval_module.normalize_eval_reads((read,))
+    assert reads == (read,)
+
+    writes = asteval_module.normalize_eval_writes((write,))
+    assert writes == (write,)
+    assert asteval_module.normalize_eval_write(write) == write
+
+    globals_payload = asteval_module.parse_eval_globals({"value": "1"})
+    assert globals_payload["value"] == 1
+
+    assert asteval_module.alias_for_eval_path(path) == "docs/notes.txt"
+    summary = asteval_module.summarize_eval_writes(writes)
+    assert summary is not None and "docs/notes.txt" in summary
+
+
 def test_interpreter_error_surfaces_in_stderr() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 

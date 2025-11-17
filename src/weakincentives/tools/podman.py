@@ -39,18 +39,10 @@ from ..runtime.session import Session, replace_latest, select_latest
 from . import vfs as vfs_module
 from ._context import ensure_context_uses_session
 from .asteval import (
-    EvalFileRead,
-    EvalFileWrite,
     EvalParams,
     EvalResult,
-    alias_for_eval_path,
     make_eval_result_reducer,
     normalize_eval_code,
-    normalize_eval_reads,
-    normalize_eval_write,
-    normalize_eval_writes,
-    parse_eval_globals,
-    summarize_eval_writes,
 )
 from .errors import ToolValidationError
 from .vfs import (
@@ -124,228 +116,6 @@ else:
 with target.open(open_mode, encoding="utf-8") as handle:
     handle.write(content)
 """
-_EVALUATE_PYTHON_SCRIPT: Final[str] = """
-import ast
-import base64
-import contextlib
-import io
-import json
-import sys
-from pathlib import Path
-
-
-class _EvalValidationError(Exception):
-    pass
-
-
-def _compile_segments(source: str) -> tuple[object, object | None]:
-    parsed = ast.parse(source, filename="<podman-eval>", mode="exec")
-    statements = list(parsed.body)
-    expr_code = None
-    if statements and isinstance(statements[-1], ast.Expr):
-        expr_stmt = statements.pop()
-        expression = ast.Expression(expr_stmt.value)
-        ast.fix_missing_locations(expression)
-        expr_code = compile(expression, filename="<podman-eval>", mode="eval")
-    module = ast.Module(body=statements, type_ignores=[])
-    ast.fix_missing_locations(module)
-    exec_code = compile(module, filename="<podman-eval>", mode="exec")
-    return exec_code, expr_code
-
-
-def _ensure_ascii(value: str, label: str) -> None:
-    try:
-        value.encode("ascii")
-    except UnicodeEncodeError as error:
-        raise _EvalValidationError(f"{label} must be ASCII text.") from error
-
-
-def _normalize_segments(
-    raw_segments: tuple[str, ...], max_depth: int, max_segment: int
-) -> tuple[str, ...]:
-    segments: list[str] = []
-    for raw in raw_segments:
-        stripped = raw.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("/"):
-            raise _EvalValidationError(
-                "Absolute paths are not allowed in the workspace."
-            )
-        parts = [piece for piece in stripped.split("/") if piece]
-        for part in parts:
-            if part in {".", ".."}:
-                raise _EvalValidationError(
-                    "Path segments must not include '.' or '..'."
-                )
-            _ensure_ascii(part, "path segment")
-            if len(part) > max_segment:
-                raise _EvalValidationError(
-                    f"Path segments must be {max_segment} characters or fewer."
-                )
-            segments.append(part)
-    if len(segments) > max_depth:
-        raise _EvalValidationError(
-            "Path depth exceeds the allowed limit (16 segments)."
-        )
-    return tuple(segments)
-
-
-def _normalize_user_path(path: str, max_depth: int, max_segment: int) -> tuple[str, ...]:
-    stripped = path.strip()
-    if not stripped:
-        raise _EvalValidationError("Path must be non-empty.")
-    return _normalize_segments((stripped,), max_depth, max_segment)
-
-
-def _format_value(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return json.dumps(value)
-    if isinstance(value, bool) or value is None:
-        return json.dumps(value)
-    return f"!repr:{value!r}"
-
-
-def _run(payload: dict[str, object]) -> dict[str, object]:
-    exec_code, expr_code = _compile_segments(payload["code"])
-    workspace = Path(payload["workspace"])
-    max_depth = int(payload["max_path_depth"])
-    max_segment = int(payload["max_path_segment"])
-    max_write = int(payload["max_write_length"])
-    read_globals = dict(payload["read_globals"])
-    user_globals = dict(payload["globals"])
-    param_writes = list(payload["param_writes"])
-    read_paths = {tuple(entry) for entry in payload["read_paths"]}
-
-    stdout_buffer = io.StringIO()
-    stderr_buffer = io.StringIO()
-    helper_writes: list[dict[str, object]] = []
-    write_targets = {tuple(write["path"]) for write in param_writes}
-    pending_writes = bool(param_writes)
-
-    def read_text(path: str) -> str:
-        normalized = _normalize_user_path(path, max_depth, max_segment)
-        resolved = workspace.joinpath(*normalized)
-        if not resolved.exists() or not resolved.is_file():
-            raise _EvalValidationError("File does not exist in the workspace.")
-        return resolved.read_text(encoding="utf-8")
-
-    def write_text(path: str, content: str, mode: str = "create") -> None:
-        nonlocal pending_writes
-        pending_writes = True
-        normalized = _normalize_user_path(path, max_depth, max_segment)
-        if normalized in read_paths:
-            raise _EvalValidationError(
-                "Writes queued during execution must not target read paths."
-            )
-        _ensure_ascii(content, "write content")
-        if len(content) > max_write:
-            raise _EvalValidationError(
-                "Content exceeds maximum length of 48,000 characters."
-            )
-        mode_value = str(mode)
-        if mode_value not in {"create", "overwrite", "append"}:
-            raise _EvalValidationError("Unsupported write mode requested.")
-        if normalized in write_targets:
-            raise _EvalValidationError("Duplicate write targets detected.")
-        write_targets.add(normalized)
-        helper_writes.append(
-            {"path": list(normalized), "content": content, "mode": mode_value}
-        )
-
-    symtable = dict(user_globals)
-    symtable["vfs_reads"] = dict(read_globals)
-    symtable["read_text"] = read_text
-    symtable["write_text"] = write_text
-    initial_keys = set(symtable)
-    value_repr: str | None = None
-    error_message = ""
-
-    with (
-        contextlib.redirect_stdout(stdout_buffer),
-        contextlib.redirect_stderr(stderr_buffer),
-    ):
-        try:
-            exec(exec_code, symtable, symtable)
-            if expr_code is not None:
-                result = eval(expr_code, symtable, symtable)
-                if result is not None:
-                    value_repr = repr(result)
-        except _EvalValidationError:
-            raise
-        except Exception as error:  # pragma: no cover - propagated via stderr
-            error_message = str(error)
-
-    stdout_text = stdout_buffer.getvalue()
-    stderr_text = stderr_buffer.getvalue()
-    if error_message:
-        stderr_text = (
-            f"{stderr_text}\\n{error_message}" if stderr_text else error_message
-        )
-        stderr_text = stderr_text.strip()
-
-    globals_payload: dict[str, str] = {}
-    visible_keys = [
-        key for key in symtable if key not in initial_keys and not key.startswith("_")
-    ]
-    for key in visible_keys:
-        globals_payload[key] = _format_value(symtable.get(key))
-    for alias, content in read_globals.items():
-        globals_payload[f"vfs:{alias}"] = content
-
-    format_context = {key: value for key, value in symtable.items() if not key.startswith("_")}
-    resolved_writes: list[dict[str, object]] = []
-    if not stderr_text:
-        for write in param_writes:
-            try:
-                resolved_content = write["content"].format_map(format_context)
-            except KeyError as error:
-                missing = error.args[0]
-                raise _EvalValidationError(
-                    f"Missing template variable '{missing}' in write request."
-                ) from error
-            _ensure_ascii(resolved_content, "write content")
-            if len(resolved_content) > max_write:
-                raise _EvalValidationError(
-                    "Content exceeds maximum length of 48,000 characters."
-                )
-            resolved_writes.append(
-                {
-                    "path": list(write["path"]),
-                    "content": resolved_content,
-                    "mode": write["mode"],
-                }
-            )
-        resolved_writes.extend(helper_writes)
-
-    return {
-        "stdout": stdout_text,
-        "stderr": stderr_text,
-        "value_repr": value_repr,
-        "writes": resolved_writes,
-        "pending_writes": pending_writes or bool(helper_writes),
-        "globals": globals_payload,
-    }
-
-
-def main() -> None:
-    payload = json.loads(base64.b64decode(sys.argv[1]).decode("utf-8"))
-    try:
-        result = _run(payload)
-    except _EvalValidationError as error:
-        output = {"error": str(error)}
-    except Exception as error:  # pragma: no cover - defensive guard
-        output = {"error": f"Evaluation failed: {error}"}
-    else:
-        output = result
-    print(json.dumps(output), end="")
-
-
-if __name__ == "__main__":
-    main()
-"""
 _REMOVE_PATH_SCRIPT: Final[str] = """
 import shutil
 import sys
@@ -367,10 +137,10 @@ Podman Workspace
 You have access to an isolated Linux container powered by Podman. The `ls`,
 `read_file`, `write_file`, `glob`, `grep`, and `rm` tools mirror the virtual
 filesystem interface but operate on `/workspace` inside the container. The
-`evaluate_python` tool runs short scripts (≤5 seconds) with the same helpers, and
-`shell_execute` runs short commands (≤120 seconds) in the shared environment. No
-network access or privileged operations are available. Do not assume files
-outside `/workspace` exist."""
+`evaluate_python` tool is a thin wrapper around `python3 -c` (≤5 seconds); read
+and edit files directly from the workspace. `shell_execute` runs short commands
+(≤120 seconds) in the shared environment. No network access or privileged
+operations are available. Do not assume files outside `/workspace` exist."""
 
 
 @runtime_checkable
@@ -784,8 +554,8 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             Tool[EvalParams, EvalResult](
                 name="evaluate_python",
                 description=(
-                    "Run a short Python script inside the Podman workspace. Captures "
-                    "stdout/stderr, exposes the VFS helpers, and stages writes for review."
+                    "Run a short Python script via `python3 -c` inside the Podman workspace. "
+                    "Captures stdout/stderr and reports the exit code."
                 ),
                 handler=self._eval_suite.evaluate_python,
                 accepts_overrides=accepts_overrides,
@@ -1551,275 +1321,64 @@ class _PodmanEvalSuite:
     ) -> ToolResult[EvalResult]:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
+        self._ensure_passthrough_payload_is_empty(params)
         code = normalize_eval_code(params.code)
-        reads = normalize_eval_reads(params.reads)
-        writes = normalize_eval_writes(params.writes)
-        read_paths = {read.path.segments for read in reads}
-        write_paths = {write.path.segments for write in writes}
-        if read_paths & write_paths:
-            raise ToolValidationError("Reads and writes must not target the same path.")
-
-        user_globals = parse_eval_globals(params.globals)
-        handle = self._section.ensure_workspace()
-        read_globals = self._load_read_globals(handle=handle, reads=reads)
-        payload = self._encode_payload(
-            code=code,
-            read_globals=read_globals,
-            reads=reads,
-            writes=writes,
-            user_globals=user_globals,
-            workdir=handle.descriptor.workdir,
-        )
+        _ = self._section.ensure_workspace()
         try:
             completed = self._section.run_python_script(
-                script=_EVALUATE_PYTHON_SCRIPT,
-                args=(payload,),
+                script=code,
+                args=(),
                 timeout=_EVAL_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
-            return self._timeout_result(reads=reads, pending=bool(writes))
+            return self._timeout_result()
         except FileNotFoundError as error:
             raise ToolValidationError(
                 "Podman CLI is required to execute evaluation commands."
             ) from error
 
-        if completed.returncode != 0:
-            message = (
-                completed.stderr.strip()
-                or completed.stdout.strip()
-                or "Evaluation failed."
-            )
-            raise ToolValidationError(message)
-
-        result_payload = self._parse_result(completed.stdout)
-        if error_message := result_payload.get("error"):
-            raise ToolValidationError(str(error_message))
-
-        stdout = _truncate_eval_stream(str(result_payload.get("stdout") or ""))
-        stderr = _truncate_eval_stream(str(result_payload.get("stderr") or ""))
-        value_repr = result_payload.get("value_repr")
-        pending_writes = bool(result_payload.get("pending_writes"))
-        success = not (stderr and not value_repr)
-        globals_payload = self._build_globals_payload(
-            raw_globals=result_payload.get("globals"),
-            read_globals=read_globals,
-        )
-        raw_writes = self._extract_write_payload(result_payload.get("writes"))
-
+        stdout = _truncate_eval_stream(str(completed.stdout or ""))
+        stderr = _truncate_eval_stream(str(completed.stderr or ""))
+        success = completed.returncode == 0
         if success:
-            resolved_writes = self._convert_writes(raw_writes)
-            if resolved_writes:
-                self._apply_writes(handle=handle, writes=resolved_writes)
+            message = f"Evaluation succeeded (exit code {completed.returncode})."
         else:
-            resolved_writes = ()
-
-        self._section.touch_workspace()
-        message = self._build_message(
-            success=success,
-            writes=resolved_writes,
-            pending=pending_writes,
-        )
+            message = f"Evaluation failed (exit code {completed.returncode})."
         result = EvalResult(
-            value_repr=value_repr if isinstance(value_repr, str) else None,
+            value_repr=None,
             stdout=stdout,
             stderr=stderr,
-            globals=globals_payload,
-            reads=reads,
-            writes=resolved_writes,
+            globals={},
+            reads=(),
+            writes=(),
         )
+        self._section.touch_workspace()
         return ToolResult(message=message, value=result, success=success)
 
-    def _encode_payload(
-        self,
-        *,
-        code: str,
-        read_globals: Mapping[str, str],
-        reads: tuple[EvalFileRead, ...],
-        writes: tuple[EvalFileWrite, ...],
-        user_globals: Mapping[str, object],
-        workdir: str,
-    ) -> str:
-        payload = {
-            "code": code,
-            "read_globals": dict(read_globals),
-            "read_paths": [list(read.path.segments) for read in reads],
-            "param_writes": [
-                {
-                    "path": list(write.path.segments),
-                    "content": write.content,
-                    "mode": write.mode,
-                }
-                for write in writes
-            ],
-            "globals": dict(user_globals),
-            "workspace": workdir,
-            "max_path_depth": _MAX_PATH_DEPTH,
-            "max_path_segment": _MAX_PATH_SEGMENT,
-            "max_write_length": vfs_module.MAX_WRITE_LENGTH,
-        }
-        encoded = json.dumps(payload).encode("utf-8")
-        return base64.b64encode(encoded).decode("ascii")
-
-    def _load_read_globals(
-        self, *, handle: _WorkspaceHandle, reads: tuple[EvalFileRead, ...]
-    ) -> Mapping[str, str]:
-        values: dict[str, str] = {}
-        for read in reads:
-            host_path = _host_path_for(handle.overlay_path, read.path)
-            if not host_path.exists() or not host_path.is_file():
-                raise ToolValidationError("File does not exist in the workspace.")
-            _assert_within_overlay(handle.overlay_path, host_path)
-            try:
-                content = host_path.read_text(encoding="utf-8")
-            except UnicodeDecodeError as error:
-                raise ToolValidationError("File is not valid UTF-8.") from error
-            alias = alias_for_eval_path(read.path)
-            values[alias] = content
-        return values
-
-    def _parse_result(self, raw: str) -> Mapping[str, object]:
-        try:
-            decoded = json.loads(raw or "{}")
-        except json.JSONDecodeError as error:
+    def _ensure_passthrough_payload_is_empty(self, params: EvalParams) -> None:
+        if params.reads:
             raise ToolValidationError(
-                "Evaluation produced an invalid response."
-            ) from error
-        if not isinstance(decoded, Mapping):
-            raise ToolValidationError("Evaluation produced an invalid response.")
-        typed_mapping = cast(Mapping[object, object], decoded)
-        typed: dict[str, object] = {}
-        for key, value in typed_mapping.items():
-            typed[str(key)] = value
-        return typed
-
-    def _convert_writes(
-        self, writes: Sequence[Mapping[str, object]]
-    ) -> tuple[EvalFileWrite, ...]:
-        normalized: list[EvalFileWrite] = []
-        seen: set[tuple[str, ...]] = set()
-        for write in writes:
-            path_value = write.get("path", ())
-            if isinstance(path_value, Sequence) and not isinstance(
-                path_value, (str, bytes)
-            ):
-                path_sequence = cast(Sequence[object], path_value)
-                segments = tuple(str(segment) for segment in path_sequence)
-            else:
-                segments = ()
-            content = str(write.get("content", ""))
-            mode = str(write.get("mode", "create"))
-            candidate = EvalFileWrite(
-                path=vfs_module.VfsPath(segments),
-                content=content,
-                mode=mode,  # type: ignore[arg-type]
+                "Podman evaluate_python reads are not supported; access the workspace directly."
             )
-            normalized_write = normalize_eval_write(candidate)
-            key = normalized_write.path.segments
-            if key in seen:
-                raise ToolValidationError("Duplicate write targets detected.")
-            seen.add(key)
-            normalized.append(normalized_write)
-        return tuple(normalized)
-
-    def _apply_writes(
-        self, *, handle: _WorkspaceHandle, writes: tuple[EvalFileWrite, ...]
-    ) -> None:
-        for write in writes:
-            host_path = _host_path_for(handle.overlay_path, write.path)
-            _assert_within_overlay(handle.overlay_path, host_path)
-            exists = host_path.exists() and host_path.is_file()
-            if write.mode == "create" and exists:
-                raise ToolValidationError(
-                    "File already exists; use overwrite or append."
-                )
-            if write.mode in {"overwrite", "append"} and not exists:
-                raise ToolValidationError("File does not exist for the requested mode.")
-            self._section.write_via_container(
-                path=write.path, content=write.content, mode=write.mode
+        if params.writes:
+            raise ToolValidationError(
+                "Podman evaluate_python writes are not supported; use the write_file tool."
+            )
+        if params.globals:
+            raise ToolValidationError(
+                "Podman evaluate_python globals are not supported."
             )
 
-    def _build_message(
-        self,
-        *,
-        success: bool,
-        writes: tuple[EvalFileWrite, ...],
-        pending: bool,
-    ) -> str:
-        if not success:
-            if pending:
-                return (
-                    "Evaluation failed; pending file writes were discarded. "
-                    "Review stderr details in the payload."
-                )
-            return "Evaluation failed; review stderr details in the payload."
-
-        if writes:
-            message = (
-                "Evaluation succeeded with "
-                f"{len(writes)} pending file write"
-                f"{'s' if len(writes) != 1 else ''}."
-            )
-        else:
-            message = "Evaluation succeeded without pending file writes."
-        summary = summarize_eval_writes(writes)
-        if pending and summary:
-            message = f"{message} {summary}"
-        return message
-
-    def _timeout_result(
-        self,
-        *,
-        reads: tuple[EvalFileRead, ...],
-        pending: bool,
-    ) -> ToolResult[EvalResult]:
+    def _timeout_result(self) -> ToolResult[EvalResult]:
         result = EvalResult(
             value_repr=None,
             stdout="",
             stderr="Execution timed out.",
             globals={},
-            reads=reads,
+            reads=(),
             writes=(),
         )
-        if pending:
-            message = (
-                "Evaluation failed; pending file writes were discarded. "
-                "Review stderr details in the payload."
-            )
-        else:
-            message = "Evaluation failed; review stderr details in the payload."
-        return ToolResult(message=message, value=result, success=False)
-
-    def _build_globals_payload(
-        self,
-        *,
-        raw_globals: object,
-        read_globals: Mapping[str, str],
-    ) -> dict[str, str]:
-        globals_payload: dict[str, str] = {}
-        if isinstance(raw_globals, Mapping):
-            globals_payload.update(
-                {
-                    str(key): str(value)
-                    for key, value in cast(Mapping[Any, object], raw_globals).items()
-                }
-            )
-        globals_payload.update(
-            {f"vfs:{alias}": content for alias, content in read_globals.items()}
-        )
-        return globals_payload
-
-    def _extract_write_payload(
-        self, payload: object
-    ) -> tuple[Mapping[str, object], ...]:
-        if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
-            return ()
-        typed_payload = cast(Sequence[object], payload)
-        entries: list[Mapping[str, object]] = []
-        # ruff: noqa: PERF401 - explicit loop keeps the typing straightforward.
-        for item in typed_payload:
-            if isinstance(item, Mapping):
-                entries.append(cast(Mapping[str, object], item))
-        return tuple(entries)
+        return ToolResult(message="Evaluation timed out.", value=result, success=False)
 
 
 class _PodmanShellSuite:

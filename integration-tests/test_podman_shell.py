@@ -130,29 +130,18 @@ def test_evaluate_python_writes_file(tmp_path: Path) -> None:
     container_name: str | None = None
     try:
         eval_tool = find_tool(section, "evaluate_python")
-        read_tool = find_tool(section, "read_file")
         eval_handler = eval_tool.handler
-        read_handler = read_tool.handler
         assert eval_handler is not None
-        assert read_handler is not None
 
-        params = EvalParams(
-            code=("value = 21 * 2\nwrite_text('reports/result.txt', str(value))\nvalue")
-        )
+        params = EvalParams(code="print('integration-ok')")
         result = eval_handler(params, context=build_tool_context(bus, session))
 
         assert result.success
-        assert result.value is not None
         payload = cast(EvalResult, result.value)
-        assert payload.value_repr == "42"
-        read_result = read_handler(
-            ReadFileParams(file_path="reports/result.txt"),
-            context=build_tool_context(bus, session),
-        )
-        assert read_result.success
-        assert read_result.value is not None
-        read_value = cast(ReadFileResult, read_result.value)
-        assert "42" in read_value.content
+        assert payload is not None
+        assert payload.stdout.strip() == "integration-ok"
+        assert payload.stderr == ""
+        assert payload.value_repr is None
         handle = section._workspace_handle
         assert handle is not None
         container_name = handle.descriptor.container_name

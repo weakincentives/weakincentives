@@ -12,13 +12,12 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -54,7 +53,6 @@ from weakincentives.tools import (
     ReadFileParams,
     ReadFileResult,
     RemoveParams,
-    WriteFile,
     WriteFileParams,
 )
 from weakincentives.tools.errors import ToolValidationError
@@ -271,84 +269,6 @@ def _setup_host_mount(
         mount_path=vfs_module.VfsPath(("sunfish",)),
     )
     return host_root, mount, file_path
-
-
-def _install_local_eval_runner(
-    section: PodmanToolsSection,
-    *,
-    monkeypatch: pytest.MonkeyPatch,
-) -> Path:
-    handle = section.ensure_workspace()
-    overlay = handle.overlay_path
-    patched_descriptor = replace(handle.descriptor, workdir=str(overlay))
-    section._workspace_handle = podman_module._WorkspaceHandle(
-        descriptor=patched_descriptor,
-        overlay_path=overlay,
-    )
-
-    def _run_local_script(
-        self: PodmanToolsSection,
-        *,
-        script: str,
-        args: Sequence[str],
-        timeout: float | None = None,
-    ) -> CompletedProcess[str]:
-        cmd = ["python3", "-c", script, *args]
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-
-    monkeypatch.setattr(
-        section,
-        "run_python_script",
-        MethodType(_run_local_script, section),
-        raising=False,
-    )
-
-    def _write_local(
-        self: PodmanToolsSection,
-        *,
-        path: vfs_module.VfsPath,
-        content: str,
-        mode: str,
-    ) -> None:
-        host_path = overlay
-        for segment in path.segments:
-            host_path = host_path / segment
-        host_path.parent.mkdir(parents=True, exist_ok=True)
-        exists = host_path.exists()
-        if mode == "create" and exists:
-            raise ToolValidationError("File already exists; use overwrite or append.")
-        if mode in {"overwrite", "append"} and not exists:
-            raise ToolValidationError("File does not exist for the requested mode.")
-        open_mode = "a" if mode == "append" else "w"
-        if mode == "create":
-            open_mode = "x"
-        with host_path.open(open_mode, encoding="utf-8") as handle:
-            handle.write(content)
-
-    monkeypatch.setattr(
-        section,
-        "write_via_container",
-        MethodType(_write_local, section),
-        raising=False,
-    )
-    return overlay
-
-
-def _make_completed_process(
-    payload: Mapping[str, object], *, returncode: int = 0, stderr: str = ""
-) -> CompletedProcess[str]:
-    return CompletedProcess(
-        ["python3"],
-        returncode,
-        stdout=json.dumps(payload),
-        stderr=stderr,
-    )
 
 
 @pytest.fixture()
@@ -1477,7 +1397,7 @@ def test_shell_execute_truncates_output(
     assert value.stderr.endswith("[truncated]")
 
 
-def test_evaluate_python_executes_script_and_applies_writes(
+def test_evaluate_python_runs_script_passthrough(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1485,45 +1405,51 @@ def test_evaluate_python_executes_script_and_applies_writes(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    overlay = _install_local_eval_runner(section, monkeypatch=monkeypatch)
-    write_tool = cast(
-        Tool[WriteFileParams, WriteFile], find_tool(section, "write_file")
-    )
-    invoke_tool(
-        bus,
-        write_tool,
-        WriteFileParams(file_path="notes.txt", content="hello world"),
-        session=session,
-    )
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-    params = EvalParams(
-        code=(
-            "text = read_text('notes.txt')\n"
-            "result = text.upper()\n"
-            "write_text('reports/summary.txt', result)\n"
-            "result"
-        ),
-        reads=(EvalFileRead(path=vfs_module.VfsPath(("notes.txt",))),),
+
+    captured: dict[str, object] = {}
+
+    def _run_script(
+        self: PodmanToolsSection,
+        *,
+        script: str,
+        args: Sequence[str],
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        captured["script"] = script
+        captured["args"] = tuple(args)
+        captured["timeout"] = timeout
+        return CompletedProcess(
+            ["python3"],
+            0,
+            stdout="hello",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        section,
+        "run_python_script",
+        MethodType(_run_script, section),
+        raising=False,
     )
 
-    result = invoke_tool(bus, tool, params, session=session)
+    result = invoke_tool(bus, tool, EvalParams(code="print('ok')"), session=session)
 
     assert result.success
+    assert result.message == "Evaluation succeeded (exit code 0)."
     payload = cast(EvalResult, result.value)
-    assert payload is not None
-    assert payload.value_repr == "'HELLO WORLD'"
-    assert payload.writes and payload.writes[0].path.segments == (
-        "reports",
-        "summary.txt",
-    )
-    assert payload.reads == params.reads
-    assert payload.globals["result"] == "HELLO WORLD"
-    assert payload.globals["vfs:notes.txt"] == "hello world"
-    report = overlay / "reports" / "summary.txt"
-    assert report.read_text(encoding="utf-8") == "HELLO WORLD"
+    assert payload.stdout == "hello"
+    assert payload.stderr == ""
+    assert payload.value_repr is None
+    assert payload.reads == ()
+    assert payload.writes == ()
+    assert payload.globals == {}
+    assert captured["script"] == "print('ok')"
+    assert captured["args"] == ()
+    assert captured["timeout"] == podman_module._EVAL_TIMEOUT_SECONDS
 
 
-def test_evaluate_python_propagates_template_errors(
+def test_evaluate_python_marks_failure_on_nonzero_exit(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1531,24 +1457,31 @@ def test_evaluate_python_propagates_template_errors(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    overlay = _install_local_eval_runner(section, monkeypatch=monkeypatch)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-    params = EvalParams(
-        code="value = 1",
-        writes=(
-            EvalFileWrite(
-                path=vfs_module.VfsPath(("reports", "summary.txt")),
-                content="value: {missing}",
-                mode="create",
-            ),
-        ),
+
+    def _run_script(
+        self: PodmanToolsSection,
+        *,
+        script: str,
+        args: Sequence[str],
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        del self, script, args, timeout
+        return CompletedProcess(["python3"], 2, stdout="", stderr="boom")
+
+    monkeypatch.setattr(
+        section,
+        "run_python_script",
+        MethodType(_run_script, section),
+        raising=False,
     )
 
-    with pytest.raises(ToolValidationError, match="Missing template variable"):
-        invoke_tool(bus, tool, params, session=session)
+    result = invoke_tool(bus, tool, EvalParams(code="fail"), session=session)
 
-    report = overlay / "reports" / "summary.txt"
-    assert not report.exists()
+    assert not result.success
+    assert result.message == "Evaluation failed (exit code 2)."
+    payload = cast(EvalResult, result.value)
+    assert payload.stderr == "boom"
 
 
 def test_evaluate_python_reports_timeout(
@@ -1568,59 +1501,8 @@ def test_evaluate_python_reports_timeout(
         args: Sequence[str],
         timeout: float | None = None,
     ) -> CompletedProcess[str]:
-        duration = (
-            timeout if timeout is not None else podman_module._EVAL_TIMEOUT_SECONDS
-        )
-        raise subprocess.TimeoutExpired(cmd=script, timeout=duration)
-
-    monkeypatch.setattr(
-        section,
-        "run_python_script",
-        MethodType(_raise_timeout, section),
-        raising=False,
-    )
-
-    params = EvalParams(
-        code="while True: pass",
-        writes=(
-            EvalFileWrite(
-                path=vfs_module.VfsPath(("reports", "pending.txt")),
-                content="value",
-                mode="create",
-            ),
-        ),
-    )
-
-    result = invoke_tool(bus, tool, params, session=session)
-
-    assert not result.success
-    payload = cast(EvalResult, result.value)
-    assert payload.stderr == "Execution timed out."
-    assert payload.writes == ()
-    assert "discarded" in result.message
-
-
-def test_evaluate_python_timeout_without_pending_writes(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-
-    def _raise_timeout(
-        self: PodmanToolsSection,
-        *,
-        script: str,
-        args: Sequence[str],
-        timeout: float | None = None,
-    ) -> CompletedProcess[str]:
-        duration = (
-            timeout if timeout is not None else podman_module._EVAL_TIMEOUT_SECONDS
-        )
-        raise subprocess.TimeoutExpired(cmd=script, timeout=duration)
+        del self, script, args
+        raise subprocess.TimeoutExpired(cmd="python3", timeout=timeout or 0.0)
 
     monkeypatch.setattr(
         section,
@@ -1634,32 +1516,9 @@ def test_evaluate_python_timeout_without_pending_writes(
     )
 
     assert not result.success
-    assert result.message == "Evaluation failed; review stderr details in the payload."
-
-
-def test_evaluate_python_rejects_overlapping_paths(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-    params = EvalParams(
-        code="0",
-        reads=(EvalFileRead(path=vfs_module.VfsPath(("docs", "data.txt"))),),
-        writes=(
-            EvalFileWrite(
-                path=vfs_module.VfsPath(("docs", "data.txt")),
-                content="value",
-                mode="create",
-            ),
-        ),
-    )
-
-    with pytest.raises(ToolValidationError, match="Reads and writes must not target"):
-        invoke_tool(bus, tool, params, session=session)
+    assert result.message == "Evaluation timed out."
+    payload = cast(EvalResult, result.value)
+    assert payload.stderr == "Execution timed out."
 
 
 def test_evaluate_python_missing_cli_raises(
@@ -1672,16 +1531,16 @@ def test_evaluate_python_missing_cli_raises(
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
-    def _raise(*_: object, **__: object) -> None:
+    def _fail(*_: object, **__: object) -> CompletedProcess[str]:
         raise FileNotFoundError("missing podman")
 
-    monkeypatch.setattr(section, "run_python_script", _raise)
+    monkeypatch.setattr(section, "run_python_script", _fail)
 
     with pytest.raises(ToolValidationError, match="Podman CLI is required"):
         invoke_tool(bus, tool, EvalParams(code="0"), session=session)
 
 
-def test_evaluate_python_cli_failure_surfaces_stderr(
+def test_evaluate_python_truncates_streams(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1691,380 +1550,74 @@ def test_evaluate_python_cli_failure_surfaces_stderr(
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
-    def _fail(*_: object, **__: object) -> CompletedProcess[str]:
-        return _make_completed_process({}, returncode=9, stderr="boom")
+    def _run_script(
+        self: PodmanToolsSection,
+        *,
+        script: str,
+        args: Sequence[str],
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        del self, script, args, timeout
+        return CompletedProcess(
+            ["python3"],
+            0,
+            stdout="o" * 5_000,
+            stderr="e" * 5_000,
+        )
 
-    monkeypatch.setattr(section, "run_python_script", _fail)
-
-    with pytest.raises(ToolValidationError, match="boom"):
-        invoke_tool(bus, tool, EvalParams(code="0"), session=session)
-
-
-def test_evaluate_python_error_payload_raises(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-
-    def _payload(*_: object, **__: object) -> CompletedProcess[str]:
-        return _make_completed_process({"error": "bad"})
-
-    monkeypatch.setattr(section, "run_python_script", _payload)
-
-    with pytest.raises(ToolValidationError, match="bad"):
-        invoke_tool(bus, tool, EvalParams(code="0"), session=session)
-
-
-def test_evaluate_python_failure_with_pending_writes_message(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-
-    def _payload(*_: object, **__: object) -> CompletedProcess[str]:
-        response = {
-            "stdout": "",
-            "stderr": "failure",
-            "value_repr": None,
-            "pending_writes": True,
-            "globals": {},
-            "writes": [],
-        }
-        return _make_completed_process(response)
-
-    monkeypatch.setattr(section, "run_python_script", _payload)
+    monkeypatch.setattr(
+        section,
+        "run_python_script",
+        MethodType(_run_script, section),
+        raising=False,
+    )
 
     result = invoke_tool(bus, tool, EvalParams(code="0"), session=session)
 
-    assert not result.success
-    assert "discarded" in result.message
+    payload = cast(EvalResult, result.value)
+    assert payload.stdout.endswith("...")
+    assert payload.stderr.endswith("...")
 
 
-def test_evaluate_python_success_without_pending_writes(
+def test_evaluate_python_rejects_reads_writes_and_globals(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
-    def _payload(*_: object, **__: object) -> CompletedProcess[str]:
-        response = {
-            "stdout": "",
-            "stderr": "",
-            "value_repr": "1",
-            "pending_writes": False,
-            "globals": {"value": 1},
-            "writes": [],
-        }
-        return _make_completed_process(response)
-
-    monkeypatch.setattr(section, "run_python_script", _payload)
-
-    result = invoke_tool(bus, tool, EvalParams(code="0"), session=session)
-
-    assert result.success
-    assert result.message.startswith("Evaluation succeeded without pending")
-    assert result.value is not None
-    payload = result.value
-    assert payload.globals["value"] == "1"
-
-
-def test_evaluate_python_failure_without_pending_message(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-
-    def _payload(*_: object, **__: object) -> CompletedProcess[str]:
-        response = {
-            "stdout": "",
-            "stderr": "failure",
-            "value_repr": None,
-            "pending_writes": False,
-            "globals": {},
-            "writes": [],
-        }
-        return _make_completed_process(response)
-
-    monkeypatch.setattr(section, "run_python_script", _payload)
-
-    result = invoke_tool(bus, tool, EvalParams(code="0"), session=session)
-
-    assert not result.success
-    assert result.message == "Evaluation failed; review stderr details in the payload."
-
-
-def test_evaluate_python_duplicate_writes_raise(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-
-    def _payload(*_: object, **__: object) -> CompletedProcess[str]:
-        response = {
-            "stdout": "",
-            "stderr": "",
-            "value_repr": "value",
-            "pending_writes": False,
-            "globals": {},
-            "writes": [
-                {"path": ["reports", "dup.txt"], "content": "data", "mode": "create"},
-                {"path": ["reports", "dup.txt"], "content": "data", "mode": "create"},
-            ],
-        }
-        return _make_completed_process(response)
-
-    monkeypatch.setattr(section, "run_python_script", _payload)
-
-    with pytest.raises(ToolValidationError, match="Duplicate write targets"):
-        invoke_tool(bus, tool, EvalParams(code="0"), session=session)
-
-
-def test_convert_writes_rejects_invalid_path_type(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-
-    writes = suite._convert_writes(
-        ({"path": "not-a-sequence", "content": "", "mode": "create"},)
-    )
-
-    assert writes[0].path.segments == ()
-
-
-def test_load_read_globals_missing_file_raises(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-    handle = section.ensure_workspace()
-    read = EvalFileRead(path=vfs_module.VfsPath(("missing.txt",)))
-
-    with pytest.raises(ToolValidationError, match="File does not exist"):
-        suite._load_read_globals(handle=handle, reads=(read,))
-
-
-def test_load_read_globals_rejects_invalid_encoding(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-    handle = section.ensure_workspace()
-    target = handle.overlay_path / "latin1.txt"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"\xff")
-
-    original_read_text = Path.read_text
-
-    def _raising_read_text(
-        self: Path, encoding: str | None = None, errors: str | None = None
-    ) -> str:
-        if self == target:
-            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad")
-        return original_read_text(self, encoding=encoding, errors=errors)
-
-    monkeypatch.setattr(Path, "read_text", _raising_read_text)
-
-    read = EvalFileRead(path=vfs_module.VfsPath(("latin1.txt",)))
-    with pytest.raises(ToolValidationError, match="not valid UTF-8"):
-        suite._load_read_globals(handle=handle, reads=(read,))
-
-
-def test_apply_writes_rejects_existing_create(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-    handle = section.ensure_workspace()
-    host_path = handle.overlay_path / "notes.txt"
-    host_path.parent.mkdir(parents=True, exist_ok=True)
-    host_path.write_text("data", encoding="utf-8")
-
+    read = EvalFileRead(path=vfs_module.VfsPath(("docs", "notes.txt")))
     write = EvalFileWrite(
-        path=vfs_module.VfsPath(("notes.txt",)), content="new", mode="create"
-    )
-
-    with pytest.raises(ToolValidationError, match="already exists"):
-        suite._apply_writes(handle=handle, writes=(write,))
-
-
-def test_apply_writes_requires_target_for_overwrite(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-    handle = section.ensure_workspace()
-
-    write = EvalFileWrite(
-        path=vfs_module.VfsPath(("missing.txt",)), content="new", mode="overwrite"
-    )
-
-    with pytest.raises(ToolValidationError, match="does not exist"):
-        suite._apply_writes(handle=handle, writes=(write,))
-
-
-def test_build_message_includes_summary(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-    writes = (
-        EvalFileWrite(
-            path=vfs_module.VfsPath(("reports", "out.txt")),
-            content="data",
-            mode="create",
-        ),
-    )
-
-    message = suite._build_message(success=True, writes=writes, pending=True)
-
-    assert "writes=1" in message
-
-
-def test_parse_result_rejects_invalid_json(
-    tmp_path: Path, session_and_bus: tuple[Session, InProcessEventBus]
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-
-    with pytest.raises(ToolValidationError, match="invalid response"):
-        suite._parse_result("not-json")
-
-
-def test_parse_result_requires_mapping(
-    tmp_path: Path, session_and_bus: tuple[Session, InProcessEventBus]
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-
-    with pytest.raises(ToolValidationError, match="invalid response"):
-        suite._parse_result("[]")
-
-
-def test_build_globals_payload_merges_values(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-
-    result = suite._build_globals_payload(
-        raw_globals={"value": 2}, read_globals={"docs/file.txt": "hello"}
-    )
-
-    assert result["value"] == "2"
-    assert result["vfs:docs/file.txt"] == "hello"
-
-
-def test_extract_write_payload_filters_items(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-
-    writes = suite._extract_write_payload(
-        [
-            {"path": ["a"], "content": "b", "mode": "create"},
-            "ignored",
-        ]
-    )
-
-    assert len(writes) == 1
-
-
-def test_extract_write_payload_handles_non_sequence(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
-) -> None:
-    session, _bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    suite = podman_module._PodmanEvalSuite(section=section)
-
-    assert suite._extract_write_payload("not-list") == ()
-
-
-def test_evaluate_python_encodes_param_writes(
-    session_and_bus: tuple[Session, InProcessEventBus],
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session, bus = session_and_bus
-    client = _FakePodmanClient()
-    section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
-    captured: list[dict[str, object]] = []
-
-    def _runner(*_: object, **kwargs: object) -> CompletedProcess[str]:
-        args = cast(Sequence[str], kwargs.get("args", ()))
-        encoded = args[0]
-        decoded = json.loads(base64.b64decode(encoded).decode("utf-8"))
-        captured.append(decoded)
-        response = {
-            "stdout": "",
-            "stderr": "",
-            "value_repr": "1",
-            "pending_writes": False,
-            "globals": {},
-            "writes": [],
-        }
-        return _make_completed_process(response)
-
-    monkeypatch.setattr(section, "run_python_script", _runner)
-
-    write = EvalFileWrite(
-        path=vfs_module.VfsPath(("notes", "encoded.txt")),
+        path=vfs_module.VfsPath(("reports", "out.txt")),
         content="value",
         mode="create",
     )
-    params = EvalParams(code="0", writes=(write,))
 
-    result = invoke_tool(bus, tool, params, session=session)
+    with pytest.raises(ToolValidationError, match="reads are not supported"):
+        invoke_tool(
+            bus,
+            tool,
+            EvalParams(code="0", reads=(read,)),
+            session=session,
+        )
 
-    assert result.success
-    assert captured
-    assert captured[0]["param_writes"]
+    with pytest.raises(ToolValidationError, match="writes are not supported"):
+        invoke_tool(
+            bus,
+            tool,
+            EvalParams(code="0", writes=(write,)),
+            session=session,
+        )
+
+    with pytest.raises(ToolValidationError, match="globals are not supported"):
+        invoke_tool(
+            bus,
+            tool,
+            EvalParams(code="0", globals={"value": "1"}),
+            session=session,
+        )
 
 
 def test_ls_lists_workspace_files(
