@@ -29,10 +29,27 @@ def main() -> int:
         code = pytest.main(args)
 
     output = buffer.getvalue()
+    summary = _extract_summary(output)
     if code != 0 or "warning" in output.lower():
         print(output, end="")
+    elif summary:
+        print(summary)
 
     return code
+
+
+def _extract_summary(output: str) -> str | None:
+    lines = output.splitlines()
+    for line in reversed(lines):
+        stripped = line.strip()
+        lower = stripped.lower()
+        if " passed" in lower or " failed" in lower or " deselected" in lower:
+            return stripped
+    for line in reversed(lines):
+        stripped = line.strip()
+        if stripped.lower().startswith("collected "):
+            return stripped
+    return None
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via Makefile target

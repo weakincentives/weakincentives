@@ -27,7 +27,7 @@ from typing import cast
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.prompt import MarkdownSection, Prompt
+from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
@@ -36,8 +36,8 @@ from weakincentives.runtime.events import InProcessEventBus, PromptRendered, Too
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
-from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
+from weakincentives.tools.podman import PodmanToolsSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -65,6 +65,19 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
 _LOG_STRING_LIMIT = 256
+_LOGGER = logging.getLogger(__name__)
+
+
+def _sunfish_mounts() -> tuple[HostMount, ...]:
+    return (
+        HostMount(
+            host_path="sunfish",
+            mount_path=VfsPath(("sunfish",)),
+            include_glob=SUNFISH_MOUNT_INCLUDE_GLOBS,
+            exclude_glob=SUNFISH_MOUNT_EXCLUDE_GLOBS,
+            max_bytes=SUNFISH_MOUNT_MAX_BYTES,
+        ),
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -76,6 +89,17 @@ class ReviewGuidance:
         ),
         metadata={
             "description": "Default framing instructions for the review assistant.",
+        },
+    )
+    workspace_overview: str = field(
+        default=(
+            "The sunfish repository is mounted read-only inside the active workspace."
+        ),
+        metadata={
+            "description": (
+                "Describes whether the agent is operating within the Podman container "
+                "or the in-memory VFS fallback."
+            ),
         },
     )
 
@@ -165,21 +189,22 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
             " but the directory is missing."
         )
 
+    workspace_section, workspace_overview = _build_workspace_section(session=session)
     guidance_section = MarkdownSection[ReviewGuidance](
         title="Code Review Brief",
         template=textwrap.dedent(
-            """
-            You are a code review assistant exploring the pre-mounted virtual
-            filesystem. The sunfish sample repository is available inside the
-            VFS under the `sunfish/` directory.
+            r"""
+            You are a code review assistant exploring the mounted workspace.
+            $workspace_overview Access the repository under the `sunfish/`
+            directory.
 
             Use the available tools to stay grounded:
             - Planning tools help you capture multi-step investigations; keep the
               plan updated as you explore.
-            - VFS tools list directories, read files, and stage edits. Mounted
-              files are read-only; use writes to stage new snapshots.
-            - Python evaluation tools run short scripts with access to staged VFS
-              reads and writes for quick experiments.
+            - Filesystem tools list directories, read files, and stage edits.
+              When available, the `shell_execute` command runs short Podman
+              commands (no network access). Mounted files are read-only; use
+              writes to stage new snapshots.
 
             Respond with JSON containing:
             - summary: One paragraph describing your findings so far.
@@ -187,7 +212,7 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
             - next_steps: Actionable recommendations to progress the task.
             """
         ).strip(),
-        default_params=ReviewGuidance(),
+        default_params=ReviewGuidance(workspace_overview=workspace_overview),
         key="code-review-brief",
     )
     planning_section = PlanningToolsSection(
@@ -195,20 +220,6 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         strategy=PlanningStrategy.PLAN_ACT_REFLECT,
     )
     subagents_section = SubagentsSection()
-    vfs_section = VfsToolsSection(
-        session=session,
-        mounts=(
-            HostMount(
-                host_path="sunfish",
-                mount_path=VfsPath(("sunfish",)),
-                include_glob=SUNFISH_MOUNT_INCLUDE_GLOBS,
-                exclude_glob=SUNFISH_MOUNT_EXCLUDE_GLOBS,
-                max_bytes=SUNFISH_MOUNT_MAX_BYTES,
-            ),
-        ),
-        allowed_host_roots=(TEST_REPOSITORIES_ROOT,),
-    )
-    asteval_section = AstevalSection(session=session)
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
@@ -222,11 +233,46 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
             guidance_section,
             planning_section,
             subagents_section,
-            vfs_section,
-            asteval_section,
+            workspace_section,
             user_turn_section,
         ),
     )
+
+
+def _build_workspace_section(
+    *,
+    session: Session,
+) -> tuple[MarkdownSection[SupportsDataclass], str]:
+    mounts = _sunfish_mounts()
+    allowed_roots = (TEST_REPOSITORIES_ROOT,)
+    connection = PodmanToolsSection.resolve_connection()
+    if connection is None:
+        _LOGGER.info(
+            "Podman connection unavailable; falling back to VFS tools for the code reviewer example."
+        )
+        section = VfsToolsSection(
+            session=session,
+            mounts=mounts,
+            allowed_host_roots=allowed_roots,
+        )
+        overview = (
+            "Podman is unavailable, so the virtual filesystem mirrors the repository "
+            "without shell access."
+        )
+        return section, overview
+    section = PodmanToolsSection(
+        session=session,
+        mounts=mounts,
+        allowed_host_roots=allowed_roots,
+        base_url=connection.get("base_url"),
+        identity=connection.get("identity"),
+        connection_name=connection.get("connection_name"),
+    )
+    overview = (
+        "Podman is available; the workspace mirrors the repository inside the "
+        "container and the `shell_execute` tool is enabled."
+    )
+    return section, overview
 
 
 def initialize_code_reviewer_runtime(
@@ -261,7 +307,7 @@ def _build_intro(override_tag: str) -> str:
         f"""
         Launching example code reviewer agent.
         - test-repositories/sunfish mounted under virtual path 'sunfish/'.
-        - Tools: planning, subagents, VFS, and Python evaluation.
+        - Tools: planning, subagents, and a filesystem workspace (Podman shell when available).
         - Command: 'exit' to quit.
         - Prompt overrides tag: '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
         """

@@ -516,7 +516,7 @@ class HostMount:
 
 
 @dataclass(slots=True, frozen=True)
-class _HostMountPreview:
+class HostMountPreview:
     host_path: str = field(
         metadata={
             "description": (
@@ -568,8 +568,8 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
         accepts_overrides: bool = False,
     ) -> None:
-        allowed_roots = tuple(_normalize_root(path) for path in allowed_host_roots)
-        self._mount_snapshot, mount_previews = _materialize_mounts(
+        allowed_roots = tuple(normalize_host_root(path) for path in allowed_host_roots)
+        self._mount_snapshot, mount_previews = materialize_host_mounts(
             mounts, allowed_roots
         )
         self._session = session
@@ -1075,21 +1075,21 @@ def _format_path(path: VfsPath) -> str:
     return "/".join(path.segments) or "/"
 
 
-def _normalize_root(path: os.PathLike[str] | str) -> Path:
+def normalize_host_root(path: os.PathLike[str] | str) -> Path:
     root = Path(path).expanduser().resolve()
     if not root.exists():
         raise ToolValidationError("Allowed host root does not exist.")
     return root
 
 
-def _materialize_mounts(
+def materialize_host_mounts(
     mounts: Sequence[HostMount], allowed_roots: Sequence[Path]
-) -> tuple[VirtualFileSystem, tuple[_HostMountPreview, ...]]:
+) -> tuple[VirtualFileSystem, tuple[HostMountPreview, ...]]:
     if not mounts:
         return VirtualFileSystem(), ()
 
     aggregated: dict[tuple[str, ...], VfsFile] = {}
-    previews: list[_HostMountPreview] = []
+    previews: list[HostMountPreview] = []
     for mount in mounts:
         loaded, preview = _load_mount(mount, allowed_roots)
         previews.append(preview)
@@ -1099,11 +1099,11 @@ def _materialize_mounts(
     return VirtualFileSystem(files=files), tuple(previews)
 
 
-def _render_section_template(previews: Sequence[_HostMountPreview]) -> str:
+def render_host_mounts_block(previews: Sequence[HostMountPreview]) -> str:
     if not previews:
-        return _VFS_SECTION_TEMPLATE
+        return ""
 
-    lines: list[str] = [_VFS_SECTION_TEMPLATE, "", "Configured host mounts:"]
+    lines: list[str] = ["Configured host mounts:"]
     for preview in previews:
         mount_label = _format_path(preview.mount_path)
         resolved_label = str(preview.resolved_host)
@@ -1113,6 +1113,13 @@ def _render_section_template(previews: Sequence[_HostMountPreview]) -> str:
         contents = _format_mount_entries(preview.entries)
         lines.append(f"  Contents: {contents}")
     return "\n".join(lines)
+
+
+def _render_section_template(previews: Sequence[HostMountPreview]) -> str:
+    block = render_host_mounts_block(previews)
+    if not block:
+        return _VFS_SECTION_TEMPLATE
+    return f"{_VFS_SECTION_TEMPLATE}\n\n{block}"
 
 
 def _format_mount_entries(entries: Sequence[str]) -> str:
@@ -1128,7 +1135,7 @@ def _format_mount_entries(entries: Sequence[str]) -> str:
 
 def _load_mount(
     mount: HostMount, allowed_roots: Sequence[Path]
-) -> tuple[tuple[VfsFile, ...], _HostMountPreview]:
+) -> tuple[tuple[VfsFile, ...], HostMountPreview]:
     host_path = mount.host_path.strip()
     if not host_path:
         raise ToolValidationError("Host mount path must not be empty.")
@@ -1138,7 +1145,7 @@ def _load_mount(
     exclude_patterns = _normalize_globs(mount.exclude_glob, "exclude_glob")
     mount_prefix = _normalize_optional_path(mount.mount_path)
     preview_entries = _list_mount_entries(resolved_host)
-    preview = _HostMountPreview(
+    preview = HostMountPreview(
         host_path=host_path,
         resolved_host=resolved_host,
         mount_path=mount_prefix,
@@ -1325,7 +1332,26 @@ def _truncate_to_milliseconds(value: datetime) -> datetime:
     return value.replace(microsecond=microsecond, tzinfo=UTC)
 
 
+# Public helper exports reused by Podman tooling.
+MAX_WRITE_LENGTH: Final[int] = _MAX_WRITE_LENGTH
+normalize_string_path = _normalize_string_path
+normalize_path = _normalize_path
+normalize_content = _normalize_content
+normalize_offset = _normalize_offset
+normalize_limit = _normalize_limit
+ensure_ascii = _ensure_ascii
+format_directory_message = _format_directory_message
+format_write_file_message = _format_write_file_message
+format_edit_message = _format_edit_message
+format_glob_message = _format_glob_message
+format_grep_message = _format_grep_message
+find_file = _find_file
+make_write_reducer = _make_write_reducer
+make_delete_reducer = _make_delete_reducer
+
+
 __all__ = [
+    "MAX_WRITE_LENGTH",
     "DeleteEntry",
     "EditFileParams",
     "FileInfo",
@@ -1347,4 +1373,18 @@ __all__ = [
     "VirtualFileSystem",
     "WriteFile",
     "WriteFileParams",
+    "ensure_ascii",
+    "find_file",
+    "format_directory_message",
+    "format_edit_message",
+    "format_glob_message",
+    "format_grep_message",
+    "format_write_file_message",
+    "make_delete_reducer",
+    "make_write_reducer",
+    "normalize_content",
+    "normalize_limit",
+    "normalize_offset",
+    "normalize_path",
+    "normalize_string_path",
 ]
