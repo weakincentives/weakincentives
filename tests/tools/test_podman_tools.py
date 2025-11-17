@@ -689,6 +689,41 @@ def test_connection_resolution_falls_back_to_first_entry(
     assert result.connection_name == "first"
 
 
+def test_connection_resolution_prefers_default_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PODMAN_BASE_URL", raising=False)
+    monkeypatch.delenv("PODMAN_IDENTITY", raising=False)
+    monkeypatch.delenv("PODMAN_CONNECTION", raising=False)
+    connections = [
+        {
+            "Name": "first",
+            "URI": "ssh://first",
+            "Identity": "/tmp/first",
+            "Default": False,
+        },
+        {
+            "Name": "preferred",
+            "URI": "ssh://preferred",
+            "Identity": "/tmp/preferred",
+            "Default": True,
+        },
+    ]
+
+    def _fake_run(
+        *_: object,
+        **__: object,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(stdout=json.dumps(connections))
+
+    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+
+    result = podman_module._resolve_podman_connection()
+    assert result is not None
+    assert result.base_url == "ssh://preferred"
+    assert result.connection_name == "preferred"
+
+
 def test_connection_resolution_handles_cli_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
