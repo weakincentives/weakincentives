@@ -732,6 +732,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         cwd: str | None = None,
         environment: Mapping[str, str] | None = None,
         timeout: float | None = None,
+        capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         handle = self.ensure_workspace()
         env = self.workspace_environment()
@@ -754,7 +755,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             exec_cmd,
             input=stdin,
             text=True,
-            capture_output=True,
+            capture_output=capture_output,
             timeout=timeout,
         )
 
@@ -1319,6 +1320,7 @@ class _PodmanShellSuite:
                 cwd=cwd,
                 environment=environment,
                 timeout=timeout_seconds,
+                capture_output=params.capture_output,
             )
             timed_out = False
             exit_code = completed.returncode

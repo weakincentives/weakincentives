@@ -863,6 +863,31 @@ def test_shell_execute_respects_capture_flag(
     assert result.value is not None
     value = cast(PodmanShellResult, result.value)
     assert value.stdout == "capture disabled"
+    assert cli_runner.kwargs[-1]["capture_output"] is False
+
+
+def test_shell_execute_captures_output_by_default(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    cli_runner = _FakeCliRunner(
+        [_ExecResponse(exit_code=0, stdout="normal output", stderr="")]
+    )
+    section = _make_section(
+        session=session, client=client, cache_dir=tmp_path, runner=cli_runner
+    )
+    tool = find_tool(section, "shell_execute")
+    handler = tool.handler
+    assert handler is not None
+
+    params = PodmanShellParams(command=("echo", "hi"))
+    result = handler(params, context=build_tool_context(bus, session))
+    assert result.value is not None
+    value = cast(PodmanShellResult, result.value)
+    assert value.stdout == "normal output"
+    assert cli_runner.kwargs[-1]["capture_output"] is True
 
 
 def test_shell_execute_normalizes_cwd(
@@ -1071,13 +1096,24 @@ def test_default_cache_root_uses_home(
     assert podman_module._default_cache_root() == expected
 
 
-def test_client_factory_creates_client() -> None:
+def test_client_factory_creates_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: dict[str, object] = {}
+
+    class _StubClient:
+        def __init__(self, **kwargs: object) -> None:
+            created["kwargs"] = kwargs
+
+        def close(self) -> None:
+            created["closed"] = True
+
+    fake_module = SimpleNamespace(PodmanClient=_StubClient)
+    monkeypatch.setitem(sys.modules, "podman", fake_module)
+
     factory = podman_module._build_client_factory(base_url=None, identity=None)
     client = factory()
-    try:
-        assert hasattr(client, "containers")
-    finally:
-        client.close()
+    assert created["kwargs"] == {}
+    client.close()
+    assert created["closed"] is True
 
 
 def test_default_exec_runner_invokes_subprocess(
