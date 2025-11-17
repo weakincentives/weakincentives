@@ -11,6 +11,9 @@
 - Host mounts reuse the `HostMount` contract from `specs/VFS_TOOLS.md`; when
   configured they hydrate `/workspace` before the container starts and seed the
   `VirtualFileSystem` snapshot so shell and filesystem tooling see the same data.
+- `PodmanToolsSection` now exposes `evaluate_python` alongside the VFS tools and
+  `shell_execute`, mirroring the ASTEval contract but executing scripts inside
+  the container with the real filesystem.
 - Work delivers in two phases: Phase 1 exposes only `shell_execute`; Phase 2 ports
   the Virtual File System (VFS) surface so filesystem and shell tooling share
   the same Podman workspace.
@@ -104,6 +107,24 @@ Key semantics:
     (e.g., piping into `tee`) so the container remains authoritative.
   - After a mutation, sync the reducer snapshot to whatever Podman reports to
     keep prompts deterministic.
+
+### Evaluate Python
+
+- Reuses the `EvalParams`/`EvalResult` dataclasses and reducer contract from
+  `specs/ASTEVAL.md`, so prompts and adapters interact with a single evaluation
+  interface regardless of backend.
+- Execution happens inside the Podman workspace via `python3 -c <script>`, with
+  a fixed five-second timeout, captured stdout/stderr (truncated to 4,096
+  characters), and access to the same `read_text`, `write_text`, and
+  `vfs_reads` helpers described in the ASTEval spec.
+- `reads` entries are materialised from the overlay and injected into the
+  script payload, while staged writes (`writes` parameters or `write_text`
+  calls) are validated, templated, and then applied via the VFS reducers so the
+  `VirtualFileSystem` snapshot and container stay in sync.
+- Validation mirrors ASTEval: ASCII-only writes, 2,000-character code limit,
+  no overlapping read/write paths, duplicate detection, and descriptive
+  `ToolValidationError`s when template variables are missing or paths are
+  invalid. Pending writes are discarded automatically when execution fails.
 
 ## Workspace & Prompt Copy
 

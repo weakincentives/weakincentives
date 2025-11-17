@@ -7,6 +7,9 @@ Release highlights for weakincentives.
 - Added the Podman `shell_execute` tool behind `PodmanToolsSection`, including a
   `podman` optional extra, session-backed workspace tracking, unit coverage, and
   a gated integration test.
+- Expanded `PodmanToolsSection` with an `evaluate_python` tool that runs short
+  Python scripts inside the container, captures stdout/stderr, and stages VFS
+  writes using the same contract as the ASTEval sandbox.
 
 ## v0.8.0 - 2025-11-15
 
