@@ -36,9 +36,9 @@ from weakincentives.runtime.events import InProcessEventBus, PromptRendered, Too
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
-from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
-from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
+from weakincentives.tools.podman import PodmanToolsSection
+from weakincentives.tools.vfs import HostMount, VfsPath
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
@@ -169,17 +169,17 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         title="Code Review Brief",
         template=textwrap.dedent(
             """
-            You are a code review assistant exploring the pre-mounted virtual
-            filesystem. The sunfish sample repository is available inside the
-            VFS under the `sunfish/` directory.
+            You are a code review assistant exploring the Podman-backed workspace.
+            The sunfish sample repository is mounted read-only inside the
+            workspace under the `sunfish/` directory.
 
             Use the available tools to stay grounded:
             - Planning tools help you capture multi-step investigations; keep the
               plan updated as you explore.
-            - VFS tools list directories, read files, and stage edits. Mounted
-              files are read-only; use writes to stage new snapshots.
-            - Python evaluation tools run short scripts with access to staged VFS
-              reads and writes for quick experiments.
+            - Podman tools list directories, read files, and stage edits while
+              also exposing the `shell_execute` command for short container
+              commands (no network access). Mounted files are read-only; use
+              writes to stage new snapshots.
 
             Respond with JSON containing:
             - summary: One paragraph describing your findings so far.
@@ -195,7 +195,7 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         strategy=PlanningStrategy.PLAN_ACT_REFLECT,
     )
     subagents_section = SubagentsSection()
-    vfs_section = VfsToolsSection(
+    podman_section = PodmanToolsSection(
         session=session,
         mounts=(
             HostMount(
@@ -208,7 +208,6 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         ),
         allowed_host_roots=(TEST_REPOSITORIES_ROOT,),
     )
-    asteval_section = AstevalSection(session=session)
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
@@ -222,8 +221,7 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
             guidance_section,
             planning_section,
             subagents_section,
-            vfs_section,
-            asteval_section,
+            podman_section,
             user_turn_section,
         ),
     )
@@ -260,8 +258,8 @@ def _build_intro(override_tag: str) -> str:
     return textwrap.dedent(
         f"""
         Launching example code reviewer agent.
-        - test-repositories/sunfish mounted under virtual path 'sunfish/'.
-        - Tools: planning, subagents, VFS, and Python evaluation.
+        - test-repositories/sunfish mounted inside Podman workspace at 'sunfish/'.
+        - Tools: planning, subagents, and Podman workspace (VFS + shell).
         - Command: 'exit' to quit.
         - Prompt overrides tag: '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
         """

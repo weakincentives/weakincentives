@@ -8,6 +8,9 @@
 - Every session owns an isolated container + overlay at `${cache}/podman/<session>`;
   containers run as `65534:65534`, with network disabled, 1 GiB memory, 1 CPU, and
   `/workspace` as the only writable mount.
+- Host mounts reuse the `HostMount` contract from `specs/VFS_TOOLS.md`; when
+  configured they hydrate `/workspace` before the container starts and seed the
+  `VirtualFileSystem` snapshot so shell and filesystem tooling see the same data.
 - Work delivers in two phases: Phase 1 exposes only `shell_execute`; Phase 2 ports
   the Virtual File System (VFS) surface so filesystem and shell tooling share
   the same Podman workspace.
@@ -90,6 +93,10 @@ Key semantics:
   `specs/VFS_TOOLS.md` (`ListDirectoryParams`, `ReadFileParams`, etc.).
 - Path normalization, ASCII limits, 2,000 result truncation, and 48,000-character
   write budgets all carry over unchanged.
+- Host mounts share the `HostMount` schema; they require explicit
+  `allowed_host_roots`, honor include/exclude globs, enforce byte budgets, seed
+  the `VirtualFileSystem` slice, and hydrate `/workspace` before the first
+  container starts.
 - Handler differences vs. the in-memory VFS:
   - Paths resolve to `/workspace/<segments>` inside the container—no host disk
     access or parent traversal is possible.
@@ -100,8 +107,11 @@ Key semantics:
 
 ## Workspace & Prompt Copy
 
-- Phase 1 leaves `/workspace` empty at start. Host mounts, preload snapshots, or
-  Podman `cp` usage only arrive alongside Phase 2 when the VFS surface lands.
+- `/workspace` starts empty unless host mounts are configured. When mounts are
+  present, Podman copies the hydrated files (subject to glob filters and byte
+  ceilings) into the session's overlay before the first container starts.
+  Subsequent recreations reuse the existing overlay and skip hydration when
+  files already exist so agent edits persist.
 - Prompt section text:
   ```
   Podman Workspace
@@ -113,8 +123,8 @@ Key semantics:
   No network access or privileged operations are available. Do not assume files
   outside `/workspace` exist.
   ```
-- When host mounts are configured (Phase 2), append the rendered mount table just
-  like `VfsToolsSection` so agents know what data is available.
+- When host mounts are configured, append the rendered mount table just like
+  `VfsToolsSection` so agents know what data is available.
 
 ## Eventing, Testing, and Reliability
 

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -38,6 +39,7 @@ from weakincentives.tools import (
     GlobParams,
     GrepMatch,
     GrepParams,
+    HostMount,
     ListDirectoryParams,
     PodmanShellParams,
     PodmanShellResult,
@@ -219,8 +221,11 @@ def _make_section(
     connection_name: str | None = None,
     runner: Callable[..., CompletedProcess[str]] | None = None,
     auto_connect: bool = False,
+    mounts: Sequence[HostMount] = (),
+    allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
 ) -> PodmanToolsSection:
     exec_runner = runner if runner is not None else _FakeCliRunner()
+    allowed_roots = tuple(allowed_host_roots)
     if auto_connect:
         return PodmanToolsSection(
             session=session,
@@ -229,6 +234,8 @@ def _make_section(
             base_environment={"PATH": "/usr/bin"},
             connection_name=connection_name,
             exec_runner=exec_runner,
+            mounts=mounts,
+            allowed_host_roots=allowed_roots,
         )
     return PodmanToolsSection(
         session=session,
@@ -237,9 +244,26 @@ def _make_section(
         base_environment={"PATH": "/usr/bin"},
         connection_name=connection_name,
         exec_runner=exec_runner,
+        mounts=mounts,
+        allowed_host_roots=allowed_roots,
         base_url="ssh://example",
         identity="/tmp/identity",
     )
+
+
+def _setup_host_mount(
+    tmp_path: Path, *, content: str = "hello world"
+) -> tuple[Path, HostMount, Path]:
+    host_root = tmp_path / "host-root"
+    repo = host_root / "sunfish"
+    repo.mkdir(parents=True, exist_ok=True)
+    file_path = repo / "README.md"
+    file_path.write_text(content, encoding="utf-8")
+    mount = HostMount(
+        host_path="sunfish",
+        mount_path=vfs_module.VfsPath(("sunfish",)),
+    )
+    return host_root, mount, file_path
 
 
 @pytest.fixture()
@@ -268,6 +292,145 @@ def test_section_registers_vfs_tool(
 
     tool = find_tool(section, "ls")
     assert tool.description.startswith("List directory entries")
+
+
+def test_host_mount_seeded_into_snapshot(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    host_root, mount, file_path = _setup_host_mount(tmp_path)
+    cache_dir = tmp_path / "cache"
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=cache_dir,
+        mounts=(mount,),
+        allowed_host_roots=(host_root,),
+    )
+
+    snapshot = section.latest_snapshot()
+
+    assert len(snapshot.files) == 1
+    file = snapshot.files[0]
+    assert file.path.segments == ("sunfish", file_path.name)
+    assert file.content == file_path.read_text(encoding="utf-8")
+
+
+def test_host_mount_populates_prompt_copy(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    host_root, mount, _file_path = _setup_host_mount(tmp_path)
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path / "cache",
+        mounts=(mount,),
+        allowed_host_roots=(host_root,),
+    )
+
+    assert "Configured host mounts:" in section.template
+    assert str(host_root / "sunfish") in section.template
+
+
+def test_host_mount_materializes_overlay(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    host_root, mount, file_path = _setup_host_mount(tmp_path)
+    cache_dir = tmp_path / "cache"
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=cache_dir,
+        mounts=(mount,),
+        allowed_host_roots=(host_root,),
+    )
+    handler = find_tool(section, "shell_execute").handler
+    assert handler is not None
+
+    handler(
+        PodmanShellParams(command=("true",)),
+        context=build_tool_context(bus, session),
+    )
+
+    handle = section._workspace_handle
+    assert handle is not None
+    mounted = handle.overlay_path / "sunfish" / file_path.name
+    assert mounted.read_text(encoding="utf-8") == file_path.read_text(encoding="utf-8")
+
+
+def test_host_mount_hydration_skips_existing_overlay(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    host_root, mount, file_path = _setup_host_mount(tmp_path)
+    cache_dir = tmp_path / "cache"
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=cache_dir,
+        mounts=(mount,),
+        allowed_host_roots=(host_root,),
+    )
+    overlay = section._workspace_overlay_path()
+    overlay.mkdir(parents=True, exist_ok=True)
+    placeholder = overlay / "existing.txt"
+    placeholder.write_text("keep", encoding="utf-8")
+
+    section._hydrate_overlay_mounts(overlay)
+
+    mounted = overlay / "sunfish" / file_path.name
+    assert not mounted.exists()
+    assert placeholder.read_text(encoding="utf-8") == "keep"
+
+
+def test_host_mount_hydration_raises_on_write_error(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    host_root, mount, file_path = _setup_host_mount(tmp_path)
+    cache_dir = tmp_path / "cache"
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=cache_dir,
+        mounts=(mount,),
+        allowed_host_roots=(host_root,),
+    )
+    overlay = section._workspace_overlay_path()
+    overlay.mkdir(parents=True, exist_ok=True)
+    target = overlay / "sunfish" / file_path.name
+    original_write_text = Path.write_text
+
+    def _fail_on_target(
+        path: Path,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if path == target:
+            raise OSError("boom")
+        return original_write_text(
+            path,
+            data,
+            encoding=encoding,
+            errors=errors,
+            newline=newline,
+        )
+
+    monkeypatch.setattr(Path, "write_text", _fail_on_target)
+
+    with pytest.raises(ToolValidationError):
+        section._hydrate_overlay_mounts(overlay)
 
 
 def test_section_exposes_new_client(

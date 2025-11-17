@@ -46,6 +46,7 @@ from .vfs import (
     GlobParams,
     GrepMatch,
     GrepParams,
+    HostMount,
     ListDirectoryParams,
     ReadFileParams,
     ReadFileResult,
@@ -406,6 +407,8 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         *,
         session: Session,
         image: str = _DEFAULT_IMAGE,
+        mounts: Sequence[HostMount] = (),
+        allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
         base_url: str | None = None,
         identity: str | os.PathLike[str] | None = None,
         base_environment: Mapping[str, str] | None = None,
@@ -453,6 +456,13 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             else _default_cache_root()
         )
         self._overlay_root.mkdir(parents=True, exist_ok=True)
+        allowed_roots = tuple(
+            vfs_module.normalize_host_root(path) for path in allowed_host_roots
+        )
+        (
+            self._mount_snapshot,
+            self._mount_previews,
+        ) = vfs_module.materialize_host_mounts(mounts, allowed_roots)
         self._clock = clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
@@ -517,10 +527,14 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
         )
+        template = _PODMAN_TEMPLATE
+        mounts_block = vfs_module.render_host_mounts_block(self._mount_previews)
+        if mounts_block:
+            template = f"{_PODMAN_TEMPLATE}\n\n{mounts_block}"
         super().__init__(
             title="Podman Workspace",
             key="podman.shell",
-            template=_PODMAN_TEMPLATE,
+            template=template,
             default_params=_PodmanSectionParams(
                 image=image, workspace_root=_DEFAULT_WORKDIR
             ),
@@ -534,7 +548,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
 
     def _initialize_vfs_state(self, session: Session) -> None:
         session.register_reducer(VirtualFileSystem, replace_latest)
-        session.seed_slice(VirtualFileSystem, (VirtualFileSystem(),))
+        session.seed_slice(VirtualFileSystem, (self._mount_snapshot,))
         session.register_reducer(
             WriteFile,
             vfs_module.make_write_reducer(),
@@ -548,7 +562,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
 
     def latest_snapshot(self) -> VirtualFileSystem:
         snapshot = select_latest(self._session, VirtualFileSystem)
-        return snapshot or VirtualFileSystem()
+        return snapshot or self._mount_snapshot
 
     @staticmethod
     def resolve_connection(
@@ -574,8 +588,9 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
 
     def _create_workspace(self) -> _WorkspaceHandle:
         client = self._client_factory()
-        overlay = self._overlay_root / str(self._session.session_id)
+        overlay = self._workspace_overlay_path()
         overlay.mkdir(parents=True, exist_ok=True)
+        self._hydrate_overlay_mounts(overlay)
         _LOGGER.info(
             "Creating Podman workspace",
             event="podman.workspace.create",
@@ -631,6 +646,31 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             last_used_at=now,
         )
         return _WorkspaceHandle(descriptor=descriptor, overlay_path=overlay)
+
+    def _workspace_overlay_path(self) -> Path:
+        return self._overlay_root / str(self._session.session_id)
+
+    def _hydrate_overlay_mounts(self, overlay: Path) -> None:
+        snapshot = self._mount_snapshot
+        if not snapshot.files:
+            return
+        iterator = overlay.iterdir()
+        try:
+            _ = next(iterator)
+        except StopIteration:
+            pass
+        else:
+            return
+        for file in snapshot.files:
+            host_path = _host_path_for(overlay, file.path)
+            _assert_within_overlay(overlay, host_path)
+            host_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                _ = host_path.write_text(file.content, encoding=file.encoding)
+            except OSError as error:
+                raise ToolValidationError(
+                    "Failed to materialize host mounts inside the Podman workspace."
+                ) from error
 
     def _workspace_env(self) -> dict[str, str]:
         return (
