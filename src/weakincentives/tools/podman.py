@@ -21,6 +21,7 @@ import os
 import posixpath
 import re
 import subprocess  # nosec: B404
+import tempfile
 import threading
 import time
 import weakref
@@ -63,6 +64,7 @@ _DEFAULT_IMAGE: Final[str] = "python:3.12-bookworm"
 _DEFAULT_WORKDIR: Final[str] = "/workspace"
 _DEFAULT_USER: Final[str] = "65534:65534"
 _TMPFS_SIZE: Final[int] = 268_435_456
+_TMPFS_TARGET: Final[str] = tempfile.gettempdir()
 _MAX_STDIO_CHARS: Final[int] = 32 * 1024
 _MAX_COMMAND_LENGTH: Final[int] = 4_096
 _MAX_ENV_LENGTH: Final[int] = 512
@@ -612,7 +614,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             environment=env,
             mounts=[
                 {
-                    "Target": "/tmp",  # nosec: B108
+                    "Target": _TMPFS_TARGET,
                     "Type": "tmpfs",
                     "TmpfsOptions": {"SizeBytes": _TMPFS_SIZE},
                 },

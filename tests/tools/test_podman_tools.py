@@ -749,6 +749,27 @@ def test_resolve_connection_static_handles_missing(
     assert PodmanToolsSection.resolve_connection() is None
 
 
+def test_resolve_connection_static_returns_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resolved = podman_module._PodmanConnectionInfo(
+        base_url="ssh://detected",
+        identity="/tmp/key",
+        connection_name="resolved",
+    )
+    monkeypatch.setattr(
+        podman_module,
+        "_resolve_podman_connection",
+        lambda *, preferred_name=None: resolved,
+    )
+    result = PodmanToolsSection.resolve_connection(connection_name="preferred")
+    assert result == {
+        "base_url": "ssh://detected",
+        "identity": "/tmp/key",
+        "connection_name": "resolved",
+    }
+
+
 def test_section_requires_connection_when_detection_fails(
     monkeypatch: pytest.MonkeyPatch,
     session_and_bus: tuple[Session, InProcessEventBus],
