@@ -35,7 +35,6 @@ from weakincentives.prompt.overrides import (
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
-from weakincentives.tools import SubagentsSection
 from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
 from weakincentives.tools.podman import PodmanSandboxSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
@@ -69,6 +68,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _sunfish_mounts() -> tuple[HostMount, ...]:
+    """Defines the repository mount for the agent's virtual filesystem."""
     return (
         HostMount(
             host_path="sunfish",
@@ -82,6 +82,8 @@ def _sunfish_mounts() -> tuple[HostMount, ...]:
 
 @dataclass(slots=True, frozen=True)
 class ReviewGuidance:
+    """Dataclass for static prompt parameters, like general instructions."""
+
     focus: str = field(
         default=(
             "Identify potential issues, risks, and follow-up questions for the changes "
@@ -106,6 +108,8 @@ class ReviewGuidance:
 
 @dataclass(slots=True, frozen=True)
 class ReviewTurnParams:
+    """Dataclass for dynamic parameters provided at runtime, like the user's request."""
+
     request: str = field(
         metadata={
             "description": "User-provided review task or question to address.",
@@ -115,6 +119,8 @@ class ReviewTurnParams:
 
 @dataclass(slots=True, frozen=True)
 class ReviewResponse:
+    """The structured response we expect from our agent after each turn."""
+
     summary: str
     issues: list[str]
     next_steps: list[str]
@@ -149,12 +155,16 @@ class CodeReviewApp:
             if user_prompt.lower() in {"exit", "quit"}:
                 break
             answer = self._evaluate_turn(user_prompt)
-            print(f"Agent: {answer}")
-            print("Plan snapshot:")
+            print("\n--- Agent Response ---")
+            print(answer)
+            print("\n--- Plan Snapshot ---")
             print(_render_plan_snapshot(self.session))
+            print("-" * 23 + "\n")
+
         print("Goodbye.")
 
     def _evaluate_turn(self, user_prompt: str) -> str:
+        """Runs a single turn of the agent evaluation."""
         response = self.adapter.evaluate(
             self.prompt,
             ReviewTurnParams(request=user_prompt),
@@ -167,7 +177,7 @@ class CodeReviewApp:
 
 
 def main() -> None:
-    """Entry point used by the Codex CLI harness."""
+    """Entry point used by the `weakincentives` CLI harness."""
 
     _configure_logging()
     adapter = build_adapter()
@@ -176,13 +186,15 @@ def main() -> None:
 
 
 def build_adapter() -> ProviderAdapter[ReviewResponse]:
+    """Builds the OpenAI adapter, checking for the required API key."""
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
-    model = os.getenv("OPENAI_MODEL", "gpt-5")
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
 def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
+    """Builds the main prompt for the code review agent."""
     if not TEST_REPOSITORIES_ROOT.exists():
         raise SystemExit(
             f"Expected test repositories under {TEST_REPOSITORIES_ROOT!s},"
@@ -190,6 +202,8 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         )
 
     workspace_section, workspace_overview = _build_workspace_section(session=session)
+
+    # This section provides the main instructions to the agent.
     guidance_section = MarkdownSection[ReviewGuidance](
         title="Code Review Brief",
         template=textwrap.dedent(
@@ -215,16 +229,21 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         default_params=ReviewGuidance(workspace_overview=workspace_overview),
         key="code-review-brief",
     )
+
+    # This section gives the agent planning capabilities.
     planning_section = PlanningToolsSection(
         session=session,
         strategy=PlanningStrategy.PLAN_ACT_REFLECT,
     )
-    subagents_section = SubagentsSection()
+
+    # This section is a placeholder for the user's request in each turn.
     user_turn_section = MarkdownSection[ReviewTurnParams](
         title="Review Request",
         template="${request}",
         key="review-request",
     )
+
+    # The Prompt object combines all sections into a single blueprint.
     return Prompt[ReviewResponse](
         ns="examples/code-review",
         key="code-review-session",
@@ -232,7 +251,6 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         sections=(
             guidance_section,
             planning_section,
-            subagents_section,
             workspace_section,
             user_turn_section,
         ),
@@ -243,6 +261,10 @@ def _build_workspace_section(
     *,
     session: Session,
 ) -> tuple[MarkdownSection[SupportsDataclass], str]:
+    """
+    Builds the appropriate workspace section based on whether a Podman
+    connection is available, demonstrating environment-aware tool selection.
+    """
     mounts = _sunfish_mounts()
     allowed_roots = (TEST_REPOSITORIES_ROOT,)
     connection = PodmanSandboxSection.resolve_connection()
@@ -260,6 +282,8 @@ def _build_workspace_section(
             "without shell access."
         )
         return section, overview
+
+    # If Podman is available, provide the more powerful shell execution tool.
     section = PodmanSandboxSection(
         session=session,
         mounts=mounts,
@@ -286,6 +310,7 @@ def initialize_code_reviewer_runtime(
     LocalPromptOverridesStore,
     str,
 ]:
+    """Initializes all the core components for the agent runtime."""
     store, resolved_tag = _resolve_prompt_overrides(
         overrides_store=overrides_store,
         override_tag=override_tag,
@@ -297,24 +322,31 @@ def initialize_code_reviewer_runtime(
         store.seed_if_necessary(prompt, tag=resolved_tag)
     except PromptOverridesError as exc:  # pragma: no cover - startup validation
         raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
+
+    # Subscribe to events for logging and observability.
+    # This demonstrates how to hook into the agent's lifecycle.
     bus.subscribe(PromptRendered, _print_rendered_prompt)
     bus.subscribe(ToolInvoked, _log_tool_invocation)
     return prompt, session, bus, store, resolved_tag
 
 
 def _build_intro(override_tag: str) -> str:
+    """Builds the introductory message for the REPL."""
     return textwrap.dedent(
         f"""
         Launching example code reviewer agent.
-        - test-repositories/sunfish mounted under virtual path 'sunfish/'.
-        - Tools: planning, subagents, and a filesystem workspace (Podman shell when available).
+        - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
+        - Tools: Planning and a filesystem workspace (with a Podman shell if available).
+        - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
         - Command: 'exit' to quit.
-        - Prompt overrides tag: '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
+
+        Note: Full prompt text and tool calls will be logged to the console for observability.
         """
     ).strip()
 
 
 def _render_plan_snapshot(session: Session) -> str:
+    """Renders the current state of the agent's plan for display."""
     plan = select_latest(session, Plan)
     if plan is None:
         return "No active plan."
@@ -330,15 +362,26 @@ def _render_plan_snapshot(session: Session) -> str:
 
 
 def _render_response_payload(response: PromptResponse[ReviewResponse]) -> str:
+    """Renders the agent's response in a user-friendly format."""
     if response.output is not None:
-        rendered_output = dump(response.output, exclude_none=True)
-        return json.dumps(rendered_output, ensure_ascii=False, indent=2)
+        output = response.output
+        lines = [f"Summary: {output.summary}"]
+        if output.issues:
+            lines.append("Issues:")
+            for issue in output.issues:
+                lines.append(f"- {issue}")
+        if output.next_steps:
+            lines.append("Next Steps:")
+            for step in output.next_steps:
+                lines.append(f"- {step}")
+        return "\n".join(lines)
     if response.text:
         return response.text
     return "(no response from assistant)"
 
 
 def _resolve_override_tag(tag: str | None = None) -> str:
+    """Resolves the prompt override tag from environment or default."""
     candidate = tag or os.getenv(PROMPT_OVERRIDES_TAG_ENV, _DEFAULT_OVERRIDE_TAG)
     normalized = candidate.strip()
     return normalized or _DEFAULT_OVERRIDE_TAG
@@ -349,12 +392,14 @@ def _resolve_prompt_overrides(
     overrides_store: LocalPromptOverridesStore | None,
     override_tag: str | None,
 ) -> tuple[LocalPromptOverridesStore, str]:
+    """Initializes the prompt overrides store."""
     store = overrides_store or LocalPromptOverridesStore()
     resolved_tag = _resolve_override_tag(override_tag)
     return store, resolved_tag
 
 
 def _configure_logging() -> None:
+    """Configures basic logging for the application."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -364,16 +409,18 @@ def _configure_logging() -> None:
 
 
 def _print_rendered_prompt(event: object) -> None:
+    """Event handler that prints the rendered prompt text for observability."""
     prompt_event = cast(PromptRendered, event)
     prompt_label = prompt_event.prompt_name or (
         f"{prompt_event.prompt_ns}:{prompt_event.prompt_key}"
     )
-    print(f"[prompt] Rendered prompt ({prompt_label})")
+    print(f"\n[prompt] Rendered prompt ({prompt_label})")
     print(prompt_event.rendered_prompt)
     print()
 
 
 def _log_tool_invocation(event: object) -> None:
+    """Event handler that logs tool invocations for observability."""
     tool_event = cast(ToolInvoked, event)
     params_repr = _format_for_log(dump(tool_event.params, exclude_none=True))
     result_message = _truncate_for_log(tool_event.result.message or "")
@@ -393,16 +440,18 @@ def _log_tool_invocation(event: object) -> None:
     if payload_repr is not None:
         lines.append(f"  payload: {payload_repr}")
 
-    print("[tool] " + "\n".join(lines))
+    print("\n[tool] " + "\n".join(lines))
 
 
 def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
+    """Truncates a string for concise logging."""
     if len(text) <= limit:
         return text
     return f"{text[: limit - 1]}…"
 
 
 def _format_for_log(payload: object, *, limit: int = _LOG_STRING_LIMIT) -> str:
+    """Formats a payload for concise logging."""
     serializable = _coerce_for_log(payload)
     try:
         rendered = json.dumps(serializable, ensure_ascii=False)
@@ -412,6 +461,7 @@ def _format_for_log(payload: object, *, limit: int = _LOG_STRING_LIMIT) -> str:
 
 
 def _coerce_for_log(payload: object) -> object:
+    """Coerces a payload into a JSON-serializable format."""
     if payload is None or isinstance(payload, (str, int, float, bool)):
         return payload
     if isinstance(payload, Mapping):
