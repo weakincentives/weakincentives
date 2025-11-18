@@ -15,7 +15,9 @@ order to integrate cleanly with the runtime and override system.
 - **Session**: Event-sourced execution trace composed of the `PromptRendered`,
   `ToolInvoked`, and `PromptExecuted` events defined in `specs/EVENTS.md`.
   Sessions are constructed through the reducer rules outlined in
-  `specs/SESSIONS.md`.
+  `specs/SESSIONS.md`. `PromptRendered` events MUST embed the
+  `PromptDescriptor` for the rendered prompt so reducer snapshots can capture
+  the canonical descriptor for downstream validation and override planning.
 - **Prompt override**: Persistent override payloads (`PromptOverride`,
   `SectionOverride`, `ToolOverride`, and associated hashes) defined in
   `specs/PROMPT_OVERRIDES.md`.
@@ -119,6 +121,10 @@ Before applying overrides, the optimizer (or caller) MUST:
 - Planning SHOULD draw conclusions from the `PromptRendered`, `ToolInvoked`, and
   `PromptExecuted` event slices held in each snapshot sequence provided to the
   optimizer.
+- Snapshot sequences inherit the canonical `PromptDescriptor` from the embedded
+  `PromptRendered` event; planners MUST rely on this descriptor when validating
+  or emitting overrides instead of attempting to rehydrate prompt bodies from
+  other sources.
 - Optimizers MAY use additional analytics or scoring helpers, but they MUST NOT
   perform network I/O unless configuration explicitly enables it.
 - Session analysis MUST be idempotent and side-effect free. Reducer-derived
