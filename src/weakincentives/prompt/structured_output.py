@@ -112,26 +112,19 @@ def _extract_json_payload(
             ) from error
 
     stripped = text.strip()
-    if stripped:
-        try:
-            return json.loads(stripped)
-        except json.JSONDecodeError:
-            pass
+    if not stripped:
+        raise OutputParseError(
+            "Assistant message must be a fenced ```json block or standalone JSON payload.",
+            dataclass_type=dataclass_type,
+        )
 
-    decoder = json.JSONDecoder()
-    for index, character in enumerate(text):
-        if character not in "{[":
-            continue
-        try:
-            payload, _ = decoder.raw_decode(text, index)
-        except json.JSONDecodeError:
-            continue
-        return cast(JSONValue, payload)
-
-    raise OutputParseError(
-        "No JSON object or array found in assistant message.",
-        dataclass_type=dataclass_type,
-    )
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError as error:
+        raise OutputParseError(
+            "Assistant message must be a fenced ```json block or standalone JSON payload.",
+            dataclass_type=dataclass_type,
+        ) from error
 
 
 def parse_dataclass_payload(
