@@ -23,14 +23,20 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
+    HexDigest,
     LocalPromptOverridesStore,
+    PromptDescriptor,
+    PromptLike,
+    PromptOverride,
     PromptOverridesError,
+    SectionOverride,
 )
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import Session, select_latest
@@ -42,7 +48,6 @@ from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
 PROMPT_OVERRIDES_TAG_ENV = "CODE_REVIEW_PROMPT_TAG"
-_DEFAULT_OVERRIDE_TAG = "latest"
 SUNFISH_MOUNT_INCLUDE_GLOBS: tuple[str, ...] = (
     "*.md",
     "*.py",
@@ -63,6 +68,7 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
     "**/*.bmp",
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
+_REPOSITORY_INSTRUCTIONS_PATH: tuple[str, ...] = ("repository-instructions",)
 _LOG_STRING_LIMIT = 256
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,6 +113,51 @@ class ReviewGuidance:
 
 
 @dataclass(slots=True, frozen=True)
+class RepositoryOptimizationGuidance:
+    """Static framing for the repository optimization helper prompt."""
+
+    focus: str = field(
+        default=(
+            "Capture language/tooling choices, build commands, and review hazards for "
+            "the sunfish workspace."
+        ),
+        metadata={
+            "description": "High-level objectives for the optimization command.",
+        },
+    )
+    workspace_overview: str = field(
+        default=(
+            "The sunfish repository is mounted read-only; use planning and filesystem "
+            "tools to inspect source files."
+        ),
+        metadata={
+            "description": "Summarizes the current workspace configuration.",
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class RepositoryOptimizationRequest:
+    """User-provided focus for the optimization helper."""
+
+    objective: str = field(
+        default=(
+            "Audit the repository to refresh instructions for future code reviews."
+        ),
+        metadata={
+            "description": "Specific themes the optimizer should emphasize.",
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class RepositoryOptimizationResponse:
+    """Structured output capturing refreshed repository instructions."""
+
+    instructions: str
+
+
+@dataclass(slots=True, frozen=True)
 class ReviewTurnParams:
     """Dataclass for dynamic parameters provided at runtime, like the user's request."""
 
@@ -129,7 +180,13 @@ class ReviewResponse:
 class CodeReviewApp:
     """Owns adapter lifecycle, prompt overrides, and the REPL loop."""
 
-    def __init__(self, adapter: ProviderAdapter[ReviewResponse]) -> None:
+    def __init__(
+        self,
+        adapter: ProviderAdapter[ReviewResponse],
+        *,
+        overrides_store: LocalPromptOverridesStore | None = None,
+        override_tag: str | None = None,
+    ) -> None:
         self.adapter = adapter
         (
             self.prompt,
@@ -137,7 +194,10 @@ class CodeReviewApp:
             self.bus,
             self.overrides_store,
             self.override_tag,
-        ) = initialize_code_reviewer_runtime()
+        ) = initialize_code_reviewer_runtime(
+            overrides_store=overrides_store,
+            override_tag=override_tag,
+        )
 
     def run(self) -> None:
         """Start the interactive review session."""
@@ -152,6 +212,10 @@ class CodeReviewApp:
                 break
             if not user_prompt:
                 break
+            command, _space, remainder = user_prompt.partition(" ")
+            if command.lower() == "optimize":
+                self._handle_optimize_command(remainder.strip())
+                continue
             if user_prompt.lower() in {"exit", "quit"}:
                 break
             answer = self._evaluate_turn(user_prompt)
@@ -174,6 +238,45 @@ class CodeReviewApp:
             overrides_tag=self.override_tag,
         )
         return _render_response_payload(response)
+
+    def _handle_optimize_command(self, focus: str) -> None:
+        """Runs the optimization prompt and persists repository instructions."""
+
+        objective = focus or (
+            "Survey README, docs, and key scripts to refresh repository instructions."
+        )
+        optimize_bus = InProcessEventBus()
+        optimize_session = Session(bus=optimize_bus)
+        optimize_bus.subscribe(PromptRendered, _print_rendered_prompt)
+        optimize_bus.subscribe(ToolInvoked, _log_tool_invocation)
+        optimize_prompt = build_repository_optimization_prompt(session=optimize_session)
+
+        response = self.adapter.evaluate(
+            optimize_prompt,
+            RepositoryOptimizationRequest(objective=objective),
+            bus=optimize_bus,
+            session=optimize_session,
+            overrides_store=self.overrides_store,
+            overrides_tag=self.override_tag,
+        )
+        instructions: str | None = None
+        if isinstance(response.output, RepositoryOptimizationResponse):
+            instructions = response.output.instructions.strip()
+        elif response.text:
+            instructions = response.text.strip()
+
+        if not instructions:
+            print("Optimize command produced no instructions.")
+            return
+
+        save_repository_instructions_override(
+            prompt=self.prompt,
+            overrides_store=self.overrides_store,
+            overrides_tag=self.override_tag,
+            body=instructions,
+        )
+        print("\nRepository instructions persisted for future review turns:\n")
+        print(instructions)
 
 
 def main() -> None:
@@ -230,6 +333,13 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         key="code-review-brief",
     )
 
+    # Repository-specific instructions are empty until `optimize` captures them.
+    repository_instructions_section = MarkdownSection(
+        title="Repository Instructions",
+        template="",
+        key="repository-instructions",
+    )
+
     # This section gives the agent planning capabilities.
     planning_section = PlanningToolsSection(
         session=session,
@@ -250,9 +360,62 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         name="sunfish_code_review_agent",
         sections=(
             guidance_section,
+            repository_instructions_section,
             planning_section,
             workspace_section,
             user_turn_section,
+        ),
+    )
+
+
+def build_repository_optimization_prompt(
+    *,
+    session: Session,
+) -> Prompt[RepositoryOptimizationResponse]:
+    """Constructs the helper prompt used by the optimize command."""
+
+    workspace_section, workspace_overview = _build_workspace_section(session=session)
+
+    guidance_section = MarkdownSection[RepositoryOptimizationGuidance](
+        title="Repository Optimization Brief",
+        template=textwrap.dedent(
+            r"""
+            You are preparing repository-specific review instructions for the
+            `sunfish/` workspace.
+            $workspace_overview Review the README, docs, build scripts, and entry
+            points to surface facts future reviewers must remember.
+
+            ${focus}
+
+            Respond with JSON containing:
+            - instructions: Markdown summary that covers repository purpose,
+              languages, critical files, build/test workflows, and review watchouts.
+            """
+        ).strip(),
+        default_params=RepositoryOptimizationGuidance(
+            workspace_overview=workspace_overview
+        ),
+        key="optimization-brief",
+    )
+    planning_section = PlanningToolsSection(
+        session=session,
+        strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+    )
+    request_section = MarkdownSection[RepositoryOptimizationRequest](
+        title="Optimization Objective",
+        template="${objective}",
+        key="optimization-objective",
+    )
+
+    return Prompt[RepositoryOptimizationResponse](
+        ns="examples/code-review",
+        key="sunfish-repository-optimize",
+        name="sunfish_repository_optimizer",
+        sections=(
+            guidance_section,
+            planning_section,
+            workspace_section,
+            request_section,
         ),
     )
 
@@ -299,6 +462,63 @@ def _build_workspace_section(
     return section, overview
 
 
+def save_repository_instructions_override(
+    *,
+    prompt: Prompt[ReviewResponse],
+    overrides_store: LocalPromptOverridesStore,
+    overrides_tag: str,
+    body: str,
+) -> None:
+    """Persist a repository instructions override for subsequent prompt renders."""
+
+    descriptor = PromptDescriptor.from_prompt(cast(PromptLike, prompt))
+    existing_override = overrides_store.resolve(
+        descriptor=descriptor, tag=overrides_tag
+    )
+
+    sections = dict(existing_override.sections) if existing_override else {}
+    tools = dict(existing_override.tool_overrides) if existing_override else {}
+    section_hash = _lookup_section_hash(descriptor, _REPOSITORY_INSTRUCTIONS_PATH)
+    trimmed_body = body.strip()
+    escaped_body = _escape_template_markers(trimmed_body)
+
+    sections[_REPOSITORY_INSTRUCTIONS_PATH] = SectionOverride(
+        expected_hash=section_hash,
+        body=escaped_body,
+    )
+
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag=overrides_tag,
+        sections=sections,
+        tool_overrides=tools,
+    )
+    overrides_store.upsert(descriptor, override)
+
+
+def _lookup_section_hash(
+    descriptor: PromptDescriptor,
+    path: tuple[str, ...],
+) -> HexDigest:
+    """Finds the hash reference for a section path."""
+
+    for candidate in descriptor.sections:
+        if candidate.path == path:
+            return candidate.content_hash
+    raise PromptOverridesError(
+        f"Section {path!r} not registered in prompt descriptor; cannot override."
+    )
+
+
+def _escape_template_markers(text: str) -> str:
+    """Escapes template markers so overrides render literal Markdown."""
+
+    if not text:
+        return text
+    return text.replace("$", "$$")
+
+
 def initialize_code_reviewer_runtime(
     *,
     overrides_store: LocalPromptOverridesStore | None = None,
@@ -311,12 +531,10 @@ def initialize_code_reviewer_runtime(
     str,
 ]:
     """Initializes all the core components for the agent runtime."""
-    store, resolved_tag = _resolve_prompt_overrides(
-        overrides_store=overrides_store,
-        override_tag=override_tag,
-    )
+    store = overrides_store or LocalPromptOverridesStore()
     bus = InProcessEventBus()
     session = Session(bus=bus)
+    resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
     prompt = build_task_prompt(session=session)
     try:
         store.seed_if_necessary(prompt, tag=resolved_tag)
@@ -338,7 +556,7 @@ def _build_intro(override_tag: str) -> str:
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
         - Tools: Planning and a filesystem workspace (with a Podman shell if available).
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-        - Command: 'exit' to quit.
+        - Commands: 'optimize [focus]' refreshes repository instructions, 'exit' quits.
 
         Note: Full prompt text and tool calls will be logged to the console for observability.
         """
@@ -378,22 +596,21 @@ def _render_response_payload(response: PromptResponse[ReviewResponse]) -> str:
     return "(no response from assistant)"
 
 
-def _resolve_override_tag(tag: str | None = None) -> str:
-    """Resolves the prompt override tag from environment or default."""
-    candidate = tag or os.getenv(PROMPT_OVERRIDES_TAG_ENV, _DEFAULT_OVERRIDE_TAG)
-    normalized = candidate.strip()
-    return normalized or _DEFAULT_OVERRIDE_TAG
-
-
-def _resolve_prompt_overrides(
+def _resolve_override_tag(
+    tag: str | None,
     *,
-    overrides_store: LocalPromptOverridesStore | None,
-    override_tag: str | None,
-) -> tuple[LocalPromptOverridesStore, str]:
-    """Initializes the prompt overrides store."""
-    store = overrides_store or LocalPromptOverridesStore()
-    resolved_tag = _resolve_override_tag(override_tag)
-    return store, resolved_tag
+    session_id: UUID,
+) -> str:
+    """Resolves the prompt override tag from args, environment, or session id."""
+
+    if tag is not None:
+        normalized = tag.strip()
+        if normalized:
+            return normalized
+    env_candidate = os.getenv(PROMPT_OVERRIDES_TAG_ENV, "").strip()
+    if env_candidate:
+        return env_candidate
+    return str(session_id)
 
 
 def _configure_logging() -> None:
