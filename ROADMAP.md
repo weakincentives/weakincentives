@@ -14,18 +14,6 @@
 - Apply GEPA overrides within the current prompt execution flow without reworking the underlying runtime.
 - Benchmark GEPA-driven overrides to confirm quality and cost improvements while guarding against regressions.
 
-### Virtual Filesystem Volume Support
-
-- Replace in-memory file cloning with persistent volume backends that support lightweight snapshots and restores.
-- Expose snapshot lifecycle APIs so callers can capture, diff, and roll back virtual filesystem state between tool invocations.
-- Stress test volume-backed sandboxes to ensure isolation guarantees and measure I/O performance regressions.
-
-### Sandboxed Code Execution
-
-- Provide hardened sandboxes so agents can run generated code with strict CPU, memory, filesystem, and network guardrails.
-- Surface sandbox lifecycle APIs that expose logs, artifacts, and exit metadata without leaking host resources.
-- Add validation suites and stress tests that assert isolation boundaries hold across supported runtimes.
-
 ### Session Durability & Prompt Resumption
 
 - Persist agent session state, including prompt stacks, tool artifacts, and checkpoint metadata, so long-running evaluations survive restarts.
