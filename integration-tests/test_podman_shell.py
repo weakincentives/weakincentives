@@ -27,9 +27,9 @@ from weakincentives.runtime.session import Session
 from weakincentives.tools import (
     EvalParams,
     EvalResult,
+    PodmanSandboxSection,
     PodmanShellParams,
     PodmanShellResult,
-    PodmanToolsSection,
     ReadFileParams,
     ReadFileResult,
     WriteFileParams,
@@ -39,7 +39,7 @@ from weakincentives.tools import (
 @pytest.mark.integration
 @pytest.mark.podman
 def test_shell_execute_creates_files(tmp_path: Path) -> None:
-    connection = PodmanToolsSection.resolve_connection()
+    connection = PodmanSandboxSection.resolve_connection()
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
@@ -47,7 +47,7 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     connection_name = connection.get("connection_name")
-    section = PodmanToolsSection(
+    section = PodmanSandboxSection(
         session=session,
         cache_dir=tmp_path,
     )
@@ -78,14 +78,14 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.podman
 def test_podman_vfs_round_trip(tmp_path: Path) -> None:
-    connection = PodmanToolsSection.resolve_connection()
+    connection = PodmanSandboxSection.resolve_connection()
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
     bus = InProcessEventBus()
     session = Session(bus=bus)
     connection_name = connection.get("connection_name")
-    section = PodmanToolsSection(session=session, cache_dir=tmp_path)
+    section = PodmanSandboxSection(session=session, cache_dir=tmp_path)
     container_name: str | None = None
     try:
         write_tool = find_tool(section, "write_file")
@@ -119,14 +119,14 @@ def test_podman_vfs_round_trip(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.podman
 def test_evaluate_python_writes_file(tmp_path: Path) -> None:
-    connection = PodmanToolsSection.resolve_connection()
+    connection = PodmanSandboxSection.resolve_connection()
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
     bus = InProcessEventBus()
     session = Session(bus=bus)
     connection_name = connection.get("connection_name")
-    section = PodmanToolsSection(session=session, cache_dir=tmp_path)
+    section = PodmanSandboxSection(session=session, cache_dir=tmp_path)
     container_name: str | None = None
     try:
         eval_tool = find_tool(section, "evaluate_python")

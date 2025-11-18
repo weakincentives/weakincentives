@@ -53,9 +53,9 @@ from .subagents import (
 
 if TYPE_CHECKING:
     from .podman import (
+        PodmanSandboxSection,
         PodmanShellParams,
         PodmanShellResult,
-        PodmanToolsSection,
         PodmanWorkspace,
     )
 from .vfs import (
@@ -110,9 +110,9 @@ __all__ = [
     "PlanStep",
     "PlanningStrategy",
     "PlanningToolsSection",
+    "PodmanSandboxSection",
     "PodmanShellParams",
     "PodmanShellResult",
-    "PodmanToolsSection",
     "PodmanWorkspace",
     "ReadFile",
     "ReadFileParams",
@@ -139,7 +139,7 @@ __all__ = [
 _PODMAN_EXPORTS = {
     "PodmanShellParams",
     "PodmanShellResult",
-    "PodmanToolsSection",
+    "PodmanSandboxSection",
     "PodmanWorkspace",
 }
 

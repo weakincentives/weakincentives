@@ -37,7 +37,7 @@ from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
 from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
-from weakincentives.tools.podman import PodmanToolsSection
+from weakincentives.tools.podman import PodmanSandboxSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -245,7 +245,7 @@ def _build_workspace_section(
 ) -> tuple[MarkdownSection[SupportsDataclass], str]:
     mounts = _sunfish_mounts()
     allowed_roots = (TEST_REPOSITORIES_ROOT,)
-    connection = PodmanToolsSection.resolve_connection()
+    connection = PodmanSandboxSection.resolve_connection()
     if connection is None:
         _LOGGER.info(
             "Podman connection unavailable; falling back to VFS tools for the code reviewer example."
@@ -260,7 +260,7 @@ def _build_workspace_section(
             "without shell access."
         )
         return section, overview
-    section = PodmanToolsSection(
+    section = PodmanSandboxSection(
         session=session,
         mounts=mounts,
         allowed_host_roots=allowed_roots,

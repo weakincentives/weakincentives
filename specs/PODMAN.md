@@ -2,7 +2,7 @@
 
 ## Snapshot
 
-- Ships a Podman-native `PodmanToolsSection` under `weakincentives.tools.podman`.
+- Ships a Podman-native `PodmanSandboxSection` under `weakincentives.tools.podman`.
 - Default container image: `python:3.12-bookworm`, started via the Podman REST API
   using `podman.PodmanClient` (extra dependency `weakincentives[podman]`).
 - Every session owns an isolated container + overlay at `${cache}/podman/<session>`;
@@ -11,7 +11,7 @@
 - Host mounts reuse the `HostMount` contract from `specs/VFS_TOOLS.md`; when
   configured they hydrate `/workspace` before the container starts and seed the
   `VirtualFileSystem` snapshot so shell and filesystem tooling see the same data.
-- `PodmanToolsSection` now exposes `evaluate_python` alongside the VFS tools and
+- `PodmanSandboxSection` now exposes `evaluate_python` alongside the VFS tools and
   `shell_execute`, mirroring the ASTEval contract but executing scripts inside
   the container with the real filesystem.
 - Work delivers in two phases: Phase 1 exposes only `shell_execute`; Phase 2 ports
@@ -74,7 +74,7 @@ class PodmanShellResult:
 run_shell_tool = Tool(
     name="shell_execute",
     description="Run a short command inside the Podman workspace.",
-    handler=PodmanToolsSection.run_shell,
+    handler=PodmanSandboxSection.run_shell,
 )
 ```
 

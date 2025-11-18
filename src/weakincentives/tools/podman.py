@@ -509,7 +509,7 @@ def _truncate_eval_stream(value: str) -> str:
     return f"{value[:keep]}{suffix}"
 
 
-class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
+class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     """Prompt section exposing the Podman ``shell_execute`` tool."""
 
     def __init__(
@@ -580,7 +580,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         self._connection_name = connection_name
         self._exec_runner: _ExecRunner = exec_runner or _default_exec_runner
         self._finalizer = weakref.finalize(
-            self, PodmanToolsSection._cleanup_from_finalizer, weakref.ref(self)
+            self, PodmanSandboxSection._cleanup_from_finalizer, weakref.ref(self)
         )
 
         session.register_reducer(PodmanWorkspace, replace_latest)
@@ -1026,7 +1026,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
 
     @staticmethod
     def _cleanup_from_finalizer(
-        section_ref: weakref.ReferenceType[PodmanToolsSection],
+        section_ref: weakref.ReferenceType[PodmanSandboxSection],
     ) -> None:
         section = section_ref()
         if section is not None:
@@ -1110,9 +1110,9 @@ def _format_read_message(path: VfsPath, start: int, end: int) -> str:
 
 
 class _PodmanVfsSuite:
-    """Filesystem tool handlers bound to a :class:`PodmanToolsSection`."""
+    """Filesystem tool handlers bound to a :class:`PodmanSandboxSection`."""
 
-    def __init__(self, *, section: PodmanToolsSection) -> None:
+    def __init__(self, *, section: PodmanSandboxSection) -> None:
         super().__init__()
         self._section = section
 
@@ -1486,7 +1486,7 @@ class _PodmanVfsSuite:
 
 
 class _PodmanEvalSuite:
-    def __init__(self, *, section: PodmanToolsSection) -> None:
+    def __init__(self, *, section: PodmanSandboxSection) -> None:
         super().__init__()
         self._section = section
 
@@ -1556,9 +1556,9 @@ class _PodmanEvalSuite:
 
 
 class _PodmanShellSuite:
-    """Handler collection bound to a :class:`PodmanToolsSection`."""
+    """Handler collection bound to a :class:`PodmanSandboxSection`."""
 
-    def __init__(self, *, section: PodmanToolsSection) -> None:
+    def __init__(self, *, section: PodmanSandboxSection) -> None:
         super().__init__()
         self._section = section
 
@@ -1641,8 +1641,8 @@ class _PodmanShellSuite:
 
 
 __all__ = [
+    "PodmanSandboxSection",
     "PodmanShellParams",
     "PodmanShellResult",
-    "PodmanToolsSection",
     "PodmanWorkspace",
 ]
