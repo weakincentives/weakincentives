@@ -304,7 +304,7 @@ def assert_serialization_round_trip(
     assert isinstance(instance, cls)
 
     payload = dump(instance)
-    restored = parse(cls, payload)
+    restored = parse(cls, payload, coerce=True)
     assert restored == instance
 
 

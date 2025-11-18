@@ -4,7 +4,10 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-_Nothing yet._
+### Serde
+
+- `serde.parse` now defaults to `coerce=False`, requiring callers to opt into
+  implicit conversions by setting `coerce=True`.
 
 ## v0.9.0 - 2025-11-17
 

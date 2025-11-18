@@ -336,12 +336,16 @@ def parse[T](
     data: Mapping[str, object] | object,
     *,
     extra: Literal["ignore", "forbid", "allow"] = "ignore",
-    coerce: bool = True,
+    coerce: bool = False,
     case_insensitive: bool = False,
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
 ) -> T:
-    """Parse a mapping into a dataclass instance."""
+    """Parse a mapping into a dataclass instance.
+
+    Coercion is disabled by default; set ``coerce=True`` to allow implicit
+    conversions such as strings to numbers or enum values.
+    """
 
     if not dataclasses.is_dataclass(cls) or not isinstance(cls, type):
         raise TypeError("parse() requires a dataclass type")

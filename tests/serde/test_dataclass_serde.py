@@ -318,6 +318,7 @@ def test_parse_handles_coercion_aliases_and_normalization() -> None:
         payload,
         aliases={"user_id": "USER"},
         alias_generator=camel,
+        coerce=True,
         case_insensitive=True,
     )
 
@@ -348,7 +349,7 @@ def test_parse_requires_mapping_and_dataclass() -> None:
         parse(User, cast(Mapping[str, object], []))
 
 
-def test_parse_strict_type_errors_when_coercion_disabled() -> None:
+def test_parse_strict_type_errors_by_default() -> None:
     payload = {
         "user_id": USER_UUID,
         "name": "Ada",
@@ -356,7 +357,7 @@ def test_parse_strict_type_errors_when_coercion_disabled() -> None:
         "age": "39",
     }
     with pytest.raises(TypeError) as exc:
-        parse(User, payload, coerce=False)
+        parse(User, payload)
     assert "age: expected int" in str(exc.value)
 
 
@@ -374,6 +375,7 @@ def test_parse_optional_blank_strings_become_none() -> None:
         payload,
         aliases={"user_id": "USER"},
         alias_generator=camel,
+        coerce=True,
         case_insensitive=True,
     )
     assert user.birthday is None
@@ -388,6 +390,7 @@ def test_parse_literal_and_bool_coercion() -> None:
     model = parse(
         LiteralModel,
         {"mode": "manual", "flag": "off", "value": "3.5"},
+        coerce=True,
     )
     assert model.mode == "manual"
     assert model.flag is False
@@ -396,17 +399,17 @@ def test_parse_literal_and_bool_coercion() -> None:
 
 def test_parse_literal_invalid_values() -> None:
     with pytest.raises(ValueError) as exc:
-        parse(LiteralModel, {"mode": "unknown", "flag": True, "value": 1})
+        parse(LiteralModel, {"mode": "unknown", "flag": True, "value": 1}, coerce=True)
     assert "mode: expected one of" in str(exc.value)
     with pytest.raises(TypeError) as exc2:
-        parse(LiteralModel, {"mode": "auto", "flag": "maybe", "value": 1})
+        parse(LiteralModel, {"mode": "auto", "flag": "maybe", "value": 1}, coerce=True)
     assert "flag: Cannot interpret" in str(exc2.value)
 
 
 def test_parse_literal_bool_strings() -> None:
-    result = parse(LiteralBoolModel, {"flag": "true"})
+    result = parse(LiteralBoolModel, {"flag": "true"}, coerce=True)
     assert result.flag is True
-    result_false = parse(LiteralBoolModel, {"flag": "off"})
+    result_false = parse(LiteralBoolModel, {"flag": "off"}, coerce=True)
     assert result_false.flag is False
 
 
@@ -427,6 +430,7 @@ def test_parse_collection_types() -> None:
             "history": ["4", "5", "6"],
             "mapping": {"1": "one", 2: "two"},
         },
+        coerce=True,
     )
     assert model.unique_tags == {"alpha"}
     assert model.scores == (1, 2, 3)
@@ -444,6 +448,7 @@ def test_parse_collection_length_mismatch() -> None:
                 "history": [],
                 "mapping": {},
             },
+            coerce=True,
         )
     assert "scores: expected 3 items" in str(exc.value)
 
@@ -456,6 +461,7 @@ def test_parse_nested_dataclass_error_paths() -> None:
             bad_zip,
             aliases={"user_id": "USER"},
             alias_generator=camel,
+            coerce=True,
             case_insensitive=True,
         )
     assert "home.zip: does not match pattern" in str(exc.value)
@@ -467,6 +473,7 @@ def test_parse_nested_dataclass_error_paths() -> None:
             missing_field,
             aliases={"user_id": "USER"},
             alias_generator=camel,
+            coerce=True,
             case_insensitive=True,
         )
     assert str(exc2.value) == "home: Missing required field: 'street'"
@@ -481,23 +488,23 @@ def test_parse_nested_dataclass_error_paths() -> None:
 )
 def test_parse_union_error_reports_last_branch(payload: dict[str, object]) -> None:
     with pytest.raises(TypeError) as exc:
-        parse(Score, payload)
+        parse(Score, payload, coerce=True)
     assert "value" in str(exc.value)
 
 
 def test_parse_metadata_constraints_and_hooks() -> None:
-    model = parse(HookModel, {"code": "  id-007  ", "amount": "8"})
+    model = parse(HookModel, {"code": "  id-007  ", "amount": "8"}, coerce=True)
     assert model.code == "ID-007-DONE"
     assert model.amount == 4
 
 
 def test_parse_metadata_validator_errors() -> None:
     with pytest.raises(ValueError) as exc:
-        parse(HookModel, {"code": "ID-100", "amount": "3"})
+        parse(HookModel, {"code": "ID-100", "amount": "3"}, coerce=True)
     assert "amount: must be even" in str(exc.value)
 
     with pytest.raises(TypeError) as exc2:
-        parse(HookModel, {"code": "ID-100", "amount": "-4"})
+        parse(HookModel, {"code": "ID-100", "amount": "-4"}, coerce=True)
     assert "amount: must be positive" in str(exc2.value)
 
 
@@ -513,7 +520,7 @@ def test_parse_converter_and_validator_exception_wrapping(
     model_cls: type[Any], payload: dict[str, object], expected_message: str
 ) -> None:
     with pytest.raises(Exception) as exc:
-        parse(model_cls, payload)
+        parse(model_cls, payload, coerce=True)
     assert expected_message in str(exc.value)
 
 
@@ -568,6 +575,7 @@ def test_parse_extra_policies() -> None:
         payload,
         aliases={"user_id": "USER"},
         alias_generator=camel,
+        coerce=True,
         case_insensitive=True,
         extra="allow",
     )
@@ -578,6 +586,7 @@ def test_parse_extra_policies() -> None:
         user_payload(nickname="Ada"),
         aliases={"user_id": "USER"},
         alias_generator=camel,
+        coerce=True,
         case_insensitive=True,
         extra="ignore",
     )
@@ -589,6 +598,7 @@ def test_parse_extra_policies() -> None:
             user_payload(nickname="Ada"),
             aliases={"user_id": "USER"},
             alias_generator=camel,
+            coerce=True,
             case_insensitive=True,
             extra="forbid",
         )
@@ -605,6 +615,7 @@ def test_parse_model_validator_runs() -> None:
             user_payload(AGE="12"),
             aliases={"user_id": "USER"},
             alias_generator=camel,
+            coerce=True,
             case_insensitive=True,
         )
     assert str(exc.value) == "age must be >= 13"
@@ -617,6 +628,7 @@ def test_parse_age_metadata_bounds() -> None:
             user_payload(AGE="-1"),
             aliases={"user_id": "USER"},
             alias_generator=camel,
+            coerce=True,
             case_insensitive=True,
         )
     assert "age: must be >= 0" in str(exc.value)
@@ -627,6 +639,7 @@ def test_parse_age_metadata_bounds() -> None:
             user_payload(AGE="150"),
             aliases={"user_id": "USER"},
             alias_generator=camel,
+            coerce=True,
             case_insensitive=True,
         )
     assert "age: must be <= 130" in str(exc2.value)
@@ -680,6 +693,7 @@ def test_clone_preserves_extras_and_revalidates() -> None:
         payload,
         aliases={"user_id": "USER"},
         alias_generator=camel,
+        coerce=True,
         case_insensitive=True,
         extra="allow",
     )
@@ -704,6 +718,7 @@ def test_dump_serializes_with_aliases_and_computed() -> None:
         user_payload(),
         aliases={"user_id": "USER"},
         alias_generator=camel,
+        coerce=True,
         case_insensitive=True,
     )
     payload = dump(
@@ -923,32 +938,32 @@ def test_schema_invalid_extra_value_and_type_errors() -> None:
 
 def test_parse_length_constraints_enforced() -> None:
     with pytest.raises(ValueError) as exc:
-        parse(LengthModel, {"token": "a"})
+        parse(LengthModel, {"token": "a"}, coerce=True)
     assert "length must be >= 2" in str(exc.value)
 
     with pytest.raises(ValueError) as exc2:
-        parse(LengthModel, {"token": "abcde"})
+        parse(LengthModel, {"token": "abcde"}, coerce=True)
     assert "length must be <= 4" in str(exc2.value)
 
 
 def test_parse_numeric_model_exclusive_bounds() -> None:
     with pytest.raises(ValueError) as exc:
-        parse(NumericModel, {"inclusive": "1", "exclusive": "1"})
+        parse(NumericModel, {"inclusive": "1", "exclusive": "1"}, coerce=True)
     assert "exclusive: must be > 1" in str(exc.value)
 
     with pytest.raises(ValueError) as exc2:
-        parse(NumericModel, {"inclusive": "2", "exclusive": "6"})
+        parse(NumericModel, {"inclusive": "2", "exclusive": "6"}, coerce=True)
     assert "exclusive: must be < 5" in str(exc2.value)
 
     with pytest.raises(ValueError) as exc3:
-        parse(NumericModel, {"inclusive": "0", "exclusive": "3"})
+        parse(NumericModel, {"inclusive": "0", "exclusive": "3"}, coerce=True)
     assert "inclusive: must be >= 1" in str(exc3.value)
 
     with pytest.raises(ValueError) as exc4:
-        parse(NumericModel, {"inclusive": "6", "exclusive": "4"})
+        parse(NumericModel, {"inclusive": "6", "exclusive": "4"}, coerce=True)
     assert "inclusive: must be <= 5" in str(exc4.value)
 
-    model = parse(NumericModel, {"inclusive": "5", "exclusive": "4"})
+    model = parse(NumericModel, {"inclusive": "5", "exclusive": "4"}, coerce=True)
     assert model.inclusive == 5
     assert model.exclusive == 4
 
@@ -1031,7 +1046,7 @@ def test_compiled_regex_and_converter_errors() -> None:
         value: Annotated[int, {"convert": value_error_convert}]
 
     with pytest.raises(ValueError) as exc:
-        parse(ConvertModel, {"value": "1"})
+        parse(ConvertModel, {"value": "1"}, coerce=True)
     assert "value: boom" in str(exc.value)
 
 
@@ -1040,14 +1055,14 @@ def test_object_type_and_union_handling() -> None:
     class ObjectModel:
         payload: Annotated[object, {"strip": True}]
 
-    parsed = parse(ObjectModel, {"payload": "  data  "})
+    parsed = parse(ObjectModel, {"payload": "  data  "}, coerce=True)
     assert parsed.payload == "data"
 
     @dataclass
     class OptionalText:
         token: str | None
 
-    optional = parse(OptionalText, {"token": "   "})
+    optional = parse(OptionalText, {"token": "   "}, coerce=True)
     assert optional.token is None
 
     @dataclass
@@ -1055,7 +1070,7 @@ def test_object_type_and_union_handling() -> None:
         value: int | float
 
     with pytest.raises((TypeError, ValueError)) as exc:
-        parse(NumberUnion, {"value": "abc"})
+        parse(NumberUnion, {"value": "abc"}, coerce=True)
     assert "value:" in str(exc.value)
 
     @dataclass
@@ -1063,7 +1078,7 @@ def test_object_type_and_union_handling() -> None:
         value: int | datetime
 
     with pytest.raises(TypeError) as union_exc:
-        parse(DateUnion, {"value": "not-a-date"})
+        parse(DateUnion, {"value": "not-a-date"}, coerce=True)
     assert "value: unable to coerce" in str(union_exc.value)
 
     class CustomWrapper:
@@ -1164,14 +1179,14 @@ def test_none_branch_and_literal_coercion() -> None:
     class FlagModel:
         flag: bool
 
-    assert parse(FlagModel, {"flag": "true"}).flag is True
+    assert parse(FlagModel, {"flag": "true"}, coerce=True).flag is True
 
     @dataclass
     class LiteralNumber:
         value: Literal[1, 2]
 
     with pytest.raises(ValueError) as exc:
-        parse(LiteralNumber, {"value": "abc"})
+        parse(LiteralNumber, {"value": "abc"}, coerce=True)
     assert "value:" in str(exc.value)
 
 
@@ -1222,28 +1237,34 @@ def test_collection_type_errors_and_conversions() -> None:
         pair: tuple[int, int]
 
     with pytest.raises(TypeError):
-        parse(CollectionErrors, {"items": 1, "unique": [], "pair": [1, 2]})
+        parse(
+            CollectionErrors,
+            {"items": 1, "unique": [], "pair": [1, 2]},
+            coerce=True,
+        )
 
     with pytest.raises(TypeError):
-        parse(CollectionErrors, {"items": [], "unique": 1, "pair": [1, 2]})
+        parse(CollectionErrors, {"items": [], "unique": 1, "pair": [1, 2]}, coerce=True)
 
     with pytest.raises(ValueError):
-        parse(CollectionErrors, {"items": [], "unique": [], "pair": [1]})
+        parse(CollectionErrors, {"items": [], "unique": [], "pair": [1]}, coerce=True)
 
     parsed = parse(
         CollectionErrors,
         {"items": "3", "unique": "4", "pair": ("5", "6")},
+        coerce=True,
     )
     assert parsed.items == [3]
     assert parsed.unique == {4}
     assert parsed.pair == (5, 6)
 
     with pytest.raises(TypeError):
-        parse(CollectionErrors, {"items": [], "unique": [], "pair": 1})
+        parse(CollectionErrors, {"items": [], "unique": [], "pair": 1}, coerce=True)
 
     parsed_iter = parse(
         CollectionErrors,
         {"items": [], "unique": iter([7, 8]), "pair": (1, 2)},
+        coerce=True,
     )
     assert parsed_iter.unique == {7, 8}
 
@@ -1253,7 +1274,7 @@ def test_collection_type_errors_and_conversions() -> None:
         )
 
     with pytest.raises(ValueError):
-        parse(CollectionErrors, {"items": [], "unique": [], "pair": "7"})
+        parse(CollectionErrors, {"items": [], "unique": [], "pair": "7"}, coerce=True)
 
 
 def test_mapping_and_enum_branches() -> None:
@@ -1265,21 +1286,22 @@ def test_mapping_and_enum_branches() -> None:
     parsed = parse(
         MappingEnum,
         {"mapping": {"1": 2}, "color": "GREEN"},
+        coerce=True,
     )
     assert parsed.mapping == {1: "2"}
     assert parsed.color is Color.GREEN
 
-    direct = parse(MappingEnum, {"mapping": {1: "a"}, "color": Color.RED})
+    direct = parse(MappingEnum, {"mapping": {1: "a"}, "color": Color.RED}, coerce=True)
     assert direct.color is Color.RED
 
     with pytest.raises(TypeError):
-        parse(MappingEnum, {"mapping": [], "color": "GREEN"})
+        parse(MappingEnum, {"mapping": [], "color": "GREEN"}, coerce=True)
 
     with pytest.raises(ValueError):
-        parse(MappingEnum, {"mapping": {"1": 2}, "color": "purple"})
+        parse(MappingEnum, {"mapping": {"1": 2}, "color": "purple"}, coerce=True)
 
     with pytest.raises(ValueError):
-        parse(MappingEnum, {"mapping": {"1": 2}, "color": ["GREEN"]})
+        parse(MappingEnum, {"mapping": {"1": 2}, "color": ["GREEN"]}, coerce=True)
 
     with pytest.raises(TypeError):
         parse(
@@ -1294,12 +1316,12 @@ def test_bool_coercion_and_errors() -> None:
     class BoolModel:
         flag: bool
 
-    assert parse(BoolModel, {"flag": True}).flag is True
-    assert parse(BoolModel, {"flag": "true"}).flag is True
-    assert parse(BoolModel, {"flag": 1}).flag is True
+    assert parse(BoolModel, {"flag": True}, coerce=True).flag is True
+    assert parse(BoolModel, {"flag": "true"}, coerce=True).flag is True
+    assert parse(BoolModel, {"flag": 1}, coerce=True).flag is True
 
     with pytest.raises(TypeError):
-        parse(BoolModel, {"flag": "maybe"})
+        parse(BoolModel, {"flag": "maybe"}, coerce=True)
 
     with pytest.raises(TypeError):
         parse(BoolModel, {"flag": "true"}, coerce=False)

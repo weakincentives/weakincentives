@@ -298,7 +298,9 @@ def execute_tool_call(
     tool_result: ToolResult[SupportsToolResult]
     try:
         try:
-            parsed_params = parse(tool.params_type, arguments_mapping, extra="forbid")
+            parsed_params = parse(
+                tool.params_type, arguments_mapping, extra="forbid", coerce=True
+            )
         except (TypeError, ValueError) as error:
             tool_params = cast(
                 SupportsDataclass,

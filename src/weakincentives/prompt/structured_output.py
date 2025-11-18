@@ -153,7 +153,9 @@ def parse_dataclass_payload(
         if not isinstance(payload, Mapping):
             raise TypeError(object_error)
         mapping_payload = cast(Mapping[str, JSONValue], payload)
-        return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
+        return parse_dataclass(
+            dataclass_type, mapping_payload, extra=extra_mode, coerce=True
+        )
 
     if isinstance(payload, Mapping):
         mapping_payload = cast(Mapping[str, JSONValue], payload)
@@ -174,6 +176,7 @@ def parse_dataclass_payload(
             dataclass_type,
             mapping_item,
             extra=extra_mode,
+            coerce=True,
         )
         parsed_items.append(parsed_item)
     return parsed_items
