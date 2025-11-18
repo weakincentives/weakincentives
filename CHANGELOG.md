@@ -4,7 +4,8 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-_Nothing yet._
+- Documented the prompt optimizer contract, introducing retrospective-based
+  planning and validation guidance for override workflows.
 
 ## v0.9.0 - 2025-11-17
 
