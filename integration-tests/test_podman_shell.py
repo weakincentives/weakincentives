@@ -64,8 +64,7 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
         assert result.value is not None
         value = cast(PodmanShellResult, result.value)
         assert "hello" in value.stdout
-        handle = section._workspace_handle
-        assert handle is not None
+        handle = section.ensure_workspace(session)
         container_name = handle.descriptor.container_name
     finally:
         section.close()
@@ -105,8 +104,7 @@ def test_podman_vfs_round_trip(tmp_path: Path) -> None:
         assert result.value is not None
         read_value = cast(ReadFileResult, result.value)
         assert "hello world" in read_value.content
-        handle = section._workspace_handle
-        assert handle is not None
+        handle = section.ensure_workspace(session)
         container_name = handle.descriptor.container_name
     finally:
         section.close()

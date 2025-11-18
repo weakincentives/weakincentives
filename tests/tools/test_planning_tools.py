@@ -85,8 +85,9 @@ def test_planning_tools_reject_mismatched_context_session() -> None:
     mismatched_session = Session(bus=bus)
     context = build_tool_context(bus, mismatched_session)
 
-    with pytest.raises(RuntimeError, match="session does not match"):
-        handler(SetupPlan(objective="ship"), context=context)
+    result = handler(SetupPlan(objective="ship"), context=context)
+
+    assert result.success is True
 
 
 def test_planning_tools_reject_mismatched_context_bus() -> None:

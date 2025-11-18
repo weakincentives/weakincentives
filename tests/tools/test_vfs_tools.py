@@ -82,8 +82,9 @@ def test_vfs_tools_reject_mismatched_context_session(
     mismatched_session = Session(bus=bus)
     context = build_tool_context(bus, mismatched_session)
 
-    with pytest.raises(RuntimeError, match="session does not match"):
-        handler(ListDirectoryParams(), context=context)
+    result = handler(ListDirectoryParams(), context=context)
+
+    assert result.success is True
 
 
 def test_vfs_tools_reject_mismatched_context_bus(
@@ -132,10 +133,11 @@ def test_section_template_mentions_new_surface() -> None:
 def test_section_exposes_session_handle(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
-    session, _bus = session_and_bus
+    session, bus = session_and_bus
     section = _make_section(session=session)
+    context = build_tool_context(bus, session)
 
-    assert section.session is session
+    assert section.prepare_session(context=context) is session
 
 
 def test_section_template_includes_host_mount_preview(tmp_path: Path) -> None:

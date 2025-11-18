@@ -31,13 +31,13 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Protocol, cast, runtime_checkable
+from uuid import UUID
 
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session, replace_latest, select_latest
 from . import vfs as vfs_module
-from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 from .vfs import (
     DeleteEntry,
@@ -63,6 +63,7 @@ _LOGGER: StructuredLogger = get_logger(__name__, context={"component": "tools.po
 _DEFAULT_IMAGE: Final[str] = "python:3.12-bookworm"
 _DEFAULT_WORKDIR: Final[str] = "/workspace"
 _DEFAULT_USER: Final[str] = "65534:65534"
+_PODMAN_INIT_KEY = object()
 _TMPFS_SIZE: Final[int] = 268_435_456
 _TMPFS_TARGET: Final[str] = tempfile.gettempdir()
 _MAX_STDIO_CHARS: Final[int] = 32 * 1024
@@ -421,7 +422,6 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         exec_runner: _ExecRunner | None = None,
         accepts_overrides: bool = False,
     ) -> None:
-        self._session = session
         self._image = image
         env_connection = os.environ.get(_PODMAN_CONNECTION_ENV)
         preferred_connection = connection_name or env_connection
@@ -465,17 +465,16 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             self._mount_snapshot,
             self._mount_previews,
         ) = vfs_module.materialize_host_mounts(mounts, allowed_roots)
+        self._vfs_write_reducer = vfs_module.make_write_reducer()
+        self._vfs_delete_reducer = vfs_module.make_delete_reducer()
         self._clock = clock or (lambda: datetime.now(UTC))
-        self._workspace_handle: _WorkspaceHandle | None = None
+        self._workspace_handles: dict[UUID, _WorkspaceHandle] = {}
         self._lock = threading.RLock()
         self._connection_name = connection_name
         self._exec_runner: _ExecRunner = exec_runner or _default_exec_runner
         self._finalizer = weakref.finalize(
             self, PodmanToolsSection._cleanup_from_finalizer, weakref.ref(self)
         )
-
-        session.register_reducer(PodmanWorkspace, replace_latest)
-        self._initialize_vfs_state(session)
 
         vfs_suite = _PodmanVfsSuite(section=self)
         shell_suite = _PodmanShellSuite(section=self)
@@ -544,26 +543,38 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
-    @property
-    def session(self) -> Session:
-        return self._session
+    def prepare_session(self, *, context: ToolContext) -> Session:
+        session = context.session
+        if not isinstance(session, Session):
+            message = "Podman tools require a concrete Session."
+            raise TypeError(message)
 
-    def _initialize_vfs_state(self, session: Session) -> None:
-        session.register_reducer(VirtualFileSystem, replace_latest)
+        return session.prepare(
+            event_bus=context.event_bus,
+            initializer=self._ensure_session_initialized,
+            key=_PODMAN_INIT_KEY,
+        )
+
+    def _ensure_session_initialized(self, session: Session) -> None:
+        session.register_reducer(data_type=PodmanWorkspace, reducer=replace_latest)
+        self._ensure_vfs_state(session)
+
+    def _ensure_vfs_state(self, session: Session) -> None:
+        session.register_reducer(data_type=VirtualFileSystem, reducer=replace_latest)
         session.seed_slice(VirtualFileSystem, (self._mount_snapshot,))
         session.register_reducer(
-            WriteFile,
-            vfs_module.make_write_reducer(),
+            data_type=WriteFile,
+            reducer=self._vfs_write_reducer,
             slice_type=VirtualFileSystem,
         )
         session.register_reducer(
-            DeleteEntry,
-            vfs_module.make_delete_reducer(),
+            data_type=DeleteEntry,
+            reducer=self._vfs_delete_reducer,
             slice_type=VirtualFileSystem,
         )
 
-    def latest_snapshot(self) -> VirtualFileSystem:
-        snapshot = select_latest(self._session, VirtualFileSystem)
+    def latest_snapshot(self, session: Session) -> VirtualFileSystem:
+        snapshot = select_latest(session, VirtualFileSystem)
         return snapshot or self._mount_snapshot
 
     @staticmethod
@@ -579,18 +590,19 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             "connection_name": resolved.connection_name,
         }
 
-    def _ensure_workspace(self) -> _WorkspaceHandle:
+    def _ensure_workspace(self, session: Session) -> _WorkspaceHandle:
         with self._lock:
-            if self._workspace_handle is not None:
-                return self._workspace_handle
-            handle = self._create_workspace()
-            self._workspace_handle = handle
-            self._session.seed_slice(PodmanWorkspace, (handle.descriptor,))
+            existing = self._workspace_handles.get(session.session_id)
+            if existing is not None:
+                return existing
+            handle = self._create_workspace(session)
+            self._workspace_handles[session.session_id] = handle
+            session.seed_slice(PodmanWorkspace, (handle.descriptor,))
             return handle
 
-    def _create_workspace(self) -> _WorkspaceHandle:
+    def _create_workspace(self, session: Session) -> _WorkspaceHandle:
         client = self._client_factory()
-        overlay = self._workspace_overlay_path()
+        overlay = self._workspace_overlay_path(session)
         overlay.mkdir(parents=True, exist_ok=True)
         self._hydrate_overlay_mounts(overlay)
         _LOGGER.info(
@@ -600,7 +612,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         )
         _ = client.images.pull(self._image)
         env = _normalize_env(dict(self._base_env))
-        name = f"wink-{self._session.session_id}"
+        name = f"wink-{session.session_id}"
         container = client.containers.create(
             image=self._image,
             command=["sleep", "infinity"],
@@ -649,8 +661,8 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         )
         return _WorkspaceHandle(descriptor=descriptor, overlay_path=overlay)
 
-    def _workspace_overlay_path(self) -> Path:
-        return self._overlay_root / str(self._session.session_id)
+    def _workspace_overlay_path(self, session: Session) -> Path:
+        return self._overlay_root / str(session.session_id)
 
     def _hydrate_overlay_mounts(self, overlay: Path) -> None:
         snapshot = self._mount_snapshot
@@ -674,61 +686,80 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
                     "Failed to materialize host mounts inside the Podman workspace."
                 ) from error
 
-    def _workspace_env(self) -> dict[str, str]:
-        return (
-            dict(self._workspace_handle.descriptor.env)
-            if self._workspace_handle
-            else dict(self._base_env)
-        )
+    def _workspace_env(self, handle: _WorkspaceHandle | None) -> dict[str, str]:
+        return dict(handle.descriptor.env) if handle else dict(self._base_env)
 
-    def _touch_workspace(self) -> None:
+    def _touch_workspace(self, session: Session) -> None:
         with self._lock:
-            handle = self._workspace_handle
+            handle = self._workspace_handles.get(session.session_id)
             if handle is None:
                 return
             now = self._clock().astimezone(UTC)
             updated_descriptor = replace(handle.descriptor, last_used_at=now)
-            self._workspace_handle = _WorkspaceHandle(
+            self._workspace_handles[session.session_id] = _WorkspaceHandle(
                 descriptor=updated_descriptor,
                 overlay_path=handle.overlay_path,
             )
-            self._session.seed_slice(PodmanWorkspace, (updated_descriptor,))
+            session.seed_slice(PodmanWorkspace, (updated_descriptor,))
 
-    def _teardown_workspace(self) -> None:
+    def _teardown_workspace(self, session: Session | None = None) -> None:
         with self._lock:
-            handle = self._workspace_handle
-            self._workspace_handle = None
-        if handle is None:
+            if session is None:
+                handles = list(self._workspace_handles.values())
+                self._workspace_handles.clear()
+            else:
+                handle = self._workspace_handles.pop(session.session_id, None)
+                handles = [handle] if handle is not None else []
+        if not handles:
             return
-        try:
-            client = self._client_factory()
-        except Exception:
-            return
-        try:
+        for handle in handles:
+            client: _PodmanClient | None = None
             try:
-                container = client.containers.get(handle.descriptor.container_id)
-            except Exception:
-                return
-            with suppress(Exception):
-                container.stop(timeout=1)
-            with suppress(Exception):
-                container.remove(force=True)
-        finally:
-            with suppress(Exception):
-                client.close()
+                try:
+                    client = self._client_factory()
+                except Exception:
+                    _LOGGER.exception(
+                        "Podman client initialization failed during teardown.",
+                        event="podman_teardown_client_failed",
+                        context={
+                            "session_id": str(session.session_id) if session else None
+                        },
+                    )
+                else:
+                    try:
+                        container = client.containers.get(
+                            handle.descriptor.container_id
+                        )
+                    except Exception:
+                        _LOGGER.exception(
+                            "Unable to locate container for teardown.",
+                            event="podman_teardown_container_missing",
+                            context={"container_id": handle.descriptor.container_id},
+                        )
+                    else:
+                        with suppress(Exception):
+                            container.stop(timeout=1)
+                        with suppress(Exception):
+                            container.remove(force=True)
+            finally:
+                if client is not None:
+                    with suppress(Exception):
+                        client.close()
 
-    def ensure_workspace(self) -> _WorkspaceHandle:
-        return self._ensure_workspace()
+    def ensure_workspace(self, session: Session) -> _WorkspaceHandle:
+        return self._ensure_workspace(session)
 
-    def workspace_environment(self) -> dict[str, str]:
-        return self._workspace_env()
+    def workspace_environment(self, session: Session) -> dict[str, str]:
+        handle = self._workspace_handles.get(session.session_id)
+        return self._workspace_env(handle)
 
-    def touch_workspace(self) -> None:
-        self._touch_workspace()
+    def touch_workspace(self, session: Session) -> None:
+        self._touch_workspace(session)
 
     def run_cli_exec(
         self,
         *,
+        session: Session,
         command: Sequence[str],
         stdin: str | None = None,
         cwd: str | None = None,
@@ -736,8 +767,8 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         timeout: float | None = None,
         capture_output: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        handle = self.ensure_workspace()
-        env = self.workspace_environment()
+        handle = self.ensure_workspace(session)
+        env = self.workspace_environment(session)
         if environment:
             env.update(environment)
 
@@ -764,11 +795,13 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
     def run_python_script(
         self,
         *,
+        session: Session,
         script: str,
         args: Sequence[str],
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return self.run_cli_exec(
+            session=session,
             command=["python3", "-c", script, *args],
             timeout=timeout,
         )
@@ -889,17 +922,16 @@ class _PodmanVfsSuite:
     def list_directory(
         self, params: ListDirectoryParams, *, context: ToolContext
     ) -> ToolResult[tuple[FileInfo, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = vfs_module.normalize_string_path(
             params.path, allow_empty=True, field="path"
         )
-        handle = self._section.ensure_workspace()
+        handle = self._section.ensure_workspace(session)
         host_path = _host_path_for(handle.overlay_path, path)
         _assert_within_overlay(handle.overlay_path, host_path)
         if host_path.exists() and host_path.is_file():
             raise ToolValidationError("Cannot list a file path; provide a directory.")
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         entries = self._build_directory_entries(
             base=path,
             host_path=host_path,
@@ -907,18 +939,17 @@ class _PodmanVfsSuite:
             overlay_root=handle.overlay_path,
         )
         message = vfs_module.format_directory_message(path, entries)
-        self._section.touch_workspace()
+        self._section.touch_workspace(session)
         return ToolResult(message=message, value=tuple(entries))
 
     def read_file(
         self, params: ReadFileParams, *, context: ToolContext
     ) -> ToolResult[ReadFileResult]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = vfs_module.normalize_string_path(params.file_path, field="file_path")
         offset = vfs_module.normalize_offset(params.offset)
         limit = vfs_module.normalize_limit(params.limit)
-        handle = self._section.ensure_workspace()
+        handle = self._section.ensure_workspace(session)
         host_path = _host_path_for(handle.overlay_path, path)
         if not host_path.exists() or not host_path.is_file():
             raise ToolValidationError("File does not exist in the workspace.")
@@ -939,7 +970,7 @@ class _PodmanVfsSuite:
         ]
         formatted = "\n".join(numbered)
         message = _format_read_message(path, start, end)
-        self._section.touch_workspace()
+        self._section.touch_workspace(session)
         return ToolResult(
             message=message,
             value=ReadFileResult(
@@ -954,19 +985,20 @@ class _PodmanVfsSuite:
     def write_file(
         self, params: WriteFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = vfs_module.normalize_string_path(params.file_path, field="file_path")
         content = vfs_module.normalize_content(params.content)
-        handle = self._section.ensure_workspace()
+        handle = self._section.ensure_workspace(session)
         host_path = _host_path_for(handle.overlay_path, path)
         if host_path.exists():
             raise ToolValidationError(
                 "File already exists; use edit_file to modify existing content."
             )
         _assert_within_overlay(handle.overlay_path, host_path)
-        self._write_via_container(path=path, content=content, mode="create")
-        self._section.touch_workspace()
+        self._write_via_container(
+            session=session, path=path, content=content, mode="create"
+        )
+        self._section.touch_workspace(session)
         message = vfs_module.format_write_file_message(path, content, "create")
         return ToolResult(
             message=message,
@@ -976,14 +1008,13 @@ class _PodmanVfsSuite:
     def edit_file(
         self, params: EditFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = vfs_module.normalize_string_path(params.file_path, field="file_path")
         if len(params.old_string) > vfs_module.MAX_WRITE_LENGTH:
             raise ToolValidationError("old_string exceeds the 48,000 character limit.")
         if len(params.new_string) > vfs_module.MAX_WRITE_LENGTH:
             raise ToolValidationError("new_string exceeds the 48,000 character limit.")
-        handle = self._section.ensure_workspace()
+        handle = self._section.ensure_workspace(session)
         host_path = _host_path_for(handle.overlay_path, path)
         if not host_path.exists() or not host_path.is_file():
             raise ToolValidationError("File does not exist in the workspace.")
@@ -1006,8 +1037,10 @@ class _PodmanVfsSuite:
             replacements = 1
             updated = existing.replace(params.old_string, params.new_string, 1)
         normalized = vfs_module.normalize_content(updated)
-        self._write_via_container(path=path, content=normalized, mode="overwrite")
-        self._section.touch_workspace()
+        self._write_via_container(
+            session=session, path=path, content=normalized, mode="overwrite"
+        )
+        self._section.touch_workspace(session)
         message = vfs_module.format_edit_message(path, replacements)
         return ToolResult(
             message=message,
@@ -1017,8 +1050,7 @@ class _PodmanVfsSuite:
     def glob(
         self, params: GlobParams, *, context: ToolContext
     ) -> ToolResult[tuple[GlobMatch, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         base = vfs_module.normalize_string_path(
             params.path, allow_empty=True, field="path"
         )
@@ -1026,11 +1058,11 @@ class _PodmanVfsSuite:
         if not pattern:
             raise ToolValidationError("Pattern must not be empty.")
         _ = vfs_module.ensure_ascii(pattern, "pattern")
-        handle = self._section.ensure_workspace()
+        handle = self._section.ensure_workspace(session)
         host_base = _host_path_for(handle.overlay_path, base)
         _assert_within_overlay(handle.overlay_path, host_base)
         matches: list[GlobMatch] = []
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         for file_path in _iter_workspace_files(host_base):
             try:
                 relative = file_path.relative_to(host_base)
@@ -1056,14 +1088,13 @@ class _PodmanVfsSuite:
                 break
         matches.sort(key=lambda match: match.path.segments)
         message = vfs_module.format_glob_message(base, pattern, matches)
-        self._section.touch_workspace()
+        self._section.touch_workspace(session)
         return ToolResult(message=message, value=tuple(matches))
 
     def grep(
         self, params: GrepParams, *, context: ToolContext
     ) -> ToolResult[tuple[GrepMatch, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         try:
             pattern = re.compile(params.pattern)
         except re.error as error:
@@ -1080,7 +1111,7 @@ class _PodmanVfsSuite:
         glob_pattern = params.glob.strip() if params.glob is not None else None
         if glob_pattern:
             _ = vfs_module.ensure_ascii(glob_pattern, "glob")
-        handle = self._section.ensure_workspace()
+        handle = self._section.ensure_workspace(session)
         host_base = _host_path_for(handle.overlay_path, base_path or VfsPath(()))
         _assert_within_overlay(handle.overlay_path, host_base)
         matches: list[GrepMatch] = []
@@ -1119,18 +1150,17 @@ class _PodmanVfsSuite:
             if len(matches) >= _MAX_MATCH_RESULTS:
                 break
         message = vfs_module.format_grep_message(params.pattern, matches)
-        self._section.touch_workspace()
+        self._section.touch_workspace(session)
         return ToolResult(message=message, value=tuple(matches))
 
     def remove(
         self, params: RemoveParams, *, context: ToolContext
     ) -> ToolResult[DeleteEntry]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = vfs_module.normalize_string_path(params.path, field="path")
         if not path.segments:
             raise ToolValidationError("Cannot remove the workspace root.")
-        handle = self._section.ensure_workspace()
+        handle = self._section.ensure_workspace(session)
         host_path = _host_path_for(handle.overlay_path, path)
         if not host_path.exists():
             raise ToolValidationError("No files matched the provided path.")
@@ -1140,8 +1170,7 @@ class _PodmanVfsSuite:
         args = (_container_path_for(path),)
         try:
             completed = self._section.run_python_script(
-                script=_REMOVE_PATH_SCRIPT,
-                args=args,
+                session=session, script=_REMOVE_PATH_SCRIPT, args=args
             )
         except FileNotFoundError as error:
             raise ToolValidationError(
@@ -1154,7 +1183,7 @@ class _PodmanVfsSuite:
                 or "Removal failed."
             )
             raise ToolValidationError(message)
-        self._section.touch_workspace()
+        self._section.touch_workspace(session)
         message = _format_remove_message(path, removed_entries)
         return ToolResult(
             message=message,
@@ -1255,6 +1284,7 @@ class _PodmanVfsSuite:
     def _write_via_container(
         self,
         *,
+        session: Session,
         path: VfsPath,
         content: str,
         mode: str,
@@ -1263,6 +1293,7 @@ class _PodmanVfsSuite:
         args = (mode, _container_path_for(path), encoded)
         try:
             completed = self._section.run_python_script(
+                session=session,
                 script=_WRITE_FILE_SCRIPT,
                 args=args,
             )
@@ -1287,17 +1318,18 @@ class _PodmanShellSuite:
     def run_shell(
         self, params: PodmanShellParams, *, context: ToolContext
     ) -> ToolResult[PodmanShellResult]:
-        ensure_context_uses_session(context=context, session=self._section.session)
+        session = self._section.prepare_session(context=context)
         command = _normalize_command(params.command)
         cwd = _normalize_cwd(params.cwd)
         env_overrides = _normalize_env(params.env)
         timeout_seconds = _normalize_timeout(params.timeout_seconds)
         if params.stdin:
             _ = _ensure_ascii(params.stdin, field="stdin")
-        _ = self._section.ensure_workspace()
+        _ = self._section.ensure_workspace(session)
 
         return self._run_shell_via_cli(
             params=params,
+            session=session,
             command=command,
             cwd=cwd,
             environment=env_overrides,
@@ -1308,6 +1340,7 @@ class _PodmanShellSuite:
         self,
         *,
         params: PodmanShellParams,
+        session: Session,
         command: tuple[str, ...],
         cwd: str,
         environment: Mapping[str, str],
@@ -1317,6 +1350,7 @@ class _PodmanShellSuite:
         start = time.perf_counter()
         try:
             completed = self._section.run_cli_exec(
+                session=session,
                 command=exec_cmd,
                 stdin=params.stdin if params.stdin else None,
                 cwd=cwd,
@@ -1338,7 +1372,7 @@ class _PodmanShellSuite:
                 "Podman CLI is required to execute commands over SSH connections."
             ) from error
         duration_ms = int((time.perf_counter() - start) * 1_000)
-        self._section.touch_workspace()
+        self._section.touch_workspace(session)
         stdout_text_clean = str(stdout_text or "").rstrip()
         stderr_text_clean = str(stderr_text or "").rstrip()
         if not params.capture_output:

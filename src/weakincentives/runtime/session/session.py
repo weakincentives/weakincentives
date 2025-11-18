@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
@@ -114,6 +114,7 @@ class Session(SessionProtocol):
         self._reducers: dict[SessionSliceType, list[_ReducerRegistration]] = {}
         self._state: dict[SessionSliceType, SessionSlice] = {}
         self._lock = RLock()
+        self._initializers_applied: set[Hashable] = set()
         self._subscriptions_attached = False
         self._attach_to_bus(bus)
 
@@ -204,6 +205,34 @@ class Session(SessionProtocol):
         """Return the event bus backing this session."""
 
         return self._bus
+
+    def prepare(
+        self,
+        *,
+        event_bus: EventBus,
+        initializer: Callable[[Session], None] | None = None,
+        key: Hashable | None = None,
+    ) -> Session:
+        """Validate the event bus and run an initializer once per session."""
+
+        if event_bus is not self._bus:
+            message = (
+                "Session event bus does not match the provided bus; align the "
+                "ToolContext session and bus before invoking tools."
+            )
+            raise RuntimeError(message)
+
+        if initializer is None:
+            return self
+
+        token: Hashable = initializer if key is None else key
+        with self._lock:
+            if token in self._initializers_applied:
+                return self
+            self._initializers_applied.add(token)
+
+        initializer(self)
+        return self
 
     @override
     def snapshot(self) -> SnapshotProtocol:

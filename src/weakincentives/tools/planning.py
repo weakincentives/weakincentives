@@ -30,11 +30,12 @@ from ..runtime.session import (
     replace_latest,
     select_latest,
 )
-from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 
 PlanStatus = Literal["active", "completed", "abandoned"]
 StepStatus = Literal["pending", "in_progress", "blocked", "done"]
+
+_PLANNING_INIT_KEY = object()
 
 
 @dataclass(slots=True, frozen=True)
@@ -313,8 +314,6 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         accepts_overrides: bool = False,
     ) -> None:
         self._strategy = strategy
-        self._session = session
-        self._initialize_session(session)
 
         tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
         super().__init__(
@@ -326,17 +325,45 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
-    @property
-    def session(self) -> Session:
-        return self._session
+    def prepare_session(self, *, context: ToolContext) -> Session:
+        session = context.session
+        if not isinstance(session, Session):
+            message = "Planning tools require a concrete Session."
+            raise TypeError(message)
 
-    def _initialize_session(self, session: Session) -> None:
-        session.register_reducer(Plan, replace_latest)
-        session.register_reducer(SetupPlan, _setup_plan_reducer, slice_type=Plan)
-        session.register_reducer(AddStep, _add_step_reducer, slice_type=Plan)
-        session.register_reducer(UpdateStep, _update_step_reducer, slice_type=Plan)
-        session.register_reducer(MarkStep, _mark_step_reducer, slice_type=Plan)
-        session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
+        return session.prepare(
+            event_bus=context.event_bus,
+            initializer=self._ensure_session_initialized,
+            key=_PLANNING_INIT_KEY,
+        )
+
+    def _ensure_session_initialized(self, session: Session) -> None:
+        session.register_reducer(data_type=Plan, reducer=replace_latest)
+        session.register_reducer(
+            data_type=SetupPlan,
+            reducer=_setup_plan_reducer,
+            slice_type=Plan,
+        )
+        session.register_reducer(
+            data_type=AddStep,
+            reducer=_add_step_reducer,
+            slice_type=Plan,
+        )
+        session.register_reducer(
+            data_type=UpdateStep,
+            reducer=_update_step_reducer,
+            slice_type=Plan,
+        )
+        session.register_reducer(
+            data_type=MarkStep,
+            reducer=_mark_step_reducer,
+            slice_type=Plan,
+        )
+        session.register_reducer(
+            data_type=ClearPlan,
+            reducer=_clear_plan_reducer,
+            slice_type=Plan,
+        )
 
     @override
     def render(self, params: SupportsDataclass | None, depth: int) -> str:
@@ -431,8 +458,7 @@ class _PlanningToolSuite:
     def setup_plan(
         self, params: SetupPlan, *, context: ToolContext
     ) -> ToolResult[SetupPlan]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        _ = self._section.prepare_session(context=context)
         objective = _normalize_required_text(
             params.objective,
             field_name="objective",
@@ -447,9 +473,7 @@ class _PlanningToolSuite:
         return ToolResult(message=message, value=normalized)
 
     def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[AddStep]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        session = self._section.session
+        session = self._section.prepare_session(context=context)
         plan = _require_plan(session)
         _ensure_active(plan, "add steps to")
         normalized_steps = _normalize_new_steps(params.steps)
@@ -466,9 +490,7 @@ class _PlanningToolSuite:
     def update_step(
         self, params: UpdateStep, *, context: ToolContext
     ) -> ToolResult[UpdateStep]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        session = self._section.session
+        session = self._section.prepare_session(context=context)
         plan = _require_plan(session)
         _ensure_active(plan, "update steps in")
         step_id = params.step_id.strip()
@@ -508,9 +530,7 @@ class _PlanningToolSuite:
     def mark_step(
         self, params: MarkStep, *, context: ToolContext
     ) -> ToolResult[MarkStep]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        session = self._section.session
+        session = self._section.prepare_session(context=context)
         plan = _require_plan(session)
         if plan.status == "abandoned":
             message = "Cannot mark steps on an abandoned plan."
@@ -536,9 +556,7 @@ class _PlanningToolSuite:
     def clear_plan(
         self, params: ClearPlan, *, context: ToolContext
     ) -> ToolResult[ClearPlan]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        session = self._section.session
+        session = self._section.prepare_session(context=context)
         plan = _require_plan(session)
         if plan.status == "abandoned":
             message = "Plan already abandoned."
@@ -547,9 +565,7 @@ class _PlanningToolSuite:
 
     def read_plan(self, params: ReadPlan, *, context: ToolContext) -> ToolResult[Plan]:
         del params
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        session = self._section.session
+        session = self._section.prepare_session(context=context)
         plan = select_latest(session, Plan)
         if plan is None:
             message = "No plan is currently initialised."

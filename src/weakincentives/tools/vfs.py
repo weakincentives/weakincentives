@@ -34,7 +34,6 @@ from ..runtime.session import (
     replace_latest,
     select_latest,
 )
-from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 
 FileEncoding = Literal["utf-8"]
@@ -60,6 +59,8 @@ _VFS_SECTION_TEMPLATE: Final[str] = (
     "7. Avoid mirroring large repositories or binary assets—only UTF-8 text up to 48k characters is accepted.\n"
     "8. Use `grep` to search for patterns across files when the workspace grows."
 )
+
+_VFS_INIT_KEY = object()
 
 
 @dataclass(slots=True, frozen=True)
@@ -572,8 +573,8 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         self._mount_snapshot, mount_previews = materialize_host_mounts(
             mounts, allowed_roots
         )
-        self._session = session
-        self._initialize_session(session)
+        self._write_reducer = _make_write_reducer()
+        self._delete_reducer = _make_delete_reducer()
 
         tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
         super().__init__(
@@ -585,26 +586,34 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
-    @property
-    def session(self) -> Session:
-        return self._session
+    def prepare_session(self, *, context: ToolContext) -> Session:
+        session = context.session
+        if not isinstance(session, Session):
+            message = "Virtual filesystem tools require a concrete Session."
+            raise TypeError(message)
 
-    def _initialize_session(self, session: Session) -> None:
-        session.register_reducer(VirtualFileSystem, replace_latest)
+        return session.prepare(
+            event_bus=context.event_bus,
+            initializer=self._ensure_session_initialized,
+            key=_VFS_INIT_KEY,
+        )
+
+    def _ensure_session_initialized(self, session: Session) -> None:
+        session.register_reducer(data_type=VirtualFileSystem, reducer=replace_latest)
         session.seed_slice(VirtualFileSystem, (self._mount_snapshot,))
         session.register_reducer(
-            WriteFile,
-            _make_write_reducer(),
+            data_type=WriteFile,
+            reducer=self._write_reducer,
             slice_type=VirtualFileSystem,
         )
         session.register_reducer(
-            DeleteEntry,
-            _make_delete_reducer(),
+            data_type=DeleteEntry,
+            reducer=self._delete_reducer,
             slice_type=VirtualFileSystem,
         )
 
-    def latest_snapshot(self) -> VirtualFileSystem:
-        snapshot = select_latest(self._session, VirtualFileSystem)
+    def latest_snapshot(self, session: Session) -> VirtualFileSystem:
+        snapshot = select_latest(session, VirtualFileSystem)
         return snapshot or VirtualFileSystem()
 
 
@@ -673,10 +682,9 @@ class _VfsToolSuite:
     def list_directory(
         self, params: ListDirectoryParams, *, context: ToolContext
     ) -> ToolResult[tuple[FileInfo, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = _normalize_string_path(params.path, allow_empty=True, field="path")
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         if _find_file(snapshot.files, path) is not None:
             raise ToolValidationError("Cannot list a file path; provide a directory.")
 
@@ -717,13 +725,12 @@ class _VfsToolSuite:
     def read_file(
         self, params: ReadFileParams, *, context: ToolContext
     ) -> ToolResult[ReadFileResult]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = _normalize_string_path(params.file_path, field="file_path")
         offset = _normalize_offset(params.offset)
         limit = _normalize_limit(params.limit)
 
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         file = _require_file(snapshot.files, path)
         lines = file.content.splitlines()
         total_lines = len(lines)
@@ -748,12 +755,11 @@ class _VfsToolSuite:
     def write_file(
         self, params: WriteFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = _normalize_string_path(params.file_path, field="file_path")
         content = _normalize_content(params.content)
 
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         if _find_file(snapshot.files, path) is not None:
             raise ToolValidationError(
                 "File already exists; use edit_file to modify existing content."
@@ -766,10 +772,9 @@ class _VfsToolSuite:
     def edit_file(
         self, params: EditFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = _normalize_string_path(params.file_path, field="file_path")
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         file = _require_file(snapshot.files, path)
 
         old = params.old_string
@@ -808,15 +813,14 @@ class _VfsToolSuite:
     def glob(
         self, params: GlobParams, *, context: ToolContext
     ) -> ToolResult[tuple[GlobMatch, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         base = _normalize_string_path(params.path, allow_empty=True, field="path")
         pattern = params.pattern.strip()
         if not pattern:
             raise ToolValidationError("Pattern must not be empty.")
         _ensure_ascii(pattern, "pattern")
 
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         matches: list[GlobMatch] = []
         for file in snapshot.files:
             if not _is_path_prefix(file.path.segments, base.segments):
@@ -839,8 +843,7 @@ class _VfsToolSuite:
     def grep(
         self, params: GrepParams, *, context: ToolContext
     ) -> ToolResult[tuple[GrepMatch, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         try:
             pattern = re.compile(params.pattern)
         except re.error as error:
@@ -859,7 +862,7 @@ class _VfsToolSuite:
         if glob_pattern:
             _ensure_ascii(glob_pattern, "glob")
 
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         matches: list[GrepMatch] = []
         for file in snapshot.files:
             if base_path is not None and not _is_path_prefix(
@@ -890,10 +893,9 @@ class _VfsToolSuite:
     def remove(
         self, params: RemoveParams, *, context: ToolContext
     ) -> ToolResult[DeleteEntry]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
+        session = self._section.prepare_session(context=context)
         path = _normalize_string_path(params.path, field="path")
-        snapshot = self._section.latest_snapshot()
+        snapshot = self._section.latest_snapshot(session)
         matches = [
             file
             for file in snapshot.files

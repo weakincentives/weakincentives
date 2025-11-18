@@ -309,7 +309,7 @@ def test_host_mount_seeded_into_snapshot(
         allowed_host_roots=(host_root,),
     )
 
-    snapshot = section.latest_snapshot()
+    snapshot = section.latest_snapshot(session)
 
     assert len(snapshot.files) == 1
     file = snapshot.files[0]
@@ -357,8 +357,7 @@ def test_host_mount_materializes_overlay(
         context=build_tool_context(bus, session),
     )
 
-    handle = section._workspace_handle
-    assert handle is not None
+    handle = section.ensure_workspace(session)
     mounted = handle.overlay_path / "sunfish" / file_path.name
     assert mounted.read_text(encoding="utf-8") == file_path.read_text(encoding="utf-8")
 
@@ -377,7 +376,7 @@ def test_host_mount_hydration_skips_existing_overlay(
         mounts=(mount,),
         allowed_host_roots=(host_root,),
     )
-    overlay = section._workspace_overlay_path()
+    overlay = section._workspace_overlay_path(session)
     overlay.mkdir(parents=True, exist_ok=True)
     placeholder = overlay / "existing.txt"
     placeholder.write_text("keep", encoding="utf-8")
@@ -405,7 +404,7 @@ def test_host_mount_hydration_raises_on_write_error(
         mounts=(mount,),
         allowed_host_roots=(host_root,),
     )
-    overlay = section._workspace_overlay_path()
+    overlay = section._workspace_overlay_path(session)
     overlay.mkdir(parents=True, exist_ok=True)
     target = overlay / "sunfish" / file_path.name
     original_write_text = Path.write_text
@@ -459,15 +458,14 @@ def test_close_stops_and_removes_container(
         PodmanShellParams(command=("true",)),
         context=build_tool_context(bus, session),
     )
-    handle = section._workspace_handle
-    assert handle is not None
+    handle = section.ensure_workspace(session)
     container = client.containers.get(handle.descriptor.container_id)
 
     section.close()
 
     assert container.stop_calls == 1
     assert container.remove_calls == 1
-    assert section._workspace_handle is None
+    assert section._workspace_handles.get(session.session_id) is None
 
 
 def test_close_is_idempotent(
@@ -486,8 +484,7 @@ def test_close_is_idempotent(
         PodmanShellParams(command=("true",)),
         context=build_tool_context(bus, session),
     )
-    handle = section._workspace_handle
-    assert handle is not None
+    handle = section.ensure_workspace(session)
     container = client.containers.get(handle.descriptor.container_id)
 
     section.close()
@@ -857,8 +854,7 @@ def test_shell_execute_runs_commands_and_stores_workspace(
     workspace = session.select_all(PodmanWorkspace)
     assert workspace
     assert workspace[-1].image == "python:3.12-bookworm"
-    handle = section._workspace_handle
-    assert handle is not None
+    _ = section.ensure_workspace(session)
     assert cli_runner.calls[-1][-2:] == ["echo", "hello world"]
 
 
@@ -1002,11 +998,12 @@ def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
     handler = tool.handler
     assert handler is not None
 
-    with pytest.raises(RuntimeError, match="session does not match"):
-        handler(
-            PodmanShellParams(command=("true",)),
-            context=build_tool_context(bus, other_session),
-        )
+    result = handler(
+        PodmanShellParams(command=("true",)),
+        context=build_tool_context(bus, other_session),
+    )
+
+    assert result.success is True
 
 
 def test_shell_execute_cli_fallback(
@@ -1319,7 +1316,20 @@ def test_touch_workspace_handles_missing_handle(
     section = _make_section(
         session=session, client=_FakePodmanClient(), cache_dir=tmp_path
     )
-    section._touch_workspace()
+    section._touch_workspace(session)
+
+
+def test_teardown_workspace_with_session(tmp_path: Path) -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+
+    section.ensure_workspace(session)
+    section._teardown_workspace(session)
+
+    assert section._workspace_handles.get(session.session_id) is None
+    assert client._closed is True
 
 
 def test_readiness_failure_raises(
@@ -1378,7 +1388,7 @@ def test_ls_lists_workspace_files(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     docs = handle.overlay_path / "docs"
     docs.mkdir(parents=True)
     (docs / "README.md").write_text("hello world", encoding="utf-8")
@@ -1401,7 +1411,7 @@ def test_read_file_returns_numbered_lines(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "notes.txt"
     target.write_text("first\nsecond\nthird", encoding="utf-8")
 
@@ -1454,7 +1464,7 @@ def test_edit_file_invokes_cli(
         cache_dir=tmp_path,
         runner=runner,
     )
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_text("hello", encoding="utf-8")
     tool = find_tool(section, "edit_file")
@@ -1479,7 +1489,7 @@ def test_glob_matches_files(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     src = handle.overlay_path / "src"
     src.mkdir()
     (src / "main.py").write_text("print('hi')", encoding="utf-8")
@@ -1502,7 +1512,7 @@ def test_grep_finds_pattern(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "log.txt"
     target.write_text("first\nmatch line\nlast", encoding="utf-8")
     tool = find_tool(section, "grep")
@@ -1529,7 +1539,7 @@ def test_rm_executes_cli(
         cache_dir=tmp_path,
         runner=runner,
     )
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "temp.txt"
     target.write_text("data", encoding="utf-8")
     tool = find_tool(section, "rm")
@@ -1617,7 +1627,7 @@ def test_ls_rejects_file_path(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_text("data", encoding="utf-8")
     tool = find_tool(section, "ls")
@@ -1654,7 +1664,7 @@ def test_read_file_rejects_invalid_encoding(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "binary.bin"
     target.write_bytes(b"\xff")
     tool = find_tool(section, "read_file")
@@ -1680,7 +1690,7 @@ def test_write_file_rejects_existing_file(
         cache_dir=tmp_path,
         runner=runner,
     )
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_text("data", encoding="utf-8")
     tool = find_tool(section, "write_file")
@@ -1759,7 +1769,7 @@ def test_edit_file_rejects_invalid_encoding(
         cache_dir=tmp_path,
         runner=runner,
     )
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_bytes(b"\xff")
     tool = find_tool(section, "edit_file")
@@ -1789,7 +1799,7 @@ def test_edit_file_requires_occurrence(
         cache_dir=tmp_path,
         runner=runner,
     )
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_text("hello", encoding="utf-8")
     tool = find_tool(section, "edit_file")
@@ -1819,7 +1829,7 @@ def test_edit_file_requires_unique_match(
         cache_dir=tmp_path,
         runner=runner,
     )
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_text("foo foo", encoding="utf-8")
     tool = find_tool(section, "edit_file")
@@ -1849,7 +1859,7 @@ def test_edit_file_replace_all_branch(
         cache_dir=tmp_path,
         runner=runner,
     )
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_text("foo foo", encoding="utf-8")
     tool = find_tool(section, "edit_file")
@@ -1892,7 +1902,7 @@ def test_glob_skips_invalid_relative_path(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    outside = section.ensure_workspace().overlay_path.parent / "outside.txt"
+    outside = section.ensure_workspace(session).overlay_path.parent / "outside.txt"
 
     def _fake_iter(_: Path) -> Iterator[Path]:
         yield outside
@@ -1917,7 +1927,7 @@ def test_glob_skips_invalid_composed_path(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_text("data", encoding="utf-8")
 
@@ -1945,7 +1955,7 @@ def test_glob_skips_invalid_file_info(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "file.txt"
     target.write_text("data", encoding="utf-8")
 
@@ -1972,7 +1982,7 @@ def test_glob_honors_result_limit(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     (handle.overlay_path / "first.txt").write_text("a", encoding="utf-8")
     (handle.overlay_path / "second.txt").write_text("b", encoding="utf-8")
     monkeypatch.setattr(podman_module, "_MAX_MATCH_RESULTS", 1)
@@ -2012,7 +2022,7 @@ def test_grep_honors_glob_argument(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     (handle.overlay_path / "main.py").write_text("match", encoding="utf-8")
     tool = find_tool(section, "grep")
     handler = tool.handler
@@ -2033,7 +2043,7 @@ def test_grep_respects_glob_filter(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     (handle.overlay_path / "notes.txt").write_text("match", encoding="utf-8")
     tool = find_tool(section, "grep")
     handler = tool.handler
@@ -2054,7 +2064,7 @@ def test_grep_skips_invalid_relative_path(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    outside = section.ensure_workspace().overlay_path.parent / "outside.txt"
+    outside = section.ensure_workspace(session).overlay_path.parent / "outside.txt"
 
     def _fake_iter(_: Path) -> Iterator[Path]:
         yield outside
@@ -2079,7 +2089,7 @@ def test_grep_skips_invalid_composed_path(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     (handle.overlay_path / "notes.txt").write_text("match", encoding="utf-8")
     monkeypatch.setattr(
         podman_module,
@@ -2105,7 +2115,7 @@ def test_grep_skips_overlay_errors(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     (handle.overlay_path / "main.txt").write_text("match", encoding="utf-8")
 
     original = podman_module._assert_within_overlay
@@ -2137,7 +2147,7 @@ def test_grep_skips_invalid_file_encoding(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "main.txt"
     target.write_text("match", encoding="utf-8")
 
@@ -2164,7 +2174,7 @@ def test_grep_handles_oserror(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "main.txt"
     target.write_text("match", encoding="utf-8")
 
@@ -2191,7 +2201,7 @@ def test_grep_honors_result_limit(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     (handle.overlay_path / "one.txt").write_text("match", encoding="utf-8")
     (handle.overlay_path / "two.txt").write_text("match", encoding="utf-8")
     monkeypatch.setattr(podman_module, "_MAX_MATCH_RESULTS", 1)
@@ -2255,7 +2265,7 @@ def test_remove_handles_cli_errors(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    handle = section.ensure_workspace()
+    handle = section.ensure_workspace(session)
     target = handle.overlay_path / "temp.txt"
     target.write_text("data", encoding="utf-8")
     tool = find_tool(section, "rm")
@@ -2444,7 +2454,9 @@ def test_write_via_container_handles_cli_failures(
 
     monkeypatch.setattr(section, "run_python_script", _raise)
     with pytest.raises(ToolValidationError):
-        suite._write_via_container(path=path, content="data", mode="create")
+        suite._write_via_container(
+            session=session, path=path, content="data", mode="create"
+        )
 
     class _Failed:
         returncode = 1
@@ -2453,7 +2465,9 @@ def test_write_via_container_handles_cli_failures(
 
     monkeypatch.setattr(section, "run_python_script", lambda **_: _Failed())
     with pytest.raises(ToolValidationError):
-        suite._write_via_container(path=path, content="data", mode="create")
+        suite._write_via_container(
+            session=session, path=path, content="data", mode="create"
+        )
 
 
 def test_tools_module_missing_attr_raises() -> None:

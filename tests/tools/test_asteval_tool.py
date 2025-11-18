@@ -128,8 +128,9 @@ def test_asteval_tool_rejects_mismatched_context_session() -> None:
     mismatched_session = Session(bus=bus)
     context = build_tool_context(bus, mismatched_session)
 
-    with pytest.raises(RuntimeError, match="session does not match"):
-        handler(EvalParams(code="1"), context=context)
+    result = handler(EvalParams(code="1"), context=context)
+
+    assert result.success is True
 
 
 def test_asteval_tool_rejects_mismatched_context_bus() -> None:

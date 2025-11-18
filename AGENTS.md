@@ -5,6 +5,9 @@ This handbook is the canonical reference for agents contributing to the
 reviewing work—other entry points (WARP scripts, READMEs, etc.) should defer to
 this document.
 
+When making changes, simplify and reason from first principles rather than
+layering extra indirection.
+
 ## Snapshot
 
 - **Goal**: Build a rigorously tested, design-by-contract oriented platform for

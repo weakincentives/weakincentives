@@ -38,7 +38,6 @@ from ..runtime.session import (
     TypedReducer,
     select_latest,
 )
-from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
@@ -54,6 +53,7 @@ _TIMEOUT_SECONDS: Final[float] = 5.0
 _MISSING_DEPENDENCY_MESSAGE: Final[str] = (
     "Install weakincentives[asteval] to enable the Python evaluation tool."
 )
+_ASTEVAL_INIT_KEY = object()
 
 _SAFE_GLOBALS: Final[Mapping[str, object]] = MappingProxyType(
     {
@@ -544,9 +544,7 @@ class _AstevalToolSuite:
     def run(
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        session = self._section.session
+        session = self._section.prepare_session(context=context)
         code = _normalize_code(params.code)
         reads = _normalize_reads(params.reads)
         writes = _normalize_writes(params.writes)
@@ -776,12 +774,7 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         session: Session,
         accepts_overrides: bool = False,
     ) -> None:
-        self._session = session
-        session.register_reducer(
-            EvalResult,
-            _make_eval_result_reducer(),
-            slice_type=VirtualFileSystem,
-        )
+        self._eval_result_reducer = _make_eval_result_reducer()
         tool_suite = _AstevalToolSuite(section=self)
         tool = Tool[EvalParams, EvalResult](
             name="evaluate_python",
@@ -802,9 +795,24 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
-    @property
-    def session(self) -> Session:
-        return self._session
+    def prepare_session(self, *, context: ToolContext) -> Session:
+        session = context.session
+        if not isinstance(session, Session):
+            message = "Asteval tools require a concrete Session."
+            raise TypeError(message)
+
+        return session.prepare(
+            event_bus=context.event_bus,
+            initializer=self._ensure_session_initialized,
+            key=_ASTEVAL_INIT_KEY,
+        )
+
+    def _ensure_session_initialized(self, session: Session) -> None:
+        session.register_reducer(
+            data_type=EvalResult,
+            reducer=self._eval_result_reducer,
+            slice_type=VirtualFileSystem,
+        )
 
 
 __all__ = [

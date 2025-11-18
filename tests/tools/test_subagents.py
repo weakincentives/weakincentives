@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import time
 from dataclasses import dataclass, is_dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -30,10 +31,13 @@ from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.structured_output import StructuredOutputConfig
-from weakincentives.prompt.tool import ToolContext
+from weakincentives.prompt.tool import ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.protocols import SessionProtocol, SnapshotProtocol
+from weakincentives.tools.asteval import AstevalSection, EvalParams
+from weakincentives.tools.planning import PlanningToolsSection, SetupPlan
+from weakincentives.tools.podman import PodmanToolsSection
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
     SubagentIsolationLevel,
@@ -41,6 +45,7 @@ from weakincentives.tools.subagents import (
     build_dispatch_subagents_tool,
     dispatch_subagents,
 )
+from weakincentives.tools.vfs import ListDirectoryParams, VfsToolsSection
 
 
 @dataclass(slots=True)
@@ -159,8 +164,60 @@ class RecordingAdapter(ProviderAdapter[Any]):
         )
 
 
+class _ToolInvokingAdapter(ProviderAdapter[Any]):
+    def __init__(self, *, tool_name: str, tool_params: SupportsDataclass) -> None:
+        self._tool_name = tool_name
+        self._tool_params = tool_params
+        self.sessions: list[Session] = []
+        self.buses: list[InProcessEventBus] = []
+        self.results: list[ToolResult[SupportsDataclass]] = []
+        self._lock = Lock()
+
+    def evaluate(
+        self,
+        prompt: Prompt[Any],
+        *params: SupportsDataclass,
+        parse_output: bool = True,
+        bus: InProcessEventBus,
+        session: Session | None = None,
+        deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
+    ) -> PromptResponse[Any]:
+        del parse_output, overrides_store, overrides_tag
+        delegation = cast(DelegationParams, params[0])
+        rendered = prompt.render(*params)
+        tool = next(tool for tool in rendered.tools if tool.name == self._tool_name)
+        handler = tool.handler
+        assert handler is not None
+        assert session is not None
+        with self._lock:
+            self.sessions.append(session)
+            self.buses.append(bus)
+        tool_context = ToolContext(
+            prompt=cast(PromptProtocol[Any], prompt),
+            rendered_prompt=rendered,
+            adapter=cast(ProviderAdapterProtocol[Any], self),
+            session=session,
+            event_bus=bus,
+            deadline=deadline,
+        )
+        result = handler(self._tool_params, context=tool_context)
+        with self._lock:
+            self.results.append(result)
+        prompt_name = prompt.name or prompt.key
+        return PromptResponse(
+            prompt_name=prompt_name,
+            text=f"child:{delegation.reason}",
+            output=None,
+            tool_results=(result,),
+        )
+
+
 def _build_parent_prompt(
-    *, deadline: Deadline | None = None
+    *,
+    deadline: Deadline | None = None,
+    extra_sections: tuple[MarkdownSection[Any], ...] = (),
 ) -> tuple[Prompt[ParentOutput], RenderedPrompt[ParentOutput]]:
     section = MarkdownSection[ParentSectionParams](
         title="Parent",
@@ -170,7 +227,7 @@ def _build_parent_prompt(
     prompt = Prompt[ParentOutput](
         ns="tests.subagents",
         key="parent",
-        sections=(section,),
+        sections=(section, *extra_sections),
     )
     rendered = prompt.render(ParentSectionParams(instructions="Document the repo."))
     if deadline is not None:
@@ -607,6 +664,227 @@ def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
     assert result.success is False
     assert result.value is None
     assert "cloning" in result.message.lower()
+
+
+def test_dispatch_subagents_full_isolation_supports_planning_tools() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    planning_section = PlanningToolsSection(session=session)
+    prompt, rendered = _build_parent_prompt(extra_sections=(planning_section,))
+    adapter = _ToolInvokingAdapter(
+        tool_name="planning_setup_plan",
+        tool_params=SetupPlan(objective="Isolated", initial_steps=()),
+    )
+    tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], prompt),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="planning",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("exercise planning tools",),
+            ),
+        )
+    )
+
+    handler = tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert adapter.sessions
+    assert all(child is not session for child in adapter.sessions)
+    assert all(
+        bus is child.event_bus
+        for bus, child in zip(adapter.buses, adapter.sessions, strict=True)
+    )
+
+
+def test_dispatch_subagents_full_isolation_supports_vfs_tools() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    vfs_section = VfsToolsSection(session=session)
+    prompt, rendered = _build_parent_prompt(extra_sections=(vfs_section,))
+    adapter = _ToolInvokingAdapter(
+        tool_name="ls", tool_params=ListDirectoryParams(path=None)
+    )
+    tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], prompt),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="vfs",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("exercise vfs",),
+            ),
+        )
+    )
+
+    handler = tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert adapter.sessions
+    assert all(child is not session for child in adapter.sessions)
+    assert all(
+        bus is child.event_bus
+        for bus, child in zip(adapter.buses, adapter.sessions, strict=True)
+    )
+
+
+def test_dispatch_subagents_full_isolation_supports_asteval() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    asteval_section = AstevalSection(session=session)
+    prompt, rendered = _build_parent_prompt(extra_sections=(asteval_section,))
+    adapter = _ToolInvokingAdapter(
+        tool_name="evaluate_python",
+        tool_params=EvalParams(code="1 + 1"),
+    )
+    tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], prompt),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="asteval",
+                expected_result="",
+                may_delegate_further="no",
+                recap_lines=("exercise asteval",),
+            ),
+        )
+    )
+
+    handler = tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert adapter.sessions
+    assert all(child is not session for child in adapter.sessions)
+    assert all(
+        bus is child.event_bus
+        for bus, child in zip(adapter.buses, adapter.sessions, strict=True)
+    )
+
+
+def test_dispatch_subagents_full_isolation_supports_podman_vfs() -> None:
+    class _FakeContainer:
+        def __init__(self) -> None:
+            self.id = "fake-container"
+
+        def start(self) -> None:
+            return None
+
+        def exec_run(
+            self, *_args: object, **_kwargs: object
+        ) -> tuple[int, tuple[bytes, bytes]]:
+            return 0, (b"", b"")
+
+        def stop(self, _timeout: int | None = None) -> None:
+            return None
+
+        def remove(self, _force: bool = True) -> None:
+            return None
+
+    class _FakeContainers:
+        def __init__(self) -> None:
+            self._last: _FakeContainer | None = None
+
+        def create(self, **_kwargs: object) -> _FakeContainer:
+            self._last = _FakeContainer()
+            return self._last
+
+        def get(self, _identifier: object) -> _FakeContainer:
+            if self._last is None:
+                raise RuntimeError("container missing")
+            return self._last
+
+    class _FakeImages:
+        def pull(self, _image: object) -> None:
+            return None
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.images = _FakeImages()
+            self.containers = _FakeContainers()
+
+        def close(self) -> None:
+            return None
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    with tempfile.TemporaryDirectory() as cache_dir:
+        podman_section = PodmanToolsSection(
+            session=session,
+            base_url="http://podman.invalid",
+            identity=None,
+            cache_dir=cache_dir,
+            client_factory=_FakeClient,
+        )
+        prompt, rendered = _build_parent_prompt(extra_sections=(podman_section,))
+        adapter = _ToolInvokingAdapter(
+            tool_name="ls", tool_params=ListDirectoryParams(path=None)
+        )
+        tool = build_dispatch_subagents_tool(
+            isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+        )
+        context = ToolContext(
+            prompt=cast(PromptProtocol[Any], prompt),
+            rendered_prompt=rendered,
+            adapter=cast(ProviderAdapterProtocol[Any], adapter),
+            session=session,
+            event_bus=bus,
+        )
+        params = DispatchSubagentsParams(
+            delegations=(
+                DelegationParams(
+                    reason="podman",
+                    expected_result="",
+                    may_delegate_further="no",
+                    recap_lines=("exercise podman",),
+                ),
+            )
+        )
+
+        handler = tool.handler
+        assert handler is not None
+        result = handler(params, context=context)
+
+        assert result.success is True
+        assert adapter.sessions
+        assert all(child is not session for child in adapter.sessions)
+        assert all(
+            bus is child.event_bus
+            for bus, child in zip(adapter.buses, adapter.sessions, strict=True)
+        )
+        podman_section.close()
 
 
 def test_build_dispatch_subagents_tool_respects_accepts_overrides() -> None:
