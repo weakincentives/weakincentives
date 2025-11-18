@@ -28,7 +28,19 @@ class SupportsDataclass(Protocol):
     __dataclass_fields__: ClassVar[DataclassFieldMapping]
 
 
+@runtime_checkable
+class ToolRenderableResult(SupportsDataclass, Protocol):
+    """Protocol implemented by tool result payloads providing render()."""
+
+    def render(self) -> str: ...
+
+
 SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass]
 
 
-__all__ = ["DataclassFieldMapping", "SupportsDataclass", "SupportsToolResult"]
+__all__ = [
+    "DataclassFieldMapping",
+    "SupportsDataclass",
+    "SupportsToolResult",
+    "ToolRenderableResult",
+]

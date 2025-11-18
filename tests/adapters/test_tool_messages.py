@@ -32,10 +32,9 @@ def test_serialize_tool_message_overrides_mapping_payload() -> None:
         payload={"group": {"value": 1}},
     )
 
-    decoded = json.loads(serialized)
-    assert decoded["message"] == "ok"
-    assert decoded["success"] is True
-    assert decoded["payload"] == {"group": {"value": 1}}
+    assert serialized == "ok\n\n" + json.dumps(
+        {"group": {"value": 1}}, ensure_ascii=False
+    )
 
 
 def test_serialize_tool_message_overrides_sequence_payload() -> None:
@@ -47,11 +46,13 @@ def test_serialize_tool_message_overrides_sequence_payload() -> None:
         payload=payload,
     )
 
-    decoded = json.loads(serialized)
-    assert decoded["payload"] == [
-        {"answer": "first"},
-        {"answer": "second"},
-    ]
+    assert serialized == "ok\n\n" + json.dumps(
+        [
+            {"answer": "first"},
+            {"answer": "second"},
+        ],
+        ensure_ascii=False,
+    )
 
 
 def test_serialize_tool_message_skips_payload_when_excluded() -> None:
@@ -61,22 +62,18 @@ def test_serialize_tool_message_skips_payload_when_excluded() -> None:
         exclude_value_from_context=True,
     )
 
-    decoded = json.loads(
-        serialize_tool_message(cast(ToolResult[SupportsToolResult], result))
-    )
-    assert decoded == {"message": "ok", "success": True}
+    serialized = serialize_tool_message(cast(ToolResult[SupportsToolResult], result))
+    assert serialized == "ok"
 
 
 def test_serialize_tool_message_skips_override_payload_when_excluded() -> None:
     result = ToolResult(message="ok", value=None, exclude_value_from_context=True)
 
-    decoded = json.loads(
-        serialize_tool_message(
-            cast(ToolResult[SupportsToolResult], result),
-            payload={"answer": "hidden"},
-        )
+    serialized = serialize_tool_message(
+        cast(ToolResult[SupportsToolResult], result),
+        payload={"answer": "hidden"},
     )
-    assert decoded == {"message": "ok", "success": True}
+    assert serialized == "ok"
 
 
 def test_serialize_tool_message_falls_back_to_stringification() -> None:
@@ -86,10 +83,25 @@ def test_serialize_tool_message_falls_back_to_stringification() -> None:
 
     result = ToolResult(message="ok", value=None)
 
-    decoded = json.loads(
-        serialize_tool_message(
-            cast(ToolResult[SupportsToolResult], result),
-            payload=UnknownPayload(),
-        )
+    serialized = serialize_tool_message(
+        cast(ToolResult[SupportsToolResult], result),
+        payload=UnknownPayload(),
     )
-    assert decoded["payload"] == "payload"
+    assert serialized == "ok\n\npayload"
+
+
+def test_serialize_tool_message_without_message() -> None:
+    payload = ToolPayload(answer="value")
+    result = ToolResult(message="", value=payload)
+
+    serialized = serialize_tool_message(cast(ToolResult[SupportsToolResult], result))
+
+    assert serialized == json.dumps({"answer": "value"}, ensure_ascii=False)
+
+
+def test_serialize_tool_message_without_payload_defaults_to_message() -> None:
+    result = ToolResult(message="fallback", value=None)
+
+    serialized = serialize_tool_message(cast(ToolResult[SupportsToolResult], result))
+
+    assert serialized == "fallback"

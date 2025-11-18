@@ -60,6 +60,9 @@ dump(
 - Converts dataclasses recursively, Enums to their values, `datetime`/`date`/`time` to ISO strings, and `UUID`/`Decimal`/`Path`
   objects to strings. Collections recurse and omit `None` values when `exclude_none=True`.
 - When `computed=True`, properties listed in `__computed__` are materialised and serialised with the same alias policy.
+- Tool runtime payloads rely on `dump(..., exclude_none=True)` as the default backing for
+  `Result.render()`, so keeping its output stable ensures telemetry, provider messages,
+  and structured payloads stay in sync.
 
 ### `clone`
 

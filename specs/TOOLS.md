@@ -65,6 +65,32 @@ The runtime focuses on three pillars:
 - `exclude_value_from_context: bool` – when `True`, adapters omit the payload from the
   provider-facing tool message while still returning it out-of-band.
 
+##### Result Rendering Protocol
+
+`ResultT` payloads must satisfy `ToolRenderableResult`, a simple protocol that guarantees
+every result can produce a provider-safe string representation:
+
+```python
+from typing import Protocol
+
+class ToolRenderableResult(Protocol):
+    def render(self) -> str: ...
+```
+
+- `render()` **must** return a string and defaults to serialising the dataclass via
+  `weakincentives.serde.dump(self, exclude_none=True)` and `json.dumps(...)`. Using the
+  shared serde helpers keeps aliases, extras policies, and computed properties aligned with
+  the structured response orchestrators forward to reducers.
+- Tool authors may override `render()` when a friendlier summary helps the LLM reason
+  about the response. For example, a search tool can emit a table-style plaintext view
+  instead of raw JSON.
+- Adapters treat `render()` as the canonical textual body when emitting `role: "tool"`
+  messages, so providing deterministic output avoids confusing deltas between the
+  message and `ToolResult.value`.
+- Instrumentation also records `render()` output; `ToolInvoked` events MUST capture the
+  rendered string alongside the structured payload so reducers and debuggers see identical
+  content to what the provider observed.
+
 #### `Tool`
 
 `Tool[ParamsT, ResultT]` instances describe callable affordances:
@@ -264,7 +290,9 @@ handlers cooperate through a consistent contract so the LLM can recover graceful
 ### Session and Telemetry
 
 - Session reducers must tolerate `ToolResult.value is None` without dropping events.
-- `ToolInvoked` events continue to fire even when tools fail; reducers may track separate
+- `ToolInvoked` events continue to fire even when tools fail; reducers MUST include the
+  corresponding `result.render()` output (or `""` when `value is None`) so downstream
+  observers can reconcile telemetry with provider-visible tool messages. Reducers may track separate
   slices for failures if desired.
 - Consider dedicated failure events in the future, but the `success` flag suffices for the
   current design.

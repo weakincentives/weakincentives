@@ -74,6 +74,7 @@ def make_tool_event(value: int) -> ToolInvoked:
         ToolResult[object],
         ToolResult(message="ok", value=payload),
     )
+    rendered_output = tool_result.render()
     return ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
@@ -83,6 +84,7 @@ def make_tool_event(value: int) -> ToolInvoked:
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=payload,
+        rendered_output=rendered_output,
     )
 
 
@@ -144,15 +146,17 @@ def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) ->
     session, bus = session_factory()
 
     payload = ExamplePayload(value=7)
+    enriched_result = cast(ToolResult[object], ToolResult(message="ok", value=payload))
     enriched_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=7),
-        result=cast(ToolResult[object], ToolResult(message="ok", value=payload)),
+        result=enriched_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=None,
+        rendered_output=enriched_result.render(),
     )
 
     bus.publish(enriched_event)
@@ -287,17 +291,19 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
     session, bus = session_factory()
 
     event = make_tool_event(1)
+    non_dataclass_result = cast(
+        ToolResult[object], ToolResult(message="ok", value="not a dataclass")
+    )
     non_dataclass_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=2),
-        result=cast(
-            ToolResult[object], ToolResult(message="ok", value="not a dataclass")
-        ),
+        result=non_dataclass_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=None,
+        rendered_output=non_dataclass_result.render(),
     )
 
     first_result = bus.publish(event)
@@ -359,6 +365,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         value=None,
+        rendered_output=failure.render(),
     )
     bus.publish(failure_event)
 

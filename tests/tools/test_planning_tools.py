@@ -66,6 +66,7 @@ def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
         session_id=uuid4(),
         created_at=datetime.now(UTC),
         value=value,
+        rendered_output=result.render(),
     )
 
 
@@ -73,6 +74,39 @@ def _make_reducer_context() -> ReducerContext:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     return build_reducer_context(session=session, event_bus=bus)
+
+
+def test_plan_render_helpers() -> None:
+    step = PlanStep(
+        step_id="S001",
+        title="draft",
+        details="write docs",
+        status="pending",
+        notes=("note",),
+    )
+    plan = Plan(objective="ship", status="active", steps=(step,))
+    assert "S001" in step.render()
+    assert "Objective" in plan.render()
+
+
+def test_plan_command_renders() -> None:
+    setup = SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),))
+    add = AddStep(steps=(NewPlanStep(title="refine"),))
+    empty_add = AddStep(steps=())
+    update = UpdateStep(step_id="S001", title="rename")
+    detail_update = UpdateStep(step_id="S002", title=None, details="full")
+    mark = MarkStep(step_id="S001", status="done", note="all set")
+    clear = ClearPlan()
+    read = ReadPlan()
+
+    assert "ship" in setup.render()
+    assert "refine" in add.render()
+    assert "no steps" in empty_add.render()
+    assert "rename" in update.render()
+    assert "full" in detail_update.render()
+    assert "done" in mark.render()
+    assert "Plan cleared" in clear.render()
+    assert "snapshot" in read.render()
 
 
 def test_planning_tools_reject_mismatched_context_session() -> None:

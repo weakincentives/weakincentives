@@ -73,6 +73,13 @@ from weakincentives.runtime.session import (
 from weakincentives.tools import DeadlineExceededError, ToolValidationError
 
 
+def _split_tool_message_content(content: str) -> tuple[str, str | None]:
+    if "\n\n" in content:
+        head, tail = content.split("\n\n", 1)
+        return head, tail or None
+    return content, None
+
+
 @dataclass
 class AdapterHarness:
     """Factory wrapper that builds adapters and exposes recorded requests."""
@@ -203,10 +210,10 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
 
     tool_message = _second_tool_message(requests)
     content_raw = cast(str, tool_message["content"])
-    content = json.loads(content_raw)
-    assert content["message"] == "completed"
-    assert content["success"] is True
-    assert content["payload"] == {"answer": "policies"}
+    message_text, rendered_text = _split_tool_message_content(content_raw)
+    assert message_text == "completed"
+    assert rendered_text is not None
+    assert json.loads(rendered_text) == {"answer": "policies"}
 
 
 def test_adapter_tool_context_receives_deadline(
@@ -392,10 +399,9 @@ def test_adapter_tool_execution_validation_error(
 
     tool_message = _second_tool_message(requests)
     content_raw = cast(str, tool_message["content"])
-    content = json.loads(content_raw)
-    assert content["message"] == "Tool validation failed: invalid query"
-    assert content["success"] is False
-    assert "payload" not in content
+    message_text, rendered_text = _split_tool_message_content(content_raw)
+    assert message_text == "Tool validation failed: invalid query"
+    assert rendered_text is None
 
 
 def test_adapter_tool_execution_rejects_extra_arguments(
@@ -454,10 +460,9 @@ def test_adapter_tool_execution_rejects_extra_arguments(
 
     tool_message = _second_tool_message(requests)
     content_raw = cast(str, tool_message["content"])
-    content = json.loads(content_raw)
-    assert content["success"] is False
-    assert "Extra keys not permitted" in content["message"]
-    assert "payload" not in content
+    message_text, rendered_text = _split_tool_message_content(content_raw)
+    assert "Extra keys not permitted" in message_text
+    assert rendered_text is None
 
 
 def test_adapter_tool_execution_rejects_type_errors(
@@ -519,10 +524,9 @@ def test_adapter_tool_execution_rejects_type_errors(
 
     tool_message = _second_tool_message(requests)
     content_raw = cast(str, tool_message["content"])
-    content = json.loads(content_raw)
-    assert content["success"] is False
-    assert content["message"] == "Tool validation failed: query: value cannot be None"
-    assert "payload" not in content
+    message_text, rendered_text = _split_tool_message_content(content_raw)
+    assert message_text == "Tool validation failed: query: value cannot be None"
+    assert rendered_text is None
 
 
 def test_adapter_tool_execution_unexpected_exception(
@@ -574,10 +578,9 @@ def test_adapter_tool_execution_unexpected_exception(
 
     tool_message = _second_tool_message(requests)
     content_raw = cast(str, tool_message["content"])
-    content = json.loads(content_raw)
-    assert content["message"] == "Tool 'search_notes' execution failed: handler crash"
-    assert content["success"] is False
-    assert "payload" not in content
+    message_text, rendered_text = _split_tool_message_content(content_raw)
+    assert message_text == "Tool 'search_notes' execution failed: handler crash"
+    assert rendered_text is None
 
 
 def test_adapter_tool_execution_rolls_back_session(
@@ -657,7 +660,7 @@ def test_adapter_tool_execution_rolls_back_session(
 
     tool_message = _second_tool_message(requests)
     content_raw = cast(str, tool_message["content"])
-    content = json.loads(content_raw)
-    assert content["message"] == invocation.result.message
-    assert content["success"] is True
-    assert content["payload"] == {"answer": "policies"}
+    message_text, rendered_text = _split_tool_message_content(content_raw)
+    assert message_text == invocation.result.message
+    assert rendered_text is not None
+    assert json.loads(rendered_text) == {"answer": "policies"}

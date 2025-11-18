@@ -139,6 +139,9 @@ class EvalFileRead:
         }
     )
 
+    def render(self) -> str:
+        return f"read {_format_vfs_path(self.path)}"
+
 
 @dataclass(slots=True, frozen=True)
 class EvalFileWrite:
@@ -164,6 +167,10 @@ class EvalFileWrite:
             )
         },
     )
+
+    def render(self) -> str:
+        size = len(self.content)
+        return f"{self.mode} {_format_vfs_path(self.path)} ({size} chars)"
 
 
 @dataclass(slots=True, frozen=True)
@@ -242,6 +249,25 @@ class EvalResult:
         metadata={"description": "File write operations requested by the code."}
     )
 
+    def render(self) -> str:
+        lines: list[str] = ["Python evaluation result:"]
+        if self.value_repr is not None:
+            lines.append(f"Result: {self.value_repr}")
+        lines.append("STDOUT:")
+        lines.append(self.stdout or "<empty>")
+        lines.append("STDERR:")
+        lines.append(self.stderr or "<empty>")
+        if self.reads:
+            lines.append("Reads:")
+            lines.extend(f"- {read.render()}" for read in self.reads)
+        if self.writes:
+            lines.append("Writes:")
+            lines.extend(f"- {write.render()}" for write in self.writes)
+        if self.globals:
+            lines.append("Globals:")
+            lines.extend(f"- {key}={value}" for key, value in self.globals.items())
+        return "\n".join(lines)
+
 
 @dataclass(slots=True, frozen=True)
 class _AstevalSectionParams:
@@ -297,6 +323,10 @@ def _normalize_segments(raw_segments: Iterable[str]) -> tuple[str, ...]:
 
 def _normalize_vfs_path(path: VfsPath) -> VfsPath:
     return VfsPath(_normalize_segments(path.segments))
+
+
+def _format_vfs_path(path: VfsPath) -> str:
+    return "/".join(path.segments) or "/"
 
 
 def _require_file(snapshot: VirtualFileSystem, path: VfsPath) -> VfsFile:

@@ -93,6 +93,7 @@ def invoke_tool(
     handler = tool.handler
     assert handler is not None
     result = handler(params, context=build_tool_context(bus, session))
+    rendered_output = result.render()
     event = ToolInvoked(
         prompt_name="test",
         adapter=GENERIC_ADAPTER_NAME,
@@ -102,6 +103,7 @@ def invoke_tool(
         session_id=getattr(session, "session_id", None),
         created_at=datetime.now(UTC),
         value=cast(SupportsDataclass | None, result.value),
+        rendered_output=rendered_output,
     )
     publish_result = bus.publish(event)
     assert publish_result.ok

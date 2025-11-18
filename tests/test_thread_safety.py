@@ -77,6 +77,7 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
     params = ExampleParams(value=index)
     result_payload = ExampleResult(value=index)
     result = ToolResult(message=f"ok-{index}", value=result_payload)
+    rendered_output = result.render()
     event = ToolInvoked(
         prompt_name="test",
         adapter=UNIT_TEST_ADAPTER_NAME,
@@ -87,6 +88,7 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
         value=result_payload,
+        rendered_output=rendered_output,
     )
     bus.publish(event)
 
@@ -100,6 +102,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
     params = ExampleParams(value=999)
     result_payload = ExampleResult(value=999)
     tool_result = ToolResult(message="ok", value=result_payload)
+    rendered_output = tool_result.render()
     event = ToolInvoked(
         prompt_name="test",
         adapter=UNIT_TEST_ADAPTER_NAME,
@@ -110,6 +113,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
         value=result_payload,
+        rendered_output=rendered_output,
     )
 
     publish_result = bus.publish(event)
