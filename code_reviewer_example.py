@@ -368,12 +368,10 @@ def _render_response_payload(response: PromptResponse[ReviewResponse]) -> str:
         lines = [f"Summary: {output.summary}"]
         if output.issues:
             lines.append("Issues:")
-            for issue in output.issues:
-                lines.append(f"- {issue}")
+            lines.extend(f"- {issue}" for issue in output.issues)
         if output.next_steps:
             lines.append("Next Steps:")
-            for step in output.next_steps:
-                lines.append(f"- {step}")
+            lines.extend(f"- {step}" for step in output.next_steps)
         return "\n".join(lines)
     if response.text:
         return response.text
