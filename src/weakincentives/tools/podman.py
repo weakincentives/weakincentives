@@ -14,12 +14,12 @@
 
 from __future__ import annotations
 
-import base64
 import fnmatch
 import json
 import os
 import posixpath
 import re
+import shutil
 import subprocess  # nosec: B404
 import tempfile
 import threading
@@ -95,27 +95,6 @@ _MISSING_DEPENDENCY_MESSAGE: Final[str] = (
     "Install weakincentives[podman] to enable the Podman tool suite."
 )
 _MAX_MATCH_RESULTS: Final[int] = 2_000
-_WRITE_FILE_SCRIPT: Final[str] = """
-import base64
-import sys
-from pathlib import Path
-
-mode = sys.argv[1]
-target = Path(sys.argv[2])
-payload = base64.b64decode(sys.argv[3])
-content = payload.decode("utf-8")
-target.parent.mkdir(parents=True, exist_ok=True)
-if mode == "create":
-    open_mode = "x"
-elif mode == "overwrite":
-    open_mode = "w"
-elif mode == "append":
-    open_mode = "a"
-else:
-    raise SystemExit(2)
-with target.open(open_mode, encoding="utf-8") as handle:
-    handle.write(content)
-"""
 _REMOVE_PATH_SCRIPT: Final[str] = """
 import shutil
 import sys
@@ -227,6 +206,18 @@ class _PodmanConnectionInfo:
     connection_name: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class _ResolvedHostMount:
+    source_label: str
+    resolved_host: Path
+    mount_path: VfsPath
+    include_glob: tuple[str, ...]
+    exclude_glob: tuple[str, ...]
+    max_bytes: int | None
+    follow_symlinks: bool
+    preview: vfs_module.HostMountPreview
+
+
 def _default_cache_root() -> Path:
     override = os.environ.get(_CACHE_ENV)
     if override:
@@ -287,6 +278,106 @@ def _connection_from_cli(
         identity=candidate.get("Identity"),
         connection_name=candidate.get("Name"),
     )
+
+
+def _resolve_podman_host_mounts(
+    mounts: Sequence[HostMount],
+    allowed_roots: Sequence[Path],
+) -> tuple[tuple[_ResolvedHostMount, ...], tuple[vfs_module.HostMountPreview, ...]]:
+    if not mounts:
+        return (), ()
+    resolved: list[_ResolvedHostMount] = []
+    previews: list[vfs_module.HostMountPreview] = []
+    for mount in mounts:
+        spec = _resolve_single_host_mount(mount, allowed_roots)
+        resolved.append(spec)
+        previews.append(spec.preview)
+    return tuple(resolved), tuple(previews)
+
+
+def _resolve_single_host_mount(
+    mount: HostMount,
+    allowed_roots: Sequence[Path],
+) -> _ResolvedHostMount:
+    host_path = mount.host_path.strip()
+    if not host_path:
+        raise ToolValidationError("Host mount path must not be empty.")
+    vfs_module.ensure_ascii(host_path, "host path")
+    resolved_host = _resolve_host_path(host_path, allowed_roots)
+    include_glob = _normalize_mount_globs(mount.include_glob, "include_glob")
+    exclude_glob = _normalize_mount_globs(mount.exclude_glob, "exclude_glob")
+    mount_path = (
+        vfs_module.normalize_path(mount.mount_path)
+        if mount.mount_path is not None
+        else VfsPath(())
+    )
+    preview_entries = _preview_mount_entries(resolved_host)
+    preview = vfs_module.HostMountPreview(
+        host_path=host_path,
+        resolved_host=resolved_host,
+        mount_path=mount_path,
+        entries=preview_entries,
+        is_directory=resolved_host.is_dir(),
+    )
+    return _ResolvedHostMount(
+        source_label=host_path,
+        resolved_host=resolved_host,
+        mount_path=mount_path,
+        include_glob=include_glob,
+        exclude_glob=exclude_glob,
+        max_bytes=mount.max_bytes,
+        follow_symlinks=mount.follow_symlinks,
+        preview=preview,
+    )
+
+
+def _resolve_host_path(host_path: str, allowed_roots: Sequence[Path]) -> Path:
+    if not allowed_roots:
+        raise ToolValidationError("No allowed host roots configured for mounts.")
+    for root in allowed_roots:
+        candidate = (root / host_path).expanduser().resolve()
+        try:
+            _ = candidate.relative_to(root)
+        except ValueError:
+            continue
+        if candidate.exists():
+            return candidate
+    raise ToolValidationError("Host path is outside the allowed roots or missing.")
+
+
+def _normalize_mount_globs(patterns: Sequence[str], field: str) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for pattern in patterns:
+        stripped = pattern.strip()
+        if not stripped:
+            continue
+        vfs_module.ensure_ascii(stripped, field)
+        normalized.append(stripped)
+    return tuple(normalized)
+
+
+def _preview_mount_entries(root: Path) -> tuple[str, ...]:
+    if root.is_file():
+        return (root.name,)
+    try:
+        children = sorted(root.iterdir(), key=lambda path: path.name.lower())
+    except OSError as error:
+        raise ToolValidationError(f"Failed to inspect host mount {root}.") from error
+    labels: list[str] = []
+    for child in children:
+        suffix = "/" if child.is_dir() else ""
+        labels.append(f"{child.name}{suffix}")
+    return tuple(labels)
+
+
+def _iter_host_mount_files(root: Path, follow_symlinks: bool) -> Iterator[Path]:
+    if root.is_file():
+        yield root
+        return
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=follow_symlinks):
+        current = Path(dirpath)
+        for name in filenames:
+            yield current / name
 
 
 def _default_exec_runner(
@@ -479,9 +570,10 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             vfs_module.normalize_host_root(path) for path in allowed_host_roots
         )
         (
-            self._mount_snapshot,
+            self._resolved_mounts,
             self._mount_previews,
-        ) = vfs_module.materialize_host_mounts(mounts, allowed_roots)
+        ) = _resolve_podman_host_mounts(mounts, allowed_roots)
+        self._mount_snapshot = VirtualFileSystem()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
@@ -685,8 +777,7 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         return self._overlay_root / str(self._session.session_id)
 
     def _hydrate_overlay_mounts(self, overlay: Path) -> None:
-        snapshot = self._mount_snapshot
-        if not snapshot.files:
+        if not self._resolved_mounts:
             return
         iterator = overlay.iterdir()
         try:
@@ -695,16 +786,8 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             pass
         else:
             return
-        for file in snapshot.files:
-            host_path = _host_path_for(overlay, file.path)
-            _assert_within_overlay(overlay, host_path)
-            host_path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                _ = host_path.write_text(file.content, encoding=file.encoding)
-            except OSError as error:
-                raise ToolValidationError(
-                    "Failed to materialize host mounts inside the Podman workspace."
-                ) from error
+        for mount in self._resolved_mounts:
+            self._copy_mount_into_overlay(overlay=overlay, mount=mount)
 
     def _workspace_env(self) -> dict[str, str]:
         return (
@@ -712,6 +795,53 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             if self._workspace_handle
             else dict(self._base_env)
         )
+
+    def _copy_mount_into_overlay(
+        self,
+        *,
+        overlay: Path,
+        mount: _ResolvedHostMount,
+    ) -> None:
+        base_target = _host_path_for(overlay, mount.mount_path)
+        consumed_bytes = 0
+        source = mount.resolved_host
+        for file_path in _iter_host_mount_files(source, mount.follow_symlinks):
+            relative = (
+                Path(file_path.name)
+                if source.is_file()
+                else file_path.relative_to(source)
+            )
+            relative_label = relative.as_posix()
+            if mount.include_glob and not any(
+                fnmatch.fnmatchcase(relative_label, pattern)
+                for pattern in mount.include_glob
+            ):
+                continue
+            if any(
+                fnmatch.fnmatchcase(relative_label, pattern)
+                for pattern in mount.exclude_glob
+            ):
+                continue
+            target = base_target / relative
+            _assert_within_overlay(overlay, target)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                size = file_path.stat().st_size
+            except OSError as error:
+                raise ToolValidationError(
+                    f"Failed to stat mounted file {file_path}."
+                ) from error
+            if mount.max_bytes is not None and consumed_bytes + size > mount.max_bytes:
+                raise ToolValidationError(
+                    "Host mount exceeded the configured byte budget."
+                )
+            consumed_bytes += size
+            try:
+                _ = shutil.copy2(file_path, target)
+            except OSError as error:
+                raise ToolValidationError(
+                    "Failed to materialize host mounts inside the Podman workspace."
+                ) from error
 
     def _touch_workspace(self) -> None:
         with self._lock:
@@ -793,6 +923,25 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
             timeout=timeout,
         )
 
+    def run_cli_cp(
+        self,
+        *,
+        source: str,
+        destination: str,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        cmd: list[str] = ["podman"]
+        if self._connection_name:
+            cmd.extend(["--connection", self._connection_name])
+        cmd.extend(["cp", source, destination])
+        runner = self._exec_runner
+        return runner(
+            cmd,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+
     def run_python_script(
         self,
         *,
@@ -812,17 +961,47 @@ class PodmanToolsSection(MarkdownSection[_PodmanSectionParams]):
         content: str,
         mode: str,
     ) -> None:
-        encoded = _encode_content(content)
-        args = (mode, _container_path_for(path), encoded)
+        handle = self.ensure_workspace()
+        host_path = _host_path_for(handle.overlay_path, path)
+        payload = content
+        if mode == "append" and host_path.exists():
+            try:
+                existing = host_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError as error:
+                raise ToolValidationError("File is not valid UTF-8.") from error
+            except OSError as error:
+                raise ToolValidationError("Failed to read existing file.") from error
+            payload = f"{existing}{content}"
+        container_path = _container_path_for(path)
+        parent = posixpath.dirname(container_path)
+        if parent and parent != "/":
+            mkdir_result = self.run_cli_exec(
+                command=["mkdir", "-p", parent],
+                cwd="/",
+            )
+            if mkdir_result.returncode != 0:
+                message = (
+                    mkdir_result.stderr.strip()
+                    or mkdir_result.stdout.strip()
+                    or "Failed to create target directory."
+                )
+                raise ToolValidationError(message)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
+            _ = tmp.write(payload)
+            temp_path = tmp.name
+        destination = f"{handle.descriptor.container_name}:{container_path}"
         try:
-            completed = self.run_python_script(
-                script=_WRITE_FILE_SCRIPT,
-                args=args,
+            completed = self.run_cli_cp(
+                source=temp_path,
+                destination=destination,
             )
         except FileNotFoundError as error:
             raise ToolValidationError(
                 "Podman CLI is required to execute filesystem commands."
             ) from error
+        finally:
+            with suppress(OSError):
+                Path(temp_path).unlink()
         if completed.returncode != 0:
             message = (
                 completed.stderr.strip() or completed.stdout.strip() or "Write failed."
@@ -865,11 +1044,6 @@ def _container_path_for(path: VfsPath) -> str:
     if not path.segments:
         return _DEFAULT_WORKDIR
     return posixpath.join(_DEFAULT_WORKDIR, *path.segments)
-
-
-def _encode_content(content: str) -> str:
-    payload = base64.b64encode(content.encode("utf-8"))
-    return payload.decode("ascii")
 
 
 def _assert_within_overlay(root: Path, candidate: Path) -> None:

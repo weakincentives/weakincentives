@@ -271,6 +271,31 @@ def _setup_host_mount(
     return host_root, mount, file_path
 
 
+def _prepare_resolved_mount(
+    tmp_path: Path,
+    *,
+    include_glob: tuple[str, ...] = (),
+    exclude_glob: tuple[str, ...] = (),
+    max_bytes: int | None = None,
+) -> tuple[podman_module._ResolvedHostMount, Path, Path]:
+    host_root = tmp_path / "resolved-root"
+    repo = host_root / "sunfish"
+    repo.mkdir(parents=True, exist_ok=True)
+    file_path = repo / "payload.txt"
+    file_path.write_text("payload", encoding="utf-8")
+    mount = HostMount(
+        host_path="sunfish",
+        mount_path=vfs_module.VfsPath(("sunfish",)),
+        include_glob=include_glob,
+        exclude_glob=exclude_glob,
+        max_bytes=max_bytes,
+    )
+    resolved = podman_module._resolve_single_host_mount(mount, (host_root,))
+    overlay = tmp_path / "overlay"
+    overlay.mkdir()
+    return resolved, file_path, overlay
+
+
 @pytest.fixture()
 def session_and_bus() -> tuple[Session, InProcessEventBus]:
     bus = InProcessEventBus()
@@ -319,12 +344,12 @@ def test_section_registers_eval_tool(
     assert tool.description.startswith("Run a short Python")
 
 
-def test_host_mount_seeded_into_snapshot(
+def test_host_mount_snapshot_starts_empty(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
-    host_root, mount, file_path = _setup_host_mount(tmp_path)
+    host_root, mount, _file_path = _setup_host_mount(tmp_path)
     cache_dir = tmp_path / "cache"
     section = _make_section(
         session=session,
@@ -336,10 +361,7 @@ def test_host_mount_seeded_into_snapshot(
 
     snapshot = section.latest_snapshot()
 
-    assert len(snapshot.files) == 1
-    file = snapshot.files[0]
-    assert file.path.segments == ("sunfish", file_path.name)
-    assert file.content == file_path.read_text(encoding="utf-8")
+    assert snapshot.files == ()
 
 
 def test_host_mount_populates_prompt_copy(
@@ -388,6 +410,160 @@ def test_host_mount_materializes_overlay(
     assert mounted.read_text(encoding="utf-8") == file_path.read_text(encoding="utf-8")
 
 
+def test_host_mount_resolver_rejects_empty_path(tmp_path: Path) -> None:
+    with pytest.raises(ToolValidationError):
+        podman_module._resolve_single_host_mount(
+            HostMount(host_path=""),
+            (tmp_path,),
+        )
+
+
+def test_resolve_host_path_requires_allowed_roots() -> None:
+    with pytest.raises(ToolValidationError):
+        podman_module._resolve_host_path("docs", ())
+
+
+def test_resolve_host_path_rejects_outside_root(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    with pytest.raises(ToolValidationError):
+        podman_module._resolve_host_path("../outside", (root,))
+
+
+def test_normalize_mount_globs_discards_empty_entries() -> None:
+    result = podman_module._normalize_mount_globs(
+        (" *.py ", " ", "*.md"),
+        "include_glob",
+    )
+    assert result == ("*.py", "*.md")
+
+
+def test_preview_mount_entries_handles_file(tmp_path: Path) -> None:
+    file_path = tmp_path / "item.txt"
+    file_path.write_text("payload", encoding="utf-8")
+    result = podman_module._preview_mount_entries(file_path)
+    assert result == ("item.txt",)
+
+
+def test_preview_mount_entries_raises_on_oserror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "items"
+    directory.mkdir()
+    original_iterdir = Path.iterdir
+
+    def _raise(self: Path) -> Iterator[Path]:
+        if self == directory:
+            raise OSError("boom")
+        return original_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", _raise)
+    with pytest.raises(ToolValidationError):
+        podman_module._preview_mount_entries(directory)
+
+
+def test_iter_host_mount_files_handles_file(tmp_path: Path) -> None:
+    file_path = tmp_path / "item.txt"
+    file_path.write_text("payload", encoding="utf-8")
+    entries = tuple(podman_module._iter_host_mount_files(file_path, False))
+    assert entries == (file_path,)
+
+
+def test_host_mount_allows_binary_files(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    host_root = tmp_path / "host-root"
+    repo = host_root / "sunfish"
+    repo.mkdir(parents=True, exist_ok=True)
+    file_path = repo / "payload.bin"
+    payload = b"\x00\xffbinary\x01"
+    file_path.write_bytes(payload)
+    cache_dir = tmp_path / "cache"
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=cache_dir,
+        mounts=(
+            HostMount(host_path="sunfish", mount_path=vfs_module.VfsPath(("sunfish",))),
+        ),
+        allowed_host_roots=(host_root,),
+    )
+    handler = find_tool(section, "shell_execute").handler
+    assert handler is not None
+
+    handler(
+        PodmanShellParams(command=("true",)),
+        context=build_tool_context(bus, session),
+    )
+
+    handle = section._workspace_handle
+    assert handle is not None
+    mounted = handle.overlay_path / "sunfish" / file_path.name
+    assert mounted.read_bytes() == payload
+
+
+def test_copy_mount_respects_include_glob(tmp_path: Path) -> None:
+    resolved, file_path, overlay = _prepare_resolved_mount(
+        tmp_path, include_glob=("*.py",)
+    )
+    dummy_section = cast(podman_module.PodmanToolsSection, SimpleNamespace())
+    podman_module.PodmanToolsSection._copy_mount_into_overlay(
+        dummy_section,
+        overlay=overlay,
+        mount=resolved,
+    )
+    target = overlay / "sunfish" / file_path.name
+    assert not target.exists()
+
+
+def test_copy_mount_respects_exclude_glob(tmp_path: Path) -> None:
+    resolved, file_path, overlay = _prepare_resolved_mount(
+        tmp_path, exclude_glob=("*.txt",)
+    )
+    dummy_section = cast(podman_module.PodmanToolsSection, SimpleNamespace())
+    podman_module.PodmanToolsSection._copy_mount_into_overlay(
+        dummy_section,
+        overlay=overlay,
+        mount=resolved,
+    )
+    target = overlay / "sunfish" / file_path.name
+    assert not target.exists()
+
+
+def test_copy_mount_stat_failure_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolved, file_path, overlay = _prepare_resolved_mount(tmp_path)
+    original_stat = Path.stat
+
+    def _raise(self: Path) -> os.stat_result:
+        if self == file_path:
+            raise OSError("boom")
+        return original_stat(self)
+
+    monkeypatch.setattr(Path, "stat", _raise)
+    with pytest.raises(ToolValidationError):
+        dummy_section = cast(podman_module.PodmanToolsSection, SimpleNamespace())
+        podman_module.PodmanToolsSection._copy_mount_into_overlay(
+            dummy_section,
+            overlay=overlay,
+            mount=resolved,
+        )
+
+
+def test_copy_mount_max_bytes_guard(tmp_path: Path) -> None:
+    resolved, _file_path, overlay = _prepare_resolved_mount(tmp_path, max_bytes=1)
+    with pytest.raises(ToolValidationError):
+        dummy_section = cast(podman_module.PodmanToolsSection, SimpleNamespace())
+        podman_module.PodmanToolsSection._copy_mount_into_overlay(
+            dummy_section,
+            overlay=overlay,
+            mount=resolved,
+        )
+
+
 def test_host_mount_hydration_skips_existing_overlay(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
@@ -433,26 +609,19 @@ def test_host_mount_hydration_raises_on_write_error(
     overlay = section._workspace_overlay_path()
     overlay.mkdir(parents=True, exist_ok=True)
     target = overlay / "sunfish" / file_path.name
-    original_write_text = Path.write_text
+    original_copy = podman_module.shutil.copy2
 
     def _fail_on_target(
-        path: Path,
-        data: str,
-        encoding: str | None = None,
-        errors: str | None = None,
-        newline: str | None = None,
-    ) -> int:
-        if path == target:
+        src: Path,
+        dst: Path,
+        *,
+        follow_symlinks: bool = True,
+    ) -> object:
+        if dst == target:
             raise OSError("boom")
-        return original_write_text(
-            path,
-            data,
-            encoding=encoding,
-            errors=errors,
-            newline=newline,
-        )
+        return original_copy(src, dst, follow_symlinks=follow_symlinks)
 
-    monkeypatch.setattr(Path, "write_text", _fail_on_target)
+    monkeypatch.setattr(podman_module.shutil, "copy2", _fail_on_target)
 
     with pytest.raises(ToolValidationError):
         section._hydrate_overlay_mounts(overlay)
@@ -643,6 +812,27 @@ def test_connection_resolution_prefers_env(monkeypatch: pytest.MonkeyPatch) -> N
     assert result.base_url == "ssh://env"
     assert result.identity == "/tmp/env"
     assert result.connection_name == "custom"
+
+
+def test_run_cli_cp_honors_connection_flag(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner()
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+        connection_name="remote",
+    )
+
+    section.run_cli_cp(source="/tmp/src", destination="/tmp/dst")
+
+    call = runner.calls[-1]
+    assert call[:4] == ["podman", "--connection", "remote", "cp"]
 
 
 def test_connection_resolution_uses_cli(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1687,7 +1877,59 @@ def test_write_file_updates_snapshot(
     )
     assert result.value is not None
     call = runner.calls[-1]
-    assert "python3" in call
+    assert "cp" in call
+
+
+def test_write_via_container_appends_existing_content(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "script.sh"
+    target.write_text("base", encoding="utf-8")
+    exec_calls: list[list[str]] = []
+    cp_payloads: list[str] = []
+
+    def _fake_exec(
+        self: PodmanToolsSection,
+        *,
+        command: Sequence[str],
+        stdin: str | None = None,
+        cwd: str | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        capture_output: bool = True,
+    ) -> CompletedProcess[str]:
+        del stdin, environment, timeout, capture_output
+        exec_calls.append(list(command))
+        return CompletedProcess(command, 0, stdout="", stderr="")
+
+    def _fake_cp(
+        self: PodmanToolsSection,
+        *,
+        source: str,
+        destination: str,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        del destination, timeout
+        cp_payloads.append(Path(source).read_text(encoding="utf-8"))
+        return CompletedProcess(["podman", "cp"], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(section, "run_cli_exec", MethodType(_fake_exec, section))
+    monkeypatch.setattr(section, "run_cli_cp", MethodType(_fake_cp, section))
+
+    section.write_via_container(
+        path=vfs_module.VfsPath(("script.sh",)),
+        content="+",
+        mode="append",
+    )
+
+    assert exec_calls[-1] == ["mkdir", "-p", "/workspace"]
+    assert cp_payloads[-1] == "base+"
 
 
 def test_edit_file_invokes_cli(
@@ -1718,7 +1960,155 @@ def test_edit_file_invokes_cli(
         context=build_tool_context(bus, session),
     )
     call = runner.calls[-1]
-    assert "overwrite" in call
+    assert "cp" in call
+
+
+def test_write_via_container_reports_mkdir_failure(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    section.ensure_workspace()
+    cp_calls = 0
+
+    def _fail_exec(
+        self: PodmanToolsSection,
+        *,
+        command: Sequence[str],
+        stdin: str | None = None,
+        cwd: str | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        capture_output: bool = True,
+    ) -> CompletedProcess[str]:
+        del self, command, stdin, cwd, environment, timeout, capture_output
+        return CompletedProcess(["mkdir", "-p"], 1, stdout="", stderr="boom")
+
+    def _fake_cp(
+        self: PodmanToolsSection,
+        *,
+        source: str,
+        destination: str,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        nonlocal cp_calls
+        cp_calls += 1
+        return CompletedProcess(["podman", "cp"], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(section, "run_cli_exec", MethodType(_fail_exec, section))
+    monkeypatch.setattr(section, "run_cli_cp", MethodType(_fake_cp, section))
+
+    with pytest.raises(ToolValidationError):
+        section.write_via_container(
+            path=vfs_module.VfsPath(("nested", "file.txt")),
+            content="data",
+            mode="create",
+        )
+
+    assert cp_calls == 0
+
+
+def test_write_via_container_rejects_non_utf8_append(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "data.bin"
+    target.write_bytes(b"\xff\xff")
+
+    def _unexpected(
+        self: PodmanToolsSection,
+        *,
+        command: Sequence[str],
+        stdin: str | None = None,
+        cwd: str | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        capture_output: bool = True,
+    ) -> CompletedProcess[str]:
+        raise AssertionError("run_cli_exec should not be called")
+
+    def _unexpected_cp(
+        self: PodmanToolsSection,
+        *,
+        source: str,
+        destination: str,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        raise AssertionError("run_cli_cp should not be called")
+
+    monkeypatch.setattr(section, "run_cli_exec", MethodType(_unexpected, section))
+    monkeypatch.setattr(section, "run_cli_cp", MethodType(_unexpected_cp, section))
+
+    with pytest.raises(ToolValidationError):
+        section.write_via_container(
+            path=vfs_module.VfsPath(("data.bin",)),
+            content="payload",
+            mode="append",
+        )
+
+
+def test_write_via_container_propagates_read_oserror(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    target = handle.overlay_path / "data.txt"
+    target.write_text("payload", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def _raise(
+        self: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
+        if self == target:
+            raise OSError("boom")
+        return original_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", _raise)
+
+    def _unexpected(
+        self: PodmanToolsSection,
+        *,
+        command: Sequence[str],
+        stdin: str | None = None,
+        cwd: str | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        capture_output: bool = True,
+    ) -> CompletedProcess[str]:
+        raise AssertionError("run_cli_exec should not be called")
+
+    def _unexpected_cp(
+        self: PodmanToolsSection,
+        *,
+        source: str,
+        destination: str,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        raise AssertionError("run_cli_cp should not be called")
+
+    monkeypatch.setattr(section, "run_cli_exec", MethodType(_unexpected, section))
+    monkeypatch.setattr(section, "run_cli_cp", MethodType(_unexpected_cp, section))
+
+    with pytest.raises(ToolValidationError):
+        section.write_via_container(
+            path=vfs_module.VfsPath(("data.txt",)),
+            content="payload",
+            mode="append",
+        )
 
 
 def test_glob_matches_files(
@@ -2689,16 +3079,12 @@ def test_write_via_container_handles_cli_failures(
     def _raise(*_: object, **__: object) -> None:
         raise FileNotFoundError("podman")
 
-    monkeypatch.setattr(section, "run_python_script", _raise)
+    monkeypatch.setattr(section, "run_cli_cp", _raise)
     with pytest.raises(ToolValidationError):
         section.write_via_container(path=path, content="data", mode="create")
 
-    class _Failed:
-        returncode = 1
-        stdout = ""
-        stderr = "boom"
-
-    monkeypatch.setattr(section, "run_python_script", lambda **_: _Failed())
+    failure = SimpleNamespace(returncode=1, stdout="", stderr="boom")
+    monkeypatch.setattr(section, "run_cli_cp", lambda **__: failure)
     with pytest.raises(ToolValidationError):
         section.write_via_container(path=path, content="data", mode="create")
 
