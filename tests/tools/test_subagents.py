@@ -564,6 +564,50 @@ def test_dispatch_subagents_full_isolation_clones_state() -> None:
     assert all(child_bus is not bus for child_bus in adapter.buses)
 
 
+def test_dispatch_subagents_full_isolation_assigns_unique_session_ids() -> None:
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], prompt),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="first",
+                expected_result="capture state",
+                may_delegate_further="no",
+                recap_lines=("Record to first clone",),
+            ),
+            DelegationParams(
+                reason="second",
+                expected_result="capture state",
+                may_delegate_further="no",
+                recap_lines=("Record to second clone",),
+            ),
+        ),
+    )
+
+    handler = tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    child_sessions = [child for child in adapter.sessions if child is not None]
+    assert len(child_sessions) == 2
+    child_ids = [child.session_id for child in child_sessions]
+    assert len(set(child_ids)) == len(child_ids)
+    assert all(child_id != session.session_id for child_id in child_ids)
+
+
 def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
     class NonCloningSession(SessionProtocol):
         def snapshot(self) -> SnapshotProtocol:

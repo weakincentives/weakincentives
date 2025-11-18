@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, is_dataclass
 from enum import Enum, auto
 from typing import Any, Final, cast, override
+from uuid import uuid4
 
 from ..prompt import SupportsDataclass
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
@@ -128,7 +129,7 @@ def _clone_session(
     clone_method = getattr(session, "clone", None)
     if not callable(clone_method):
         return None
-    return cast(SessionProtocol, clone_method(bus=bus))
+    return cast(SessionProtocol, clone_method(bus=bus, session_id=uuid4()))
 
 
 def _prepare_child_contexts(
