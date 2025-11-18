@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Prompt optimizers run retrospectives over completed Sessions and emit prompt
+Prompt optimizers analyze reducer snapshots from completed Sessions and emit prompt
 override plans so future executions inherit improvements without manual edits.
 This document defines the shared contract that every optimizer must honor in
 order to integrate cleanly with the runtime and override system.
@@ -16,9 +16,6 @@ order to integrate cleanly with the runtime and override system.
   `ToolInvoked`, and `PromptExecuted` events defined in `specs/EVENTS.md`.
   Sessions are constructed through the reducer rules outlined in
   `specs/SESSIONS.md`.
-- **Retrospective**: A read-only summary of a Session built from its reducer
-  snapshots. Retrospectives never mutate the underlying session data and are
-  scoped to the prompt descriptor embedded in the snapshots.
 - **Prompt override**: Persistent override payloads (`PromptOverride`,
   `SectionOverride`, `ToolOverride`, and associated hashes) defined in
   `specs/PROMPT_OVERRIDES.md`.
@@ -27,13 +24,13 @@ order to integrate cleanly with the runtime and override system.
 
 ## Optimizer Lifecycle
 
-1. The optimizer receives a batch of retrospectives plus access to the override
-   store.
-1. All retrospectives in the batch MUST resolve to the same `PromptDescriptor`.
+1. The optimizer receives a batch of reducer snapshots plus access to the
+   override store.
+1. All snapshots in the batch MUST resolve to the same `PromptDescriptor`.
    Diverging descriptors are a planning error and MUST be detected by deriving
    descriptors from the snapshots.
 1. The optimizer produces an immutable plan describing intended store
-   mutations. Planning MUST NOT mutate retrospectives, snapshots, or the store.
+   mutations. Planning MUST NOT mutate snapshots or the store.
 1. The runtime validates the plan against the current prompt descriptor.
 1. If validation succeeds, the optimizer applies the plan atomically to the
    override store.
@@ -55,20 +52,12 @@ from weakincentives.runtime.session.snapshots import Snapshot
 from weakincentives.prompt.overrides.versioning import PromptOverridesStore
 
 
-class SessionRetrospective(NamedTuple):
-    snapshots: Sequence[Snapshot]
-
-    # Snapshots embed the PromptDescriptor required to fetch canonical prompt
-    # definitions and construct override payloads. Prompt bodies are hydrated on
-    # demand using these descriptors; retrospectives never persist prompt text.
-
-
 class PromptOptimizer(Protocol):
     """Shared contract for prompt optimizers."""
 
     def plan(
         self,
-        retrospectives: Sequence[SessionRetrospective],
+        snapshots: Sequence[Snapshot],
         *,
         tag: str = "latest",
     ) -> OverridePlan: ...
@@ -80,10 +69,10 @@ class PromptOptimizer(Protocol):
     ) -> tuple[PromptOverride | None, ...]: ...
 ```
 
-- `plan` inspects one or more retrospectives and produces an `OverridePlan`
-  scoped to a single override tag. Empty batches MUST raise. Each retrospective
-  carries at least one reducer snapshot; planners SHOULD analyze the full
-  snapshot sequence to understand how the session evolved across the batch.
+- `plan` inspects one or more snapshots and produces an `OverridePlan` scoped
+  to a single override tag. Empty batches MUST raise. Callers SHOULD pass the
+  full snapshot sequence for a session so planners can analyze how execution
+  evolved before emitting overrides.
 - `apply` commits the plan using `PromptOverridesStore.upsert` and
   `PromptOverridesStore.delete`. The return value lists the resulting overrides
   in mutation order, inserting `None` entries for deletions. Validation failures
@@ -94,8 +83,8 @@ class PromptOptimizer(Protocol):
 `OverridePlan` is an immutable record containing:
 
 - `descriptor`: The `PromptDescriptor` derived from the canonical prompt in the
-  retrospectives at planning time. Plans MUST persist this descriptor so apply
-  time validation can detect drift.
+  snapshots at planning time. Plans MUST persist this descriptor so apply time
+  validation can detect drift.
 - `upserts`: Ordered `PromptOverride` payloads ready for
   `PromptOverridesStore.upsert`. Each payload targets the `(ns, prompt_key, tag)`
   triple referenced by `descriptor` and MUST contain validated section and tool
@@ -107,16 +96,16 @@ class PromptOptimizer(Protocol):
 
 `OverrideLocator` is a frozen dataclass with `ns: str`, `prompt_key: str`, and
 `tag: str`. Plans MUST be serializable for auditing. Planning MUST confirm that
-all retrospectives map back to the same descriptor; mismatches MUST raise.
+all snapshots map back to the same descriptor; mismatches MUST raise.
 
 ## Validation Requirements
 
 Before applying overrides, the optimizer (or caller) MUST:
 
-1. Recompute the `PromptDescriptor` for each retrospective under consideration by
-   deriving it from the appropriate snapshots and confirm every descriptor
-   matches `OverridePlan.descriptor` (namespace, prompt key, section hashes, and
-   tag).
+1. Recompute the `PromptDescriptor` for each snapshot sequence under
+   consideration by deriving it from the appropriate snapshots and confirm
+   every descriptor matches `OverridePlan.descriptor` (namespace, prompt key,
+   section hashes, and tag).
 1. Validate each `PromptOverride` using the hashing and identifier rules in
    `specs/PROMPT_OVERRIDES.md`, including tool contract hashes.
 1. Treat deletions targeting missing files as no-ops while continuing to ensure
@@ -128,7 +117,8 @@ Before applying overrides, the optimizer (or caller) MUST:
 ## Session Analysis Expectations
 
 - Planning SHOULD draw conclusions from the `PromptRendered`, `ToolInvoked`, and
-  `PromptExecuted` event slices held in each retrospective snapshot sequence.
+  `PromptExecuted` event slices held in each snapshot sequence provided to the
+  optimizer.
 - Optimizers MAY use additional analytics or scoring helpers, but they MUST NOT
   perform network I/O unless configuration explicitly enables it.
 - Session analysis MUST be idempotent and side-effect free. Reducer-derived
@@ -156,7 +146,7 @@ Before applying overrides, the optimizer (or caller) MUST:
   conflicting state.
 - `apply` MUST raise `PromptOverridesError` whenever store validation fails or
   the descriptor has drifted, enabling callers to re-plan with fresh
-  retrospectives.
+  snapshots.
 - Exceptions SHOULD preserve references to the descriptor and snapshot data that
   triggered them.
 
