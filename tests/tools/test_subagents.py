@@ -43,6 +43,18 @@ from weakincentives.tools.subagents import (
 )
 
 
+def test_subagent_result_render_reports_status() -> None:
+    success = SubagentResult(output="done", success=True, error=None)
+    failure = SubagentResult(output="", success=False, error="boom")
+
+    success_render = success.render()
+    failure_render = failure.render()
+    assert "succeeded" in success_render.lower()
+    assert "done" in success_render
+    assert "failed" in failure_render.lower()
+    assert "boom" in failure_render
+
+
 @dataclass(slots=True)
 class ParentSectionParams:
     instructions: str

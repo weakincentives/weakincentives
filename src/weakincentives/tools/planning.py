@@ -80,6 +80,14 @@ class PlanStep:
         },
     )
 
+    def render(self) -> str:
+        parts = [f"{self.step_id} [{self.status}] {self.title}"]
+        if self.details:
+            parts.append(f"details: {self.details}")
+        if self.notes:
+            parts.append(f"notes: {' | '.join(self.notes)}")
+        return " | ".join(parts)
+
 
 @dataclass(slots=True, frozen=True)
 class Plan:
@@ -107,6 +115,15 @@ class Plan:
         },
     )
 
+    def render(self) -> str:
+        lines = [f"Objective: {self.objective}", f"Status: {self.status}"]
+        lines.append("")
+        if not self.steps:
+            lines.append("<no steps>")
+        else:
+            lines.extend(step.render() for step in self.steps)
+        return "\n".join(lines)
+
 
 @dataclass(slots=True, frozen=True)
 class NewPlanStep:
@@ -125,6 +142,10 @@ class NewPlanStep:
             )
         },
     )
+
+    def render(self) -> str:
+        detail = f" — {self.details}" if self.details else ""
+        return f"{self.title}{detail}"
 
 
 @dataclass(slots=True, frozen=True)
@@ -145,6 +166,15 @@ class SetupPlan:
         },
     )
 
+    def render(self) -> str:
+        lines = [f"Setup plan: {self.objective}"]
+        if self.initial_steps:
+            lines.append("Initial steps:")
+            lines.extend(f"- {step.render()}" for step in self.initial_steps)
+        else:
+            lines.append("Initial steps: <none>")
+        return "\n".join(lines)
+
 
 @dataclass(slots=True, frozen=True)
 class AddStep:
@@ -158,6 +188,13 @@ class AddStep:
             )
         }
     )
+
+    def render(self) -> str:
+        if not self.steps:
+            return "AddStep: <no steps provided>"
+        lines = ["AddStep:"]
+        lines.extend(f"- {step.render()}" for step in self.steps)
+        return "\n".join(lines)
 
 
 @dataclass(slots=True, frozen=True)
@@ -191,6 +228,15 @@ class UpdateStep:
         },
     )
 
+    def render(self) -> str:
+        changes: list[str] = []
+        if self.title is not None:
+            changes.append(f"title='{self.title}'")
+        if self.details is not None:
+            changes.append(f"details='{self.details}'")
+        payload = ", ".join(changes) or "no changes"
+        return f"UpdateStep {self.step_id}: {payload}"
+
 
 @dataclass(slots=True, frozen=True)
 class MarkStep:
@@ -220,19 +266,25 @@ class MarkStep:
         },
     )
 
+    def render(self) -> str:
+        note = f" note='{self.note}'" if self.note else ""
+        return f"MarkStep {self.step_id}: status={self.status}{note}"
+
 
 @dataclass(slots=True, frozen=True)
 class ClearPlan:
     """Mark the current plan as abandoned while retaining its objective."""
 
-    pass
+    def render(self) -> str:
+        return "Plan cleared; objective retained."
 
 
 @dataclass(slots=True, frozen=True)
 class ReadPlan:
     """Request the most recent plan snapshot from the session store."""
 
-    pass
+    def render(self) -> str:  # pragma: no cover - mirrors Request semantics
+        return "Read latest plan snapshot."
 
 
 @dataclass(slots=True, frozen=True)

@@ -382,6 +382,8 @@ def execute_tool_call(
     if is_dataclass_instance(tool_value):
         dataclass_value = cast(SupportsDataclass, tool_value)  # pyright: ignore[reportUnnecessaryCast]
 
+    rendered_output = tool_result.render()
+
     invocation = ToolInvoked(
         prompt_name=prompt_name,
         adapter=adapter_name,
@@ -391,6 +393,7 @@ def execute_tool_call(
         session_id=session_id,
         created_at=datetime.now(UTC),
         value=dataclass_value,
+        rendered_output=rendered_output,
         call_id=call_id,
         event_id=uuid4(),
     )

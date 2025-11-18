@@ -84,6 +84,35 @@ def _setup_sections() -> tuple[
     return session, bus, vfs_section, tool
 
 
+def test_eval_file_render_helpers() -> None:
+    read = EvalFileRead(path=VfsPath(("src", "app.py")))
+    write = EvalFileWrite(
+        path=VfsPath(("src", "out.py")), content="print()", mode="overwrite"
+    )
+
+    assert "src/app.py" in read.render()
+    assert "overwrite" in write.render()
+
+
+def test_eval_result_render_summarizes_payload() -> None:
+    read = EvalFileRead(path=VfsPath(("src", "input.py")))
+    write = EvalFileWrite(
+        path=VfsPath(("src", "out.py")), content="print()", mode="create"
+    )
+    result = EvalResult(
+        value_repr="42",
+        stdout="output",
+        stderr="",
+        globals={"x": "1"},
+        reads=(read,),
+        writes=(write,),
+    )
+
+    rendered = result.render()
+    assert "42" in rendered
+    assert "Writes" in rendered
+
+
 def test_missing_dependency_instructs_extra_install(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

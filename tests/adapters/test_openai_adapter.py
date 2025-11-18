@@ -102,6 +102,13 @@ MODULE_PATH = "weakincentives.adapters.openai"
 PROMPT_NS = "tests/adapters/openai"
 
 
+def _split_tool_message_content(content: str) -> tuple[str, str | None]:
+    if "\n\n" in content:
+        message, remainder = content.split("\n\n", 1)
+        return message, remainder or None
+    return content, None
+
+
 def _reload_module() -> types.ModuleType:
     return importlib.reload(std_import_module(MODULE_PATH))
 
@@ -383,10 +390,10 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     second_messages = cast(list[dict[str, Any]], second_request["messages"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
-    serialized = json.loads(tool_message["content"])
-    assert serialized["message"] == "completed"
-    assert serialized["success"] is True
-    assert serialized["payload"] == {"answer": "Policy summary"}
+    message_text, rendered_text = _split_tool_message_content(tool_message["content"])
+    assert message_text == "completed"
+    assert rendered_text is not None
+    assert json.loads(rendered_text) == {"answer": "Policy summary"}
 
 
 def test_openai_adapter_rolls_back_session_on_publish_failure(
@@ -577,10 +584,9 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     second_messages = cast(list[dict[str, Any]], second_request["messages"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
-    serialized = json.loads(tool_message["content"])
-    assert serialized["message"] == "Tool validation failed: invalid query"
-    assert serialized["success"] is False
-    assert "payload" not in serialized
+    message_text, rendered_text = _split_tool_message_content(tool_message["content"])
+    assert message_text == "Tool validation failed: invalid query"
+    assert rendered_text is None
 
 
 def test_openai_adapter_surfaces_tool_type_errors() -> None:
@@ -665,12 +671,9 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
     second_messages = cast(list[dict[str, Any]], second_request["messages"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
-    serialized = json.loads(tool_message["content"])
-    assert (
-        serialized["message"] == "Tool validation failed: query: value cannot be None"
-    )
-    assert serialized["success"] is False
-    assert "payload" not in serialized
+    message_text, rendered_text = _split_tool_message_content(tool_message["content"])
+    assert message_text == "Tool validation failed: query: value cannot be None"
+    assert rendered_text is None
 
 
 def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
@@ -1405,9 +1408,9 @@ def test_openai_adapter_records_handler_failures() -> None:
     second_messages = cast(list[dict[str, Any]], second_request["messages"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
-    serialized = json.loads(tool_message["content"])
-    assert serialized["success"] is False
-    assert serialized["message"].endswith("execution failed: boom")
+    message_text, rendered_text = _split_tool_message_content(tool_message["content"])
+    assert message_text.endswith("execution failed: boom")
+    assert rendered_text is None
 
 
 def test_openai_adapter_records_provider_payload_from_mapping() -> None:

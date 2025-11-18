@@ -102,6 +102,13 @@ class SubagentResult:
         },
     )
 
+    def render(self) -> str:
+        output_text = self.output or ""
+        if self.success:
+            return f"Subagent succeeded:\n\n{output_text}"
+        message = self.error or "Subagent execution failed"
+        return f"Subagent failed: {message}\n\n{output_text}"
+
 
 def _extract_output_text(response: PromptResponseProtocol[Any]) -> str:
     if response.text:

@@ -27,6 +27,7 @@ from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
+    DeleteEntry,
     EditFileParams,
     FileInfo,
     GlobMatch,
@@ -69,6 +70,93 @@ def _make_section(
 def session_and_bus() -> tuple[Session, InProcessEventBus]:
     bus = InProcessEventBus()
     return Session(bus=bus), bus
+
+
+def test_file_info_render_formats_metadata() -> None:
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
+    file_info = FileInfo(
+        path=VfsPath(("src", "app.py")),
+        kind="file",
+        size_bytes=24,
+        version=3,
+        updated_at=timestamp,
+    )
+
+    rendered_file = file_info.render()
+    assert "src/app.py" in rendered_file
+    assert "24 B" in rendered_file
+    assert "v3" in rendered_file
+
+    directory_info = FileInfo(path=VfsPath(("src",)), kind="directory")
+    rendered_directory = directory_info.render()
+    assert rendered_directory.startswith("DIR")
+    assert rendered_directory.endswith("/")
+
+
+def test_read_file_result_render_includes_window() -> None:
+    payload = ReadFileResult(
+        path=VfsPath(("docs", "note.txt")),
+        content="3 | value",
+        offset=2,
+        limit=1,
+        total_lines=5,
+    )
+
+    rendered = payload.render()
+    assert "lines 3-3" in rendered
+    assert "value" in rendered
+
+
+def test_write_file_render_includes_preview() -> None:
+    payload = WriteFile(
+        path=VfsPath(("docs", "draft.md")),
+        content="first line\nsecond line",
+        mode="create",
+    )
+
+    rendered = payload.render()
+    assert "mode create" in rendered
+    assert "first line" in rendered
+
+
+def test_glob_and_grep_render_strings() -> None:
+    timestamp = datetime(2024, 2, 1, tzinfo=UTC)
+    glob_match = GlobMatch(
+        path=VfsPath(("docs", "readme.md")),
+        size_bytes=120,
+        version=5,
+        updated_at=timestamp,
+    )
+    grep_match = GrepMatch(
+        path=VfsPath(("docs", "readme.md")),
+        line_number=12,
+        line="match content",
+    )
+
+    assert "docs/readme.md" in glob_match.render()
+    assert "120 B" in glob_match.render()
+    assert "docs/readme.md:12" in grep_match.render()
+
+
+def test_delete_entry_render_mentions_path() -> None:
+    payload = DeleteEntry(path=VfsPath(("tmp", "cache")))
+
+    assert "tmp/cache" in payload.render()
+
+
+def test_format_timestamp_helper_and_write_render() -> None:
+    naive = datetime(2024, 1, 1, 12, 0, 0)
+    aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
+    assert vfs_module._format_timestamp(naive).endswith("+00:00")
+    assert vfs_module._format_timestamp(aware).endswith("+00:00")
+    assert vfs_module._format_timestamp(None) == "-"
+
+    write = WriteFile(
+        path=VfsPath(("docs", "notes.txt")), content="full content", mode="create"
+    )
+    rendered = write.render()
+    assert "full content" in rendered
+    assert "create" in rendered
 
 
 def test_vfs_tools_reject_mismatched_context_session(

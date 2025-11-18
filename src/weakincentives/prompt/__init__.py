@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from ._types import SupportsDataclass, SupportsToolResult
+from ._types import SupportsDataclass, SupportsToolResult, ToolRenderableResult
 from .chapter import Chapter, ChaptersExpansionPolicy
 from .composition import (
     DelegationParams,
@@ -98,6 +98,7 @@ __all__ = [
     "ToolDescriptor",
     "ToolHandler",
     "ToolOverride",
+    "ToolRenderableResult",
     "ToolResult",
     "hash_json",
     "hash_text",

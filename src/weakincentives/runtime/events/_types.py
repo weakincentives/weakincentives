@@ -97,6 +97,7 @@ class ToolInvoked:
     session_id: UUID | None
     created_at: datetime
     value: SupportsDataclass | None = None
+    rendered_output: str = ""
     call_id: str | None = None
     event_id: UUID = field(default_factory=uuid4)
 

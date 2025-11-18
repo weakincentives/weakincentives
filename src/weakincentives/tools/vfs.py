@@ -167,6 +167,21 @@ class FileInfo:
         },
     )
 
+    def render(self) -> str:
+        path_label = _format_path(self.path)
+        if self.kind == "directory":
+            directory_label = path_label if path_label == "/" else f"{path_label}/"
+            return f"DIR  {directory_label}"
+        size_label = "size ?"
+        if self.size_bytes is not None:
+            size_label = f"{self.size_bytes} B"
+        version_label = "v?" if self.version is None else f"v{self.version}"
+        updated_label = _format_timestamp(self.updated_at)
+        return (
+            f"FILE {path_label} ("
+            f"{size_label}, {version_label}, updated {updated_label})"
+        )
+
 
 @dataclass(slots=True, frozen=True)
 class ReadFileResult:
@@ -202,6 +217,17 @@ class ReadFileResult:
         }
     )
 
+    def render(self) -> str:
+        path_label = _format_path(self.path)
+        if self.limit == 0:
+            window = "no lines returned"
+        else:
+            end_line = self.offset + self.limit
+            window = f"lines {self.offset + 1}-{end_line}"
+        header = f"{path_label} - {window} of {self.total_lines}"
+        body = self.content or "<empty>"
+        return f"{header}\n\n{body}"
+
 
 @dataclass(slots=True, frozen=True)
 class GlobMatch:
@@ -228,6 +254,13 @@ class GlobMatch:
         }
     )
 
+    def render(self) -> str:
+        path_label = _format_path(self.path)
+        timestamp = _format_timestamp(self.updated_at)
+        return (
+            f"{path_label} - {self.size_bytes} B, v{self.version}, updated {timestamp}"
+        )
+
 
 @dataclass(slots=True, frozen=True)
 class GrepMatch:
@@ -246,6 +279,10 @@ class GrepMatch:
             "description": "Full line content containing the match so callers can review context."
         }
     )
+
+    def render(self) -> str:
+        path_label = _format_path(self.path)
+        return f"{path_label}:{self.line_number}: {self.line}"
 
 
 @dataclass(slots=True, frozen=True)
@@ -454,6 +491,15 @@ class WriteFile:
         },
     )
 
+    def render(self) -> str:
+        path_label = _format_path(self.path)
+        byte_count = len(self.content.encode(self.encoding))
+        header = (
+            f"{path_label} - mode {self.mode}, {byte_count} bytes ({self.encoding})"
+        )
+        body = self.content or "<empty>"
+        return f"{header}\n\n{body}"
+
 
 @dataclass(slots=True, frozen=True)
 class DeleteEntry:
@@ -462,6 +508,10 @@ class DeleteEntry:
             "description": "Path of the file or directory slated for removal from the VFS."
         }
     )
+
+    def render(self) -> str:
+        path_label = _format_path(self.path)
+        return f"Removed entries under {path_label}"
 
 
 @dataclass(slots=True, frozen=True)
@@ -1073,6 +1123,13 @@ def _format_delete_message(path: VfsPath, files: Sequence[VfsFile]) -> str:
 
 def _format_path(path: VfsPath) -> str:
     return "/".join(path.segments) or "/"
+
+
+def _format_timestamp(value: datetime | None) -> str:
+    if value is None:
+        return "-"
+    aware = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    return aware.isoformat()
 
 
 def normalize_host_root(path: os.PathLike[str] | str) -> Path:
