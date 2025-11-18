@@ -4,12 +4,60 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- Added the Podman `shell_execute` tool behind `PodmanSandboxSection`, including a
-  `podman` optional extra, session-backed workspace tracking, unit coverage, and
-  a gated integration test.
-- Expanded `PodmanSandboxSection` with an `evaluate_python` tool that runs short
-  Python scripts inside the container, captures stdout/stderr, and stages VFS
-  writes using the same contract as the ASTEval sandbox.
+_Nothing yet._
+
+## v0.9.0 - 2025-11-17
+
+### Podman Sandbox
+
+- Added `PodmanSandboxSection` (renamed from `PodmanToolsSection`) as a
+  Podman-backed workspace that mirrors the VFS
+  contract, exposes `shell_execute`, `ls`/`read_file`/`write_file`/`rm`, and
+  publishes `PodmanWorkspace` slices so reducers and subagents can inspect
+  container state. The section sits behind the new `weakincentives[podman]`
+  optional extra, is re-exported from `weakincentives.tools`, and ships with a
+  spec plus pytest marker for Podman-only suites.
+- `evaluate_python` is now available inside the Podman sandbox with the same
+  return schema as ASTEval but without the 2,000-character cap, and file writes
+  now run through `podman cp` to keep binary-safe edits consistent with the VFS.
+- The `code_reviewer_example.py` prompt auto-detects local Podman connections,
+  mounts repositories into the sandbox, and falls back to the in-memory VFS when
+  Podman is unavailable so the workflow keeps functioning in both modes.
+
+### Tooling & Runtime
+
+- `PlanningToolsSection`, `VfsToolsSection`, and `AstevalSection` now require a
+  live `Session` at construction time, register their reducers immediately, and
+  verify that tool handlers execute within the same `Session`/event bus. Update
+  custom prompts to pass the session you plan to route through `ToolContext`.
+- Section registration reinstates strict validation for tool entries and tool
+  generics: `Tool[...]` now enforces dataclass result types (or sequences of
+  dataclasses), handler annotations must match the declared generics, and
+  `ToolContext` exposes typed prompt/adapter protocols so invalid overrides fail
+  fast during initialization.
+
+### Prompt Runtime & Overrides
+
+- `Prompt.render` accepts any overrides store implementing the new
+  `PromptOverridesStoreProtocol`, and we now export `PromptProtocol`,
+  `ProviderAdapterProtocol`, and `RenderedPromptProtocol` for adapters, subagent
+  dispatchers, and tool authors that need structural typing without importing
+  the concrete prompt classes.
+- `Prompt` exposes a `structured_output` descriptor (and `RenderedPrompt` mirrors
+  it) so runtimes can inspect the resolved dataclass/container contract directly
+  instead of juggling separate `output_type`, `container`, and `allow_extra_keys`
+  attributes.
+
+### Serde, Logging & Session State
+
+- Introduced canonical JSON typing helpers under `weakincentives.types` (also
+  re-exported from the package root) and rewired structured logging to enforce
+  JSON-friendly payloads, nested adapter support, and context-preserving
+  `StructuredLogger.bind()` calls.
+- Dataclass serialization/deserialization now keeps set outputs deterministic,
+  respects `exclude_none` inside nested collections, and emits clearer errors
+  when schema/constraint validators fail, while session snapshots gained typed
+  slice aliases plus an `event_bus` accessor on `Session` for reducer helpers.
 
 ## v0.8.0 - 2025-11-15
 

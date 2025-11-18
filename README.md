@@ -1,10 +1,64 @@
-# Weak Incentives
+# Weak Incentives (Is All You Need)
 
-**Lean, typed building blocks for side-effect-free background agents.**
-Compose deterministic prompts, run typed tools, and parse strict JSON replies without
-heavy dependencies. Optional adapters snap in when you need a model provider.
+Weak Incentives is a Python library for building "background agents" (automated
+AI systems). It provides lean, typed, and composable building blocks that keep
+determinism, testability, and safe execution front and center without relying on
+heavy dependencies or hosted services.
+
+The core philosophy treats agent development as a structured engineering
+discipline rather than an exercise in ad-hoc scripting. The library ships a set
+of focused abstractions that reinforce that rigor:
+
+- **Prompts as code.** Prompts are typed `Prompt` objects composed from sections
+  such as `MarkdownSection`, versioned deterministically, and scoped with
+  chapters so long-form directives can stay dormant until policies open them.
+- **Structured I/O.** Declaring a dataclass output type for a `Prompt[OutputT]`
+  automatically builds a JSON schema, instructs the provider to obey it, and
+  parses the reply back into a typed Python object.
+- **Stateful, replayable sessions.** `Session` acts as a Redux-like state
+  store, letting pure reducers respond to events (for example, `ToolInvoked`)
+  so every change is observable, replayable, and snapshot-friendly.
+- **Typed and sandboxed tools.** Tools are typed callables (`Tool[ParamsT, ResultT]`) with explicit contracts for inputs and outputs, plus built-in
+  suites for planning, a secure in-memory VFS, and sandboxed Python evaluation.
+- **Provider-agnostic adapters.** Adapters connect the framework to providers
+  like OpenAI or LiteLLM by handling API calls, tool negotiation, and response
+  parsing while keeping the agent logic model-agnostic.
+- **Configuration and optimization hooks.** Structured logging via
+  `structlog`, enforced deadlines, and a powerful prompt overrides system let
+  teams A/B test and iterate on prompts through JSON files without touching the
+  application source.
 
 ## What's novel?
+
+While other agent frameworks provide a toolbox of loose components, Weak
+Incentives offers an opinionated chassis that emphasizes determinism, type
+contracts, and observable workflows:
+
+1. **Redux-like state management with reducers.** Every state change is a
+   traceable consequence of a published event processed by a pure reducer. This
+   thread of causality delivers replayability and visibility far beyond
+   free-form dictionaries or mutable object properties.
+1. **Composable prompt blueprints with typed contracts.** Prompts are built
+   from reusable sections and chapters backed by dataclasses, so composition and
+   parameter binding feel like standard software engineering instead of string
+   concatenation.
+1. **Integrated, hash-based prompt overrides.** `PromptDescriptor` content
+   hashes ensure overrides only apply to the intended section version, and
+   `LocalPromptOverridesStore` keeps the JSON artifacts in version control so
+   teams can collaborate without risking stale edits.
+1. **First-class in-memory virtual filesystem.** The sandboxed VFS ships as a
+   core tool, giving agents a secure workspace whose state is tracked like any
+   other session slice and avoiding accidental host access.
+1. **Lean dependency surface.** Avoiding heavyweight stacks such as Pydantic
+   keeps the core lightweight. Custom serde modules provide the needed
+   functionality without saddling users with sprawling dependency trees.
+
+In short, Weak Incentives favors software-engineering discipline—determinism,
+type safety, testability, and clear state management—over maximizing the number
+of exposed knobs.
+
+The specs below dive into each area when you need exact contracts and deeper
+context:
 
 - **Observable session state with reducer hooks.** A Redux-like session ledger
   and in-process event bus keep every tool call and prompt render replayable.
