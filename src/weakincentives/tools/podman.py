@@ -42,7 +42,6 @@ from .asteval import (
     EvalParams,
     EvalResult,
     make_eval_result_reducer,
-    normalize_eval_code,
 )
 from .errors import ToolValidationError
 from .vfs import (
@@ -507,6 +506,14 @@ def _truncate_eval_stream(value: str) -> str:
     suffix = "..."
     keep = _EVAL_MAX_STREAM_LENGTH - len(suffix)
     return f"{value[:keep]}{suffix}"
+
+
+def _normalize_podman_eval_code(code: str) -> str:
+    for char in code:
+        code_point = ord(char)
+        if code_point < 32 and char not in {"\n", "\t"}:
+            raise ToolValidationError("Code contains unsupported control characters.")
+    return code
 
 
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
@@ -1496,7 +1503,7 @@ class _PodmanEvalSuite:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
         self._ensure_passthrough_payload_is_empty(params)
-        code = normalize_eval_code(params.code)
+        code = _normalize_podman_eval_code(params.code)
         _ = self._section.ensure_workspace()
         try:
             completed = self._section.run_python_script(

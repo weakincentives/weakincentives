@@ -767,10 +767,6 @@ def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
     return reducer
 
 
-def normalize_eval_code(code: str) -> str:
-    return _normalize_code(code)
-
-
 def normalize_eval_reads(reads: Iterable[EvalFileRead]) -> tuple[EvalFileRead, ...]:
     return _normalize_reads(reads)
 
@@ -849,7 +845,6 @@ __all__ = [
     "EvalResult",
     "alias_for_eval_path",
     "make_eval_result_reducer",
-    "normalize_eval_code",
     "normalize_eval_reads",
     "normalize_eval_write",
     "normalize_eval_writes",

@@ -1639,6 +1639,63 @@ def test_evaluate_python_runs_script_passthrough(
     assert captured["timeout"] == podman_module._EVAL_TIMEOUT_SECONDS
 
 
+def test_evaluate_python_accepts_large_scripts(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    code = "\n".join("print('line')" for _ in range(600))
+
+    captured: dict[str, object] = {}
+
+    def _run_script(
+        self: PodmanSandboxSection,
+        *,
+        script: str,
+        args: Sequence[str],
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        captured["script"] = script
+        captured["args"] = tuple(args)
+        captured["timeout"] = timeout
+        return CompletedProcess(["python3"], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        section,
+        "run_python_script",
+        MethodType(_run_script, section),
+        raising=False,
+    )
+
+    result = invoke_tool(bus, tool, EvalParams(code=code), session=session)
+
+    assert result.success
+    assert captured["script"] == code
+    assert len(code) > 2_000
+
+
+def test_evaluate_python_rejects_control_characters(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+
+    with pytest.raises(ToolValidationError, match="unsupported control characters"):
+        invoke_tool(
+            bus,
+            tool,
+            EvalParams(code="print('ok')\x01"),
+            session=session,
+        )
+
+
 def test_evaluate_python_marks_failure_on_nonzero_exit(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
