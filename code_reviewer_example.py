@@ -41,6 +41,7 @@ from weakincentives.prompt.overrides import (
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
+from weakincentives.tools import SubagentsSection
 from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
 from weakincentives.tools.podman import PodmanSandboxSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
@@ -298,6 +299,7 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
     sections = (
         _build_review_guidance_section(workspace_overview),
         _build_repository_instructions_section(),
+        _build_subagents_section(),
         PlanningToolsSection(
             session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT
         ),
@@ -338,7 +340,9 @@ def build_repository_optimization_prompt(
                 Respond with JSON containing:
                 - instructions: Very brief Markdown that starts with a short paragraph
                   followed by a compact bullet list calling out languages, build/test
-                  commands, and review watchouts. Avoid section headings.
+                  commands, and review watchouts. Avoid section headings and keep it
+                  punchy. Use `dispatch_subagents` to fan out doc/code scans so results
+                  land quickly.
                 """
             ).strip(),
             default_params=RepositoryOptimizationGuidance(
@@ -349,6 +353,7 @@ def build_repository_optimization_prompt(
         PlanningToolsSection(
             session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT
         ),
+        _build_subagents_section(),
         workspace_section,
         MarkdownSection[RepositoryOptimizationRequest](
             title="Optimization Objective",
@@ -391,6 +396,8 @@ def _build_review_guidance_section(
               When available, the `shell_execute` command runs short Podman
               commands (no network access). Mounted files are read-only; use
               writes to stage new snapshots.
+            - `dispatch_subagents` lets you delegate parallel scans (e.g., README,
+              docs, build scripts) so you can summarize broader surface area faster.
 
             Respond with JSON containing:
             - summary: One paragraph describing your findings so far.
@@ -409,6 +416,10 @@ def _build_repository_instructions_section() -> MarkdownSection[SupportsDataclas
         template="",
         key="repository-instructions",
     )
+
+
+def _build_subagents_section() -> SubagentsSection:
+    return SubagentsSection()
 
 
 def _sunfish_mounts() -> tuple[HostMount, ...]:
