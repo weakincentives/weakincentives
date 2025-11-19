@@ -656,16 +656,18 @@ class ToolExecutor:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     _log: StructuredLogger = field(init=False)
-    _tool_events: list[ToolInvoked] = field(default_factory=list)
+    _tool_events: list[ToolInvoked] = field(init=False)
     _tool_message_records: list[
         tuple[ToolResult[SupportsToolResult], dict[str, Any]]
-    ] = field(default_factory=list)
+    ] = field(init=False)
 
     def __post_init__(self) -> None:
         self._log = (self.logger_override or logger).bind(
             adapter=self.adapter_name,
             prompt=self.prompt_name,
         )
+        self._tool_events = []
+        self._tool_message_records = []
 
     def execute(
         self,
