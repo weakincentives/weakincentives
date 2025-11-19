@@ -39,6 +39,36 @@ throughput.
 - **Fairness**: Allocate concurrency by session or tenant to prevent a single
   actor from starving others under constrained capacity.
 
+## Adapter integration map
+
+- **Shared conversation runner**: Insert retry and backoff handling inside
+  `adapters.shared.run_conversation` by wrapping the `call_provider` callable.
+  The runner owns the request/response loop for both the OpenAI and LiteLLM
+  adapters, so a single throttle policy there keeps behavior consistent while
+  preserving the existing `PromptEvaluationError` surface area.
+- **Provider-specific detection**:
+  - OpenAI: inspect `openai.RateLimitError`, `openai.APITimeoutError`, and
+    payloads that contain `"insufficient_quota"` or HTTP 429 responses inside
+    `adapters.openai.OpenAIAdapter.evaluate`'s `_call_provider` closure.
+    Normalize those into a structured `ThrottleError` before re-raising through
+    `PromptEvaluationError` so telemetry and backoff logic can branch on
+    `ThrottleError.kind`.
+  - LiteLLM: handle `litellm.RateLimitError` and 429 payloads surfaced through
+    the completion callable built in `adapters.litellm.create_litellm_completion`
+    and `_call_provider`. Normalize LiteLLM's `retry_after` hints (when
+    present) into the shared `ThrottleError.retry_after` field.
+- **Session/runtime hooks**: propagate throttle metadata into `PromptExecuted`
+  events published by `ConversationRunner` so downstream handlers (e.g., UI or
+  orchestrators) can present retry guidance without re-inspecting provider
+  payloads. Add a structured context field such as `"throttle": {"kind": ...}`
+  on the structured logger events in `adapters.shared` so log-based monitors can
+  alert on throttle rates.
+- **Configuration plumbing**: centralize backoff and concurrency settings in the
+  adapter constructors (e.g., optional `throttle_policy: ThrottlePolicy` kwarg
+  on `OpenAIAdapter` and `LiteLLMAdapter`). The default policy should be shared
+  via a helper in `adapters.shared` so both adapters stay aligned and new
+  providers can opt in without duplicating constants.
+
 ## Retry policy
 
 - **Exponential backoff with jitter**: Start with a small base delay (e.g.,
