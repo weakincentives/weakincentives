@@ -137,3 +137,177 @@ def test_run_conversation_requires_message_payload() -> None:
             select_choice=select_choice,
             serialize_tool_message_fn=serialize_stub,
         )
+
+
+def test_run_conversation_retries_on_throttle() -> None:
+    rendered = RenderedPrompt(text="system")
+    bus = NullEventBus()
+    throttle_policy = shared.ThrottlePolicy(
+        base_delay_seconds=0.01,
+        max_delay_seconds=0.02,
+        max_attempts=3,
+        max_total_seconds=1.0,
+    )
+    sleep_calls: list[float] = []
+
+    class DummyChoice:
+        def __init__(self) -> None:
+            self.message = SimpleNamespace(content="ok", tool_calls=[])
+
+    class DummyResponse:
+        def __init__(self) -> None:
+            self.choices = [DummyChoice()]
+
+    attempts = 0
+
+    def call_provider(
+        messages: list[dict[str, Any]],
+        tool_specs: list[Mapping[str, Any]],
+        tool_choice: shared.ToolChoice | None,
+        response_format: Mapping[str, Any] | None,
+    ) -> DummyResponse:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise shared.ThrottleError(
+                kind="rate_limit",
+                retry_after=0.01,
+                provider_payload={"status": 429},
+                message="rate limited",
+            )
+        return DummyResponse()
+
+    def select_choice(response: DummyResponse) -> shared.ProviderChoice:
+        return response.choices[0]
+
+    serialize_stub = cast(
+        shared.ToolMessageSerializer,
+        lambda _result, *, payload=None: "",
+    )
+
+    class DummyAdapter(ProviderAdapter[object]):
+        def evaluate(
+            self,
+            prompt: Prompt[object],
+            *params: SupportsDataclass,
+            parse_output: bool = True,
+            bus: EventBus,
+            session: SessionProtocol,
+            deadline: Deadline | None = None,
+            overrides_store: PromptOverridesStore | None = None,
+            overrides_tag: str = "latest",
+        ) -> PromptResponse[object]:
+            raise NotImplementedError
+
+    adapter = DummyAdapter()
+    prompt = Prompt(ns="tests", key="example")
+    session = Session(bus=bus)
+
+    result = shared.run_conversation(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=adapter,
+        prompt=prompt,
+        prompt_name="example",
+        rendered=rendered,
+        render_inputs=(),
+        initial_messages=[{"role": "system", "content": rendered.text}],
+        parse_output=False,
+        bus=bus,
+        session=session,
+        tool_choice="auto",
+        response_format=None,
+        require_structured_output_text=False,
+        call_provider=call_provider,
+        select_choice=select_choice,
+        serialize_tool_message_fn=serialize_stub,
+        throttle_policy=throttle_policy,
+        sleep_fn=sleep_calls.append,
+    )
+
+    assert attempts == 2
+    assert sleep_calls and sleep_calls[0] <= throttle_policy.max_delay_seconds
+    assert result.text == "ok"
+
+
+def test_run_conversation_honors_throttle_budget() -> None:
+    rendered = RenderedPrompt(text="system")
+    bus = NullEventBus()
+    throttle_policy = shared.ThrottlePolicy(
+        base_delay_seconds=0.01,
+        max_delay_seconds=0.01,
+        max_attempts=1,
+        max_total_seconds=0.01,
+    )
+
+    class DummyChoice:
+        def __init__(self) -> None:
+            self.message = SimpleNamespace(content="ok", tool_calls=[])
+
+    class DummyResponse:
+        def __init__(self) -> None:
+            self.choices = [DummyChoice()]
+
+    def call_provider(
+        messages: list[dict[str, Any]],
+        tool_specs: list[Mapping[str, Any]],
+        tool_choice: shared.ToolChoice | None,
+        response_format: Mapping[str, Any] | None,
+    ) -> DummyResponse:
+        raise shared.ThrottleError(
+            kind="rate_limit",
+            retry_after=0.0,
+            provider_payload=None,
+            message="rate limited",
+        )
+
+    def select_choice(response: DummyResponse) -> shared.ProviderChoice:
+        return response.choices[0]
+
+    serialize_stub = cast(
+        shared.ToolMessageSerializer,
+        lambda _result, *, payload=None: "",
+    )
+
+    class DummyAdapter(ProviderAdapter[object]):
+        def evaluate(
+            self,
+            prompt: Prompt[object],
+            *params: SupportsDataclass,
+            parse_output: bool = True,
+            bus: EventBus,
+            session: SessionProtocol,
+            deadline: Deadline | None = None,
+            overrides_store: PromptOverridesStore | None = None,
+            overrides_tag: str = "latest",
+        ) -> PromptResponse[object]:
+            raise NotImplementedError
+
+    adapter = DummyAdapter()
+    prompt = Prompt(ns="tests", key="example")
+    session = Session(bus=bus)
+
+    with pytest.raises(PromptEvaluationError) as err:
+        shared.run_conversation(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=adapter,
+            prompt=prompt,
+            prompt_name="example",
+            rendered=rendered,
+            render_inputs=(),
+            initial_messages=[{"role": "system", "content": rendered.text}],
+            parse_output=False,
+            bus=bus,
+            session=session,
+            tool_choice="auto",
+            response_format=None,
+            require_structured_output_text=False,
+            call_provider=call_provider,
+            select_choice=select_choice,
+            serialize_tool_message_fn=serialize_stub,
+            throttle_policy=throttle_policy,
+            sleep_fn=lambda _: None,
+        )
+
+    assert "throttled" in str(err.value)
+    payload = getattr(err.value, "provider_payload", {})
+    assert payload.get("throttle", {}).get("kind") == "rate_limit"
