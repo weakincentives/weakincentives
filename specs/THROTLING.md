@@ -9,8 +9,8 @@ throughput.
 ## Goals and guardrails
 
 - **Protect providers**: Never amplify overload with aggressive retries or burst
-  amplification. Favor smoothing and proactive shaping over reactionary retry
-  storms.
+  amplification. Favor jittered, reactive backoff over any pre-emptive shaping
+  that would alter caller intent before a throttle signal arrives.
 - **Preserve correctness**: Keep requests idempotent under retry and expose
   enough context for callers to decide whether to reissue work.
 - **Bound latency**: Cap retry windows so flows terminate in a predictable time.
@@ -29,15 +29,19 @@ throughput.
   as throttling when caused by backpressure; avoid retry when upstream latency is
   unknown or unbounded.
 
-## Request shaping before sending
+## Reactive handling only
 
-- **Concurrency budgets**: Enforce per-provider and per-model in-flight limits.
-  Use non-blocking acquisition with bounded wait; when the budget is exhausted
-  return a retryable error to the caller rather than piling up work.
-- **Token-aware sizing**: Estimate token usage and split oversized requests to
-  avoid hitting per-request caps that trigger throttling.
-- **Fairness**: Allocate concurrency by session or tenant to prevent a single
-  actor from starving others under constrained capacity.
+- **No pre-send shaping**: Do not alter or down-scope requests before they hit
+  the provider. All mitigation is triggered by explicit throttle signals (e.g.,
+  HTTP 429, `Retry-After`, or provider error codes) to avoid silently degrading
+  caller intent.
+- **Backoff kicks in after signals**: The first provider throttle immediately
+  enters the retry/backoff path; there is no pre-emptive smoothing. Subsequent
+  throttles continue to use the same reactive policy until the budget is
+  exhausted.
+- **Fairness during recovery**: When multiple sessions are retrying, arbitrate
+  retry scheduling so one session does not monopolize the backoff window, but
+  never reshape or split the original request payload.
 
 ## Adapter integration map
 
