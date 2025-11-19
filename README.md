@@ -112,7 +112,10 @@ uv add "weakincentives[litellm]"
 
 Let's build a simple, interactive code review assistant. This agent will be able to browse a codebase, answer questions about it, and create plans for more complex reviews. We'll see how Weak Incentives helps build this in a structured, observable, and safe way.
 
-The full source for this example is in [`code_reviewer_example.py`](./code_reviewer_example.py).
+The full source for this example is in
+[`code_reviewer_example.py`](https://github.com/weakincentives/weakincentives/blob/main/code_reviewer_example.py),
+and a high-level walkthrough of the architecture lives in
+[`specs/code_reviewer_example.md`](https://github.com/weakincentives/weakincentives/blob/main/specs/code_reviewer_example.md).
 
 ### 1. Define the Agent's Task with Typed Dataclasses
 
