@@ -39,9 +39,9 @@ throughput.
   enters the retry/backoff path; there is no pre-emptive smoothing. Subsequent
   throttles continue to use the same reactive policy until the budget is
   exhausted.
-- **Fairness during recovery**: When multiple sessions are retrying, arbitrate
-  retry scheduling so one session does not monopolize the backoff window, but
-  never reshape or split the original request payload.
+- **Independence across sessions**: Each caller thread/session reacts only to
+  provider throttle signals and applies its own backoff. Avoid any cross-session
+  coordination or request shaping that could dilute caller intent.
 
 ## Adapter integration map
 
