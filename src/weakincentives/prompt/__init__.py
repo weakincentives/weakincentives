@@ -63,8 +63,8 @@ from .tool import Tool, ToolContext, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
-    "ChapterDescriptor",
     "Chapter",
+    "ChapterDescriptor",
     "ChaptersExpansionPolicy",
     "DelegationParams",
     "DelegationPrompt",

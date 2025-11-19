@@ -44,7 +44,7 @@ class RenderedPrompt[OutputT_co]:
     text: str
     structured_output: StructuredOutputConfig[SupportsDataclass] | None = None
     deadline: Deadline | None = None
-    descriptor: "PromptDescriptor" | None = None
+    descriptor: PromptDescriptor | None = None
     _tools: tuple[Tool[SupportsDataclass, SupportsToolResult], ...] = field(
         default_factory=tuple
     )
@@ -159,7 +159,7 @@ class PromptRenderer[OutputT]:
         tool_overrides: Mapping[str, ToolOverride] | None = None,
         *,
         inject_output_instructions: bool | None = None,
-        descriptor: "PromptDescriptor" | None = None,
+        descriptor: PromptDescriptor | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclass, SupportsToolResult]] = []

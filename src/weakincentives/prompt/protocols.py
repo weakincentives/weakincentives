@@ -22,9 +22,9 @@ from ._overrides_protocols import PromptOverridesStoreProtocol
 from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .overrides import PromptDescriptor
     from ..runtime.events._types import EventBus
     from ..runtime.session.protocols import SessionProtocol
+    from .overrides import PromptDescriptor
 
 PromptOutputT = TypeVar("PromptOutputT", covariant=True)
 RenderedOutputT = TypeVar("RenderedOutputT", covariant=True)
@@ -64,7 +64,7 @@ class RenderedPromptProtocol(Protocol[RenderedOutputT]):
     def tool_param_descriptions(self) -> Mapping[str, Mapping[str, str]]: ...
 
     @property
-    def descriptor(self) -> "PromptDescriptor | None": ...
+    def descriptor(self) -> PromptDescriptor | None: ...
 
 
 class PromptProtocol(Protocol[PromptOutputT]):

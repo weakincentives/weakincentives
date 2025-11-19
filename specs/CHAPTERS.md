@@ -168,7 +168,7 @@ class ChapterDescriptor:
 - `parent_path` records the section path anchoring the chapter. Chapters are
   currently root-scoped so the value is `()`, but nested structures can reuse
   the field.
-`PromptDescriptor.chapters` preserves the declaration order and is populated
-even when a prompt snapshot has already expanded its chapters. This keeps
-override tooling deterministic while surfacing the declared visibility
-structure to adapters and telemetry pipelines.
+  `PromptDescriptor.chapters` preserves the declaration order and is populated
+  even when a prompt snapshot has already expanded its chapters. This keeps
+  override tooling deterministic while surfacing the declared visibility
+  structure to adapters and telemetry pipelines.

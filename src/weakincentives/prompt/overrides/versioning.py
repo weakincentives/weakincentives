@@ -175,15 +175,17 @@ class PromptDescriptor:
             ]
             tools.extend(tool_descriptors)
         chapter_declarations = getattr(prompt, "chapters", ()) or ()
-        for chapter in chapter_declarations:
-            chapters.append(
+        chapters.extend(
+            [
                 ChapterDescriptor(
                     key=chapter.key,
                     title=chapter.title,
                     description=chapter.description,
                     parent_path=(),
                 )
-            )
+                for chapter in chapter_declarations
+            ]
+        )
         return cls(prompt.ns, prompt.key, sections, tools, chapters)
 
 
