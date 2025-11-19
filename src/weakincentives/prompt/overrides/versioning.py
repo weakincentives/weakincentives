@@ -56,12 +56,21 @@ class SectionNodeLike(Protocol):
     section: SectionLike
 
 
+class ChapterLike(Protocol):
+    key: str
+    title: str
+    description: str | None
+
+
 class PromptLike(Protocol):
     ns: str
     key: str
 
     @property
     def sections(self) -> tuple[SectionNodeLike, ...]: ...
+
+    @property
+    def chapters(self) -> tuple[ChapterLike, ...]: ...
 
 
 _HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -125,6 +134,16 @@ class ToolDescriptor:
 
 
 @dataclass(slots=True)
+class ChapterDescriptor:
+    """Describes the declaration order and metadata for a prompt chapter."""
+
+    key: str
+    title: str
+    description: str | None
+    parent_path: tuple[str, ...]
+
+
+@dataclass(slots=True)
 class PromptDescriptor:
     """Stable metadata describing a prompt and its hash-aware sections."""
 
@@ -132,11 +151,13 @@ class PromptDescriptor:
     key: str
     sections: list[SectionDescriptor]
     tools: list[ToolDescriptor]
+    chapters: list[ChapterDescriptor]
 
     @classmethod
     def from_prompt(cls, prompt: PromptLike) -> PromptDescriptor:
         sections: list[SectionDescriptor] = []
         tools: list[ToolDescriptor] = []
+        chapters: list[ChapterDescriptor] = []
         for node in prompt.sections:
             if getattr(node.section, "accepts_overrides", True):
                 template = node.section.original_body_template()
@@ -153,7 +174,19 @@ class PromptDescriptor:
                 if tool.accepts_overrides
             ]
             tools.extend(tool_descriptors)
-        return cls(prompt.ns, prompt.key, sections, tools)
+        chapter_declarations = getattr(prompt, "chapters", ()) or ()
+        chapters.extend(
+            [
+                ChapterDescriptor(
+                    key=chapter.key,
+                    title=chapter.title,
+                    description=chapter.description,
+                    parent_path=(),
+                )
+                for chapter in chapter_declarations
+            ]
+        )
+        return cls(prompt.ns, prompt.key, sections, tools, chapters)
 
 
 @dataclass(slots=True)
@@ -227,6 +260,7 @@ class PromptOverridesStore(Protocol):
 
 
 __all__ = [
+    "ChapterDescriptor",
     "HexDigest",
     "PromptDescriptor",
     "PromptOverride",

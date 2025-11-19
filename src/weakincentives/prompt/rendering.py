@@ -28,7 +28,7 @@ from .structured_output import StructuredOutputConfig
 from .tool import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .overrides import ToolOverride
+    from .overrides import PromptDescriptor, ToolOverride
 
 
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
@@ -44,6 +44,7 @@ class RenderedPrompt[OutputT_co]:
     text: str
     structured_output: StructuredOutputConfig[SupportsDataclass] | None = None
     deadline: Deadline | None = None
+    descriptor: PromptDescriptor | None = None
     _tools: tuple[Tool[SupportsDataclass, SupportsToolResult], ...] = field(
         default_factory=tuple
     )
@@ -158,6 +159,7 @@ class PromptRenderer[OutputT]:
         tool_overrides: Mapping[str, ToolOverride] | None = None,
         *,
         inject_output_instructions: bool | None = None,
+        descriptor: PromptDescriptor | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclass, SupportsToolResult]] = []
@@ -207,6 +209,7 @@ class PromptRenderer[OutputT]:
         return RenderedPrompt[OutputT](
             text=text,
             structured_output=self._structured_output,
+            descriptor=descriptor,
             _tools=tuple(collected_tools),
             _tool_param_descriptions=_freeze_tool_param_descriptions(
                 field_description_patches

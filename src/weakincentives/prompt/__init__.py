@@ -33,6 +33,7 @@ from .errors import (
 )
 from .markdown import MarkdownSection
 from .overrides import (
+    ChapterDescriptor,
     LocalPromptOverridesStore,
     PromptDescriptor,
     PromptLike,
@@ -63,6 +64,7 @@ from .tool_result import ToolResult
 
 __all__ = [
     "Chapter",
+    "ChapterDescriptor",
     "ChaptersExpansionPolicy",
     "DelegationParams",
     "DelegationPrompt",

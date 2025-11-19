@@ -43,7 +43,8 @@ contracts, and observable workflows:
    parameter binding feel like standard software engineering instead of string
    concatenation.
 1. **Integrated, hash-based prompt overrides.** `PromptDescriptor` content
-   hashes ensure overrides only apply to the intended section version, and
+   hashes, tool contracts, and chapter descriptors ensure overrides only apply to
+   the intended section version while describing the declared chapter layout.
    `LocalPromptOverridesStore` keeps the JSON artifacts in version control so
    teams can collaborate without risking stale edits.
 1. **First-class in-memory virtual filesystem.** The sandboxed VFS ships as a

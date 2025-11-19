@@ -128,11 +128,10 @@ class ProviderAdapter(Protocol):
    chapter content and render that snapshot. This ensures subsequent render calls
    operate on a deterministic decision.
 
-Adapters MUST thread chapter metadata and resolved state into the prompt
-descriptor so optimization tooling can inspect visibility choices. Dedicated
-telemetry or logging streams for chapter decisions remain out of scope; rely on
-existing descriptor metadata and redaction guidance when sharing prompt
-snapshots.
+Adapters MUST thread chapter metadata into the prompt descriptor so optimization
+tooling can inspect the declared visibility boundaries. Dedicated telemetry or
+logging streams for chapter decisions remain out of scope; rely on existing
+descriptor metadata and redaction guidance when sharing prompt snapshots.
 
 ## Lifecycle Considerations
 
@@ -150,3 +149,26 @@ snapshots.
   inner content.
 - **Versioning**: Include chapter metadata in prompt descriptors so versioned
   prompts capture the visibility structure.
+
+## Descriptor Metadata
+
+`PromptDescriptor` exposes chapter information via a dedicated dataclass so
+adapters and tooling can inspect which visibility boundaries were declared.
+
+```python
+@dataclass(slots=True)
+class ChapterDescriptor:
+    key: str
+    title: str
+    description: str | None
+    parent_path: tuple[str, ...]
+```
+
+- `key`, `title`, and `description` mirror the chapter declaration.
+- `parent_path` records the section path anchoring the chapter. Chapters are
+  currently root-scoped so the value is `()`, but nested structures can reuse
+  the field.
+  `PromptDescriptor.chapters` preserves the declaration order and is populated
+  even when a prompt snapshot has already expanded its chapters. This keeps
+  override tooling deterministic while surfacing the declared visibility
+  structure to adapters and telemetry pipelines.
