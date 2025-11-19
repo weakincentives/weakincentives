@@ -1,0 +1,111 @@
+# Throttling and Rate Limit Recovery
+
+This spec describes a principled approach for detecting and recovering from
+`openai.RateLimitError` and analogous throttling responses from other model
+providers. The goal is to protect upstream services, preserve session-level
+invariants, and provide predictable caller experience while maximizing useful
+throughput.
+
+## Goals and guardrails
+
+- **Protect providers**: Never amplify overload with aggressive retries or burst
+  amplification. Favor smoothing and proactive shaping over reactionary retry
+  storms.
+- **Preserve correctness**: Keep requests idempotent under retry and expose
+  enough context for callers to decide whether to reissue work.
+- **Bound latency**: Cap retry windows so flows terminate in a predictable time.
+- **Visibility first**: Emit structured telemetry for every throttle event to
+  guide tuning and capacity planning.
+
+## Taxonomy of throttling signals
+
+- **HTTP 429 / explicit rate limit error**: OpenAI `RateLimitError` or provider
+  equivalents. Prefer the provider-supplied `Retry-After` header or error field
+  when present.
+- **Token/budget exhaustion**: Errors indicating quota exhaustion (e.g., OpenAI
+  `insufficient_quota`). Treat as throttling with a longer cool-down and
+  elevated alerting because retries will not succeed until limits reset.
+- **Soft timeouts**: Errors from local circuit breakers or queue timeouts. Handle
+  as throttling when caused by backpressure; avoid retry when upstream latency is
+  unknown or unbounded.
+
+## Request shaping before sending
+
+- **Concurrency budgets**: Enforce per-provider and per-model in-flight limits.
+  Use non-blocking acquisition with bounded wait; when the budget is exhausted
+  return a retryable error to the caller rather than piling up work.
+- **Token-aware sizing**: Estimate token usage and split oversized requests to
+  avoid hitting per-request caps that trigger throttling.
+- **Fairness**: Allocate concurrency by session or tenant to prevent a single
+  actor from starving others under constrained capacity.
+
+## Retry policy
+
+- **Exponential backoff with jitter**: Start with a small base delay (e.g.,
+  250–500 ms) and double until capped (e.g., 8–16 s). Apply full jitter to avoid
+  synchronization. Respect provider-specified `Retry-After` values; treat them
+  as the minimum backoff.
+- **Retry budget**: Cap total retry duration (e.g., 30–60 s) or attempt count to
+  bound latency. Surface the exhausted budget as a structured failure with the
+  last provider payload attached for context.
+- **Idempotency**: Only retry operations that are safe to repeat. Prefer
+  idempotency keys (where supported) or deterministic request construction so the
+  provider can deduplicate.
+- **Cancel on caller abort**: If the session or task is cancelled while waiting
+  to retry, abort immediately and return a cancellation reason instead of
+  continuing retries in the background.
+
+## Adaptive degradation
+
+- **Quality shaping**: When retry budgets are nearly exhausted, consider falling
+  back to cheaper or smaller models, shorter contexts, or truncated tool traces
+  to reduce pressure.
+- **Queue shedding**: Reject new work with a clear "try later" error when local
+  queues exceed safe depth; do not enqueue unbounded retries.
+- **Circuit breakers**: Open a short circuit (e.g., 30–90 s) after repeated
+  throttles from a provider/model pair to prevent hammering a constrained
+  dependency.
+
+## Telemetry and observability
+
+- **Structured events**: Log throttle events with provider, model, status code,
+  request type, retry count, backoff duration, and correlation/session ids.
+- **Metrics**: Emit counters for throttles and quota failures plus timers for
+  backoff delay. Track per-model rates to surface localized contention.
+- **Tracing**: Attach retry spans with attributes for decision inputs (retry
+  budget remaining, retry-after value, jittered delay). Mark the terminal span
+  when retries are exhausted or cancelled.
+
+## Surface area to callers
+
+- **Typed errors**: Wrap provider exceptions in a local `ThrottleError` that
+  records provider payloads, retry-after hints, whether retry is safe, and the
+  number of attempts performed.
+- **User messaging**: Provide actionable error messages that distinguish quota
+  exhaustion from transient throttling. Include suggested wait durations when
+  available.
+- **Retry hints**: Expose retry-after timestamps on responses so interactive
+  clients or schedulers can defer work without guessing.
+
+## Testing strategy
+
+- **Unit**: Simulate provider responses for 429s with and without `Retry-After`,
+  quota exhaustion, and malformed payloads. Assert backoff calculations, jitter,
+  retry ceilings, and idempotency key propagation.
+- **Integration**: Use the OpenAI test endpoint or a stub server to validate
+  envelope shape, telemetry, and circuit breaker behavior under sustained
+  throttling.
+- **Load**: Stress concurrency budgets with synthetic traffic to confirm fairness
+  and that shedding happens before upstream saturation.
+
+## Operational playbook
+
+- **Alarm thresholds**: Alert when throttle rate exceeds a baseline (e.g., >1%
+  over five minutes) or when quota failures occur. Distinguish transient spikes
+  from sustained limit breaches.
+- **Config levers**: Centralize backoff constants, retry budgets, and concurrency
+  caps in configuration so they can be tuned without code changes. Validate at
+  startup and disallow zero/negative values.
+- **Runbooks**: Document per-provider quirks (e.g., headers to respect, error
+  fields to parse) and escalation paths for quota raises. Keep examples of
+  throttle payloads to aid debugging.
