@@ -38,7 +38,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
     SectionOverride,
 )
-from weakincentives.runtime.events import InProcessEventBus, PromptRendered, ToolInvoked
+from weakincentives.runtime.events import EventBus, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
@@ -157,7 +157,7 @@ class RuntimeContext:
 
     prompt: Prompt[ReviewResponse]
     session: Session
-    bus: InProcessEventBus
+    bus: EventBus
     overrides_store: LocalPromptOverridesStore
     override_tag: str
 
@@ -477,7 +477,7 @@ def initialize_code_reviewer_runtime(
 ) -> tuple[
     Prompt[ReviewResponse],
     Session,
-    InProcessEventBus,
+    EventBus,
     LocalPromptOverridesStore,
     str,
 ]:
@@ -500,8 +500,8 @@ def _create_runtime_context(
     override_tag: str | None = None,
 ) -> RuntimeContext:
     store = overrides_store or LocalPromptOverridesStore()
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
+    bus = session.event_bus
     resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
     prompt = build_task_prompt(session=session)
     try:
@@ -571,9 +571,9 @@ def _escape_template_markers(text: str) -> str:
     return text.replace("$", "$$")
 
 
-def _build_isolated_session() -> tuple[Session, InProcessEventBus]:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+def _build_isolated_session() -> tuple[Session, EventBus]:
+    session = Session()
+    bus = session.event_bus
     bus.subscribe(PromptRendered, _print_rendered_prompt)
     bus.subscribe(ToolInvoked, _log_tool_invocation)
     return session, bus

@@ -95,7 +95,7 @@ class Session(SessionProtocol):
     def __init__(
         self,
         *,
-        bus: EventBus,
+        bus: EventBus | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
     ) -> None:
@@ -110,12 +110,19 @@ class Session(SessionProtocol):
 
         self.session_id: UUID = resolved_session_id
         self.created_at: datetime = resolved_created_at.astimezone(UTC)
-        self._bus: EventBus = bus
+
+        if bus is None:
+            from ..events import InProcessEventBus
+
+            self._bus: EventBus = InProcessEventBus()
+        else:
+            self._bus = bus
+
         self._reducers: dict[SessionSliceType, list[_ReducerRegistration]] = {}
         self._state: dict[SessionSliceType, SessionSlice] = {}
         self._lock = RLock()
         self._subscriptions_attached = False
-        self._attach_to_bus(bus)
+        self._attach_to_bus(self._bus)
 
     def clone(
         self,

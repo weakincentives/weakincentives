@@ -6,6 +6,10 @@ Release highlights for weakincentives.
 
 _Nothing yet._
 
+### Session & Event Bus
+
+- `Session` now optionally instantiates its own `InProcessEventBus` if one is not provided, reducing boilerplate for common use cases (`session = Session()` works out of the box).
+
 ## v0.9.0 - 2025-11-17
 
 ### Podman Sandbox

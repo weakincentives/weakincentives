@@ -637,3 +637,8 @@ def test_session_requires_timezone_aware_created_at() -> None:
 
     with pytest.raises(ValueError):
         Session(bus=bus, created_at=naive_timestamp)
+
+
+def test_session_instantiates_default_bus_when_none_provided() -> None:
+    session = Session()
+    assert isinstance(session.event_bus, InProcessEventBus)
