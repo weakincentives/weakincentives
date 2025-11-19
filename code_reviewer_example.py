@@ -336,8 +336,9 @@ def build_repository_optimization_prompt(
                 ${focus}
 
                 Respond with JSON containing:
-                - instructions: Markdown summary that covers repository purpose,
-                  languages, critical files, build/test workflows, and review watchouts.
+                - instructions: Very brief Markdown that starts with a short paragraph
+                  followed by a compact bullet list calling out languages, build/test
+                  commands, and review watchouts. Avoid section headings.
                 """
             ).strip(),
             default_params=RepositoryOptimizationGuidance(
