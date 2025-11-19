@@ -115,6 +115,7 @@ class Prompt[OutputT]:
         self._chapter_key_registry: dict[str, Chapter[SupportsDataclass]] = {
             chapter.key: chapter for chapter in self._chapters
         }
+        self._chapter_expansion_enabled = bool(self._chapters)
 
         self._structured_output: StructuredOutputConfig[SupportsDataclass] | None
         self._structured_output = self._resolve_output_spec(allow_extra_keys)
@@ -160,11 +161,11 @@ class Prompt[OutputT]:
 
         overrides: dict[SectionPath, str] | None = None
         tool_overrides: dict[str, ToolOverride] | None = None
+        from .overrides import PromptDescriptor
+
+        descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
 
         if overrides_store is not None:
-            from .overrides import PromptDescriptor
-
-            descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
             override = overrides_store.resolve(descriptor=descriptor, tag=tag)
 
             if override is not None:
@@ -180,6 +181,7 @@ class Prompt[OutputT]:
             overrides,
             tool_overrides,
             inject_output_instructions=inject_output_instructions,
+            descriptor=descriptor,
         )
 
     @property
@@ -208,7 +210,7 @@ class Prompt[OutputT]:
     ) -> Prompt[OutputT]:
         """Return a prompt snapshot with chapters opened per the supplied policy."""
 
-        if not self._chapters:
+        if not self._chapters or not self._chapter_expansion_enabled:
             return self
 
         if policy is ChaptersExpansionPolicy.ALL_INCLUDED:
@@ -243,6 +245,7 @@ class Prompt[OutputT]:
                 params = self._normalize_chapter_params(chapter, params)
             elif chapter.default_params is not None:
                 params = clone_dataclass(chapter.default_params)
+            should_open = True
 
             if chapter.enabled is not None:
                 if params is None and chapter.param_type is not None:
@@ -260,21 +263,26 @@ class Prompt[OutputT]:
                         dataclass_type=chapter.param_type,
                     ) from error
                 if not enabled:
-                    continue
+                    should_open = False
+
+            if not should_open:
+                continue
 
             open_sections.extend(chapter.sections)
 
         prompt_cls = type(self)
 
-        return prompt_cls(
+        expanded = prompt_cls(
             ns=self.ns,
             key=self.key,
             name=self.name,
             sections=open_sections,
-            chapters=(),
+            chapters=self._chapters,
             inject_output_instructions=self.inject_output_instructions,
             allow_extra_keys=self._allow_extra_keys_requested,
         )
+        expanded._chapter_expansion_enabled = False
+        return expanded
 
     def _normalize_chapter_params(
         self,

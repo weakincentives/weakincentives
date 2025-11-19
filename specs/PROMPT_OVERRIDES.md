@@ -55,11 +55,19 @@ class ToolDescriptor:
     contract_hash: str
 
 @dataclass(slots=True)
+class ChapterDescriptor:
+    key: str
+    title: str
+    description: str | None
+    parent_path: tuple[str, ...]
+
+@dataclass(slots=True)
 class PromptDescriptor:
     ns: str
     key: str
     sections: list[SectionDescriptor]  # ordered depth-first
     tools: list[ToolDescriptor]
+    chapters: list[ChapterDescriptor]
 ```
 
 Rules:
@@ -83,6 +91,8 @@ Rules:
    - `contract_hash = hash_text("::".join((description_hash, params_schema_hash, result_schema_hash)))`
 1. Record the originating section path for every tool.
 1. Descriptor construction ignores runtime enablement predicates.
+1. Chapters appear in descriptor order so adapters can audit which visibility
+   boundaries were declared.
 1. `PromptDescriptor.from_prompt(prompt: Prompt) -> PromptDescriptor` gathers
    both section and tool descriptors while computing the hashes.
 

@@ -14,7 +14,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from weakincentives.prompt import MarkdownSection, Prompt, Section, Tool
+from weakincentives.prompt import (
+    Chapter,
+    MarkdownSection,
+    Prompt,
+    Section,
+    Tool,
+)
 from weakincentives.prompt.overrides import (
     PromptDescriptor,
     PromptOverride,
@@ -52,6 +58,44 @@ def _build_prompt() -> Prompt:
                 key="greeting",
             )
         ],
+    )
+
+
+def _build_chapter_prompt() -> Prompt:
+    base_section = MarkdownSection[_GreetingParams](
+        title="Summary",
+        template="Summarize ${subject}",
+        key="base-summary",
+    )
+    chapter_one = MarkdownSection[_GreetingParams](
+        title="One",
+        template="Chapter one ${subject}",
+        key="chapter-one",
+    )
+    chapter_two = MarkdownSection[_GreetingParams](
+        title="Two",
+        template="Chapter two ${subject}",
+        key="chapter-two",
+    )
+    return Prompt(
+        ns="tests/versioning",
+        key="versioned-chapters",
+        sections=[base_section],
+        chapters=(
+            Chapter(
+                key="chapter-one",
+                title="Chapter One",
+                description="Primary chapter",
+                sections=(chapter_one,),
+            ),
+            Chapter(
+                key="chapter-two",
+                title="Chapter Two",
+                description="Secondary chapter",
+                sections=(chapter_two,),
+                enabled=lambda: False,
+            ),
+        ),
     )
 
 
@@ -129,6 +173,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
         )
     ]
     assert descriptor.tools == []
+    assert descriptor.chapters == []
 
 
 def test_prompt_descriptor_excludes_response_format_section() -> None:
@@ -155,6 +200,7 @@ def test_prompt_descriptor_excludes_response_format_section() -> None:
     assert ("response-format",) not in paths
     assert descriptor.tools == []
     assert descriptor.ns == "tests/versioning"
+    assert descriptor.chapters == []
 
 
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
@@ -169,6 +215,7 @@ def test_prompt_descriptor_ignores_non_hash_sections() -> None:
 
     assert descriptor.sections == []
     assert descriptor.tools == []
+    assert descriptor.chapters == []
 
 
 def test_prompt_descriptor_collects_tools() -> None:
@@ -215,6 +262,21 @@ def test_prompt_descriptor_collects_sequence_tools() -> None:
             contract_hash=expected_contract,
         )
     ]
+
+
+def test_prompt_descriptor_includes_chapter_metadata() -> None:
+    prompt = _build_chapter_prompt()
+
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    assert [chapter.key for chapter in descriptor.chapters] == [
+        "chapter-one",
+        "chapter-two",
+    ]
+    first = descriptor.chapters[0]
+    assert first.title == "Chapter One"
+    assert first.description == "Primary chapter"
+    assert first.parent_path == ()
 
 
 def test_prompt_descriptor_skips_tools_without_override_acceptance() -> None:

@@ -78,10 +78,15 @@ class _Prompt:
     ns: str
     key: str
     _section_nodes: tuple[_SectionNode, ...]
+    _chapters: tuple[object, ...] = ()
 
     @property
     def sections(self) -> tuple[_SectionNode, ...]:
         return self._section_nodes
+
+    @property
+    def chapters(self) -> tuple[object, ...]:
+        return self._chapters
 
 
 def _build_prompt_with_tool() -> tuple[
@@ -144,6 +149,7 @@ def test_load_sections_filters_unknown_entries() -> None:
         key="example",
         sections=[SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST)],
         tools=[],
+        chapters=[],
     )
     payload: dict[str, JSONValue] = {
         "intro": {
@@ -167,6 +173,7 @@ def test_load_sections_rejects_invalid_hash_format() -> None:
         key="example",
         sections=[SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST)],
         tools=[],
+        chapters=[],
     )
     payload: dict[str, JSONValue] = {
         "intro": {
@@ -191,6 +198,7 @@ def test_load_tools_filters_unknown_entries() -> None:
                 contract_hash=VALID_DIGEST,
             )
         ],
+        chapters=[],
     )
     payload: dict[str, JSONValue] = {
         "demo_tool": {
@@ -220,6 +228,7 @@ def test_load_tools_rejects_invalid_hash_format() -> None:
                 contract_hash=VALID_DIGEST,
             )
         ],
+        chapters=[],
     )
     payload: dict[str, JSONValue] = {
         "demo_tool": {
@@ -237,6 +246,7 @@ def test_validate_sections_for_write_rejects_unknown_path() -> None:
         key="example",
         sections=[SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST)],
         tools=[],
+        chapters=[],
     )
     overrides = {("unknown",): SectionOverride(expected_hash=VALID_DIGEST, body="Body")}
 
@@ -256,6 +266,7 @@ def test_validate_tools_for_write_rejects_unknown_tool() -> None:
                 contract_hash=VALID_DIGEST,
             )
         ],
+        chapters=[],
     )
     overrides = {
         "other": ToolOverride(
@@ -278,6 +289,7 @@ def test_serialization_round_trip_for_sections() -> None:
             "demo",
             "example",
             [SectionDescriptor(("intro",), VALID_DIGEST)],
+            [],
             [],
         ),
     )
@@ -305,6 +317,7 @@ def test_serialization_round_trip_for_tools() -> None:
                 contract_hash=VALID_DIGEST,
             )
         ],
+        chapters=[],
     )
 
     payload = serialize_tools(overrides)
