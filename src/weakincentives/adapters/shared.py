@@ -639,6 +639,170 @@ class ToolMessageSerializer(Protocol):
 
 
 @dataclass(slots=True)
+class ToolExecutor:
+    """Handles execution of tool calls and event publishing."""
+
+    adapter_name: AdapterName
+    adapter: ProviderAdapter[Any]
+    prompt: Prompt[Any]
+    prompt_name: str
+    rendered: RenderedPrompt[Any]
+    bus: EventBus
+    session: SessionProtocol
+    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]]
+    serialize_tool_message_fn: ToolMessageSerializer
+    format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
+    parse_arguments: ToolArgumentsParser
+    logger_override: StructuredLogger | None = None
+    deadline: Deadline | None = None
+    _log: StructuredLogger = field(init=False)
+    _tool_events: list[ToolInvoked] = field(default_factory=list)
+    _tool_message_records: list[
+        tuple[ToolResult[SupportsToolResult], dict[str, Any]]
+    ] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self._log = (self.logger_override or logger).bind(
+            adapter=self.adapter_name,
+            prompt=self.prompt_name,
+        )
+
+    def execute(
+        self,
+        tool_calls: Sequence[ProviderToolCall],
+        provider_payload: dict[str, Any] | None,
+    ) -> tuple[list[dict[str, Any]], ToolChoice]:
+        """Execute tool calls and return resulting messages and next tool choice."""
+        messages: list[dict[str, Any]] = []
+        next_tool_choice: ToolChoice = "auto"
+
+        self._log.debug(
+            "Processing tool calls.",
+            event="prompt_tool_calls_detected",
+            context={"count": len(tool_calls)},
+        )
+
+        for tool_call in tool_calls:
+            tool_name = getattr(tool_call.function, "name", "tool")
+            if self.deadline is not None and self.deadline.remaining() <= timedelta(0):
+                _raise_tool_deadline_error(
+                    prompt_name=self.prompt_name,
+                    tool_name=tool_name,
+                    deadline=self.deadline,
+                )
+
+            invocation, tool_result = execute_tool_call(
+                adapter_name=self.adapter_name,
+                adapter=self.adapter,
+                prompt=self.prompt,
+                rendered_prompt=self.rendered,
+                tool_call=tool_call,
+                tool_registry=self.tool_registry,
+                bus=self.bus,
+                session=self.session,
+                prompt_name=self.prompt_name,
+                provider_payload=provider_payload,
+                deadline=self.deadline,
+                format_publish_failures=self.format_publish_failures,
+                parse_arguments=self.parse_arguments,
+                logger_override=self.logger_override,
+            )
+            self._tool_events.append(invocation)
+
+            tool_message = {
+                "role": "tool",
+                "tool_call_id": getattr(tool_call, "id", None),
+                "content": self.serialize_tool_message_fn(tool_result),
+            }
+            messages.append(tool_message)
+            self._tool_message_records.append((tool_result, tool_message))
+
+        return messages, next_tool_choice
+
+    @property
+    def tool_events(self) -> list[ToolInvoked]:
+        return self._tool_events
+
+    @property
+    def tool_message_records(
+        self,
+    ) -> list[tuple[ToolResult[SupportsToolResult], dict[str, Any]]]:
+        return self._tool_message_records
+
+
+@dataclass(slots=True)
+class ResponseParser[OutputT]:
+    """Handles parsing of provider responses into structured output."""
+
+    prompt_name: str
+    rendered: RenderedPrompt[OutputT]
+    parse_output: bool
+    require_structured_output_text: bool
+    _should_parse_structured_output: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._should_parse_structured_output = (
+            self.parse_output
+            and self.rendered.output_type is not None
+            and self.rendered.container is not None
+        )
+
+    def parse(
+        self, message: object, provider_payload: dict[str, Any] | None
+    ) -> tuple[OutputT | None, str | None]:
+        """Parse the provider message into output and text content."""
+        final_text = message_text_content(getattr(message, "content", None))
+        output: OutputT | None = None
+        text_value: str | None = final_text or None
+
+        if self._should_parse_structured_output:
+            parsed_payload = extract_parsed_content(message)
+            if parsed_payload is not None:
+                try:
+                    output = cast(
+                        OutputT,
+                        parse_schema_constrained_payload(
+                            cast(JSONValue, parsed_payload), self.rendered
+                        ),
+                    )
+                except (TypeError, ValueError) as error:
+                    raise PromptEvaluationError(
+                        str(error),
+                        prompt_name=self.prompt_name,
+                        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+                        provider_payload=provider_payload,
+                    ) from error
+            else:
+                if final_text or not self.require_structured_output_text:
+                    try:
+                        output = parse_structured_output(
+                            final_text or "", self.rendered
+                        )
+                    except OutputParseError as error:
+                        raise PromptEvaluationError(
+                            error.message,
+                            prompt_name=self.prompt_name,
+                            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+                            provider_payload=provider_payload,
+                        ) from error
+                else:
+                    raise PromptEvaluationError(
+                        "Provider response did not include structured output.",
+                        prompt_name=self.prompt_name,
+                        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+                        provider_payload=provider_payload,
+                    )
+            if output is not None:
+                text_value = None
+
+        return output, text_value
+
+    @property
+    def should_parse_structured_output(self) -> bool:
+        return self._should_parse_structured_output
+
+
+@dataclass(slots=True)
 class ConversationRunner[OutputT]:
     """Coordinate a conversational exchange with a provider."""
 
@@ -667,16 +831,10 @@ class ConversationRunner[OutputT]:
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
-    _tool_registry: dict[str, Tool[SupportsDataclass, SupportsToolResult]] = field(
-        init=False
-    )
-    _tool_events: list[ToolInvoked] = field(init=False)
-    _tool_message_records: list[
-        tuple[ToolResult[SupportsToolResult], dict[str, Any]]
-    ] = field(init=False)
     _provider_payload: dict[str, Any] | None = field(init=False, default=None)
     _next_tool_choice: ToolChoice = field(init=False)
-    _should_parse_structured_output: bool = field(init=False)
+    _tool_executor: ToolExecutor = field(init=False)
+    _response_parser: ResponseParser[OutputT] = field(init=False)
 
     def _raise_deadline_error(
         self, message: str, *, phase: PromptEvaluationPhase
@@ -751,15 +909,30 @@ class ConversationRunner[OutputT]:
 
         tools = list(self.rendered.tools)
         self._tool_specs = [tool_to_spec(tool) for tool in tools]
-        self._tool_registry = {tool.name: tool for tool in tools}
-        self._tool_events = []
-        self._tool_message_records = []
+        tool_registry = {tool.name: tool for tool in tools}
         self._provider_payload = None
         self._next_tool_choice = self.tool_choice
-        self._should_parse_structured_output = (
-            self.parse_output
-            and self.rendered.output_type is not None
-            and self.rendered.container is not None
+
+        self._tool_executor = ToolExecutor(
+            adapter_name=self.adapter_name,
+            adapter=self.adapter,
+            prompt=self.prompt,
+            prompt_name=self.prompt_name,
+            rendered=self.rendered,
+            bus=self.bus,
+            session=self.session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=self.serialize_tool_message_fn,
+            format_publish_failures=self.format_publish_failures,
+            parse_arguments=self.parse_arguments,
+            logger_override=self.logger_override,
+            deadline=self.deadline,
+        )
+        self._response_parser = ResponseParser[OutputT](
+            prompt_name=self.prompt_name,
+            rendered=self.rendered,
+            parse_output=self.parse_output,
+            require_structured_output_text=self.require_structured_output_text,
         )
 
         publish_result = self.bus.publish(
@@ -811,48 +984,15 @@ class ConversationRunner[OutputT]:
             }
         )
 
-        self._log.debug(
-            "Processing tool calls.",
-            event="prompt_tool_calls_detected",
-            context={"count": len(tool_calls)},
+        tool_messages, next_choice = self._tool_executor.execute(
+            tool_calls, self._provider_payload
         )
-
-        for tool_call in tool_calls:
-            tool_name = getattr(tool_call.function, "name", "tool")
-            self._ensure_deadline_remaining(
-                f"Deadline expired before executing tool '{tool_name}'.",
-                phase=PROMPT_EVALUATION_PHASE_TOOL,
-            )
-            invocation, tool_result = execute_tool_call(
-                adapter_name=self.adapter_name,
-                adapter=self.adapter,
-                prompt=self.prompt,
-                rendered_prompt=self.rendered,
-                tool_call=tool_call,
-                tool_registry=self._tool_registry,
-                bus=self.bus,
-                session=self.session,
-                prompt_name=self.prompt_name,
-                provider_payload=self._provider_payload,
-                deadline=self.deadline,
-                format_publish_failures=self.format_publish_failures,
-                parse_arguments=self.parse_arguments,
-                logger_override=self.logger_override,
-            )
-            self._tool_events.append(invocation)
-
-            tool_message = {
-                "role": "tool",
-                "tool_call_id": getattr(tool_call, "id", None),
-                "content": self.serialize_tool_message_fn(tool_result),
-            }
-            self._messages.append(tool_message)
-            self._tool_message_records.append((tool_result, tool_message))
+        self._messages.extend(tool_messages)
 
         if isinstance(self._next_tool_choice, Mapping):
             tool_choice_mapping = cast(Mapping[str, object], self._next_tool_choice)
             if tool_choice_mapping.get("type") == "function":
-                self._next_tool_choice = "auto"
+                self._next_tool_choice = next_choice
 
     def _finalize_response(self, message: object) -> PromptResponse[OutputT]:
         """Assemble and publish the final prompt response."""
@@ -861,56 +1001,19 @@ class ConversationRunner[OutputT]:
             "Deadline expired while finalizing provider response.",
             phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
-        final_text = message_text_content(getattr(message, "content", None))
-        output: OutputT | None = None
-        text_value: str | None = final_text or None
 
-        if self._should_parse_structured_output:
-            parsed_payload = extract_parsed_content(message)
-            if parsed_payload is not None:
-                try:
-                    output = cast(
-                        OutputT,
-                        parse_schema_constrained_payload(
-                            cast(JSONValue, parsed_payload), self.rendered
-                        ),
-                    )
-                except (TypeError, ValueError) as error:
-                    raise PromptEvaluationError(
-                        str(error),
-                        prompt_name=self.prompt_name,
-                        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-                        provider_payload=self._provider_payload,
-                    ) from error
-            else:
-                if final_text or not self.require_structured_output_text:
-                    try:
-                        output = parse_structured_output(
-                            final_text or "", self.rendered
-                        )
-                    except OutputParseError as error:
-                        raise PromptEvaluationError(
-                            error.message,
-                            prompt_name=self.prompt_name,
-                            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-                            provider_payload=self._provider_payload,
-                        ) from error
-                else:
-                    raise PromptEvaluationError(
-                        "Provider response did not include structured output.",
-                        prompt_name=self.prompt_name,
-                        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-                        provider_payload=self._provider_payload,
-                    )
-            if output is not None:
-                text_value = None
+        output, text_value = self._response_parser.parse(
+            message, self._provider_payload
+        )
+        tool_message_records = self._tool_executor.tool_message_records
+        tool_events = self._tool_executor.tool_events
 
         if (
             output is not None
-            and self._tool_message_records
-            and self._tool_message_records[-1][0].success
+            and tool_message_records
+            and tool_message_records[-1][0].success
         ):
-            last_result, last_message = self._tool_message_records[-1]
+            last_result, last_message = tool_message_records[-1]
             last_message["content"] = self.serialize_tool_message_fn(
                 last_result, payload=output
             )
@@ -919,7 +1022,7 @@ class ConversationRunner[OutputT]:
             prompt_name=self.prompt_name,
             text=text_value,
             output=output,
-            tool_results=tuple(self._tool_events),
+            tool_results=tuple(tool_events),
             provider_payload=self._provider_payload,
         )
         prompt_value: SupportsDataclass | None = None
@@ -955,10 +1058,10 @@ class ConversationRunner[OutputT]:
             "Prompt execution completed.",
             event="prompt_execution_succeeded",
             context={
-                "tool_count": len(self._tool_events),
+                "tool_count": len(tool_events),
                 "has_output": output is not None,
                 "text_length": len(text_value or "") if text_value else 0,
-                "structured_output": self._should_parse_structured_output,
+                "structured_output": self._response_parser.should_parse_structured_output,
                 "handler_count": publish_result.handled_count,
             },
         )
