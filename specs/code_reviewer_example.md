@@ -42,7 +42,7 @@ overrides, planning tools, and a repository-specific optimization workflow.
   `examples/code-review:code-review-session`).
 - `build_repository_optimization_prompt` — helper prompt that guides the agent
   through README/docs/tooling exploration and yields a Markdown block suitable
-  for the repository instructions section.
+  for the `WorkspaceDigest` section.
 - Both prompts use `MarkdownSection` instances plus the shared planning/workspace
   sections so the agent can list files, inspect paths, and update multi-step
   plans.
@@ -53,9 +53,9 @@ overrides, planning tools, and a repository-specific optimization workflow.
   prompt key + tag.
 - `initialize_code_reviewer_runtime` seeds the override file on startup so
   later edits always have a stable hash reference.
-- `save_repository_instructions_override` replaces the body of the repository
-  instructions section with escaped Markdown (all `$` are doubled) to avoid
-  `string.Template` collisions during render time.
+- Repository instructions are no longer a bespoke section; override writes
+  target the shared `WorkspaceDigest` section so callers persist a single
+  digest format.
 
 ### Optimization Command
 
@@ -64,24 +64,29 @@ overrides, planning tools, and a repository-specific optimization workflow.
 - Implementation steps:
   1. Create an `InProcessEventBus` and `Session` dedicated to the optimization
      prompt so tool invocations/events don’t pollute the main session.
-  1. Render the optimization prompt with `RepositoryOptimizationRequest`.
+  1. Render the optimization prompt with basic parameters (no bespoke
+     `RepositoryOptimizationResponse` class)—the response is treated as
+     markdown digest content.
   1. Invoke the adapter’s `optimize` method (same signature shape as
      `evaluate`) to execute the prompt within the sandboxed session/bus and
-     extract `RepositoryOptimizationResponse.instructions` (falling back to
-     plain text if structured output is missing).
-  1. Persist the Markdown override and print the new instructions to stdout.
+     capture the resulting text or structured output field as the digest.
+  1. Persist the digest into the main session’s workspace-digest slice and the
+     overrides store so the `WorkspaceDigest` section renders it on subsequent
+     turns.
 
 ### WorkspaceDigest Simplification Roadmap
 
 - Replace the repository instructions section with the shared `WorkspaceDigest`
   section so the REPL uses the same task-agnostic digest format as other
   orchestrations.
+- Remove `RepositoryOptimizationRequest`/`RepositoryOptimizationResponse` and
+  the specialized optimization plumbing—optimization simply renders the digest
+  prompt, runs `adapter.optimize` against an isolated session/bus, and writes
+  the resulting digest back to session state and overrides.
 - Deprecate custom override plumbing by sourcing digest content from the active
-  session first, then falling back to prompt overrides—`save_repository_instructions_override`
-  becomes a thin helper that updates the digest entry used by the section.
-- Route optimization runs through `adapter.optimize`, publishing the resulting
-  digest back into the sandboxed session before persisting to overrides, so the
-  main REPL can render the fresh summary without bespoke wiring.
+  session first, then falling back to prompt overrides—any helper that persists
+  digest content should operate directly on the workspace-digest entry consumed
+  by the shared section.
 - Simplify prompt construction: `build_task_prompt` imports `WorkspaceDigest`
   directly instead of maintaining a local Markdown section and related
   rendering code.

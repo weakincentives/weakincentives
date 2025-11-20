@@ -91,5 +91,8 @@ class ProviderAdapter(Protocol):
   instructions” block to the shared `WorkspaceDigest` section. The REPL’s
   optimization command should call `adapter.optimize` with an isolated session
   and bus, then stash the emitted digest into the primary session and override
-  store so every turn renders the latest summary without custom wiring.
+  store so every turn renders the latest summary without custom wiring. Any
+  legacy `RepositoryOptimizationRequest`/`RepositoryOptimizationResponse`
+  classes and related custom parsing should be removed in favor of this simpler
+  digest-handling path.
 
