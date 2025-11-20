@@ -30,7 +30,7 @@ overrides, planning tools, and a repository-specific optimization workflow.
    - **Review Request** — injects the user’s turn-by-turn prompt.
 1. Each REPL turn renders the prompt, dispatches it through the adapter, then
    prints the structured response and the current planning state.
-1. The special `optimize [focus]` command launches an isolated session/bus,
+1. The special `optimize [focus]` command launches a dedicated session,
    renders a repository-optimization prompt, and persists the resulting digest
    in the session/overrides for the `WorkspaceDigest` section. The command can
    attach a focus section that highlights priority files or subsystems so the
@@ -66,14 +66,16 @@ overrides, planning tools, and a repository-specific optimization workflow.
 - Trigger: User types `optimize` with an optional focus string (defaults to
   “Survey README, docs, and key scripts…”).
 - Implementation steps:
-  1. Create an `InProcessEventBus` and `Session` dedicated to the optimization
-     prompt so tool invocations/events don’t pollute the main session.
+  1. Create a `Session` dedicated to the optimization prompt so tool
+     invocations/events don’t pollute the main session (the attached bus, if
+     present, travels with the session implicitly).
   1. Render the optimization prompt with the goal section key and an optional
      focus `MarkdownSection`; no bespoke `RepositoryOptimizationResponse` class
      is needed because the digest is treated as markdown content.
   1. Invoke the adapter’s `optimize` method (same signature shape as
-     `evaluate`) to execute the prompt within the sandboxed session/bus and
-     capture the resulting text or structured output field as the digest.
+     `evaluate` but returning an `OptimizationResult`) to execute the prompt
+     within the sandboxed session and capture the resulting text or structured
+     output field as the digest.
   1. Persist the digest into the main session’s workspace-digest slice and the
      overrides store (using `OptimizationScope.GLOBAL` and a supplied
      `overrides_tag`) so the `WorkspaceDigest` section renders it on subsequent
@@ -90,16 +92,16 @@ optimization_prompt = build_repository_optimization_prompt(
     focus=user_focus,
     goal_section_key=digest_goal_key,
 )
-response = adapter.optimize(
+result = adapter.optimize(
     optimization_prompt,
     goal_section_key=digest_goal_key,
     focus_areas=MarkdownSection("Focus", user_focus) if user_focus else None,
     store_scope=OptimizationScope.GLOBAL,
     overrides_store=overrides_store,
     overrides_tag=overrides_tag,
-    bus=optimization_bus,
+    session=optimization_session,
 )
-digest_body = response.structured_output.get(digest_goal_key) or response.text
+digest_body = result.digest
 ```
 
 The assistant is instructed to explore the repository (README, docs, workflow
@@ -114,8 +116,8 @@ not need to re-run the optimization flow.
   orchestrations.
 - Remove `RepositoryOptimizationRequest`/`RepositoryOptimizationResponse` and
   the specialized optimization plumbing—optimization simply renders the digest
-  prompt, runs `adapter.optimize` against an isolated session/bus, and writes
-  the resulting digest back to session state and overrides.
+  prompt, runs `adapter.optimize` against a dedicated session, and writes the
+  resulting digest back to session state and overrides.
 - Deprecate custom override plumbing by sourcing digest content from the active
   session first, then falling back to prompt overrides—any helper that persists
   digest content should operate directly on the workspace-digest entry consumed

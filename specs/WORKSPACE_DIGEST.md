@@ -60,17 +60,21 @@ class ProviderAdapter(Protocol):
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str | None = None,
         focus_areas: MarkdownSection | None = None,
-        chapters_expansion_policy: ChaptersExpansionPolicy = (
-            ChaptersExpansionPolicy.ALL_INCLUDED
-        ),
         parse_output: bool = True,
-        bus: EventBus,
-    ) -> PromptResponse[OutputT]:
+        session: Session,
+    ) -> OptimizationResult[OutputT]:
         ...
 ```
 
 - The signature mirrors `evaluate` so callers can swap between evaluation and
-  optimization without branching on provider capabilities.
+  optimization without branching on provider capabilities. `optimize` returns an
+  `OptimizationResult` dataclass that captures the **output** of the inner
+  optimization prompt (structured output and digest text), not the input prompt
+  itself.
+- `OptimizationResult` SHOULD, at minimum, wrap the executed `PromptResponse`,
+  the extracted digest text, and the requested `OptimizationScope` so callers
+  can persist or forward the optimized workspace summary without re-rendering
+  the prompt.
 - `optimize` constructs and runs an **optimization prompt** analogous to the
   "optimize" REPL command described in `specs/code_reviewer_example.md`:
   - Render the supplied prompt against the provided params and goal section.
@@ -80,17 +84,14 @@ class ProviderAdapter(Protocol):
   - Execute the provider call, including any tool invocations, until a final
     assistant message is produced.
   - Parse structured output when declared, falling back to plain text.
-- Optimization MUST run against a **separate `Session` and `EventBus`** from the
-  primary request flow to keep optimization state and events isolated. The
-  caller or adapter is responsible for constructing this sandboxed session and
-  wiring its bus into the `optimize` invocation.
-- The returned `PromptResponse` SHOULD be published as a `PromptExecuted` event
-  on the supplied bus, matching `evaluate` semantics.
-- Adapters SHOULD surface the resulting optimization content (structured output
-  field or text) so callers can persist it as the workspace digest in the
-  session and/or overrides store. This enables `WorkspaceDigest` sections to
-  surface the optimized digest on subsequent renders without rerunning the
-  optimization prompt.
+- Optimization reads from the supplied `Session` (typically sandboxed from the
+  main flow) and does not require an `EventBus` argument. Any event publishing
+  should reuse the bus already attached to the session. Adapters SHOULD surface
+  the resulting optimization content (structured output field or text) so
+  callers can persist it as the workspace digest in the session and/or
+  overrides store. This enables `WorkspaceDigest` sections to surface the
+  optimized digest on subsequent renders without rerunning the optimization
+  prompt.
 
 ### Optimization Scope
 
@@ -109,15 +110,14 @@ class ProviderAdapter(Protocol):
 
 The adapter builds the optimization prompt by cloning the incoming prompt
 structure and injecting optimization guidance that targets the digest goal
-section. A typical flow:
+section. `optimize` generates its own prompt variant and only extracts the
+workspace digest section from the optimized prompt rather than requiring a
+chapters expansion policy argument. A typical flow:
 
 ```python
-def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, bus: EventBus, ...):
+def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, session: Session, ...):
     optimization_prompt = prompt.clone_with(
-        # Keep the same namespace and chapters but expand the goal section to
-        # capture the digest output.
         goal_section_key=goal_section_key,
-        chapters_expansion_policy=ChaptersExpansionPolicy.ALL_INCLUDED,
         optimization_sections=[
             MarkdownSection(
                 "Optimization Goal",
@@ -131,7 +131,11 @@ def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, bus: Event
         focus_areas=focus_areas,
     )
 
-    response = self._execute_prompt(optimization_prompt, bus=bus, parse_output=True)
+    response = self._execute_prompt(
+        optimization_prompt,
+        session=session,
+        parse_output=True,
+    )
     digest = response.structured_output.get(goal_section_key) or response.text
     if store_scope is OptimizationScope.GLOBAL:
         assert overrides_store is not None and overrides_tag, "Global scope requires overrides store and tag"
@@ -141,9 +145,23 @@ def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, bus: Event
             overrides_tag,
             goal_section_key,
             digest,
-        )
+    )
 
-    return response.with_metadata({"workspace_digest": digest, "store_scope": store_scope})
+    return OptimizationResult(
+        digest=digest,
+        response=response,
+        scope=store_scope,
+    )
+```
+
+An example `OptimizationResult` implementation:
+
+```python
+@dataclass
+class OptimizationResult(Generic[OutputT]):
+    response: PromptResponse[OutputT]
+    digest: str
+    scope: OptimizationScope
 ```
 
 - The injected sections provide the optimization instructions that mirror the
@@ -165,9 +183,9 @@ def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, bus: Event
 
 - The `code_reviewer_example` will migrate from a bespoke “repository
   instructions” block to the shared `WorkspaceDigest` section. The REPL’s
-  optimization command should call `adapter.optimize` with an isolated session
-  and bus, then stash the emitted digest into the primary session and override
-  store so every turn renders the latest summary without custom wiring. Any
-  legacy `RepositoryOptimizationRequest`/`RepositoryOptimizationResponse`
-  classes and related custom parsing should be removed in favor of this simpler
-  digest-handling path.
+  optimization command should call `adapter.optimize` with a dedicated session
+  (no extra bus argument), then stash the emitted digest into the primary
+  session and override store so every turn renders the latest summary without
+  custom wiring. Any legacy `RepositoryOptimizationRequest`/
+  `RepositoryOptimizationResponse` classes and related custom parsing should be
+  removed in favor of this simpler digest-handling path.
