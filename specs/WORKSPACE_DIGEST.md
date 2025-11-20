@@ -85,3 +85,11 @@ class ProviderAdapter(Protocol):
   surface the optimized digest on subsequent renders without rerunning the
   optimization prompt.
 
+## Integration Notes
+
+- The `code_reviewer_example` will migrate from a bespoke “repository
+  instructions” block to the shared `WorkspaceDigest` section. The REPL’s
+  optimization command should call `adapter.optimize` with an isolated session
+  and bus, then stash the emitted digest into the primary session and override
+  store so every turn renders the latest summary without custom wiring.
+

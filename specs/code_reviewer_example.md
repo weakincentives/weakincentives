@@ -24,14 +24,15 @@ overrides, planning tools, and a repository-specific optimization workflow.
    `CODE_REVIEW_PROMPT_TAG` is set).
 1. `build_task_prompt` composes four sections:
    - **Code Review Brief** — static instructions about reviewing mounted code.
-   - **Repository Instructions** — initially empty; populated via overrides.
+   - **Workspace Digest** — task-agnostic workspace summary sourced from the
+     session or overrides; replaces the bespoke repository instructions block.
    - **Planning Tools** — exposes PLAN/ACT/REFLECT helpers tied to the session.
    - **Review Request** — injects the user’s turn-by-turn prompt.
 1. Each REPL turn renders the prompt, dispatches it through the adapter, then
    prints the structured response and the current planning state.
 1. The special `optimize [focus]` command launches an isolated session/bus,
-   renders a repository-optimization prompt, and persists the resulting Markdown
-   into the repository instructions section via overrides.
+   renders a repository-optimization prompt, and persists the resulting digest
+   in the session/overrides for the `WorkspaceDigest` section.
 
 ## Key Components
 
@@ -64,10 +65,26 @@ overrides, planning tools, and a repository-specific optimization workflow.
   1. Create an `InProcessEventBus` and `Session` dedicated to the optimization
      prompt so tool invocations/events don’t pollute the main session.
   1. Render the optimization prompt with `RepositoryOptimizationRequest`.
-  1. Evaluate the prompt via the adapter and extract
-     `RepositoryOptimizationResponse.instructions` (falling back to plain text
-     if structured output is missing).
+  1. Invoke the adapter’s `optimize` method (same signature shape as
+     `evaluate`) to execute the prompt within the sandboxed session/bus and
+     extract `RepositoryOptimizationResponse.instructions` (falling back to
+     plain text if structured output is missing).
   1. Persist the Markdown override and print the new instructions to stdout.
+
+### WorkspaceDigest Simplification Roadmap
+
+- Replace the repository instructions section with the shared `WorkspaceDigest`
+  section so the REPL uses the same task-agnostic digest format as other
+  orchestrations.
+- Deprecate custom override plumbing by sourcing digest content from the active
+  session first, then falling back to prompt overrides—`save_repository_instructions_override`
+  becomes a thin helper that updates the digest entry used by the section.
+- Route optimization runs through `adapter.optimize`, publishing the resulting
+  digest back into the sandboxed session before persisting to overrides, so the
+  main REPL can render the fresh summary without bespoke wiring.
+- Simplify prompt construction: `build_task_prompt` imports `WorkspaceDigest`
+  directly instead of maintaining a local Markdown section and related
+  rendering code.
 
 ## Running the Example
 
