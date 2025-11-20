@@ -71,6 +71,10 @@ class ProviderAdapter(Protocol):
   - Execute the provider call, including any tool invocations, until a final
     assistant message is produced.
   - Parse structured output when declared, falling back to plain text.
+- Optimization MUST run against a **separate `Session` and `EventBus`** from the
+  primary request flow to keep optimization state and events isolated. The
+  caller or adapter is responsible for constructing this sandboxed session and
+  wiring its bus into the `optimize` invocation.
 - The returned `PromptResponse` SHOULD be published as a `PromptExecuted` event
   on the supplied bus, matching `evaluate` semantics.
 - Adapters SHOULD surface the resulting optimization content (structured output
