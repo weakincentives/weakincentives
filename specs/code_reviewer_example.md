@@ -65,14 +65,38 @@ overrides, planning tools, and a repository-specific optimization workflow.
   1. Create an `InProcessEventBus` and `Session` dedicated to the optimization
      prompt so tool invocations/events don’t pollute the main session.
   1. Render the optimization prompt with basic parameters (no bespoke
-     `RepositoryOptimizationResponse` class)—the response is treated as
-     markdown digest content.
+     `RepositoryOptimizationResponse` class)—the response is treated as markdown
+     digest content.
   1. Invoke the adapter’s `optimize` method (same signature shape as
      `evaluate`) to execute the prompt within the sandboxed session/bus and
      capture the resulting text or structured output field as the digest.
   1. Persist the digest into the main session’s workspace-digest slice and the
      overrides store so the `WorkspaceDigest` section renders it on subsequent
      turns.
+
+The optimization prompt mirrors the live review prompt but injects a concise set
+of optimization directives and a dedicated `WorkspaceDigest` goal section key so
+the adapter knows where to place the resulting markdown. A minimal pseudo-code
+sketch:
+
+```python
+digest_goal_key = "workspace_digest"
+optimization_prompt = build_repository_optimization_prompt(
+    focus=user_focus,
+    goal_section_key=digest_goal_key,
+)
+response = adapter.optimize(
+    optimization_prompt,
+    goal_section_key=digest_goal_key,
+    bus=optimization_bus,
+)
+digest_body = response.structured_output.get(digest_goal_key) or response.text
+```
+
+The assistant is instructed to explore the repository (README, docs, workflow
+files, default test/build commands) and emit a markdown digest. The digest body
+feeds both the session and overrides store so later `WorkspaceDigest` renders do
+not need to re-run the optimization flow.
 
 ### WorkspaceDigest Simplification Roadmap
 

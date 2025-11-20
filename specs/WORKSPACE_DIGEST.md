@@ -30,11 +30,11 @@ supporting prompt overrides as a fallback.
      the active `Session`. Callers SHOULD register a reducer slice dedicated to
      workspace digests so the section can pull the newest tuple entry without
      performing I/O during render time.
-  2. **Override fallback** – when no digest exists in the session, resolve a
+  1. **Override fallback** – when no digest exists in the session, resolve a
      template override for the section from the active overrides store (see
      `specs/PROMPT_OVERRIDES.md`). Overrides must be applied exactly as stored,
      including any escaped template tokens.
-  3. **Empty state** – if neither source provides content, log a warning to the
+  1. **Empty state** – if neither source provides content, log a warning to the
      caller and render an explicit placeholder that invites the model to explore
      the workspace before starting further tasks.
 - The section is **task agnostic**: it MUST NOT incorporate per-request user
@@ -85,6 +85,51 @@ class ProviderAdapter(Protocol):
   surface the optimized digest on subsequent renders without rerunning the
   optimization prompt.
 
+### Optimization Prompt Assembly
+
+The adapter builds the optimization prompt by cloning the incoming prompt
+structure and injecting optimization guidance that targets the digest goal
+section. A typical flow:
+
+```python
+def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, bus: EventBus, ...):
+    optimization_prompt = prompt.clone_with(
+        # Keep the same namespace and chapters but expand the goal section to
+        # capture the digest output.
+        goal_section_key=goal_section_key,
+        chapters_expansion_policy=ChaptersExpansionPolicy.ALL_INCLUDED,
+        optimization_sections=[
+            MarkdownSection(
+                "Optimization Goal",
+                "Focus on summarizing the workspace so future prompts can rely on a cached digest.",
+            ),
+            MarkdownSection(
+                "Expectations",
+                "List key files, configs, and workflows; avoid task-specific advice.",
+            ),
+        ],
+    )
+
+    response = self._execute_prompt(optimization_prompt, bus=bus, parse_output=True)
+    digest = response.structured_output.get(goal_section_key) or response.text
+    return response.with_metadata({"workspace_digest": digest})
+```
+
+- The injected sections provide the optimization instructions that mirror the
+  "optimize" REPL command: explore README/docs first, record build/test
+  commands, and emit a markdown digest suitable for the `WorkspaceDigest`
+  section.
+- `goal_section_key` identifies where the digest should land inside the prompt’s
+  structured output schema; adapters MUST preserve the caller-supplied value so
+  downstream code can map the digest into session state and overrides.
+- The adapter may use helper methods (e.g., `_execute_prompt`) that mirror
+  `evaluate` behavior: render, stream/tool execute, and parse output. The digest
+  is read from structured output when available; otherwise the final assistant
+  message text is treated as the digest body.
+- Callers store the `workspace_digest` metadata (or equivalent) back into the
+  primary session and prompt override store so the `WorkspaceDigest` section can
+  reuse it without re-optimizing.
+
 ## Integration Notes
 
 - The `code_reviewer_example` will migrate from a bespoke “repository
@@ -95,4 +140,3 @@ class ProviderAdapter(Protocol):
   legacy `RepositoryOptimizationRequest`/`RepositoryOptimizationResponse`
   classes and related custom parsing should be removed in favor of this simpler
   digest-handling path.
-
