@@ -56,6 +56,10 @@ class ProviderAdapter(Protocol):
         prompt: Prompt[OutputT],
         *params: object,
         goal_section_key: str,
+        store_scope: OptimizationScope = OptimizationScope.SESSION,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str | None = None,
+        focus_areas: MarkdownSection | None = None,
         chapters_expansion_policy: ChaptersExpansionPolicy = (
             ChaptersExpansionPolicy.ALL_INCLUDED
         ),
@@ -70,6 +74,9 @@ class ProviderAdapter(Protocol):
 - `optimize` constructs and runs an **optimization prompt** analogous to the
   "optimize" REPL command described in `specs/code_reviewer_example.md`:
   - Render the supplied prompt against the provided params and goal section.
+  - Optionally append the `focus_areas` section to guide the model toward
+    specific files, subsystems, or workflows the caller wants prioritized in the
+    digest.
   - Execute the provider call, including any tool invocations, until a final
     assistant message is produced.
   - Parse structured output when declared, falling back to plain text.
@@ -84,6 +91,19 @@ class ProviderAdapter(Protocol):
   session and/or overrides store. This enables `WorkspaceDigest` sections to
   surface the optimized digest on subsequent renders without rerunning the
   optimization prompt.
+
+### Optimization Scope
+
+- Introduce `OptimizationScope` as an enum that indicates where optimized
+  results are persisted:
+  - `SESSION` — store only in the calling session’s workspace-digest slice.
+  - `GLOBAL` — store in the prompt overrides store so the digest survives across
+    sessions and processes.
+- When `store_scope` is `GLOBAL`, callers MUST supply both `overrides_store` and
+  `overrides_tag` so the adapter can write the digest to the correct override
+  entry. Calls missing either parameter should raise or fail early.
+- Adapters SHOULD persist into the session even when storing globally so the
+  current flow immediately benefits from the optimized digest.
 
 ### Optimization Prompt Assembly
 
@@ -108,11 +128,22 @@ def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, bus: Event
                 "List key files, configs, and workflows; avoid task-specific advice.",
             ),
         ],
+        focus_areas=focus_areas,
     )
 
     response = self._execute_prompt(optimization_prompt, bus=bus, parse_output=True)
     digest = response.structured_output.get(goal_section_key) or response.text
-    return response.with_metadata({"workspace_digest": digest})
+    if store_scope is OptimizationScope.GLOBAL:
+        assert overrides_store is not None and overrides_tag, "Global scope requires overrides store and tag"
+        overrides_store.set_override(
+            prompt.namespace,
+            prompt.key,
+            overrides_tag,
+            goal_section_key,
+            digest,
+        )
+
+    return response.with_metadata({"workspace_digest": digest, "store_scope": store_scope})
 ```
 
 - The injected sections provide the optimization instructions that mirror the
