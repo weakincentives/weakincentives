@@ -34,10 +34,9 @@ supporting prompt overrides as a fallback.
      template override for the section from the active overrides store (see
      `specs/PROMPT_OVERRIDES.md`). Overrides must be applied exactly as stored,
      including any escaped template tokens.
-  3. **Empty state** – if neither source provides content, render an explicit
-     placeholder instructing the caller to run optimization to populate the
-     digest and suggesting a quick workspace exploration before starting further
-     tasks.
+  3. **Empty state** – if neither source provides content, log a warning to the
+     caller and render an explicit placeholder that invites the model to explore
+     the workspace before starting further tasks.
 - The section is **task agnostic**: it MUST NOT incorporate per-request user
   instructions. It only summarizes workspace structure and defaults for
   long-lived tooling (tests, linters, package managers, container settings,
