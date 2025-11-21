@@ -68,7 +68,9 @@ overrides, planning tools, and a repository-specific optimization workflow.
 - Implementation steps:
   1. Create a `Session` dedicated to the optimization prompt so tool
      invocations/events don’t pollute the main session (the attached bus, if
-     present, travels with the session implicitly).
+     present, travels with the session implicitly). Any sections borrowed from
+     the main prompt must be safe to run with this new session/bus; clone or
+     rebuild them if they capture session state.
   1. Invoke the adapter’s `optimize` method with the normal review prompt and an
      optional focus `MarkdownSection`; no bespoke `RepositoryOptimizationResponse`
      class is needed because the digest is treated as markdown content. The

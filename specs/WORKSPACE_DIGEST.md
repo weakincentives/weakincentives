@@ -87,13 +87,15 @@ class ProviderAdapter(Protocol):
   - Execute the provider call, including any tool invocations, until a final
     assistant message is produced.
   - Parse structured output when declared, falling back to plain text.
-  - Optimization reads from the supplied `Session` (typically sandboxed from the
-    main flow) and does not require an `EventBus` argument. Any event publishing
-    should reuse the bus already attached to the session. Adapters MUST persist
-    the resulting optimization content (structured output field or text) within
-    `optimize` based on the configured scope so the digest is immediately
-    available for subsequent prompts without rerunning the optimization
-    prompt.
+- Optimization reads from the supplied `Session` (typically sandboxed from the
+  main flow) and does not require an `EventBus` argument. Any event publishing
+  should reuse the bus already attached to the session, and adapters must avoid
+  wiring prompt sections that still reference a different session or bus. Clone
+  or rebuild sections before execution so the optimization prompt interacts
+  solely with the supplied session. Adapters MUST persist the resulting
+  optimization content (structured output field or text) within `optimize`
+  based on the configured scope so the digest is immediately available for
+  subsequent prompts without rerunning the optimization prompt.
 
 ### Optimization Scope
 
@@ -116,7 +118,12 @@ The adapter accepts a normal user prompt and internally builds a **brand new**
 optimization prompt rather than cloning or rendering the original. It scans the
 provided prompt to find the workspace section (VFS or Podman) and the
 `WorkspaceDigest` section key, then assembles a streamlined prompt with a fresh
-preamble plus only the sections needed to perform workspace exploration. The
+preamble plus only the sections needed to perform workspace exploration. When
+the optimization prompt executes with a dedicated session (and its event bus),
+any sections borrowed from the user prompt MUST be safe to use with that new
+session. Prefer constructing new section instances or cloning sections (for
+example, a `section.clone()` helper that rebinds session-aware fields) instead
+of reusing objects that still reference the original session or bus. The
 adapter should rely on `prompt.find_section` with either section keys or type
 references to locate the relevant inputs. A typical flow:
 
@@ -124,6 +131,11 @@ references to locate the relevant inputs. A typical flow:
 def optimize(self, prompt: Prompt[OutputT], *, session: Session, ...):
     goal_section = prompt.find_section("workspace-digest")
     workspace_section = prompt.find_section(("vfs", "podman", WorkspaceSection))
+
+    safe_workspace_section = workspace_section.clone() if hasattr(
+        workspace_section, "clone"
+    ) else workspace_section
+    safe_goal_section = goal_section.clone() if hasattr(goal_section, "clone") else goal_section
 
     optimization_prompt = Prompt(
         namespace="optimization",
@@ -138,8 +150,8 @@ def optimize(self, prompt: Prompt[OutputT], *, session: Session, ...):
                 "List key files, configs, and workflows; avoid task-specific advice.",
             ),
             *(((focus_areas,) if focus_areas else ())),
-            workspace_section,
-            goal_section,
+            safe_workspace_section,
+            safe_goal_section,
         ],
     )
 
