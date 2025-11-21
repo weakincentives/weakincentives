@@ -69,32 +69,24 @@ overrides, planning tools, and a repository-specific optimization workflow.
   1. Create a `Session` dedicated to the optimization prompt so tool
      invocations/events don’t pollute the main session (the attached bus, if
      present, travels with the session implicitly).
-  1. Render the optimization prompt with the goal section key and an optional
-     focus `MarkdownSection`; no bespoke `RepositoryOptimizationResponse` class
-     is needed because the digest is treated as markdown content.
-  1. Invoke the adapter’s `optimize` method (same signature shape as
-     `evaluate` but returning an `OptimizationResult`) to execute the prompt
-     within the sandboxed session and capture the resulting text or structured
-     output field as the digest.
+  1. Invoke the adapter’s `optimize` method with the normal review prompt and an
+     optional focus `MarkdownSection`; no bespoke `RepositoryOptimizationResponse`
+     class is needed because the digest is treated as markdown content. The
+     adapter scans the prompt to find the workspace and `WorkspaceDigest`
+     sections, clones the prompt with optimization guidance, and runs the inner
+     optimization flow automatically.
   1. Persist the digest into the main session’s workspace-digest slice and the
      overrides store (using `OptimizationScope.GLOBAL` and a supplied
      `overrides_tag`) so the `WorkspaceDigest` section renders it on subsequent
      turns and across runs.
 
 The optimization prompt mirrors the live review prompt but injects a concise set
-of optimization directives and a dedicated `WorkspaceDigest` goal section key so
-the adapter knows where to place the resulting markdown. A minimal pseudo-code
-sketch:
+of optimization directives; the adapter identifies the relevant sections while
+building the optimization variant. A minimal pseudo-code sketch:
 
 ```python
-digest_goal_key = "workspace_digest"
-optimization_prompt = build_repository_optimization_prompt(
-    focus=user_focus,
-    goal_section_key=digest_goal_key,
-)
 result = adapter.optimize(
-    optimization_prompt,
-    goal_section_key=digest_goal_key,
+    build_task_prompt(user_request, overrides_tag),
     focus_areas=MarkdownSection("Focus", user_focus) if user_focus else None,
     store_scope=OptimizationScope.GLOBAL,
     overrides_store=overrides_store,

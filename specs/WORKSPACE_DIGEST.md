@@ -55,7 +55,6 @@ class ProviderAdapter(Protocol):
         self,
         prompt: Prompt[OutputT],
         *params: object,
-        goal_section_key: str,
         store_scope: OptimizationScope = OptimizationScope.SESSION,
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str | None = None,
@@ -71,13 +70,18 @@ class ProviderAdapter(Protocol):
   `OptimizationResult` dataclass that captures the **output** of the inner
   optimization prompt (structured output and digest text), not the input prompt
   itself.
+- Callers pass the same user-facing prompt they would evaluate; the adapter
+  derives optimization metadata (workspace section, digest section key) by
+  inspecting that prompt instead of requiring explicit arguments such as a
+  `goal_section_key`.
 - `OptimizationResult` SHOULD, at minimum, wrap the executed `PromptResponse`,
   the extracted digest text, and the requested `OptimizationScope` so callers
   can persist or forward the optimized workspace summary without re-rendering
   the prompt.
 - `optimize` constructs and runs an **optimization prompt** analogous to the
   "optimize" REPL command described in `specs/code_reviewer_example.md`:
-  - Render the supplied prompt against the provided params and goal section.
+  - Render the supplied prompt against the provided params, deriving the
+    workspace and digest sections from the prompt structure for optimization.
   - Optionally append the `focus_areas` section to guide the model toward
     specific files, subsystems, or workflows the caller wants prioritized in the
     digest.
@@ -108,16 +112,19 @@ class ProviderAdapter(Protocol):
 
 ### Optimization Prompt Assembly
 
-The adapter builds the optimization prompt by cloning the incoming prompt
-structure and injecting optimization guidance that targets the digest goal
-section. `optimize` generates its own prompt variant and only extracts the
-workspace digest section from the optimized prompt rather than requiring a
-chapters expansion policy argument. A typical flow:
+The adapter accepts a normal user prompt and internally builds the optimization
+prompt by cloning the incoming structure. It scans the provided prompt to find
+the workspace section (VFS or Podman) and the `WorkspaceDigest` section key,
+then injects optimization guidance that targets that digest goal. `optimize`
+generates its own prompt variant and only extracts the workspace digest section
+from the optimized prompt rather than requiring a chapters expansion policy
+argument. A typical flow:
 
 ```python
-def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, session: Session, ...):
+def optimize(self, prompt: Prompt[OutputT], *, session: Session, ...):
+    goal_section_key = prompt.find_section_key("workspace-digest")
+    workspace_section = prompt.find_section(("vfs", "podman"))
     optimization_prompt = prompt.clone_with(
-        goal_section_key=goal_section_key,
         optimization_sections=[
             MarkdownSection(
                 "Optimization Goal",
@@ -129,6 +136,7 @@ def optimize(self, prompt: Prompt[OutputT], *, goal_section_key: str, session: S
             ),
         ],
         focus_areas=focus_areas,
+        restricted_sections=[workspace_section, goal_section_key],
     )
 
     response = self._execute_prompt(
@@ -168,9 +176,10 @@ class OptimizationResult(Generic[OutputT]):
   "optimize" REPL command: explore README/docs first, record build/test
   commands, and emit a markdown digest suitable for the `WorkspaceDigest`
   section.
-- `goal_section_key` identifies where the digest should land inside the prompt’s
-  structured output schema; adapters MUST preserve the caller-supplied value so
-  downstream code can map the digest into session state and overrides.
+- The adapter is responsible for deriving the digest target from the prompt
+  itself (e.g., the `WorkspaceDigest` section key discovered during scanning)
+  rather than receiving it as an explicit argument so callers only supply the
+  user-facing prompt and params.
 - The adapter may use helper methods (e.g., `_execute_prompt`) that mirror
   `evaluate` behavior: render, stream/tool execute, and parse output. The digest
   is read from structured output when available; otherwise the final assistant
