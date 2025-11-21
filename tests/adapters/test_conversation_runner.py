@@ -368,6 +368,23 @@ def test_throttle_policy_applies_jitter(monkeypatch: pytest.MonkeyPatch) -> None
     assert policy.compute_delay(attempt=1, retry_after=None) == 0.5
 
 
+def test_throttle_policy_uses_retry_after_as_minimum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = ThrottlePolicy(
+        base_delay_seconds=0.5,
+        max_delay_seconds=1.0,
+        max_attempts=3,
+        max_total_delay_seconds=10.0,
+    )
+    monkeypatch.setattr(
+        "weakincentives.adapters.shared._jitter_random.uniform",
+        lambda lower, upper: lower,
+    )
+
+    assert policy.compute_delay(attempt=1, retry_after=3.0) == 3.0
+
+
 def test_conversation_runner_respects_max_total_delay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

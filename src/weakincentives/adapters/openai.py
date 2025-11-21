@@ -150,16 +150,6 @@ def _normalize_openai_throttle(
         typed_body = cast(Mapping[str, object], body)
         code = typed_body.get("code", code)
 
-    if status_code == 429 or "ratelimit" in name:
-        return ThrottleError(
-            message,
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            kind="rate_limit",
-            retry_after=retry_after,
-            provider_payload=payload,
-        )
-
     if (isinstance(code, str) and "quota" in code) or "quota" in name:
         return ThrottleError(
             message,
@@ -169,6 +159,16 @@ def _normalize_openai_throttle(
             retry_after=retry_after,
             provider_payload=payload,
             safe_to_retry=False,
+        )
+
+    if status_code == 429 or "ratelimit" in name:
+        return ThrottleError(
+            message,
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            kind="rate_limit",
+            retry_after=retry_after,
+            provider_payload=payload,
         )
 
     if "timeout" in name:

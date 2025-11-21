@@ -132,6 +132,21 @@ def test_openai_throttle_normalization_recognizes_quota() -> None:
     assert not throttle.safe_to_retry
 
 
+def test_openai_throttle_normalization_prioritizes_quota_hints() -> None:
+    class FakeQuota(Exception):
+        status_code = 429
+        code = "insufficient_quota"
+
+    throttle = openai_adapter._normalize_openai_throttle(
+        FakeQuota(),
+        prompt_name=TEST_PROMPT_NAME,
+    )
+
+    assert isinstance(throttle, ThrottleError)
+    assert throttle.kind == "quota"
+    assert not throttle.safe_to_retry
+
+
 def test_openai_throttle_normalization_recognizes_timeout() -> None:
     class FakeTimeout(Exception):
         pass

@@ -120,15 +120,13 @@ class ThrottlePolicy:
 
         growth = self.base_delay_seconds * (2 ** (attempt - 1))
         capped = min(self.max_delay_seconds, growth)
-        target = capped
-        if retry_after is not None:
-            target = max(target, retry_after)
+        min_delay = max(0.0, retry_after) if retry_after is not None else 0.0
+        target = max(capped, min_delay)
 
         if target <= 0:
             return 0.0
 
-        jitter = _jitter_random.uniform(0, target)
-        return min(self.max_delay_seconds, jitter)
+        return _jitter_random.uniform(min_delay, target)
 
 
 def default_throttle_policy() -> ThrottlePolicy:
