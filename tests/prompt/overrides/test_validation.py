@@ -39,6 +39,7 @@ from weakincentives.prompt.overrides.versioning import (
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
+    ToolParamDescription,
 )
 from weakincentives.prompt.tool import Tool
 from weakincentives.types import JSONValue
@@ -196,7 +197,14 @@ def test_load_tools_filters_unknown_entries() -> None:
         "demo_tool": {
             "expected_contract_hash": str(VALID_DIGEST),
             "description": "Updated",
-            "param_descriptions": {"value": "Value"},
+            "param_descriptions": {
+                "value": {
+                    "description": "Value",
+                    "type": "int",
+                    "has_default": False,
+                    "default": None,
+                }
+            },
         },
         "unknown_tool": {
             "expected_contract_hash": str(OTHER_DIGEST),
@@ -291,7 +299,9 @@ def test_serialization_round_trip_for_tools() -> None:
             name="demo_tool",
             expected_contract_hash=VALID_DIGEST,
             description="Updated",
-            param_descriptions={"value": "Value"},
+            param_descriptions={
+                "value": ToolParamDescription(description="Value")
+            },
         )
     }
     descriptor = PromptDescriptor(
@@ -320,4 +330,6 @@ def test_seed_sections_and_tools_generate_overrides() -> None:
     tools = seed_tools(prompt, descriptor)
 
     assert sections["intro",].body == "Body template"
-    assert tools[tool.name].param_descriptions == {"value": "Value"}
+    assert tools[tool.name].param_descriptions == {
+        "value": ToolParamDescription(description="Value", type_name="int")
+    }

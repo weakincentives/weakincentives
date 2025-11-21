@@ -26,12 +26,15 @@ from .registry import RegistrySnapshot, SectionNode
 from .response_format import ResponseFormatSection
 from .structured_output import StructuredOutputConfig
 from .tool import Tool
+from .overrides.versioning import ToolParamDescription
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .overrides import ToolOverride
 
 
-_EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
+_EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[
+    str, Mapping[str, ToolParamDescription]
+] = MappingProxyType({})
 
 
 OutputT_co = TypeVar("OutputT_co", covariant=True)
@@ -47,7 +50,7 @@ class RenderedPrompt[OutputT_co]:
     _tools: tuple[Tool[SupportsDataclass, SupportsToolResult], ...] = field(
         default_factory=tuple
     )
-    _tool_param_descriptions: Mapping[str, Mapping[str, str]] = field(
+    _tool_param_descriptions: Mapping[str, Mapping[str, ToolParamDescription]] = field(
         default=_EMPTY_TOOL_PARAM_DESCRIPTIONS
     )
 
@@ -64,7 +67,7 @@ class RenderedPrompt[OutputT_co]:
     @property
     def tool_param_descriptions(
         self,
-    ) -> Mapping[str, Mapping[str, str]]:
+    ) -> Mapping[str, Mapping[str, ToolParamDescription]]:
         """Description patches keyed by tool name."""
 
         return self._tool_param_descriptions
@@ -95,11 +98,11 @@ class RenderedPrompt[OutputT_co]:
 
 
 def _freeze_tool_param_descriptions(
-    descriptions: Mapping[str, dict[str, str]],
-) -> Mapping[str, Mapping[str, str]]:
+    descriptions: Mapping[str, dict[str, ToolParamDescription]],
+) -> Mapping[str, Mapping[str, ToolParamDescription]]:
     if not descriptions:
         return MappingProxyType({})
-    frozen: dict[str, Mapping[str, str]] = {}
+    frozen: dict[str, Mapping[str, ToolParamDescription]] = {}
     for name, field_mapping in descriptions.items():
         frozen[name] = MappingProxyType(dict(field_mapping))
     return MappingProxyType(frozen)
@@ -163,7 +166,7 @@ class PromptRenderer[OutputT]:
         collected_tools: list[Tool[SupportsDataclass, SupportsToolResult]] = []
         override_lookup = dict(overrides or {})
         tool_override_lookup = dict(tool_overrides or {})
-        field_description_patches: dict[str, dict[str, str]] = {}
+        field_description_patches: dict[str, dict[str, ToolParamDescription]] = {}
 
         for node, section_params in self._iter_enabled_sections(
             dict(param_lookup),

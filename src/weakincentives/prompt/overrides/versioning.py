@@ -30,7 +30,7 @@ def _tool_override_mapping_factory() -> dict[str, ToolOverride]:
     return {}
 
 
-def _param_description_mapping_factory() -> dict[str, str]:
+def _param_description_mapping_factory() -> dict[str, "ToolParamDescription"]:
     return {}
 
 
@@ -165,13 +165,23 @@ class SectionOverride:
 
 
 @dataclass(slots=True)
+class ToolParamDescription:
+    """Metadata describing a single tool parameter field."""
+
+    description: str
+    type_name: str | None = None
+    has_default: bool = False
+    default: str | None = None
+
+
+@dataclass(slots=True)
 class ToolOverride:
     """Description overrides validated against a tool contract hash."""
 
     name: str
     expected_contract_hash: HexDigest
     description: str | None = None
-    param_descriptions: dict[str, str] = field(
+    param_descriptions: dict[str, ToolParamDescription] = field(
         default_factory=_param_description_mapping_factory
     )
 
@@ -235,6 +245,7 @@ __all__ = [
     "SectionDescriptor",
     "SectionOverride",
     "ToolDescriptor",
+    "ToolParamDescription",
     "ToolOverride",
     "ensure_hex_digest",
 ]

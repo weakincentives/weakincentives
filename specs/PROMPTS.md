@@ -113,8 +113,8 @@ Rendering returns a `RenderedPrompt` dataclass. Besides the markdown string (`.t
 the object surfaces:
 
 - `.tools` – ordered tuple of tools contributed by enabled sections.
-- `.tool_param_descriptions` – optional mapping of tool name → field description overrides supplied by the
-  override system.
+- `.tool_param_descriptions` – optional mapping of tool name → per-field metadata supplied by the override system. Each field
+  entry exposes the description, inferred type, and default hints for every parameter attribute.
 
 ## Validation and Error Handling
 

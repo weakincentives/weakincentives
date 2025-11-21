@@ -23,6 +23,7 @@ from weakincentives.prompt.overrides import (
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
+    ToolParamDescription,
     filter_override_for_descriptor,
     hash_json,
     hash_text,
@@ -388,7 +389,11 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
                 name=tool.name,
                 expected_contract_hash=contract_hash,
                 description="Offer a celebratory greeting for the subject.",
-                param_descriptions={"subject": "Name of the person to greet."},
+                param_descriptions={
+                    "subject": ToolParamDescription(
+                        description="Name of the person to greet."
+                    )
+                },
             )
         },
     )
@@ -403,7 +408,9 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
         rendered.tools[0].description == "Offer a celebratory greeting for the subject."
     )
     assert rendered.tool_param_descriptions == {
-        tool.name: {"subject": "Name of the person to greet."}
+        tool.name: {
+            "subject": ToolParamDescription(description="Name of the person to greet.")
+        }
     }
 
 

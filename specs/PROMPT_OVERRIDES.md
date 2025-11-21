@@ -102,7 +102,14 @@ class ToolOverride:
     name: str
     expected_contract_hash: str
     description: str | None = None
-    param_descriptions: dict[str, str] = field(default_factory=dict)
+    param_descriptions: dict[str, ToolParamDescription] = field(default_factory=dict)
+
+@dataclass(slots=True)
+class ToolParamDescription:
+    description: str
+    type_name: str | None = None
+    has_default: bool = False
+    default: str | None = None
 
 @dataclass(slots=True)
 class PromptOverride:
@@ -122,8 +129,10 @@ Rules:
    continue to publish the in-code hash.
 1. Tool overrides are keyed by tool name. They apply only when the stored
    contract hash matches the descriptor value and allow callers to replace the
-   model-facing description and optionally patch per-field parameter
-   descriptions.
+   model-facing description and optionally patch per-field parameter metadata.
+   Each metadata entry corresponds to a dataclass attribute (including nested
+   dataclasses expressed as dotted paths like `address.street`) and records the
+   description, type name, and default hints.
 1. Overrides are valid only when `expected_hash` (sections) or
    `expected_contract_hash` (tools) matches the descriptor entry.
 1. Callers render prompts with overrides via `Prompt.render`, which should:
@@ -204,7 +213,18 @@ Each `{tag}.json` file stores a single `PromptOverride` payload:
       "expected_contract_hash": "…",
       "description": "Use the vector index.",
       "param_descriptions": {
-        "query": "User provided keywords."
+        "query": {
+          "description": "User provided keywords.",
+          "type": "str",
+          "has_default": false,
+          "default": null
+        },
+        "filters.language": {
+          "description": "Describe the `filters.language` parameter.",
+          "type": "LanguageFilter",
+          "has_default": true,
+          "default": "'en'"
+        }
       }
     }
   }
@@ -245,9 +265,12 @@ Each `{tag}.json` file stores a single `PromptOverride` payload:
      to the concrete prompt body supplying the data.
    - Build a `PromptOverride` enumerating every section path with the actual
      section body text read from the `Prompt` instance.
-   - Include every tool descriptor with the tool descriptions and parameter
-     descriptions sourced from the `Prompt`, paired with the descriptor’s
-     contract hash.
+   - Include every tool descriptor with the tool descriptions and a complete
+     parameter catalog sourced from the `Prompt` (covering every params
+     dataclass field, including nested dataclasses) paired with the descriptor’s
+     contract hash. Each catalog entry records the description, inferred type
+     name, and default hints so override authors can edit files without diving
+     into the Python source.
    - If an override already exists for `(ns, prompt_key, tag)`, return the
      persisted override unchanged without touching the filesystem. Future
      enhancements may add an `overwrite=True` flag if clobbering becomes

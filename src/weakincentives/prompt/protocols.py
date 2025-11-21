@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
 from ..deadlines import Deadline
 from ._overrides_protocols import PromptOverridesStoreProtocol
 from ._types import SupportsDataclass
+from .overrides.versioning import ToolParamDescription
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..runtime.events._types import EventBus
@@ -60,7 +61,9 @@ class RenderedPromptProtocol(Protocol[RenderedOutputT]):
     def tools(self) -> tuple[object, ...]: ...
 
     @property
-    def tool_param_descriptions(self) -> Mapping[str, Mapping[str, str]]: ...
+    def tool_param_descriptions(
+        self,
+    ) -> Mapping[str, Mapping[str, ToolParamDescription]]: ...
 
 
 class PromptProtocol(Protocol[PromptOutputT]):

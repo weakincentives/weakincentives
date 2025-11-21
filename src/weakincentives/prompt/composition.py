@@ -22,6 +22,7 @@ from typing import Any, ClassVar, Generic, TypeVar, cast, override
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
 from .markdown import MarkdownSection
+from .overrides.versioning import ToolParamDescription
 from .prompt import Prompt, RenderedPrompt
 from .protocols import PromptProtocol
 from .response_format import ResponseFormatParams, ResponseFormatSection
@@ -247,13 +248,13 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
 
 
 def _merge_tool_param_descriptions(
-    parent_descriptions: Mapping[str, Mapping[str, str]],
-    rendered_descriptions: Mapping[str, Mapping[str, str]],
-) -> Mapping[str, Mapping[str, str]]:
+    parent_descriptions: Mapping[str, Mapping[str, ToolParamDescription]],
+    rendered_descriptions: Mapping[str, Mapping[str, ToolParamDescription]],
+) -> Mapping[str, Mapping[str, ToolParamDescription]]:
     if not parent_descriptions:
         return rendered_descriptions
 
-    merged: dict[str, dict[str, str]] = {
+    merged: dict[str, dict[str, ToolParamDescription]] = {
         name: dict(fields) for name, fields in parent_descriptions.items()
     }
     for name, fields in rendered_descriptions.items():
