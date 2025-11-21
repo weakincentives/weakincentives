@@ -45,6 +45,12 @@ class ProviderAdapter(Protocol):
         ...
 ```
 
+> **Implementation note**: The production code exposes `ProviderAdapter` as an
+> abstract base class so all adapters inherit a shared `optimize(...)`
+> implementation. The abstract `evaluate(...)` contract above remains the
+> required surface; the additional `optimize` helper is invoked by callers that
+> need to persist workspace digests.
+
 Implementations own the provider client and any serialization glue needed for that API. The call must not mutate the
 provided `Prompt` instance.
 

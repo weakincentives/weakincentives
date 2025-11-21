@@ -110,8 +110,6 @@ else:
     target.unlink()
 """
 _PODMAN_TEMPLATE: Final[str] = """\
-Podman Workspace
-----------------
 You have access to an isolated Linux container powered by Podman. The `ls`,
 `read_file`, `write_file`, `glob`, `grep`, and `rm` tools mirror the virtual
 filesystem interface but operate on `/workspace` inside the container. The

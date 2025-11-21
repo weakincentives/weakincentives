@@ -187,13 +187,12 @@ class CodeReviewApp:
     def _handle_optimize_command(self, _focus: str) -> None:
         """Runs the optimization prompt and persists workspace digest content."""
 
-        optimization_session, _bus = _build_isolated_session()
         result = self.adapter.optimize(
             self.prompt,
             store_scope=OptimizationScope.GLOBAL,
             overrides_store=self.overrides_store,
             overrides_tag=self.override_tag,
-            session=optimization_session,
+            session=self.session,
         )
         digest = result.digest.strip()
         self.session.workspace_digest.set(result.section_key, digest)
@@ -387,14 +386,6 @@ def _create_runtime_context(
         overrides_store=store,
         override_tag=resolved_tag,
     )
-
-
-def _build_isolated_session() -> tuple[Session, EventBus]:
-    session = Session()
-    bus = session.event_bus
-    bus.subscribe(PromptRendered, _print_rendered_prompt)
-    bus.subscribe(ToolInvoked, _log_tool_invocation)
-    return session, bus
 
 
 def _build_intro(override_tag: str) -> str:

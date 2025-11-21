@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import timedelta
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Final, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
@@ -36,6 +36,7 @@ from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PromptEvaluationError,
     PromptResponse,
+    ProviderAdapter,
     SessionProtocol,
 )
 from .shared import (
@@ -49,8 +50,9 @@ from .shared import (
     run_conversation,
 )
 
+OutputT = TypeVar("OutputT")
+
 if TYPE_CHECKING:
-    from ..adapters.core import ProviderAdapter
     from ..prompt.overrides import PromptOverridesStore
 
 _ERROR_MESSAGE: Final[str] = (
@@ -102,7 +104,7 @@ logger: StructuredLogger = get_logger(
 )
 
 
-class LiteLLMAdapter:
+class LiteLLMAdapter(ProviderAdapter[Any]):
     """Adapter that evaluates prompts via LiteLLM's completion helper."""
 
     def __init__(
@@ -132,7 +134,8 @@ class LiteLLMAdapter:
         self._model = model
         self._tool_choice: ToolChoice = tool_choice
 
-    def evaluate[OutputT](
+    @override
+    def evaluate(
         self,
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,
