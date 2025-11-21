@@ -17,10 +17,11 @@ import types
 from collections.abc import Mapping
 from importlib import import_module as std_import_module
 from types import MethodType
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, ClassVar, Literal, TypeVar, cast
 
 import pytest
 
+from weakincentives.adapters import openai as openai_adapter
 from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
@@ -29,7 +30,7 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
-from weakincentives.adapters.shared import OPENAI_ADAPTER_NAME
+from weakincentives.adapters.shared import OPENAI_ADAPTER_NAME, ThrottleError
 from weakincentives.prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     StructuredOutputConfig,
@@ -100,6 +101,106 @@ from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.openai"
 PROMPT_NS = "tests/adapters/openai"
+TEST_PROMPT_NAME = "demo"
+
+
+def test_openai_throttle_normalization_recognizes_rate_limits() -> None:
+    class FakeRateLimit(Exception):
+        status_code = 429
+
+    throttle = openai_adapter._normalize_openai_throttle(
+        FakeRateLimit(),
+        prompt_name=TEST_PROMPT_NAME,
+    )
+
+    assert isinstance(throttle, ThrottleError)
+    assert throttle.kind == "rate_limit"
+    assert throttle.safe_to_retry
+
+
+def test_openai_throttle_normalization_recognizes_quota() -> None:
+    class FakeQuota(Exception):
+        code = "insufficient_quota"
+
+    throttle = openai_adapter._normalize_openai_throttle(
+        FakeQuota(),
+        prompt_name=TEST_PROMPT_NAME,
+    )
+
+    assert isinstance(throttle, ThrottleError)
+    assert throttle.kind == "quota"
+    assert not throttle.safe_to_retry
+
+
+def test_openai_throttle_normalization_recognizes_timeout() -> None:
+    class FakeTimeout(Exception):
+        pass
+
+    error = FakeTimeout("timeout")
+    error.__class__.__name__ = "APITimeoutError"
+
+    throttle = openai_adapter._normalize_openai_throttle(
+        error,
+        prompt_name=TEST_PROMPT_NAME,
+    )
+
+    assert isinstance(throttle, ThrottleError)
+    assert throttle.kind == "timeout"
+
+
+def test_openai_retry_after_parses_headers() -> None:
+    class FakeError(Exception):
+        headers: ClassVar[dict[str, object]] = {"Retry-After": "2.5"}
+
+    retry_after = openai_adapter._retry_after_hint(FakeError())
+
+    assert retry_after == 2.5
+
+
+def test_openai_retry_after_parses_response_headers() -> None:
+    class FakeResponse:
+        headers: ClassVar[dict[str, object]] = {"retry-after": 3}
+
+    class FakeError(Exception):
+        response = FakeResponse()
+
+    retry_after = openai_adapter._retry_after_hint(FakeError())
+
+    assert retry_after == 3.0
+
+
+def test_openai_throttle_normalization_reads_body_code() -> None:
+    class FakeError(Exception):
+        body: ClassVar[dict[str, object]] = {"code": "insufficient_quota"}
+
+    throttle = openai_adapter._normalize_openai_throttle(
+        FakeError(),
+        prompt_name=TEST_PROMPT_NAME,
+    )
+
+    assert isinstance(throttle, ThrottleError)
+    assert throttle.kind == "quota"
+
+
+def test_openai_retry_after_prefers_attribute() -> None:
+    class FakeError(Exception):
+        retry_after = 4
+
+    retry_after = openai_adapter._retry_after_hint(FakeError())
+
+    assert retry_after == 4.0
+
+
+def test_openai_throttle_normalization_allows_non_throttle_errors() -> None:
+    class FakeError(Exception):
+        pass
+
+    assert (
+        openai_adapter._normalize_openai_throttle(
+            FakeError(), prompt_name=TEST_PROMPT_NAME
+        )
+        is None
+    )
 
 
 def _split_tool_message_content(content: str) -> tuple[str, str | None]:

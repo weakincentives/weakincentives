@@ -40,9 +40,12 @@ from .core import (
 )
 from .shared import (
     LITELLM_ADAPTER_NAME,
+    ThrottleError,
+    ThrottlePolicy,
     ToolChoice,
     build_json_schema_response_format,
     deadline_provider_payload,
+    default_throttle_policy,
     first_choice,
     format_publish_failures,
     parse_tool_arguments,
@@ -97,6 +100,38 @@ def create_litellm_completion(**kwargs: object) -> LiteLLMCompletion:
     return _wrapped_completion
 
 
+def _normalize_litellm_throttle(
+    error: Exception, *, prompt_name: str
+) -> ThrottleError | None:
+    message = str(error) or "LiteLLM request failed."
+    payload = _shared.extract_payload(getattr(error, "response", None) or error)
+    status_code = getattr(error, "status_code", None) or getattr(
+        getattr(error, "response", None), "status_code", None
+    )
+    retry_after = getattr(error, "retry_after", None)
+    name = error.__class__.__name__.lower()
+    if status_code == 429 or "ratelimit" in name:
+        return ThrottleError(
+            message,
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            kind="rate_limit",
+            retry_after=float(retry_after) if retry_after is not None else None,
+            provider_payload=payload,
+        )
+    if "quota" in name:
+        return ThrottleError(
+            message,
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            kind="quota",
+            retry_after=float(retry_after) if retry_after is not None else None,
+            provider_payload=payload,
+            safe_to_retry=False,
+        )
+    return None
+
+
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "adapter.litellm"}
 )
@@ -113,6 +148,7 @@ class LiteLLMAdapter:
         completion: LiteLLMCompletion | None = None,
         completion_factory: _LiteLLMCompletionFactory | None = None,
         completion_kwargs: Mapping[str, object] | None = None,
+        throttle_policy: ThrottlePolicy | None = None,
     ) -> None:
         super().__init__()
         if completion is not None:
@@ -131,6 +167,7 @@ class LiteLLMAdapter:
         self._completion = completion
         self._model = model
         self._tool_choice: ToolChoice = tool_choice
+        self._throttle_policy = throttle_policy or default_throttle_policy()
 
     def evaluate[OutputT](
         self,
@@ -203,10 +240,16 @@ class LiteLLMAdapter:
             try:
                 return self._completion(**request_payload)
             except Exception as error:  # pragma: no cover - network/SDK failure
+                throttle_error = _normalize_litellm_throttle(
+                    error, prompt_name=prompt_name
+                )
+                if throttle_error is not None:
+                    raise throttle_error from error
                 raise PromptEvaluationError(
                     "LiteLLM request failed.",
                     prompt_name=prompt_name,
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    provider_payload=_shared.extract_payload(error),
                 ) from error
 
         def _select_choice(response: object) -> ProviderChoice:
@@ -236,6 +279,7 @@ class LiteLLMAdapter:
             parse_arguments=parse_tool_arguments,
             logger_override=logger,
             deadline=deadline,
+            throttle_policy=self._throttle_policy,
         )
 
 

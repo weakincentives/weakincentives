@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import RLock
@@ -91,6 +92,7 @@ class PromptExecuted:
     session_id: UUID | None
     created_at: datetime
     value: SupportsDataclass | None = None
+    throttle: Mapping[str, object] | None = None
     event_id: UUID = field(default_factory=uuid4)
 
 

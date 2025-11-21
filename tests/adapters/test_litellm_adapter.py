@@ -27,12 +27,14 @@ from weakincentives.adapters import (
     PromptResponse,
     shared,
 )
+from weakincentives.adapters import litellm as litellm_adapter
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
     ProviderAdapter,
     SessionProtocol,
 )
+from weakincentives.adapters.shared import ThrottleError
 from weakincentives.prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     StructuredOutputConfig,
@@ -102,6 +104,51 @@ from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.litellm"
 PROMPT_NS = "tests/adapters/litellm"
+TEST_PROMPT_NAME = "demo"
+
+
+def test_litellm_throttle_normalization_recognizes_rate_limits() -> None:
+    class FakeRateLimit(Exception):
+        status_code = 429
+        retry_after = 1
+
+    throttle = litellm_adapter._normalize_litellm_throttle(
+        FakeRateLimit(),
+        prompt_name=TEST_PROMPT_NAME,
+    )
+
+    assert isinstance(throttle, ThrottleError)
+    assert throttle.kind == "rate_limit"
+    assert throttle.retry_after == 1
+
+
+def test_litellm_throttle_normalization_recognizes_quota() -> None:
+    class FakeQuota(Exception):
+        pass
+
+    error = FakeQuota()
+    error.__class__.__name__ = "InsufficientQuota"
+
+    throttle = litellm_adapter._normalize_litellm_throttle(
+        error,
+        prompt_name=TEST_PROMPT_NAME,
+    )
+
+    assert isinstance(throttle, ThrottleError)
+    assert throttle.kind == "quota"
+    assert not throttle.safe_to_retry
+
+
+def test_litellm_throttle_normalization_returns_none_for_other_errors() -> None:
+    class FakeError(Exception):
+        pass
+
+    throttle = litellm_adapter._normalize_litellm_throttle(
+        FakeError(),
+        prompt_name=TEST_PROMPT_NAME,
+    )
+
+    assert throttle is None
 
 
 def _split_tool_message_content(content: str) -> tuple[str, str | None]:

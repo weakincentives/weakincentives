@@ -49,28 +49,29 @@ throughput.
   `adapters.shared.run_conversation` by wrapping the `call_provider` callable.
   The runner owns the request/response loop for both the OpenAI and LiteLLM
   adapters, so a single throttle policy there keeps behavior consistent while
-  preserving the existing `PromptEvaluationError` surface area.
+  preserving the existing `PromptEvaluationError` surface area. The shared
+  runner now applies a `ThrottlePolicy` with exponential backoff, jitter, and a
+  bounded attempt budget before surfacing an exhausted-budget error.
 - **Provider-specific detection**:
   - OpenAI: inspect `openai.RateLimitError`, `openai.APITimeoutError`, and
     payloads that contain `"insufficient_quota"` or HTTP 429 responses inside
     `adapters.openai.OpenAIAdapter.evaluate`'s `_call_provider` closure.
-    Normalize those into a structured `ThrottleError` before re-raising through
-    `PromptEvaluationError` so telemetry and backoff logic can branch on
-    `ThrottleError.kind`.
+    Normalize those into a structured `ThrottleError` before re-raising so the
+    shared runner can apply backoff logic based on `ThrottleError.kind` and the
+    optional `retry_after` hint.
   - LiteLLM: handle `litellm.RateLimitError` and 429 payloads surfaced through
     the completion callable built in `adapters.litellm.create_litellm_completion`
-    and `_call_provider`. Normalize LiteLLM's `retry_after` hints (when
-    present) into the shared `ThrottleError.retry_after` field.
+    and `_call_provider`. Normalize LiteLLM's `retry_after` hints (when present)
+    into the shared `ThrottleError.retry_after` field.
 - **Session/runtime hooks**: propagate throttle metadata into `PromptExecuted`
   events published by `ConversationRunner` so downstream handlers (e.g., UI or
   orchestrators) can present retry guidance without re-inspecting provider
-  payloads. Add a structured context field such as `"throttle": {"kind": ...}`
-  on the structured logger events in `adapters.shared` so log-based monitors can
-  alert on throttle rates.
-- **Configuration plumbing**: centralize backoff and concurrency settings in the
-  adapter constructors (e.g., optional `throttle_policy: ThrottlePolicy` kwarg
-  on `OpenAIAdapter` and `LiteLLMAdapter`). The default policy should be shared
-  via a helper in `adapters.shared` so both adapters stay aligned and new
+  payloads. A structured `throttle` context is now attached to both the prompt
+  completion log entry and the `PromptExecuted` event when throttling occurred.
+- **Configuration plumbing**: centralize backoff settings in the adapter
+  constructors via the optional `throttle_policy: ThrottlePolicy` kwarg on
+  `OpenAIAdapter` and `LiteLLMAdapter`. The shared
+  `adapters.shared.default_throttle_policy()` keeps defaults aligned so new
   providers can opt in without duplicating constants.
 
 ## Retry policy
@@ -78,10 +79,12 @@ throughput.
 - **Exponential backoff with jitter**: Start with a small base delay (e.g.,
   250–500 ms) and double until capped (e.g., 8–16 s). Apply full jitter to avoid
   synchronization. Respect provider-specified `Retry-After` values; treat them
-  as the minimum backoff.
+  as the minimum backoff. The shared defaults begin at 500 ms, cap at 8 s, and
+  enforce a 30 s cumulative delay ceiling.
 - **Retry budget**: Cap total retry duration (e.g., 30–60 s) or attempt count to
   bound latency. Surface the exhausted budget as a structured failure with the
-  last provider payload attached for context.
+  last provider payload attached for context. The default policy allows four
+  retries (five total attempts) before surfacing a `PromptEvaluationError`.
 - **Idempotency**: Only retry operations that are safe to repeat. Prefer
   idempotency keys (where supported) or deterministic request construction so the
   provider can deduplicate.
@@ -91,14 +94,9 @@ throughput.
 
 ## Adaptive degradation
 
-- **Quality shaping**: When retry budgets are nearly exhausted, consider falling
-  back to cheaper or smaller models, shorter contexts, or truncated tool traces
-  to reduce pressure.
-- **Queue shedding**: Reject new work with a clear "try later" error when local
-  queues exceed safe depth; do not enqueue unbounded retries.
-- **Circuit breakers**: Open a short circuit (e.g., 30–90 s) after repeated
-  throttles from a provider/model pair to prevent hammering a constrained
-  dependency.
+The current implementation is intentionally minimal and does not yet include
+quality shaping, queue shedding, or circuit breakers. Add these behind explicit
+feature flags once the reactive retry loop is stable and telemetry is in place.
 
 ## Telemetry and observability
 
@@ -114,12 +112,19 @@ throughput.
 
 - **Typed errors**: Wrap provider exceptions in a local `ThrottleError` that
   records provider payloads, retry-after hints, whether retry is safe, and the
-  number of attempts performed.
+  number of attempts performed. Throttle errors that set `safe_to_retry=False`
+  short-circuit retries and surface immediately to callers.
 - **User messaging**: Provide actionable error messages that distinguish quota
   exhaustion from transient throttling. Include suggested wait durations when
   available.
 - **Retry hints**: Expose retry-after timestamps on responses so interactive
   clients or schedulers can defer work without guessing.
+
+## Future enhancements
+
+- **Quality shaping**, **queue shedding**, and **circuit breakers** remain
+  aspirational for now. Implementations should add them behind explicit feature
+  flags once coverage and telemetry for the reactive retry loop are stable.
 
 ## Testing strategy
 

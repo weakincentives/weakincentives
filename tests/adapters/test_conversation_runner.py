@@ -12,21 +12,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
 
 from tests.helpers.adapters import DUMMY_ADAPTER_NAME
 from weakincentives.adapters.core import (
+    PROMPT_EVALUATION_PHASE_REQUEST,
     PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
     SessionProtocol,
 )
-from weakincentives.adapters.shared import ConversationRunner, ToolChoice
+from weakincentives.adapters.shared import (
+    ConversationRunner,
+    ThrottleError,
+    ThrottlePolicy,
+    ToolChoice,
+)
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, ToolContext
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
@@ -91,6 +97,17 @@ class ProviderStub:
         return self._responses.pop(0)
 
 
+ProviderCallable = Callable[
+    [
+        list[dict[str, Any]],
+        Sequence[Mapping[str, Any]],
+        ToolChoice | None,
+        Mapping[str, Any] | None,
+    ],
+    DummyResponse,
+]
+
+
 def serialize_tool_message(
     result: ToolResult[SupportsToolResult], *, payload: object | None = None
 ) -> object:
@@ -141,13 +158,14 @@ class RecordingBus(EventBus):
 def build_runner(
     *,
     rendered: RenderedPrompt[object],
-    provider: ProviderStub,
+    provider: ProviderCallable,
     bus: RecordingBus,
     tool_choice: ToolChoice = "auto",
     parse_output: bool = False,
     response_format: Mapping[str, Any] | None = None,
     session: SessionProtocol | None = None,
     render_inputs: tuple[SupportsDataclass, ...] | None = None,
+    throttle_policy: ThrottlePolicy | None = None,
 ) -> ConversationRunner[object]:
     prompt = Prompt(ns="tests", key="example")
     session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
@@ -168,6 +186,7 @@ def build_runner(
         call_provider=provider,
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=serialize_tool_message,
+        throttle_policy=throttle_policy or ThrottlePolicy(),
     )
 
 
@@ -184,6 +203,313 @@ def test_conversation_runner_success() -> None:
     assert response.output is None
     assert isinstance(bus.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
+
+
+def test_conversation_runner_retries_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
+    rendered = RenderedPrompt(text="system")
+
+    class ThrottlingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(
+            self,
+            messages: list[dict[str, Any]],
+            tool_specs: Sequence[Mapping[str, Any]],
+            tool_choice: ToolChoice | None,
+            response_format: Mapping[str, Any] | None,
+        ) -> DummyResponse:
+            del messages, tool_specs, tool_choice, response_format
+            self.calls += 1
+            if self.calls == 1:
+                raise ThrottleError(
+                    "rate limit",  # pragma: no cover - message normalized
+                    prompt_name="example",
+                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    kind="rate_limit",
+                    retry_after=0,
+                )
+            return DummyResponse([DummyChoice(DummyMessage(content="Hello"))])
+
+    provider = ThrottlingProvider()
+    bus = RecordingBus()
+    policy = ThrottlePolicy(
+        base_delay_seconds=0.0,
+        max_delay_seconds=0.0,
+        max_attempts=3,
+        max_total_delay_seconds=1.0,
+    )
+    monkeypatch.setattr(
+        "weakincentives.adapters.shared.time.sleep", lambda _delay: None
+    )
+
+    runner = build_runner(
+        rendered=rendered,
+        provider=provider,
+        bus=bus,
+        throttle_policy=policy,
+    )
+    response = runner.run()
+
+    assert response.text == "Hello"
+    assert provider.calls == 2
+    prompt_event = cast(PromptExecuted, bus.events[-1])
+    assert prompt_event.throttle == {
+        "attempts": 1,
+        "kind": "rate_limit",
+        "retry_after": 0,
+        "total_delay_seconds": 0.0,
+    }
+
+
+def test_conversation_runner_stops_after_retry_budget() -> None:
+    rendered = RenderedPrompt(text="system")
+
+    class ThrottlingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(
+            self,
+            messages: list[dict[str, Any]],
+            tool_specs: Sequence[Mapping[str, Any]],
+            tool_choice: ToolChoice | None,
+            response_format: Mapping[str, Any] | None,
+        ) -> DummyResponse:
+            del messages, tool_specs, tool_choice, response_format
+            self.calls += 1
+            raise ThrottleError(
+                "still throttled",  # pragma: no cover - message normalized
+                prompt_name="example",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                kind="rate_limit",
+                retry_after=0,
+            )
+
+    provider = ThrottlingProvider()
+    bus = RecordingBus()
+    policy = ThrottlePolicy(
+        base_delay_seconds=0.0,
+        max_delay_seconds=0.0,
+        max_attempts=2,
+        max_total_delay_seconds=0.0,
+    )
+
+    runner = build_runner(
+        rendered=rendered,
+        provider=provider,
+        bus=bus,
+        throttle_policy=policy,
+    )
+
+    with pytest.raises(PromptEvaluationError):
+        runner.run()
+
+
+def test_conversation_runner_propagates_non_retryable_throttle() -> None:
+    rendered = RenderedPrompt(text="system")
+
+    class ThrottlingProvider:
+        def __call__(
+            self,
+            messages: list[dict[str, Any]],
+            tool_specs: Sequence[Mapping[str, Any]],
+            tool_choice: ToolChoice | None,
+            response_format: Mapping[str, Any] | None,
+        ) -> DummyResponse:
+            del messages, tool_specs, tool_choice, response_format
+            raise ThrottleError(
+                "quota",  # pragma: no cover - message normalized
+                prompt_name="example",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                kind="quota",
+                safe_to_retry=False,
+            )
+
+    provider = ThrottlingProvider()
+    bus = RecordingBus()
+
+    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
+
+    with pytest.raises(ThrottleError):
+        runner.run()
+
+
+def test_throttle_policy_handles_zero_delay() -> None:
+    policy = ThrottlePolicy(
+        base_delay_seconds=0.0,
+        max_delay_seconds=0.0,
+        max_attempts=2,
+        max_total_delay_seconds=0.0,
+    )
+
+    assert policy.compute_delay(attempt=1, retry_after=None) == 0.0
+
+
+def test_throttle_policy_rejects_non_positive_attempt() -> None:
+    policy = ThrottlePolicy()
+
+    with pytest.raises(ValueError):
+        policy.compute_delay(attempt=0, retry_after=None)
+
+
+def test_throttle_policy_applies_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = ThrottlePolicy(
+        base_delay_seconds=1.0,
+        max_delay_seconds=2.0,
+        max_attempts=2,
+        max_total_delay_seconds=5.0,
+    )
+    monkeypatch.setattr(
+        "weakincentives.adapters.shared._jitter_random.uniform",
+        lambda lower, upper: upper - 0.5,
+    )
+
+    assert policy.compute_delay(attempt=1, retry_after=None) == 0.5
+
+
+def test_conversation_runner_respects_max_total_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered = RenderedPrompt(text="system")
+
+    class ThrottlingProvider:
+        def __call__(
+            self,
+            messages: list[dict[str, Any]],
+            tool_specs: Sequence[Mapping[str, Any]],
+            tool_choice: ToolChoice | None,
+            response_format: Mapping[str, Any] | None,
+        ) -> DummyResponse:
+            del messages, tool_specs, tool_choice, response_format
+            raise ThrottleError(
+                "rate limit",  # pragma: no cover - message normalized
+                prompt_name="example",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                kind="rate_limit",
+                retry_after=1.0,
+            )
+
+    policy = ThrottlePolicy(
+        base_delay_seconds=1.0,
+        max_delay_seconds=1.0,
+        max_attempts=2,
+        max_total_delay_seconds=0.5,
+    )
+    bus = RecordingBus()
+    monkeypatch.setattr(
+        "weakincentives.adapters.shared._jitter_random.uniform", lambda _a, _b: 1.0
+    )
+
+    runner = build_runner(
+        rendered=rendered,
+        provider=ThrottlingProvider(),
+        bus=bus,
+        throttle_policy=policy,
+    )
+
+    with pytest.raises(PromptEvaluationError):
+        runner.run()
+
+
+def test_conversation_runner_aborts_when_deadline_would_be_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered = RenderedPrompt(text="system")
+
+    class ThrottlingProvider:
+        def __call__(
+            self,
+            messages: list[dict[str, Any]],
+            tool_specs: Sequence[Mapping[str, Any]],
+            tool_choice: ToolChoice | None,
+            response_format: Mapping[str, Any] | None,
+        ) -> DummyResponse:
+            del messages, tool_specs, tool_choice, response_format
+            raise ThrottleError(
+                "deadline",  # pragma: no cover - message normalized
+                prompt_name="example",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                kind="rate_limit",
+                retry_after=2.0,
+            )
+
+    policy = ThrottlePolicy(
+        base_delay_seconds=2.0,
+        max_delay_seconds=2.0,
+        max_attempts=2,
+        max_total_delay_seconds=5.0,
+    )
+    bus = RecordingBus()
+    monkeypatch.setattr(
+        "weakincentives.adapters.shared._jitter_random.uniform", lambda _a, _b: 2.0
+    )
+
+    runner = build_runner(
+        rendered=rendered,
+        provider=ThrottlingProvider(),
+        bus=bus,
+        throttle_policy=policy,
+    )
+    runner.deadline = Deadline(datetime.now(UTC) + timedelta(seconds=1.5))
+
+    with pytest.raises(PromptEvaluationError):
+        runner.run()
+
+
+def test_conversation_runner_waits_between_throttles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered = RenderedPrompt(text="system")
+
+    class ThrottlingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(
+            self,
+            messages: list[dict[str, Any]],
+            tool_specs: Sequence[Mapping[str, Any]],
+            tool_choice: ToolChoice | None,
+            response_format: Mapping[str, Any] | None,
+        ) -> DummyResponse:
+            del messages, tool_specs, tool_choice, response_format
+            self.calls += 1
+            if self.calls == 1:
+                raise ThrottleError(
+                    "rate limit",  # pragma: no cover - message normalized
+                    prompt_name="example",
+                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    kind="rate_limit",
+                    retry_after=1.0,
+                )
+            return DummyResponse([DummyChoice(DummyMessage(content="Hello"))])
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "weakincentives.adapters.shared.time.sleep", sleeps.append, raising=False
+    )
+    monkeypatch.setattr(
+        "weakincentives.adapters.shared._jitter_random.uniform", lambda _a, _b: 0.25
+    )
+    policy = ThrottlePolicy(
+        base_delay_seconds=1.0,
+        max_delay_seconds=1.0,
+        max_attempts=3,
+        max_total_delay_seconds=5.0,
+    )
+    bus = RecordingBus()
+    runner = build_runner(
+        rendered=rendered,
+        provider=ThrottlingProvider(),
+        bus=bus,
+        throttle_policy=policy,
+    )
+
+    response = runner.run()
+
+    assert response.text == "Hello"
+    assert sleeps == [0.25]
 
 
 def test_conversation_runner_publishes_prompt_rendered_event() -> None:
