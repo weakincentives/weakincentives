@@ -1,4 +1,4 @@
-# Weak Incentives (WINK Is All You Need)
+# Weak Incentives (Is All You Need)
 
 Weak Incentives (WINK) is a Python library for building "background agents" (automated
 AI systems). It provides lean, typed, and composable building blocks that keep
