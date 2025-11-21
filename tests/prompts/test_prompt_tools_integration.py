@@ -87,9 +87,9 @@ def test_prompt_tools_integration_example() -> None:
     markdown = rendered.text
 
     assert markdown == (
-        "## Guidance\n\nUse tools when you need up-to-date context. "
+        "## 1 Guidance\n\nUse tools when you need up-to-date context. "
         "Prefer lookup_entity for critical lookups.\n\n"
-        "### Available Tools\n\nInvoke lookup_entity whenever you need fresh entity context."
+        "### 1.1 Available Tools\n\nInvoke lookup_entity whenever you need fresh entity context."
     )
 
     tools = rendered.tools

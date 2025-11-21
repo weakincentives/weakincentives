@@ -331,13 +331,13 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
         )
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
         if not isinstance(params, _SubagentsSectionParams):
             raise PromptRenderError(
                 "Subagents section requires parameters.",
                 dataclass_type=_SubagentsSectionParams,
             )
-        return super().render(params, depth)
+        return super().render(params, depth, number)
 
 
 dispatch_subagents = build_dispatch_subagents_tool()

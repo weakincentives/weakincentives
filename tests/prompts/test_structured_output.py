@@ -77,7 +77,7 @@ def test_prompt_specialization_appends_response_format_block() -> None:
     assert rendered.text.endswith(
         "\n".join(
             [
-                "## Response Format",
+                "## 2 Response Format",
                 "",
                 "Return ONLY a single fenced JSON code block. Do not include any text",
                 "before or after the block.",
@@ -94,7 +94,7 @@ def test_prompt_can_disable_response_format_injection() -> None:
 
     rendered = prompt.render(Guidance(topic="Grace Hopper"))
 
-    assert "## Response Format" not in rendered.text
+    assert "Response Format" not in rendered.text
     assert rendered.output_type is Summary
 
 
@@ -106,7 +106,7 @@ def test_prompt_render_can_skip_response_format_temporarily() -> None:
         inject_output_instructions=False,
     )
 
-    assert "## Response Format" not in rendered.text
+    assert "Response Format" not in rendered.text
     assert prompt.inject_output_instructions is True
 
 
@@ -118,7 +118,7 @@ def test_prompt_render_can_force_response_format_temporarily() -> None:
         inject_output_instructions=True,
     )
 
-    assert "## Response Format" in rendered.text
+    assert "## 2 Response Format" in rendered.text
     assert prompt.inject_output_instructions is False
 
 
@@ -184,7 +184,7 @@ def test_parse_structured_output_allows_extra_keys_when_configured() -> None:
     assert rendered.text.endswith(
         "\n".join(
             [
-                "## Response Format",
+                "## 2 Response Format",
                 "",
                 "Return ONLY a single fenced JSON code block. Do not include any text",
                 "before or after the block.",

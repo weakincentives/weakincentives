@@ -52,14 +52,18 @@ class MarkdownSection(Section[MarkdownParamsT]):
         )
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int) -> str:
-        return self.render_with_template(self.template, params, depth)
+    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
+        return self.render_with_template(self.template, params, depth, number)
 
     def render_with_template(
-        self, template_text: str, params: SupportsDataclass | None, depth: int
+        self,
+        template_text: str,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
     ) -> str:
         heading_level = "#" * (depth + 2)
-        heading = f"{heading_level} {self.title.strip()}"
+        heading = f"{heading_level} {number} {self.title.strip()}"
         template = Template(textwrap.dedent(template_text).strip())
         try:
             normalized_params = self._normalize_params(params)

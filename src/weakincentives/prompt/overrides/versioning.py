@@ -53,6 +53,7 @@ class SectionLike(Protocol):
 
 class SectionNodeLike(Protocol):
     path: tuple[str, ...]
+    number: str
     section: SectionLike
 
 
@@ -122,6 +123,7 @@ class SectionDescriptor:
 
     path: tuple[str, ...]
     content_hash: HexDigest
+    number: str
 
 
 @dataclass(slots=True)
@@ -163,7 +165,9 @@ class PromptDescriptor:
                 template = node.section.original_body_template()
                 if template is not None:
                     content_hash = hash_text(template)
-                    sections.append(SectionDescriptor(node.path, content_hash))
+                    sections.append(
+                        SectionDescriptor(node.path, content_hash, node.number)
+                    )
             tool_descriptors = [
                 ToolDescriptor(
                     path=node.path,

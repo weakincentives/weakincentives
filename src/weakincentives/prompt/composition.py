@@ -90,14 +90,14 @@ class ParentPromptSection(Section[ParentPromptParams]):
         )
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
         if not isinstance(params, ParentPromptParams):
             raise PromptRenderError(
                 "Parent prompt section requires parameters.",
                 dataclass_type=ParentPromptParams,
             )
         heading = "#" * (depth + 2)
-        prefix = f"{heading} {self.title}"
+        prefix = f"{heading} {number} {self.title}"
         body = params.body
         suffix = "" if body.endswith("\n") else "\n"
         return (
@@ -115,14 +115,14 @@ class RecapSection(Section[RecapParams]):
         super().__init__(title="Recap", key="recap")
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
         if not isinstance(params, RecapParams):
             raise PromptRenderError(
                 "Recap section requires parameters.",
                 dataclass_type=RecapParams,
             )
         heading = "#" * (depth + 2)
-        prefix = f"{heading} {self.title}"
+        prefix = f"{heading} {number} {self.title}"
         bullets = params.bullets
         bullet_lines = "\n".join(f"- {line}" for line in bullets)
         if bullet_lines:

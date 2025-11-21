@@ -200,7 +200,7 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
 
 
 class _InvalidToolSection(Section[GuidanceParams]):
-    def render(self, params: GuidanceParams, depth: int) -> str:
+    def render(self, params: GuidanceParams, depth: int, number: str) -> str:
         return ""
 
     def tools(self) -> tuple[Any, ...]:

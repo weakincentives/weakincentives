@@ -33,6 +33,7 @@ class SectionNode[ParamsT: SupportsDataclass]:
     section: Section[ParamsT]
     depth: int
     path: SectionPath
+    number: str
 
 
 @dataclass(frozen=True)
@@ -210,6 +211,7 @@ class PromptRegistry:
         self._defaults_by_type: dict[type[SupportsDataclass], SupportsDataclass] = {}
         self._placeholders: dict[SectionPath, set[str]] = {}
         self._tool_name_registry: dict[str, SectionPath] = {}
+        self._numbering_stack: list[int] = []
 
     def register_sections(self, sections: Sequence[Section[SupportsDataclass]]) -> None:
         """Register the provided root sections."""
@@ -243,8 +245,9 @@ class PromptRegistry:
                 dataclass_type=params_type,
             )
 
+        number = self._next_section_number(depth)
         node: SectionNode[SupportsDataclass] = SectionNode(
-            section=section, depth=depth, path=path
+            section=section, depth=depth, path=path, number=number
         )
         self._section_nodes.append(node)
 
@@ -308,6 +311,18 @@ class PromptRegistry:
         for child in section.children:
             child_path = (*path, child.key)
             self._register_section(child, path=child_path, depth=depth + 1)
+
+    def _next_section_number(self, depth: int) -> str:
+        while len(self._numbering_stack) > depth + 1:
+            _ = self._numbering_stack.pop()
+
+        if len(self._numbering_stack) <= depth:
+            while len(self._numbering_stack) < depth + 1:
+                self._numbering_stack.append(1)
+        else:
+            self._numbering_stack[-1] += 1
+
+        return ".".join(str(value) for value in self._numbering_stack)
 
     def _register_section_tools[
         ParamsT: SupportsDataclass,

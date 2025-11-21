@@ -35,13 +35,13 @@ class GenericParams:
 
 
 class ExampleSection(Section[ExampleParams]):
-    def render(self, params: ExampleParams, depth: int) -> str:
+    def render(self, params: ExampleParams, depth: int, number: str) -> str:
         return f"Rendered {params.value} at depth {depth}"
 
 
 def test_example_section_render_outputs_value() -> None:
     section = ExampleSection(title="Demo", key="demo")
-    rendered = section.render(ExampleParams(value="hi"), depth=2)
+    rendered = section.render(ExampleParams(value="hi"), depth=2, number="1")
 
     assert rendered == "Rendered hi at depth 2"
 
@@ -106,13 +106,13 @@ def test_section_allows_custom_children_and_enabled() -> None:
 
 
 class PlainSection(Section):
-    def render(self, params: object, depth: int) -> str:
+    def render(self, params: object, depth: int, number: str) -> str:
         return ""
 
 
 def test_plain_section_render_stubs_result() -> None:
     instance = PlainSection.__new__(PlainSection)
-    assert PlainSection.render(instance, object(), 0) == ""
+    assert PlainSection.render(instance, object(), 0, "1") == ""
 
 
 def test_plain_section_allows_absence_of_params() -> None:
@@ -120,7 +120,7 @@ def test_plain_section_allows_absence_of_params() -> None:
 
     assert section.param_type is None
     assert section.is_enabled(None) is True
-    assert section.render(None, 1) == ""
+    assert section.render(None, 1, "1") == ""
 
 
 def test_plain_section_accepts_parameterless_enabled_callable() -> None:

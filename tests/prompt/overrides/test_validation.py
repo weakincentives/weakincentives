@@ -70,6 +70,7 @@ class _Section:
 @dataclass(slots=True)
 class _SectionNode:
     path: tuple[str, ...]
+    number: str
     section: _Section
 
 
@@ -101,7 +102,7 @@ def _build_prompt_with_tool() -> tuple[
         template="Body template",
         _tools=(cast(Tool[SupportsDataclass, SupportsToolResult], tool),),
     )
-    node = _SectionNode(path=("intro",), section=section)
+    node = _SectionNode(path=("intro",), number="1", section=section)
     prompt = _Prompt(ns="demo", key="example", _section_nodes=(node,))
     descriptor = PromptDescriptor.from_prompt(prompt)
     return prompt, descriptor, tool
@@ -147,7 +148,9 @@ def test_load_sections_filters_unknown_entries() -> None:
     descriptor = PromptDescriptor(
         ns="demo",
         key="example",
-        sections=[SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST)],
+        sections=[
+            SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST, number="1")
+        ],
         tools=[],
         chapters=[],
     )
@@ -171,7 +174,9 @@ def test_load_sections_rejects_invalid_hash_format() -> None:
     descriptor = PromptDescriptor(
         ns="demo",
         key="example",
-        sections=[SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST)],
+        sections=[
+            SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST, number="1")
+        ],
         tools=[],
         chapters=[],
     )
@@ -244,7 +249,9 @@ def test_validate_sections_for_write_rejects_unknown_path() -> None:
     descriptor = PromptDescriptor(
         ns="demo",
         key="example",
-        sections=[SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST)],
+        sections=[
+            SectionDescriptor(path=("intro",), content_hash=VALID_DIGEST, number="1")
+        ],
         tools=[],
         chapters=[],
     )
@@ -288,7 +295,7 @@ def test_serialization_round_trip_for_sections() -> None:
         PromptDescriptor(
             "demo",
             "example",
-            [SectionDescriptor(("intro",), VALID_DIGEST)],
+            [SectionDescriptor(("intro",), VALID_DIGEST, "1")],
             [],
             [],
         ),

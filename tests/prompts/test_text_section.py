@@ -35,9 +35,9 @@ def test_text_section_renders_heading_and_body() -> None:
         key="greeting",
     )
 
-    output = section.render(GreetingParams(greeting="hello"), depth=0)
+    output = section.render(GreetingParams(greeting="hello"), depth=0, number="1")
 
-    assert output == "## Greeting\n\nGreeting:\nhello"
+    assert output == "## 1 Greeting\n\nGreeting:\nhello"
 
 
 def test_text_section_performs_strict_substitution() -> None:
@@ -51,9 +51,9 @@ def test_text_section_performs_strict_substitution() -> None:
         key="placeholder-demo",
     )
 
-    output = section.render(PlaceholderParams(value="42"), depth=1)
+    output = section.render(PlaceholderParams(value="42"), depth=1, number="1.1")
 
-    assert output == "### Placeholder Demo\n\nValue: 42"
+    assert output == "### 1.1 Placeholder Demo\n\nValue: 42"
 
 
 def test_text_section_supports_slotted_dataclass_params() -> None:
@@ -67,9 +67,9 @@ def test_text_section_supports_slotted_dataclass_params() -> None:
         key="slots",
     )
 
-    output = section.render(SlottedParams(value="ok"), depth=0)
+    output = section.render(SlottedParams(value="ok"), depth=0, number="1")
 
-    assert output == "## Slots\n\nSlot value: ok"
+    assert output == "## 1 Slots\n\nSlot value: ok"
 
 
 def test_text_section_rejects_non_dataclass_params() -> None:
@@ -80,7 +80,7 @@ def test_text_section_rejects_non_dataclass_params() -> None:
     )
 
     with pytest.raises(PromptRenderError) as error_info:
-        section.render(SimpleNamespace(value="nope"), depth=0)
+        section.render(SimpleNamespace(value="nope"), depth=0, number="1")
 
     error = error_info.value
     assert isinstance(error, PromptRenderError)
