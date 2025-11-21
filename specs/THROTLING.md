@@ -31,57 +31,48 @@ throughput.
 
 ## Reactive handling only
 
-- **No pre-send shaping**: Do not alter or down-scope requests before they hit
-  the provider. All mitigation is triggered by explicit throttle signals (e.g.,
-  HTTP 429, `Retry-After`, or provider error codes) to avoid silently degrading
-  caller intent.
-- **Backoff kicks in after signals**: The first provider throttle immediately
-  enters the retry/backoff path; there is no pre-emptive smoothing. Subsequent
-  throttles continue to use the same reactive policy until the budget is
-  exhausted.
-- **Independence across sessions**: Each caller thread/session reacts only to
-  provider throttle signals and applies its own backoff. Avoid any cross-session
-  coordination or request shaping that could dilute caller intent.
+- **Reactive detection**: Requests are issued unchanged until the provider
+  returns an explicit throttling signal. OpenAI and LiteLLM adapters normalize
+  429 responses, rate limit errors, and `insufficient_quota` payloads into a
+  shared `ThrottleError` that triggers retry.
+- **Backoff kicks in after signals**: The first throttle raises `ThrottleError`,
+  which `run_conversation` handles by backing off with jitter and retrying until
+  the budget is exhausted. There is no pre-emptive smoothing.
+- **Independence across sessions**: Backoff decisions and budgets are scoped to
+  the `ConversationRunner` instance so one throttled session will not alter the
+  pacing of others.
 
 ## Adapter integration map
 
-- **Shared conversation runner**: Insert retry and backoff handling inside
-  `adapters.shared.run_conversation` by wrapping the `call_provider` callable.
-  The runner owns the request/response loop for both the OpenAI and LiteLLM
-  adapters, so a single throttle policy there keeps behavior consistent while
-  preserving the existing `PromptEvaluationError` surface area.
+- **Shared conversation runner**: Retry and backoff handling live in
+  `adapters.shared.run_conversation`, which wraps `call_provider` for OpenAI and
+  LiteLLM adapters. Throttle handling preserves the existing
+  `PromptEvaluationError` surface area while adding a `throttle` payload when
+  retries are exhausted.
 - **Provider-specific detection**:
-  - OpenAI: inspect `openai.RateLimitError`, `openai.APITimeoutError`, and
-    payloads that contain `"insufficient_quota"` or HTTP 429 responses inside
-    `adapters.openai.OpenAIAdapter.evaluate`'s `_call_provider` closure.
-    Normalize those into a structured `ThrottleError` before re-raising through
-    `PromptEvaluationError` so telemetry and backoff logic can branch on
-    `ThrottleError.kind`.
-  - LiteLLM: handle `litellm.RateLimitError` and 429 payloads surfaced through
-    the completion callable built in `adapters.litellm.create_litellm_completion`
-    and `_call_provider`. Normalize LiteLLM's `retry_after` hints (when
-    present) into the shared `ThrottleError.retry_after` field.
-- **Session/runtime hooks**: propagate throttle metadata into `PromptExecuted`
-  events published by `ConversationRunner` so downstream handlers (e.g., UI or
-  orchestrators) can present retry guidance without re-inspecting provider
-  payloads. Add a structured context field such as `"throttle": {"kind": ...}`
-  on the structured logger events in `adapters.shared` so log-based monitors can
-  alert on throttle rates.
-- **Configuration plumbing**: centralize backoff and concurrency settings in the
-  adapter constructors (e.g., optional `throttle_policy: ThrottlePolicy` kwarg
-  on `OpenAIAdapter` and `LiteLLMAdapter`). The default policy should be shared
-  via a helper in `adapters.shared` so both adapters stay aligned and new
-  providers can opt in without duplicating constants.
+  - OpenAI: `OpenAIAdapter` maps `RateLimitError`, `APITimeoutError`, HTTP 429
+    statuses, and messages containing `"insufficient_quota"` into
+    `ThrottleError` with retry-after hints pulled from the SDK error payloads.
+  - LiteLLM: `LiteLLMAdapter` maps `RateLimitError`, 429 statuses, and
+    `insufficient_quota` codes exposed by LiteLLM into the same `ThrottleError`
+    shape, carrying through any `retry_after` hint when present.
+- **Session/runtime hooks**: `ConversationRunner` logs a structured
+  `prompt_throttled` event with throttle metadata for each backoff interval. If
+  the retry budget is exhausted, the resulting `PromptEvaluationError` includes
+  a `{"throttle": ...}` provider payload for downstream consumers.
+- **Configuration plumbing**: Both adapters accept an optional
+  `throttle_policy: ThrottlePolicy` keyword argument. The default policy is
+  shared via `DEFAULT_THROTTLE_POLICY` in `adapters.shared` so providers stay in
+  sync.
 
 ## Retry policy
 
-- **Exponential backoff with jitter**: Start with a small base delay (e.g.,
-  250–500 ms) and double until capped (e.g., 8–16 s). Apply full jitter to avoid
-  synchronization. Respect provider-specified `Retry-After` values; treat them
-  as the minimum backoff.
-- **Retry budget**: Cap total retry duration (e.g., 30–60 s) or attempt count to
-  bound latency. Surface the exhausted budget as a structured failure with the
-  last provider payload attached for context.
+- **Exponential backoff with jitter**: The default `ThrottlePolicy` starts at
+  0.5 s, doubles per attempt, and caps at 8 s with full jitter applied to the
+  ceiling. Provider `retry_after` hints raise the jitter ceiling when present.
+- **Retry budget**: The default budget allows up to five throttle retries within
+  a 30 s window. When the budget is exhausted the runner raises
+  `PromptEvaluationError` with throttle metadata in `provider_payload`.
 - **Idempotency**: Only retry operations that are safe to repeat. Prefer
   idempotency keys (where supported) or deterministic request construction so the
   provider can deduplicate.
