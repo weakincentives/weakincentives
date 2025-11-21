@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import is_dataclass
+from dataclasses import dataclass, field, is_dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -24,6 +24,7 @@ from typing import (
     get_origin,
 )
 
+from ._normalization import normalize_component_key
 from ._overrides_protocols import PromptOverridesStoreProtocol
 from ._types import SupportsDataclass
 from .chapter import Chapter, ChaptersExpansionPolicy
@@ -46,8 +47,32 @@ def _format_specialization_argument(argument: object | None) -> str:
     return repr(argument)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Prompt[OutputT]:
     """Coordinate prompt sections and their parameter bindings."""
+
+    ns: str
+    key: str
+    name: str | None = None
+    _base_sections: tuple[Section[SupportsDataclass], ...] = field(init=False)
+    _sections: tuple[Section[SupportsDataclass], ...] = field(init=False)
+    _registry: PromptRegistry = field(init=False, repr=False)
+    placeholders: dict[SectionPath, set[str]] = field(init=False, default_factory=dict)
+    _allow_extra_keys_requested: bool = field(init=False, repr=False, default=False)
+    _chapters: tuple[Chapter[SupportsDataclass], ...] = field(init=False, default_factory=tuple)
+    _chapter_key_registry: dict[str, Chapter[SupportsDataclass]] = field(
+        init=False, repr=False, default_factory=dict
+    )
+    _chapter_expansion_enabled: bool = field(init=False, repr=False, default=True)
+    _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
+        init=False, repr=False, default=None
+    )
+    inject_output_instructions: bool = True
+    _response_section: ResponseFormatSection | None = field(
+        init=False, repr=False, default=None
+    )
+    _registry_snapshot: RegistrySnapshot = field(init=False, repr=False)
+    _renderer: PromptRenderer[OutputT] = field(init=False, repr=False)
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -84,23 +109,24 @@ class Prompt[OutputT]:
         chapters: Sequence[Chapter[SupportsDataclass]] | None = None,
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
+        _chapter_expansion_enabled: bool | None = None,
     ) -> None:
-        super().__init__()
         stripped_ns = ns.strip()
         if not stripped_ns:
             raise PromptValidationError("Prompt namespace must be a non-empty string.")
         stripped_key = key.strip()
         if not stripped_key:
             raise PromptValidationError("Prompt key must be a non-empty string.")
-        self.ns = stripped_ns
-        self.key = stripped_key
-        self.name = name
+        normalized_key = normalize_component_key(stripped_key, owner="Prompt")
+        object.__setattr__(self, "ns", stripped_ns)
+        object.__setattr__(self, "key", normalized_key)
+        object.__setattr__(self, "name", name)
         base_sections = tuple(sections or ())
-        self._base_sections: tuple[Section[SupportsDataclass], ...] = base_sections
-        self._sections: tuple[Section[SupportsDataclass], ...] = base_sections
-        self._registry = PromptRegistry()
-        self.placeholders: dict[SectionPath, set[str]] = {}
-        self._allow_extra_keys_requested = allow_extra_keys
+        object.__setattr__(self, "_base_sections", base_sections)
+        object.__setattr__(self, "_sections", base_sections)
+        object.__setattr__(self, "_registry", PromptRegistry())
+        object.__setattr__(self, "placeholders", {})
+        object.__setattr__(self, "_allow_extra_keys_requested", allow_extra_keys)
 
         seen_chapter_keys: set[str] = set()
         provided_chapters = tuple(chapters or ())
@@ -111,43 +137,60 @@ class Prompt[OutputT]:
                     section_path=(chapter.key,),
                 )
             seen_chapter_keys.add(chapter.key)
-        self._chapters: tuple[Chapter[SupportsDataclass], ...] = provided_chapters
-        self._chapter_key_registry: dict[str, Chapter[SupportsDataclass]] = {
-            chapter.key: chapter for chapter in self._chapters
-        }
-        self._chapter_expansion_enabled = bool(self._chapters)
+        object.__setattr__(self, "_chapters", provided_chapters)
+        object.__setattr__(
+            self,
+            "_chapter_key_registry",
+            {chapter.key: chapter for chapter in provided_chapters},
+        )
+        expansion_enabled = (
+            bool(provided_chapters)
+            if _chapter_expansion_enabled is None
+            else _chapter_expansion_enabled
+        )
+        object.__setattr__(self, "_chapter_expansion_enabled", expansion_enabled)
 
-        self._structured_output: StructuredOutputConfig[SupportsDataclass] | None
-        self._structured_output = self._resolve_output_spec(allow_extra_keys)
+        structured_output = self._resolve_output_spec(allow_extra_keys)
+        object.__setattr__(self, "_structured_output", structured_output)
 
-        self.inject_output_instructions = inject_output_instructions
+        object.__setattr__(self, "inject_output_instructions", inject_output_instructions)
 
-        self._registry.register_sections(self._sections)
+        registry = self._registry
 
-        self._response_section: ResponseFormatSection | None = None
-        if self._structured_output is not None:
+        sections_to_register: list[Section[SupportsDataclass]] = list(base_sections)
+
+        response_section: ResponseFormatSection | None = None
+        if structured_output is not None:
             response_params = self._build_response_format_params()
             response_section = ResponseFormatSection(
                 params=response_params,
                 enabled=lambda _params, prompt=self: prompt.inject_output_instructions,
             )
-            self._response_section = response_section
+            object.__setattr__(self, "_response_section", response_section)
             section_for_registry = cast(Section[SupportsDataclass], response_section)
-            self._sections += (section_for_registry,)
-            self._registry.register_section(
-                section_for_registry, path=(response_section.key,), depth=0
-            )
+            sections_to_register.append(section_for_registry)
+        else:
+            object.__setattr__(self, "_response_section", None)
 
-        snapshot = self._registry.snapshot()
-        self._registry_snapshot: RegistrySnapshot = snapshot
-        self.placeholders = {
-            path: set(names) for path, names in snapshot.placeholders.items()
-        }
+        object.__setattr__(self, "_sections", tuple(sections_to_register))
+        registry.register_sections(self._sections)
 
-        self._renderer: PromptRenderer[OutputT] = PromptRenderer(
-            registry=snapshot,
-            structured_output=self._structured_output,
-            response_section=self._response_section,
+        snapshot = registry.snapshot()
+        object.__setattr__(self, "_registry_snapshot", snapshot)
+        object.__setattr__(
+            self,
+            "placeholders",
+            {path: set(names) for path, names in snapshot.placeholders.items()},
+        )
+
+        object.__setattr__(
+            self,
+            "_renderer",
+            PromptRenderer(
+                registry=snapshot,
+                structured_output=structured_output,
+                response_section=response_section,
+            ),
         )
 
     def render(
@@ -156,14 +199,22 @@ class Prompt[OutputT]:
         overrides_store: PromptOverridesStoreProtocol | None = None,
         tag: str = "latest",
         inject_output_instructions: bool | None = None,
+        chapters_expansion_policy: ChaptersExpansionPolicy | None = None,
+        chapter_params: Mapping[str, SupportsDataclass | None] | None = None,
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt and apply overrides when an overrides store is supplied."""
+
+        prompt_for_render: Prompt[OutputT] = self
+        if chapters_expansion_policy is not None and self._chapter_expansion_enabled:
+            prompt_for_render = self.expand_chapters(
+                chapters_expansion_policy, chapter_params=chapter_params
+            )
 
         overrides: dict[SectionPath, str] | None = None
         tool_overrides: dict[str, ToolOverride] | None = None
         from .overrides import PromptDescriptor
 
-        descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
+        descriptor = PromptDescriptor.from_prompt(cast("PromptLike", prompt_for_render))
 
         if overrides_store is not None:
             override = overrides_store.resolve(descriptor=descriptor, tag=tag)
@@ -175,8 +226,8 @@ class Prompt[OutputT]:
                 }
                 tool_overrides = dict(override.tool_overrides)
 
-        param_lookup = self._renderer.build_param_lookup(params)
-        return self._renderer.render(
+        param_lookup = prompt_for_render._renderer.build_param_lookup(params)
+        return prompt_for_render._renderer.render(
             param_lookup,
             overrides,
             tool_overrides,
@@ -280,8 +331,8 @@ class Prompt[OutputT]:
             chapters=self._chapters,
             inject_output_instructions=self.inject_output_instructions,
             allow_extra_keys=self._allow_extra_keys_requested,
+            _chapter_expansion_enabled=False,
         )
-        expanded._chapter_expansion_enabled = False
         return expanded
 
     def _normalize_chapter_params(

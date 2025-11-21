@@ -37,7 +37,7 @@ ChapterParamsT = TypeVar("ChapterParamsT", bound=SupportsDataclass, covariant=Tr
 EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
 
 
-@dataclass
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Chapter(GenericParamsSpecializer[ChapterParamsT]):
     """Container grouping sections under a shared visibility boundary."""
 
@@ -59,11 +59,11 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
             params_candidate if isinstance(params_candidate, type) else None
         )
         params_type = cast(type[SupportsDataclass] | None, candidate_type)
-        self.key = self._normalize_key(self.key)
-
-        self.sections = tuple(self.sections or ())
-
-        self._enabled_callable = self._normalize_enabled(self.enabled, params_type)
+        object.__setattr__(self, "key", self._normalize_key(self.key))
+        object.__setattr__(self, "sections", tuple(self.sections or ()))
+        object.__setattr__(
+            self, "_enabled_callable", self._normalize_enabled(self.enabled, params_type)
+        )
 
         if params_type is None:
             if self.default_params is not None:

@@ -13,8 +13,8 @@
 from __future__ import annotations
 
 import textwrap
-from collections.abc import Callable, Sequence
-from dataclasses import fields, is_dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field, fields, is_dataclass
 from string import Template
 from typing import Any, TypeVar, override
 
@@ -25,8 +25,15 @@ from .section import Section
 MarkdownParamsT = TypeVar("MarkdownParamsT", bound=SupportsDataclass, covariant=True)
 
 
+@dataclass(frozen=True, slots=True, kw_only=True, init=False)
 class MarkdownSection(Section[MarkdownParamsT]):
     """Render markdown content using :class:`string.Template`."""
+
+    template: str = field(repr=False)
+    children: tuple[Section[SupportsDataclass], ...] | tuple[()] = ()
+    enabled: Callable[[SupportsDataclass], bool] | Callable[[], bool] | None = None
+    default_params: MarkdownParamsT | None = None
+    accepts_overrides: bool = True
 
     def __init__(
         self,
@@ -36,12 +43,13 @@ class MarkdownSection(Section[MarkdownParamsT]):
         key: str,
         default_params: MarkdownParamsT | None = None,
         children: Sequence[Section[SupportsDataclass]] | None = None,
-        enabled: Callable[[SupportsDataclass], bool] | None = None,
+        enabled: Callable[[SupportsDataclass], bool] | Callable[[], bool] | None = None,
         tools: Sequence[object] | None = None,
         accepts_overrides: bool = True,
     ) -> None:
-        self.template = template
-        super().__init__(
+        object.__setattr__(self, "template", template)
+        Section.__init__(
+            self,
             title=title,
             key=key,
             default_params=default_params,
