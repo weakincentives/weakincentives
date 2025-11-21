@@ -1,6 +1,6 @@
-# Weak Incentives (Is All You Need)
+# Weak Incentives (WINK Is All You Need)
 
-Weak Incentives is a Python library for building "background agents" (automated
+Weak Incentives (WINK) is a Python library for building "background agents" (automated
 AI systems). It provides lean, typed, and composable building blocks that keep
 determinism, testability, and safe execution front and center without relying on
 heavy dependencies or hosted services.
@@ -30,8 +30,8 @@ of focused abstractions that reinforce that rigor:
 
 ## What's novel?
 
-While other agent frameworks provide a toolbox of loose components, Weak
-Incentives offers an opinionated chassis that emphasizes determinism, type
+While other agent frameworks provide a toolbox of loose components, WINK
+offers an opinionated chassis that emphasizes determinism, type
 contracts, and observable workflows:
 
 1. **Redux-like state management with reducers.** Every state change is a
@@ -54,7 +54,7 @@ contracts, and observable workflows:
    keeps the core lightweight. Custom serde modules provide the needed
    functionality without saddling users with sprawling dependency trees.
 
-In short, Weak Incentives favors software-engineering discipline—determinism,
+In short, WINK favors software-engineering discipline—determinism,
 type safety, testability, and clear state management—over maximizing the number
 of exposed knobs.
 
@@ -111,7 +111,7 @@ uv add "weakincentives[litellm]"
 
 ## Tutorial: An Interactive Code Review Assistant
 
-Let's build a simple, interactive code review assistant. This agent will be able to browse a codebase, answer questions about it, and create plans for more complex reviews. We'll see how Weak Incentives helps build this in a structured, observable, and safe way.
+Let's build a simple, interactive code review assistant. This agent will be able to browse a codebase, answer questions about it, and create plans for more complex reviews. We'll see how WINK helps build this in a structured, observable, and safe way.
 
 The full source for this example is in
 [`code_reviewer_example.py`](https://github.com/weakincentives/weakincentives/blob/main/code_reviewer_example.py),
@@ -137,7 +137,7 @@ This `ReviewResponse` class is our contract with the agent. We're telling it exa
 
 ### 2. Compose a "Blueprint" for the Agent's Brain
 
-In Weak Incentives, prompts are not just f-strings; they are composable, versioned objects. We build a `Prompt` from `Section`s, which are like building blocks for the agent's reasoning process.
+In WINK, prompts are not just f-strings; they are composable, versioned objects. We build a `Prompt` from `Section`s, which are like building blocks for the agent's reasoning process.
 
 Here, we create a main prompt that includes:
 
@@ -253,7 +253,7 @@ This observability is crucial for debugging and understanding the agent's behavi
 
 ### 6. Evolve Prompts without Changing Code
 
-What if you want to tweak the agent's instructions? Instead of editing the Python code, you can use **Prompt Overrides**. Weak Incentives can load modified prompt sections from external JSON files.
+What if you want to tweak the agent's instructions? Instead of editing the Python code, you can use **Prompt Overrides**. WINK can load modified prompt sections from external JSON files.
 
 This allows you to iterate on prompts, A/B test different instructions, and tune the agent's behavior without redeploying your application.
 
@@ -282,7 +282,7 @@ This approach turns agent development from a scripting exercise into a structure
 
 ## Logging
 
-Weak Incentives ships a structured logging adapter so hosts can add contextual
+WINK ships a structured logging adapter so hosts can add contextual
 metadata to every record without manual dictionary plumbing. Call
 `configure_logging()` during startup to install the default handler and then
 bind logger instances wherever you need telemetry:
@@ -296,7 +296,7 @@ logger.info("boot", event="demo.start", context={"attempt": 1})
 ```
 
 The helper respects any existing root handlers—omit `force=True` if your
-application already configures logging and you only want Weak Incentives to
+application already configures logging and you only want WINK to
 honor the selected level. When you do want to take over the pipeline, call
 `configure_logging(..., force=True)` and then customize the root handler list
 with additional sinks (for example, forwarding records to Cloud Logging or a
