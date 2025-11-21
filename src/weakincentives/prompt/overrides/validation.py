@@ -13,9 +13,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import fields, is_dataclass
+from dataclasses import MISSING, Field, fields, is_dataclass
 from pathlib import Path
-from typing import Literal, cast, overload
+from typing import Any, Literal, cast, overload, get_args, get_origin, get_type_hints
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
@@ -29,6 +29,7 @@ from .versioning import (
     SectionOverride,
     ToolContractProtocol,
     ToolDescriptor,
+    ToolParamDescription,
     ToolOverride,
     ensure_hex_digest,
 )
@@ -238,11 +239,13 @@ def _normalize_tool_override(
     if not isinstance(param_descriptions, Mapping):
         raise PromptOverridesError(param_mapping_error_message)
     mapping_params = cast(Mapping[str, JSONValue], param_descriptions)
-    normalized_params: dict[str, str] = {}
+    normalized_params: dict[str, ToolParamDescription] = {}
     for key, value in mapping_params.items():
-        if not isinstance(value, str):
-            raise PromptOverridesError(param_entry_error_message)
-        normalized_params[key] = value
+        normalized_params[key] = _normalize_param_description_entry(
+            field_name=key,
+            payload=value,
+            entry_error_message=param_entry_error_message,
+        )
     if description is None:
         normalized_description: str | None = None
     else:
@@ -329,7 +332,9 @@ def filter_override_for_descriptor(
             strict=False,
             description_error_message="Tool description override must be a string when set.",
             param_mapping_error_message="Tool param_descriptions must be a mapping when provided.",
-            param_entry_error_message="Tool param description entries must be strings.",
+            param_entry_error_message=(
+                "Tool param description entries must be strings or metadata objects."
+            ),
         )
         if normalized_tool is not None:
             filtered_tools[name] = normalized_tool
@@ -370,7 +375,9 @@ def load_tools(
             strict=False,
             description_error_message="Tool description must be a string when set.",
             param_mapping_error_message="Tool param_descriptions must be a mapping when provided.",
-            param_entry_error_message="Tool param description entries must be strings.",
+            param_entry_error_message=(
+                "Tool param description entries must be strings or metadata objects."
+            ),
         )
         if tool_override is not None:
             overrides[tool_name] = tool_override
@@ -423,7 +430,7 @@ def validate_tools_for_write(
                 f"Tool parameter descriptions must be a mapping for {name}."
             ),
             param_entry_error_message=(
-                f"Tool parameter descriptions must map strings to strings for {name}."
+                f"Tool parameter descriptions must map strings to metadata objects for {name}."
             ),
         )
         validated[name] = normalized_tool
@@ -443,6 +450,68 @@ def serialize_sections(
     return serialized
 
 
+def _serialize_param_descriptions(
+    descriptions: Mapping[str, ToolParamDescription],
+) -> dict[str, dict[str, JSONValue]]:
+    serialized: dict[str, dict[str, JSONValue]] = {}
+    for field_name, metadata in descriptions.items():
+        serialized[field_name] = {
+            "description": metadata.description,
+            "type": metadata.type_name,
+            "has_default": metadata.has_default,
+            "default": metadata.default,
+        }
+    return serialized
+
+
+def _normalize_param_description_entry(
+    *,
+    field_name: str,
+    payload: JSONValue,
+    entry_error_message: str,
+) -> ToolParamDescription:
+    if isinstance(payload, ToolParamDescription):
+        return payload
+    if isinstance(payload, str):
+        return ToolParamDescription(description=payload)
+    if not isinstance(payload, Mapping):
+        raise PromptOverridesError(entry_error_message)
+    mapping = cast(Mapping[str, JSONValue], payload)
+    description_value = mapping.get("description")
+    if not isinstance(description_value, str):
+        raise PromptOverridesError(
+            f"Tool parameter metadata for {field_name} must include a description string."
+        )
+    type_value = mapping.get("type")
+    if type_value is not None and not isinstance(type_value, str):
+        raise PromptOverridesError(
+            f"Tool parameter metadata for {field_name} must encode the type name as a string when provided."
+        )
+    has_default_value = mapping.get("has_default")
+    if has_default_value is None:
+        has_default = mapping.get("default") is not None
+    elif isinstance(has_default_value, bool):
+        has_default = has_default_value
+    else:
+        raise PromptOverridesError(
+            f"Tool parameter metadata for {field_name} must encode has_default as a boolean when provided."
+        )
+    default_value = mapping.get("default")
+    if default_value is not None and not isinstance(default_value, str):
+        raise PromptOverridesError(
+            f"Tool parameter metadata for {field_name} must encode the default as a string when provided."
+        )
+    default_repr: str | None = cast(str | None, default_value)
+    if not has_default:
+        default_repr = None
+    return ToolParamDescription(
+        description=description_value,
+        type_name=type_value,
+        has_default=has_default,
+        default=default_repr,
+    )
+
+
 def serialize_tools(
     tools: Mapping[str, ToolOverride],
 ) -> dict[str, dict[str, JSONValue]]:
@@ -451,7 +520,9 @@ def serialize_tools(
         serialized[name] = {
             "expected_contract_hash": str(tool_override.expected_contract_hash),
             "description": tool_override.description,
-            "param_descriptions": dict(tool_override.param_descriptions),
+            "param_descriptions": _serialize_param_descriptions(
+                tool_override.param_descriptions
+            ),
         }
     return serialized
 
@@ -497,7 +568,7 @@ def seed_tools(
             raise PromptOverridesError(
                 f"Prompt missing tool for descriptor entry {tool.name}."
             )
-        param_descriptions = _collect_param_descriptions(tool_obj)
+        param_descriptions = _collect_param_metadata(tool_obj)
         seeded[tool.name] = ToolOverride(
             name=tool.name,
             expected_contract_hash=tool.contract_hash,
@@ -507,16 +578,141 @@ def seed_tools(
     return seeded
 
 
-def _collect_param_descriptions(tool: ToolContractProtocol) -> dict[str, str]:
+def _collect_param_metadata(tool: ToolContractProtocol) -> dict[str, ToolParamDescription]:
     params_type = getattr(tool, "params_type", None)
     if not isinstance(params_type, type) or not is_dataclass(params_type):
         return {}
-    descriptions: dict[str, str] = {}
-    for field in fields(params_type):
-        description = field.metadata.get("description") if field.metadata else None
-        if isinstance(description, str) and description:
-            descriptions[field.name] = description
-    return descriptions
+    hints = _safe_get_type_hints(params_type)
+    catalog: dict[str, ToolParamDescription] = {}
+    _collect_dataclass_fields(
+        dataclass_type=params_type,
+        hints=hints,
+        prefix=(),
+        catalog=catalog,
+        visited=set(),
+    )
+    return catalog
+
+
+def _collect_dataclass_fields(
+    *,
+    dataclass_type: type[Any],
+    hints: Mapping[str, Any],
+    prefix: tuple[str, ...],
+    catalog: dict[str, ToolParamDescription],
+    visited: set[type[Any]],
+) -> None:
+    if dataclass_type in visited:
+        return
+    visited.add(dataclass_type)
+    for field in fields(dataclass_type):
+        field_path = _format_param_path((*prefix, field.name))
+        description = _field_description(field, field_path)
+        annotation = hints.get(field.name, field.type)
+        type_name = _format_type_name(annotation)
+        has_default = _field_has_default(field)
+        default_repr = _field_default_repr(field) if has_default else None
+        catalog[field_path] = ToolParamDescription(
+            description=description,
+            type_name=type_name,
+            has_default=has_default,
+            default=default_repr,
+        )
+        nested_dataclass = _resolve_nested_dataclass(annotation)
+        if nested_dataclass is not None:
+            nested_hints = _safe_get_type_hints(nested_dataclass)
+            _collect_dataclass_fields(
+                dataclass_type=nested_dataclass,
+                hints=nested_hints,
+                prefix=(*prefix, field.name),
+                catalog=catalog,
+                visited=visited,
+            )
+    visited.remove(dataclass_type)
+
+
+def _format_param_path(parts: tuple[str, ...]) -> str:
+    return ".".join(parts)
+
+
+def _field_description(field: Field[Any], path: str) -> str:
+    if field.metadata:
+        description = field.metadata.get("description")
+    else:
+        description = None
+    if isinstance(description, str) and description.strip():
+        return description
+    return f"Describe the `{path}` parameter."
+
+
+def _field_has_default(field: Field[Any]) -> bool:
+    return field.default is not MISSING or field.default_factory is not MISSING
+
+
+def _field_default_repr(field: Field[Any]) -> str:
+    if field.default is not MISSING:
+        return repr(field.default)
+    factory = field.default_factory
+    factory_name = getattr(factory, "__qualname__", getattr(factory, "__name__", repr(factory)))
+    module = getattr(factory, "__module__", None)
+    if module:
+        return f"<factory {module}.{factory_name}>"
+    return f"<factory {factory_name}>"
+
+
+def _safe_get_type_hints(dataclass_type: type[Any]) -> Mapping[str, Any]:
+    try:
+        return get_type_hints(dataclass_type, include_extras=True)
+    except Exception:
+        return {}
+
+
+def _format_type_name(annotation: Any) -> str | None:
+    if annotation is None:
+        return None
+    origin = get_origin(annotation)
+    if origin is None:
+        if isinstance(annotation, type):
+            return annotation.__name__
+        return repr(annotation)
+    if getattr(origin, "__qualname__", "") == "Annotated":
+        args = get_args(annotation)
+        if args:
+            return _format_type_name(args[0])
+        return "Annotated"
+    args = get_args(annotation)
+    origin_name = getattr(origin, "__name__", repr(origin))
+    if not args:
+        return origin_name
+    arg_names = ", ".join(
+        filter(None, (_format_type_name(arg) for arg in args))
+    )
+    return f"{origin_name}[{arg_names}]"
+
+
+def _resolve_nested_dataclass(annotation: Any) -> type[Any] | None:
+    for candidate in _iter_possible_dataclass_types(annotation):
+        if isinstance(candidate, type) and is_dataclass(candidate):
+            return candidate
+    return None
+
+
+def _iter_possible_dataclass_types(annotation: Any) -> tuple[Any, ...]:
+    origin = get_origin(annotation)
+    if origin is None:
+        return (annotation,)
+    if getattr(origin, "__qualname__", "") == "Annotated":
+        args = get_args(annotation)
+        if args:
+            return _iter_possible_dataclass_types(args[0])
+        return ()
+    args = get_args(annotation)
+    if not args:
+        return ()
+    flattened: list[Any] = []
+    for arg in args:
+        flattened.extend(_iter_possible_dataclass_types(arg))
+    return tuple(flattened)
 
 
 __all__ = [

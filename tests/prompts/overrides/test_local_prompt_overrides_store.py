@@ -29,6 +29,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
     SectionOverride,
     ToolOverride,
+    ToolParamDescription,
 )
 from weakincentives.prompt.overrides._fs import OverrideFilesystem
 from weakincentives.prompt.overrides.validation import (
@@ -53,6 +54,21 @@ class _ToolParams:
 @dataclass
 class _ToolResult:
     result: str
+
+
+@dataclass
+class _NestedChildParams:
+    note: str = field(metadata={"description": "Child note."})
+    retries: int = 3
+
+
+@dataclass
+class _NestedToolParams:
+    value: str
+    child: _NestedChildParams = field(metadata={"description": "Nested context."})
+    optional_child: _NestedChildParams | None = None
+    mode: str = "auto"
+    tags: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _build_prompt() -> Prompt:
@@ -157,7 +173,14 @@ def test_seed_if_necessary_captures_prompt_content(tmp_path: Path) -> None:
     assert tool_descriptor.name in override.tool_overrides
     tool_override = override.tool_overrides[tool_descriptor.name]
     assert tool_override.description == "Search stored notes."
-    assert tool_override.param_descriptions == {"query": "User provided keywords."}
+    assert tool_override.param_descriptions == {
+        "query": ToolParamDescription(
+            description="User provided keywords.",
+            type_name="str",
+            has_default=False,
+            default=None,
+        )
+    }
 
     resolved = store.resolve(descriptor, tag="stable")
     assert resolved is not None
@@ -340,6 +363,29 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
             "expected_contract_hash": tool.contract_hash,
             "description": "desc",
             "param_descriptions": {"field": 1},
+        }
+    }
+    override_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(PromptOverridesError):
+        store.resolve(descriptor)
+
+    payload = dict(base_payload)
+    payload["tools"] = {
+        tool.name: {
+            "expected_contract_hash": tool.contract_hash,
+            "description": "desc",
+            "param_descriptions": {"field": "Describe field."},
+        }
+    }
+    override_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert store.resolve(descriptor) is not None
+
+    payload = dict(base_payload)
+    payload["tools"] = {
+        tool.name: {
+            "expected_contract_hash": tool.contract_hash,
+            "description": "desc",
+            "param_descriptions": {"field": {"type": "str"}},
         }
     }
     override_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -823,6 +869,83 @@ def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
 
 
 def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
+    @dataclass
+    class _PlainResult:
+        value: str
+
+    tool = Tool[_NestedToolParams, _PlainResult](
+        name="plain",
+        description="Plain description.",
+        handler=None,
+    )
+
+    prompt = Prompt(
+        ns="tests/versioning",
+        key="plain-metadata",
+        sections=[
+            MarkdownSection[_GreetingParams](
+                title="Example",
+                template="Example body for ${subject}.",
+                key="example",
+                tools=[tool],
+            )
+        ],
+    )
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    overrides = seed_tools(prompt, descriptor)
+    catalog = overrides[tool.name].param_descriptions
+
+    assert set(catalog) == {
+        "value",
+        "child",
+        "child.note",
+        "child.retries",
+        "optional_child",
+        "optional_child.note",
+        "optional_child.retries",
+        "mode",
+        "tags",
+    }
+
+    value_metadata = catalog["value"]
+    assert value_metadata.description == "Describe the `value` parameter."
+    assert value_metadata.type_name == "str"
+    assert value_metadata.has_default is False
+    assert value_metadata.default is None
+
+    child_metadata = catalog["child"]
+    assert child_metadata.description == "Nested context."
+    assert child_metadata.type_name == "_NestedChildParams"
+
+    child_note = catalog["child.note"]
+    assert child_note.description == "Child note."
+    assert child_note.type_name == "str"
+
+    child_retries = catalog["child.retries"]
+    assert child_retries.has_default is True
+    assert child_retries.default == "3"
+
+    optional_child = catalog["optional_child"]
+    assert optional_child.has_default is True
+    assert optional_child.default == "None"
+    assert optional_child.type_name is not None
+    assert "_NestedChildParams" in optional_child.type_name
+
+    optional_note = catalog["optional_child.note"]
+    assert optional_note.description == "Child note."
+
+    mode_metadata = catalog["mode"]
+    assert mode_metadata.has_default is True
+    assert mode_metadata.default == "'auto'"
+
+    tags_metadata = catalog["tags"]
+    assert tags_metadata.has_default is True
+    assert tags_metadata.default is not None
+    assert "tuple" in tags_metadata.default
+
+
+def test_collect_param_metadata_ignores_non_dataclasses(tmp_path: Path) -> None:
     @dataclass
     class _PlainParams:
         value: str

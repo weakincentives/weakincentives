@@ -143,8 +143,9 @@ that tree depth-first to validate all contributed tools:
 
 `Prompt.render(...)` returns a `RenderedPrompt` containing both the rendered markdown and
 an ordered tuple of `Tool` instances contributed by enabled sections. The rendered object
-also exposes `.tool_param_descriptions`, a mapping of tool name to parameter description
-overrides sourced from the override system.
+also exposes `.tool_param_descriptions`, a mapping of tool name to per-field metadata
+overrides sourced from the override system (description, type, and default hints for
+every parameter attribute).
 
 ### Runtime Responsibilities
 

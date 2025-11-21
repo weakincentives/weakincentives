@@ -33,6 +33,7 @@ from weakincentives.prompt import (
     Tool,
 )
 from weakincentives.prompt.composition import _merge_tool_param_descriptions
+from weakincentives.prompt.overrides import ToolParamDescription
 from weakincentives.prompt.protocols import PromptProtocol
 
 ParentProtocolT = TypeVar("ParentProtocolT")
@@ -100,7 +101,11 @@ def test_delegation_prompt_renders_required_sections() -> None:
     parent_with_descriptions = replace(
         rendered_parent,
         _tool_param_descriptions=MappingProxyType(
-            {tool.name: MappingProxyType({"path": "Absolute path to inspect."})}
+            {
+                tool.name: MappingProxyType(
+                    {"path": ToolParamDescription(description="Absolute path to inspect.")}
+                )
+            }
         ),
     )
 
@@ -125,7 +130,9 @@ def test_delegation_prompt_renders_required_sections() -> None:
     assert rendered.allow_extra_keys is False
     assert rendered.tools == (tool,)
     assert rendered.tool_param_descriptions == {
-        tool.name: {"path": "Absolute path to inspect."}
+        tool.name: {
+            "path": ToolParamDescription(description="Absolute path to inspect.")
+        }
     }
 
     text = rendered.text
@@ -294,17 +301,27 @@ def test_delegation_prompt_inherits_deadline() -> None:
 
 def test_merge_tool_param_descriptions_combines_entries() -> None:
     parent = MappingProxyType(
-        {"filesystem_inspect": MappingProxyType({"path": "Absolute path to inspect."})}
+        {
+            "filesystem_inspect": MappingProxyType(
+                {"path": ToolParamDescription(description="Absolute path to inspect.")}
+            )
+        }
     )
     rendered = {
-        "filesystem_inspect": {"mode": "Traversal mode."},
-        "repo_scan": {"branch": "Branch to examine."},
+        "filesystem_inspect": {
+            "mode": ToolParamDescription(description="Traversal mode.")
+        },
+        "repo_scan": {
+            "branch": ToolParamDescription(description="Branch to examine.")
+        },
     }
 
     merged = _merge_tool_param_descriptions(parent, rendered)
 
     assert merged["filesystem_inspect"] == {
-        "path": "Absolute path to inspect.",
-        "mode": "Traversal mode.",
+        "path": ToolParamDescription(description="Absolute path to inspect."),
+        "mode": ToolParamDescription(description="Traversal mode."),
     }
-    assert merged["repo_scan"] == {"branch": "Branch to examine."}
+    assert merged["repo_scan"] == {
+        "branch": ToolParamDescription(description="Branch to examine.")
+    }
