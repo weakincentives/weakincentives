@@ -54,34 +54,33 @@ class ProviderAdapter(Protocol):
     def optimize(
         self,
         prompt: Prompt[OutputT],
-        *params: object,
         store_scope: OptimizationScope = OptimizationScope.SESSION,
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str | None = None,
         focus_areas: MarkdownSection | None = None,
         parse_output: bool = True,
         session: Session,
-    ) -> OptimizationResult[OutputT]:
+    ) -> OptimizationResult:
         ...
 ```
 
-- The signature mirrors `evaluate` so callers can swap between evaluation and
-  optimization without branching on provider capabilities. `optimize` returns an
-  `OptimizationResult` dataclass that captures the **output** of the inner
-  optimization prompt (structured output and digest text), not the input prompt
-  itself.
+- `optimize` returns an `OptimizationResult` dataclass that captures the
+  **output** of the inner optimization prompt (structured output and digest
+  text), not the input prompt itself.
 - Callers pass the same user-facing prompt they would evaluate; the adapter
   derives optimization metadata (workspace section, digest section key) by
   inspecting that prompt instead of requiring explicit arguments such as a
-  `goal_section_key`.
+  `goal_section_key`. Mirroring `evaluate` is not required—the method only needs
+  enough inputs to identify and render the workspace sections included in the
+  optimization prompt.
 - `OptimizationResult` SHOULD, at minimum, wrap the executed `PromptResponse`,
   the extracted digest text, and the requested `OptimizationScope` so the
   adapter can persist and callers can forward the optimized workspace summary
   without re-rendering the prompt.
 - `optimize` constructs and runs an **optimization prompt** analogous to the
   "optimize" REPL command described in `specs/code_reviewer_example.md`:
-  - Render the supplied prompt against the provided params, deriving the
-    workspace and digest sections from the prompt structure for optimization.
+  - Derive the workspace and digest sections from the prompt structure without
+    rendering the full original prompt.
   - Optionally append the `focus_areas` section to guide the model toward
     specific files, subsystems, or workflows the caller wants prioritized in the
     digest.
@@ -113,31 +112,35 @@ class ProviderAdapter(Protocol):
 
 ### Optimization Prompt Assembly
 
-The adapter accepts a normal user prompt and internally builds the optimization
-prompt by cloning the incoming structure. It scans the provided prompt to find
-the workspace section (VFS or Podman) and the `WorkspaceDigest` section key,
-then injects optimization guidance that targets that digest goal. `optimize`
-generates its own prompt variant and only extracts the workspace digest section
-from the optimized prompt rather than requiring a chapters expansion policy
-argument. A typical flow:
+The adapter accepts a normal user prompt and internally builds a **brand new**
+optimization prompt rather than cloning or rendering the original. It scans the
+provided prompt to find the workspace section (VFS or Podman) and the
+`WorkspaceDigest` section key, then assembles a streamlined prompt with a fresh
+preamble plus only the sections needed to perform workspace exploration. The
+adapter should rely on `prompt.find_section` with either section keys or type
+references to locate the relevant inputs. A typical flow:
 
 ```python
 def optimize(self, prompt: Prompt[OutputT], *, session: Session, ...):
-    goal_section_key = prompt.find_section_key("workspace-digest")
-    workspace_section = prompt.find_section(("vfs", "podman"))
-    optimization_prompt = prompt.clone_with(
-        optimization_sections=[
+    goal_section = prompt.find_section("workspace-digest")
+    workspace_section = prompt.find_section(("vfs", "podman", WorkspaceSection))
+
+    optimization_prompt = Prompt(
+        namespace="optimization",
+        key="workspace-digest",
+        sections=[
             MarkdownSection(
                 "Optimization Goal",
-                "Focus on summarizing the workspace so future prompts can rely on a cached digest.",
+                "Summarize the workspace so future prompts can rely on a cached digest.",
             ),
             MarkdownSection(
                 "Expectations",
                 "List key files, configs, and workflows; avoid task-specific advice.",
             ),
+            *(((focus_areas,) if focus_areas else ())),
+            workspace_section,
+            goal_section,
         ],
-        focus_areas=focus_areas,
-        restricted_sections=[workspace_section, goal_section_key],
     )
 
     response = self._execute_prompt(
@@ -145,18 +148,18 @@ def optimize(self, prompt: Prompt[OutputT], *, session: Session, ...):
         session=session,
         parse_output=True,
     )
-    digest = response.structured_output.get(goal_section_key) or response.text
+    digest = response.structured_output.get(goal_section.key) or response.text
     if store_scope is OptimizationScope.GLOBAL:
         assert overrides_store is not None and overrides_tag, "Global scope requires overrides store and tag"
         overrides_store.set_override(
             prompt.namespace,
             prompt.key,
             overrides_tag,
-            goal_section_key,
+            goal_section.key,
             digest,
         )
 
-    session.workspace_digest.set(goal_section_key, digest)
+    session.workspace_digest.set(goal_section.key, digest)
 
     return OptimizationResult(
         digest=digest,
@@ -169,8 +172,8 @@ An example `OptimizationResult` implementation:
 
 ```python
 @dataclass
-class OptimizationResult(Generic[OutputT]):
-    response: PromptResponse[OutputT]
+class OptimizationResult:
+    response: PromptResponse[Any]
     digest: str
     scope: OptimizationScope
 ```

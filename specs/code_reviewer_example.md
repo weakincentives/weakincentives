@@ -73,16 +73,18 @@ overrides, planning tools, and a repository-specific optimization workflow.
      optional focus `MarkdownSection`; no bespoke `RepositoryOptimizationResponse`
      class is needed because the digest is treated as markdown content. The
      adapter scans the prompt to find the workspace and `WorkspaceDigest`
-     sections, clones the prompt with optimization guidance, and runs the inner
-     optimization flow automatically.
+     sections (using keys or type references), builds a brand-new optimization
+     prompt with a simplified preamble and only the necessary sections, and runs
+     the inner optimization flow automatically without rendering the original
+     user prompt.
   1. Persist the digest into the main session’s workspace-digest slice and the
      overrides store (using `OptimizationScope.GLOBAL` and a supplied
      `overrides_tag`) so the `WorkspaceDigest` section renders it on subsequent
      turns and across runs.
 
-The optimization prompt mirrors the live review prompt but injects a concise set
-of optimization directives; the adapter identifies the relevant sections while
-building the optimization variant. A minimal pseudo-code sketch:
+The optimization prompt is constructed fresh with a concise preamble and only
+the workspace-aware sections; the adapter identifies the relevant sections while
+building this new prompt. A minimal pseudo-code sketch:
 
 ```python
 result = adapter.optimize(
