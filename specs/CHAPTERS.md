@@ -81,6 +81,16 @@ provide the coarse-grained boundary while sections inside continue to perform
 fine-grained feature gating. Chapters also never own tools directly; only the
 sections they contain register tool handlers.
 
+## Cloning
+
+Chapters MUST implement `clone(**kwargs)` so orchestrators can transplant chapter
+trees into new prompts. Clones are deep copies: parameter defaults, description
+metadata, and every nested section instance are duplicated rather than shared.
+Runtime bindings (such as `Session` or `EventBus` objects accepted by tool-backed
+sections) MUST be forwarded when supplied so the cloned chapter re-registers any
+reducers or tools against the new runtime. Open/closed state never carries over;
+the destination prompt or adapter reevaluates visibility after cloning.
+
 ## Evaluation Responsibilities
 
 Chapter gating happens inside `ProviderAdapter.evaluate()`. Implementations MUST

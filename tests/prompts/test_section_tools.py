@@ -53,6 +53,14 @@ class _BareSection(Section[SectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
+    def clone(self, **kwargs: object) -> _BareSection:
+        return _BareSection(
+            title=self.title,
+            key=self.key,
+            tools=self.tools(),
+            accepts_overrides=self.accepts_overrides,
+        )
+
     def render(self, params: SectionParams, depth: int, number: str) -> str:
         return ""
 

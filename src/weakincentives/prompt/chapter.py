@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import ClassVar, TypeVar, cast
 
+from ..serde import clone as clone_dataclass
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass
@@ -123,6 +124,23 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
             return bool(coerced(cast(SupportsDataclass, value)))
 
         return _with_params
+
+    def clone(self, **kwargs: object) -> Chapter[ChapterParamsT]:
+        cloned_sections = tuple(section.clone(**kwargs) for section in self.sections)
+        cloned_default = (
+            clone_dataclass(self.default_params)
+            if self.default_params is not None
+            else None
+        )
+
+        return Chapter(
+            key=self.key,
+            title=self.title,
+            description=self.description,
+            sections=cloned_sections,
+            default_params=cloned_default,
+            enabled=self.enabled,
+        )
 
 
 def _callable_requires_positional_argument(callback: EnabledPredicate) -> bool:

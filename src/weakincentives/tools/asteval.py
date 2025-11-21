@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib import import_module
 from types import MappingProxyType, ModuleType
-from typing import Final, Literal, Protocol, TextIO, cast
+from typing import Final, Literal, Protocol, TextIO, cast, override
 
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
@@ -865,6 +865,14 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
     @property
     def session(self) -> Session:
         return self._session
+
+    @override
+    def clone(self, **kwargs: object) -> AstevalSection:
+        session = kwargs.get("session")
+        if not isinstance(session, Session):
+            msg = "session is required to clone AstevalSection."
+            raise TypeError(msg)
+        return AstevalSection(session=session, accepts_overrides=self.accepts_overrides)
 
 
 __all__ = [

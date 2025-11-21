@@ -21,7 +21,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, Literal, cast
+from typing import Final, Literal, cast, override
 
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.markdown import MarkdownSection
@@ -619,8 +619,10 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         accepts_overrides: bool = False,
     ) -> None:
         allowed_roots = tuple(normalize_host_root(path) for path in allowed_host_roots)
+        self._allowed_roots = allowed_roots
+        self._mounts = tuple(mounts)
         self._mount_snapshot, mount_previews = materialize_host_mounts(
-            mounts, allowed_roots
+            self._mounts, self._allowed_roots
         )
         self._session = session
         self._initialize_session(session)
@@ -656,6 +658,23 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
     def latest_snapshot(self) -> VirtualFileSystem:
         snapshot = select_latest(self._session, VirtualFileSystem)
         return snapshot or VirtualFileSystem()
+
+    @override
+    def clone(self, **kwargs: object) -> VfsToolsSection:
+        session_obj = kwargs.get("session")
+        if not isinstance(session_obj, Session):
+            msg = "session is required to clone VfsToolsSection."
+            raise TypeError(msg)
+        provided_bus = kwargs.get("bus")
+        if provided_bus is not None and provided_bus is not session_obj.event_bus:
+            msg = "Provided bus must match the target session's event bus."
+            raise TypeError(msg)
+        return VfsToolsSection(
+            session=session_obj,
+            mounts=self._mounts,
+            allowed_host_roots=self._allowed_roots,
+            accepts_overrides=self.accepts_overrides,
+        )
 
 
 def _build_tools(

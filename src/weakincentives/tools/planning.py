@@ -391,6 +391,18 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
 
     @override
+    def clone(self, **kwargs: object) -> PlanningToolsSection:
+        session = kwargs.get("session")
+        if not isinstance(session, Session):
+            msg = "session is required to clone PlanningToolsSection."
+            raise TypeError(msg)
+        return PlanningToolsSection(
+            session=session,
+            strategy=self._strategy,
+            accepts_overrides=self.accepts_overrides,
+        )
+
+    @override
     def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
         if not isinstance(params, _PlanningSectionParams):
             raise PromptRenderError(

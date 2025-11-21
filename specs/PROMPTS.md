@@ -71,6 +71,21 @@ dataclass attributes are acceptable, but missing placeholders trigger `PromptVal
 (section title, placeholder name) for developers to resolve the issue quickly. Default instances are optional; when
 absent we rely on the dataclass' own default field values by instantiating it with no arguments during rendering.
 
+## Cloning and reuse
+
+Sections and chapters MUST expose a `clone(**kwargs)` method that returns a deep copy of the
+component tree suitable for insertion into a new prompt. Clones behave as if they were
+constructed from scratch: numbering restarts from the destination prompt, default parameter
+dataclasses are duplicated (not reused), and the cloned objects share no references to the
+original prompt, `Session`, or `EventBus` instances. Implementations must recursively clone
+children so the entire subtree remains decoupled.
+
+Tool-backed sections MAY accept runtime objects (for example `session` or `bus`) as keyword
+arguments to `clone`. When supplied, the clone MUST wire reducers and tool handlers against the
+provided instances instead of the originals. This is critical for reusable sections such as the
+VFS and Podman tool suites, which need to register their reducers on the target session and bind
+tool telemetry to the new event bus when transplanted into another prompt.
+
 ### Prompt namespace (`ns`) — REQUIRED
 
 Prompts MUST declare a non-empty `ns: str`. The `(ns, key)` pair identifies a prompt

@@ -22,6 +22,7 @@ from weakincentives.dbc import dbc_enabled
 from weakincentives.prompt import Section
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.registry import PromptRegistry, SectionNode
+from weakincentives.serde import clone as clone_dataclass
 
 
 @dataclass
@@ -41,6 +42,16 @@ class ExampleSection(Section[ExampleParams]):
     def placeholder_names(self) -> set[str]:
         return {"value"}
 
+    def clone(self, **kwargs: object) -> ExampleSection:
+        cloned_children = tuple(child.clone(**kwargs) for child in self.children)
+        cloned_default = clone_dataclass(self.default_params)
+        return ExampleSection(
+            title=self.title,
+            key=self.key,
+            default_params=cloned_default,
+            children=cloned_children,
+        )
+
 
 class OtherSection(Section[OtherParams]):
     def render(self, params: OtherParams, depth: int, number: str) -> str:
@@ -49,10 +60,23 @@ class OtherSection(Section[OtherParams]):
     def placeholder_names(self) -> set[str]:
         return {"level"}
 
+    def clone(self, **kwargs: object) -> OtherSection:
+        cloned_children = tuple(child.clone(**kwargs) for child in self.children)
+        cloned_default = clone_dataclass(self.default_params)
+        return OtherSection(
+            title=self.title,
+            key=self.key,
+            default_params=cloned_default,
+            children=cloned_children,
+        )
+
 
 class NoParamsSection(Section):
     def render(self, params: object, depth: int, number: str) -> str:
         return "no-params"
+
+    def clone(self, **kwargs: object) -> NoParamsSection:
+        return NoParamsSection(title=self.title, key=self.key)
 
 
 def _build_registry_with_sections() -> PromptRegistry:

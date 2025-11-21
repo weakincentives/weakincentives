@@ -101,6 +101,15 @@ that file and shell state are visible across agent boundaries. With
 session; the clone receives a new session id, which in turn yields a fresh
 overlay path and container when the sandbox section is accessed.
 
+### Cloning
+
+`PodmanSandboxSection.clone(session=..., bus=...)` returns a fresh section wired
+to the provided runtime. The clone MUST re-register reducers on the supplied
+session, publish tool telemetry to the new event bus, and resolve a distinct
+overlay and container so no filesystem or process state leaks from the source
+section. Host mounts hydrate against the new session id, mirroring constructor
+behavior.
+
 ## Tooling Surface
 
 ### `shell_execute`
