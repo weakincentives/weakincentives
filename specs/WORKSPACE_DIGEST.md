@@ -57,8 +57,6 @@ class ProviderAdapter(Protocol):
         store_scope: OptimizationScope = OptimizationScope.SESSION,
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str | None = None,
-        focus_areas: MarkdownSection | None = None,
-        parse_output: bool = True,
         session: Session,
     ) -> OptimizationResult:
         ...
@@ -81,9 +79,6 @@ class ProviderAdapter(Protocol):
   "optimize" REPL command described in `specs/code_reviewer_example.md`:
   - Derive the workspace and digest sections from the prompt structure without
     rendering the full original prompt.
-  - Optionally append the `focus_areas` section to guide the model toward
-    specific files, subsystems, or workflows the caller wants prioritized in the
-    digest.
   - Execute the provider call, including any tool invocations, until a final
     assistant message is produced.
   - Parse structured output when declared, falling back to plain text.
@@ -149,7 +144,6 @@ def optimize(self, prompt: Prompt[OutputT], *, session: Session, ...):
                 "Expectations",
                 "List key files, configs, and workflows; avoid task-specific advice.",
             ),
-            *(((focus_areas,) if focus_areas else ())),
             safe_workspace_section,
             safe_goal_section,
         ],
@@ -158,7 +152,6 @@ def optimize(self, prompt: Prompt[OutputT], *, session: Session, ...):
     response = self._execute_prompt(
         optimization_prompt,
         session=session,
-        parse_output=True,
     )
     digest = response.structured_output.get(goal_section.key) or response.text
     if store_scope is OptimizationScope.GLOBAL:

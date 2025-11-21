@@ -30,11 +30,9 @@ overrides, planning tools, and a repository-specific optimization workflow.
    - **Review Request** — injects the user’s turn-by-turn prompt.
 1. Each REPL turn renders the prompt, dispatches it through the adapter, then
    prints the structured response and the current planning state.
-1. The special `optimize [focus]` command launches a dedicated session,
-   renders a repository-optimization prompt, and persists the resulting digest
-   in the session/overrides for the `WorkspaceDigest` section. The command can
-   attach a focus section that highlights priority files or subsystems so the
-   digest emphasizes what matters most.
+1. The special `optimize` command launches a dedicated session, renders a
+   repository-optimization prompt, and persists the resulting digest in the
+   session/overrides for the `WorkspaceDigest` section.
 
 ## Key Components
 
@@ -44,9 +42,7 @@ overrides, planning tools, and a repository-specific optimization workflow.
   `examples/code-review:code-review-session`).
 - `build_repository_optimization_prompt` — helper prompt that guides the agent
   through README/docs/tooling exploration and yields a Markdown block suitable
-  for the `WorkspaceDigest` section. It accepts an optional focus string that is
-  rendered as a `MarkdownSection` so the optimization prompt highlights
-  prioritized paths or workflows.
+  for the `WorkspaceDigest` section.
 - Both prompts use `MarkdownSection` instances plus the shared planning/workspace
   sections so the agent can list files, inspect paths, and update multi-step
   plans.
@@ -63,18 +59,17 @@ overrides, planning tools, and a repository-specific optimization workflow.
 
 ### Optimization Command
 
-- Trigger: User types `optimize` with an optional focus string (defaults to
-  “Survey README, docs, and key scripts…”).
+- Trigger: User types `optimize` to refresh the workspace digest.
 - Implementation steps:
   1. Create a `Session` dedicated to the optimization prompt so tool
      invocations/events don’t pollute the main session (the attached bus, if
      present, travels with the session implicitly). Any sections borrowed from
      the main prompt must be safe to run with this new session/bus; clone or
      rebuild them if they capture session state.
-  1. Invoke the adapter’s `optimize` method with the normal review prompt and an
-     optional focus `MarkdownSection`; no bespoke `RepositoryOptimizationResponse`
-     class is needed because the digest is treated as markdown content. The
-     adapter scans the prompt to find the workspace and `WorkspaceDigest`
+  1. Invoke the adapter’s `optimize` method with the normal review prompt; no
+     bespoke `RepositoryOptimizationResponse` class is needed because the digest
+     is treated as markdown content. The adapter scans the prompt to find the
+     workspace and `WorkspaceDigest`
      sections (using keys or type references), builds a brand-new optimization
      prompt with a simplified preamble and only the necessary sections, and runs
      the inner optimization flow automatically without rendering the original
@@ -91,7 +86,6 @@ building this new prompt. A minimal pseudo-code sketch:
 ```python
 result = adapter.optimize(
     build_task_prompt(user_request, overrides_tag),
-    focus_areas=MarkdownSection("Focus", user_focus) if user_focus else None,
     store_scope=OptimizationScope.GLOBAL,
     overrides_store=overrides_store,
     overrides_tag=overrides_tag,
@@ -137,8 +131,8 @@ Environment requirements:
 Interactive commands:
 
 - Any non-empty input except the reserved commands is treated as a review task.
-- `optimize [focus]` refreshes the repository instructions override using the
-  global store scope so the digest persists across runs.
+- `optimize` refreshes the repository instructions override using the global
+  store scope so the digest persists across runs.
 - `exit` or `quit` terminates the REPL.
 
 ## Testing Strategy
