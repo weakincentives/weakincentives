@@ -84,7 +84,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         return bool(self._enabled(params))
 
     @abstractmethod
-    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
         """Produce markdown output for the section at the supplied depth."""
 
     def placeholder_names(self) -> set[str]:

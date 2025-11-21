@@ -33,7 +33,7 @@ def test_subagents_section_render_mentions_tool() -> None:
     params_type = section.param_type
     assert params_type is not None
     params = params_type()
-    rendered = section.render(params, depth=0)
+    rendered = section.render(params, depth=0, number="1")
 
     assert "dispatch_subagents" in rendered
     assert "parallel" in rendered.lower()
@@ -57,7 +57,7 @@ def test_subagents_section_rejects_missing_params() -> None:
     section = SubagentsSection()
 
     with pytest.raises(PromptRenderError):
-        section.render(None, depth=0)
+        section.render(None, depth=0, number="1")
 
 
 def test_subagents_section_respects_accepts_overrides() -> None:
@@ -71,6 +71,6 @@ def test_subagents_section_respects_accepts_overrides() -> None:
 
     params_type = section.param_type
     assert params_type is not None
-    rendered = section.render(params_type(), depth=1)
+    rendered = section.render(params_type(), depth=1, number="1.1")
 
-    assert rendered.startswith("### Delegation")
+    assert rendered.startswith("### 1.1 Delegation")

@@ -126,8 +126,8 @@ def test_repository_instructions_section_empty_by_default() -> None:
 
     rendered = prompt.render(ReviewTurnParams(request="demo request"))
 
-    assert "## Repository Instructions" in rendered.text
-    post_section = rendered.text.split("## Repository Instructions", 1)[1]
+    assert "## 2 Repository Instructions" in rendered.text
+    post_section = rendered.text.split("## 2 Repository Instructions", 1)[1]
     section_body = post_section.split("\n## ", 1)[0]
     assert section_body.strip() == ""
 

@@ -129,13 +129,13 @@ def test_delegation_prompt_renders_required_sections() -> None:
     }
 
     text = rendered.text
-    assert "# Delegation Summary" in text
+    assert "## 1 Delegation Summary" in text
     summary_segment = text.split("<!-- PARENT PROMPT START -->", 1)[0]
-    assert "## Response Format" not in summary_segment
-    assert "## Parent Prompt (Verbatim)" in text
+    assert "Response Format" not in summary_segment
+    assert "## 2 Parent Prompt (Verbatim)" in text
     assert "<!-- PARENT PROMPT START -->" in text
     assert rendered_parent.text in text
-    assert "## Recap" in text
+    assert "## 3 Recap" in text
     assert "- Prioritize areas touched in the latest commits." in text
 
 
@@ -161,11 +161,11 @@ def test_delegation_prompt_with_response_format_instructions() -> None:
         parent=ParentPromptParams(body=rendered_parent.text),
     )
 
-    assert "## Response Format" in rendered.text
+    assert "## 2 Response Format" in rendered.text
     assert "Return ONLY a single fenced JSON code block." in rendered.text
     assert "an object" in rendered.text
-    assert rendered.text.index("## Delegation Summary") < rendered.text.index(
-        "## Parent Prompt (Verbatim)"
+    assert rendered.text.index("## 1 Delegation Summary") < rendered.text.index(
+        "## 3 Parent Prompt (Verbatim)"
     )
 
 
@@ -229,21 +229,21 @@ def test_delegation_prompt_skips_fallback_when_parent_freeform() -> None:
         parent=ParentPromptParams(body=rendered_parent.text),
     )
 
-    assert "## Response Format" not in rendered.text
+    assert "Response Format" not in rendered.text
 
 
 def test_parent_prompt_section_requires_params() -> None:
     section = ParentPromptSection()
 
     with pytest.raises(PromptRenderError):
-        section.render(None, depth=0)
+        section.render(None, depth=0, number="1")
 
 
 def test_recap_section_requires_params() -> None:
     section = RecapSection()
 
     with pytest.raises(PromptRenderError):
-        section.render(None, depth=0)
+        section.render(None, depth=0, number="1")
 
 
 def test_delegation_prompt_empty_recap_uses_placeholder() -> None:
@@ -264,8 +264,8 @@ def test_delegation_prompt_empty_recap_uses_placeholder() -> None:
         )
     )
 
-    assert "## Recap" in rendered.text
-    recap_segment = rendered.text.split("## Recap", 1)[-1]
+    assert "## 3 Recap" in rendered.text
+    recap_segment = rendered.text.split("## 3 Recap", 1)[-1]
     assert "- " not in recap_segment
 
 

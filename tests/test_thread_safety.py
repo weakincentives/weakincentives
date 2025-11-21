@@ -59,6 +59,7 @@ class _DummySection:
 @dataclass(slots=True)
 class _DummySectionNode:
     path: tuple[str, ...]
+    number: str
     section: _DummySection
 
 
@@ -157,7 +158,7 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
     prompt = _DummyPrompt(
         ns="sample",
         key="prompt",
-        _sections=(_DummySectionNode(path=("intro",), section=section),),
+        _sections=(_DummySectionNode(path=("intro",), number="1", section=section),),
     )
 
     def seed() -> PromptOverride:

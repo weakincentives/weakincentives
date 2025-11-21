@@ -128,7 +128,7 @@ class BrokenSection(Section[BrokenParams]):
     def __init__(self) -> None:
         super().__init__(title="Broken", key="broken")
 
-    def render(self, params: BrokenParams, depth: int) -> str:
+    def render(self, params: BrokenParams, depth: int, number: str) -> str:
         raise PromptRenderError("inner", placeholder="value")
 
 
@@ -153,13 +153,13 @@ class InvalidParamsSection(Section[int]):  # type: ignore[arg-type]
     def __init__(self) -> None:
         super().__init__(title="Invalid", key="invalid")
 
-    def render(self, params: int, depth: int) -> str:
+    def render(self, params: int, depth: int, number: str) -> str:
         return "invalid"
 
 
 def test_invalid_params_section_render_stub() -> None:
     section = InvalidParamsSection()
-    assert section.render(0, depth=1) == "invalid"
+    assert section.render(0, depth=1, number="1") == "invalid"
 
 
 def test_prompt_register_requires_dataclass_params() -> None:
@@ -241,7 +241,7 @@ class BareSection(Section[PlaceholderParams]):
     def __init__(self) -> None:
         super().__init__(title="Bare", key="bare")
 
-    def render(self, params: PlaceholderParams, depth: int) -> str:
+    def render(self, params: PlaceholderParams, depth: int, number: str) -> str:
         return "bare"
 
 
@@ -263,9 +263,9 @@ def test_text_section_returns_heading_when_body_empty() -> None:
         key="heading",
     )
 
-    output = section.render(HeadingOnlyParams(), depth=0)
+    output = section.render(HeadingOnlyParams(), depth=0, number="1")
 
-    assert output == "## Heading"
+    assert output == "## 1 Heading"
 
 
 @dataclass
@@ -293,7 +293,7 @@ class ContextAwareSection(Section[ContextParams]):
     def __init__(self) -> None:
         super().__init__(title="Context", key="context")
 
-    def render(self, params: ContextParams, depth: int) -> str:
+    def render(self, params: ContextParams, depth: int, number: str) -> str:
         raise PromptRenderError(
             "context",
             section_path=("Provided",),

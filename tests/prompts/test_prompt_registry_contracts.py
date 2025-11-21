@@ -35,7 +35,7 @@ class OtherParams:
 
 
 class ExampleSection(Section[ExampleParams]):
-    def render(self, params: ExampleParams, depth: int) -> str:
+    def render(self, params: ExampleParams, depth: int, number: str) -> str:
         return f"example:{params.value}:{depth}"
 
     def placeholder_names(self) -> set[str]:
@@ -43,7 +43,7 @@ class ExampleSection(Section[ExampleParams]):
 
 
 class OtherSection(Section[OtherParams]):
-    def render(self, params: OtherParams, depth: int) -> str:
+    def render(self, params: OtherParams, depth: int, number: str) -> str:
         return f"other:{params.level}:{depth}"
 
     def placeholder_names(self) -> set[str]:
@@ -51,7 +51,7 @@ class OtherSection(Section[OtherParams]):
 
 
 class NoParamsSection(Section):
-    def render(self, params: object, depth: int) -> str:
+    def render(self, params: object, depth: int, number: str) -> str:
         return "no-params"
 
 
@@ -152,6 +152,7 @@ def _corrupt_params_registry_with_unknown_node(registry: PromptRegistry) -> None
         section=example_node.section,
         depth=example_node.depth,
         path=("ghost",),
+        number="999",
     )
     registry._params_registry[ExampleParams].append(ghost_node)
 

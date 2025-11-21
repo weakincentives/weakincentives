@@ -156,9 +156,9 @@ def test_prompt_render_merges_defaults_and_overrides() -> None:
 
     assert rendered.text == "\n\n".join(
         [
-            "## Intro\n\nIntro: hello",
-            "## Details\n\nDetails: world",
-            "## Outro\n\nOutro: bye",
+            "## 1 Intro\n\nIntro: hello",
+            "## 2 Details\n\nDetails: world",
+            "## 3 Outro\n\nOutro: bye",
         ]
     )
 
@@ -217,10 +217,10 @@ def test_prompt_render_renders_nested_sections_and_depth() -> None:
 
     assert rendered.text == "\n\n".join(
         [
-            "## Parent\n\nParent: Main Heading",
-            "### Child\n\nChild detail: Child detail",
-            "#### Leaf\n\nLeaf: Deep note",
-            "## Summary\n\nSummary: All done",
+            "## 1 Parent\n\nParent: Main Heading",
+            "### 1.1 Child\n\nChild detail: Child detail",
+            "#### 1.1.1 Leaf\n\nLeaf: Deep note",
+            "## 2 Summary\n\nSummary: All done",
         ]
     )
 
@@ -233,7 +233,7 @@ def test_prompt_render_skips_disabled_parent_and_children() -> None:
         SummaryParams(summary="Visible"),
     )
 
-    assert rendered.text == "## Summary\n\nSummary: Visible"
+    assert rendered.text == "## 2 Summary\n\nSummary: Visible"
     assert "Parent" not in rendered.text
     assert "Child" not in rendered.text
     assert "Leaf" not in rendered.text
@@ -245,7 +245,7 @@ def test_prompt_render_wraps_template_errors_with_context() -> None:
         value: str
 
     class ExplodingSection(MarkdownSection[ErrorParams]):
-        def render(self, params: ErrorParams, depth: int) -> str:
+        def render(self, params: ErrorParams, depth: int, number: str) -> str:
             raise ValueError("boom")
 
     section = ExplodingSection(
@@ -322,7 +322,7 @@ def test_markdown_section_missing_placeholder_raises_prompt_error() -> None:
     )
 
     with pytest.raises(PromptRenderError) as exc:
-        section.render(IntroParams(title="ignored"), depth=0)
+        section.render(IntroParams(title="ignored"), depth=0, number="1")
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.placeholder == "name"

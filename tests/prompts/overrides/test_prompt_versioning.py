@@ -36,8 +36,8 @@ class _GreetingParams:
 
 
 class _StaticSection(Section[_GreetingParams]):
-    def render(self, params: _GreetingParams, depth: int) -> str:
-        return f"Depth {depth}: {params.subject}"
+    def render(self, params: _GreetingParams, depth: int, number: str) -> str:
+        return f"Depth {depth}: {params.subject} ({number})"
 
 
 def _build_prompt() -> Prompt:
@@ -126,6 +126,7 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
         SectionDescriptor(
             path=("greeting",),
             content_hash=hash_text("Greet ${subject} warmly."),
+            number="1",
         )
     ]
     assert descriptor.tools == []

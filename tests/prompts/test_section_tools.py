@@ -53,7 +53,7 @@ class _BareSection(Section[SectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
-    def render(self, params: SectionParams, depth: int) -> str:
+    def render(self, params: SectionParams, depth: int, number: str) -> str:
         return ""
 
 

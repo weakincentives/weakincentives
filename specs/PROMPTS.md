@@ -33,7 +33,10 @@ reaches an LLM. The design should be simple enough to maintain but strict enough
 A `Prompt` owns a **namespace** (`ns`), a required machine-readable `key`, an optional human-readable `name`, and
 an ordered tree of `Section` instances. Rendering walks this tree depth first and produces markdown where the
 heading level is `##` for roots and adds one `#` per level of depth (so depth one becomes `###`, depth two `####`,
-and so on). The namespace
+and so on). Each heading is also prefixed with a hierarchical number derived from its position in the traversal:
+top-level sections start at `1`, their first child becomes `1.1`, its child becomes `1.1.1`, and so on.
+Chapters participate in this same numbering scheme so the rendered document exposes a stable breadcrumb for every
+visible fragment. The namespace
 groups prompts by logical domain (for example `webapp/agents`, `backoffice/cron`, `infra/sweeper`) and participates
 in versioning plus override resolution to prevent collisions across applications. The implementation keeps
 `Section` as the abstract base class that defines the shared contract—metadata, parameter typing, optional defaults,
@@ -105,7 +108,9 @@ factories). If instantiating the dataclass fails because required fields lack va
 surface `PromptRenderError`. Once parameters are in place we call
 `section.is_enabled(params)`; disabled sections short-circuit the traversal, meaning their children do not render and
 their defaults are ignored. Active sections invoke `section.render(params, depth)`, which always emits a markdown
-heading at the appropriate depth followed by the body content. Text bodies are dedented, stripped, and separated by a
+heading at the appropriate depth followed by the body content. Heading titles must include the numbering prefix
+generated from the section's location in the tree (`1`, `1.2`, `1.2.1`, etc.) so rendered prompts expose the same
+structure optimization tooling inspects. Text bodies are dedented, stripped, and separated by a
 single blank line so the final document is readable and deterministic. Enabled sections contribute any registered
 `Tool` instances to the rendered prompt; tools from disabled sections never appear in the result.
 
@@ -115,6 +120,8 @@ the object surfaces:
 - `.tools` – ordered tuple of tools contributed by enabled sections.
 - `.tool_param_descriptions` – optional mapping of tool name → field description overrides supplied by the
   override system.
+- Prompt descriptors MUST capture the numbering string assigned to each section (and chapter) so callers can map
+  section keys or `SectionPath`s back to the human-facing headings rendered in `.text`.
 
 ## Validation and Error Handling
 

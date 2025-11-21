@@ -46,7 +46,7 @@ def _render_section(strategy: PlanningStrategy | None = None) -> str:
     params = section.default_params
     assert params is not None
 
-    return section.render(params, depth=0)
+    return section.render(params, depth=0, number="1")
 
 
 def test_planning_section_renders_instructions() -> None:
@@ -105,4 +105,4 @@ def test_planning_section_rejects_missing_params() -> None:
     section = _make_section()
 
     with pytest.raises(PromptRenderError):
-        section.render(None, depth=0)
+        section.render(None, depth=0, number="1")

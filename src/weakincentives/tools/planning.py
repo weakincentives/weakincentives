@@ -391,14 +391,14 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         session.register_reducer(ClearPlan, _clear_plan_reducer, slice_type=Plan)
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int) -> str:
+    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
         if not isinstance(params, _PlanningSectionParams):
             raise PromptRenderError(
                 "Planning tools section requires parameters.",
                 dataclass_type=_PlanningSectionParams,
             )
         template = _template_for_strategy(self._strategy)
-        return self.render_with_template(template, params, depth)
+        return self.render_with_template(template, params, depth, number)
 
     @override
     def original_body_template(self) -> str:
