@@ -92,6 +92,10 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
         return set()
 
+    @abstractmethod
+    def clone(self, **kwargs: object) -> Section[SectionParamsT]:
+        """Return a deep copy of the section and its children."""
+
     def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
         """Return the tools exposed by this section."""
 

@@ -206,6 +206,9 @@ class _InvalidToolSection(Section[GuidanceParams]):
     def tools(self) -> tuple[Any, ...]:
         return ("not-a-tool",)
 
+    def clone(self, **kwargs: object) -> _InvalidToolSection:
+        return _InvalidToolSection(title=self.title, key=self.key)
+
 
 def test_prompt_tools_requires_tool_instances() -> None:
     invalid_section = _InvalidToolSection(title="Invalid", key="invalid")

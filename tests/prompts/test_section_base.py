@@ -38,6 +38,10 @@ class ExampleSection(Section[ExampleParams]):
     def render(self, params: ExampleParams, depth: int, number: str) -> str:
         return f"Rendered {params.value} at depth {depth}"
 
+    def clone(self, **kwargs: object) -> ExampleSection:
+        cloned_children = tuple(child.clone(**kwargs) for child in self.children)
+        return ExampleSection(title=self.title, key=self.key, children=cloned_children)
+
 
 def test_example_section_render_outputs_value() -> None:
     section = ExampleSection(title="Demo", key="demo")
@@ -108,6 +112,9 @@ def test_section_allows_custom_children_and_enabled() -> None:
 class PlainSection(Section):
     def render(self, params: object, depth: int, number: str) -> str:
         return ""
+
+    def clone(self, **kwargs: object) -> PlainSection:
+        return PlainSection(title=self.title, key=self.key, enabled=self._enabled)
 
 
 def test_plain_section_render_stubs_result() -> None:

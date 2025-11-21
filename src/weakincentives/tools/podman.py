@@ -30,7 +30,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, Protocol, cast, runtime_checkable
+from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolResult
@@ -538,6 +538,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     ) -> None:
         self._session = session
         self._image = image
+        self._mounts = tuple(mounts)
         env_connection = os.environ.get(_PODMAN_CONNECTION_ENV)
         preferred_connection = connection_name or env_connection
         resolved_connection: _PodmanConnectionInfo | None = None
@@ -564,6 +565,8 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             base_url=base_url,
             identity=identity_str,
         )
+        self._base_url = base_url
+        self._identity = identity_str
         self._base_env = tuple(
             sorted((base_environment or {}).items(), key=lambda item: item[0])
         )
@@ -576,10 +579,11 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         allowed_roots = tuple(
             vfs_module.normalize_host_root(path) for path in allowed_host_roots
         )
+        self._allowed_roots = allowed_roots
         (
             self._resolved_mounts,
             self._mount_previews,
-        ) = _resolve_podman_host_mounts(mounts, allowed_roots)
+        ) = _resolve_podman_host_mounts(self._mounts, self._allowed_roots)
         self._mount_snapshot = VirtualFileSystem()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
@@ -678,6 +682,32 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     @property
     def session(self) -> Session:
         return self._session
+
+    @override
+    def clone(self, **kwargs: object) -> PodmanSandboxSection:  # pragma: no cover
+        session = kwargs.get("session")
+        if not isinstance(session, Session):
+            msg = "session is required to clone PodmanSandboxSection."
+            raise TypeError(msg)
+        provided_bus = kwargs.get("bus")
+        if provided_bus is not None and provided_bus is not session.event_bus:
+            msg = "Provided bus must match the target session's event bus."
+            raise TypeError(msg)
+        return PodmanSandboxSection(
+            session=session,
+            image=self._image,
+            mounts=self._mounts,
+            allowed_host_roots=self._allowed_roots,
+            base_url=self._base_url,
+            identity=self._identity,
+            base_environment=dict(self._base_env),
+            cache_dir=self._overlay_root,
+            client_factory=self._client_factory,
+            clock=self._clock,
+            connection_name=self._connection_name,
+            exec_runner=self._exec_runner,
+            accepts_overrides=self.accepts_overrides,
+        )
 
     def _initialize_vfs_state(self, session: Session) -> None:
         session.register_reducer(VirtualFileSystem, replace_latest)

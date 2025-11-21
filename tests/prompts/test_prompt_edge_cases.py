@@ -131,6 +131,9 @@ class BrokenSection(Section[BrokenParams]):
     def render(self, params: BrokenParams, depth: int, number: str) -> str:
         raise PromptRenderError("inner", placeholder="value")
 
+    def clone(self, **kwargs: object) -> BrokenSection:
+        return BrokenSection()
+
 
 def test_prompt_render_wraps_prompt_errors_with_context() -> None:
     section = BrokenSection()
@@ -155,6 +158,9 @@ class InvalidParamsSection(Section[int]):  # type: ignore[arg-type]
 
     def render(self, params: int, depth: int, number: str) -> str:
         return "invalid"
+
+    def clone(self, **kwargs: object) -> InvalidParamsSection:
+        return InvalidParamsSection()
 
 
 def test_invalid_params_section_render_stub() -> None:
@@ -244,6 +250,9 @@ class BareSection(Section[PlaceholderParams]):
     def render(self, params: PlaceholderParams, depth: int, number: str) -> str:
         return "bare"
 
+    def clone(self, **kwargs: object) -> BareSection:
+        return BareSection()
+
 
 def test_section_placeholder_names_default_to_empty_set() -> None:
     section = BareSection()
@@ -300,6 +309,9 @@ class ContextAwareSection(Section[ContextParams]):
             dataclass_type=ContextParams,
             placeholder="kept",
         )
+
+    def clone(self, **kwargs: object) -> ContextAwareSection:
+        return ContextAwareSection()
 
 
 def test_prompt_render_propagates_errors_with_existing_context() -> None:

@@ -18,6 +18,7 @@ from dataclasses import fields, is_dataclass
 from string import Template
 from typing import Any, TypeVar, override
 
+from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
 from .section import Section
@@ -107,6 +108,33 @@ class MarkdownSection(Section[MarkdownParamsT]):
     @override
     def original_body_template(self) -> str:
         return self.template
+
+    @override
+    def clone(self, **kwargs: object) -> MarkdownSection[MarkdownParamsT]:
+        cloned_children: list[Section[SupportsDataclass]] = []
+        for child in self.children:
+            if not hasattr(child, "clone"):
+                raise TypeError(
+                    "Section children must implement clone()."
+                )  # pragma: no cover
+            cloned_children.append(child.clone(**kwargs))
+
+        cloned_default = (
+            clone_dataclass(self.default_params)
+            if self.default_params is not None
+            else None
+        )
+
+        return self.__class__(
+            title=self.title,
+            template=self.template,
+            key=self.key,
+            default_params=cloned_default,
+            children=cloned_children,
+            enabled=self._enabled,
+            tools=self.tools(),
+            accepts_overrides=self.accepts_overrides,
+        )
 
 
 __all__ = ["MarkdownSection"]

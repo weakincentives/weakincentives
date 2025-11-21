@@ -317,6 +317,7 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
             if isolation_level is not None
             else SubagentIsolationLevel.NO_ISOLATION
         )
+        self._isolation_level = effective_level
         tool = build_dispatch_subagents_tool(
             isolation_level=effective_level,
             accepts_overrides=accepts_overrides,
@@ -338,6 +339,13 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
                 dataclass_type=_SubagentsSectionParams,
             )
         return super().render(params, depth, number)
+
+    @override
+    def clone(self, **kwargs: object) -> SubagentsSection:
+        return SubagentsSection(
+            isolation_level=self._isolation_level,
+            accepts_overrides=self.accepts_overrides,
+        )
 
 
 dispatch_subagents = build_dispatch_subagents_tool()

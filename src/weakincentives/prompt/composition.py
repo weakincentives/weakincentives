@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, ClassVar, Generic, TypeVar, cast, override
 
+from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
 from .markdown import MarkdownSection
@@ -72,6 +73,10 @@ class DelegationSummarySection(MarkdownSection[DelegationParams]):
             ),
         )
 
+    @override
+    def clone(self, **kwargs: object) -> DelegationSummarySection:
+        return DelegationSummarySection()
+
 
 class ParentPromptSection(Section[ParentPromptParams]):
     """Embed the parent prompt verbatim between explicit markers."""
@@ -107,6 +112,18 @@ class ParentPromptSection(Section[ParentPromptParams]):
             "<!-- PARENT PROMPT END -->"
         )
 
+    @override
+    def clone(self, **kwargs: object) -> ParentPromptSection:
+        cloned_default = (
+            clone_dataclass(self.default_params)
+            if self.default_params is not None
+            else None
+        )
+        return ParentPromptSection(
+            tools=self.tools(),
+            default_params=cloned_default,
+        )
+
 
 class RecapSection(Section[RecapParams]):
     """Render a concise recap of inherited parent prompt directives."""
@@ -128,6 +145,10 @@ class RecapSection(Section[RecapParams]):
         if bullet_lines:
             return f"{prefix}\n\n{bullet_lines}"
         return prefix
+
+    @override
+    def clone(self, **kwargs: object) -> RecapSection:
+        return RecapSection()
 
 
 class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP046

@@ -1,0 +1,147 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pytest
+
+from weakincentives.prompt import Chapter, MarkdownSection
+from weakincentives.prompt.composition import (
+    DelegationSummarySection,
+    ParentPromptParams,
+    ParentPromptSection,
+    RecapSection,
+)
+from weakincentives.prompt.response_format import (
+    ResponseFormatParams,
+    ResponseFormatSection,
+)
+from weakincentives.runtime.session import Session
+from weakincentives.tools.asteval import AstevalSection
+from weakincentives.tools.planning import PlanningStrategy, PlanningToolsSection
+from weakincentives.tools.subagents import SubagentIsolationLevel, SubagentsSection
+from weakincentives.tools.vfs import VfsToolsSection
+
+
+@dataclass
+class _SampleParams:
+    value: str = "sample"
+
+
+def test_markdown_section_clone_deep_copies_children_and_defaults() -> None:
+    child = MarkdownSection[_SampleParams](
+        title="Child", template="${value}", key="child", default_params=_SampleParams()
+    )
+    section = MarkdownSection[_SampleParams](
+        title="Parent",
+        template="${value}",
+        key="parent",
+        default_params=_SampleParams(value="original"),
+        children=[child],
+    )
+
+    clone = section.clone()
+
+    assert clone is not section
+    assert clone.default_params is not section.default_params
+    assert clone.children and clone.children[0] is not child
+
+
+def test_chapter_clone_copies_sections_and_defaults() -> None:
+    section = MarkdownSection[_SampleParams](
+        title="Solo", template="${value}", key="solo", default_params=_SampleParams()
+    )
+    chapter = Chapter[_SampleParams](
+        key="chapter",
+        title="Chapter",
+        sections=(section,),
+    )
+
+    clone = chapter.clone()
+
+    assert clone is not chapter
+    assert clone.default_params is chapter.default_params
+    assert clone.sections[0] is not section
+
+
+def test_response_format_clone_preserves_params() -> None:
+    params = ResponseFormatParams(article="a", container="object", extra_clause="")
+    section = ResponseFormatSection(params=params)
+
+    clone = section.clone()
+
+    assert clone.default_params is not section.default_params
+    assert clone.default_params is not None
+    assert clone.default_params.container == "object"
+
+
+def test_composition_sections_clone_with_metadata() -> None:
+    parent = ParentPromptSection(default_params=ParentPromptParams(body="parent"))
+    recap = RecapSection()
+    summary = DelegationSummarySection()
+
+    assert isinstance(parent.clone(), ParentPromptSection)
+    assert isinstance(recap.clone(), RecapSection)
+    assert isinstance(summary.clone(), DelegationSummarySection)
+
+
+def test_tool_sections_clone_to_new_sessions() -> None:
+    original_session = Session()
+    vfs = VfsToolsSection(session=original_session)
+    planning = PlanningToolsSection(
+        session=original_session, strategy=PlanningStrategy.REACT
+    )
+    asteval = AstevalSection(session=original_session)
+    subagents = SubagentsSection(isolation_level=SubagentIsolationLevel.NO_ISOLATION)
+
+    new_session = Session()
+
+    vfs_clone = vfs.clone(session=new_session)
+    planning_clone = planning.clone(session=new_session)
+    asteval_clone = asteval.clone(session=new_session)
+    subagents_clone = subagents.clone()
+
+    assert vfs_clone.session is new_session
+    assert planning_clone.session is new_session
+    assert asteval_clone.session is new_session
+    assert subagents_clone is not subagents
+
+
+def test_response_format_clone_requires_defaults() -> None:
+    params = ResponseFormatParams(article="a", container="object", extra_clause="")
+    section = ResponseFormatSection(params=params)
+    section.default_params = None
+
+    with pytest.raises(ValueError):
+        section.clone()
+
+
+def test_tool_clones_validate_session_and_bus() -> None:
+    base_session = Session()
+    vfs = VfsToolsSection(session=base_session)
+    planning = PlanningToolsSection(
+        session=base_session, strategy=PlanningStrategy.REACT
+    )
+    asteval = AstevalSection(session=base_session)
+
+    with pytest.raises(TypeError):
+        _ = vfs.clone()
+    with pytest.raises(TypeError):
+        _ = planning.clone()
+    with pytest.raises(TypeError):
+        _ = asteval.clone()
+
+    other_session = Session()
+    with pytest.raises(TypeError):
+        _ = vfs.clone(session=base_session, bus=other_session.event_bus)
