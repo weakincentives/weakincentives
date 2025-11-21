@@ -75,9 +75,9 @@ class ProviderAdapter(Protocol):
   inspecting that prompt instead of requiring explicit arguments such as a
   `goal_section_key`.
 - `OptimizationResult` SHOULD, at minimum, wrap the executed `PromptResponse`,
-  the extracted digest text, and the requested `OptimizationScope` so callers
-  can persist or forward the optimized workspace summary without re-rendering
-  the prompt.
+  the extracted digest text, and the requested `OptimizationScope` so the
+  adapter can persist and callers can forward the optimized workspace summary
+  without re-rendering the prompt.
 - `optimize` constructs and runs an **optimization prompt** analogous to the
   "optimize" REPL command described in `specs/code_reviewer_example.md`:
   - Render the supplied prompt against the provided params, deriving the
@@ -88,14 +88,13 @@ class ProviderAdapter(Protocol):
   - Execute the provider call, including any tool invocations, until a final
     assistant message is produced.
   - Parse structured output when declared, falling back to plain text.
-- Optimization reads from the supplied `Session` (typically sandboxed from the
-  main flow) and does not require an `EventBus` argument. Any event publishing
-  should reuse the bus already attached to the session. Adapters SHOULD surface
-  the resulting optimization content (structured output field or text) so
-  callers can persist it as the workspace digest in the session and/or
-  overrides store. This enables `WorkspaceDigest` sections to surface the
-  optimized digest on subsequent renders without rerunning the optimization
-  prompt.
+  - Optimization reads from the supplied `Session` (typically sandboxed from the
+    main flow) and does not require an `EventBus` argument. Any event publishing
+    should reuse the bus already attached to the session. Adapters MUST persist
+    the resulting optimization content (structured output field or text) within
+    `optimize` based on the configured scope so the digest is immediately
+    available for subsequent prompts without rerunning the optimization
+    prompt.
 
 ### Optimization Scope
 
@@ -107,8 +106,10 @@ class ProviderAdapter(Protocol):
 - When `store_scope` is `GLOBAL`, callers MUST supply both `overrides_store` and
   `overrides_tag` so the adapter can write the digest to the correct override
   entry. Calls missing either parameter should raise or fail early.
-- Adapters SHOULD persist into the session even when storing globally so the
-  current flow immediately benefits from the optimized digest.
+- `optimize` MUST handle persistence internally: it should always write the
+  digest to the session slice and, for `GLOBAL` scope, also record the digest in
+  the overrides store using the provided tag. Callers should not need to perform
+  extra persistence steps.
 
 ### Optimization Prompt Assembly
 
@@ -153,7 +154,9 @@ def optimize(self, prompt: Prompt[OutputT], *, session: Session, ...):
             overrides_tag,
             goal_section_key,
             digest,
-    )
+        )
+
+    session.workspace_digest.set(goal_section_key, digest)
 
     return OptimizationResult(
         digest=digest,
@@ -184,17 +187,18 @@ class OptimizationResult(Generic[OutputT]):
   `evaluate` behavior: render, stream/tool execute, and parse output. The digest
   is read from structured output when available; otherwise the final assistant
   message text is treated as the digest body.
-- Callers store the `workspace_digest` metadata (or equivalent) back into the
-  primary session and prompt override store so the `WorkspaceDigest` section can
-  reuse it without re-optimizing.
+- Persistence happens inside `optimize`; callers only need to provide scope and
+  override details. The method records the digest in the session (and overrides
+  when requested) so the `WorkspaceDigest` section can reuse it without
+  re-optimizing.
 
 ## Integration Notes
 
 - The `code_reviewer_example` will migrate from a bespoke “repository
   instructions” block to the shared `WorkspaceDigest` section. The REPL’s
   optimization command should call `adapter.optimize` with a dedicated session
-  (no extra bus argument), then stash the emitted digest into the primary
-  session and override store so every turn renders the latest summary without
-  custom wiring. Any legacy `RepositoryOptimizationRequest`/
+  (no extra bus argument); the method writes the digest into the session and, if
+  requested, the override store so every turn renders the latest summary
+  without custom wiring. Any legacy `RepositoryOptimizationRequest`/
   `RepositoryOptimizationResponse` classes and related custom parsing should be
   removed in favor of this simpler digest-handling path.
