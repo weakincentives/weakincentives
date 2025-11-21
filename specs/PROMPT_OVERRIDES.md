@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 class SectionDescriptor:
     path: tuple[str, ...]
     content_hash: str
+    number: str
 
 @dataclass(slots=True)
 class ToolDescriptor:
@@ -76,6 +77,9 @@ Rules:
 1. Every `Section` constructor must accept `key: str`. Keys remain stable even
    for sections excluded from hashing.
 1. `SectionPath` is the tuple of section keys from root to target.
+1. `number` records the dotted hierarchical identifier (for example `2.1.3`) that
+   the prompt renderer prepends to the heading so descriptor consumers can link
+   rendered text back to section keys.
 1. Only hash-aware sections appear in `sections`.
 1. Compute `content_hash` solely from the section’s original body template text.
    Ignore defaults, enable predicates, tools, children, and runtime params.
