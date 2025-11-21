@@ -31,6 +31,11 @@ copy-on-write, start empty automatically, and disappear when the session ends; n
   initial snapshot immediately.
 - Tool handlers run normalization and validation outside the reducer, returning informative status messages alongside
   the params dataclass used for the update.
+- `VfsToolsSection.clone(session=..., bus=...)` returns a fully decoupled copy of the
+  section. The clone MUST re-register reducers against the supplied session, bind
+  tool handlers to the provided event bus, and reapply host mount hydration so the
+  resulting prompt can mutate its own virtual filesystem without touching the
+  original section's state.
 
 ## Data Model
 
