@@ -202,6 +202,37 @@ class Prompt[OutputT]:
     def chapters(self) -> tuple[Chapter[SupportsDataclass], ...]:
         return self._chapters
 
+    def find_section(
+        self, selector: str | type[Section[SupportsDataclass]] | Sequence[object]
+    ) -> Section[SupportsDataclass]:
+        """Return the first section matching ``selector``.
+
+        The selector may be a section key, a section type, or a sequence of
+        candidate keys/types. Raises ``KeyError`` when no section matches.
+        """
+
+        def _matches(section: Section[SupportsDataclass], candidate: object) -> bool:
+            if isinstance(candidate, str):
+                return section.key == candidate
+            if isinstance(candidate, type) and issubclass(candidate, Section):
+                return isinstance(section, candidate)
+            return False
+
+        for node in self._registry_snapshot.sections:
+            match_target = selector
+            if isinstance(selector, Sequence) and not isinstance(
+                selector, (str, bytes)
+            ):
+                if any(_matches(node.section, item) for item in selector):
+                    return node.section
+                continue
+            if _matches(node.section, match_target):
+                return node.section
+
+        raise KeyError(
+            f"Section matching {selector!r} not found in prompt {self.ns}:{self.key}."
+        )
+
     def expand_chapters(
         self,
         policy: ChaptersExpansionPolicy,

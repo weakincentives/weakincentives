@@ -23,23 +23,25 @@ from pytest import CaptureFixture
 
 from code_reviewer_example import (
     CodeReviewApp,
-    RepositoryOptimizationResponse,
     ReviewResponse,
     ReviewTurnParams,
     build_task_prompt,
     initialize_code_reviewer_runtime,
-    save_repository_instructions_override,
 )
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
-from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.adapters.core import (
+    OptimizationResult,
+    OptimizationScope,
+    ProviderAdapter,
+)
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptDescriptor,
 )
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.session import Session, WorkspaceDigest
 
 
 class _RepositoryOptimizationAdapter:
@@ -62,20 +64,50 @@ class _RepositoryOptimizationAdapter:
     ) -> PromptResponse[Any]:
         del params, parse_output, bus, session, deadline, overrides_store, overrides_tag
         self.calls.append(prompt.key)
-        if prompt.key == "sunfish-repository-optimize":
-            return PromptResponse(
-                prompt_name=prompt.name or prompt.key,
-                text=None,
-                output=RepositoryOptimizationResponse(instructions=self.instructions),
-                tool_results=(),
-                provider_payload=None,
-            )
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,
             text="",
             output=None,
             tool_results=(),
             provider_payload=None,
+        )
+
+    def optimize(
+        self,
+        prompt: Prompt[SupportsDataclass],
+        *,
+        store_scope: OptimizationScope = OptimizationScope.SESSION,
+        overrides_store: LocalPromptOverridesStore | None = None,
+        overrides_tag: str | None = None,
+        session: Session | None = None,
+    ) -> OptimizationResult:
+        assert session is not None
+        self.calls.append(f"optimize:{prompt.key}")
+        session.workspace_digest.set("workspace-digest", self.instructions)
+        if overrides_store is not None and overrides_tag is not None:
+            digest_node = next(
+                node
+                for node in prompt.sections
+                if node.section.key == "workspace-digest"
+            )
+            overrides_store.set_section_override(
+                prompt,
+                tag=overrides_tag,
+                path=digest_node.path,
+                body=self.instructions,
+            )
+        response = PromptResponse(
+            prompt_name=prompt.name or prompt.key,
+            text=self.instructions,
+            output=None,
+            tool_results=(),
+            provider_payload=None,
+        )
+        return OptimizationResult(
+            response=response,
+            digest=self.instructions,
+            scope=store_scope,
+            section_key="workspace-digest",
         )
 
 
@@ -119,67 +151,69 @@ def test_prompt_render_reducer_prints_full_prompt(
     assert stored_events[-1].rendered_prompt == "<prompt body>"
 
 
-def test_repository_instructions_section_empty_by_default() -> None:
+def test_workspace_digest_section_empty_by_default() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     prompt = build_task_prompt(session=session)
 
     rendered = prompt.render(ReviewTurnParams(request="demo request"))
 
-    assert "## 2 Repository Instructions" in rendered.text
-    post_section = rendered.text.split("## 2 Repository Instructions", 1)[1]
+    assert "## 2 Workspace Digest" in rendered.text
+    post_section = rendered.text.split("## 2 Workspace Digest", 1)[1]
     section_body = post_section.split("\n## ", 1)[0]
-    assert section_body.strip() == ""
+    assert "Workspace digest unavailable" in section_body
 
 
-def test_save_repository_instructions_override_writes_body(tmp_path: Path) -> None:
+def test_workspace_digest_override_applied_when_no_session_digest(
+    tmp_path: Path,
+) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     bus = InProcessEventBus()
     session = Session(bus=bus)
     prompt = build_task_prompt(session=session)
 
-    body = "- Custom instructions"
-    save_repository_instructions_override(
-        prompt=prompt,
-        overrides_store=overrides_store,
-        overrides_tag="seed",
-        body=body,
+    digest_node = next(
+        node for node in prompt.sections if node.section.key == "workspace-digest"
     )
-
-    descriptor = PromptDescriptor.from_prompt(prompt)
-    override = overrides_store.resolve(descriptor=descriptor, tag="seed")
-    assert override is not None
-    assert override.sections["repository-instructions",].body == body
-
-
-def test_repository_instructions_override_escapes_dollar_signs(tmp_path: Path) -> None:
-    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    prompt = build_task_prompt(session=session)
-
-    body = "- Define $PATH and ${VAR}"
-    save_repository_instructions_override(
-        prompt=prompt,
-        overrides_store=overrides_store,
-        overrides_tag="seed",
-        body=body,
+    overrides_store.set_section_override(
+        prompt,
+        tag="seed",
+        path=digest_node.path,
+        body="- Override digest",
     )
-
-    descriptor = PromptDescriptor.from_prompt(prompt)
-    override = overrides_store.resolve(descriptor=descriptor, tag="seed")
-    assert override is not None
-    stored_body = override.sections["repository-instructions",].body
-    assert "$$PATH" in stored_body
-    assert "$${VAR}" in stored_body
 
     rendered = prompt.render(
         ReviewTurnParams(request="demo request"),
         overrides_store=overrides_store,
         tag="seed",
     )
-    assert "$PATH" in rendered.text
-    assert "${VAR}" in rendered.text
+    assert "Override digest" in rendered.text
+
+
+def test_workspace_digest_prefers_session_snapshot_over_override(
+    tmp_path: Path,
+) -> None:
+    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
+    session = Session()
+    prompt = build_task_prompt(session=session)
+    digest_node = next(
+        node for node in prompt.sections if node.section.key == "workspace-digest"
+    )
+
+    overrides_store.set_section_override(
+        prompt,
+        tag="seed",
+        path=digest_node.path,
+        body="- Override digest",
+    )
+    session.workspace_digest.set("workspace-digest", "- Session digest")
+
+    rendered = prompt.render(
+        ReviewTurnParams(request="demo request"),
+        overrides_store=overrides_store,
+        tag="seed",
+    )
+    assert "Session digest" in rendered.text
 
 
 def test_optimize_command_persists_override(tmp_path: Path) -> None:
@@ -197,6 +231,11 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(app.prompt)
     override = overrides_store.resolve(descriptor=descriptor, tag=app.override_tag)
     assert override is not None
-    saved_body = override.sections["repository-instructions",].body
+    saved_body = override.sections["workspace-digest",].body
     assert saved_body == "- Repo instructions from stub"
-    assert adapter.calls == ["sunfish-repository-optimize"]
+    session_digest = cast(
+        WorkspaceDigest | None, app.session.workspace_digest.latest("workspace-digest")
+    )
+    assert session_digest is not None
+    assert session_digest.body == "- Repo instructions from stub"
+    assert adapter.calls == ["optimize:code-review-session"]

@@ -16,9 +16,16 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from ..events import EventBus
 from .snapshots import Snapshot
 
 type SnapshotProtocol = Snapshot
+
+
+class WorkspaceDigestSliceProtocol(Protocol):
+    def set(self, section_key: str, body: str) -> object: ...
+
+    def latest(self, section_key: str) -> object | None: ...
 
 
 class SessionProtocol(Protocol):
@@ -30,5 +37,10 @@ class SessionProtocol(Protocol):
 
     def reset(self) -> None: ...
 
+    @property
+    def event_bus(self) -> EventBus: ...
 
-__all__ = ["SessionProtocol", "SnapshotProtocol"]
+    workspace_digest: WorkspaceDigestSliceProtocol
+
+
+__all__ = ["SessionProtocol", "SnapshotProtocol", "WorkspaceDigestSliceProtocol"]

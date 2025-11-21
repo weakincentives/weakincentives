@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
 
 from ..deadlines import Deadline
@@ -26,7 +27,36 @@ if TYPE_CHECKING:
     from ..prompt.prompt import Prompt
     from ..runtime.events._types import EventBus, ToolInvoked
 
+
 OutputT = TypeVar("OutputT")
+
+
+@dataclass(slots=True)
+class PromptResponse[OutputT]:
+    """Structured result emitted by an adapter evaluation."""
+
+    prompt_name: str
+    text: str | None
+    output: OutputT | None
+    tool_results: tuple[ToolInvoked, ...]
+    provider_payload: dict[str, Any] | None = None
+
+
+class OptimizationScope(Enum):
+    """Control where optimized digests are persisted."""
+
+    SESSION = "session"
+    GLOBAL = "global"
+
+
+@dataclass(slots=True)
+class OptimizationResult:
+    """Capture the outcome of an optimization run."""
+
+    response: PromptResponse[Any]
+    digest: str
+    scope: OptimizationScope
+    section_key: str
 
 
 class ProviderAdapter(Protocol[OutputT]):
@@ -47,16 +77,18 @@ class ProviderAdapter(Protocol[OutputT]):
 
         ...
 
+    def optimize(
+        self,
+        prompt: Prompt[OutputT],
+        *,
+        store_scope: OptimizationScope = OptimizationScope.SESSION,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str | None = None,
+        session: SessionProtocol,
+    ) -> OptimizationResult:
+        """Optimize the workspace digest for the provided prompt."""
 
-@dataclass(slots=True)
-class PromptResponse[OutputT]:
-    """Structured result emitted by an adapter evaluation."""
-
-    prompt_name: str
-    text: str | None
-    output: OutputT | None
-    tool_results: tuple[ToolInvoked, ...]
-    provider_payload: dict[str, Any] | None = None
+        ...
 
 
 class PromptEvaluationError(RuntimeError):
@@ -94,6 +126,8 @@ __all__ = [
     "PROMPT_EVALUATION_PHASE_REQUEST",
     "PROMPT_EVALUATION_PHASE_RESPONSE",
     "PROMPT_EVALUATION_PHASE_TOOL",
+    "OptimizationResult",
+    "OptimizationScope",
     "PromptEvaluationError",
     "PromptEvaluationPhase",
     "PromptResponse",

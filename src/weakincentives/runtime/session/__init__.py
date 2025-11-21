@@ -23,6 +23,7 @@ from .snapshots import (
     SnapshotRestoreError,
     SnapshotSerializationError,
 )
+from .workspace_digest import WorkspaceDigest, WorkspaceDigestSlice
 
 __all__ = [
     "DataEvent",
@@ -36,6 +37,8 @@ __all__ = [
     "SnapshotRestoreError",
     "SnapshotSerializationError",
     "TypedReducer",
+    "WorkspaceDigest",
+    "WorkspaceDigestSlice",
     "append",
     "build_reducer_context",
     "replace_latest",

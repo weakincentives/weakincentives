@@ -33,11 +33,13 @@ from .validation import (
     validate_tools_for_write,
 )
 from .versioning import (
+    HexDigest,
     PromptDescriptor,
     PromptLike,
     PromptOverride,
     PromptOverridesError,
     PromptOverridesStore,
+    SectionOverride,
 )
 
 _LOGGER: StructuredLogger = get_logger(
@@ -236,6 +238,33 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 )
 
     @override
+    def set_section_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],
+        body: str,
+    ) -> PromptOverride:
+        descriptor = PromptDescriptor.from_prompt(prompt)
+        normalized_tag = self._filesystem.validate_identifier(tag, "tag")
+        existing_override = self.resolve(descriptor=descriptor, tag=normalized_tag)
+        sections = dict(existing_override.sections) if existing_override else {}
+        tools = dict(existing_override.tool_overrides) if existing_override else {}
+
+        expected_hash = _lookup_section_hash(descriptor, path)
+        sections[path] = SectionOverride(expected_hash=expected_hash, body=body)
+
+        override = PromptOverride(
+            ns=descriptor.ns,
+            prompt_key=descriptor.key,
+            tag=normalized_tag,
+            sections=sections,
+            tool_overrides=tools,
+        )
+        return self.upsert(descriptor, override)
+
+    @override
     def seed_if_necessary(
         self,
         prompt: PromptLike,
@@ -270,6 +299,17 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 tool_overrides=tools,
             )
             return self.upsert(descriptor, seed_override)
+
+
+def _lookup_section_hash(
+    descriptor: PromptDescriptor, path: tuple[str, ...]
+) -> HexDigest:
+    for candidate in descriptor.sections:
+        if candidate.path == path:
+            return candidate.content_hash
+    raise PromptOverridesError(
+        f"Section {path!r} not registered in prompt descriptor; cannot override."
+    )
 
 
 __all__ = ["LocalPromptOverridesStore"]

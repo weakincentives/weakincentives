@@ -255,6 +255,15 @@ class PromptOverridesStore(Protocol):
         tag: str,
     ) -> None: ...
 
+    def set_section_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],
+        body: str,
+    ) -> PromptOverride: ...
+
     def seed_if_necessary(
         self,
         prompt: PromptLike,

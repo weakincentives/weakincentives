@@ -28,7 +28,11 @@ from ..logging import StructuredLogger, get_logger
 from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
-from .protocols import SessionProtocol, SnapshotProtocol
+from .protocols import (
+    SessionProtocol,
+    SnapshotProtocol,
+    WorkspaceDigestSliceProtocol,
+)
 from .reducers import append
 from .snapshots import (
     Snapshot,
@@ -37,6 +41,7 @@ from .snapshots import (
     SnapshotState,
     normalize_snapshot_state,
 )
+from .workspace_digest import WorkspaceDigestHost, WorkspaceDigestSlice
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "session"})
 
@@ -123,6 +128,9 @@ class Session(SessionProtocol):
         self._lock = RLock()
         self._subscriptions_attached = False
         self._attach_to_bus(self._bus)
+        self.workspace_digest: WorkspaceDigestSliceProtocol = WorkspaceDigestSlice(
+            cast(WorkspaceDigestHost, self)
+        )
 
     def clone(
         self,
@@ -207,6 +215,7 @@ class Session(SessionProtocol):
             self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
 
     @property
+    @override
     def event_bus(self) -> EventBus:
         """Return the event bus backing this session."""
 
