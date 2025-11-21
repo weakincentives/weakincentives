@@ -211,6 +211,7 @@ def test_optimize_updates_global_overrides() -> None:
     assert tag == "tag"
     assert path[-1] == "workspace-digest"
     assert body == result.digest
+    assert session.workspace_digest.latest("workspace-digest") is None
 
 
 def test_optimize_requires_overrides_inputs_for_global_scope() -> None:
@@ -298,4 +299,4 @@ def test_optimize_uses_isolated_session() -> None:
     inner_session = adapter.sessions[0]
     assert isinstance(inner_session, Session)
     assert inner_session is not outer_session
-    assert adapter.buses[0] is outer_session.event_bus
+    assert adapter.buses[0] is inner_session.event_bus

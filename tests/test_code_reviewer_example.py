@@ -231,8 +231,8 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(app.prompt)
     override = overrides_store.resolve(descriptor=descriptor, tag=app.override_tag)
     assert override is not None
-    saved_body = override.sections["workspace-digest",].body
-    assert saved_body == "- Repo instructions from stub"
+    placeholder_body = override.sections["workspace-digest",].body
+    assert "Workspace digest unavailable" in placeholder_body
     session_digest = cast(
         WorkspaceDigest | None, app.session.workspace_digest.latest("workspace-digest")
     )

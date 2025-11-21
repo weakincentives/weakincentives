@@ -158,14 +158,16 @@ class ProviderAdapter(ABC):
         response = self.evaluate(
             optimization_prompt,
             parse_output=True,
-            bus=outer_session.event_bus,
+            bus=optimization_session.event_bus,
             session=optimization_session,
             overrides_store=overrides_store,
             overrides_tag=overrides_tag or "latest",
         )
 
         digest = self._extract_digest(response=response, prompt_name=prompt_name)
-        _ = outer_session.workspace_digest.set(digest_section.key, digest)
+
+        if store_scope is OptimizationScope.SESSION:
+            _ = outer_session.workspace_digest.set(digest_section.key, digest)
 
         if store_scope is OptimizationScope.GLOBAL:
             if overrides_store is None or overrides_tag is None:

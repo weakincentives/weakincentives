@@ -189,13 +189,10 @@ class CodeReviewApp:
 
         result = self.adapter.optimize(
             self.prompt,
-            store_scope=OptimizationScope.GLOBAL,
-            overrides_store=self.overrides_store,
-            overrides_tag=self.override_tag,
+            store_scope=OptimizationScope.SESSION,
             session=self.session,
         )
         digest = result.digest.strip()
-        self.session.workspace_digest.set(result.section_key, digest)
         print("\nWorkspace digest persisted for future review turns:\n")
         print(digest)
 
