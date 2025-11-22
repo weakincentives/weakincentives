@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
 
 from ..deadlines import Deadline
-from ._overrides_protocols import PromptOverridesStoreProtocol
+from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -77,7 +77,7 @@ class PromptProtocol(Protocol[PromptOutputT]):
     def render(
         self,
         *params: SupportsDataclass,
-        overrides_store: PromptOverridesStoreProtocol | None = None,
+        overrides_store: PromptOverridesStore | None = None,
         tag: str = "latest",
         inject_output_instructions: bool | None = None,
     ) -> RenderedPromptProtocol[PromptOutputT]: ...
@@ -94,7 +94,7 @@ class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStoreProtocol | None = None,
+        overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str = "latest",
     ) -> PromptResponseProtocol[AdapterOutputT]: ...
 

@@ -14,20 +14,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from .overrides.versioning import PromptOverridesStore
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .overrides import PromptDescriptor, PromptOverride
-
-
-class PromptOverridesStoreProtocol(Protocol):
-    """Structural interface satisfied by prompt overrides stores."""
-
-    def resolve(
-        self,
-        descriptor: PromptDescriptor,
-        tag: str = "latest",
-    ) -> PromptOverride | None: ...
-
-
-__all__ = ["PromptOverridesStoreProtocol"]
+__all__ = ["PromptOverridesStore"]

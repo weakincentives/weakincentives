@@ -228,12 +228,8 @@ class PromptOverride:
     )
 
 
-class PromptOverridesError(Exception):
-    """Raised when prompt overrides fail validation or persistence."""
-
-
 class PromptOverridesStore(Protocol):
-    """Lookup interface for resolving prompt overrides at render time."""
+    """Structural interface satisfied by prompt overrides stores."""
 
     def resolve(
         self,
@@ -270,6 +266,10 @@ class PromptOverridesStore(Protocol):
         *,
         tag: str = "latest",
     ) -> PromptOverride: ...
+
+
+class PromptOverridesError(Exception):
+    """Raised when prompt overrides fail validation or persistence."""
 
 
 __all__ = [
