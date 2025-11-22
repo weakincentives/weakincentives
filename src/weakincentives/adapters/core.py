@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import textwrap
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, TypeVar, cast
@@ -28,7 +27,7 @@ from ..prompt.overrides import PromptLike, PromptOverridesStore
 from ..prompt.prompt import Prompt
 from ..prompt.section import Section
 from ..prompt.workspace_digest import WorkspaceDigestSection
-from ..runtime.events._types import EventBus, EventHandler, ToolInvoked
+from ..runtime.events._types import EventBus, ToolInvoked
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
 from ..tools.planning import PlanningStrategy, PlanningToolsSection
@@ -104,20 +103,23 @@ class ProviderAdapter(ABC):
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str | None = None,
         session: SessionProtocol,
-        bus_subscribers: Sequence[tuple[type[object], EventHandler]] | None = None,
+        optimization_session: Session | None = None,
     ) -> OptimizationResult:
         """Optimize the workspace digest for the provided prompt."""
 
         prompt_name = prompt.name or prompt.key
         outer_session = session
-        optimization_session = Session()
+        inner_session = optimization_session or Session()
         digest_section = self._require_workspace_digest_section(
             prompt, prompt_name=prompt_name
         )
         workspace_section = self._resolve_workspace_section(prompt, prompt_name)
 
         safe_workspace = self._clone_section_for_session(
-            workspace_section, session=optimization_session
+            workspace_section, session=inner_session
+        )
+        safe_workspace_digest = self._clone_section_for_session(
+            digest_section, session=inner_session
         )
 
         optimization_prompt = Prompt[_OptimizationResponse](
@@ -143,22 +145,19 @@ class ProviderAdapter(ABC):
                     key="optimization-expectations",
                 ),
                 PlanningToolsSection(
-                    session=optimization_session,
+                    session=inner_session,
                     strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
                 ),
                 safe_workspace,
+                safe_workspace_digest,
             ),
         )
-
-        if bus_subscribers:
-            for event_type, handler in bus_subscribers:
-                optimization_session.event_bus.subscribe(event_type, handler)
 
         response = self.evaluate(
             optimization_prompt,
             parse_output=True,
-            bus=optimization_session.event_bus,
-            session=optimization_session,
+            bus=inner_session.event_bus,
+            session=inner_session,
             overrides_store=overrides_store,
             overrides_tag=overrides_tag or "latest",
         )
@@ -169,6 +168,7 @@ class ProviderAdapter(ABC):
             _ = outer_session.workspace_digest.set(digest_section.key, digest)
 
         if store_scope is OptimizationScope.GLOBAL:
+            outer_session.workspace_digest.clear(digest_section.key)
             if overrides_store is None or overrides_tag is None:
                 message = "Global scope requires overrides_store and overrides_tag."
                 raise PromptEvaluationError(
@@ -206,14 +206,8 @@ class ProviderAdapter(ABC):
     def _resolve_workspace_section(
         self, prompt: Prompt[object], prompt_name: str
     ) -> Section[SupportsDataclass]:
-        candidates: tuple[object, ...] = (
-            PodmanSandboxSection,
-            VfsToolsSection,
-            "podman.shell",
-            "vfs.tools",
-        )
         try:
-            return prompt.find_section(candidates)
+            return prompt.find_section((PodmanSandboxSection, VfsToolsSection))
         except KeyError as error:  # pragma: no cover - defensive
             raise PromptEvaluationError(
                 "Workspace section required for optimization.",
@@ -225,21 +219,14 @@ class ProviderAdapter(ABC):
         self, prompt: Prompt[object], *, prompt_name: str
     ) -> WorkspaceDigestSection:
         try:
-            section = prompt.find_section((WorkspaceDigestSection, "workspace-digest"))
+            section = prompt.find_section(WorkspaceDigestSection)
         except KeyError as error:  # pragma: no cover - defensive
             raise PromptEvaluationError(
                 "Workspace digest section required for optimization.",
                 prompt_name=prompt_name,
                 phase=PROMPT_EVALUATION_PHASE_REQUEST,
             ) from error
-        if not isinstance(section, WorkspaceDigestSection):
-            message = "Workspace digest section has unexpected type."
-            raise PromptEvaluationError(
-                message,
-                prompt_name=prompt_name,
-                phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            )
-        return section
+        return cast(WorkspaceDigestSection, section)
 
     def _find_section_path(
         self, prompt: Prompt[object], section_key: str

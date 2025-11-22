@@ -38,12 +38,16 @@ def _build_prompt() -> Prompt[str]:
 def test_prompt_find_section_by_key_and_candidates() -> None:
     prompt = _build_prompt()
 
-    assert prompt.find_section("one").title == "One"
     assert isinstance(prompt.find_section(MarkdownSection), MarkdownSection)
-    assert prompt.find_section(("missing", "two")).key == "two"
-    assert prompt.find_section((123, "one")).key == "one"
+    assert isinstance(
+        prompt.find_section((MarkdownSection,)),
+        MarkdownSection,
+    )
+    assert prompt.find_section((MarkdownSection, WorkspaceDigestSection)).key == "one"
+    with pytest.raises(TypeError):
+        prompt.find_section(())
     with pytest.raises(KeyError):
-        prompt.find_section("absent")
+        prompt.find_section((WorkspaceDigestSection,))
 
 
 def test_set_section_override_requires_registered_path(tmp_path: Path) -> None:

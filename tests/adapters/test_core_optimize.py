@@ -237,6 +237,24 @@ def test_optimize_updates_global_overrides() -> None:
     assert session.workspace_digest.latest("workspace-digest") is None
 
 
+def test_optimize_global_scope_clears_existing_session_digest() -> None:
+    adapter = _RecordingAdapter(mode="dataclass")
+    overrides_store = _RecordingOverridesStore()
+    prompt = _build_prompt()
+    session = Session()
+    _ = session.workspace_digest.set("workspace-digest", "stale")
+
+    _ = adapter.optimize(
+        prompt,
+        store_scope=OptimizationScope.GLOBAL,
+        overrides_store=overrides_store,
+        overrides_tag="tag",
+        session=session,
+    )
+
+    assert session.workspace_digest.latest("workspace-digest") is None
+
+
 def test_optimize_requires_overrides_inputs_for_global_scope() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     prompt = _build_prompt()
@@ -325,17 +343,18 @@ def test_optimize_uses_isolated_session() -> None:
     assert adapter.buses[0] is inner_session.event_bus
 
 
-def test_optimize_attaches_bus_subscribers() -> None:
-    adapter = _RecordingAdapter(mode="dataclass", emit_tool_event=True)
+def test_optimize_accepts_provided_session() -> None:
+    adapter = _RecordingAdapter(mode="dataclass")
     prompt = _build_prompt()
     outer_session = Session()
-    captured: list[ToolInvoked] = []
+    provided_session = Session()
 
     _ = adapter.optimize(
         prompt,
         session=outer_session,
-        bus_subscribers=((ToolInvoked, captured.append),),
+        optimization_session=provided_session,
     )
 
-    assert captured
-    assert captured[0].name == "optimize-tool"
+    assert adapter.sessions
+    assert adapter.sessions[0] is provided_session
+    assert adapter.buses[0] is provided_session.event_bus

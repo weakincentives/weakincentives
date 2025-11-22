@@ -203,34 +203,25 @@ class Prompt[OutputT]:
         return self._chapters
 
     def find_section(
-        self, selector: str | type[Section[SupportsDataclass]] | Sequence[object]
+        self,
+        selector: type[Section[SupportsDataclass]]
+        | tuple[type[Section[SupportsDataclass]], ...],
     ) -> Section[SupportsDataclass]:
-        """Return the first section matching ``selector``.
+        """Return the first section matching ``selector``."""
 
-        The selector may be a section key, a section type, or a sequence of
-        candidate keys/types. Raises ``KeyError`` when no section matches.
-        """
-
-        def _matches(section: Section[SupportsDataclass], candidate: object) -> bool:
-            if isinstance(candidate, str):
-                return section.key == candidate
-            if isinstance(candidate, type) and issubclass(candidate, Section):
-                return isinstance(section, candidate)
-            return False
+        if isinstance(selector, tuple):
+            if not selector:
+                raise TypeError("find_section requires at least one section type.")
+            candidates = selector
+        else:
+            candidates = (selector,)
 
         for node in self._registry_snapshot.sections:
-            match_target = selector
-            if isinstance(selector, Sequence) and not isinstance(
-                selector, (str, bytes)
-            ):
-                if any(_matches(node.section, item) for item in selector):
-                    return node.section
-                continue
-            if _matches(node.section, match_target):
+            if any(isinstance(node.section, candidate) for candidate in candidates):
                 return node.section
 
         raise KeyError(
-            f"Section matching {selector!r} not found in prompt {self.ns}:{self.key}."
+            f"Section matching {candidates!r} not found in prompt {self.ns}:{self.key}."
         )
 
     def expand_chapters(

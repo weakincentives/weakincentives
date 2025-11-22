@@ -76,6 +76,18 @@ class WorkspaceDigestSlice:
         self._session.seed_slice(WorkspaceDigest, tuple(existing))
         return entry
 
+    def clear(self, section_key: str) -> None:
+        """Remove any cached digest for ``section_key``."""
+
+        normalized_key = normalize_component_key(section_key, owner="WorkspaceDigest")
+        digests = cast(
+            tuple[WorkspaceDigest, ...], self._session.select_all(WorkspaceDigest)
+        )
+        remaining = tuple(
+            digest for digest in digests if digest.section_key != normalized_key
+        )
+        self._session.seed_slice(WorkspaceDigest, remaining)
+
     def latest(self, section_key: str) -> WorkspaceDigest | None:
         """Return the most recent digest for ``section_key`` when present."""
 

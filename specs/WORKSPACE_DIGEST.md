@@ -41,7 +41,7 @@ def optimize(
     overrides_store: PromptOverridesStore | None = None,
     overrides_tag: str | None = None,
     session: SessionProtocol,
-    bus_subscribers: Sequence[tuple[type[object], EventHandler]] | None = None,
+    optimization_session: Session | None = None,
 ) -> OptimizationResult: ...
 ```
 
@@ -49,9 +49,9 @@ def optimize(
   it to locate the `WorkspaceDigestSection` and whichever workspace section is
   present (Podman or VFS).
 - The adapter launches a brand-new `Session` for the optimization run, cloning
-  session-aware sections (workspace tools, digest) via `section.clone`. Optional
-  `bus_subscribers` are registered against the optimization session’s event bus
-  so tooling logs mirror the interactive REPL.
+  session-aware sections (workspace tools, digest) via `section.clone`. Advanced
+  callers may pass an existing `optimization_session` when they need to preserve
+  a custom event bus or logging context.
 - Two small markdown sections—`Optimization Goal` and `Expectations`—lead the
   optimization prompt, followed by `PlanningToolsSection` configured with
   `GOAL_DECOMPOSE_ROUTE_SYNTHESISE`, then the cloned workspace tools and
@@ -66,9 +66,11 @@ def optimize(
   `session.workspace_digest`.
 - `OptimizationScope.GLOBAL` additionally requires `overrides_store` and
   `overrides_tag`; the adapter resolves the digest section path and writes the
-  rendered markdown through `PromptOverridesStore.set_section_override`.
-- Both scopes always persist to the active session slice so the digest is
-  immediately available to the caller’s main session after optimization.
+  rendered markdown through `PromptOverridesStore.set_section_override`. After a
+  successful write the caller’s session slice is cleared so
+  `WorkspaceDigestSection` immediately falls back to the override snapshot.
+- Only the session scope keeps the digest cached locally; global scope trades
+  the session entry for the persisted override so future renders stay in sync.
 
 ### OptimizationResult
 
@@ -85,8 +87,7 @@ and the section key that was updated.
 ## Integration Notes
 
 - `code_reviewer_example.py` wires the REPL `optimize` command to
-  `ProviderAdapter.optimize`, subscribing loggers to the optimization session so
-  prompt bodies and tool invocations remain visible.
+  `ProviderAdapter.optimize`.
 - `WorkspaceDigestSection` is the canonical way to surface repo summaries across
   all prompts; bespoke “repository instructions” sections should be replaced by
   this shared component so optimization and overrides behave uniformly.

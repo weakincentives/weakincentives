@@ -80,10 +80,10 @@ class _RepositoryOptimizationAdapter:
         overrides_store: LocalPromptOverridesStore | None = None,
         overrides_tag: str | None = None,
         session: Session | None = None,
-        bus_subscribers: tuple[tuple[type[object], Any], ...] | None = None,
+        optimization_session: Session | None = None,
     ) -> OptimizationResult:
-        del bus_subscribers
         assert session is not None
+        del optimization_session
         self.calls.append(f"optimize:{prompt.key}")
         session.workspace_digest.set("workspace-digest", self.instructions)
         if overrides_store is not None and overrides_tag is not None:

@@ -182,10 +182,6 @@ class CodeReviewApp:
             self.prompt,
             store_scope=OptimizationScope.SESSION,
             session=self.session,
-            bus_subscribers=(
-                (PromptRendered, _print_rendered_prompt),
-                (ToolInvoked, _log_tool_invocation),
-            ),
         )
         digest = result.digest.strip()
         print("\nWorkspace digest persisted for future review turns:\n")
