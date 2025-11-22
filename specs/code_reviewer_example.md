@@ -1,109 +1,141 @@
 # Code Reviewer Example
 
-This document outlines the scope, architecture, and runtime behavior of the
-`code_reviewer_example.py` program. The example demonstrates how the
-`weakincentives` platform assembles an interactive review agent with prompt
-overrides, planning tools, and a repository-specific optimization workflow.
+This handbook entry documents the `code_reviewer_example.py` program that ships
+alongside the library. The script assembles a full-featured review agent that
+demonstrates prompt composition, overrides, workspace tools, and adapter
+optimization hooks in one place.
 
-## Goals
+## Objectives
 
-- Showcase a minimal-yet-complete agent that reviews a mounted repository
-  (default: `test-repositories/sunfish`).
-- Exercise the core subsystems shipped by the library:
-  - Prompt rendering and structured output.
-  - Runtime session/event bus plumbing.
-  - Planning and workspace tool sections.
-  - Prompt overrides managed by `LocalPromptOverridesStore`.
-- Provide an interactive REPL that surfaces the agent’s reasoning and allows a
-  human operator to steer review tasks.
+- Mount the `test-repositories/sunfish` fixture read-only and guide the agent
+  through code review workflows.
+- Exercise core subsystems: prompt rendering, session/event bus plumbing,
+  planning tools, workspace digests, Podman/VFS tooling, prompt overrides, and
+  adapter-driven optimization prompts.
+- Provide an interactive REPL with transparent logging (prompt renderings, tool
+  calls, plan snapshots) so operators can steer the review.
 
-## High-Level Flow
+## Runtime Architecture
 
-1. `CodeReviewApp` bootstraps the OpenAI adapter, creates a runtime session, and
-   seeds prompt overrides (default tag = session UUID unless
-   `CODE_REVIEW_PROMPT_TAG` is set).
-1. `build_task_prompt` composes four sections:
-   - **Code Review Brief** — static instructions about reviewing mounted code.
-   - **Repository Instructions** — initially empty; populated via overrides.
-   - **Planning Tools** — exposes PLAN/ACT/REFLECT helpers tied to the session.
-   - **Review Request** — injects the user’s turn-by-turn prompt.
-1. Each REPL turn renders the prompt, dispatches it through the adapter, then
-   prints the structured response and the current planning state.
-1. The special `optimize [focus]` command launches an isolated session/bus,
-   renders a repository-optimization prompt, and persists the resulting Markdown
-   into the repository instructions section via overrides.
+`CodeReviewApp` wires together the adapter, prompt, session, overrides store,
+and event bus. The helper `_create_runtime_context` builds these pieces and
+subscribes console loggers to `PromptRendered` and `ToolInvoked` events.
 
-## Key Components
+On startup:
 
-### Prompts
+1. `_ensure_test_repository_available` verifies that
+   `PROJECT_ROOT/test-repositories` exists.
+1. `build_task_prompt(session=Session())` composes the prompt (details below).
+1. A `LocalPromptOverridesStore` is initialized, seeded (once) with the prompt,
+   and keyed by namespace + prompt key + tag.
+1. `_resolve_override_tag` selects the overrides tag using the order:
+   explicit `override_tag` arg → `CODE_REVIEW_PROMPT_TAG` env var → `"latest"`.
+1. `CodeReviewApp.run()` prints an intro banner, accepts review prompts until
+   EOF/`exit`/`quit`, and emits plan snapshots after every agent response.
 
-- `build_task_prompt` — main review prompt (namespace
-  `examples/code-review:code-review-session`).
-- `build_repository_optimization_prompt` — helper prompt that guides the agent
-  through README/docs/tooling exploration and yields a Markdown block suitable
-  for the repository instructions section.
-- Both prompts use `MarkdownSection` instances plus the shared planning/workspace
-  sections so the agent can list files, inspect paths, and update multi-step
-  plans.
+Each REPL turn invokes `ProviderAdapter.evaluate` with
+`ReviewTurnParams(request=...)` and our session/bus/override state. Responses
+are converted into human-readable text by `_render_response_payload`, which
+mirrors the `ReviewResponse` dataclass (`summary`, `issues`, `next_steps`). Plan
+data is pulled from the session via `select_latest(session, Plan)`.
 
-### Overrides
+## Prompt Composition
 
-- Overrides are backed by `LocalPromptOverridesStore` and keyed by namespace +
-  prompt key + tag.
-- `initialize_code_reviewer_runtime` seeds the override file on startup so
-  later edits always have a stable hash reference.
-- `save_repository_instructions_override` replaces the body of the repository
-  instructions section with escaped Markdown (all `$` are doubled) to avoid
-  `string.Template` collisions during render time.
+`build_task_prompt` produces `Prompt[ReviewResponse]` with namespace
+`examples/code-review` and key `code-review-session`. Sections render in this
+order:
 
-### Optimization Command
+1. **Code Review Brief** (`MarkdownSection[ReviewGuidance]`):
+   - Hard-coded template describing tooling, delegation strategy, and output
+     format.
+   - Ships with `ReviewGuidance.focus` default instructions.
+1. **Workspace Digest** (`WorkspaceDigestSection`):
+   - Renders cached workspace notes from the session or overrides store.
+   - Populated interactively via the `optimize` command.
+1. **Subagents** (`SubagentsSection`):
+   - Enables `dispatch_subagents` so the agent can parallelize exploration.
+1. **Planning Tools** (`PlanningToolsSection`):
+   - Uses `PlanningStrategy.PLAN_ACT_REFLECT`, allowing multi-step plans whose
+     snapshots we print after every turn.
+1. **Workspace Tools**:
+   - `_build_workspace_section` picks a `PodmanSandboxSection` when
+     `PodmanSandboxSection.resolve_connection()` succeeds; otherwise it falls
+     back to `VfsToolsSection`.
+   - Both variants mount the `sunfish` repo with
+     `SUNFISH_MOUNT_INCLUDE_GLOBS`, `SUNFISH_MOUNT_EXCLUDE_GLOBS`, and a
+     600 KB cap to keep prompts concise. Podman inherits the base URL,
+     identity, and connection name from the resolved connection.
+1. **Review Request** (`MarkdownSection[ReviewTurnParams]`):
+   - Echoes `${request}` verbatim so the model always sees the latest operator
+     question at the end of the prompt.
 
-- Trigger: User types `optimize` with an optional focus string (defaults to
-  “Survey README, docs, and key scripts…”).
-- Implementation steps:
-  1. Create an `InProcessEventBus` and `Session` dedicated to the optimization
-     prompt so tool invocations/events don’t pollute the main session.
-  1. Render the optimization prompt with `RepositoryOptimizationRequest`.
-  1. Evaluate the prompt via the adapter and extract
-     `RepositoryOptimizationResponse.instructions` (falling back to plain text
-     if structured output is missing).
-  1. Persist the Markdown override and print the new instructions to stdout.
+All sections accept overrides unless otherwise noted, but only the workspace
+digest is expected to receive long-lived overrides.
+
+## Overrides & Optimization
+
+Overrides live in `LocalPromptOverridesStore`, defaulting to
+`~/.weakincentives/prompts`. `initialize_code_reviewer_runtime` is a helper
+used by tests (and other code) to get a prompt/session/bus/store/tag tuple
+without booting the REPL.
+
+The REPL recognizes a single special command:
+
+- `optimize`: calls `ProviderAdapter.optimize` with the base review prompt,
+  storing results in the ambient session (`OptimizationScope.SESSION`). Event
+  subscribers print the optimization prompt body (`PromptRendered`) and log
+  tool invokes (`ToolInvoked`), giving full visibility into the digest refresh.
+
+The shared adapter logic (see `ProviderAdapter.optimize`) builds its own
+optimization prompt using two short markdown sections
+(`Optimization Goal`, `Expectations`), the planning tools, and whichever
+workspace section matches the review prompt (Podman or VFS). The digest body is
+persisted via `set_workspace_digest` and, when callers request global scope,
+via `PromptOverridesStore.set_section_override`.
+
+## Logging & Observability
+
+- `_print_rendered_prompt` prints the entire prompt whenever `PromptRendered`
+  fires. The label uses `prompt_name` or `ns:key`.
+- `_log_tool_invocation` renders tool params/results/payloads via the serde
+  helpers while truncating long strings (`_LOG_STRING_LIMIT = 256`).
+- `_render_plan_snapshot` summarizes the latest plan objective, per-step status,
+  notes, and details. We call it after every agent response so operators can
+  track progress.
 
 ## Running the Example
 
 ```bash
-uv run python code_reviewer_example.py
+OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 ```
 
-Environment requirements:
+Environment knobs:
 
-- `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) must be set.
-- Podman is optional; when unavailable the agent falls back to the in-memory VFS
-  tool set.
+- `OPENAI_API_KEY` is required. `OPENAI_MODEL` defaults to `gpt-5.1`.
+- `CODE_REVIEW_PROMPT_TAG` customizes the overrides tag shared across runs.
 
 Interactive commands:
 
-- Any non-empty input except the reserved commands is treated as a review task.
-- `optimize [focus]` refreshes the repository instructions override.
-- `exit` or `quit` terminates the REPL.
+- Non-empty input becomes the next review request.
+- `optimize` refreshes the workspace digest in the current session (and prints
+  the resulting markdown).
+- `exit`/`quit` or an empty line terminates the REPL.
 
-## Testing Strategy
+## Testing
 
-- `tests/test_code_reviewer_example.py` covers:
-  - Prompt rendering events and session logging.
-  - Default empty repository instructions and override persistence.
-  - The optimize command path using a stub adapter that emits canned
-    instructions.
-  - Escape handling for `$` placeholders in stored overrides.
-- `make test` exercises the entire suite with a 100% coverage floor, while
-  `make check` runs the full verification pipeline (format, lint, typecheck,
-  security, deps, markdown, tests).
+- `tests/test_code_reviewer_example.py` covers prompt rendering logs, default
+  workspace digest behavior, overrides precedence, the optimize command (via a
+  stub adapter), and structured response formatting.
+- `tests/test_thread_safety.py` reuses `initialize_code_reviewer_runtime` during
+  concurrency checks.
+- `make test` / `make check` enforce the repository-wide guarantees
+  (formatting, lint, typecheck, security scans, dependency audits, markdown
+  lint, and 100 % coverage).
 
-## Future Extensions
+## Future Work
 
-- Swap the OpenAI adapter for other providers by injecting a different
-  `ProviderAdapter`.
-- Expose additional commands (e.g., custom repo initialization) by following the
-  same pattern as the `optimize` handler.
-- Extend the repository instructions section to include structured subsections
-  (e.g., “Build”, “Tests”, “Watchouts”) if more granularity is desired.
+- Swap adapters by passing a different `ProviderAdapter` into `CodeReviewApp`.
+- Extend the workspace digest format with structured subsections and persist
+  them through overrides.
+- Introduce more REPL commands (e.g., “reset overrides”, “rerender prompt”) by
+  following the pattern used for `optimize`.

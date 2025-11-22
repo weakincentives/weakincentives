@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import RLock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID, uuid4
 
 from ...prompt._types import SupportsDataclass
@@ -26,7 +26,10 @@ from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolI
 
 if TYPE_CHECKING:
     from ...adapters._names import AdapterName
-    from ...adapters.core import PromptResponse
+
+
+class _PromptResponseLike(Protocol):
+    output: object | None
 
 
 def _describe_handler(handler: EventHandler) -> str:
@@ -87,7 +90,7 @@ class PromptExecuted:
 
     prompt_name: str
     adapter: AdapterName
-    result: PromptResponse[object]
+    result: _PromptResponseLike
     session_id: UUID | None
     created_at: datetime
     value: SupportsDataclass | None = None

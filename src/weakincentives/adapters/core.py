@@ -14,24 +14,76 @@
 
 from __future__ import annotations
 
+import textwrap
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
+from enum import Enum
+from typing import Any, Literal, TypeVar, cast
 
 from ..deadlines import Deadline
+from ..prompt import MarkdownSection
 from ..prompt._types import SupportsDataclass
+from ..prompt.overrides import PromptLike, PromptOverridesStore
+from ..prompt.prompt import Prompt
+from ..prompt.section import Section
+from ..runtime.events._types import EventBus, ToolInvoked
+from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
-
-if TYPE_CHECKING:
-    from ..prompt.overrides import PromptOverridesStore
-    from ..prompt.prompt import Prompt
-    from ..runtime.events._types import EventBus, ToolInvoked
+from ..tools.digests import (
+    WorkspaceDigestSection,
+    clear_workspace_digest,
+    set_workspace_digest,
+)
+from ..tools.planning import PlanningStrategy, PlanningToolsSection
+from ..tools.podman import PodmanSandboxSection
+from ..tools.vfs import VfsToolsSection
 
 OutputT = TypeVar("OutputT")
 
 
-class ProviderAdapter(Protocol[OutputT]):
-    """Protocol describing the synchronous adapter contract."""
+@dataclass(slots=True)
+class PromptResponse[OutputT]:
+    """Structured result emitted by an adapter evaluation."""
 
+    prompt_name: str
+    text: str | None
+    output: OutputT | None
+    tool_results: tuple[ToolInvoked, ...]
+    provider_payload: dict[str, Any] | None = None
+
+
+class OptimizationScope(Enum):
+    """Control where optimized digests are persisted."""
+
+    SESSION = "session"
+    GLOBAL = "global"
+
+
+@dataclass(slots=True)
+class OptimizationResult:
+    """Capture the outcome of an optimization run."""
+
+    response: PromptResponse[Any]
+    digest: str
+    scope: OptimizationScope
+    section_key: str
+
+
+@dataclass(slots=True, frozen=True)
+class _OptimizationResponse:
+    """Structured response emitted by the workspace digest optimization prompt."""
+
+    digest: str
+
+
+class ProviderAdapter(ABC):
+    """Abstract base class describing the synchronous adapter contract."""
+
+    @classmethod
+    def __class_getitem__(cls, _: object) -> type[ProviderAdapter[Any]]:
+        return cls
+
+    @abstractmethod
     def evaluate(
         self,
         prompt: Prompt[OutputT],
@@ -47,16 +99,161 @@ class ProviderAdapter(Protocol[OutputT]):
 
         ...
 
+    def optimize(
+        self,
+        prompt: Prompt[OutputT],
+        *,
+        store_scope: OptimizationScope = OptimizationScope.SESSION,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str | None = None,
+        session: SessionProtocol,
+        optimization_session: Session | None = None,
+    ) -> OptimizationResult:
+        """Optimize the workspace digest for the provided prompt."""
 
-@dataclass(slots=True)
-class PromptResponse[OutputT]:
-    """Structured result emitted by an adapter evaluation."""
+        prompt_name = prompt.name or prompt.key
+        outer_session = session
+        inner_session = optimization_session or Session()
+        digest_section = self._require_workspace_digest_section(
+            prompt, prompt_name=prompt_name
+        )
+        workspace_section = self._resolve_workspace_section(prompt, prompt_name)
 
-    prompt_name: str
-    text: str | None
-    output: OutputT | None
-    tool_results: tuple[ToolInvoked, ...]
-    provider_payload: dict[str, Any] | None = None
+        safe_workspace = workspace_section.clone(
+            session=inner_session,
+            bus=inner_session.event_bus,
+        )
+        safe_workspace_digest = digest_section.clone(
+            session=inner_session,
+            bus=inner_session.event_bus,
+        )
+
+        optimization_prompt = Prompt[_OptimizationResponse](
+            ns=f"{prompt.ns}.optimization",
+            key=f"{prompt.key}-workspace-digest",
+            name=(f"{prompt.name}_workspace_digest" if prompt.name else None),
+            sections=(
+                MarkdownSection(
+                    title="Optimization Goal",
+                    template=(
+                        "Summarize the workspace so future prompts can rely on a cached digest."
+                    ),
+                    key="optimization-goal",
+                ),
+                MarkdownSection(
+                    title="Expectations",
+                    template=textwrap.dedent(
+                        """
+                        Explore README/docs/workflow files first. Capture build/test commands,
+                        dependency managers, and watchouts. Keep the digest task agnostic.
+                        """
+                    ).strip(),
+                    key="optimization-expectations",
+                ),
+                PlanningToolsSection(
+                    session=inner_session,
+                    strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
+                ),
+                safe_workspace,
+                safe_workspace_digest,
+            ),
+        )
+
+        response = self.evaluate(
+            optimization_prompt,
+            parse_output=True,
+            bus=inner_session.event_bus,
+            session=inner_session,
+            overrides_store=overrides_store,
+            overrides_tag=overrides_tag or "latest",
+        )
+
+        digest = self._extract_digest(response=response, prompt_name=prompt_name)
+
+        if store_scope is OptimizationScope.SESSION:
+            _ = set_workspace_digest(outer_session, digest_section.key, digest)
+
+        if store_scope is OptimizationScope.GLOBAL:
+            if overrides_store is None or overrides_tag is None:
+                message = "Global scope requires overrides_store and overrides_tag."
+                raise PromptEvaluationError(
+                    message,
+                    prompt_name=prompt_name,
+                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                )
+            section_path = self._find_section_path(prompt, digest_section.key)
+            _ = overrides_store.set_section_override(
+                cast(PromptLike, prompt),
+                tag=overrides_tag,
+                path=section_path,
+                body=digest,
+            )
+            clear_workspace_digest(outer_session, digest_section.key)
+
+        return OptimizationResult(
+            response=response,
+            digest=digest,
+            scope=store_scope,
+            section_key=digest_section.key,
+        )
+
+    def _resolve_workspace_section(
+        self, prompt: Prompt[object], prompt_name: str
+    ) -> Section[SupportsDataclass]:
+        try:
+            return prompt.find_section((PodmanSandboxSection, VfsToolsSection))
+        except KeyError as error:  # pragma: no cover - defensive
+            raise PromptEvaluationError(
+                "Workspace section required for optimization.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            ) from error
+
+    def _require_workspace_digest_section(
+        self, prompt: Prompt[object], *, prompt_name: str
+    ) -> WorkspaceDigestSection:
+        try:
+            section = prompt.find_section(WorkspaceDigestSection)
+        except KeyError as error:  # pragma: no cover - defensive
+            raise PromptEvaluationError(
+                "Workspace digest section required for optimization.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            ) from error
+        return cast(WorkspaceDigestSection, section)
+
+    def _find_section_path(
+        self, prompt: Prompt[object], section_key: str
+    ) -> tuple[str, ...]:
+        for node in prompt.sections:
+            if node.section.key == section_key:
+                return node.path
+        message = f"Section path not found for key: {section_key}"
+        raise PromptEvaluationError(
+            message,
+            prompt_name=prompt.name or prompt.key,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        )
+
+    def _extract_digest(
+        self, *, response: PromptResponse[Any], prompt_name: str
+    ) -> str:
+        digest: str | None = None
+        if isinstance(response.output, str):
+            digest = response.output
+        elif response.output is not None:
+            candidate = getattr(response.output, "digest", None)
+            if isinstance(candidate, str):
+                digest = candidate
+        if digest is None and response.text:
+            digest = response.text
+        if digest is None:
+            raise PromptEvaluationError(
+                "Optimization did not return digest content.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+            )
+        return digest.strip()
 
 
 class PromptEvaluationError(RuntimeError):
@@ -94,6 +291,8 @@ __all__ = [
     "PROMPT_EVALUATION_PHASE_REQUEST",
     "PROMPT_EVALUATION_PHASE_RESPONSE",
     "PROMPT_EVALUATION_PHASE_TOOL",
+    "OptimizationResult",
+    "OptimizationScope",
     "PromptEvaluationError",
     "PromptEvaluationPhase",
     "PromptResponse",

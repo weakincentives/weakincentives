@@ -166,3 +166,6 @@ parsing noise.
 
 Use this document as the authoritative guide. If tooling, architecture, or
 expectations shift, update this file in the same change set.
+
+> Always review the relevant specs for the area you are touching before doing
+> any work.

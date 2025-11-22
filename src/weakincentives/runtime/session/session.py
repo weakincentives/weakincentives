@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
@@ -180,12 +180,14 @@ class Session(SessionProtocol):
             bucket.append(registration)
             _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
 
+    @override
     def select_all[S: SupportsDataclass](self, slice_type: type[S]) -> tuple[S, ...]:
         """Return the tuple slice maintained for the provided type."""
 
         with self._lock:
             return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
 
+    @override
     def seed_slice[S: SupportsDataclass](
         self, slice_type: type[S], values: Iterable[S]
     ) -> None:
@@ -193,6 +195,24 @@ class Session(SessionProtocol):
 
         with self._lock:
             self._state[slice_type] = tuple(values)
+
+    @override
+    def clear_slice[S: SupportsDataclass](
+        self,
+        slice_type: type[S],
+        predicate: Callable[[S], bool] | None = None,
+    ) -> None:
+        """Remove items from the slice, optionally filtering by predicate."""
+
+        with self._lock:
+            existing = cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
+            if not existing:
+                return
+            if predicate is None:
+                self._state[slice_type] = EMPTY_SLICE
+                return
+            filtered = tuple(value for value in existing if not predicate(value))
+            self._state[slice_type] = filtered
 
     @override
     def reset(self) -> None:
@@ -207,6 +227,7 @@ class Session(SessionProtocol):
             self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
 
     @property
+    @override
     def event_bus(self) -> EventBus:
         """Return the event bus backing this session."""
 

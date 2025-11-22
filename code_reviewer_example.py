@@ -26,22 +26,18 @@ from typing import cast
 from uuid import UUID
 
 from weakincentives.adapters import PromptResponse
-from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.adapters.core import OptimizationScope, ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
-    HexDigest,
     LocalPromptOverridesStore,
-    PromptDescriptor,
-    PromptLike,
-    PromptOverride,
     PromptOverridesError,
-    SectionOverride,
 )
 from weakincentives.runtime.events import EventBus, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
+from weakincentives.tools.digests import WorkspaceDigestSection
 from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
 from weakincentives.tools.podman import PodmanSandboxSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
@@ -69,7 +65,6 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
     "**/*.bmp",
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
-_REPOSITORY_INSTRUCTIONS_PATH: tuple[str, ...] = ("repository-instructions",)
 _LOG_STRING_LIMIT = 256
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,52 +82,6 @@ class ReviewGuidance:
             "description": "Default framing instructions for the review assistant."
         },
     )
-    workspace_overview: str = field(
-        default="The sunfish repository is mounted read-only inside the active workspace.",
-        metadata={
-            "description": (
-                "Describes whether the agent is operating within the Podman container "
-                "or the in-memory VFS fallback."
-            )
-        },
-    )
-
-
-@dataclass(slots=True, frozen=True)
-class RepositoryOptimizationGuidance:
-    """Static framing for the repository optimization helper prompt."""
-
-    focus: str = field(
-        default=(
-            "Capture language/tooling choices, build commands, and review hazards for "
-            "the sunfish workspace."
-        ),
-        metadata={"description": "High-level objectives for the optimization command."},
-    )
-    workspace_overview: str = field(
-        default=(
-            "The sunfish repository is mounted read-only; use planning and filesystem "
-            "tools to inspect source files."
-        ),
-        metadata={"description": "Summarizes the current workspace configuration."},
-    )
-
-
-@dataclass(slots=True, frozen=True)
-class RepositoryOptimizationRequest:
-    """User-provided focus for the optimization helper."""
-
-    objective: str = field(
-        default="Audit the repository to refresh instructions for future code reviews.",
-        metadata={"description": "Specific themes the optimizer should emphasize."},
-    )
-
-
-@dataclass(slots=True, frozen=True)
-class RepositoryOptimizationResponse:
-    """Structured output capturing refreshed repository instructions."""
-
-    instructions: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -182,11 +131,6 @@ class CodeReviewApp:
         self.bus = self.context.bus
         self.overrides_store = self.context.overrides_store
         self.override_tag = self.context.override_tag
-        self.optimizer = RepositoryOptimizer(
-            adapter=cast(ProviderAdapter[SupportsDataclass], adapter),
-            overrides_store=self.overrides_store,
-            override_tag=self.override_tag,
-        )
 
     def run(self) -> None:
         """Start the interactive review session."""
@@ -201,9 +145,9 @@ class CodeReviewApp:
                 break
             if not user_prompt:
                 break
-            command, _space, remainder = user_prompt.partition(" ")
+            command = user_prompt.split(" ", 1)[0]
             if command.lower() == "optimize":
-                self._handle_optimize_command(remainder.strip())
+                self._handle_optimize_command()
                 continue
             if user_prompt.lower() in {"exit", "quit"}:
                 break
@@ -227,50 +171,24 @@ class CodeReviewApp:
         )
         return _render_response_payload(response)
 
-    def _handle_optimize_command(self, focus: str) -> None:
-        """Runs the optimization prompt and persists repository instructions."""
+    def _handle_optimize_command(self) -> None:
+        """Runs the optimization prompt and persists workspace digest content."""
 
-        instructions = self.optimizer.run(focus)
-        if instructions is None:
-            print("Optimize command produced no instructions.")
-            return
-        save_repository_instructions_override(
-            prompt=self.prompt,
-            overrides_store=self.overrides_store,
-            overrides_tag=self.override_tag,
-            body=instructions,
+        optimization_session = self._create_optimization_session()
+        result = self.adapter.optimize(
+            self.prompt,
+            store_scope=OptimizationScope.SESSION,
+            session=self.session,
+            optimization_session=optimization_session,
         )
-        print("\nRepository instructions persisted for future review turns:\n")
-        print(instructions)
+        digest = result.digest.strip()
+        print("\nWorkspace digest persisted for future review turns:\n")
+        print(digest)
 
+    def _create_optimization_session(self) -> Session:
+        """Provision a fresh session for optimization runs."""
 
-@dataclass(slots=True)
-class RepositoryOptimizer:
-    """Runs the repository optimization prompt in an isolated session."""
-
-    adapter: ProviderAdapter[SupportsDataclass]
-    overrides_store: LocalPromptOverridesStore
-    override_tag: str
-
-    def run(self, focus: str) -> str | None:
-        objective = focus or (
-            "Survey README, docs, and key scripts to refresh repository instructions."
-        )
-        session, bus = _build_isolated_session()
-        prompt = build_repository_optimization_prompt(session=session)
-        response = self.adapter.evaluate(
-            prompt,
-            RepositoryOptimizationRequest(objective=objective),
-            bus=bus,
-            session=session,
-            overrides_store=self.overrides_store,
-            overrides_tag=self.override_tag,
-        )
-        if isinstance(response.output, RepositoryOptimizationResponse):
-            return response.output.instructions.strip()
-        if response.text:
-            return response.text.strip()
-        return None
+        return _build_logged_session()
 
 
 def main() -> None:
@@ -295,10 +213,10 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
     """Builds the main prompt for the code review agent."""
 
     _ensure_test_repository_available()
-    workspace_section, workspace_overview = _build_workspace_section(session=session)
+    workspace_section = _build_workspace_section(session=session)
     sections = (
-        _build_review_guidance_section(workspace_overview),
-        _build_repository_instructions_section(),
+        _build_review_guidance_section(),
+        WorkspaceDigestSection(session=session),
         _build_subagents_section(),
         PlanningToolsSection(
             session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT
@@ -318,57 +236,6 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
     )
 
 
-def build_repository_optimization_prompt(
-    *,
-    session: Session,
-) -> Prompt[RepositoryOptimizationResponse]:
-    """Constructs the helper prompt used by the optimize command."""
-
-    workspace_section, workspace_overview = _build_workspace_section(session=session)
-    sections = (
-        MarkdownSection[RepositoryOptimizationGuidance](
-            title="Repository Optimization Brief",
-            template=textwrap.dedent(
-                """
-                You are preparing repository-specific review instructions for the
-                `sunfish/` workspace.
-                $workspace_overview Review the README, docs, build scripts, and entry
-                points to surface facts future reviewers must remember.
-
-                ${focus}
-
-                Respond with JSON containing:
-                - instructions: Very brief Markdown that starts with a short paragraph
-                  followed by a compact bullet list calling out languages, build/test
-                  commands, and review watchouts. Avoid section headings and keep it
-                  punchy. Use `dispatch_subagents` to fan out doc/code scans so results
-                  land quickly.
-                """
-            ).strip(),
-            default_params=RepositoryOptimizationGuidance(
-                workspace_overview=workspace_overview
-            ),
-            key="optimization-brief",
-        ),
-        PlanningToolsSection(
-            session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT
-        ),
-        _build_subagents_section(),
-        workspace_section,
-        MarkdownSection[RepositoryOptimizationRequest](
-            title="Optimization Objective",
-            template="${objective}",
-            key="optimization-objective",
-        ),
-    )
-    return Prompt[RepositoryOptimizationResponse](
-        ns="examples/code-review",
-        key="sunfish-repository-optimize",
-        name="sunfish_repository_optimizer",
-        sections=sections,
-    )
-
-
 def _ensure_test_repository_available() -> None:
     if TEST_REPOSITORIES_ROOT.exists():
         return
@@ -378,16 +245,13 @@ def _ensure_test_repository_available() -> None:
     )
 
 
-def _build_review_guidance_section(
-    workspace_overview: str,
-) -> MarkdownSection[ReviewGuidance]:
+def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
     return MarkdownSection[ReviewGuidance](
         title="Code Review Brief",
         template=textwrap.dedent(
             """
             You are a code review assistant exploring the mounted workspace.
-            $workspace_overview Access the repository under the `sunfish/`
-            directory.
+            Access the repository under the `sunfish/` directory.
 
             Use the available tools to stay grounded:
             - Planning tools help you capture multi-step investigations; keep the
@@ -405,16 +269,8 @@ def _build_review_guidance_section(
             - next_steps: Actionable recommendations to progress the task.
             """
         ).strip(),
-        default_params=ReviewGuidance(workspace_overview=workspace_overview),
+        default_params=ReviewGuidance(),
         key="code-review-brief",
-    )
-
-
-def _build_repository_instructions_section() -> MarkdownSection[SupportsDataclass]:
-    return MarkdownSection(
-        title="Repository Instructions",
-        template="",
-        key="repository-instructions",
     )
 
 
@@ -437,7 +293,7 @@ def _sunfish_mounts() -> tuple[HostMount, ...]:
 def _build_workspace_section(
     *,
     session: Session,
-) -> tuple[MarkdownSection[SupportsDataclass], str]:
+) -> MarkdownSection[SupportsDataclass]:
     mounts = _sunfish_mounts()
     allowed_roots = (TEST_REPOSITORIES_ROOT,)
     connection = PodmanSandboxSection.resolve_connection()
@@ -445,17 +301,13 @@ def _build_workspace_section(
         _LOGGER.info(
             "Podman connection unavailable; falling back to VFS tools for the code reviewer example."
         )
-        return (
-            VfsToolsSection(
-                session=session,
-                mounts=mounts,
-                allowed_host_roots=allowed_roots,
-            ),
-            "Podman is unavailable, so the virtual filesystem mirrors the repository "
-            "without shell access.",
+        return VfsToolsSection(
+            session=session,
+            mounts=mounts,
+            allowed_host_roots=allowed_roots,
         )
 
-    section = PodmanSandboxSection(
+    return PodmanSandboxSection(
         session=session,
         mounts=mounts,
         allowed_host_roots=allowed_roots,
@@ -463,11 +315,6 @@ def _build_workspace_section(
         identity=connection.get("identity"),
         connection_name=connection.get("connection_name"),
     )
-    overview = (
-        "Podman is available; the workspace mirrors the repository inside the "
-        "container and the `shell_execute` tool is enabled."
-    )
-    return section, overview
 
 
 def initialize_code_reviewer_runtime(
@@ -500,7 +347,7 @@ def _create_runtime_context(
     override_tag: str | None = None,
 ) -> RuntimeContext:
     store = overrides_store or LocalPromptOverridesStore()
-    session = Session()
+    session = _build_logged_session()
     bus = session.event_bus
     resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
     prompt = build_task_prompt(session=session)
@@ -509,8 +356,6 @@ def _create_runtime_context(
     except PromptOverridesError as exc:  # pragma: no cover - startup validation
         raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
 
-    bus.subscribe(PromptRendered, _print_rendered_prompt)
-    bus.subscribe(ToolInvoked, _log_tool_invocation)
     return RuntimeContext(
         prompt=prompt,
         session=session,
@@ -520,63 +365,10 @@ def _create_runtime_context(
     )
 
 
-def save_repository_instructions_override(
-    *,
-    prompt: Prompt[ReviewResponse],
-    overrides_store: LocalPromptOverridesStore,
-    overrides_tag: str,
-    body: str,
-) -> None:
-    descriptor = PromptDescriptor.from_prompt(cast(PromptLike, prompt))
-    existing_override = overrides_store.resolve(
-        descriptor=descriptor, tag=overrides_tag
-    )
-
-    sections = dict(existing_override.sections) if existing_override else {}
-    tools = dict(existing_override.tool_overrides) if existing_override else {}
-    section_hash = _lookup_section_hash(descriptor, _REPOSITORY_INSTRUCTIONS_PATH)
-    trimmed_body = body.strip()
-    escaped_body = _escape_template_markers(trimmed_body)
-
-    sections[_REPOSITORY_INSTRUCTIONS_PATH] = SectionOverride(
-        expected_hash=section_hash,
-        body=escaped_body,
-    )
-
-    override = PromptOverride(
-        ns=descriptor.ns,
-        prompt_key=descriptor.key,
-        tag=overrides_tag,
-        sections=sections,
-        tool_overrides=tools,
-    )
-    overrides_store.upsert(descriptor, override)
-
-
-def _lookup_section_hash(
-    descriptor: PromptDescriptor,
-    path: tuple[str, ...],
-) -> HexDigest:
-    for candidate in descriptor.sections:
-        if candidate.path == path:
-            return candidate.content_hash
-    raise PromptOverridesError(
-        f"Section {path!r} not registered in prompt descriptor; cannot override."
-    )
-
-
-def _escape_template_markers(text: str) -> str:
-    if not text:
-        return text
-    return text.replace("$", "$$")
-
-
-def _build_isolated_session() -> tuple[Session, EventBus]:
+def _build_logged_session() -> Session:
     session = Session()
-    bus = session.event_bus
-    bus.subscribe(PromptRendered, _print_rendered_prompt)
-    bus.subscribe(ToolInvoked, _log_tool_invocation)
-    return session, bus
+    _attach_logging_subscribers(session.event_bus)
+    return session
 
 
 def _build_intro(override_tag: str) -> str:
@@ -586,7 +378,7 @@ def _build_intro(override_tag: str) -> str:
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
         - Tools: Planning and a filesystem workspace (with a Podman shell if available).
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-        - Commands: 'optimize [focus]' refreshes repository instructions, 'exit' quits.
+        - Commands: 'optimize' refreshes the workspace digest, 'exit' quits.
 
         Note: Full prompt text and tool calls will be logged to the console for observability.
         """
@@ -636,7 +428,7 @@ def _resolve_override_tag(
     env_candidate = os.getenv(PROMPT_OVERRIDES_TAG_ENV, "").strip()
     if env_candidate:
         return env_candidate
-    return str(session_id)
+    return "latest"
 
 
 def _configure_logging() -> None:
@@ -679,6 +471,11 @@ def _log_tool_invocation(event: object) -> None:
         lines.append(f"  payload: {payload_repr}")
 
     print("\n[tool] " + "\n".join(lines))
+
+
+def _attach_logging_subscribers(bus: EventBus) -> None:
+    bus.subscribe(PromptRendered, _print_rendered_prompt)
+    bus.subscribe(ToolInvoked, _log_tool_invocation)
 
 
 def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:

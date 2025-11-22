@@ -15,7 +15,7 @@
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducer_context import ReducerContext, build_reducer_context
-from .reducers import append, replace_latest, upsert_by
+from .reducers import append, replace_latest, replace_latest_by, upsert_by
 from .selectors import select_all, select_latest, select_where
 from .session import DataEvent, Session
 from .snapshots import (
@@ -39,6 +39,7 @@ __all__ = [
     "append",
     "build_reducer_context",
     "replace_latest",
+    "replace_latest_by",
     "select_all",
     "select_latest",
     "select_where",

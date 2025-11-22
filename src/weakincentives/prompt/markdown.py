@@ -23,7 +23,11 @@ from ._types import SupportsDataclass
 from .errors import PromptRenderError
 from .section import Section
 
-MarkdownParamsT = TypeVar("MarkdownParamsT", bound=SupportsDataclass, covariant=True)
+MarkdownParamsT = TypeVar(
+    "MarkdownParamsT",
+    bound=SupportsDataclass,
+    covariant=True,
+)
 
 
 class MarkdownSection(Section[MarkdownParamsT]):

@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import timedelta
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Final, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
@@ -32,6 +32,7 @@ from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PromptEvaluationError,
     PromptResponse,
+    ProviderAdapter,
     SessionProtocol,
 )
 from .shared import (
@@ -45,8 +46,9 @@ from .shared import (
     run_conversation,
 )
 
+OutputT = TypeVar("OutputT")
+
 if TYPE_CHECKING:
-    from ..adapters.core import ProviderAdapter
     from ..prompt.overrides import PromptOverridesStore
 
 _ERROR_MESSAGE: Final[str] = (
@@ -98,7 +100,7 @@ def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
 logger: StructuredLogger = get_logger(__name__, context={"component": "adapter.openai"})
 
 
-class OpenAIAdapter:
+class OpenAIAdapter(ProviderAdapter[Any]):
     """Adapter that evaluates prompts against OpenAI's Responses API."""
 
     def __init__(
@@ -130,7 +132,8 @@ class OpenAIAdapter:
         self._tool_choice: ToolChoice = tool_choice
         self._use_native_response_format = use_native_response_format
 
-    def evaluate[OutputT](
+    @override
+    def evaluate(
         self,
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,
