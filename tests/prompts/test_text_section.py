@@ -37,7 +37,7 @@ def test_text_section_renders_heading_and_body() -> None:
 
     output = section.render(GreetingParams(greeting="hello"), depth=0, number="1")
 
-    assert output == "## 1 Greeting\n\nGreeting:\nhello"
+    assert output == "## 1. Greeting\n\nGreeting:\nhello"
 
 
 def test_text_section_performs_strict_substitution() -> None:
@@ -53,7 +53,7 @@ def test_text_section_performs_strict_substitution() -> None:
 
     output = section.render(PlaceholderParams(value="42"), depth=1, number="1.1")
 
-    assert output == "### 1.1 Placeholder Demo\n\nValue: 42"
+    assert output == "### 1.1. Placeholder Demo\n\nValue: 42"
 
 
 def test_text_section_supports_slotted_dataclass_params() -> None:
@@ -69,7 +69,7 @@ def test_text_section_supports_slotted_dataclass_params() -> None:
 
     output = section.render(SlottedParams(value="ok"), depth=0, number="1")
 
-    assert output == "## 1 Slots\n\nSlot value: ok"
+    assert output == "## 1. Slots\n\nSlot value: ok"
 
 
 def test_text_section_rejects_non_dataclass_params() -> None:

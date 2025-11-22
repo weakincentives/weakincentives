@@ -85,9 +85,9 @@ def test_prompt_integration_renders_expected_markdown() -> None:
 
     assert rendered.text == "\n\n".join(
         [
-            "## 1 Message Routing\n\nTo: Jordan\nSubject: Q2 sync",
-            "### 1.1 Tone\n\nTarget tone: warm",
-            "### 1.2 Content Guidance\n\nInclude the following summary:\nTop takeaways from yesterday's meeting.",
+            "## 1. Message Routing\n\nTo: Jordan\nSubject: Q2 sync",
+            "### 1.1. Tone\n\nTarget tone: warm",
+            "### 1.2. Content Guidance\n\nInclude the following summary:\nTop takeaways from yesterday's meeting.",
         ]
     )
 

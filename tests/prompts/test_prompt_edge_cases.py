@@ -274,7 +274,7 @@ def test_text_section_returns_heading_when_body_empty() -> None:
 
     output = section.render(HeadingOnlyParams(), depth=0, number="1")
 
-    assert output == "## 1 Heading"
+    assert output == "## 1. Heading"
 
 
 @dataclass

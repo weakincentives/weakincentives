@@ -68,7 +68,8 @@ class MarkdownSection(Section[MarkdownParamsT]):
         number: str,
     ) -> str:
         heading_level = "#" * (depth + 2)
-        heading = f"{heading_level} {number} {self.title.strip()}"
+        normalized_number = number.rstrip(".")
+        heading = f"{heading_level} {normalized_number}. {self.title.strip()}"
         template = Template(textwrap.dedent(template_text).strip())
         try:
             normalized_params = self._normalize_params(params)

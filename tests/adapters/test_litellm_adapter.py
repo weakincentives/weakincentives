@@ -362,7 +362,7 @@ def test_litellm_adapter_returns_plain_text_response() -> None:
     request = completion.requests[0]
     messages = cast(list[dict[str, Any]], request["messages"])
     assert messages[0]["role"] == "system"
-    assert str(messages[0]["content"]).startswith("## 1 Greeting")
+    assert str(messages[0]["content"]).startswith("## 1. Greeting")
     assert "tools" not in request
 
 
