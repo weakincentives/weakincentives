@@ -17,8 +17,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from functools import wraps
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
 from uuid import uuid4
 
@@ -66,11 +68,93 @@ from .core import (
 
 if TYPE_CHECKING:
     from ..adapters.core import ProviderAdapter
+    from ..prompt.overrides import PromptOverridesStore
 
 
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "adapters.shared"}
 )
+
+_current_prompt_name: ContextVar[str | None] = ContextVar[str | None](
+    "current_adapter_prompt_name", default=None
+)
+
+
+def guard_adapter_evaluate[EvaluateOutputT](
+    func: Callable[..., PromptResponse[EvaluateOutputT]],
+) -> Callable[..., PromptResponse[EvaluateOutputT]]:
+    """Wrap adapter evaluate methods with shared guards."""
+
+    @wraps(func)
+    def wrapper(
+        self: ProviderAdapter[EvaluateOutputT],
+        prompt: Prompt[EvaluateOutputT],
+        *params: SupportsDataclass,
+        parse_output: bool = True,
+        bus: EventBus,
+        session: SessionProtocol,
+        deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
+    ) -> PromptResponse[EvaluateOutputT]:
+        prompt_name = prompt.name or prompt.__class__.__name__
+
+        if deadline is not None and deadline.remaining() <= timedelta(0):
+            raise PromptEvaluationError(
+                "Deadline expired before evaluation started.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                provider_payload=deadline_provider_payload(deadline),
+            )
+
+        token = _current_prompt_name.set(prompt_name)
+        try:
+            return func(
+                self,
+                prompt,
+                *params,
+                parse_output=parse_output,
+                bus=bus,
+                session=session,
+                deadline=deadline,
+                overrides_store=overrides_store,
+                overrides_tag=overrides_tag,
+            )
+        finally:
+            _current_prompt_name.reset(token)
+
+    return wrapper
+
+
+def guard_provider_call[ProviderCallT](
+    call_provider: Callable[[], ProviderCallT],
+    *,
+    request_error_message: str,
+    prompt_name: str | None = None,
+    provider_payload: Mapping[str, Any] | None = None,
+) -> ProviderCallT:
+    """Invoke a provider callable and normalize failures."""
+
+    resolved_prompt_name = prompt_name or _current_prompt_name.get()
+    if resolved_prompt_name is None:  # pragma: no cover - defensive guard
+        raise RuntimeError(
+            "guard_provider_call must be used within an adapter evaluation context.",
+        )
+
+    try:
+        return call_provider()
+    except Exception as error:  # pragma: no cover - network/SDK failure
+        normalized_payload: dict[str, Any] | None
+        if provider_payload is None:
+            normalized_payload = None
+        else:
+            normalized_payload = dict(provider_payload)
+        raise PromptEvaluationError(
+            request_error_message,
+            prompt_name=resolved_prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload=normalized_payload,
+        ) from error
 
 
 @dataclass(slots=True)
@@ -601,6 +685,8 @@ __all__ = [
     "extract_payload",
     "first_choice",
     "format_publish_failures",
+    "guard_adapter_evaluate",
+    "guard_provider_call",
     "message_text_content",
     "parse_schema_constrained_payload",
     "parse_tool_arguments",
