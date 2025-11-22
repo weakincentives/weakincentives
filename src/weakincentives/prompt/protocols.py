@@ -24,8 +24,8 @@ from ._types import SupportsDataclass
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..runtime.events._types import EventBus
     from ..runtime.session.protocols import SessionProtocol
+    from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
-    from .structured_output import StructuredOutputConfig
 
 PromptOutputT = TypeVar("PromptOutputT", covariant=True)
 RenderedOutputT = TypeVar("RenderedOutputT", covariant=True)

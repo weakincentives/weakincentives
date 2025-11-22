@@ -15,11 +15,11 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import Final, Literal, TypeAlias, TypeVar, cast
+from typing import Final, Literal, cast
 
 from ..serde.parse import parse as parse_dataclass
 from ..types import JSONValue, ParseableDataclassT
+from ._structured_output_config import StructuredOutputConfig
 from ._types import SupportsDataclass
 from .protocols import RenderedPromptProtocol
 
@@ -35,21 +35,6 @@ ARRAY_WRAPPER_KEY: Final[str] = "items"
 _JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"```json\s*\n(.*?)```", re.IGNORECASE | re.DOTALL
 )
-
-
-DataclassT = TypeVar("DataclassT", bound=SupportsDataclass)
-
-
-@dataclass(frozen=True, slots=True)
-class StructuredOutputConfig[DataclassT]:
-    """Resolved structured output declaration for a prompt."""
-
-    dataclass_type: type[DataclassT]
-    container: Literal["object", "array"]
-    allow_extra_keys: bool
-
-
-StructuredRenderedPrompt: TypeAlias = RenderedPromptProtocol
 
 
 class OutputParseError(Exception):
