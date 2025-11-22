@@ -178,6 +178,7 @@ class CodeReviewApp:
             self.prompt,
             store_scope=OptimizationScope.SESSION,
             session=self.session,
+            optimization_session=self.session,
         )
         digest = result.digest.strip()
         print("\nWorkspace digest persisted for future review turns:\n")
