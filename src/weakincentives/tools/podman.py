@@ -26,7 +26,7 @@ import threading
 import time
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1023,22 +1023,17 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                     or "Failed to create target directory."
                 )
                 raise ToolValidationError(message)
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
-            _ = tmp.write(payload)
-            temp_path = tmp.name
         destination = f"{handle.descriptor.container_name}:{container_path}"
         try:
-            completed = self.run_cli_cp(
-                source=temp_path,
-                destination=destination,
-            )
+            with _stage_tempfile(payload) as temp_path:
+                completed = self.run_cli_cp(
+                    source=str(temp_path),
+                    destination=destination,
+                )
         except FileNotFoundError as error:
             raise ToolValidationError(
                 "Podman CLI is required to execute filesystem commands."
             ) from error
-        finally:
-            with suppress(OSError):
-                Path(temp_path).unlink()
         if completed.returncode != 0:
             message = (
                 completed.stderr.strip() or completed.stdout.strip() or "Write failed."
@@ -1121,6 +1116,16 @@ def _iter_workspace_files(base: Path) -> Iterator[Path]:
         current = Path(dirpath)
         for name in filenames:
             yield current / name
+
+
+@contextmanager
+def _stage_tempfile(payload: str) -> Iterator[Path]:
+    """Write ``payload`` to a temporary file and clean up after use."""
+
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=True) as tmp:
+        _ = tmp.write(payload)
+        tmp.flush()
+        yield Path(tmp.name)
 
 
 def _stat_file(path: Path) -> tuple[int, datetime]:
