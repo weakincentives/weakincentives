@@ -4,9 +4,7 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-### Packaging
-
-- Dropped the direct `typing-extensions` dependency now that all runtime type features come from the stdlib typing module.
+_Nothing yet._
 
 ### Session & Event Bus
 

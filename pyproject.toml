@@ -7,6 +7,7 @@ authors = [
     { name = "Andrei Savu", email = "andrei@weakincentives.com" }
 ]
 requires-python = ">=3.12"
+dependencies = []
 license = { text = "Apache-2.0" }
 keywords = [
     "ai",
