@@ -13,10 +13,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast, override
 
 import pytest
 
+from weakincentives.adapters._names import OPENAI_ADAPTER_NAME
 from weakincentives.adapters.core import (
     OptimizationScope,
     PromptEvaluationError,
@@ -31,7 +33,9 @@ from weakincentives.prompt.overrides import (
     PromptOverridesStore,
 )
 from weakincentives.prompt.section import Section
+from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.prompt.workspace_digest import WorkspaceDigestSection
+from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.tools.vfs import VfsToolsSection
 
@@ -44,6 +48,11 @@ class _FakeOptimizationOutput:
 @dataclass(slots=True, frozen=True)
 class _PromptOutput:
     summary: str = "ok"
+
+
+@dataclass(slots=True, frozen=True)
+class _ToolEventParams:
+    value: str = "param"
 
 
 class _RecordingOverridesStore(PromptOverridesStore):
@@ -97,11 +106,12 @@ class _RecordingOverridesStore(PromptOverridesStore):
 
 
 class _RecordingAdapter(ProviderAdapter):
-    def __init__(self, *, mode: str) -> None:
+    def __init__(self, *, mode: str, emit_tool_event: bool = False) -> None:
         self.mode = mode
         self.rendered_prompts: list[Prompt[Any]] = []
         self.sessions: list[Session | None] = []
         self.buses: list[Any] = []
+        self._emit_tool_event = emit_tool_event
 
     @override
     def evaluate(
@@ -116,9 +126,22 @@ class _RecordingAdapter(ProviderAdapter):
         overrides_tag: str = "latest",
     ) -> PromptResponse[Any]:
         del params, parse_output, deadline, overrides_store, overrides_tag
+        prompt_name = prompt.name or prompt.key
         self.rendered_prompts.append(prompt)
         self.sessions.append(session)
         self.buses.append(bus)
+
+        if self._emit_tool_event and bus is not None:
+            event = ToolInvoked(
+                prompt_name=prompt_name,
+                adapter=OPENAI_ADAPTER_NAME,
+                name="optimize-tool",
+                params=_ToolEventParams(),
+                result=ToolResult(message="ok", value=None),
+                session_id=getattr(session, "session_id", None) if session else None,
+                created_at=datetime.now(UTC),
+            )
+            bus.publish(event)
 
         digest_value = f"{self.mode}-digest"
         if self.mode == "dataclass":
@@ -300,3 +323,19 @@ def test_optimize_uses_isolated_session() -> None:
     assert isinstance(inner_session, Session)
     assert inner_session is not outer_session
     assert adapter.buses[0] is inner_session.event_bus
+
+
+def test_optimize_attaches_bus_subscribers() -> None:
+    adapter = _RecordingAdapter(mode="dataclass", emit_tool_event=True)
+    prompt = _build_prompt()
+    outer_session = Session()
+    captured: list[ToolInvoked] = []
+
+    _ = adapter.optimize(
+        prompt,
+        session=outer_session,
+        bus_subscribers=((ToolInvoked, captured.append),),
+    )
+
+    assert captured
+    assert captured[0].name == "optimize-tool"

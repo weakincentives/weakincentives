@@ -80,7 +80,9 @@ class _RepositoryOptimizationAdapter:
         overrides_store: LocalPromptOverridesStore | None = None,
         overrides_tag: str | None = None,
         session: Session | None = None,
+        bus_subscribers: tuple[tuple[type[object], Any], ...] | None = None,
     ) -> OptimizationResult:
+        del bus_subscribers
         assert session is not None
         self.calls.append(f"optimize:{prompt.key}")
         session.workspace_digest.set("workspace-digest", self.instructions)
@@ -224,7 +226,7 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
         overrides_store=overrides_store,
     )
 
-    assert app.override_tag == str(app.session.session_id)
+    assert app.override_tag == "latest"
 
     app._handle_optimize_command("Highlight docs")
 

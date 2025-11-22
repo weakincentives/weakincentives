@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import textwrap
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, TypeVar, cast
@@ -27,7 +28,7 @@ from ..prompt.overrides import PromptLike, PromptOverridesStore
 from ..prompt.prompt import Prompt
 from ..prompt.section import Section
 from ..prompt.workspace_digest import WorkspaceDigestSection
-from ..runtime.events._types import EventBus, ToolInvoked
+from ..runtime.events._types import EventBus, EventHandler, ToolInvoked
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
 from ..tools.podman import PodmanSandboxSection
@@ -112,6 +113,7 @@ class ProviderAdapter(ABC):
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str | None = None,
         session: SessionProtocol,
+        bus_subscribers: Sequence[tuple[type[object], EventHandler]] | None = None,
     ) -> OptimizationResult:
         """Optimize the workspace digest for the provided prompt."""
 
@@ -154,6 +156,10 @@ class ProviderAdapter(ABC):
                 safe_digest,
             ),
         )
+
+        if bus_subscribers:
+            for event_type, handler in bus_subscribers:
+                optimization_session.event_bus.subscribe(event_type, handler)
 
         response = self.evaluate(
             optimization_prompt,
