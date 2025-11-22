@@ -31,6 +31,7 @@ from ..prompt.workspace_digest import WorkspaceDigestSection
 from ..runtime.events._types import EventBus, EventHandler, ToolInvoked
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
+from ..tools.planning import PlanningStrategy, PlanningToolsSection
 from ..tools.podman import PodmanSandboxSection
 from ..tools.vfs import VfsToolsSection
 
@@ -120,14 +121,13 @@ class ProviderAdapter(ABC):
         prompt_name = prompt.name or prompt.key
         outer_session = session
         optimization_session = Session()
-        digest_section = self._resolve_digest_section(prompt, prompt_name=prompt_name)
+        digest_section = self._require_workspace_digest_section(
+            prompt, prompt_name=prompt_name
+        )
         workspace_section = self._resolve_workspace_section(prompt, prompt_name)
 
         safe_workspace = self._clone_section_for_session(
             workspace_section, session=optimization_session
-        )
-        safe_digest = self._clone_section_for_session(
-            digest_section, session=optimization_session
         )
 
         optimization_prompt = Prompt[_OptimizationResponse](
@@ -152,8 +152,11 @@ class ProviderAdapter(ABC):
                     ).strip(),
                     key="optimization-expectations",
                 ),
+                PlanningToolsSection(
+                    session=optimization_session,
+                    strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
+                ),
                 safe_workspace,
-                safe_digest,
             ),
         )
 
@@ -228,7 +231,7 @@ class ProviderAdapter(ABC):
                 phase=PROMPT_EVALUATION_PHASE_REQUEST,
             ) from error
 
-    def _resolve_digest_section(
+    def _require_workspace_digest_section(
         self, prompt: Prompt[object], *, prompt_name: str
     ) -> WorkspaceDigestSection:
         try:
