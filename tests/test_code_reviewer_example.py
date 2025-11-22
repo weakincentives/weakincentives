@@ -54,6 +54,7 @@ class _RepositoryOptimizationAdapter:
     def __init__(self, instructions: str) -> None:
         self.instructions = instructions
         self.calls: list[str] = []
+        self.optimization_sessions: list[Session] = []
 
     def evaluate(
         self,
@@ -87,7 +88,22 @@ class _RepositoryOptimizationAdapter:
         optimization_session: Session | None = None,
     ) -> OptimizationResult:
         assert session is not None
-        del optimization_session
+        assert optimization_session is not None
+        self.optimization_sessions.append(optimization_session)
+        assert optimization_session is not session
+        optimization_event = PromptRendered(
+            prompt_ns=prompt.ns,
+            prompt_key=prompt.key,
+            prompt_name=prompt.name,
+            adapter=UNIT_TEST_ADAPTER_NAME,
+            session_id=optimization_session.session_id,
+            render_inputs=(),
+            rendered_prompt="<optimize prompt>",
+            created_at=datetime.now(UTC),
+            event_id=uuid4(),
+        )
+        publish_result = optimization_session.event_bus.publish(optimization_event)
+        assert publish_result.handled_count >= 1
         self.calls.append(f"optimize:{prompt.key}")
         set_workspace_digest(session, "workspace-digest", self.instructions)
         if overrides_store is not None and overrides_tag is not None:
@@ -242,4 +258,6 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
     session_digest = latest_workspace_digest(app.session, "workspace-digest")
     assert session_digest is not None
     assert session_digest.body == "- Repo instructions from stub"
+    assert len(adapter.optimization_sessions) == 1
+    assert adapter.optimization_sessions[0] is not app.session
     assert adapter.calls == ["optimize:code-review-session"]

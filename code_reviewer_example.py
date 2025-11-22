@@ -174,15 +174,21 @@ class CodeReviewApp:
     def _handle_optimize_command(self) -> None:
         """Runs the optimization prompt and persists workspace digest content."""
 
+        optimization_session = self._create_optimization_session()
         result = self.adapter.optimize(
             self.prompt,
             store_scope=OptimizationScope.SESSION,
             session=self.session,
-            optimization_session=self.session,
+            optimization_session=optimization_session,
         )
         digest = result.digest.strip()
         print("\nWorkspace digest persisted for future review turns:\n")
         print(digest)
+
+    def _create_optimization_session(self) -> Session:
+        """Provision a fresh session for optimization runs."""
+
+        return _build_logged_session()
 
 
 def main() -> None:
@@ -341,7 +347,7 @@ def _create_runtime_context(
     override_tag: str | None = None,
 ) -> RuntimeContext:
     store = overrides_store or LocalPromptOverridesStore()
-    session = Session()
+    session = _build_logged_session()
     bus = session.event_bus
     resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
     prompt = build_task_prompt(session=session)
@@ -350,8 +356,6 @@ def _create_runtime_context(
     except PromptOverridesError as exc:  # pragma: no cover - startup validation
         raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
 
-    bus.subscribe(PromptRendered, _print_rendered_prompt)
-    bus.subscribe(ToolInvoked, _log_tool_invocation)
     return RuntimeContext(
         prompt=prompt,
         session=session,
@@ -359,6 +363,12 @@ def _create_runtime_context(
         overrides_store=store,
         override_tag=resolved_tag,
     )
+
+
+def _build_logged_session() -> Session:
+    session = Session()
+    _attach_logging_subscribers(session.event_bus)
+    return session
 
 
 def _build_intro(override_tag: str) -> str:
@@ -461,6 +471,11 @@ def _log_tool_invocation(event: object) -> None:
         lines.append(f"  payload: {payload_repr}")
 
     print("\n[tool] " + "\n".join(lines))
+
+
+def _attach_logging_subscribers(bus: EventBus) -> None:
+    bus.subscribe(PromptRendered, _print_rendered_prompt)
+    bus.subscribe(ToolInvoked, _log_tool_invocation)
 
 
 def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
