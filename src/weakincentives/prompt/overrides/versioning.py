@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Literal, Protocol, TypeVar, overload
 
-from .._overrides_protocols import PromptOverridesStore
 from ...serde.schema import schema
 from .._types import SupportsDataclass
 
@@ -227,6 +226,46 @@ class PromptOverride:
     tool_overrides: dict[str, ToolOverride] = field(
         default_factory=_tool_override_mapping_factory
     )
+
+
+class PromptOverridesStore(Protocol):
+    """Structural interface satisfied by prompt overrides stores."""
+
+    def resolve(
+        self,
+        descriptor: PromptDescriptor,
+        tag: str = "latest",
+    ) -> PromptOverride | None: ...
+
+    def upsert(
+        self,
+        descriptor: PromptDescriptor,
+        override: PromptOverride,
+    ) -> PromptOverride: ...
+
+    def delete(
+        self,
+        *,
+        ns: str,
+        prompt_key: str,
+        tag: str,
+    ) -> None: ...
+
+    def set_section_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],
+        body: str,
+    ) -> PromptOverride: ...
+
+    def seed_if_necessary(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+    ) -> PromptOverride: ...
 
 
 class PromptOverridesError(Exception):
