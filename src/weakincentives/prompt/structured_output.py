@@ -15,12 +15,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import Final, Literal, Protocol, TypeVar, cast
+from typing import Final, Literal, cast
 
 from ..serde.parse import parse as parse_dataclass
 from ..types import JSONValue, ParseableDataclassT
+from ._structured_output_config import StructuredOutputConfig
 from ._types import SupportsDataclass
+from .protocols import RenderedPromptProtocol
 
 __all__ = [
     "ARRAY_WRAPPER_KEY",
@@ -34,24 +35,6 @@ ARRAY_WRAPPER_KEY: Final[str] = "items"
 _JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"```json\s*\n(.*?)```", re.IGNORECASE | re.DOTALL
 )
-
-
-DataclassT = TypeVar("DataclassT", bound=SupportsDataclass)
-
-
-@dataclass(frozen=True, slots=True)
-class StructuredOutputConfig[DataclassT]:
-    """Resolved structured output declaration for a prompt."""
-
-    dataclass_type: type[DataclassT]
-    container: Literal["object", "array"]
-    allow_extra_keys: bool
-
-
-class StructuredRenderedPrompt[PayloadT](Protocol):
-    @property
-    def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
-        """Structured output metadata declared by the prompt."""
 
 
 class OutputParseError(Exception):
@@ -69,7 +52,7 @@ class OutputParseError(Exception):
 
 
 def parse_structured_output[PayloadT](
-    output_text: str, rendered: StructuredRenderedPrompt[PayloadT]
+    output_text: str, rendered: RenderedPromptProtocol[PayloadT]
 ) -> PayloadT:
     """Parse a model response into the structured output type declared by the prompt."""
 

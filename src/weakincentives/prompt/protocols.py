@@ -24,6 +24,7 @@ from ._types import SupportsDataclass
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..runtime.events._types import EventBus
     from ..runtime.session.protocols import SessionProtocol
+    from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
 
 PromptOutputT = TypeVar("PromptOutputT", covariant=True)
@@ -65,6 +66,11 @@ class RenderedPromptProtocol(Protocol[RenderedOutputT]):
 
     @property
     def descriptor(self) -> PromptDescriptor | None: ...
+
+    @property
+    def structured_output(
+        self,
+    ) -> StructuredOutputConfig[SupportsDataclass] | None: ...
 
 
 class PromptProtocol(Protocol[PromptOutputT]):
