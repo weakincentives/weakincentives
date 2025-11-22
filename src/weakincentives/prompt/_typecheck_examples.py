@@ -20,7 +20,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from ._types import SupportsDataclass
     from .markdown import MarkdownSection
 
-    _parameterless_section = MarkdownSection(
+    _parameterless_section = MarkdownSection[SupportsDataclass](
         title="Example",
         template="static content",
         key="example-section",

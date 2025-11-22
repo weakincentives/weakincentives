@@ -1959,9 +1959,6 @@ wheels = [
 [[package]]
 name = "weakincentives"
 source = { editable = "." }
-dependencies = [
-    { name = "typing-extensions" },
-]
 
 [package.optional-dependencies]
 asteval = [
@@ -1999,7 +1996,6 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.79.3" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.8.0" },
     { name = "podman", marker = "extra == 'podman'", specifier = ">=5.6.0" },
-    { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 provides-extras = ["asteval", "litellm", "openai", "podman"]
 
