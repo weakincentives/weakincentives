@@ -129,13 +129,13 @@ def test_delegation_prompt_renders_required_sections() -> None:
     }
 
     text = rendered.text
-    assert "## 1 Delegation Summary" in text
+    assert "## 1. Delegation Summary" in text
     summary_segment = text.split("<!-- PARENT PROMPT START -->", 1)[0]
     assert "Response Format" not in summary_segment
-    assert "## 2 Parent Prompt (Verbatim)" in text
+    assert "## 2. Parent Prompt (Verbatim)" in text
     assert "<!-- PARENT PROMPT START -->" in text
     assert rendered_parent.text in text
-    assert "## 3 Recap" in text
+    assert "## 3. Recap" in text
     assert "- Prioritize areas touched in the latest commits." in text
 
 
@@ -161,11 +161,11 @@ def test_delegation_prompt_with_response_format_instructions() -> None:
         parent=ParentPromptParams(body=rendered_parent.text),
     )
 
-    assert "## 2 Response Format" in rendered.text
+    assert "## 2. Response Format" in rendered.text
     assert "Return ONLY a single fenced JSON code block." in rendered.text
     assert "an object" in rendered.text
-    assert rendered.text.index("## 1 Delegation Summary") < rendered.text.index(
-        "## 3 Parent Prompt (Verbatim)"
+    assert rendered.text.index("## 1. Delegation Summary") < rendered.text.index(
+        "## 3. Parent Prompt (Verbatim)"
     )
 
 
@@ -264,8 +264,8 @@ def test_delegation_prompt_empty_recap_uses_placeholder() -> None:
         )
     )
 
-    assert "## 3 Recap" in rendered.text
-    recap_segment = rendered.text.split("## 3 Recap", 1)[-1]
+    assert "## 3. Recap" in rendered.text
+    recap_segment = rendered.text.split("## 3. Recap", 1)[-1]
     assert "- " not in recap_segment
 
 

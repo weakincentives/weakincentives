@@ -180,8 +180,8 @@ def test_workspace_digest_section_empty_by_default() -> None:
 
     rendered = prompt.render(ReviewTurnParams(request="demo request"))
 
-    assert "## 2 Workspace Digest" in rendered.text
-    post_section = rendered.text.split("## 2 Workspace Digest", 1)[1]
+    assert "## 2. Workspace Digest" in rendered.text
+    post_section = rendered.text.split("## 2. Workspace Digest", 1)[1]
     section_body = post_section.split("\n## ", 1)[0]
     assert "Workspace digest unavailable" in section_body
 

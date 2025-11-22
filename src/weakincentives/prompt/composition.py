@@ -102,7 +102,8 @@ class ParentPromptSection(Section[ParentPromptParams]):
                 dataclass_type=ParentPromptParams,
             )
         heading = "#" * (depth + 2)
-        prefix = f"{heading} {number} {self.title}"
+        normalized_number = number.rstrip(".")
+        prefix = f"{heading} {normalized_number}. {self.title}"
         body = params.body
         suffix = "" if body.endswith("\n") else "\n"
         return (
@@ -139,7 +140,8 @@ class RecapSection(Section[RecapParams]):
                 dataclass_type=RecapParams,
             )
         heading = "#" * (depth + 2)
-        prefix = f"{heading} {number} {self.title}"
+        normalized_number = number.rstrip(".")
+        prefix = f"{heading} {normalized_number}. {self.title}"
         bullets = params.bullets
         bullet_lines = "\n".join(f"- {line}" for line in bullets)
         if bullet_lines:

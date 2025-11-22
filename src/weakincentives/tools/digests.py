@@ -165,7 +165,8 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
 
     def _render_block(self, body: str, depth: int, number: str) -> str:
         heading_level = "#" * (depth + 2)
-        heading = f"{heading_level} {number} {self.title.strip()}"
+        normalized_number = number.rstrip(".")
+        heading = f"{heading_level} {normalized_number}. {self.title.strip()}"
         if body:
             return f"{heading}\n\n{body.strip()}"
         return heading

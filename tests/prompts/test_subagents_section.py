@@ -73,4 +73,4 @@ def test_subagents_section_respects_accepts_overrides() -> None:
     assert params_type is not None
     rendered = section.render(params_type(), depth=1, number="1.1")
 
-    assert rendered.startswith("### 1.1 Delegation")
+    assert rendered.startswith("### 1.1. Delegation")
