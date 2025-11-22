@@ -86,15 +86,6 @@ class ReviewGuidance:
             "description": "Default framing instructions for the review assistant."
         },
     )
-    workspace_overview: str = field(
-        default="The sunfish repository is mounted read-only inside the active workspace.",
-        metadata={
-            "description": (
-                "Describes whether the agent is operating within the Podman container "
-                "or the in-memory VFS fallback."
-            )
-        },
-    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -160,7 +151,7 @@ class CodeReviewApp:
                 break
             command, _space, remainder = user_prompt.partition(" ")
             if command.lower() == "optimize":
-                self._handle_optimize_command(remainder.strip())
+                self._handle_optimize_command()
                 continue
             if user_prompt.lower() in {"exit", "quit"}:
                 break
@@ -184,7 +175,7 @@ class CodeReviewApp:
         )
         return _render_response_payload(response)
 
-    def _handle_optimize_command(self, _focus: str) -> None:
+    def _handle_optimize_command(self) -> None:
         """Runs the optimization prompt and persists workspace digest content."""
 
         result = self.adapter.optimize(
@@ -223,9 +214,9 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
     """Builds the main prompt for the code review agent."""
 
     _ensure_test_repository_available()
-    workspace_section, workspace_overview = _build_workspace_section(session=session)
+    workspace_section = _build_workspace_section(session=session)
     sections = (
-        _build_review_guidance_section(workspace_overview),
+        _build_review_guidance_section(),
         WorkspaceDigestSection(session=session),
         _build_subagents_section(),
         PlanningToolsSection(
@@ -255,16 +246,13 @@ def _ensure_test_repository_available() -> None:
     )
 
 
-def _build_review_guidance_section(
-    workspace_overview: str,
-) -> MarkdownSection[ReviewGuidance]:
+def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
     return MarkdownSection[ReviewGuidance](
         title="Code Review Brief",
         template=textwrap.dedent(
             """
             You are a code review assistant exploring the mounted workspace.
-            $workspace_overview Access the repository under the `sunfish/`
-            directory.
+            Access the repository under the `sunfish/` directory.
 
             Use the available tools to stay grounded:
             - Planning tools help you capture multi-step investigations; keep the
@@ -282,7 +270,7 @@ def _build_review_guidance_section(
             - next_steps: Actionable recommendations to progress the task.
             """
         ).strip(),
-        default_params=ReviewGuidance(workspace_overview=workspace_overview),
+        default_params=ReviewGuidance(),
         key="code-review-brief",
     )
 
@@ -306,7 +294,7 @@ def _sunfish_mounts() -> tuple[HostMount, ...]:
 def _build_workspace_section(
     *,
     session: Session,
-) -> tuple[MarkdownSection[SupportsDataclass], str]:
+) -> MarkdownSection[SupportsDataclass]:
     mounts = _sunfish_mounts()
     allowed_roots = (TEST_REPOSITORIES_ROOT,)
     connection = PodmanSandboxSection.resolve_connection()
@@ -314,17 +302,13 @@ def _build_workspace_section(
         _LOGGER.info(
             "Podman connection unavailable; falling back to VFS tools for the code reviewer example."
         )
-        return (
-            VfsToolsSection(
-                session=session,
-                mounts=mounts,
-                allowed_host_roots=allowed_roots,
-            ),
-            "Podman is unavailable, so the virtual filesystem mirrors the repository "
-            "without shell access.",
+        return VfsToolsSection(
+            session=session,
+            mounts=mounts,
+            allowed_host_roots=allowed_roots,
         )
 
-    section = PodmanSandboxSection(
+    return PodmanSandboxSection(
         session=session,
         mounts=mounts,
         allowed_host_roots=allowed_roots,
@@ -332,11 +316,6 @@ def _build_workspace_section(
         identity=connection.get("identity"),
         connection_name=connection.get("connection_name"),
     )
-    overview = (
-        "Podman is available; the workspace mirrors the repository inside the "
-        "container and the `shell_execute` tool is enabled."
-    )
-    return section, overview
 
 
 def initialize_code_reviewer_runtime(

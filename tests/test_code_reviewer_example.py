@@ -228,7 +228,7 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
 
     assert app.override_tag == "latest"
 
-    app._handle_optimize_command("Highlight docs")
+    app._handle_optimize_command()
 
     descriptor = PromptDescriptor.from_prompt(app.prompt)
     override = overrides_store.resolve(descriptor=descriptor, tag=app.override_tag)
