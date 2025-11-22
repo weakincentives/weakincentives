@@ -67,16 +67,6 @@ class OptimizationResult:
 
 
 @dataclass(slots=True, frozen=True)
-class _OptimizationGoalParams:
-    """Placeholder params for the optimization goal section."""
-
-
-@dataclass(slots=True, frozen=True)
-class _OptimizationExpectationsParams:
-    """Placeholder params for the optimization expectations section."""
-
-
-@dataclass(slots=True, frozen=True)
 class _OptimizationResponse:
     """Structured response emitted by the workspace digest optimization prompt."""
 
@@ -135,14 +125,14 @@ class ProviderAdapter(ABC):
             key=f"{prompt.key}-workspace-digest",
             name=(f"{prompt.name}_workspace_digest" if prompt.name else None),
             sections=(
-                MarkdownSection[_OptimizationGoalParams](
+                MarkdownSection(
                     title="Optimization Goal",
                     template=(
                         "Summarize the workspace so future prompts can rely on a cached digest."
                     ),
                     key="optimization-goal",
                 ),
-                MarkdownSection[_OptimizationExpectationsParams](
+                MarkdownSection(
                     title="Expectations",
                     template=textwrap.dedent(
                         """

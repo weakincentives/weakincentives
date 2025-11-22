@@ -16,14 +16,21 @@ import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any, TypeVar, override
+from typing import Any, override
+
+from typing_extensions import TypeVar
 
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
 from .section import Section
 
-MarkdownParamsT = TypeVar("MarkdownParamsT", bound=SupportsDataclass, covariant=True)
+MarkdownParamsT = TypeVar(
+    "MarkdownParamsT",
+    bound=SupportsDataclass,
+    covariant=True,
+    default=SupportsDataclass,
+)
 
 
 class MarkdownSection(Section[MarkdownParamsT]):
