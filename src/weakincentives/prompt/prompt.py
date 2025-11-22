@@ -24,7 +24,7 @@ from typing import (
     get_origin,
 )
 
-from ._overrides_protocols import PromptOverridesStoreProtocol
+from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
 from .chapter import Chapter, ChaptersExpansionPolicy
 from .errors import PromptValidationError, SectionPath
@@ -153,7 +153,7 @@ class Prompt[OutputT]:
     def render(
         self,
         *params: SupportsDataclass,
-        overrides_store: PromptOverridesStoreProtocol | None = None,
+        overrides_store: PromptOverridesStore | None = None,
         tag: str = "latest",
         inject_output_instructions: bool | None = None,
     ) -> RenderedPrompt[OutputT]:

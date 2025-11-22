@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Literal, Protocol, TypeVar, overload
 
+from .._overrides_protocols import PromptOverridesStore
 from ...serde.schema import schema
 from .._types import SupportsDataclass
 
@@ -230,46 +231,6 @@ class PromptOverride:
 
 class PromptOverridesError(Exception):
     """Raised when prompt overrides fail validation or persistence."""
-
-
-class PromptOverridesStore(Protocol):
-    """Lookup interface for resolving prompt overrides at render time."""
-
-    def resolve(
-        self,
-        descriptor: PromptDescriptor,
-        tag: str = "latest",
-    ) -> PromptOverride | None: ...
-
-    def upsert(
-        self,
-        descriptor: PromptDescriptor,
-        override: PromptOverride,
-    ) -> PromptOverride: ...
-
-    def delete(
-        self,
-        *,
-        ns: str,
-        prompt_key: str,
-        tag: str,
-    ) -> None: ...
-
-    def set_section_override(
-        self,
-        prompt: PromptLike,
-        *,
-        tag: str = "latest",
-        path: tuple[str, ...],
-        body: str,
-    ) -> PromptOverride: ...
-
-    def seed_if_necessary(
-        self,
-        prompt: PromptLike,
-        *,
-        tag: str = "latest",
-    ) -> PromptOverride: ...
 
 
 __all__ = [
