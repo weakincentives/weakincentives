@@ -145,7 +145,7 @@ class CodeReviewApp:
                 break
             if not user_prompt:
                 break
-            command, _space, _remainder = user_prompt.partition(" ")
+            command = user_prompt.split(" ", 1)[0]
             if command.lower() == "optimize":
                 self._handle_optimize_command()
                 continue
