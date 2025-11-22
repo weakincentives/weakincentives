@@ -32,7 +32,6 @@ from weakincentives.prompt.overrides import (
     PromptOverride,
     PromptOverridesStore,
 )
-from weakincentives.prompt.section import Section
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.prompt.workspace_digest import WorkspaceDigestSection
 from weakincentives.runtime.events import ToolInvoked
@@ -311,14 +310,6 @@ def test_optimize_validates_digest_section_type() -> None:
 
     with pytest.raises(PromptEvaluationError):
         adapter.optimize(prompt, session=Session())
-
-
-def test_clone_section_without_clone_returns_original() -> None:
-    adapter = _RecordingAdapter(mode="dataclass")
-    section = cast(Section[SupportsDataclass], object())
-    session = Session()
-
-    assert adapter._clone_section_for_session(section, session=session) is section
 
 
 def test_find_section_path_raises_for_missing_section() -> None:

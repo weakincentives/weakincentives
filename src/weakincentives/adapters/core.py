@@ -115,11 +115,13 @@ class ProviderAdapter(ABC):
         )
         workspace_section = self._resolve_workspace_section(prompt, prompt_name)
 
-        safe_workspace = self._clone_section_for_session(
-            workspace_section, session=inner_session
+        safe_workspace = workspace_section.clone(
+            session=inner_session,
+            bus=inner_session.event_bus,
         )
-        safe_workspace_digest = self._clone_section_for_session(
-            digest_section, session=inner_session
+        safe_workspace_digest = digest_section.clone(
+            session=inner_session,
+            bus=inner_session.event_bus,
         )
 
         optimization_prompt = Prompt[_OptimizationResponse](
@@ -190,18 +192,6 @@ class ProviderAdapter(ABC):
             scope=store_scope,
             section_key=digest_section.key,
         )
-
-    @staticmethod
-    def _clone_section_for_session(
-        section: Section[SupportsDataclass], *, session: SessionProtocol
-    ) -> Section[SupportsDataclass]:
-        clone = getattr(section, "clone", None)
-        if callable(clone):  # pragma: no cover - helper for optimize
-            return cast(
-                Section[SupportsDataclass],
-                clone(session=session, bus=session.event_bus),
-            )
-        return section
 
     def _resolve_workspace_section(
         self, prompt: Prompt[object], prompt_name: str
