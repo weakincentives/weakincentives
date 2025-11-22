@@ -55,6 +55,9 @@ this document.
 > **Contract**: Do not commit without running `make check`. The pre-commit hook
 > expects a clean run.
 
+> **Very important**: Always run `make check` and ensure it completes without
+> reporting any issues before committing.
+
 ## Day-to-Day Commands (Always via `uv run`)
 
 All targets live in the `Makefile` and run silently on success. Mirror that
