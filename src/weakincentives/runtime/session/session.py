@@ -15,10 +15,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from functools import wraps
 from threading import RLock
-from typing import Any, cast, override
+from typing import Any, Concatenate, Iterator, ParamSpec, TypeVar, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
@@ -42,6 +44,21 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "session"}
 
 
 type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _locked_method(
+    func: Callable[Concatenate["Session", _P], _R]
+) -> Callable[Concatenate["Session", _P], _R]:
+    @wraps(func)
+    def wrapper(session: "Session", *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with session._locked():
+            return func(session, *args, **kwargs)
+
+    return wrapper
 
 
 _PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
@@ -124,6 +141,11 @@ class Session(SessionProtocol):
         self._subscriptions_attached = False
         self._attach_to_bus(self._bus)
 
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        with self._lock:
+            yield
+
     def clone(
         self,
         *,
@@ -133,7 +155,7 @@ class Session(SessionProtocol):
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
 
-        with self._lock:
+        with self._locked():
             reducer_snapshot = [
                 (data_type, tuple(registrations))
                 for data_type, registrations in self._reducers.items()
@@ -154,11 +176,12 @@ class Session(SessionProtocol):
                     slice_type=registration.slice_type,
                 )
 
-        with clone._lock:
+        with clone._locked():
             clone._state = state_snapshot
 
         return clone
 
+    @_locked_method
     def register_reducer[S: SupportsDataclass](
         self,
         data_type: SessionSliceType,
@@ -175,28 +198,28 @@ class Session(SessionProtocol):
             reducer=cast(TypedReducer[Any], reducer),
             slice_type=target_slice_type,
         )
-        with self._lock:
-            bucket = self._reducers.setdefault(data_type, [])
-            bucket.append(registration)
-            _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
+        bucket = self._reducers.setdefault(data_type, [])
+        bucket.append(registration)
+        _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
 
     @override
+    @_locked_method
     def select_all[S: SupportsDataclass](self, slice_type: type[S]) -> tuple[S, ...]:
         """Return the tuple slice maintained for the provided type."""
 
-        with self._lock:
-            return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
+        return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
 
     @override
+    @_locked_method
     def seed_slice[S: SupportsDataclass](
         self, slice_type: type[S], values: Iterable[S]
     ) -> None:
         """Initialize or replace the stored tuple for the provided type."""
 
-        with self._lock:
-            self._state[slice_type] = tuple(values)
+        self._state[slice_type] = tuple(values)
 
     @override
+    @_locked_method
     def clear_slice[S: SupportsDataclass](
         self,
         slice_type: type[S],
@@ -204,27 +227,26 @@ class Session(SessionProtocol):
     ) -> None:
         """Remove items from the slice, optionally filtering by predicate."""
 
-        with self._lock:
-            existing = cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
-            if not existing:
-                return
-            if predicate is None:
-                self._state[slice_type] = EMPTY_SLICE
-                return
-            filtered = tuple(value for value in existing if not predicate(value))
-            self._state[slice_type] = filtered
+        existing = cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
+        if not existing:
+            return
+        if predicate is None:
+            self._state[slice_type] = EMPTY_SLICE
+            return
+        filtered = tuple(value for value in existing if not predicate(value))
+        self._state[slice_type] = filtered
 
     @override
+    @_locked_method
     def reset(self) -> None:
         """Clear all stored slices while preserving reducer registrations."""
 
-        with self._lock:
-            slice_types: set[SessionSliceType] = set(self._state)
-            for registrations in self._reducers.values():
-                for registration in registrations:
-                    slice_types.add(registration.slice_type)
+        slice_types: set[SessionSliceType] = set(self._state)
+        for registrations in self._reducers.values():
+            for registration in registrations:
+                slice_types.add(registration.slice_type)
 
-            self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
+        self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
 
     @property
     @override
@@ -237,7 +259,7 @@ class Session(SessionProtocol):
     def snapshot(self) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state."""
 
-        with self._lock:
+        with self._locked():
             state_snapshot: dict[SessionSliceType, SessionSlice] = dict(self._state)
         for ephemeral in (
             _TOOL_INVOKED_TYPE,
@@ -269,7 +291,7 @@ class Session(SessionProtocol):
             msg = f"Slice types not registered: {missing_names}"
             raise SnapshotRestoreError(msg)
 
-        with self._lock:
+        with self._locked():
             new_state: dict[SessionSliceType, SessionSlice] = dict(self._state)
             for slice_type in registered_slices:
                 new_state[slice_type] = snapshot.slices.get(slice_type, EMPTY_SLICE)
@@ -277,7 +299,7 @@ class Session(SessionProtocol):
             self._state = new_state
 
     def _registered_slice_types(self) -> set[SessionSliceType]:
-        with self._lock:
+        with self._locked():
             types: set[SessionSliceType] = set(self._state)
             for registrations in self._reducers.values():
                 for registration in registrations:
@@ -351,7 +373,7 @@ class Session(SessionProtocol):
     ) -> None:
         from .reducer_context import build_reducer_context
 
-        with self._lock:
+        with self._locked():
             registrations = list(self._reducers.get(data_type, ()))
             if not registrations:
                 default_reducer: TypedReducer[Any]
@@ -372,7 +394,7 @@ class Session(SessionProtocol):
         for registration in registrations:
             slice_type = registration.slice_type
             while True:
-                with self._lock:
+                with self._locked():
                     previous = self._state.get(slice_type, EMPTY_SLICE)
                 try:
                     result = registration.reducer(previous, event, context=context)
@@ -391,14 +413,14 @@ class Session(SessionProtocol):
                     )
                     break
                 normalized = tuple(result)
-                with self._lock:
+                with self._locked():
                     current = self._state.get(slice_type, EMPTY_SLICE)
                     if current is previous or current == normalized:
                         self._state[slice_type] = normalized
                         break
 
     def _attach_to_bus(self, bus: EventBus) -> None:
-        with self._lock:
+        with self._locked():
             if self._subscriptions_attached and self._bus is bus:
                 return
             self._bus = bus
