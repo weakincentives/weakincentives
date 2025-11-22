@@ -73,7 +73,9 @@ callers can safely assert on phase-specific error handling.
 1. clones of the prompt's workspace section (`PodmanSandboxSection` or `VfsToolsSection`) plus its digest section.
 
 The optimization run executes in an inner `Session` and `EventBus` so tool handlers used for standard prompts cannot
-mutate the original session. The result is stored according to the selected scope:
+mutate the original session. Callers may override this isolation by supplying an explicit
+`optimization_session`; in that case the method reuses the provided session and event bus verbatim. The result is stored
+according to the selected scope:
 
 - `OptimizationScope.SESSION`: call `set_workspace_digest` on the caller's session.
 - `OptimizationScope.GLOBAL`: require both `overrides_store` and `overrides_tag`; persist the digest in the overrides
@@ -138,9 +140,10 @@ returned by `deadline_provider_payload`.
 - Tool handlers run synchronously. If a handler raises `DeadlineExceededError` or the `Deadline` has already expired,
   `PromptEvaluationError` is raised and the provider turn aborts. Other exceptions are logged and converted into failed
   `ToolResult` instances that still flow back to the provider.
-- After a handler completes, the adapter publishes a `ToolInvoked` event and stores it in both the session snapshot and
-  the `PromptResponse.tool_results` tuple. When the publish fails the session rolls back to the snapshot taken before
-  the handler ran and the tool message is replaced with the aggregated reducer errors (`format_publish_failures`).
+- Before emitting an event, the adapter captures a session snapshot. After a handler completes it publishes a
+  `ToolInvoked` event and appends the instance to `PromptResponse.tool_results`. When the publish fails the session rolls
+  back to the saved snapshot and the tool message is replaced with the aggregated reducer errors
+  (`format_publish_failures`).
 - Tool messages forwarded to the provider contain the handler's message plus the rendered value (if the tool opted into
   sharing it). After structured output parsing succeeds, the final successful tool message is patched with the parsed
   payload so the provider can continue referencing it if needed.
@@ -155,8 +158,9 @@ supports it:
 - OpenAI: when `use_native_response_format=True`, adapters disable inline structured-output instructions and pass the
   schema under `response_format`. OpenAI responses include a `.parsed` payload which `ResponseParser` prefers. The
   parser accepts empty message text because the schema covers validation.
-- LiteLLM: always forwards the schema (LiteLLM proxies it to the target model) but still requires textual output for
-  parsing (`require_structured_output_text=True`) because the API does not return a structured `.parsed` payload.
+- LiteLLM: forwards the schema when structured output parsing is requested (LiteLLM proxies it to the target model) but
+  still requires textual output for parsing (`require_structured_output_text=True`) because the API does not return a
+  structured `.parsed` payload.
 
 When providers return schema-constrained payloads the parser calls `parse_schema_constrained_payload`. Otherwise it falls
 back to `parse_structured_output`, raising `PromptEvaluationError` on any mismatch. If `parse_output=False`, the parser
