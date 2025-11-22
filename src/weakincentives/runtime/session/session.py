@@ -14,13 +14,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
-from typing import Any, Concatenate, Iterator, ParamSpec, TypeVar, cast, override
+from typing import Any, Concatenate, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
@@ -46,16 +46,12 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "session"}
 type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
 
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
-
-def _locked_method(
-    func: Callable[Concatenate["Session", _P], _R]
-) -> Callable[Concatenate["Session", _P], _R]:
+def _locked_method[SessionT: "Session", **P, R](
+    func: Callable[Concatenate[SessionT, P], R],
+) -> Callable[Concatenate[SessionT, P], R]:
     @wraps(func)
-    def wrapper(session: "Session", *args: _P.args, **kwargs: _P.kwargs) -> _R:
-        with session._locked():
+    def wrapper(session: SessionT, *args: P.args, **kwargs: P.kwargs) -> R:
+        with session.locked():
             return func(session, *args, **kwargs)
 
     return wrapper
@@ -144,6 +140,11 @@ class Session(SessionProtocol):
     @contextmanager
     def _locked(self) -> Iterator[None]:
         with self._lock:
+            yield
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        with self._locked():
             yield
 
     def clone(
