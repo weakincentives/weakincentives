@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .overrides import PromptDescriptor, PromptOverride
+    from .overrides.versioning import PromptDescriptor, PromptLike, PromptOverride
 
 
 class PromptOverridesStoreProtocol(Protocol):
@@ -28,6 +28,36 @@ class PromptOverridesStoreProtocol(Protocol):
         descriptor: PromptDescriptor,
         tag: str = "latest",
     ) -> PromptOverride | None: ...
+
+    def upsert(
+        self,
+        descriptor: PromptDescriptor,
+        override: PromptOverride,
+    ) -> PromptOverride: ...
+
+    def delete(
+        self,
+        *,
+        ns: str,
+        prompt_key: str,
+        tag: str,
+    ) -> None: ...
+
+    def set_section_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],
+        body: str,
+    ) -> PromptOverride: ...
+
+    def seed_if_necessary(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+    ) -> PromptOverride: ...
 
 
 __all__ = ["PromptOverridesStoreProtocol"]
