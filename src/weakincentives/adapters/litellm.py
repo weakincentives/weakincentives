@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from datetime import timedelta
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
@@ -32,20 +31,15 @@ from ._provider_protocols import (
     ProviderCompletionResponse,
 )
 from ._tool_messages import serialize_tool_message
-from .core import (
-    PROMPT_EVALUATION_PHASE_REQUEST,
-    PromptEvaluationError,
-    PromptResponse,
-    ProviderAdapter,
-    SessionProtocol,
-)
+from .core import PromptResponse, ProviderAdapter, SessionProtocol
 from .shared import (
     LITELLM_ADAPTER_NAME,
     ToolChoice,
     build_json_schema_response_format,
-    deadline_provider_payload,
     first_choice,
     format_publish_failures,
+    guard_adapter_evaluate,
+    guard_provider_call,
     parse_tool_arguments,
     run_conversation,
 )
@@ -134,6 +128,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         self._model = model
         self._tool_choice: ToolChoice = tool_choice
 
+    @guard_adapter_evaluate
     @override
     def evaluate(
         self,
@@ -148,13 +143,6 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
         render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
-        if deadline is not None and deadline.remaining() <= timedelta(0):
-            raise PromptEvaluationError(
-                "Deadline expired before evaluation started.",
-                prompt_name=prompt_name,
-                phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                provider_payload=deadline_provider_payload(deadline),
-            )
         has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
             parse_output
@@ -203,14 +191,11 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             if response_format_payload is not None:
                 request_payload["response_format"] = response_format_payload
 
-            try:
-                return self._completion(**request_payload)
-            except Exception as error:  # pragma: no cover - network/SDK failure
-                raise PromptEvaluationError(
-                    "LiteLLM request failed.",
-                    prompt_name=prompt_name,
-                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                ) from error
+            return guard_provider_call(
+                lambda: self._completion(**request_payload),
+                request_error_message="LiteLLM request failed.",
+                prompt_name=prompt_name,
+            )
 
         def _select_choice(response: object) -> ProviderChoice:
             return cast(
