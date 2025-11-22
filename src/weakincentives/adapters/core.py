@@ -26,10 +26,14 @@ from ..prompt._types import SupportsDataclass
 from ..prompt.overrides import PromptLike, PromptOverridesStore
 from ..prompt.prompt import Prompt
 from ..prompt.section import Section
-from ..prompt.workspace_digest import WorkspaceDigestSection
 from ..runtime.events._types import EventBus, ToolInvoked
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
+from ..tools.digests import (
+    WorkspaceDigestSection,
+    clear_workspace_digest,
+    set_workspace_digest,
+)
 from ..tools.planning import PlanningStrategy, PlanningToolsSection
 from ..tools.podman import PodmanSandboxSection
 from ..tools.vfs import VfsToolsSection
@@ -167,7 +171,7 @@ class ProviderAdapter(ABC):
         digest = self._extract_digest(response=response, prompt_name=prompt_name)
 
         if store_scope is OptimizationScope.SESSION:
-            _ = outer_session.workspace_digest.set(digest_section.key, digest)
+            _ = set_workspace_digest(outer_session, digest_section.key, digest)
 
         if store_scope is OptimizationScope.GLOBAL:
             if overrides_store is None or overrides_tag is None:
@@ -184,7 +188,7 @@ class ProviderAdapter(ABC):
                 path=section_path,
                 body=digest,
             )
-            outer_session.workspace_digest.clear(digest_section.key)
+            clear_workspace_digest(outer_session, digest_section.key)
 
         return OptimizationResult(
             response=response,

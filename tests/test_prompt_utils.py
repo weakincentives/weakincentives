@@ -22,9 +22,12 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
 )
 from weakincentives.prompt.overrides.versioning import PromptDescriptor
-from weakincentives.prompt.workspace_digest import WorkspaceDigestSection
-from weakincentives.runtime.session import Session, WorkspaceDigest
-from weakincentives.runtime.session.workspace_digest import _digest_key
+from weakincentives.runtime.session import Session
+from weakincentives.tools.digests import (
+    WorkspaceDigest,
+    WorkspaceDigestSection,
+    _digest_key,
+)
 
 
 def _build_prompt() -> Prompt[str]:

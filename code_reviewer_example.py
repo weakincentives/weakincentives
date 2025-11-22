@@ -28,12 +28,7 @@ from uuid import UUID
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import OptimizationScope, ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.prompt import (
-    MarkdownSection,
-    Prompt,
-    SupportsDataclass,
-    WorkspaceDigestSection,
-)
+from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
@@ -42,6 +37,7 @@ from weakincentives.runtime.events import EventBus, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
+from weakincentives.tools.digests import WorkspaceDigestSection
 from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
 from weakincentives.tools.podman import PodmanSandboxSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection

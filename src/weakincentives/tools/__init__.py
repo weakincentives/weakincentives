@@ -26,6 +26,13 @@ from .asteval import (
     EvalParams,
     EvalResult,
 )
+from .digests import (
+    WorkspaceDigest,
+    WorkspaceDigestSection,
+    clear_workspace_digest,
+    latest_workspace_digest,
+    set_workspace_digest,
+)
 from .errors import DeadlineExceededError, ToolValidationError
 from .planning import (
     AddStep,
@@ -130,10 +137,15 @@ __all__ = [
     "VfsPath",
     "VfsToolsSection",
     "VirtualFileSystem",
+    "WorkspaceDigest",
+    "WorkspaceDigestSection",
     "WriteFile",
     "WriteFileParams",
     "build_dispatch_subagents_tool",
+    "clear_workspace_digest",
     "dispatch_subagents",
+    "latest_workspace_digest",
+    "set_workspace_digest",
 ]
 
 _PODMAN_EXPORTS = {

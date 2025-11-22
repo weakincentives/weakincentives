@@ -14,7 +14,7 @@ warning) when no digest exists yet.
   heading followed by the digest body.
 - Resolution order:
   1. **Session snapshot** – read the latest `WorkspaceDigest` entry stored in the
-     active `Session` via `session.workspace_digest.latest(section.key)`.
+     active session via `latest_workspace_digest(session, section.key)`.
   1. **Override fallback** – when the session slice is empty, use the override
      body provided by the prompt overrides store (overrides are applied exactly
      as stored).
@@ -62,15 +62,16 @@ def optimize(
 
 ### Scope & Persistence
 
-- `OptimizationScope.SESSION` (default) stores the digest only in
-  `session.workspace_digest`.
+- `OptimizationScope.SESSION` (default) stores the digest only in the session’s
+  `WorkspaceDigest` slice via `set_workspace_digest`.
 - `OptimizationScope.GLOBAL` additionally requires `overrides_store` and
   `overrides_tag`; the adapter resolves the digest section path and writes the
   rendered markdown through `PromptOverridesStore.set_section_override`. After a
   successful write the caller’s session slice is cleared so
   `WorkspaceDigestSection` immediately falls back to the override snapshot.
 - Only the session scope keeps the digest cached locally; global scope trades
-  the session entry for the persisted override so future renders stay in sync.
+  the session entry for the persisted override so future renders stay in sync
+  after `clear_workspace_digest` removes the stale snapshot.
 
 ### OptimizationResult
 

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
@@ -28,11 +28,7 @@ from ..logging import StructuredLogger, get_logger
 from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
-from .protocols import (
-    SessionProtocol,
-    SnapshotProtocol,
-    WorkspaceDigestSliceProtocol,
-)
+from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append
 from .snapshots import (
     Snapshot,
@@ -41,7 +37,6 @@ from .snapshots import (
     SnapshotState,
     normalize_snapshot_state,
 )
-from .workspace_digest import WorkspaceDigestHost, WorkspaceDigestSlice
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "session"})
 
@@ -128,9 +123,6 @@ class Session(SessionProtocol):
         self._lock = RLock()
         self._subscriptions_attached = False
         self._attach_to_bus(self._bus)
-        self.workspace_digest: WorkspaceDigestSliceProtocol = WorkspaceDigestSlice(
-            cast(WorkspaceDigestHost, self)
-        )
 
     def clone(
         self,
@@ -188,12 +180,14 @@ class Session(SessionProtocol):
             bucket.append(registration)
             _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
 
+    @override
     def select_all[S: SupportsDataclass](self, slice_type: type[S]) -> tuple[S, ...]:
         """Return the tuple slice maintained for the provided type."""
 
         with self._lock:
             return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
 
+    @override
     def seed_slice[S: SupportsDataclass](
         self, slice_type: type[S], values: Iterable[S]
     ) -> None:
@@ -201,6 +195,24 @@ class Session(SessionProtocol):
 
         with self._lock:
             self._state[slice_type] = tuple(values)
+
+    @override
+    def clear_slice[S: SupportsDataclass](
+        self,
+        slice_type: type[S],
+        predicate: Callable[[S], bool] | None = None,
+    ) -> None:
+        """Remove items from the slice, optionally filtering by predicate."""
+
+        with self._lock:
+            existing = cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
+            if not existing:
+                return
+            if predicate is None:
+                self._state[slice_type] = EMPTY_SLICE
+                return
+            filtered = tuple(value for value in existing if not predicate(value))
+            self._state[slice_type] = filtered
 
     @override
     def reset(self) -> None:

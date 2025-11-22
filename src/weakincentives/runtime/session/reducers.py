@@ -79,4 +79,24 @@ def replace_latest[T: SupportsDataclass](
     return (cast(T, event.value),)
 
 
-__all__ = ["append", "replace_latest", "upsert_by"]
+def replace_latest_by[T: SupportsDataclass, K](
+    key_fn: Callable[[T], K],
+) -> TypedReducer[T]:
+    """Return a reducer that keeps only the most recent item for each key."""
+
+    def reducer(
+        slice_values: tuple[T, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContextProtocol,
+    ) -> tuple[T, ...]:
+        del context
+        value = cast(T, event.value)
+        key = key_fn(value)
+        filtered = tuple(item for item in slice_values if key_fn(item) != key)
+        return (*filtered, value)
+
+    return pure(reducer)
+
+
+__all__ = ["append", "replace_latest", "replace_latest_by", "upsert_by"]

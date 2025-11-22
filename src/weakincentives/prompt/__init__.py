@@ -61,7 +61,6 @@ from .structured_output import (
 )
 from .tool import Tool, ToolContext, ToolHandler
 from .tool_result import ToolResult
-from .workspace_digest import WorkspaceDigestSection
 
 __all__ = [
     "Chapter",
@@ -103,7 +102,6 @@ __all__ = [
     "ToolOverride",
     "ToolRenderableResult",
     "ToolResult",
-    "WorkspaceDigestSection",
     "hash_json",
     "hash_text",
     "parse_structured_output",

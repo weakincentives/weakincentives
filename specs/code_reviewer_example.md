@@ -90,8 +90,8 @@ The shared adapter logic (see `ProviderAdapter.optimize`) builds its own
 optimization prompt using two short markdown sections
 (`Optimization Goal`, `Expectations`), the planning tools, and whichever
 workspace section matches the review prompt (Podman or VFS). The digest body is
-persisted via `session.workspace_digest.set` and, when callers request global
-scope, via `PromptOverridesStore.set_section_override`.
+persisted via `set_workspace_digest` and, when callers request global scope,
+via `PromptOverridesStore.set_section_override`.
 
 ## Logging & Observability
 

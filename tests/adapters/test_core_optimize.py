@@ -33,9 +33,14 @@ from weakincentives.prompt.overrides import (
     PromptOverridesStore,
 )
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.prompt.workspace_digest import WorkspaceDigestSection
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session
+from weakincentives.tools.digests import (
+    WorkspaceDigest,
+    WorkspaceDigestSection,
+    latest_workspace_digest,
+    set_workspace_digest,
+)
 from weakincentives.tools.vfs import VfsToolsSection
 
 
@@ -178,10 +183,19 @@ def test_optimize_persists_digest_from_output() -> None:
 
     result = adapter.optimize(prompt, session=session)
 
-    latest = session.workspace_digest.latest("workspace-digest")
+    latest = latest_workspace_digest(session, "workspace-digest")
     assert result.digest == "dataclass-digest"
     assert latest is not None
     assert getattr(latest, "body", None) == "dataclass-digest"
+
+
+def test_session_clear_slice_removes_entire_digest_slice() -> None:
+    session = Session()
+    set_workspace_digest(session, "workspace-digest", "value")
+
+    session.clear_slice(WorkspaceDigest)
+
+    assert latest_workspace_digest(session, "workspace-digest") is None
 
 
 def test_optimize_handles_string_output() -> None:
@@ -233,7 +247,7 @@ def test_optimize_updates_global_overrides() -> None:
     assert tag == "tag"
     assert path[-1] == "workspace-digest"
     assert body == result.digest
-    assert session.workspace_digest.latest("workspace-digest") is None
+    assert latest_workspace_digest(session, "workspace-digest") is None
 
 
 def test_optimize_global_scope_clears_existing_session_digest() -> None:
@@ -241,7 +255,7 @@ def test_optimize_global_scope_clears_existing_session_digest() -> None:
     overrides_store = _RecordingOverridesStore()
     prompt = _build_prompt()
     session = Session()
-    _ = session.workspace_digest.set("workspace-digest", "stale")
+    _ = set_workspace_digest(session, "workspace-digest", "stale")
 
     _ = adapter.optimize(
         prompt,
@@ -251,7 +265,7 @@ def test_optimize_global_scope_clears_existing_session_digest() -> None:
         session=session,
     )
 
-    assert session.workspace_digest.latest("workspace-digest") is None
+    assert latest_workspace_digest(session, "workspace-digest") is None
 
 
 def test_optimize_requires_overrides_inputs_for_global_scope() -> None:
@@ -271,7 +285,7 @@ def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     prompt = _build_prompt()
     session = Session()
-    _ = session.workspace_digest.set("workspace-digest", "existing")
+    _ = set_workspace_digest(session, "workspace-digest", "existing")
 
     with pytest.raises(PromptEvaluationError):
         adapter.optimize(
@@ -282,7 +296,7 @@ def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
             session=session,
         )
 
-    latest = session.workspace_digest.latest("workspace-digest")
+    latest = latest_workspace_digest(session, "workspace-digest")
     assert latest is not None
     assert getattr(latest, "body", None) == "existing"
 

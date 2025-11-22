@@ -14,20 +14,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from typing import Protocol
 
+from ...prompt._types import SupportsDataclass
 from ..events import EventBus
 from .snapshots import Snapshot
 
 type SnapshotProtocol = Snapshot
-
-
-class WorkspaceDigestSliceProtocol(Protocol):
-    def set(self, section_key: str, body: str) -> object: ...
-
-    def clear(self, section_key: str) -> None: ...
-
-    def latest(self, section_key: str) -> object | None: ...
 
 
 class SessionProtocol(Protocol):
@@ -42,7 +36,21 @@ class SessionProtocol(Protocol):
     @property
     def event_bus(self) -> EventBus: ...
 
-    workspace_digest: WorkspaceDigestSliceProtocol
+    def select_all(
+        self, slice_type: type[SupportsDataclass]
+    ) -> tuple[SupportsDataclass, ...]: ...
+
+    def seed_slice(
+        self,
+        slice_type: type[SupportsDataclass],
+        values: Iterable[SupportsDataclass],
+    ) -> None: ...
+
+    def clear_slice(
+        self,
+        slice_type: type[SupportsDataclass],
+        predicate: Callable[[SupportsDataclass], bool] | None = None,
+    ) -> None: ...
 
 
-__all__ = ["SessionProtocol", "SnapshotProtocol", "WorkspaceDigestSliceProtocol"]
+__all__ = ["SessionProtocol", "SnapshotProtocol"]

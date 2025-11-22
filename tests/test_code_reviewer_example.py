@@ -41,7 +41,11 @@ from weakincentives.prompt.overrides import (
     PromptDescriptor,
 )
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered
-from weakincentives.runtime.session import Session, WorkspaceDigest
+from weakincentives.runtime.session import Session
+from weakincentives.tools.digests import (
+    latest_workspace_digest,
+    set_workspace_digest,
+)
 
 
 class _RepositoryOptimizationAdapter:
@@ -85,7 +89,7 @@ class _RepositoryOptimizationAdapter:
         assert session is not None
         del optimization_session
         self.calls.append(f"optimize:{prompt.key}")
-        session.workspace_digest.set("workspace-digest", self.instructions)
+        set_workspace_digest(session, "workspace-digest", self.instructions)
         if overrides_store is not None and overrides_tag is not None:
             digest_node = next(
                 node
@@ -208,7 +212,7 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
         path=digest_node.path,
         body="- Override digest",
     )
-    session.workspace_digest.set("workspace-digest", "- Session digest")
+    set_workspace_digest(session, "workspace-digest", "- Session digest")
 
     rendered = prompt.render(
         ReviewTurnParams(request="demo request"),
@@ -235,9 +239,7 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
     assert override is not None
     placeholder_body = override.sections["workspace-digest",].body
     assert "Workspace digest unavailable" in placeholder_body
-    session_digest = cast(
-        WorkspaceDigest | None, app.session.workspace_digest.latest("workspace-digest")
-    )
+    session_digest = latest_workspace_digest(app.session, "workspace-digest")
     assert session_digest is not None
     assert session_digest.body == "- Repo instructions from stub"
     assert adapter.calls == ["optimize:code-review-session"]
