@@ -170,7 +170,6 @@ class ProviderAdapter(ABC):
             _ = outer_session.workspace_digest.set(digest_section.key, digest)
 
         if store_scope is OptimizationScope.GLOBAL:
-            outer_session.workspace_digest.clear(digest_section.key)
             if overrides_store is None or overrides_tag is None:
                 message = "Global scope requires overrides_store and overrides_tag."
                 raise PromptEvaluationError(
@@ -185,6 +184,7 @@ class ProviderAdapter(ABC):
                 path=section_path,
                 body=digest,
             )
+            outer_session.workspace_digest.clear(digest_section.key)
 
         return OptimizationResult(
             response=response,
