@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
@@ -243,7 +244,19 @@ def parse_tool_arguments(
     return arguments
 
 
-def execute_tool_call(
+@dataclass(slots=True)
+class ToolExecutionOutcome:
+    """Result of executing a tool handler."""
+
+    tool: Tool[SupportsDataclass, SupportsToolResult]
+    params: SupportsDataclass
+    result: ToolResult[SupportsToolResult]
+    call_id: str | None
+    log: StructuredLogger
+
+
+@contextmanager
+def tool_execution(
     *,
     adapter_name: AdapterName,
     adapter: ProviderAdapter[Any],
@@ -256,11 +269,10 @@ def execute_tool_call(
     prompt_name: str,
     provider_payload: dict[str, Any] | None,
     deadline: Deadline | None,
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
     parse_arguments: ToolArgumentsParser,
     logger_override: StructuredLogger | None = None,
-) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
-    """Execute a provider tool call and publish the resulting event."""
+) -> Iterator[ToolExecutionOutcome]:
+    """Context manager that executes a tool call and standardizes logging."""
 
     function = tool_call.function
     tool_name = function.name
@@ -375,32 +387,50 @@ def execute_tool_call(
     if tool_params is None:  # pragma: no cover - defensive
         raise RuntimeError("Tool parameters were not parsed.")
 
+    yield ToolExecutionOutcome(
+        tool=tool,
+        params=tool_params,
+        result=tool_result,
+        call_id=call_id,
+        log=log,
+    )
+
+
+def _publish_tool_invocation(
+    *,
+    adapter_name: AdapterName,
+    prompt_name: str,
+    session: SessionProtocol,
+    bus: EventBus,
+    outcome: ToolExecutionOutcome,
+    format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
+) -> ToolInvoked:
     snapshot = session.snapshot()
     session_id = getattr(session, "session_id", None)
-    tool_value = tool_result.value
+    tool_value = outcome.result.value
     dataclass_value: SupportsDataclass | None = None
     if is_dataclass_instance(tool_value):
         dataclass_value = cast(SupportsDataclass, tool_value)  # pyright: ignore[reportUnnecessaryCast]
 
-    rendered_output = tool_result.render()
+    rendered_output = outcome.result.render()
 
     invocation = ToolInvoked(
         prompt_name=prompt_name,
         adapter=adapter_name,
-        name=tool_name,
-        params=tool_params,
-        result=cast(ToolResult[object], tool_result),
+        name=outcome.tool.name,
+        params=outcome.params,
+        result=cast(ToolResult[object], outcome.result),
         session_id=session_id,
         created_at=datetime.now(UTC),
         value=dataclass_value,
         rendered_output=rendered_output,
-        call_id=call_id,
+        call_id=outcome.call_id,
         event_id=uuid4(),
     )
     publish_result = bus.publish(invocation)
     if not publish_result.ok:
         session.rollback(snapshot)
-        log.warning(
+        outcome.log.warning(
             "Session rollback triggered after publish failure.",
             event="session_rollback_due_to_publish_failure",
         )
@@ -408,7 +438,7 @@ def execute_tool_call(
             getattr(failure.handler, "__qualname__", repr(failure.handler))
             for failure in publish_result.errors
         ]
-        log.error(
+        outcome.log.error(
             "Tool event publish failed.",
             event="tool_event_publish_failed",
             context={
@@ -416,14 +446,59 @@ def execute_tool_call(
                 "failed_handlers": failure_handlers,
             },
         )
-        tool_result.message = format_publish_failures(publish_result.errors)
+        outcome.result.message = format_publish_failures(publish_result.errors)
     else:
-        log.debug(
+        outcome.log.debug(
             "Tool event published.",
             event="tool_event_published",
             context={"handler_count": publish_result.handled_count},
         )
-    return invocation, tool_result
+    return invocation
+
+
+def execute_tool_call(
+    *,
+    adapter_name: AdapterName,
+    adapter: ProviderAdapter[Any],
+    prompt: Prompt[Any],
+    rendered_prompt: RenderedPrompt[Any] | None,
+    tool_call: ProviderToolCall,
+    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
+    bus: EventBus,
+    session: SessionProtocol,
+    prompt_name: str,
+    provider_payload: dict[str, Any] | None,
+    deadline: Deadline | None,
+    format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
+    parse_arguments: ToolArgumentsParser,
+    logger_override: StructuredLogger | None = None,
+) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
+    """Execute a provider tool call and publish the resulting event."""
+
+    with tool_execution(
+        adapter_name=adapter_name,
+        adapter=adapter,
+        prompt=prompt,
+        rendered_prompt=rendered_prompt,
+        tool_call=tool_call,
+        tool_registry=tool_registry,
+        bus=bus,
+        session=session,
+        prompt_name=prompt_name,
+        provider_payload=provider_payload,
+        deadline=deadline,
+        parse_arguments=parse_arguments,
+        logger_override=logger_override,
+    ) as outcome:
+        invocation = _publish_tool_invocation(
+            adapter_name=adapter_name,
+            prompt_name=prompt_name,
+            session=session,
+            bus=bus,
+            outcome=outcome,
+            format_publish_failures=format_publish_failures,
+        )
+    return invocation, outcome.result
 
 
 def build_json_schema_response_format(
@@ -602,6 +677,7 @@ __all__ = [
     "first_choice",
     "format_publish_failures",
     "message_text_content",
+    "tool_execution",
     "parse_schema_constrained_payload",
     "parse_tool_arguments",
     "run_conversation",
@@ -692,8 +768,7 @@ class ToolExecutor:
                     tool_name=tool_name,
                     deadline=self.deadline,
                 )
-
-            invocation, tool_result = execute_tool_call(
+            with tool_execution(
                 adapter_name=self.adapter_name,
                 adapter=self.adapter,
                 prompt=self.prompt,
@@ -705,19 +780,26 @@ class ToolExecutor:
                 prompt_name=self.prompt_name,
                 provider_payload=provider_payload,
                 deadline=self.deadline,
-                format_publish_failures=self.format_publish_failures,
                 parse_arguments=self.parse_arguments,
                 logger_override=self.logger_override,
-            )
+            ) as outcome:
+                invocation = _publish_tool_invocation(
+                    adapter_name=self.adapter_name,
+                    prompt_name=self.prompt_name,
+                    session=self.session,
+                    bus=self.bus,
+                    outcome=outcome,
+                    format_publish_failures=self.format_publish_failures,
+                )
             self._tool_events.append(invocation)
 
             tool_message = {
                 "role": "tool",
                 "tool_call_id": getattr(tool_call, "id", None),
-                "content": self.serialize_tool_message_fn(tool_result),
+                "content": self.serialize_tool_message_fn(outcome.result),
             }
             messages.append(tool_message)
-            self._tool_message_records.append((tool_result, tool_message))
+            self._tool_message_records.append((outcome.result, tool_message))
 
         return messages, next_tool_choice
 
