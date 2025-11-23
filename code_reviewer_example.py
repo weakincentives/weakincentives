@@ -529,6 +529,13 @@ def _persist_session_snapshot(session: Session) -> Path | None:
         )
         return None
     else:
+        _LOGGER.info(
+            "Session snapshot persisted.",
+            extra={
+                "session_id": str(session.session_id),
+                "snapshot_path": str(snapshot_path),
+            },
+        )
         return snapshot_path
 
 

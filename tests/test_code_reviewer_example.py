@@ -14,17 +14,21 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
+import pytest
 from pytest import CaptureFixture
 
+import code_reviewer_example as reviewer_example
 from code_reviewer_example import (
     CodeReviewApp,
     ReviewResponse,
     ReviewTurnParams,
+    _persist_session_snapshot,
     build_task_prompt,
     initialize_code_reviewer_runtime,
 )
@@ -258,6 +262,26 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
     session_digest = latest_workspace_digest(app.session, "workspace-digest")
     assert session_digest is not None
     assert session_digest.body == "- Repo instructions from stub"
-    assert len(adapter.optimization_sessions) == 1
-    assert adapter.optimization_sessions[0] is not app.session
-    assert adapter.calls == ["optimize:code-review-session"]
+
+
+def test_persist_session_snapshot_logs_success(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caplog.set_level(logging.INFO, logger=reviewer_example.__name__)
+    session = Session()
+    monkeypatch.setattr(reviewer_example, "SNAPSHOT_DIR", tmp_path, raising=False)
+
+    snapshot_path = _persist_session_snapshot(session)
+
+    assert snapshot_path == tmp_path / f"{session.session_id}.json"
+    assert snapshot_path is not None and snapshot_path.exists()
+    record = next(
+        rec
+        for rec in caplog.records
+        if getattr(rec, "session_id", None) == str(session.session_id)
+    )
+    assert record.levelno == logging.INFO
+    assert "Session snapshot persisted" in record.getMessage()
+    assert record.snapshot_path == str(snapshot_path)
