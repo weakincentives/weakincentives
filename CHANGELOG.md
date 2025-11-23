@@ -6,9 +6,45 @@ Release highlights for weakincentives.
 
 _Nothing yet._
 
-### Session & Event Bus
+## v0.10.0 - 2025-11-22
 
-- `Session` now optionally instantiates its own `InProcessEventBus` if one is not provided, reducing boilerplate for common use cases (`session = Session()` works out of the box).
+### Public API & Imports
+
+- Curated exports now live in `api.py` modules across the root package and major
+  subsystems; `__init__` files lazy-load those surfaces to keep import paths
+  stable while trimming broad re-exports.
+
+### Prompt Authoring & Overrides
+
+- Rendered prompts now include hierarchical numbering (with punctuation) on
+  section headings and descriptors so multi-section outputs remain readable and
+  traceable.
+- Prompts, chapters, and sections have explicit clone contracts that rebind to
+  new sessions and event buses, keeping reusable prompt trees isolated.
+- The prompt overrides store protocol is unified and re-exported through the
+  versioned overrides module so custom stores and adapters target the same
+  interface.
+- Structured output metadata now flows through the shared prompt protocols and
+  rendered prompts, simplifying adapters that need container/dataclass details
+  without provider-specific shims.
+
+### Tools & Execution
+
+- Provider tool calls run through a shared `tool_execution` context manager that
+  standardizes argument parsing, deadline enforcement, logging, and publish/
+  rollback handling; executor wrappers stay thin and fix prior mutable default
+  edge cases.
+- Added deadline coverage and clearer telemetry around tool execution to surface
+  timeouts consistently.
+- Introduced workspace digest helpers (`WorkspaceDigest`, `WorkspaceDigestSection`)
+  so sessions can persist and render cached workspace summaries across runs.
+
+### Session & Concurrency
+
+- `Session` now owns an in-process event bus by default, removing boilerplate
+  for common setups while preserving the ability to inject a custom bus.
+- Added a reusable locking helper around session mutations to guard reducers and
+  state updates without sprinkling ad hoc locks.
 
 ## v0.9.0 - 2025-11-17
 
