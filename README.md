@@ -121,6 +121,16 @@ uv run --extra wink wink debug snapshots/5de6bba7-d699-4229-9747-d68664d8f91e.js
   --host 127.0.0.1 --port 8000
 ```
 
+The UI is tuned for quick inspection of captured runs:
+
+- Snapshot metadata (path, created timestamp, schema version) is pinned to the
+  header so you always know what file is being viewed.
+- A slice sidebar lists every slice type with item counts; selecting one streams
+  the items into a JSON viewer with copy-to-clipboard and collapse controls.
+- A reload action re-reads the snapshot from disk so you can iterate on
+  reproducible runs without restarting the server, and a raw download button
+  fetches the full JSON for archival or diffing.
+
 ## Tutorial: An Interactive Code Review Assistant
 
 Let's build a simple, interactive code review assistant. This agent will be able to browse a codebase, answer questions about it, and create plans for more complex reviews. We'll see how WINK helps build this in a structured, observable, and safe way.
