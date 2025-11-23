@@ -66,6 +66,7 @@ Adapter responsibilities:
 ### Adapter type map
 
 - **LiteLLMAdapter** (`src/weakincentives/adapters/litellm.py`)
+
   - **Configuration surfaces:** Optional dependency (`uv sync --extra litellm`); requires `model` and accepts
     `tool_choice`; callers provide either a `completion` callable or a `completion_factory` plus `completion_kwargs`
     to wrap `litellm.completion`. Structured output requests always enable
@@ -75,6 +76,7 @@ Adapter responsibilities:
     outputs rely on textual content and prompt-level parsing.
 
 - **OpenAIAdapter** (`src/weakincentives/adapters/openai.py`)
+
   - **Configuration surfaces:** Optional dependency (`uv sync --extra openai`); requires `model` and accepts
     `tool_choice`; callers can pass a concrete client or a `client_factory` with `client_kwargs`. The
     `use_native_response_format` toggle disables inline output instructions when structured parsing is requested and
