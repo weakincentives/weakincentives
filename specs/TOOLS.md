@@ -246,10 +246,10 @@ and event publication:
 1. **Registry lookup** – the adapter resolves the provider-supplied tool name against the
    rendered prompt's registry, erroring early when the name is missing or the handler is
    `None`.
-1. **Argument parsing** – tool arguments are decoded from the provider payload, validated
-   against the params dataclass with `pydantic.dataclasses.parse`, and converted into the
-   typed params instance. Validation failures produce a synthetic params object (with raw
-   arguments and error details) and a `ToolResult` marked unsuccessful.
+1. **Argument parsing** – tool arguments are decoded from the provider payload and parsed
+   into the typed params dataclass via `weakincentives.serde.parse.parse(..., extra="forbid")`.
+   Validation failures produce a synthetic params object (with raw arguments and error
+   details) and a `ToolResult` marked unsuccessful.
 1. **Deadline check** – when the orchestrator passes a deadline, the dispatcher refuses to
    invoke the handler once the deadline has elapsed and raises a prompt-level deadline
    error instead of allowing the handler to run.
@@ -368,8 +368,8 @@ handlers cooperate through a consistent contract so the LLM can recover graceful
   Long-running work should offload to background primitives and return promptly with
   progress metadata to avoid blocking streaming responses.
 - **Dataclass-only schemas** – params and results must be dataclasses (or dataclass-like
-  objects accepted by `pydantic.dataclasses.parse`). Arbitrary mappings/TypedDicts are not
-  supported in the registry and will fail validation.
+  objects accepted by `weakincentives.serde.parse.parse`). Arbitrary mappings/TypedDicts are
+  not supported in the registry and will fail validation.
 - **Payload visibility** – setting `exclude_value_from_context=True` hides the structured
   payload from provider tool messages but not from reducers or logs; avoid using it as a
   security boundary.
