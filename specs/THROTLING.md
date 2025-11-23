@@ -4,7 +4,23 @@ This spec describes a principled approach for detecting and recovering from
 `openai.RateLimitError` and analogous throttling responses from other model
 providers. The goal is to protect upstream services, preserve session-level
 invariants, and provide predictable caller experience while maximizing useful
-throughput.
+throughput. It also serves as a reference for the current implementation so we
+can see what is already in place, what is missing, and where provider nuances
+matter.
+
+## Rationale and scope
+
+- **Preserve upstream health**: Throttling is a defensive posture that keeps the
+  orchestrator from amplifying congestion or blowing through quotas when
+  providers start pushing back. The strategy must assume that retrying too
+  aggressively can worsen the incident.
+- **Scope boundaries**: Throttling applies to outbound provider calls issued by
+  adapters through the shared conversation runner. Local tool execution and
+  prompt rendering stay out of scope except for the telemetry hooks that help
+  correlate throttle events with the full request lifecycle.
+- **Design + reference**: This document documents the intended behavior and
+  anchors it to current error handling so implementers can reason about the gap
+  between design and runtime reality.
 
 ## Goals and guardrails
 
@@ -16,6 +32,19 @@ throughput.
 - **Bound latency**: Cap retry windows so flows terminate in a predictable time.
 - **Visibility first**: Emit structured telemetry for every throttle event to
   guide tuning and capacity planning.
+
+## Principles for the throttling strategy
+
+- **Explicit classification**: Distinguish transient throttling from quota
+  exhaustion and from application-level timeouts before deciding whether to
+  retry.
+- **Provider-aware but adapter-neutral**: Normalize provider payloads into a
+  shared throttle vocabulary so the conversation runner can behave consistently
+  regardless of which adapter raised the error.
+- **Fail predictable**: Use bounded budgets and surface structured failure
+  states so callers can degrade gracefully instead of waiting indefinitely.
+- **Observable by default**: Emit structured events and metrics at each decision
+  point so operators can trace retries, exits, and provider responses.
 
 ## Taxonomy of throttling signals
 
@@ -72,6 +101,30 @@ throughput.
   on `OpenAIAdapter` and `LiteLLMAdapter`). The default policy should be shared
   via a helper in `adapters.shared` so both adapters stay aligned and new
   providers can opt in without duplicating constants.
+
+## Current implementation reference and gaps
+
+- **Error surfacing today**: `run_conversation` currently calls the provider
+  once and raises `PromptEvaluationError` immediately when payloads are missing
+  or invalid (for example, when a provider response lacks a `message` or when
+  parsing structured output fails). Throttle responses therefore bubble up as
+  generic request/response failures rather than a typed throttle path.
+- **Backoff status**: No retry loop or jittered delay exists yet. The
+  conversation runner only checks `Deadline` guards before each provider call
+  and aborts if the budget is exhausted, so any future backoff implementation
+  must account for time already consumed before a throttle signal arrives.
+- **Provider nuance coverage**:
+  - OpenAI: `_call_provider` wraps any SDK exception in a request-phase
+    `PromptEvaluationError` without inspecting status codes or headers. There is
+    no normalization of `Retry-After`, `RateLimitError`, or quota payloads.
+  - LiteLLM: `_call_provider` similarly wraps SDK exceptions as request-phase
+    failures with no throttle-specific parsing or retry hints. This keeps the
+    surface aligned with OpenAI but offers no provider-specific guidance yet.
+- **Caveats**: Because errors are not typed as throttle events, telemetry and
+  observability hooks cannot distinguish throttling from other provider
+  failures. Implementers should expect to introduce a `ThrottleError` wrapper
+  and structured logging before enabling backoff to avoid silent behavior
+  changes.
 
 ## Retry policy
 
