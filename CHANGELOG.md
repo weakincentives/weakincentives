@@ -4,7 +4,9 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-_Nothing yet._
+- Documented the prompt optimizer contract, introducing snapshot-based planning
+  and validation guidance for override workflows plus descriptor-bearing
+  `PromptRendered` events.
 
 ### Session & Event Bus
 
