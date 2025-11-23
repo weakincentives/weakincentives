@@ -5,7 +5,42 @@
 This document extends the built-in planning prompt section so orchestrators can tailor
 its instructions to different reasoning styles. The current `PlanningToolsSection`
 always emits the same guidance block; this spec introduces a strategy enum that
-swaps the descriptive copy while keeping the tool surface identical.
+swaps the descriptive copy while keeping the tool surface identical. Treat this
+document as both the design rationale (why strategies exist and how they should
+feel) and a reference guide (where to hook strategies into prompts, configuration,
+and testing).
+
+## Guiding Principles
+
+- **Prompt house style is non-negotiable**: Strategy-specific copy must respect the
+  rules in `specs/PROMPTS.md` about ASCII-only text, concise headings, imperative
+  phrasing, and quiet tone. Do not reformat list structures or heading counts when
+  swapping strategies.
+- **Planning remains tool-centric**: The mindset text can change, but every
+  strategy must still foreground the planning tool invocation flow described in
+  `specs/PLANNING_TOOL.md` and `specs/PROMPTS_COMPOSITION.md`. Planning is a tool
+  engagement, not a free-form essay.
+- **State transitions stay observable**: Each strategy should reinforce status and
+  note updates on the plan steps so downstream agents can read what happened.
+  Avoid copy that encourages inline stream-of-consciousness outside the plan
+  object.
+- **Default path must be backwards compatible**: Selecting no strategy should emit
+  the existing guidance block to protect all legacy prompt templates and tests.
+
+## Scope and Use Cases
+
+Planning strategies are only responsible for tuning the instructional copy inside
+the planning tools section of a prompt. They do **not**:
+
+- Alter the structure or schema of plan objects.
+- Change tool schemas or the routing logic for planning vs. direct tool calls.
+- Replace prompt sections outside the planning block (e.g., safety chapters,
+  workspace overviews, or structured output constraints).
+
+Use a strategy when you need to steer the model toward a specific workflow without
+rewriting prompt templates. Pair strategy selection with existing prompt
+composition APIs described in `specs/PROMPTS_COMPOSITION.md` so the same prompt
+layout can support multiple reasoning flavours.
 
 ## Goals
 
@@ -15,6 +50,25 @@ swaps the descriptive copy while keeping the tool surface identical.
   preserving the existing markdown structure and house style.
 - Keep the default behaviour identical to the current output so no change is
   observed unless a strategy is explicitly chosen.
+
+## Configuration and Integration Points
+
+- **Section entrypoint**: Strategies are selected via the `strategy` argument on
+  `PlanningToolsSection` in `weakincentives.tools.planning.section`. The section
+  wiring and prompt assembly patterns live in `specs/PROMPTS_COMPOSITION.md` and
+  `specs/CHAPTERS.md`—reuse those patterns rather than inventing bespoke
+  templates.
+- **Prompt templates**: The base planning copy currently mirrors the planning
+  templates documented in `specs/PLANNING_TOOL.md` and the broader prompt
+  conventions in `specs/PROMPTS.md`. When editing strategy text, cross-check the
+  rendered output against those templates to avoid drift.
+- **Runtime configuration**: Strategy selection should flow from the session or
+  prompt configuration surface (e.g., prompt constructor options). Avoid hard
+  coding strategy choices inside tools or adapters so orchestration layers can
+  override defaults.
+- **Testing**: Snapshot tests in the prompt module should assert the rendered
+  markdown for each strategy. Add or update fixtures when the copy changes to keep
+  coverage meaningful.
 
 ## API Additions
 
@@ -67,6 +121,20 @@ following guidance:
   paragraph(s) should vary.
 - Update regression tests (or add new ones) to snapshot the rendered markdown for
   each strategy so future edits remain intentional.
+
+## Known Caveats
+
+- **Template drift**: Because strategy copy is free text, it can silently diverge
+  from the canonical planning tool description. Periodically compare the rendered
+  markdown with the examples in `specs/PLANNING_TOOL.md` to ensure the plan
+  lifecycle remains aligned.
+- **Section ordering**: The planning section may appear alongside safety or
+  workspace context chapters. Strategies must not assume they are the first or
+  only instructions the model sees; avoid references like "above" or "previous"
+  that depend on placement.
+- **Session constraints**: Some orchestration flows may disable planning tools in
+  favour of direct tool calls. Strategy selection should no-op when planning is
+  unavailable rather than producing contradictory guidance.
 
 ## Backwards Compatibility
 
