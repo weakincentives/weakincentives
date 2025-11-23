@@ -7,6 +7,26 @@ Allow orchestration hosts to enforce a wall-clock deadline for an entire
 window closes. The deadline is provided by the caller and applies uniformly to
 all nested work spawned during that evaluation.
 
+## Rationale
+
+- Protect hosts from runaway evaluations and tool handlers that would otherwise
+  overrun their resource budgets.
+- Standardize how providers, tools, and subagents receive deadline data so
+  integrations can make consistent decisions about when to abort.
+- Preserve compatibility with existing prompts by keeping the deadline optional
+  while still enforcing validation when a value is present.
+
+## Scope
+
+- Applies to every provider adapter (`openai`, `litellm`, and shared orchestration
+  helpers) plus all tool handler entry points executed through
+  `ToolContext.deadline`.
+- Covers deadline validation, propagation into rendered prompts, enforcement
+  before provider requests, and translation of tool-level deadline errors into
+  prompt failures.
+- Excludes any out-of-band cancellation of in-flight provider calls; enforcement
+  happens at discrete checkpoints in the orchestrator and inside tool handlers.
+
 ## API Changes
 
 - Extend `ProviderAdapter.evaluate` with a dedicated keyword-only argument for
@@ -51,6 +71,39 @@ all nested work spawned during that evaluation.
 - Introduce a `DeadlineExceededError(RuntimeError)` in `weakincentives.tools.errors`.
   Tools raise it when they cannot finish before the cutoff.
 
+## Implementation today
+
+- **Value object (`weakincentives.deadlines.Deadline`)** – Validates
+  timezone-aware expirations at construction, rejects deadlines fewer than one
+  second in the future, and exposes `remaining()` for shared comparisons.
+  `remaining()` enforces a timezone-aware `now` argument and uses the same UTC
+  clock source as `__post_init__` for consistency.
+- **Adapter entrypoints (`openai`, `litellm`)** – `evaluate()` guards immediately
+  after collecting render inputs: when `deadline.remaining()` is non-positive,
+  the adapters raise `PromptEvaluationError` with `phase="request"` before the
+  provider is called. When a deadline is provided it replaces
+  `RenderedPrompt.deadline` so downstream helpers see the same value.
+- **Conversation runner (`adapters.shared.run_conversation`)** – Picks the
+  effective deadline from the explicit argument or the rendered prompt, then
+  carries it through each loop iteration.
+- **Pre-flight checks (`ConversationRunner._ensure_deadline_remaining`)** –
+  Called before every provider request and during response finalization to
+  translate an expired deadline into `PromptEvaluationError` tagged with
+  `phase="request"` or `phase="response"` respectively. Provider payloads
+  include `deadline_expires_at` when available.
+- **Tool execution (`ToolExecutor` and `tool_execution`)** – Checks
+  `deadline.remaining()` before entering each tool call and again inside the
+  handler context. When time has elapsed, `_raise_tool_deadline_error()` raises a
+  `PromptEvaluationError` with `phase="tool"` and a provider payload containing
+  the ISO timestamp. Handlers that raise `DeadlineExceededError` are translated
+  into the same prompt error shape.
+- **Propagation to tool context** – `ToolContext.deadline` passes the active
+  deadline to handlers, allowing them to compute remaining time or raise
+  `DeadlineExceededError` proactively.
+- **Provider payloads** – `deadline_provider_payload()` serializes
+  `deadline.expires_at` to ISO-8601 for structured logging and telemetry across
+  provider, tool, and finalization paths.
+
 ## Deadline Propagation
 
 1. **Rendered Prompt Metadata** – After validation the orchestrator stores the
@@ -89,6 +142,20 @@ all nested work spawned during that evaluation.
 - **Polling & Retries** – Any retry loops (for streaming responses or provider
   backoffs) must re-check the deadline before each iteration to avoid overshooting
   the wall-clock budget.
+
+## Caveats & limitations
+
+- Deadline checks happen at well-defined checkpoints (before provider calls,
+  before tool execution, and while finalizing responses) but do not interrupt
+  in-flight SDK requests; long-running provider calls may still consume time
+  past the cutoff.
+- Tool handlers must cooperate by consulting `context.deadline` or raising
+  `DeadlineExceededError`; the runtime cannot preempt handlers that ignore the
+  deadline.
+- The minimum one-second buffer may be too coarse for extremely short-running
+  tasks and could reject aggressive deadlines that are valid for specific hosts.
+- Deadlines rely on synchronized UTC clocks between callers and the runtime; skew
+  can cause premature expirations or unintended slack.
 
 ## Observability
 
