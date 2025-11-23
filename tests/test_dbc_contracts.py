@@ -127,6 +127,21 @@ def test_invariant_can_be_skipped_for_helpers() -> None:
         buf.append(1)
 
 
+def test_invariant_is_inert_when_disabled() -> None:
+    @invariant(lambda self: self.balance >= 0)
+    class Counter:
+        def __init__(self) -> None:
+            self.balance = 0
+
+        def withdraw(self, amount: int) -> None:
+            self.balance -= amount
+
+    counter = Counter()
+    with dbc_enabled(False):
+        counter.withdraw(5)
+    assert counter.balance == -5
+
+
 def test_pure_detects_mutation() -> None:
     @pure
     def mutate(values: list[int]) -> list[int]:

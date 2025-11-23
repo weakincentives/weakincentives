@@ -19,6 +19,7 @@ import logging
 import os
 import sys
 import textwrap
+import weakref
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +45,7 @@ from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
+SNAPSHOT_DIR = PROJECT_ROOT / "snapshots"
 PROMPT_OVERRIDES_TAG_ENV = "CODE_REVIEW_PROMPT_TAG"
 SUNFISH_MOUNT_INCLUDE_GLOBS: tuple[str, ...] = (
     "*.md",
@@ -159,6 +161,7 @@ class CodeReviewApp:
             print("-" * 23 + "\n")
 
         print("Goodbye.")
+        _persist_session_snapshot(self.session)
 
     def _evaluate_turn(self, user_prompt: str) -> str:
         response = self.adapter.evaluate(
@@ -181,6 +184,7 @@ class CodeReviewApp:
             session=self.session,
             optimization_session=optimization_session,
         )
+        _persist_session_snapshot(optimization_session)
         digest = result.digest.strip()
         print("\nWorkspace digest persisted for future review turns:\n")
         print(digest)
@@ -368,6 +372,7 @@ def _create_runtime_context(
 def _build_logged_session() -> Session:
     session = Session()
     _attach_logging_subscribers(session.event_bus)
+    _register_snapshot_persistence(session)
     return session
 
 
@@ -507,6 +512,38 @@ def _coerce_for_log(payload: object) -> object:
     if isinstance(payload, set):
         return sorted(_coerce_for_log(item) for item in payload)
     return str(payload)
+
+
+def _persist_session_snapshot(session: Session) -> Path | None:
+    """Persist the session snapshot to `snapshots/<session_id>.json`."""
+
+    snapshot_path = SNAPSHOT_DIR / f"{session.session_id}.json"
+    try:
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_json = session.snapshot().to_json()
+        snapshot_path.write_text(snapshot_json, encoding="utf-8")
+    except Exception:  # pragma: no cover - defensive logging
+        _LOGGER.exception(
+            "Failed to persist session snapshot.",
+            extra={"session_id": str(session.session_id), "path": str(snapshot_path)},
+        )
+        return None
+    else:
+        return snapshot_path
+
+
+def _register_snapshot_persistence(session: Session) -> None:
+    """Register a finalizer that saves the session snapshot when it is collected."""
+
+    session_ref = weakref.ref(session)
+
+    def _finalize() -> None:
+        session_obj = session_ref()
+        if session_obj is None:
+            return
+        _persist_session_snapshot(session_obj)
+
+    weakref.finalize(session, _finalize)
 
 
 if __name__ == "__main__":
