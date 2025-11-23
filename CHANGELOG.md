@@ -43,7 +43,7 @@ _Nothing yet._
 ### Prompt Runtime & Overrides
 
 - `Prompt.render` accepts any overrides store implementing the new
-  `PromptOverridesStoreProtocol`, and we now export `PromptProtocol`,
+  `PromptOverridesStore`, and we now export `PromptProtocol`,
   `ProviderAdapterProtocol`, and `RenderedPromptProtocol` for adapters, subagent
   dispatchers, and tool authors that need structural typing without importing
   the concrete prompt classes.

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from .._overrides_protocols import PromptOverridesStore
 from .inspection import (
     OverrideFileMetadata,
     iter_override_files,
@@ -28,7 +29,6 @@ from .versioning import (
     PromptLike,
     PromptOverride,
     PromptOverridesError,
-    PromptOverridesStore,
     SectionDescriptor,
     SectionOverride,
     ToolDescriptor,

@@ -18,6 +18,7 @@ from typing import cast, override
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
+from .._overrides_protocols import PromptOverridesStore
 from ._fs import OverrideFilesystem
 from .validation import (
     FORMAT_VERSION,
@@ -38,7 +39,6 @@ from .versioning import (
     PromptLike,
     PromptOverride,
     PromptOverridesError,
-    PromptOverridesStore,
     SectionOverride,
 )
 

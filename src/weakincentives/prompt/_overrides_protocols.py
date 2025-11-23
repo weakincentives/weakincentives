@@ -20,7 +20,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from .overrides.versioning import PromptDescriptor, PromptLike, PromptOverride
 
 
-class PromptOverridesStoreProtocol(Protocol):
+class PromptOverridesStore(Protocol):
     """Structural interface satisfied by prompt overrides stores."""
 
     def resolve(
@@ -60,4 +60,4 @@ class PromptOverridesStoreProtocol(Protocol):
     ) -> PromptOverride: ...
 
 
-__all__ = ["PromptOverridesStoreProtocol"]
+__all__ = ["PromptOverridesStore"]

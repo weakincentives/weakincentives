@@ -20,7 +20,6 @@ from typing import Literal, Protocol, TypeVar, overload
 
 from ...serde.schema import schema
 from .._types import SupportsDataclass
-from .._overrides_protocols import PromptOverridesStoreProtocol
 
 
 def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:
@@ -233,16 +232,12 @@ class PromptOverridesError(Exception):
     """Raised when prompt overrides fail validation or persistence."""
 
 
-PromptOverridesStore = PromptOverridesStoreProtocol
-
-
 __all__ = [
     "ChapterDescriptor",
     "HexDigest",
     "PromptDescriptor",
     "PromptOverride",
     "PromptOverridesError",
-    "PromptOverridesStore",
     "SectionDescriptor",
     "SectionOverride",
     "ToolDescriptor",
