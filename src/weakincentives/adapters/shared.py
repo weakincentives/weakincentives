@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 import json
+import random
 import re
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-import random
-import time
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
 from uuid import uuid4
 
@@ -101,23 +101,28 @@ ToolChoice = Literal["auto"] | Mapping[str, Any] | None
 ThrottleKind = Literal["rate_limit", "quota_exhausted", "timeout", "unknown"]
 """Classification for throttling scenarios."""
 
+_DEFAULT_MAX_ATTEMPTS = 5
+_DEFAULT_BASE_DELAY = timedelta(milliseconds=500)
+_DEFAULT_MAX_DELAY = timedelta(seconds=8)
+_DEFAULT_MAX_TOTAL_DELAY = timedelta(seconds=30)
+
 
 @dataclass(slots=True, frozen=True)
 class ThrottlePolicy:
     """Configuration for throttle retry handling."""
 
-    max_attempts: int = 5
-    base_delay: timedelta = timedelta(milliseconds=500)
-    max_delay: timedelta = timedelta(seconds=8)
-    max_total_delay: timedelta = timedelta(seconds=30)
+    max_attempts: int = _DEFAULT_MAX_ATTEMPTS
+    base_delay: timedelta = _DEFAULT_BASE_DELAY
+    max_delay: timedelta = _DEFAULT_MAX_DELAY
+    max_total_delay: timedelta = _DEFAULT_MAX_TOTAL_DELAY
 
 
 def new_throttle_policy(
     *,
-    max_attempts: int = 5,
-    base_delay: timedelta = timedelta(milliseconds=500),
-    max_delay: timedelta = timedelta(seconds=8),
-    max_total_delay: timedelta = timedelta(seconds=30),
+    max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
+    base_delay: timedelta = _DEFAULT_BASE_DELAY,
+    max_delay: timedelta = _DEFAULT_MAX_DELAY,
+    max_total_delay: timedelta = _DEFAULT_MAX_TOTAL_DELAY,
 ) -> ThrottlePolicy:
     """Return a throttle policy instance with validation."""
 
@@ -162,10 +167,10 @@ class ThrottleError(PromptEvaluationError):
             phase=phase,
             provider_payload=provider_payload,
         )
-        self.kind = kind
-        self.retry_after = retry_after
-        self.attempts = attempts
-        self.retry_safe = retry_safe
+        self.kind: ThrottleKind = kind
+        self.retry_after: timedelta | None = retry_after
+        self.attempts: int = attempts
+        self.retry_safe: bool = retry_safe
 
 
 def _sleep_for(delay: timedelta) -> None:
@@ -183,7 +188,7 @@ def _jittered_backoff(
     if base <= timedelta(0):
         return policy.base_delay
 
-    jitter_seconds = random.uniform(0, base.total_seconds())
+    jitter_seconds = random.uniform(0, base.total_seconds())  # nosec B311
     delay = timedelta(seconds=jitter_seconds)
     if retry_after is not None and delay < retry_after:
         return retry_after
@@ -752,15 +757,15 @@ __all__ = [
     "ChoiceSelector",
     "ConversationRequest",
     "ConversationRunner",
-    "ThrottleError",
-    "ThrottleKind",
-    "ThrottlePolicy",
     "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
     "ProviderFunctionCall",
     "ProviderMessage",
     "ProviderToolCall",
+    "ThrottleError",
+    "ThrottleKind",
+    "ThrottlePolicy",
     "ToolArgumentsParser",
     "ToolChoice",
     "ToolMessageSerializer",
@@ -772,9 +777,9 @@ __all__ = [
     "extract_parsed_content",
     "extract_payload",
     "first_choice",
-    "new_throttle_policy",
     "format_publish_failures",
     "message_text_content",
+    "new_throttle_policy",
     "parse_schema_constrained_payload",
     "parse_tool_arguments",
     "run_conversation",
@@ -1085,7 +1090,7 @@ class ConversationRunner[OutputT]:
             except ThrottleError as error:
                 error.attempts = max(error.attempts, attempts)
                 if not error.retry_safe:
-                    raise error
+                    raise
 
                 if attempts >= self.throttle_policy.max_attempts:
                     raise ThrottleError(
@@ -1097,7 +1102,7 @@ class ConversationRunner[OutputT]:
                         attempts=error.attempts,
                         retry_safe=False,
                         provider_payload=error.provider_payload,
-                    )
+                    ) from error
 
                 delay = _jittered_backoff(
                     policy=self.throttle_policy,
@@ -1115,7 +1120,7 @@ class ConversationRunner[OutputT]:
                         attempts=error.attempts,
                         retry_safe=False,
                         provider_payload=error.provider_payload,
-                    )
+                    ) from error
 
                 total_delay += delay
                 if total_delay > self.throttle_policy.max_total_delay:
@@ -1128,7 +1133,7 @@ class ConversationRunner[OutputT]:
                         attempts=error.attempts,
                         retry_safe=False,
                         provider_payload=error.provider_payload,
-                    )
+                    ) from error
 
                 self._log.warning(
                     "Provider throttled request.",

@@ -28,11 +28,11 @@ __all__ = [
     "OPENAI_ADAPTER_NAME",
     "AdapterName",
     "PromptEvaluationError",
-    "ThrottleError",
-    "ThrottlePolicy",
     "PromptResponse",
     "ProviderAdapter",
     "SessionProtocol",
+    "ThrottleError",
+    "ThrottlePolicy",
     "new_throttle_policy",
 ]
 

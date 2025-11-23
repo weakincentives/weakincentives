@@ -120,19 +120,26 @@ def _retry_after_from_error(error: object) -> timedelta | None:
         return direct
     headers = getattr(error, "headers", None)
     if isinstance(headers, Mapping):
-        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        header_mapping = cast(Mapping[str, object], headers)
+        retry_after = header_mapping.get("retry-after") or header_mapping.get(
+            "Retry-After"
+        )
         coerced = _coerce_retry_after(retry_after)
         if coerced is not None:
             return coerced
     response = getattr(error, "response", None)
     if isinstance(response, Mapping):
-        retry_after = response.get("retry_after")
+        response_mapping = cast(Mapping[str, object], response)
+        retry_after = response_mapping.get("retry_after")
         coerced = _coerce_retry_after(retry_after)
         if coerced is not None:
             return coerced
-        headers = response.get("headers")
+        headers = response_mapping.get("headers")
         if isinstance(headers, Mapping):
-            retry_after = headers.get("retry-after") or headers.get("Retry-After")
+            header_mapping = cast(Mapping[str, object], headers)
+            retry_after = header_mapping.get("retry-after") or header_mapping.get(
+                "Retry-After"
+            )
             coerced = _coerce_retry_after(retry_after)
             if coerced is not None:
                 return coerced
@@ -142,7 +149,8 @@ def _retry_after_from_error(error: object) -> timedelta | None:
 def _error_payload(error: object) -> dict[str, Any] | None:
     response = getattr(error, "response", None)
     if isinstance(response, Mapping):
-        return {str(key): value for key, value in response.items()}
+        response_mapping = cast(Mapping[object, Any], response)
+        return {str(key): value for key, value in response_mapping.items()}
     return None
 
 
@@ -295,7 +303,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                     error, prompt_name=prompt_name
                 )
                 if throttle_error is not None:
-                    raise throttle_error
+                    raise throttle_error from error
                 raise PromptEvaluationError(
                     "LiteLLM request failed.",
                     prompt_name=prompt_name,

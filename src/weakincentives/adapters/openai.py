@@ -107,10 +107,9 @@ def _coerce_retry_after(value: object) -> timedelta | None:
     if isinstance(value, (int, float)):
         seconds = float(value)
         return timedelta(seconds=seconds) if seconds > 0 else None
-    if isinstance(value, str):
-        if value.isdigit():
-            seconds = float(value)
-            return timedelta(seconds=seconds)
+    if isinstance(value, str) and value.isdigit():
+        seconds = float(value)
+        return timedelta(seconds=seconds)
     return None
 
 
@@ -128,35 +127,44 @@ def _retry_after_from_error(error: object) -> timedelta | None:
         return direct
     headers = getattr(error, "headers", None)
     retry_after = _retry_after_from_headers(
-        headers if isinstance(headers, Mapping) else None
+        cast(Mapping[str, object], headers) if isinstance(headers, Mapping) else None
     )
     if retry_after is not None:
         return retry_after
-    response = getattr(error, "response", None)
+    response = cast(object | None, getattr(error, "response", None))
     if isinstance(response, Mapping):
+        response_mapping = cast(Mapping[str, object], response)
         retry_after = _retry_after_from_headers(
-            cast(Mapping[str, Any], response).get("headers")
-            if isinstance(response.get("headers"), Mapping)
+            cast(Mapping[str, object], response_mapping.get("headers"))
+            if isinstance(response_mapping.get("headers"), Mapping)
             else None
         )
         if retry_after is not None:
             return retry_after
-        retry_after = _coerce_retry_after(response.get("retry_after"))
+        retry_after = _coerce_retry_after(response_mapping.get("retry_after"))
         if retry_after is not None:
             return retry_after
-    response_headers = getattr(response, "headers", None)
+        response_headers_obj: object | None = response_mapping.get("headers")
+    else:
+        response_headers_obj = (
+            getattr(response, "headers", None) if response is not None else None
+        )
     return _retry_after_from_headers(
-        response_headers if isinstance(response_headers, Mapping) else None
+        cast(Mapping[str, object], response_headers_obj)
+        if isinstance(response_headers_obj, Mapping)
+        else None
     )
 
 
 def _error_payload(error: object) -> dict[str, Any] | None:
     payload_candidate = getattr(error, "response", None)
     if isinstance(payload_candidate, Mapping):
-        return {str(key): value for key, value in payload_candidate.items()}
+        payload_mapping = cast(Mapping[object, Any], payload_candidate)
+        return {str(key): value for key, value in payload_mapping.items()}
     payload_candidate = getattr(error, "json_body", None)
     if isinstance(payload_candidate, Mapping):
-        return {str(key): value for key, value in payload_candidate.items()}
+        payload_mapping = cast(Mapping[object, Any], payload_candidate)
+        return {str(key): value for key, value in payload_mapping.items()}
     return None
 
 
@@ -313,7 +321,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     error, prompt_name=prompt_name
                 )
                 if throttle_error is not None:
-                    raise throttle_error
+                    raise throttle_error from error
                 raise PromptEvaluationError(
                     "OpenAI request failed.",
                     prompt_name=prompt_name,
