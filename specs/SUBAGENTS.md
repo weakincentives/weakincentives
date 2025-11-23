@@ -4,6 +4,20 @@
 
 Enable a parent run to fork lightweight child runs in parallel without losing access to the parent's tools, session state, or telemetry. The feature should feel like a single tool call that spawns fully powered agents sharing the same persistent context.
 
+## Guiding Principles and Scope
+
+- The feature lives entirely in `SubagentsSection` plus the `dispatch_subagents`
+  tool; no additional knobs, prompt templates, or helper sections are in scope.
+- Delegation is always explicit: the language model decides when to dispatch and
+  constructs every payload field at call time, keeping the parent prompt
+  declarative and free of baked-in defaults.
+- Children should behave like peers inside the same orchestration context unless
+  a stricter isolation level is configured. Sharing tools, event streams, and
+  state is the default to preserve observability and avoid setup drift.
+- The specification is a living reference rather than a contract for every edge
+  case. Confirm runtime behaviour in code when referencing these notes, and
+  prefer `SubagentsSection` as the single entry point for future extensions.
+
 ## Building Blocks
 
 - **`SubagentsSection`** – a prompt section that introduces the delegation tool and reminds the model that parallel work MUST be dispatched instead of executed serially.
@@ -76,6 +90,19 @@ Isolation levels describe how much access a child run has to parent state and te
 
 - **No Isolation (default)** – Children inherit the exact `Session` instance, event bus, and tool access the parent uses. Tool calls and state mutations occur against the shared objects so observers can watch every update in real time.
 - **Full Isolation** – Each child runs inside a brand new environment. Clone the parent session via `context.session.clone()` (or the equivalent repository helper) and back it with a newly created event bus. The cloned session MUST NOT share mutable state with the parent, and the fresh event bus MUST prevent telemetry from crossing run boundaries.
+
+## Current Behaviour and Caveats
+
+- Spawning uses `ThreadPoolExecutor` with default worker sizing to launch
+  children in parallel; results track the order of the provided delegations.
+- In No Isolation mode, children share the parent's session and event bus, so
+  mutations and telemetry propagate immediately. Full Isolation relies on
+  session cloning and separate buses; implementations that cannot clone the
+  session should treat that limitation as a precondition failure.
+- The handler requires a rendered parent prompt and will fail fast if it is
+  missing. Downstream consumers should treat this document as guidance; defer to
+  `dispatch_subagents` and `SubagentsSection` implementations for authoritative
+  runtime details.
 
 ## Runtime Flow
 
