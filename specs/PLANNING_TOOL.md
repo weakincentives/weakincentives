@@ -7,6 +7,31 @@ execution planning: capture the objective, keep a few ordered steps, and observe
 existing session/state infrastructure. Nothing in this suite persists beyond the session and no calendar, deadline, or
 multi-user concepts are exposed.
 
+## Rationale and Scope
+
+- **Keep orchestration lightweight**: The suite is the smallest possible coordination layer for background agents that
+  need to remember a handful of steps across tool calls. It intentionally avoids calendars, blockers, or owner fields so
+  the cognitive and implementation footprint stays small.
+- **Session-only provenance**: Plans exist only inside a `Session`; they die with the session and never write to external
+  stores. This keeps the suite safe for background runs where persistence is undesired or disallowed.
+- **Single-plan focus**: Each session tracks exactly one plan at a time. Tools replace or mutate the existing snapshot but
+  never spawn branches or per-actor plans. This mirrors the orchestrator's need for one shared source of truth.
+- **No scheduling semantics**: Deadlines, reminders, or dependency graphs are out-of-scope. Agents should use the
+  broader runtime or other tools for time-aware coordination.
+
+## Guiding Principles
+
+- **Deterministic state transitions**: Reducers are the only place that mutate plan state. Every reducer invocation emits
+  a fresh immutable snapshot so callers can diff and cache safely.
+- **Tool-first validation**: Handlers eagerly validate inputs and normalise strings/collections before dispatching to
+  reducers. The `ToolValidationError` surface is consistent across all planning operations to keep error handling simple.
+- **Minimal, stable identifiers**: Step IDs are numeric suffixes in the `S###` format, generated exclusively by reducers
+  to preserve idempotency and human readability.
+- **Plan lifecycle guardrails**: Tools fail fast when prerequisites are not met (e.g., `planning_add_step` requires an
+  active plan). This keeps the plan coherent and avoids accidental resurrection of abandoned work.
+- **Prompt clarity over verbosity**: The prompt copy steers agents toward concise, ASCII-only objectives and discourages
+  planning when a direct answer suffices.
+
 ## Module Surface
 
 - Planning code lives in `weakincentives.tools.planning`.
@@ -134,6 +159,22 @@ Reducers enforce unique `step_id` values whenever the plan is mutated. If the pl
 next calculated identifier, the reducer must raise `ToolValidationError` because duplicates break status updates and
 marking flows. Clearing or abandoning the plan removes all steps but preserves the `PlanStep.step_id` generator's monotonic
 counter. Replacing the plan via `planning_setup_plan` creates a fresh plan and restarts IDs at `S001` for the new snapshot.
+
+## Behaviour Mapping and Caveats
+
+- **Plan lifecycle**: `planning_setup_plan` is the only entry to create or replace a plan; all other tools assume a plan
+  already exists. `planning_clear_plan` abandons the plan but keeps the session ready for a new setup. `planning_read_plan`
+  raises when no plan exists, reinforcing the single-plan contract.
+- **Step identity**: Reducers own ID generation and never recycle suffixes within a plan snapshot. Agents must treat
+  `step_id` as opaque handles rather than user-editable fields; injecting IDs via tool inputs is not supported.
+- **Status transitions**: Plan status is implicitly managed: setup seeds `active`, marking steps to `done` can auto-complete
+  the plan, and clearing marks it `abandoned`. There is no status to represent "on hold" or scheduling delays.
+- **Validation boundaries**: ASCII enforcement and length limits apply to all string inputs, including notes. Attempts to
+  submit empty updates or missing required fields surface as `ToolValidationError` before reducers run.
+- **Session isolation**: Reducers operate on the session-local store only. Copying a plan between sessions or exporting it
+  for reuse requires bespoke tooling; this suite does not provide it.
+- **Telemetry**: No tool-specific metrics are emitted beyond the shared `ToolInvoked` events. Consumers should rely on the
+  session event bus if they need observability.
 
 ## Prompt Template Guidance
 
