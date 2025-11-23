@@ -38,7 +38,7 @@ from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.protocols import SessionProtocol
 
@@ -212,6 +212,55 @@ def test_execute_tool_call_raises_when_deadline_expired(
         )
     error = cast(PromptEvaluationError, excinfo.value)
     assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
+
+
+def test_execute_tool_call_publishes_invocation() -> None:
+    prompt = _build_prompt()
+    rendered = _build_rendered(prompt)
+    bus = InProcessEventBus()
+    session: SessionProtocol = Session(bus=bus)
+
+    events: list[ToolInvoked] = []
+    bus.subscribe(ToolInvoked, events.append)
+
+    def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
+        del context
+        return ToolResult(message="done", value=EchoResult(content=params.content))
+
+    tool = Tool[EchoParams, EchoResult](
+        name="echo",
+        description="echo",
+        handler=handler,
+    )
+    tool_registry = cast(
+        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]], {tool.name: tool}
+    )
+    call = SimpleNamespace(
+        id="call", function=SimpleNamespace(name="echo", arguments='{"content": "hi"}')
+    )
+
+    invocation, result = shared.execute_tool_call(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[BodyResult], object()),
+        prompt=prompt,
+        rendered_prompt=rendered,
+        tool_call=cast(shared.ProviderToolCall, call),
+        tool_registry=tool_registry,
+        bus=bus,
+        session=session,
+        prompt_name="publish",
+        provider_payload=None,
+        deadline=None,
+        format_publish_failures=shared.format_publish_failures,
+        parse_arguments=shared.parse_tool_arguments,
+        logger_override=None,
+    )
+
+    assert result.success is True
+    assert invocation in events
+    assert invocation.name == "echo"
+    assert isinstance(invocation.params, EchoParams)
+    assert invocation.params.content == "hi"
 
 
 def test_run_conversation_replaces_rendered_deadline() -> None:
