@@ -1,10 +1,57 @@
 # Logging Schema and Conventions
 
-This document records the current logging surface in the runtime modules and
-establishes conventions for future events. All loggers are module scoped and
-created via `logging.getLogger(__name__)`.
+This document describes the runtime logging mini-framework that lives inside
+the `weakincentives` library. It is an **internal** facility shared by runtime
+modules; callers do not consume it directly. The goals are to:
 
-## Current Logger Usage
+- give maintainers a stable contract for structured log shapes across runtime
+  modules;
+- make downstream collectors and CLI presentation code resilient to module-level
+  change by reusing common field names; and
+- keep loggers module scoped via `logging.getLogger(__name__)` so signals stay
+  attributable without a global registry.
+
+Future changes SHOULD extend this file first to capture intent before altering
+logger usage. Treat the schemas and conventions below as the single source of
+truth for the in-repo logging framework.
+
+## Scope
+
+The logging framework covers runtime-facing modules (event bus, sessions,
+adapters, prompt overrides, built-in tools). It intentionally excludes:
+
+- build and CI scripts;
+- test-only utilities; and
+- external consumers (applications integrating the library must layer their own
+  logging policies on top of what the runtime emits).
+
+Within scope, log records SHOULD favor structured payloads over formatted
+messages so the runtime can evolve without breaking observability pipelines.
+
+## Design Intent (Internal Framework)
+
+The logging framework is intentionally minimal: it provides shared semantics for
+event names, severity, and structured payloads without wrapping the standard
+library API. The design choices are:
+
+- **Module isolation**: each module owns its logger instance; cross-module
+  helpers SHOULD rely on shared field names rather than shared logger objects.
+- **Structured-first**: prefer stable key/value pairs (`extra`) over message
+  formatting to keep downstream parsing simple.
+- **Event taxonomy**: every non-error record SHOULD carry an `event` key so
+  collectors and CLI renderers can bucket logs predictably.
+- **Non-breaking evolvability**: new context fields SHOULD extend existing
+  schemas; breaking changes require updating this document and coordinating
+  migrations.
+
+These rules keep the runtime logs cohesive while letting maintainers adjust
+message wording or add fields without surprising internal consumers.
+
+## Current Implementation (Module-Level Loggers)
+
+Runtime modules attach to Python's standard library logging without custom
+handlers. The table below captures the current surface area and should be kept
+in sync with code changes.
 
 | Module | Logger Variable | Level | Message / Event | Context Fields |
 | --- | --- | --- | --- | --- |
@@ -14,19 +61,28 @@ created via `logging.getLogger(__name__)`.
 | `src/weakincentives/prompt/overrides/local_store.py` | `_LOGGER` | `debug` | Missing override file, empty override payload, persistence success, delete-miss, unknown section/tool, stale hashes | `ns`, `prompt_key`, `tag`, `section_path`, `expected_hash`, `found_hash`, `tool_name` |
 | `src/weakincentives/tools/asteval.py` | `_logger` | `debug` | event="asteval.run" | `event`, `mode`, `stdout_len`, `stderr_len`, `write_count`, `code_preview` |
 
-### Module Notes
+### Module Notes and Caveats
 
 - **events.py**: Exceptions from subscriber handlers are logged at ERROR and the
-  publish operation continues, collecting the failures for the caller.
+  publish operation continues, collecting the failures for the caller. The
+  structured context exposes the event class name and handler reference to
+  support debugging misbehaving subscribers.
 - **session/session.py**: Reducer failures are logged at ERROR. The session
-  suppresses the exception, skips the reducer, and continues dispatching.
+  suppresses the exception, skips the reducer, and continues dispatching. Log
+  payloads currently rely on message formatting instead of `extra`—future
+  changes SHOULD add `event="session.reducer.failed"` plus reducer metadata.
 - **adapters/shared.py**: Unexpected tool handler failures are logged at ERROR.
   The adapter converts the exception into a failed `ToolResult` and continues.
+  Adapter implementations MAY supply their own logger if they wish to enrich
+  context fields, but SHOULD preserve the message for compatibility.
 - **prompt/overrides/local_store.py**: Diagnostic messages for override
   lookups, persistence, and validation run at DEBUG. They use positional
-  formatting to emit namespace, prompt key, tag, and mismatch details.
+  formatting to emit namespace, prompt key, tag, and mismatch details. These
+  logs are intentionally verbose to aid local debugging and are not expected to
+  surface in production default log levels.
 - **tools/asteval.py**: Tool runs emit a DEBUG record with an explicit
   `event` field (`"asteval.run"`) and additional telemetry describing the run.
+  This is the primary structured log suitable for aggregation pipelines today.
 
 ## Required Context Keys
 
