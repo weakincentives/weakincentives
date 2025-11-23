@@ -1,13 +1,33 @@
 # Dataclass Serde Utilities
 
-## Motivation
+## Guiding Principles
 
-This module introduces a dependency-free bridge between standard library `dataclasses` and the ergonomics typically provided by
-validation frameworks such as Pydantic. Agents can parse untrusted mappings, enforce field-level constraints, and emit JSON-
-ready payloads without decorating dataclasses or depending on third-party packages. The helper functions live in
-`weakincentives.serde` and are designed for background agents that need predictable, validated state transfer.
+- **Dependency-free contracts**: Bridge standard library `dataclasses` with validation and serialisation guarantees without
+  runtime decorators or third-party packages.
+- **Predictable, inspectable state**: Keep parsing and dumping deterministic so agent telemetry, provider payloads, and
+  cached tool responses remain stable.
+- **Metadata-first validation**: Treat `field.metadata` and `typing.Annotated` as the single source of truth for constraints
+  and transforms; favour declarative configuration over imperative guards.
+- **Ergonomic defaults with explicit escape hatches**: Coercion, alias resolution, and extras handling come pre-wired but can
+  be tightened (`extra="forbid"`, `coerce=False`) or relaxed (`extra="allow"`) per call.
+- **Contract-friendly errors**: Surface path-aware failures with dotted/indexed notation so DbC tests and callers can assert
+  on precise failure modes.
 
-## Public API
+## Scope and Ownership
+
+- **Modules covered**: `weakincentives.serde.parse`, `.dump`, `.clone`, and `.schema` implement the behaviours described here.
+- **Supported types**: dataclasses (including nested), stdlib primitives, `Enum`, `UUID`, `Path`, `Decimal`,
+  `datetime`/`date`/`time`, collections (`list`, `set`, `tuple`, `dict`), `Literal`, and `Union`/`Optional` constructs.
+- **Constraints and transforms**: Merge keys from `Annotated[..., {...}]` and `field(metadata=...)`; `Annotated` wins on
+  conflicts. Recognised keys include numeric bounds (`ge`, `gt`, `le`, `lt`, `minimum`, `maximum`), length limits,
+  membership checks, regex `pattern`, string normalisers (`strip`, `lower`, `upper`), callable `validate`/`validators`, and a
+  final `convert`/`transform` hook.
+- **Hooks**: Dataclasses may define `__validate__` and `__post_validate__` for post-construction checks. `__computed__`
+  lists property names eligible for serialisation when requested.
+- **Out of scope**: Discriminated unions, `$ref` schema components, and assignment-time validation are intentionally
+  unsupported. External parsers (for example, `python-dateutil`) are not used; conversions rely on stdlib behaviour.
+
+## API Reference
 
 Import helpers directly from the package:
 
@@ -30,17 +50,18 @@ parse(
 ) -> T
 ```
 
-- Accepts a dataclass type and a mapping payload.
-- Unknown keys obey the `extra` policy (`"ignore"`, `"forbid"`, or `"allow"`). When allowed, extras are attached to the
-  instance or stored under `__extras__` when slots prevent dynamic attributes.
-- Type coercion converts strings to numerics, UUID, paths, Enums, date/time objects, nested dataclasses, collections, unions,
-  and literals when feasible. Disable by passing `coerce=False`.
-- Field aliases resolve in this order: the `aliases` mapping argument, `field(metadata={"alias": ...})`, and finally the
-  `alias_generator` callback. Case-insensitive matching is optional.
-- Constraints come from `dataclasses.field(metadata=...)` and `typing.Annotated[..., {...}]`. Supported keys include numeric
-  bounds (`ge`, `gt`, `le`, `lt`, `minimum`, `maximum`), length limits, regular expressions, membership checks, string
-  normalisers (`strip`, `lower`, `upper`), callable `validate`/`validators`, and a trailing `convert`/`transform` hook.
-- Model-level hooks named `__validate__` or `__post_validate__` run after construction and extras assignment.
+- Accepts a dataclass type and a mapping payload. Missing required inputs raise `ValueError("Missing required field:
+  'field'")`.
+- **Extras**: `extra` may be `"ignore"`, `"forbid"`, or `"allow"`. Allowed extras attach to the instance or fall back to
+  `__extras__` when slots block dynamic attributes.
+- **Coercion**: When enabled, converts strings to numerics, UUID, paths, Enums, date/time objects, nested dataclasses,
+  collections, unions, and literals. Optional unions treat `None` and empty strings as missing inputs when coercion is on.
+- **Aliases**: Resolution order is `aliases` argument → `field(metadata={"alias": ...})` → `alias_generator` callback.
+  `case_insensitive=True` enables case folding across all alias sources.
+- **Validation order**: Apply string normalisers first, then constraint/validator checks, then `convert` / `transform` for the
+  final value. Model-level hooks run after construction and extras assignment.
+- **Error reporting**: Path-aware messages use dotted/indexed keys such as `"address.street"` or `"line_items[0].price"`.
+- **Union semantics**: Branches are attempted in declaration order; the last failure surfaces when all branches fail.
 
 ### `dump`
 
@@ -55,14 +76,13 @@ dump(
 ) -> dict[str, Any]
 ```
 
-- Serialises a dataclass instance into JSON-safe primitives.
-- Respects aliases or generator-driven key transformations when `by_alias=True`.
-- Converts dataclasses recursively, Enums to their values, `datetime`/`date`/`time` to ISO strings, and `UUID`/`Decimal`/`Path`
-  objects to strings. Collections recurse and omit `None` values when `exclude_none=True`.
-- When `computed=True`, properties listed in `__computed__` are materialised and serialised with the same alias policy.
-- Tool runtime payloads rely on `dump(..., exclude_none=True)` as the default backing for
-  `Result.render()`, so keeping its output stable ensures telemetry, provider messages,
-  and structured payloads stay in sync.
+- Serialises dataclasses into JSON-safe primitives, recursing through nested dataclasses and collections.
+- **Aliases**: Uses field aliases or `alias_generator` when `by_alias=True`; otherwise falls back to field names.
+- **Type handling**: Enums emit their values; `datetime`/`date`/`time` use ISO formatting; `UUID`/`Decimal`/`Path` stringify.
+- **Nullability**: `exclude_none=True` prunes `None` values throughout the payload.
+- **Computed fields**: When `computed=True`, properties listed in `__computed__` materialise under the same alias policy.
+- **Runtime contract**: Tool payloads depend on `dump(..., exclude_none=True)` for `Result.render()`, so regressions here
+  surface as telemetry or provider mismatches.
 
 ### `clone`
 
@@ -70,8 +90,8 @@ dump(
 clone(obj, **updates) -> T
 ```
 
-- Thin wrapper around `dataclasses.replace` that preserves extras, applies updates, and re-runs `__validate__` /
-  `__post_validate__` if present.
+- Wraps `dataclasses.replace` to apply updates while preserving extras. Re-runs `__validate__` / `__post_validate__` hooks
+  to keep invariants intact.
 
 ### `schema`
 
@@ -79,29 +99,33 @@ clone(obj, **updates) -> T
 schema(cls, *, alias_generator=None, extra="ignore") -> dict[str, Any]
 ```
 
-- Emits a JSON Schema snippet describing the dataclass structure.
-- Maps Python primitives, Enums, literals, unions/optionals, lists/sets/tuples/dicts, and nested dataclasses to schema types.
-- Includes constraints derived from metadata (length, numeric bounds, patterns, membership) and mirrors alias selection.
-- Sets `additionalProperties` to `False` only when `extra="forbid"`.
+- Emits JSON Schema describing the dataclass structure, inlining nested dataclasses instead of `$ref` components.
+- Mirrors alias resolution rules and marks additional properties forbidden only when `extra="forbid"`.
+- Propagates constraint metadata into schema keywords (numeric bounds, length, membership, `pattern`).
 
-## Constraints & Hooks
+## Behaviour Map
 
-1. Merge metadata from `Annotated` annotations and `field.metadata`. When both provide a key, the `Annotated` payload wins.
-1. Apply string normalisers before constraint checks. Validators run next and may return a transformed value. `convert` /
-   `transform` executes last and should return the final value.
-1. Path-aware errors use dotted/indexed notation such as `"address.street"`, `"line_items[0].price"`, and
-   `"attributes[sku]"`. Missing required inputs raise `ValueError("Missing required field: 'field'")`.
-1. Union parsing tries branches in declaration order and surfaces the final failure message. Optional unions treat `None` and
-   empty strings as missing when coercion is enabled.
+| Principle | Implementation Touchpoints |
+| --- | --- |
+| Dependency-free contracts | `src/weakincentives/serde/__init__.py` re-exports helpers; parsing and dumping rely solely on stdlib types and helper functions within `src/weakincentives/serde/` modules. |
+| Metadata-first validation | Constraint extraction and merge logic live in `src/weakincentives/serde/metadata.py`; enforcement flows through `parse` in `src/weakincentives/serde/parse.py`. |
+| Deterministic coercion | Coercers and collection handlers reside in `src/weakincentives/serde/coercion.py` and `src/weakincentives/serde/collections.py`. |
+| Alias-aware IO | Alias plumbing is handled in `src/weakincentives/serde/aliases.py` and is shared by both `parse` and `dump`. |
+| Path-aware errors | Error tracking utilities sit in `src/weakincentives/serde/errors.py`, surfacing dotted/indexed paths. |
+| Schema parity with runtime | `src/weakincentives/serde/schema.py` mirrors parse-time constraints into JSON Schema output. |
+| Extras preservation | Extras attachment and cloning behaviours are implemented in `parse` and `clone` under `src/weakincentives/serde/parse.py` and `src/weakincentives/serde/clone.py`. |
+| Contract verification | Tests in `tests/serde/test_dataclass_serde.py` and `tests/plugins/dataclass_serde.py` enforce the documented behaviours. |
 
-## Limitations
+## Edge Cases and Caveats
 
-- No assignment-time validation hooks; parsing is the validation entry point.
-- Discriminated unions and `$ref` schemas are out of scope.
-- External parsers (for example `python-dateutil`) are not used; conversions rely on stdlib APIs such as
-  `datetime.fromisoformat`.
-- Schema generation inlines nested dataclasses and does not maintain a reusable component registry.
-- Error aggregation for unions re-raises the final branch error instead of collecting all failures.
+- **Slots vs extras**: When dataclasses use `slots=True`, extras fall back to a `__extras__` dict to avoid attribute errors.
+- **Empty strings**: With coercion enabled, empty strings are treated as missing for optional fields; with coercion disabled
+  they remain literal values and may trigger constraint errors.
+- **Union error reporting**: Only the final attempted branch error is surfaced; errors are not aggregated across branches.
+- **Datetime parsing**: Relies on `datetime.fromisoformat` without timezone coercion; malformed offsets will raise.
+- **Schema reuse**: Nested dataclasses are inlined; there is no component registry or `$ref` reuse.
+- **Validator outputs**: `validate`/`validators` may mutate values; ensure they return the transformed value to avoid silent
+  loss during subsequent processing.
 
 ## Examples
 
