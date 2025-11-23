@@ -12,13 +12,14 @@ removed.
 
 - Replace Chat Completions usage in the OpenAI adapter with the Responses API
   while preserving the adapter's public interfaces and DbC guarantees.
-- Maintain feature parity: prompt sections, native structured outputs, streaming
-  tokens, tool execution, and error translation must keep working with no
-  behavior regressions.
+- Maintain feature parity: prompt sections, native structured outputs, tool
+  execution, and error translation must keep working with no behavior
+  regressions. Streaming is explicitly out of scope; the adapter should issue
+  blocking Responses requests only.
 - Remove legacy Chat Completions code paths; the adapter should exclusively use
   the Responses API once this migration lands.
-- Extend integration tests to cover responses-based flows, including streaming
-  and tool call handling.
+- Extend integration tests to cover responses-based flows, including tool call
+  handling without streaming.
 
 ### Non-Goals
 
@@ -49,11 +50,11 @@ removed.
    attach `response_format={"type": "json_schema", "json_schema": ...}`.
    Preserve the fallback path to instruction-based JSON when the target model
    does not advertise native structured outputs.
-1. **Streaming**: Use `stream=true` and pass a `ResponsesStream` iterator into
-   the runtime's streaming loop. The adapter must emit the same incremental
-   events (`on_delta`, `on_tool_call`, `on_final`) expected by existing
-   consumers, translating response segments into the runtime's event model. All
-   streaming harnesses should assume Responses chunk types only.
+1. **Streaming**: Do **not** use streaming. The adapter must avoid the
+   `stream=true` flag and rely exclusively on blocking Responses requests,
+   returning the final message in one pass. Remove any stream-specific event
+   hooks (`on_delta`, chunk translations) so the runtime always treats Responses
+   as a single-shot call.
 1. **Metadata and Logging**: Include request identifiers, model name, and token
    limits in the adapter's debug logging so existing observability hooks remain
    usable. Preserve `client_timeout` semantics when constructing the Responses
@@ -61,10 +62,10 @@ removed.
 
 ## Response Handling
 
-1. **Content Assembly**: For non-streaming calls, extract the final text from
-   `response.output[0].content[0].text`. For streaming, concatenate
-   `output_text.delta` chunks while respecting tool calls and finish reasons;
-   remove any chat-specific parsers.
+1. **Content Assembly**: Extract the final text from
+   `response.output[0].content[0].text`. Remove stream-specific parsers and
+   chunk concatenation helpers; Responses should deliver the complete payload in
+   one response.
 1. **Tool Calls**: Convert any `response.output[0].content` entries of type
    `"input_text"` + `tool_calls` into the adapter's tool invocation format.
    Ensure tool call arguments are parsed as JSON and validated against the
@@ -94,7 +95,6 @@ removed.
    `integration-tests/` that exercises the Responses path end-to-end with a real
    API key. Cover:
    - Basic text completion and stop reason handling.
-   - Streaming deltas with incremental token accumulation.
    - Tool call discovery and execution round-trips.
    - Native structured output parsing for a simple dataclass response.
 1. **Responses-Only Coverage**: Remove feature flag parameterization; unit tests
@@ -103,9 +103,9 @@ removed.
 1. **Unsupported Models**: Tests should assert that supplying a model without
    Responses support raises a clear configuration error rather than silently
    downgrading behavior.
-1. **Streaming Harness**: Update any test helpers that previously assumed
-   `ChatCompletionChunk` types to accept Responses streaming objects. Keep
-   fixture factories that synthesize stream segments for deterministic tests.
+1. **Streaming Harness**: Remove streaming harnesses and fixtures. Tests should
+   assert that the adapter rejects streaming flags and only issues blocking
+   Responses calls.
 1. **Tool Contract Tests**: Ensure existing DbC enforcement for tool schemas is
    re-run against Responses-derived tool calls by adjusting helper functions that
    normalize tool payloads.
@@ -121,4 +121,4 @@ removed.
 - Update documentation and changelog entries describing the Responses-only
   contract and default model expectations.
 - Run `make integration-tests` against production credentials to validate the
-  streaming, structured output, and tool call scenarios end-to-end.
+  structured output and tool call scenarios end-to-end (non-streaming only).
