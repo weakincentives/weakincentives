@@ -1,56 +1,80 @@
 # LiteLLM Adapter Specification
 
-## Overview
-
-- Extend the adapters package with a LiteLLM-backed implementation that mirrors the OpenAI adapter's behavior and ergonomics.
-- Preserve existing evaluation loops, tool execution semantics, structured output handling, and event publication expectations to maintain consistency across providers.
-- Surface LiteLLM as an officially supported optional dependency and document how consumers can adopt it alongside the current OpenAI integration.
-
 ## Goals
 
-1. Provide a drop-in LiteLLM adapter that matches the OpenAI adapter's API surface, lifecycle, and error handling so callers can switch providers without code changes.
-1. Ensure parity in automated test coverage, including dependency guards, tool invocation flows, structured outputs, and error conditions.
-1. Update packaging, documentation, and examples so LiteLLM becomes a first-class integration path for end users.
+- Provide a drop-in LiteLLM adapter that matches the OpenAI adapter's API
+  surface, lifecycle, and error handling so callers can switch providers
+  without code changes.
+- Keep parity in automated coverage across dependency guards, tool invocation
+  flows, structured outputs, and error conditions.
+- Maintain documentation and packaging that present LiteLLM as a first-class
+  integration path for end users.
 
-## Non-Goals
+## Constraints
 
-- Introducing provider-specific features beyond what the OpenAI adapter already exposes.
-- Refactoring the broader adapter architecture or event model.
-- Implementing live end-to-end tests that require external LiteLLM credentials (optional stretch goal only).
+- Treat LiteLLM as an optional dependency; missing packages must fail fast with
+  actionable errors instead of implicit fallbacks.
+- Preserve adapter ergonomics and telemetry shapes to avoid downstream
+  migrations when swapping providers.
+- Reuse shared adapter utilities and prompt abstractions rather than adding
+  provider-specific branches.
 
-## Key Design Considerations
+## Guiding Principles
 
-- **Module symmetry**: Replicate the structure of `src/weakincentives/adapters/openai.py` when implementing `litellm.py`, including factory helpers, adapter classes, and event publishing patterns. This keeps feature behavior and ergonomics identical between providers.
-- **Dependency guarding**: Add a loader helper that raises a clear runtime error when `litellm` is missing, mirroring `_load_openai_module()` so optional installs behave predictably.
-- **Tool execution**: Preserve the existing tool invocation loop, including how tool selections are surfaced, executed, and logged via `ToolInvoked` events.
-- **Structured output**: Maintain the structured output parsing and validation logic so responses stay compatible with the higher-level prompt framework.
-- **Event parity**: Continue emitting `PromptExecuted` and related telemetry events with the same payload shapes to avoid downstream ingestion changes.
-- **Adapter exports**: Update `src/weakincentives/adapters/__init__.py` to export the new adapter and helper protocols so external consumers can import LiteLLM alongside OpenAI.
-- **Packaging**: Introduce a `litellm` optional dependency in `pyproject.toml`, matching the structure of the existing `openai` extra to keep installation flows aligned.
+- **Symmetry with OpenAI**: Align module structure, adapter methods, and
+  conversation flow helpers with the OpenAI adapter to keep feature behavior
+  identical between providers.
+- **Contract preservation**: Honor existing structured output parsing, tool
+  execution semantics, and deadline handling so higher-level prompts continue
+  to behave consistently.
+- **Explicit configuration**: Surface explicit hooks for dependency injection
+  (custom completions or factories) while preventing ambiguous combinations
+  that could mask misconfiguration.
 
-## Implementation Plan
+## Current Implementation: API Surface
 
-1. **Adapter module**
-   - Create `src/weakincentives/adapters/litellm.py` with the Apache license header.
-   - Define the LiteLLM adapter class and completion factory, reusing the OpenAI adapter's control flow while swapping in LiteLLM client constructs (e.g., `litellm.completion`).
-   - Guard imports and expose helpers to simplify testing and dependency injection.
-1. **Exports and registry**
-   - Update adapter package `__init__` to include LiteLLM symbols and ensure any registries remain synchronized.
-1. **Testing**
-   - Add `tests/adapters/test_litellm_adapter.py` by adapting the OpenAI test suite.
-   - Validate missing dependency errors, injected completion callables, plain responses, tool loops, structured outputs, and error propagation.
-   - Share or refactor test utilities as needed to avoid duplication between OpenAI and LiteLLM suites.
-1. **Optional integration tests** (opt-in)
-   - Author LiteLLM-powered integration tests that exercise the OpenAI-style flows via the LiteLLM client, but gate execution behind pytest markers or environment variables so CI remains credential-free.
+- `LiteLLMAdapter.evaluate` mirrors the OpenAI adapter's signature, accepting a
+  `Prompt`, render parameters, an `EventBus`, a `SessionProtocol`, optional
+  `Deadline`, and optional prompt override context. It delegates to the shared
+  `run_conversation` helper, ensuring identical message assembly, tool routing,
+  and event publication behavior.
+- The adapter exposes structured output helpers (`extract_parsed_content`,
+  `message_text_content`, `parse_schema_constrained_payload`) via
+  `__all__`, matching the OpenAI-facing surface for downstream imports.
+- Initial messages are seeded with the rendered system prompt, and tool choice
+  defaults to `"auto"` while respecting prompt-level structured output settings
+  such as `inject_output_instructions`.
 
-## Documentation & Packaging Updates
+## Current Implementation: Configuration and Dependency Handling
 
-- Update the README optional extras section to describe installing with `litellm` support and include a short usage snippet.
-- Either generalize the existing OpenAI example or add a new LiteLLM-specific example script to illustrate usage.
-- Record the addition in `CHANGELOG.md` (or similar release notes) to highlight the new adapter.
+- Construction requires a `model` name and accepts `tool_choice`, an explicit
+  `completion` callable, a `completion_factory`, and `completion_kwargs` for the
+  factory path. The initializer rejects mixing `completion` with factory inputs
+  to avoid ambiguous execution paths.
+- `create_litellm_completion` defers import until call time and wraps
+  `litellm.completion`, merging any `completion_kwargs` with per-request kwargs
+  supplied during evaluation. `_load_litellm_module` raises a `RuntimeError`
+  with installation guidance if the optional dependency is missing.
+- Requests are assembled in `_call_provider` with model, messages, tool
+  definitions, tool choice directives, and `response_format` payloads when
+  structured output parsing is enabled, mirroring OpenAI request shapes.
 
-## Rationale
+## Current Implementation: Fallbacks and Error Paths
 
-- Maintaining parity with the OpenAI adapter ensures consumers can swap providers without learning new semantics, preserving the current developer experience.
-- Mirroring the OpenAI test coverage provides confidence that LiteLLM integration adheres to established quality and behavior expectations, while keeping optional integration tests opt-in so they do not require secrets in CI.
-- Documenting the new optional dependency and example workflows lowers adoption friction and signals official support for LiteLLM-based setups without introducing provider-specific configuration tweaks beyond the parity goal.
+- Deadline handling rejects already-expired deadlines before rendering to avoid
+  wasted provider calls.
+- Provider failures during completion are wrapped in `PromptEvaluationError`
+  with consistent phase metadata, keeping error propagation aligned with the
+  OpenAI adapter.
+- Choice selection is delegated to `first_choice`, ensuring deterministic
+  selection semantics even if the provider returns multiple candidates.
+
+## Caveats and Limitations
+
+- LiteLLM coverage depends on the optional `litellm` package; environments
+  lacking the extra will fail at import or factory creation time.
+- Integration tests remain opt-in and may require external credentials; the
+  default CI path relies on mocked completions rather than live LiteLLM calls.
+- Structured output parsing is limited to schemas supported by LiteLLM's
+  `response_format` contract; provider-side deviations could still surface as
+  parsing errors despite symmetric adapter handling.
