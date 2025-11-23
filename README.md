@@ -106,7 +106,19 @@ uv add "weakincentives[asteval]"
 # optional provider adapters
 uv add "weakincentives[openai]"
 uv add "weakincentives[litellm]"
-# cloning the repo? use: uv sync --extra asteval --extra openai --extra litellm
+# optional CLI extras (FastAPI debug UI)
+uv add "weakincentives[wink]"
+# cloning the repo? use: uv sync --extra asteval --extra openai --extra litellm --extra wink
+```
+
+### Debugging snapshots with `wink`
+
+The `wink` CLI ships a debug subcommand that serves a FastAPI-based UI for
+exploring session snapshot JSON files. Install the extra and start the server:
+
+```bash
+uv run --extra wink wink debug snapshots/5de6bba7-d699-4229-9747-d68664d8f91e.json \
+  --host 127.0.0.1 --port 8000
 ```
 
 ## Tutorial: An Interactive Code Review Assistant

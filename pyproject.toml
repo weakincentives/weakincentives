@@ -51,6 +51,10 @@ litellm = [
 podman = [
     "podman>=5.6.0",
 ]
+wink = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+]
 
 [project.scripts]
 wink = "weakincentives.cli.wink:main"
