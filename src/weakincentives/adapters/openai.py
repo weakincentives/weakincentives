@@ -37,6 +37,8 @@ from .core import (
 )
 from .shared import (
     OPENAI_ADAPTER_NAME,
+    ThrottleError,
+    ThrottleKind,
     ToolChoice,
     build_json_schema_response_format,
     deadline_provider_payload,
@@ -95,6 +97,114 @@ def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
 
     openai_module = _load_openai_module()
     return openai_module.OpenAI(**kwargs)
+
+
+def _coerce_retry_after(value: object) -> timedelta | None:
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        return value if value > timedelta(0) else None
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        return timedelta(seconds=seconds) if seconds > 0 else None
+    if isinstance(value, str) and value.isdigit():
+        seconds = float(value)
+        return timedelta(seconds=seconds)
+    return None
+
+
+def _retry_after_from_headers(headers: Mapping[str, Any] | None) -> timedelta | None:
+    if headers is None:
+        return None
+    normalized = {str(key).lower(): val for key, val in headers.items()}
+    value = normalized.get("retry-after")
+    return _coerce_retry_after(value)
+
+
+def _retry_after_from_error(error: object) -> timedelta | None:
+    direct = _coerce_retry_after(getattr(error, "retry_after", None))
+    if direct is not None:
+        return direct
+    headers = getattr(error, "headers", None)
+    retry_after = _retry_after_from_headers(
+        cast(Mapping[str, object], headers) if isinstance(headers, Mapping) else None
+    )
+    if retry_after is not None:
+        return retry_after
+    response = cast(object | None, getattr(error, "response", None))
+    if isinstance(response, Mapping):
+        response_mapping = cast(Mapping[str, object], response)
+        retry_after = _retry_after_from_headers(
+            cast(Mapping[str, object], response_mapping.get("headers"))
+            if isinstance(response_mapping.get("headers"), Mapping)
+            else None
+        )
+        if retry_after is not None:
+            return retry_after
+        retry_after = _coerce_retry_after(response_mapping.get("retry_after"))
+        if retry_after is not None:
+            return retry_after
+        response_headers_obj: object | None = response_mapping.get("headers")
+    else:
+        response_headers_obj = (
+            getattr(response, "headers", None) if response is not None else None
+        )
+    return _retry_after_from_headers(
+        cast(Mapping[str, object], response_headers_obj)
+        if isinstance(response_headers_obj, Mapping)
+        else None
+    )
+
+
+def _error_payload(error: object) -> dict[str, Any] | None:
+    payload_candidate = getattr(error, "response", None)
+    if isinstance(payload_candidate, Mapping):
+        payload_mapping = cast(Mapping[object, Any], payload_candidate)
+        return {str(key): value for key, value in payload_mapping.items()}
+    payload_candidate = getattr(error, "json_body", None)
+    if isinstance(payload_candidate, Mapping):
+        payload_mapping = cast(Mapping[object, Any], payload_candidate)
+        return {str(key): value for key, value in payload_mapping.items()}
+    return None
+
+
+def _normalize_openai_throttle(
+    error: Exception, *, prompt_name: str
+) -> ThrottleError | None:
+    message = str(error) or "OpenAI request failed."
+    lower_message = message.lower()
+    code = getattr(error, "code", None)
+    status_code = getattr(error, "status_code", None)
+    class_name = error.__class__.__name__.lower()
+    kind: ThrottleKind | None = None
+
+    if "insufficient_quota" in lower_message or code == "insufficient_quota":
+        kind = "quota_exhausted"
+    elif (
+        status_code == 429
+        or "ratelimit" in class_name
+        or code
+        in {
+            "rate_limit_exceeded",
+            "rate_limit",
+        }
+    ):
+        kind = "rate_limit"
+    elif "timeout" in class_name:
+        kind = "timeout"
+
+    if kind is None:
+        return None
+
+    retry_after = _retry_after_from_error(error)
+    return ThrottleError(
+        message,
+        prompt_name=prompt_name,
+        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        kind=kind,
+        retry_after=retry_after,
+        provider_payload=_error_payload(error),
+    )
 
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "adapter.openai"})
@@ -207,10 +317,16 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             try:
                 return self._client.chat.completions.create(**request_payload)
             except Exception as error:  # pragma: no cover - network/SDK failure
+                throttle_error = _normalize_openai_throttle(
+                    error, prompt_name=prompt_name
+                )
+                if throttle_error is not None:
+                    raise throttle_error from error
                 raise PromptEvaluationError(
                     "OpenAI request failed.",
                     prompt_name=prompt_name,
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    provider_payload=_error_payload(error),
                 ) from error
 
         def _select_choice(response: object) -> ProviderChoice:

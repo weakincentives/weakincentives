@@ -26,7 +26,12 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
-from weakincentives.adapters.shared import ConversationRunner, ToolChoice
+from weakincentives.adapters.shared import (
+    ConversationRunner,
+    ThrottlePolicy,
+    ToolChoice,
+    new_throttle_policy,
+)
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, ToolContext
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
@@ -148,6 +153,7 @@ def build_runner(
     response_format: Mapping[str, Any] | None = None,
     session: SessionProtocol | None = None,
     render_inputs: tuple[SupportsDataclass, ...] | None = None,
+    throttle_policy: ThrottlePolicy | None = None,
 ) -> ConversationRunner[object]:
     prompt = Prompt(ns="tests", key="example")
     session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
@@ -168,6 +174,7 @@ def build_runner(
         call_provider=provider,
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=serialize_tool_message,
+        throttle_policy=throttle_policy or new_throttle_policy(),
     )
 
 

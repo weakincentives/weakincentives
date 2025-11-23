@@ -15,7 +15,9 @@
 from __future__ import annotations
 
 import json
+import random
 import re
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -94,6 +96,103 @@ class ToolArgumentsParser(Protocol):
 
 ToolChoice = Literal["auto"] | Mapping[str, Any] | None
 """Supported tool choice directives for provider APIs."""
+
+
+ThrottleKind = Literal["rate_limit", "quota_exhausted", "timeout", "unknown"]
+"""Classification for throttling scenarios."""
+
+_DEFAULT_MAX_ATTEMPTS = 5
+_DEFAULT_BASE_DELAY = timedelta(milliseconds=500)
+_DEFAULT_MAX_DELAY = timedelta(seconds=8)
+_DEFAULT_MAX_TOTAL_DELAY = timedelta(seconds=30)
+
+
+@dataclass(slots=True, frozen=True)
+class ThrottlePolicy:
+    """Configuration for throttle retry handling."""
+
+    max_attempts: int = _DEFAULT_MAX_ATTEMPTS
+    base_delay: timedelta = _DEFAULT_BASE_DELAY
+    max_delay: timedelta = _DEFAULT_MAX_DELAY
+    max_total_delay: timedelta = _DEFAULT_MAX_TOTAL_DELAY
+
+
+def new_throttle_policy(
+    *,
+    max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
+    base_delay: timedelta = _DEFAULT_BASE_DELAY,
+    max_delay: timedelta = _DEFAULT_MAX_DELAY,
+    max_total_delay: timedelta = _DEFAULT_MAX_TOTAL_DELAY,
+) -> ThrottlePolicy:
+    """Return a throttle policy instance with validation."""
+
+    if max_attempts < 1:
+        msg = "Throttle max_attempts must be at least 1."
+        raise ValueError(msg)
+    if base_delay <= timedelta(0):
+        msg = "Throttle base_delay must be positive."
+        raise ValueError(msg)
+    if max_delay <= timedelta(0):
+        msg = "Throttle max_delay must be positive."
+        raise ValueError(msg)
+    if max_total_delay <= timedelta(0):
+        msg = "Throttle max_total_delay must be positive."
+        raise ValueError(msg)
+    return ThrottlePolicy(
+        max_attempts=max_attempts,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        max_total_delay=max_total_delay,
+    )
+
+
+class ThrottleError(PromptEvaluationError):
+    """Raised when a provider throttles a request."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        prompt_name: str,
+        phase: PromptEvaluationPhase,
+        kind: ThrottleKind,
+        retry_after: timedelta | None = None,
+        attempts: int = 1,
+        retry_safe: bool = True,
+        provider_payload: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            prompt_name=prompt_name,
+            phase=phase,
+            provider_payload=provider_payload,
+        )
+        self.kind: ThrottleKind = kind
+        self.retry_after: timedelta | None = retry_after
+        self.attempts: int = attempts
+        self.retry_safe: bool = retry_safe
+
+
+def _sleep_for(delay: timedelta) -> None:
+    time.sleep(delay.total_seconds())
+
+
+def _jittered_backoff(
+    *,
+    policy: ThrottlePolicy,
+    attempt: int,
+    retry_after: timedelta | None,
+) -> timedelta:
+    capped = min(policy.max_delay, policy.base_delay * 2 ** max(attempt - 1, 0))
+    base = max(capped, retry_after or timedelta(0))
+    if base <= timedelta(0):
+        return policy.base_delay
+
+    jitter_seconds = random.uniform(0, base.total_seconds())  # nosec B311
+    delay = timedelta(seconds=jitter_seconds)
+    if retry_after is not None and delay < retry_after:
+        return retry_after
+    return delay
 
 
 def deadline_provider_payload(deadline: Deadline | None) -> dict[str, Any] | None:
@@ -664,6 +763,9 @@ __all__ = [
     "ProviderFunctionCall",
     "ProviderMessage",
     "ProviderToolCall",
+    "ThrottleError",
+    "ThrottleKind",
+    "ThrottlePolicy",
     "ToolArgumentsParser",
     "ToolChoice",
     "ToolMessageSerializer",
@@ -677,6 +779,7 @@ __all__ = [
     "first_choice",
     "format_publish_failures",
     "message_text_content",
+    "new_throttle_policy",
     "parse_schema_constrained_payload",
     "parse_tool_arguments",
     "run_conversation",
@@ -912,6 +1015,7 @@ class ConversationRunner[OutputT]:
     parse_arguments: ToolArgumentsParser = parse_tool_arguments
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
+    throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
@@ -944,16 +1048,7 @@ class ConversationRunner[OutputT]:
         self._prepare_payload()
 
         while True:
-            self._ensure_deadline_remaining(
-                "Deadline expired before provider request.",
-                phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            )
-            response = self.call_provider(
-                self._messages,
-                self._tool_specs,
-                self._next_tool_choice if self._tool_specs else None,
-                self.response_format,
-            )
+            response = self._issue_provider_request()
 
             self._provider_payload = extract_payload(response)
             choice = self.select_choice(response)
@@ -973,6 +1068,86 @@ class ConversationRunner[OutputT]:
                 return self._finalize_response(message)
 
             self._handle_tool_calls(message, tool_calls)
+
+    def _issue_provider_request(self) -> object:
+        attempts = 0
+        total_delay = timedelta(0)
+
+        while True:
+            attempts += 1
+            self._ensure_deadline_remaining(
+                "Deadline expired before provider request.",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            )
+
+            try:
+                return self.call_provider(
+                    self._messages,
+                    self._tool_specs,
+                    self._next_tool_choice if self._tool_specs else None,
+                    self.response_format,
+                )
+            except ThrottleError as error:
+                error.attempts = max(error.attempts, attempts)
+                if not error.retry_safe:
+                    raise
+
+                if attempts >= self.throttle_policy.max_attempts:
+                    raise ThrottleError(
+                        "Throttle retry budget exhausted.",
+                        prompt_name=self.prompt_name,
+                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                        kind=error.kind,
+                        retry_after=error.retry_after,
+                        attempts=error.attempts,
+                        retry_safe=False,
+                        provider_payload=error.provider_payload,
+                    ) from error
+
+                delay = _jittered_backoff(
+                    policy=self.throttle_policy,
+                    attempt=attempts,
+                    retry_after=error.retry_after,
+                )
+
+                if self.deadline is not None and self.deadline.remaining() <= delay:
+                    raise ThrottleError(
+                        "Deadline expired before retrying after throttling.",
+                        prompt_name=self.prompt_name,
+                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                        kind=error.kind,
+                        retry_after=error.retry_after,
+                        attempts=error.attempts,
+                        retry_safe=False,
+                        provider_payload=error.provider_payload,
+                    ) from error
+
+                total_delay += delay
+                if total_delay > self.throttle_policy.max_total_delay:
+                    raise ThrottleError(
+                        "Throttle retry window exceeded configured budget.",
+                        prompt_name=self.prompt_name,
+                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                        kind=error.kind,
+                        retry_after=error.retry_after,
+                        attempts=error.attempts,
+                        retry_safe=False,
+                        provider_payload=error.provider_payload,
+                    ) from error
+
+                self._log.warning(
+                    "Provider throttled request.",
+                    event="prompt_throttled",
+                    context={
+                        "attempt": attempts,
+                        "retry_after_seconds": error.retry_after.total_seconds()
+                        if error.retry_after
+                        else None,
+                        "kind": error.kind,
+                        "delay_seconds": delay.total_seconds(),
+                    },
+                )
+                _sleep_for(delay)
 
     def _prepare_payload(self) -> None:
         """Initialize execution state prior to the provider loop."""
@@ -1178,6 +1353,7 @@ def run_conversation[
     parse_arguments: ToolArgumentsParser = parse_tool_arguments,
     logger_override: StructuredLogger | None = None,
     deadline: Deadline | None = None,
+    throttle_policy: ThrottlePolicy | None = None,
 ) -> PromptResponse[OutputT]:
     """Execute a conversational exchange with a provider and return the result."""
 
@@ -1207,5 +1383,6 @@ def run_conversation[
         parse_arguments=parse_arguments,
         logger_override=logger_override,
         deadline=effective_deadline,
+        throttle_policy=throttle_policy or new_throttle_policy(),
     )
     return runner.run()

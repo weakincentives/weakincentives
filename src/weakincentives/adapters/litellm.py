@@ -41,6 +41,8 @@ from .core import (
 )
 from .shared import (
     LITELLM_ADAPTER_NAME,
+    ThrottleError,
+    ThrottleKind,
     ToolChoice,
     build_json_schema_response_format,
     deadline_provider_payload,
@@ -97,6 +99,97 @@ def create_litellm_completion(**kwargs: object) -> LiteLLMCompletion:
         return module.completion(*args, **merged)
 
     return _wrapped_completion
+
+
+def _coerce_retry_after(value: object) -> timedelta | None:
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        return value if value > timedelta(0) else None
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        return timedelta(seconds=seconds) if seconds > 0 else None
+    if isinstance(value, str) and value.isdigit():
+        return timedelta(seconds=float(value))
+    return None
+
+
+def _retry_after_from_error(error: object) -> timedelta | None:
+    direct = _coerce_retry_after(getattr(error, "retry_after", None))
+    if direct is not None:
+        return direct
+    headers = getattr(error, "headers", None)
+    if isinstance(headers, Mapping):
+        header_mapping = cast(Mapping[str, object], headers)
+        retry_after = header_mapping.get("retry-after") or header_mapping.get(
+            "Retry-After"
+        )
+        coerced = _coerce_retry_after(retry_after)
+        if coerced is not None:
+            return coerced
+    response = getattr(error, "response", None)
+    if isinstance(response, Mapping):
+        response_mapping = cast(Mapping[str, object], response)
+        retry_after = response_mapping.get("retry_after")
+        coerced = _coerce_retry_after(retry_after)
+        if coerced is not None:
+            return coerced
+        headers = response_mapping.get("headers")
+        if isinstance(headers, Mapping):
+            header_mapping = cast(Mapping[str, object], headers)
+            retry_after = header_mapping.get("retry-after") or header_mapping.get(
+                "Retry-After"
+            )
+            coerced = _coerce_retry_after(retry_after)
+            if coerced is not None:
+                return coerced
+    return None
+
+
+def _error_payload(error: object) -> dict[str, Any] | None:
+    response = getattr(error, "response", None)
+    if isinstance(response, Mapping):
+        response_mapping = cast(Mapping[object, Any], response)
+        return {str(key): value for key, value in response_mapping.items()}
+    return None
+
+
+def _normalize_litellm_throttle(
+    error: Exception, *, prompt_name: str
+) -> ThrottleError | None:
+    message = str(error) or "LiteLLM request failed."
+    lower = message.lower()
+    status_code = getattr(error, "status_code", None)
+    code = getattr(error, "code", None)
+    class_name = error.__class__.__name__.lower()
+    kind: ThrottleKind | None = None
+
+    if "insufficient_quota" in lower or code == "insufficient_quota":
+        kind = "quota_exhausted"
+    elif (
+        status_code == 429
+        or "ratelimit" in class_name
+        or code
+        in {
+            "rate_limit",
+            "rate_limit_exceeded",
+        }
+    ):
+        kind = "rate_limit"
+    elif "timeout" in class_name:
+        kind = "timeout"
+
+    if kind is None:
+        return None
+
+    return ThrottleError(
+        message,
+        prompt_name=prompt_name,
+        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        kind=kind,
+        retry_after=_retry_after_from_error(error),
+        provider_payload=_error_payload(error),
+    )
 
 
 logger: StructuredLogger = get_logger(
@@ -206,10 +299,16 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             try:
                 return self._completion(**request_payload)
             except Exception as error:  # pragma: no cover - network/SDK failure
+                throttle_error = _normalize_litellm_throttle(
+                    error, prompt_name=prompt_name
+                )
+                if throttle_error is not None:
+                    raise throttle_error from error
                 raise PromptEvaluationError(
                     "LiteLLM request failed.",
                     prompt_name=prompt_name,
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    provider_payload=_error_payload(error),
                 ) from error
 
         def _select_choice(response: object) -> ProviderChoice:

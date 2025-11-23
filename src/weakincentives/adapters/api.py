@@ -21,6 +21,7 @@ from .core import (
     ProviderAdapter,
     SessionProtocol,
 )
+from .shared import ThrottleError, ThrottlePolicy, new_throttle_policy
 
 __all__ = [
     "LITELLM_ADAPTER_NAME",
@@ -30,6 +31,9 @@ __all__ = [
     "PromptResponse",
     "ProviderAdapter",
     "SessionProtocol",
+    "ThrottleError",
+    "ThrottlePolicy",
+    "new_throttle_policy",
 ]
 
 
