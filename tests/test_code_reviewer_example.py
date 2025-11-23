@@ -280,6 +280,7 @@ def test_persist_session_snapshot_logs_success(
 ) -> None:
     caplog.set_level(logging.INFO, logger=reviewer_example.__name__)
     session = Session()
+    set_workspace_digest(session, "workspace-digest", "body")
 
     snapshot_path = _persist_session_snapshot(session)
 
@@ -293,3 +294,22 @@ def test_persist_session_snapshot_logs_success(
     assert record.levelno == logging.INFO
     assert "Session snapshot persisted" in record.getMessage()
     assert record.snapshot_path == str(snapshot_path)
+
+
+def test_persist_session_snapshot_skips_empty_session(
+    caplog: pytest.LogCaptureFixture,
+    _redirect_snapshots: Path,
+) -> None:
+    caplog.set_level(logging.INFO, logger=reviewer_example.__name__)
+    session = Session()
+
+    snapshot_path = _persist_session_snapshot(session)
+
+    assert snapshot_path is None
+    assert not any(_redirect_snapshots.iterdir())
+    record = next(
+        rec
+        for rec in caplog.records
+        if getattr(rec, "session_id", None) == str(session.session_id)
+    )
+    assert "skipped; no slices" in record.getMessage()

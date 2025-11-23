@@ -518,9 +518,19 @@ def _persist_session_snapshot(session: Session) -> Path | None:
     """Persist the session snapshot to `snapshots/<session_id>.json`."""
 
     snapshot_path = SNAPSHOT_DIR / f"{session.session_id}.json"
+    snapshot = session.snapshot()
+    if not snapshot.slices:
+        _LOGGER.info(
+            "Session snapshot skipped; no slices to persist.",
+            extra={
+                "session_id": str(session.session_id),
+                "snapshot_path": str(snapshot_path),
+            },
+        )
+        return None
     try:
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-        snapshot_json = session.snapshot().to_json()
+        snapshot_json = snapshot.to_json()
         snapshot_path.write_text(snapshot_json, encoding="utf-8")
     except Exception:  # pragma: no cover - defensive logging
         _LOGGER.exception(
