@@ -29,6 +29,7 @@ from ..prompt.section import Section
 from ..runtime.events._types import EventBus, ToolInvoked
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
+from ..tools.asteval import AstevalSection
 from ..tools.digests import (
     WorkspaceDigestSection,
     clear_workspace_digest,
@@ -119,9 +120,14 @@ class ProviderAdapter(ABC):
         )
         workspace_section = self._resolve_workspace_section(prompt, prompt_name)
 
-        safe_workspace = workspace_section.clone(
+        safe_workspace = self._clone_section(
+            workspace_section,
             session=inner_session,
-            bus=inner_session.event_bus,
+        )
+        tool_sections = self._resolve_tool_sections(prompt)
+        safe_tools = tuple(
+            self._clone_section(section, session=inner_session)
+            for section in tool_sections
         )
         safe_workspace_digest = digest_section.clone(
             session=inner_session,
@@ -146,6 +152,8 @@ class ProviderAdapter(ABC):
                         """
                         Explore README/docs/workflow files first. Capture build/test commands,
                         dependency managers, and watchouts. Keep the digest task agnostic.
+                        Capture command exec tools (asteval, Podman exec) plus env caps/
+                        versions/libs. Keep it dense.
                         """
                     ).strip(),
                     key="optimization-expectations",
@@ -154,6 +162,7 @@ class ProviderAdapter(ABC):
                     session=inner_session,
                     strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
                 ),
+                *safe_tools,
                 safe_workspace,
                 safe_workspace_digest,
             ),
@@ -208,6 +217,22 @@ class ProviderAdapter(ABC):
                 prompt_name=prompt_name,
                 phase=PROMPT_EVALUATION_PHASE_REQUEST,
             ) from error
+
+    def _resolve_tool_sections(
+        self, prompt: Prompt[object]
+    ) -> tuple[Section[SupportsDataclass], ...]:
+        sections: list[Section[SupportsDataclass]] = []
+        for section_type in (AstevalSection,):
+            try:
+                sections.append(prompt.find_section(section_type))
+            except KeyError:
+                continue
+        return tuple(sections)
+
+    def _clone_section(
+        self, section: Section[SupportsDataclass], *, session: Session
+    ) -> Section[SupportsDataclass]:
+        return section.clone(session=session, bus=session.event_bus)
 
     def _require_workspace_digest_section(
         self, prompt: Prompt[object], *, prompt_name: str
