@@ -8,6 +8,25 @@ the filesystem. The section prefers live session state, gracefully falls back
 to prompt overrides, and emits an explicit placeholder (plus a structured log
 warning) when no digest exists yet.
 
+## Rationale
+
+- Reduce provider call costs by reusing a vetted workspace summary instead of
+  relying on repeated filesystem crawls or ad hoc prompt context.
+- Keep the digest bounded to predictable metadata (layout, tooling defaults,
+  recurring pitfalls) so downstream prompts remain stable even as tasks vary.
+- Preserve human-curated overrides so operators can inject authoritative
+  guidance when automated optimization is unavailable or delayed.
+
+## Scope
+
+- Applies to prompts that need repository awareness without embedding
+  task-specific instructions.
+- Covers only mounted workspace state surfaced through the session or override
+  stores; it does **not** attempt to summarize in-flight tool output or
+  temporary scratch data.
+- Excludes credential material, external service state, and ephemeral
+  sandbox-only files unless the optimization process explicitly inserts them.
+
 ## Section Behavior
 
 - The section is keyed to `workspace-digest` by default and renders a markdown
@@ -27,6 +46,35 @@ warning) when no digest exists yet.
 - `clone(session=...)` **requires** a `Session` argument because the section
   always binds to a concrete session instance. Callers must supply a new session
   when cloning for optimization prompts.
+
+### Behavior–Data Mapping
+
+- **Session snapshot path** → stores and retrieves the rendered digest text via
+  `set_workspace_digest` / `latest_workspace_digest`.
+- **Overrides path** → persists the rendered markdown override in
+  `PromptOverridesStore` keyed by section path so any prompt can consume the
+  same digest without re-optimizing.
+- **Placeholder path** → emits the default placeholder string and logs a
+  workspace-digest warning; no digest content is recorded in session or
+  overrides.
+
+### Data Captured
+
+- Repository layout and notable directories or files required for navigation.
+- Default tooling commands and workflows (tests, linting, formatting).
+- Known caveats or recurring pitfalls that affect most tasks.
+- Optimization metadata: section key, scope, and origin (session vs override).
+
+### Limitations and Caveats
+
+- The digest reflects the workspace at the time of optimization; it is not
+  auto-refreshed after filesystem changes unless optimization is rerun.
+- Placeholder renders omit contextual hints; operators should treat the warning
+  log as a signal to generate a digest before relying on the section.
+- Overrides can drift from reality if the workspace changes; prefer session
+  snapshots when freshness is critical and clear overrides that are obsolete.
+- The section avoids task-specific directives; pair it with task sections when
+  additional guidance is required.
 
 ## Adapter `optimize` Workflow
 
