@@ -34,6 +34,9 @@ from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.snapshots import Snapshot, SnapshotPayload, SnapshotRestoreError
 from ..types import JSONValue
 
+# Module-level logger keeps loader warnings consistent with the debug server.
+logger: StructuredLogger = get_logger(__name__)
+
 # pyright: reportUnusedFunction=false
 
 
@@ -54,6 +57,7 @@ class SnapshotMeta:
     created_at: str
     path: str
     slices: tuple[SliceSummary, ...]
+    validation_error: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -90,10 +94,20 @@ def load_snapshot(snapshot_path: Path) -> LoadedSnapshot:
 
     try:
         payload = SnapshotPayload.from_json(raw_text)
-        _ = Snapshot.from_json(raw_text)
     except SnapshotRestoreError as error:
         msg = f"Invalid snapshot: {error}"
         raise SnapshotLoadError(msg) from error
+
+    validation_error: str | None = None
+    try:
+        _ = Snapshot.from_json(raw_text)
+    except SnapshotRestoreError as error:
+        validation_error = str(error)
+        logger.warning(
+            "Snapshot validation failed",
+            event="wink.debug.snapshot_error",
+            context={"path": str(snapshot_path), "error": validation_error},
+        )
 
     raw_payload = MappingProxyType(
         json.loads(raw_text, object_pairs_hook=dict),
@@ -121,6 +135,7 @@ def load_snapshot(snapshot_path: Path) -> LoadedSnapshot:
         created_at=payload.created_at,
         path=str(snapshot_path),
         slices=tuple(summaries),
+        validation_error=validation_error,
     )
 
     return LoadedSnapshot(
@@ -262,6 +277,7 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
             "version": meta.version,
             "created_at": meta.created_at,
             "path": meta.path,
+            "validation_error": meta.validation_error,
             "slices": [
                 {
                     "slice_type": entry.slice_type,
@@ -308,6 +324,7 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
                 "version": store.reload().version,
                 "created_at": store.meta.created_at,
                 "path": store.meta.path,
+                "validation_error": store.meta.validation_error,
                 "slices": [
                     {
                         "slice_type": entry.slice_type,
@@ -344,6 +361,7 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
             "version": meta.version,
             "created_at": meta.created_at,
             "path": meta.path,
+            "validation_error": meta.validation_error,
             "slices": [
                 {
                     "slice_type": entry.slice_type,

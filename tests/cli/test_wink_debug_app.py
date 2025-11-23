@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Callable
@@ -63,6 +64,29 @@ def test_load_snapshot_errors(tmp_path: Path) -> None:
 
     with pytest.raises(debug_app.SnapshotLoadError):
         debug_app.load_snapshot(snapshot_path)
+
+
+def test_load_snapshot_recovers_from_unknown_types(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    payload = {
+        "version": "1",
+        "created_at": datetime.now(UTC).isoformat(),
+        "slices": [
+            {
+                "slice_type": "__main__:UnknownType",
+                "item_type": "__main__:UnknownType",
+                "items": [{"value": "one"}],
+            }
+        ],
+    }
+    snapshot_path.write_text(json.dumps(payload))
+
+    loaded = debug_app.load_snapshot(snapshot_path)
+
+    assert loaded.meta.validation_error
+    assert "__main__:UnknownType" in loaded.slices
+    unknown_slice = loaded.slices["__main__:UnknownType"]
+    assert unknown_slice.items == ({"value": "one"},)
 
 
 def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
