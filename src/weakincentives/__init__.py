@@ -17,7 +17,7 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from . import adapters, cli, dbc, deadlines, prompt, runtime, serde, tools, types
+from . import adapters, cli, deadlines, prompt, runtime, serde, tools, types
 
 if TYPE_CHECKING:
     from .api import *  # noqa: F403
@@ -28,7 +28,6 @@ __all__ = [
     "adapters",
     "api",
     "cli",
-    "dbc",
     "deadlines",
     "prompt",
     "runtime",
