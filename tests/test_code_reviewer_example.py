@@ -264,18 +264,26 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
     assert session_digest.body == "- Repo instructions from stub"
 
 
+@pytest.fixture(autouse=True)
+def _redirect_snapshots(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    snapshot_dir = tmp_path_factory.mktemp("snapshots")
+    monkeypatch.setattr(reviewer_example, "SNAPSHOT_DIR", snapshot_dir, raising=False)
+    return snapshot_dir
+
+
 def test_persist_session_snapshot_logs_success(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
+    _redirect_snapshots: Path,
 ) -> None:
     caplog.set_level(logging.INFO, logger=reviewer_example.__name__)
     session = Session()
-    monkeypatch.setattr(reviewer_example, "SNAPSHOT_DIR", tmp_path, raising=False)
 
     snapshot_path = _persist_session_snapshot(session)
 
-    assert snapshot_path == tmp_path / f"{session.session_id}.json"
+    assert snapshot_path == _redirect_snapshots / f"{session.session_id}.json"
     assert snapshot_path is not None and snapshot_path.exists()
     record = next(
         rec
