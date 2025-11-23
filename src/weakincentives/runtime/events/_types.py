@@ -17,14 +17,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol, cast, override
+from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
-from ...prompt._types import SupportsDataclass
-from ...prompt.tool_result import ToolResult
-
-if TYPE_CHECKING:
-    from ...adapters._names import AdapterName
+from ...adapters._names import AdapterName
 
 EventHandler = Callable[[object], None]
 
@@ -92,11 +88,11 @@ class ToolInvoked:
     prompt_name: str
     adapter: AdapterName
     name: str
-    params: SupportsDataclass
-    result: ToolResult[object]
+    params: Any
+    result: Any
     session_id: UUID | None
     created_at: datetime
-    value: SupportsDataclass | None = None
+    value: Any | None = None
     rendered_output: str = ""
     call_id: str | None = None
     event_id: UUID = field(default_factory=uuid4)

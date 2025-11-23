@@ -17,19 +17,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import RLock
-from typing import TYPE_CHECKING, Protocol
+from typing import Any
 from uuid import UUID, uuid4
 
+from ...adapters._names import AdapterName
 from ...prompt._types import SupportsDataclass
 from ..logging import StructuredLogger, get_logger
 from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
-
-if TYPE_CHECKING:
-    from ...adapters._names import AdapterName
-
-
-class _PromptResponseLike(Protocol):
-    output: object | None
 
 
 def _describe_handler(handler: EventHandler) -> str:
@@ -90,10 +84,10 @@ class PromptExecuted:
 
     prompt_name: str
     adapter: AdapterName
-    result: _PromptResponseLike
+    result: Any
     session_id: UUID | None
     created_at: datetime
-    value: SupportsDataclass | None = None
+    value: Any | None = None
     event_id: UUID = field(default_factory=uuid4)
 
 
@@ -106,7 +100,7 @@ class PromptRendered:
     prompt_name: str | None
     adapter: AdapterName
     session_id: UUID | None
-    render_inputs: tuple[SupportsDataclass, ...]
+    render_inputs: tuple[Any, ...]
     rendered_prompt: str
     created_at: datetime
     event_id: UUID = field(default_factory=uuid4)

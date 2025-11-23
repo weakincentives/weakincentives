@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from ...prompt._types import SupportsDataclass
-from ..events import EventBus
+from ..events._types import EventBus
 
 if TYPE_CHECKING:
     from .protocols import SessionProtocol

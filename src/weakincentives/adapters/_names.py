@@ -14,10 +14,10 @@
 
 from __future__ import annotations
 
-from typing import Final, Literal
+from typing import Final
 
-AdapterName = Literal["openai", "litellm"]
-"""Recognized adapter identifiers for provider integrations."""
+AdapterName = str
+"""Adapter identifier for provider integrations."""
 
 OPENAI_ADAPTER_NAME: Final[AdapterName] = "openai"
 """Canonical label for the OpenAI adapter."""

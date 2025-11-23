@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterable
 from typing import Protocol
 
 from ...prompt._types import SupportsDataclass
-from ..events import EventBus
+from ..events._types import EventBus
 from .snapshots import Snapshot
 
 type SnapshotProtocol = Snapshot

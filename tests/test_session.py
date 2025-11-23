@@ -523,6 +523,54 @@ def test_snapshot_preserves_custom_reducer_behavior(
     assert third_result.ok
 
 
+def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    rendered_event = make_prompt_rendered(rendered_prompt="Rendered prompt text")
+    executed_event = make_prompt_event(ExampleOutput(text="complete"))
+    tool_event = make_tool_event(4)
+
+    bus.publish(rendered_event)
+    bus.publish(executed_event)
+    bus.publish(tool_event)
+
+    snapshot = session.snapshot()
+    serialized = snapshot.to_json()
+    restored = Snapshot.from_json(serialized)
+
+    rendered_snapshot = cast(
+        tuple[PromptRendered, ...], snapshot.slices[PromptRendered]
+    )
+    executed_snapshot = cast(
+        tuple[PromptExecuted, ...], snapshot.slices[PromptExecuted]
+    )
+    tools_snapshot = cast(tuple[ToolInvoked, ...], snapshot.slices[ToolInvoked])
+
+    assert rendered_snapshot == (rendered_event,)
+    assert executed_snapshot[0].value == ExampleOutput(text="complete")
+    assert tools_snapshot[0].value == ExamplePayload(value=4)
+
+    restored_rendered = cast(
+        tuple[PromptRendered, ...], restored.slices[PromptRendered]
+    )
+    restored_executed_slice = cast(
+        tuple[PromptExecuted, ...], restored.slices[PromptExecuted]
+    )
+    restored_tool_slice = cast(tuple[ToolInvoked, ...], restored.slices[ToolInvoked])
+
+    assert restored_rendered[0].event_id == rendered_event.event_id
+    restored_executed = restored_executed_slice[0]
+    assert restored_executed.event_id == executed_event.event_id
+    assert restored_executed.result["prompt_name"] == "example"
+    assert restored_executed.value == {"text": "complete"}
+
+    restored_tool = restored_tool_slice[0]
+    assert restored_tool.event_id == tool_event.event_id
+    assert restored_tool.name == "tool"
+    assert restored_tool.params == {"value": 4}
+    assert restored_tool.result["value"] == {"value": 4}
+
+
 def test_snapshot_rollback_requires_registered_slices(
     session_factory: SessionFactory,
 ) -> None:

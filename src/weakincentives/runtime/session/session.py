@@ -262,12 +262,6 @@ class Session(SessionProtocol):
 
         with self._locked():
             state_snapshot: dict[SessionSliceType, SessionSlice] = dict(self._state)
-        for ephemeral in (
-            _TOOL_INVOKED_TYPE,
-            _PROMPT_EXECUTED_TYPE,
-            _PROMPT_RENDERED_TYPE,
-        ):
-            _ = state_snapshot.pop(ephemeral, None)
         try:
             normalized: SnapshotState = normalize_snapshot_state(state_snapshot)
         except ValueError as error:
@@ -331,8 +325,9 @@ class Session(SessionProtocol):
         )
 
         if normalized_event.value is not None:
+            value_type = cast(SessionSliceType, type(normalized_event.value))
             self._dispatch_data_event(
-                type(normalized_event.value),
+                value_type,
                 cast(ReducerEvent, normalized_event),
             )
 
@@ -348,8 +343,9 @@ class Session(SessionProtocol):
         )
 
         if normalized_event.value is not None:
+            value_type = cast(SessionSliceType, type(normalized_event.value))
             self._dispatch_data_event(
-                type(normalized_event.value),
+                value_type,
                 cast(ReducerEvent, normalized_event),
             )
             return
