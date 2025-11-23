@@ -3,15 +3,31 @@
 ## Purpose
 
 External optimization services need a stable contract for identifying prompts and
-overriding their content without touching source files. This document consolidates
-the descriptor schema, tool-aware hashing rules, override structures, and the
-filesystem-backed store required to persist those overrides in local workflows.
+overriding their content without touching source files. This document
+consolidates the descriptor schema, tool-aware hashing rules, override
+structures, and the filesystem-backed store required to persist those overrides
+in local workflows.
+
+## Rationale
+
+- Decouples prompt iteration from source control churn so experimentation and
+  production review can happen without merge pressure.
+- Anchors overrides to deterministic identifiers (`ns`, prompt key, section path,
+  content hash) so stale or ambiguous edits fail closed instead of silently
+  mutating runtime output.
+- Preserves the authored prompt as the source of truth; overrides are
+  opt-in layers whose applicability is proved via hashing rather than heuristics.
+- Ensures tools exposed to the model remain contractually stable by hashing
+  their schemas and descriptions alongside section content.
 
 ## Scope
 
 - Applies to every prompt that participates in the override ecosystem.
 - Covers descriptor generation, override authoring, storage, and mutation
   behaviors.
+- Maps the current override mechanisms (sections and tools) to their governing
+  identifiers and validation constraints so implementers can locate the
+  enforcement points quickly.
 - Omits remote synchronization, conflict resolution between machines, and
   templating semantics.
 
@@ -34,6 +50,44 @@ filesystem-backed store required to persist those overrides in local workflows.
   used to decide whether an override still applies.
 - **Tag** – Free-form label (for example `latest`, `stable`, `experiment-a`) that
   callers use to request a specific family of overrides.
+
+## Override Mechanisms and Identifier Map
+
+- **Section overrides**
+  - Mechanism: replace the rendered body of hash-aware sections.
+  - Identifiers: `(ns, prompt_key, section_path, expected_hash, tag)` with paths
+    ordered from root to leaf.
+  - Constraints: hashes must match the descriptor; section paths must use the
+    canonical keys, not headings or titles. Bodies can include templating tokens
+    already supported by the prompt renderer but cannot introduce new tools or
+    change section enablement rules.
+- **Tool overrides**
+  - Mechanism: patch model-facing descriptions and per-parameter annotations
+    without altering schemas or handler wiring.
+  - Identifiers: `(ns, prompt_key, tool_name, expected_contract_hash, tag)`.
+  - Constraints: tool names remain the stable identifiers; schema changes
+    invalidate overrides via the contract hash. Parameter descriptions are
+    optional and scoped to the existing parameter keys.
+- **Tags**
+  - Mechanism: switch between multiple override variants for the same prompt.
+  - Identifiers: free-form string stored alongside the override payload.
+  - Constraints: tags are sanitized by the store; lookups default to `latest`
+    when callers omit a value.
+
+### Caveats and Reference Notes
+
+- Overrides never bypass section enablement predicates—disabled sections stay
+  disabled even if an override exists.
+- Changing a prompt’s namespace, key, or section key invalidates every stored
+  override for that element because lookups are strict.
+- Descriptor hashes are derived from in-repo templates; edits applied at runtime
+  do not rewrite the hash and therefore remain transient.
+- File sanitization rejects identifiers outside the section-key regex
+  `^[a-z0-9][a-z0-9._-]{0,63}$`; the store fails fast before touching the
+  filesystem.
+- The spec does not guarantee cross-repository portability; paths are relative
+  to the detected project root, and overrides are intended to travel with the
+  working copy.
 
 ## Descriptor Contract
 
