@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompt.tool_result import render_tool_payload
+from weakincentives.prompt.tools import render_tool_payload
 
 
 @dataclass(slots=True)
@@ -67,7 +67,7 @@ def test_render_tool_payload_falls_back_to_repr(
     def failing_dump(*_: object, **__: object) -> dict[str, object]:
         raise TypeError("cannot serialize")
 
-    monkeypatch.setattr("weakincentives.prompt.tool_result.dump", failing_dump)
+    monkeypatch.setattr("weakincentives.prompt.tools.tool_result.dump", failing_dump)
     payload = render_tool_payload(data)
     assert "PlainData" in payload
 
@@ -118,7 +118,7 @@ def test_render_tool_payload_handles_unserializable_mapping_values(
     def failing_dump(*_: object, **__: object) -> dict[str, object]:
         raise TypeError("fail")
 
-    monkeypatch.setattr("weakincentives.prompt.tool_result.dump", failing_dump)
+    monkeypatch.setattr("weakincentives.prompt.tools.tool_result.dump", failing_dump)
     payload = render_tool_payload({"data": PlainData(value="fallback")})
     decoded = json.loads(payload)
     assert decoded["data"].startswith("PlainData(")

@@ -10,7 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utilities for composing delegation prompts from rendered parents."""
+"""Prompt composition helpers for delegation flows.
+
+The :mod:`weakincentives.prompt.composition` layer builds on the core sections
+to splice rendered parent prompts into new requests without bypassing tool,
+override, or structured output wiring.
+"""
 
 from __future__ import annotations
 
@@ -19,14 +24,13 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, ClassVar, Generic, TypeVar, cast, override
 
-from ..serde import clone as clone_dataclass
-from ._types import SupportsDataclass
-from .errors import PromptRenderError
-from .markdown import MarkdownSection
-from .prompt import Prompt, RenderedPrompt
-from .protocols import PromptProtocol
-from .response_format import ResponseFormatParams, ResponseFormatSection
-from .section import Section
+from ...serde import clone as clone_dataclass
+from .._types import SupportsDataclass
+from ..errors import PromptRenderError
+from ..prompt import Prompt, RenderedPrompt
+from ..protocols import PromptProtocol
+from ..response_format import ResponseFormatParams, ResponseFormatSection
+from ..sections import MarkdownSection, Section
 
 ParentOutputT = TypeVar("ParentOutputT")
 DelegationOutputT = TypeVar("DelegationOutputT")

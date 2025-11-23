@@ -10,28 +10,108 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt namespace exposing the :mod:`weakincentives.prompt.api` surface."""
+"""Stable prompt API grouped into layered subpackages.
+
+The top-level package surfaces the public interfaces documented in
+:mod:`weakincentives.prompt.api` while keeping implementation details organized
+under :mod:`weakincentives.prompt.sections`, :mod:`weakincentives.prompt.tools`,
+:mod:`weakincentives.prompt.composition`, and :mod:`weakincentives.prompt.overrides`.
+"""
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from . import api, composition, overrides, sections, tools
+from .api import (
+    Chapter,
+    ChapterDescriptor,
+    ChaptersExpansionPolicy,
+    DelegationParams,
+    DelegationPrompt,
+    DelegationSummarySection,
+    LocalPromptOverridesStore,
+    MarkdownSection,
+    OutputParseError,
+    ParentPromptParams,
+    ParentPromptSection,
+    Prompt,
+    PromptDescriptor,
+    PromptError,
+    PromptLike,
+    PromptOverride,
+    PromptOverridesError,
+    PromptOverridesStore,
+    PromptProtocol,
+    PromptRenderError,
+    PromptValidationError,
+    ProviderAdapterProtocol,
+    RecapParams,
+    RecapSection,
+    RenderedPromptProtocol,
+    Section,
+    SectionDescriptor,
+    SectionOverride,
+    SectionPath,
+    StructuredOutputConfig,
+    SupportsDataclass,
+    SupportsToolResult,
+    Tool,
+    ToolContext,
+    ToolDescriptor,
+    ToolHandler,
+    ToolOverride,
+    ToolRenderableResult,
+    ToolResult,
+    hash_json,
+    hash_text,
+    parse_structured_output,
+)
 
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
-
-api: object | None = None
-
-__all__ = ["api"]
-
-
-def __getattr__(name: str) -> object:
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
-
-
-def __dir__() -> list[str]:
-    return sorted({*globals().keys(), *__all__})
+__all__ = [
+    "Chapter",
+    "ChapterDescriptor",
+    "ChaptersExpansionPolicy",
+    "DelegationParams",
+    "DelegationPrompt",
+    "DelegationSummarySection",
+    "LocalPromptOverridesStore",
+    "MarkdownSection",
+    "OutputParseError",
+    "ParentPromptParams",
+    "ParentPromptSection",
+    "Prompt",
+    "PromptDescriptor",
+    "PromptError",
+    "PromptLike",
+    "PromptOverride",
+    "PromptOverridesError",
+    "PromptOverridesStore",
+    "PromptProtocol",
+    "PromptRenderError",
+    "PromptValidationError",
+    "ProviderAdapterProtocol",
+    "RecapParams",
+    "RecapSection",
+    "RenderedPromptProtocol",
+    "Section",
+    "SectionDescriptor",
+    "SectionOverride",
+    "SectionPath",
+    "StructuredOutputConfig",
+    "SupportsDataclass",
+    "SupportsToolResult",
+    "Tool",
+    "ToolContext",
+    "ToolDescriptor",
+    "ToolHandler",
+    "ToolOverride",
+    "ToolRenderableResult",
+    "ToolResult",
+    "api",
+    "composition",
+    "hash_json",
+    "hash_text",
+    "overrides",
+    "parse_structured_output",
+    "sections",
+    "tools",
+]

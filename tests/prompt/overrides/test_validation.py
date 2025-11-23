@@ -40,7 +40,7 @@ from weakincentives.prompt.overrides.versioning import (
     ToolDescriptor,
     ToolOverride,
 )
-from weakincentives.prompt.tool import Tool
+from weakincentives.prompt.tools import Tool
 from weakincentives.types import JSONValue
 
 

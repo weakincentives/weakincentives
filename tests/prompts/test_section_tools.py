@@ -17,9 +17,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompt.markdown import MarkdownSection
-from weakincentives.prompt.section import Section
-from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+from weakincentives.prompt.sections import MarkdownSection, Section
+from weakincentives.prompt.tools import Tool, ToolContext, ToolResult
 
 
 @dataclass

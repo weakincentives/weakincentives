@@ -22,8 +22,8 @@ from typing import Any, cast
 from ..dbc import invariant
 from ._types import SupportsDataclass, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
-from .section import Section
-from .tool import Tool
+from .sections import Section
+from .tools import Tool
 
 
 @dataclass(frozen=True, slots=True)

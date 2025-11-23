@@ -24,7 +24,7 @@ from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.dbc import dbc_enabled
 from weakincentives.prompt._types import SupportsDataclass
-from weakincentives.prompt.tool import ToolResult
+from weakincentives.prompt.tools import ToolResult
 from weakincentives.runtime.events import (
     InProcessEventBus,
     PromptExecuted,

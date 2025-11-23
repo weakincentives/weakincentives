@@ -46,7 +46,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from weakincentives.prompt import DelegationParams, Tool, ToolResult
+from weakincentives.prompt.composition import DelegationParams
+from weakincentives.prompt.tools import Tool, ToolResult
 
 
 class SubagentIsolationLevel(Enum):
@@ -127,7 +128,9 @@ Every tool invocation MUST execute the following steps:
 ```python
 from dataclasses import dataclass, replace
 
-from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt
+from weakincentives.prompt import Prompt
+from weakincentives.prompt.composition import DelegationParams
+from weakincentives.prompt.sections import MarkdownSection
 from weakincentives.tools import SubagentsSection
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,

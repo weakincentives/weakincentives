@@ -32,8 +32,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
-from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.sections import MarkdownSection
+from ..prompt.tools import Tool, ToolContext, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session, replace_latest, select_latest
 from . import vfs as vfs_module

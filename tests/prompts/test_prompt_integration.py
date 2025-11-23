@@ -109,4 +109,10 @@ def test_prompt_module_public_exports() -> None:
     for symbol in ("Prompt", "Section", "MarkdownSection"):
         assert hasattr(prompt, symbol), f"prompt module missing export: {symbol}"
         assert getattr(prompt, symbol) is getattr(prompt.api, symbol)
-    assert prompt.__all__ == ["api"]
+    assert set(prompt.__all__) == set(prompt.api.__all__) | {
+        "api",
+        "composition",
+        "overrides",
+        "sections",
+        "tools",
+    }

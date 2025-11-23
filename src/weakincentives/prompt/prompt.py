@@ -26,12 +26,11 @@ from typing import (
 
 from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
-from .chapter import Chapter, ChaptersExpansionPolicy
 from .errors import PromptValidationError, SectionPath
 from .registry import PromptRegistry, RegistrySnapshot, SectionNode, clone_dataclass
 from .rendering import PromptRenderer, RenderedPrompt
 from .response_format import ResponseFormatParams, ResponseFormatSection
-from .section import Section
+from .sections import Chapter, ChaptersExpansionPolicy, Section
 from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:

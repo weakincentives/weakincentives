@@ -10,19 +10,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations  # pragma: no cover
+"""Composable prompt sections and chapters.
 
-from typing import TYPE_CHECKING  # pragma: no cover
+This subpackage contains the building blocks used to assemble prompt content
+before tooling, overrides, or composition layers are applied. Sections represent
+leaf and container nodes, while chapters model higher-level groupings.
+"""
 
-if TYPE_CHECKING:  # pragma: no cover
-    from typing import assert_type
+from __future__ import annotations
 
-    from ._types import SupportsDataclass
-    from .sections import MarkdownSection
+from .chapter import Chapter, ChaptersExpansionPolicy
+from .markdown import MarkdownSection
+from .section import Section
 
-    _parameterless_section = MarkdownSection[SupportsDataclass](
-        title="Example",
-        template="static content",
-        key="example-section",
-    )
-    _ = assert_type(_parameterless_section, MarkdownSection[SupportsDataclass])
+__all__ = [
+    "Chapter",
+    "ChaptersExpansionPolicy",
+    "MarkdownSection",
+    "Section",
+]

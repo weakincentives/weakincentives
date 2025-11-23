@@ -33,7 +33,7 @@ from ..prompt.structured_output import (
     parse_dataclass_payload,
     parse_structured_output,
 )
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.tools import Tool, ToolContext, ToolResult
 from ..runtime.events import (
     EventBus,
     HandlerFailure,

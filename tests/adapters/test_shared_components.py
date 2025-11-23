@@ -38,8 +38,7 @@ from weakincentives.prompt import Prompt, ToolContext
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
-from weakincentives.prompt.tool import Tool
-from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.prompt.tools import Tool, ToolResult
 from weakincentives.runtime.events import (
     EventBus,
     PublishResult,

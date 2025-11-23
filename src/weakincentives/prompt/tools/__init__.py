@@ -10,19 +10,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations  # pragma: no cover
+"""Tool registration and result helpers used by prompts.
 
-from typing import TYPE_CHECKING  # pragma: no cover
+The :mod:`weakincentives.prompt.tools` layer holds the abstractions that wire
+up tool handlers to prompts and normalize their outputs for downstream
+rendering and telemetry.
+"""
 
-if TYPE_CHECKING:  # pragma: no cover
-    from typing import assert_type
+from __future__ import annotations
 
-    from ._types import SupportsDataclass
-    from .sections import MarkdownSection
+from .tool import Tool, ToolContext, ToolHandler
+from .tool_result import ToolResult, render_tool_payload
 
-    _parameterless_section = MarkdownSection[SupportsDataclass](
-        title="Example",
-        template="static content",
-        key="example-section",
-    )
-    _ = assert_type(_parameterless_section, MarkdownSection[SupportsDataclass])
+__all__ = ["Tool", "ToolContext", "ToolHandler", "ToolResult", "render_tool_payload"]

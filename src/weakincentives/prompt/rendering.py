@@ -25,7 +25,7 @@ from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .registry import RegistrySnapshot, SectionNode
 from .response_format import ResponseFormatSection
 from .structured_output import StructuredOutputConfig
-from .tool import Tool
+from .tools import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .overrides import PromptDescriptor, ToolOverride

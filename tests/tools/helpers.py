@@ -27,7 +27,7 @@ from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
-from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+from weakincentives.prompt.tools import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclass)

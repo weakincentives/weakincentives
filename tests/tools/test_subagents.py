@@ -30,7 +30,7 @@ from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.structured_output import StructuredOutputConfig
-from weakincentives.prompt.tool import ToolContext
+from weakincentives.prompt.tools import ToolContext
 from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.protocols import SessionProtocol, SnapshotProtocol

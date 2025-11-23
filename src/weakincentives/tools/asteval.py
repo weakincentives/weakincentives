@@ -28,8 +28,8 @@ from importlib import import_module
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast, override
 
-from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.sections import MarkdownSection
+from ..prompt.tools import Tool, ToolContext, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import (
     ReducerContextProtocol,

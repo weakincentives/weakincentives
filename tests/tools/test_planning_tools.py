@@ -23,7 +23,7 @@ import pytest
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.prompt import SupportsDataclass
-from weakincentives.prompt.tool import ToolResult
+from weakincentives.prompt.tools import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import (
     ReducerContext,

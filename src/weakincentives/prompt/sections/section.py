@@ -18,11 +18,11 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
 if TYPE_CHECKING:
-    from .tool import Tool
+    from ..tools import Tool
 
-from ._generic_params_specializer import GenericParamsSpecializer
-from ._normalization import normalize_component_key
-from ._types import SupportsDataclass, SupportsToolResult
+from .._generic_params_specializer import GenericParamsSpecializer
+from .._normalization import normalize_component_key
+from .._types import SupportsDataclass, SupportsToolResult
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -117,7 +117,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         if not tools:
             return ()
 
-        from .tool import Tool
+        from ..tools import Tool
 
         normalized: list[Tool[SupportsDataclass, SupportsToolResult]] = []
         for tool in tools:

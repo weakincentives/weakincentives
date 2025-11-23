@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import ClassVar, TypeVar, cast
 
-from ..serde import clone as clone_dataclass
-from ._generic_params_specializer import GenericParamsSpecializer
-from ._normalization import normalize_component_key
-from ._types import SupportsDataclass
+from ...serde import clone as clone_dataclass
+from .._generic_params_specializer import GenericParamsSpecializer
+from .._normalization import normalize_component_key
+from .._types import SupportsDataclass
 from .section import Section
 
 

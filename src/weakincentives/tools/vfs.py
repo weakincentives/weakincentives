@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Final, Literal, cast, override
 
 from ..prompt import SupportsDataclass, SupportsToolResult
-from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.sections import MarkdownSection
+from ..prompt.tools import Tool, ToolContext, ToolResult
 from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,

@@ -19,7 +19,7 @@ import pytest
 
 from weakincentives.prompt import MarkdownSection, Prompt, Section
 from weakincentives.prompt.errors import PromptValidationError
-from weakincentives.prompt.tool import Tool
+from weakincentives.prompt.tools import Tool
 
 
 @dataclass

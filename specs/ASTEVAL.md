@@ -105,7 +105,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from weakincentives.prompt import Tool, ToolResult
+from weakincentives.prompt.tools import Tool, ToolResult
 from weakincentives.tools.vfs import VfsPath
 
 @dataclass(slots=True, frozen=True)

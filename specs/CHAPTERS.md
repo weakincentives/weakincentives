@@ -222,7 +222,7 @@ descriptor metadata and redaction guidance when sharing prompt snapshots.
 
 ## Code References and Behaviors
 
-- **Chapter normalization and gating**: `src/weakincentives/prompt/chapter.py`
+- **Chapter normalization and gating**: `src/weakincentives/prompt/sections/chapter.py`
   normalizes keys, coerces `enabled` callables, clones default params, and
   exposes `is_enabled` for adapter use.
 - **Prompt-level expansion**: `src/weakincentives/prompt/prompt.py` enforces

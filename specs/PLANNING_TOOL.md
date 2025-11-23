@@ -196,7 +196,8 @@ The section follows the standard prompt system rules (see `specs/PROMPTS.md`) an
 ```python
 from dataclasses import dataclass
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.prompt import MarkdownSection, Prompt
+from weakincentives.prompt import Prompt
+from weakincentives.prompt.sections import MarkdownSection
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.selectors import select_latest
 from weakincentives.tools import planning

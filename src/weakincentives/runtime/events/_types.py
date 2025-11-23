@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...prompt._types import SupportsDataclass
-from ...prompt.tool_result import ToolResult
+from ...prompt.tools.tool_result import ToolResult
 
 if TYPE_CHECKING:
     from ...adapters._names import AdapterName

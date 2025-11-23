@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 import pytest
 
 from weakincentives.prompt.errors import PromptValidationError
-from weakincentives.prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from weakincentives.prompt.tools import Tool, ToolContext, ToolHandler, ToolResult
 
 
 @dataclass

@@ -19,8 +19,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, is_dataclass
 from typing import Any, cast
 
-from ..serde import dump
-from ._types import SupportsDataclass
+from ...serde import dump
+from .._types import SupportsDataclass
 
 _SEQUENCE_EXCLUSIONS = (str, bytes, bytearray)
 

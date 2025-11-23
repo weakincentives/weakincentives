@@ -53,15 +53,15 @@ The runtime exposes three core schemas:
 - **`Tool`** – the declaration emitted by sections and the registry entry consumed by
   adapters. It enforces name and description constraints, validates handler signatures,
   and persists type arguments for params/result inspection at runtime (defined in
-  `src/weakincentives/prompt/tool.py`).
+  `src/weakincentives/prompt/tools/tool.py`).
 - **`ToolResult`** – the structured response container that all handlers return. It
   carries the human-readable message, typed payload, success flag, and a signal for
   omitting payloads from provider-visible context while still persisting them for reducers
-  (`src/weakincentives/prompt/tool_result.py`).
+  (`src/weakincentives/prompt/tools/tool_result.py`).
 - **`ToolContext`** – the immutable snapshot passed into every handler. It binds the
   active prompt, rendered prompt (when available), provider adapter, session, event bus,
   and optional deadline so handlers can issue nested prompts or record telemetry without
-  depending on globals (`src/weakincentives/prompt/tool.py`).
+  depending on globals (`src/weakincentives/prompt/tools/tool.py`).
 
 Downstream consumers must treat these schemas as stable: adapter integrations SHOULD read
 their fields rather than duplicating parsing logic, and tooling authors MUST preserve the
@@ -138,7 +138,7 @@ class ToolRenderableResult(Protocol):
 Handlers follow the canonical signature:
 
 ```python
-from weakincentives.prompt import ToolContext, ToolHandler, ToolResult
+from weakincentives.prompt.tools import ToolContext, ToolHandler, ToolResult
 
 def handle_tool(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]:
     ...
@@ -190,7 +190,9 @@ responsible for:
 ```python
 from dataclasses import dataclass, field
 
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.prompt import Prompt
+from weakincentives.prompt.sections import MarkdownSection
+from weakincentives.prompt.tools import Tool, ToolContext, ToolResult
 
 
 @dataclass

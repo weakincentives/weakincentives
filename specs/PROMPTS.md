@@ -226,7 +226,8 @@ concerns placeholder presence and dataclass coverage; naming conventions are unc
 
 ```python
 from dataclasses import dataclass
-from weakincentives.prompt import Prompt, MarkdownSection
+from weakincentives.prompt import Prompt
+from weakincentives.prompt.sections import MarkdownSection
 
 @dataclass
 class MessageRoutingParams:

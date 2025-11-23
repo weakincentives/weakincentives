@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import cast, override
 
 from ..prompt._types import SupportsDataclass
-from ..prompt.section import Section
+from ..prompt.sections import Section
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol

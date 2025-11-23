@@ -24,11 +24,10 @@ from typing import Any, Final, cast, override
 from ..prompt import SupportsDataclass
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
-from ..prompt.markdown import MarkdownSection
 from ..prompt.prompt import RenderedPrompt
 from ..prompt.protocols import PromptResponseProtocol
-from ..prompt.tool import Tool, ToolContext
-from ..prompt.tool_result import ToolResult
+from ..prompt.sections import MarkdownSection
+from ..prompt.tools import Tool, ToolContext, ToolResult
 from ..runtime.events import InProcessEventBus
 from ..runtime.events._types import EventBus
 from ..runtime.session.protocols import SessionProtocol

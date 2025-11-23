@@ -152,8 +152,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Generic, Sequence, TypeVar, cast, get_args
 
-from weakincentives.prompt import MarkdownSection, Prompt, Section
+from weakincentives.prompt import Prompt
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.prompt.sections import MarkdownSection, Section
 
 ParentOutputT = TypeVar("ParentOutputT")
 DelegationOutputT = TypeVar("DelegationOutputT")
@@ -300,12 +301,13 @@ initialiser to inject the section between the summary and parent prompt when req
 ```python
 from typing import Any, Generic, Sequence, TypeVar, cast, get_args
 
-from weakincentives.prompt import MarkdownSection, Prompt, Section
+from weakincentives.prompt import Prompt
+from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.response_format import (
     ResponseFormatParams,
     ResponseFormatSection,
 )
-from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.prompt.sections import MarkdownSection, Section
 
 
 ParentOutputT = TypeVar("ParentOutputT")

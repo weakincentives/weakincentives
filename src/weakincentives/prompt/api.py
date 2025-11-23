@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from ._types import SupportsDataclass, SupportsToolResult, ToolRenderableResult
-from .chapter import Chapter, ChaptersExpansionPolicy
 from .composition import (
     DelegationParams,
     DelegationPrompt,
@@ -31,7 +30,6 @@ from .errors import (
     PromptValidationError,
     SectionPath,
 )
-from .markdown import MarkdownSection
 from .overrides import (
     ChapterDescriptor,
     LocalPromptOverridesStore,
@@ -49,14 +47,13 @@ from .overrides import (
 )
 from .prompt import Prompt
 from .protocols import PromptProtocol, ProviderAdapterProtocol, RenderedPromptProtocol
-from .section import Section
+from .sections import Chapter, ChaptersExpansionPolicy, MarkdownSection, Section
 from .structured_output import (
     OutputParseError,
     StructuredOutputConfig,
     parse_structured_output,
 )
-from .tool import Tool, ToolContext, ToolHandler
-from .tool_result import ToolResult
+from .tools import Tool, ToolContext, ToolHandler, ToolResult
 
 __all__ = [
     "Chapter",

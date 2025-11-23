@@ -30,7 +30,7 @@ import pytest
 import weakincentives.tools.podman as podman_module
 import weakincentives.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.prompt.tool import Tool
+from weakincentives.prompt.tools import Tool
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 from weakincentives.tools import (

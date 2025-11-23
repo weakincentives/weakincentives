@@ -23,7 +23,7 @@ import pytest
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from tests.helpers.events import NullEventBus
 from weakincentives.adapters.core import PromptResponse
-from weakincentives.prompt.tool import ToolResult
+from weakincentives.prompt.tools import ToolResult
 from weakincentives.runtime.events import (
     HandlerFailure,
     InProcessEventBus,

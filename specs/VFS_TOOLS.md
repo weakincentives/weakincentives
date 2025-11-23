@@ -245,7 +245,8 @@ The section follows the shared prompt conventions (`specs/PROMPTS.md`) and adds 
 ```python
 from dataclasses import dataclass
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.prompt import MarkdownSection, Prompt
+from weakincentives.prompt import Prompt
+from weakincentives.prompt.sections import MarkdownSection
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.selectors import select_latest
 from weakincentives.tools import vfs

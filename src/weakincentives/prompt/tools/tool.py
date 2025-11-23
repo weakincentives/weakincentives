@@ -31,18 +31,18 @@ from typing import (
     get_type_hints,
 )
 
-from ..deadlines import Deadline
-from ._types import SupportsDataclass, SupportsToolResult
-from .errors import PromptValidationError
+from ...deadlines import Deadline
+from .._types import SupportsDataclass, SupportsToolResult
+from ..errors import PromptValidationError
 from .tool_result import ToolResult
 
 _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 
 if TYPE_CHECKING:
-    from ..runtime.events._types import EventBus
-    from ..runtime.session.protocols import SessionProtocol
-    from .protocols import (
+    from ...runtime.events._types import EventBus
+    from ...runtime.session.protocols import SessionProtocol
+    from ..protocols import (
         PromptProtocol,
         ProviderAdapterProtocol,
         RenderedPromptProtocol,

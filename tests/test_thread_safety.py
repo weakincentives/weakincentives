@@ -27,7 +27,7 @@ import pytest
 from code_reviewer_example import initialize_code_reviewer_runtime
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
-from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.prompt.tools import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
 

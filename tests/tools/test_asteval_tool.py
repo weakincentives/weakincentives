@@ -23,7 +23,7 @@ import pytest
 
 import weakincentives.tools.asteval as asteval_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.prompt.tools import Tool, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (

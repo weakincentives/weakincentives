@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from ..prompt.tool import ToolContext
+from ..prompt.tools import ToolContext
 from ..runtime.session import Session
 
 

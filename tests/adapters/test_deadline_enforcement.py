@@ -36,8 +36,7 @@ from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.prompt.tool import Tool, ToolContext
-from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.prompt.tools import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.protocols import SessionProtocol

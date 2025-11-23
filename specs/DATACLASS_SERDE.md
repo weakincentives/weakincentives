@@ -50,8 +50,7 @@ parse(
 ) -> T
 ```
 
-- Accepts a dataclass type and a mapping payload. Missing required inputs raise `ValueError("Missing required field:
-  'field'")`.
+- Accepts a dataclass type and a mapping payload. Missing required inputs raise `ValueError("Missing required field: 'field'")`.
 - **Extras**: `extra` may be `"ignore"`, `"forbid"`, or `"allow"`. Allowed extras attach to the instance or fall back to
   `__extras__` when slots block dynamic attributes.
 - **Coercion**: When enabled, converts strings to numerics, UUID, paths, Enums, date/time objects, nested dataclasses,

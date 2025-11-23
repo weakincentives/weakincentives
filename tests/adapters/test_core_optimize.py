@@ -32,7 +32,7 @@ from weakincentives.prompt.overrides import (
     PromptOverride,
     PromptOverridesStore,
 )
-from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.prompt.tools import ToolResult
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.tools.digests import (

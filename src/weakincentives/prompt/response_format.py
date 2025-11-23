@@ -18,7 +18,7 @@ from typing import Final, Literal, override
 
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
-from .markdown import MarkdownSection
+from .sections import MarkdownSection
 
 __all__ = ["ResponseFormatParams", "ResponseFormatSection"]
 

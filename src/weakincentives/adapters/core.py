@@ -25,7 +25,7 @@ from ..prompt import MarkdownSection
 from ..prompt._types import SupportsDataclass
 from ..prompt.overrides import PromptLike, PromptOverridesStore
 from ..prompt.prompt import Prompt
-from ..prompt.section import Section
+from ..prompt.sections import Section
 from ..runtime.events._types import EventBus, ToolInvoked
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol

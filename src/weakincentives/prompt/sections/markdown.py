@@ -18,9 +18,9 @@ from dataclasses import fields, is_dataclass
 from string import Template
 from typing import Any, TypeVar, override
 
-from ..serde import clone as clone_dataclass
-from ._types import SupportsDataclass
-from .errors import PromptRenderError
+from ...serde import clone as clone_dataclass
+from .._types import SupportsDataclass
+from ..errors import PromptRenderError
 from .section import Section
 
 MarkdownParamsT = TypeVar(
