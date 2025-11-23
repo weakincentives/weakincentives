@@ -10,6 +10,52 @@ in `specs/VFS_TOOLS.md`. It exposes a single read–eval–print surface that
 accepts an expression string, optional helper definitions, and an optional list
 of read/write file operations to run before or after evaluation.
 
+## Rationale and Scope
+
+### Why the tool exists
+
+- Provide a deterministic, resource-bounded way to let agents run short Python
+  snippets without breaking the "side effect free" contract. The implementation
+  lives in `src/weakincentives/tools/asteval.py` and injects into prompt flows
+  through `AstevalSection`, mirroring the other built-in tool sections so it can
+  be advertised consistently to LLMs.
+- Keep Python optional for downstream consumers by parking the dependency
+  behind the `asteval` extra in `pyproject.toml`; lazy imports raise a targeted
+  error instructing users to install `weakincentives[asteval]` when the module
+  is absent.
+
+### Guiding principles
+
+- **Sandbox first** – Strip privileged nodes (import/exec) and expose only a
+  whitelisted symtable of math/statistics helpers, custom `read_text`/`write_text`
+  hooks, and a constrained `print`, keeping runtime behavior transparent.
+- **Short, synchronous runs** – Enforce 2,000-character code limits, 4,096-char
+  stream caps, and a 5-second timeout so the tool behaves predictably within the
+  agent event loop instead of turning into a background worker.
+- **VFS-only side effects** – Route all reads/writes through the in-memory VFS,
+  validating relative ASCII paths, deduplicating targets, and templating writes
+  against the final globals snapshot so edits remain explicit and reversible.
+- **Contractable surface** – Model parameters and results with frozen
+  dataclasses to keep prompt schemas stable and to simplify serialization inside
+  `ToolResult` payloads and reducers.
+
+### Scope boundaries and present-state caveats
+
+- The timeout guard is implemented with a daemon thread/event rather than the
+  signal-based approach envisioned in early drafts, so long-running code is
+  interrupted cooperatively only when the worker thread returns.
+- The packaged dependency currently targets `asteval>=1.0.7`, which supersedes
+  the `>=1.0.6` minimum described in earlier planning notes. The handler still
+  raises the same runtime message when the optional dependency is missing.
+- The symtable includes a minimal set of builtins plus math/statistics, but it
+  also exposes the raw `print` replacement used for stdout capture; additional
+  helpers (like custom reducers) remain intentionally out of scope to preserve
+  a narrow attack surface.
+- The tool executes multi-line scripts via `interpreter.eval` and captures the
+  repr of the last expression when no errors occurred; if stderr is populated
+  and no value is produced, any staged writes are discarded and summarized in
+  the returned message, making error handling explicit to prompt authors.
+
 ## Goals
 
 - **Deterministic Sandbox** – Provide a constrained Python expression evaluator
