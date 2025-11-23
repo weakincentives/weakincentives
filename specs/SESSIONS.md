@@ -57,6 +57,9 @@
   types to their tuples plus metadata such as timestamps.
 - **Snapshot tuple** – The tuple stored for a specific slice within a snapshot;
   it mirrors the reducer-managed slice tuple at capture time.
+- **Session hierarchy** – Sessions can be nested. Each session knows its parent
+  (if any) and the set of directly registered child sessions to enable
+  tree-aware operations.
 
 ## Data Model
 
@@ -97,6 +100,29 @@ structures.
 - **Fallback behavior**: If no reducer is registered for a payload type the default
   append reducer is used. If no slice exists for a dispatched event, it is created
   on demand via the registered reducer or default behavior.
+- **Hierarchy plumbing**: Sessions optionally accept a parent session reference on
+  construction. Children register themselves with the parent, and each session
+  exposes its immediate descendants. Hierarchy metadata stays out of snapshots so
+  rollback remains local to each session's slices.
+
+## Session Hierarchy
+
+Sessions form a tree to mirror nested orchestration flows. Parent/child links must
+be deterministic and immutable after construction so ancestry remains stable during
+dispatch. Hierarchy awareness enables tools to walk the tree and perform
+topological operations without mutating state.
+
+- **Parent awareness**: A session stores its parent as a read-only reference.
+  Passing no parent yields a root session. Parent references are for navigation,
+  not state sharing, so reducer registration and event subscriptions remain scoped
+  to each session instance.
+- **Child registration**: Constructing a session with a parent automatically adds
+  it to the parent's direct children set. Children are tracked by identity to avoid
+  duplicate registrations and keep traversal deterministic.
+- **Snapshot fan-in**: Callers that need a whole-tree snapshot can traverse from
+  the leaves upward, capturing each session's snapshot and aggregating the results
+  in ancestor-first order. Parent sessions do not implicitly serialize child state;
+  tooling must walk the tree explicitly when building aggregate reports.
 
 ## Public API Surface
 
