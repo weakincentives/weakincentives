@@ -156,6 +156,19 @@ def test_parse_structured_output_handles_json_code_block() -> None:
     assert parsed.featured is True
 
 
+def test_parse_structured_output_handles_raw_json_message() -> None:
+    prompt = _build_summary_prompt()
+    rendered = prompt.render(Guidance(topic="Ada"))
+
+    reply = '{"title": "Ada", "views": 5, "featured": false}'
+
+    parsed = parse_structured_output(reply, rendered)
+
+    assert parsed.title == "Ada"
+    assert parsed.views == 5
+    assert parsed.featured is False
+
+
 def test_parse_structured_output_rejects_extra_keys_by_default() -> None:
     prompt = _build_summary_prompt()
     rendered = prompt.render(Guidance(topic="Ada"))
@@ -277,27 +290,16 @@ def test_parse_structured_output_requires_wrapped_array_list_value() -> None:
     assert "Expected top-level JSON array" in str(exc.value)
 
 
-def test_parse_structured_output_falls_back_to_embedded_json() -> None:
+def test_parse_structured_output_rejects_embedded_json() -> None:
     prompt = _build_summary_prompt()
     rendered = prompt.render(Guidance(topic="Ada"))
 
     reply = 'The payload is {"title": "Ada", "views": 7}'
 
-    parsed = parse_structured_output(reply, rendered)
+    with pytest.raises(OutputParseError) as exc:
+        parse_structured_output(reply, rendered)
 
-    assert parsed.views == 7
-
-
-def test_parse_structured_output_skips_invalid_prefix_chars() -> None:
-    prompt = _build_summary_prompt()
-    rendered = prompt.render(Guidance(topic="Ada"))
-
-    reply = '[oops]{"title": "Ada", "views": 11}'
-
-    parsed = parse_structured_output(reply, rendered)
-
-    assert parsed.title == "Ada"
-    assert parsed.views == 11
+    assert "fenced ```json block" in str(exc.value)
 
 
 def test_parse_structured_output_requires_specialized_prompt() -> None:
@@ -399,7 +401,17 @@ def test_parse_structured_output_requires_json_payload() -> None:
     with pytest.raises(OutputParseError) as exc:
         parse_structured_output("No structured data", rendered)
 
-    assert "No JSON object or array" in str(exc.value)
+    assert "fenced ```json block" in str(exc.value)
+
+
+def test_parse_structured_output_rejects_blank_message() -> None:
+    prompt = _build_summary_prompt()
+    rendered = prompt.render(Guidance(topic="Ada"))
+
+    with pytest.raises(OutputParseError) as exc:
+        parse_structured_output("   \n  ", rendered)
+
+    assert "fenced ```json block" in str(exc.value)
 
 
 def test_parse_structured_output_rejects_unknown_container() -> None:
