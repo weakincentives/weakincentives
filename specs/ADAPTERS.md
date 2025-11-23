@@ -2,10 +2,45 @@
 
 ## Overview
 
-Adapters in `src/weakincentives/adapters/` bridge rendered `Prompt` objects to concrete model providers.
-The adapters own every provider SDK call, execute prompt tools locally, parse structured output, and surface
-observability through the shared `EventBus`. Implementations run synchronously and reuse the helper pipeline in
-`shared.py` so every provider behaves the same regardless of API quirks.
+**Scope:** This document covers the adapter architecture in `src/weakincentives/adapters/`, the public
+`ProviderAdapter` contract, and the concrete adapters that ship today. It is the design source of truth and the
+runtime reference guide for how prompts become provider calls.
+
+**Design goals**
+
+- Present a uniform adapter surface so prompts behave identically across providers and test doubles.
+- Preserve deterministic, synchronous execution to align with session reducers and the DbC enforcement model.
+- Keep all provider interactions observable through the `EventBus` while isolating prompt rendering from transport
+  details.
+- Minimize adapter-specific branches by centralizing lifecycles in shared helpers.
+
+**Constraints**
+
+- Adapters must run synchronously and honor the caller-supplied `Deadline` at every blocking boundary (request,
+  tools, response parsing).
+- Structured output parsing must remain compatible with providers that lack native schema enforcement; adapters cannot
+  rely solely on provider-side validation.
+- Tool execution must reuse the active `Session` and its `EventBus` so reducers observe the same state mutations that
+  the adapter returns.
+
+**Rationale for the architecture**
+
+- A single runner (`shared.run_conversation` / `ConversationRunner`) coordinates provider calls, tool dispatch, and
+  structured output parsing so new adapters inherit identical behavior without reimplementing loops.
+- Provider-specific layers (`openai.py`, `litellm.py`, and future modules) only handle payload translation and choice
+  selection, keeping SDK dependencies out of core logic.
+- Centralizing error handling (`PromptEvaluationError`) gives callers stable failure semantics while leaving providers
+  free to change their native exceptions.
+
+**Guiding principles**
+
+- Prefer adapter configuration over branching logic—surface provider toggles as constructor parameters rather than
+  inline conditionals.
+- Treat prompt rendering as immutable input: adapters should not mutate `RenderedPrompt` objects outside of sanctioned
+  instruction toggles for response formats.
+- Keep observability first-class: every render, tool invocation, and final response should emit the corresponding bus
+  events unless publication fails and rollbacks occur.
+- Document live behaviors alongside code paths so tests and operators can trace how settings map to runtime effects.
 
 Adapter responsibilities:
 
@@ -15,6 +50,41 @@ Adapter responsibilities:
 - execute requested tools inside the active session,
 - parse structured output into typed dataclasses, and
 - raise `PromptEvaluationError` with precise context when any phase fails.
+
+### Architecture map
+
+- `core.py` – Defines `ProviderAdapter`, `PromptResponse`, and the shared error model. All adapters inherit from this
+  layer to guarantee consistent typing and DbC coverage.
+- `shared.py` – Implements `run_conversation` / `ConversationRunner`, tool serialization (`tool_to_spec`), and response
+  parsing. This is the live execution path for every adapter.
+- `_provider_protocols.py` – Structural typing for provider choices, responses, and completion callables so adapters can
+  remain import-light when extras are missing.
+- `_tool_messages.py` – Utilities for formatting tool transcripts that flow back into provider conversations.
+- `openai.py` / `litellm.py` – Provider-specific shims that translate runner payloads into SDK calls and map responses
+  back into the shared representation.
+
+### Adapter type map
+
+- **LiteLLMAdapter** (`src/weakincentives/adapters/litellm.py`)
+  - **Configuration surfaces:** Optional dependency (`uv sync --extra litellm`); requires `model` and accepts
+    `tool_choice`; callers provide either a `completion` callable or a `completion_factory` plus `completion_kwargs`
+    to wrap `litellm.completion`. Structured output requests always enable
+    `require_structured_output_text=True` so the runner expects text even when forwarding schemas.
+  - **Known caveats/limitations:** Behavior depends on downstream providers LiteLLM proxies. Errors bubble up as
+    LiteLLM exceptions wrapped in `PromptEvaluationError`. Because the API lacks native parsed payloads, structured
+    outputs rely on textual content and prompt-level parsing.
+
+- **OpenAIAdapter** (`src/weakincentives/adapters/openai.py`)
+  - **Configuration surfaces:** Optional dependency (`uv sync --extra openai`); requires `model` and accepts
+    `tool_choice`; callers can pass a concrete client or a `client_factory` with `client_kwargs`. The
+    `use_native_response_format` toggle disables inline output instructions when structured parsing is requested and
+    forwards JSON schemas under `response_format`.
+  - **Known caveats/limitations:** Requires OpenAI's Responses API. Deadlines are enforced before each request and tool
+    execution. When `use_native_response_format=False`, parsing falls back to prompt instructions and requires textual
+    outputs.
+
+Use this map when wiring new adapters: mirror the configuration surfaces, expose extras explicitly, and document any
+parser or provider limitations up front.
 
 ## Core Interfaces
 
