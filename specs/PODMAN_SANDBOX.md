@@ -10,6 +10,45 @@ ASTEval tools while mapping every call onto a shared Podman workspace rooted at
 state reducers back it, and how the sandbox interacts with subagents running at
 different isolation levels.
 
+## Rationale
+
+- **Safety-first isolation** – Podman offers a rootless, reproducible runtime
+  that keeps experiments and generated patches contained, protecting both the
+  host and higher-trust agents.
+- **Parity with in-memory tooling** – By mirroring VFS and ASTEval contracts,
+  Podman executions behave like the in-process tools the rest of the platform
+  relies on, minimizing cognitive overhead when swapping surfaces.
+- **Traceable orchestration** – The section threads workspace metadata through
+  reducers so orchestrators, subagents, and prompt templates can always explain
+  where files live and which container executed a command.
+
+## Scope
+
+- Applies to the Podman-backed sandbox section (`PodmanSandboxSection`) and its
+  helper dataclasses (`PodmanWorkspace`, `PodmanShellParams`, etc.).
+- Covers runtime configuration (image, limits, mounts), session reducer wiring,
+  VFS-compatible tools, and the evaluate_python shim described below.
+- Excludes broader prompt composition rules or non-Podman runtimes; see other
+  specs (e.g., `specs/VFS_TOOLS.md`, `specs/AST_EVAL.md`) for those.
+
+## Guiding Principles
+
+- **Predictability over flexibility** – Defaults (image, limits, user, mount
+  layout) are fixed so `shell_execute` and the VFS tools behave the same across
+  orchestrators. Override only through the documented configuration knobs in the
+  workspace lifecycle and operational notes sections.
+- **Single source of truth** – The reducers enumerated in the session state
+  section back every file mutation and execution record. Avoid shadow state
+  outside these slices so prompt sections and subagents stay consistent.
+- **Minimal host risk** – All tooling resolves paths through `_host_path_for`
+  and the hydration pipeline to prevent escapes. Retain the copy-then-exec
+  model for writes and removals so binary safety and include/exclude guards stay
+  enforced.
+- **Reference-friendly** – Treat this document as the operational guide for the
+  sandbox: the module layout lists where to dig into code, workspace lifecycle
+  details how containers are shaped, and operational notes enumerate the
+  supported configuration and caveats.
+
 ## Goals
 
 - **Deterministic Container Sandbox** – Provide a podman-managed environment
@@ -46,6 +85,17 @@ different isolation levels.
   `integration-tests/test_podman_shell.py`.
 - Prompt helpers: `code_reviewer_example.py` demonstrates composing the section
   with other tools.
+
+### Reference Map
+
+- **How it works**: See "Workspace Lifecycle" and "Session Reducers & State".
+- **What to call**: Tooling surface summaries live in "Tooling Surface" and
+  "evaluate_python".
+- **Where to configure**: Environment and resource knobs are captured in
+  "Operational Notes"; host mounts follow "Host Mounts".
+- **What to watch out for**: Timeouts, truncation, and isolation expectations
+  are documented in "Goals", "Workspace Lifecycle", and "Subagent Isolation
+  Requirements".
 
 ## External Dependencies
 
