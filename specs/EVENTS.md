@@ -14,6 +14,41 @@ prompt execution observable inside a single process.
 - **Schema reuse**: Reuse existing prompt and tooling dataclasses wherever possible so events stay consistent with the
   synchronous API.
 
+## Guiding principles
+
+- **Typed, minimal payloads**: Events are frozen dataclasses in
+  `weakincentives.runtime.events`; prefer explicit fields and reuse prompt/tool
+  dataclasses over opaque dictionaries so reducers can rely on static typing.
+- **Publisher isolation**: Adapter and session code MUST treat event dispatch as
+  fire-and-forget. Publishers log handler failures and continue execution unless
+  a caller explicitly opts into propagation via `PublishResult.raise_if_errors()`.
+- **Subscriber determinism**: Subscriptions are scoped to exact event types and
+  triggered synchronously on publish. Keep handlers idempotent and side-effect
+  aware because they run on the adapter thread.
+- **Session-first reducers**: The session module (`runtime/session/session.py`)
+  is the canonical consumer; emitters should prefer enriching events rather than
+  manipulating session state directly so reducers stay the single source of
+  truth.
+- **No implicit globals**: There is no module-level default bus. Callers MUST
+  provide an `EventBus` instance per evaluation to avoid cross-request bleed.
+
+## Scope
+
+Event emission currently covers the synchronous prompt lifecycle inside a single
+process:
+
+- Prompt rendering, prompt execution, and tool invocations are the only
+  lifecycle milestones with first-class events.
+- Events are dispatched on the caller's thread with in-order delivery per bus
+  instance. Cross-process forwarding, async fan-out, or persistence layers are
+  outside the current scope and should be built in subscribers.
+- The bus abstraction lives in `runtime/events/_types.py` and the reference
+  implementation `InProcessEventBus` lives in `runtime/events/__init__.py`.
+  Tests often depend on `tests.helpers.events.NullEventBus` to disable
+  telemetry while satisfying the interface.
+- Sessions subscribe to all defined event types to build reducers and snapshots
+  without mutating adapter code.
+
 ## Event Bus Abstraction
 
 - Adapters MUST emit prompt lifecycle events through an in-process message bus exposed by `weakincentives.runtime.events`.
@@ -79,6 +114,23 @@ Emitted every time an adapter executes a tool handler. The dataclass mirrors the
 
 Adapters SHOULD publish `ToolInvoked` immediately after the handler returns. A failure is signalled via
 `result.success=False`, and in that case `result.value` MAY be `None`.
+
+### Emitters and listeners
+
+- **Adapters**: `adapters/shared.py` publishes `PromptRendered` when the provider
+  payload is ready, `ToolInvoked` as tools complete, and `PromptExecuted` once
+  parsing finishes. Publish failures are logged and optionally bubbled via
+  `PublishResult.raise_if_errors()` depending on adapter configuration.
+- **Tool executor**: `ToolExecutor` in `adapters/shared.py` drives the
+  per-tool `ToolInvoked` emission and surfaces aggregated handler errors in tool
+  outputs when reducers fail.
+- **Sessions**: `runtime/session/session.py` subscribes to all three events to
+  populate slices and snapshots. Default reducers append the full events and, if
+  present, the underlying dataclass payloads (`value`) so downstream reducers can
+  react to typed prompt outputs or tool results.
+- **Test helpers**: `tests.helpers.events.NullEventBus` satisfies the
+  `EventBus` protocol while dropping events, useful for benchmarks or tests that
+  mock telemetry.
 
 ## Delivery Semantics
 
@@ -170,6 +222,23 @@ the core synchronous semantics.
     can now inspect the returned errors.
 - Existing callers that ignore the return value continue to operate; the return is additive and does not introduce side
   effects. New code can opt in by inspecting `PublishResult.ok` or calling `raise_if_errors()`.
+
+## Caveats and known gaps
+
+- **No persistence or buffering**: Events are process-local and discarded after
+  handler execution. Adding queues, retries, or cross-process forwarding must
+  happen in subscribers or custom `EventBus` implementations.
+- **Schema gaps**: Provider-specific metadata (token counts, latency per tool,
+  call IDs beyond `ToolInvoked.call_id`) is intentionally absent. Extend
+  dataclasses with typed fields rather than stuffing dictionaries when new
+  provider data becomes available.
+- **Partial value propagation**: `PromptExecuted` and `ToolInvoked` expose a
+  `value` field when a dataclass payload is present. Non-dataclass outputs will
+  not enrich session slices; reducers that depend on raw strings or lists should
+  inspect `result.output` and handle normalization themselves.
+- **Listener discipline**: Subscribers run synchronously and can mutate shared
+  state. Keep handlers cheap, idempotent, and side-effect aware to avoid
+  stalling adapter threads.
 
 ### Testing Strategy
 
