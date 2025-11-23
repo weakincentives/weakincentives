@@ -11,6 +11,26 @@ dark. Conceptually a chapter is a specialized `Section` subclass whose value
 comes from aggregating other sections; it never renders standalone content or
 tools.
 
+## Design Rationale and Scope
+
+Chapters exist to express **prompt-wide visibility decisions** that cannot be
+captured by section-level `enabled` predicates alone.
+
+- Use chapters when multiple sections must open or stay hidden as a unit (e.g.,
+  PII-handling prompts, experimental personas, or provider-specific rendering
+  tracks).
+- Chapters **do not** replace fine-grained section gating. Section `enabled`
+  predicates continue to run inside an open chapter to skip individual pieces of
+  content without reopening the visibility boundary.
+- Current implementations keep chapters **flat** and **root-scoped**; nesting is
+  discouraged to avoid recursive visibility evaluation.
+- Chapter definitions belong alongside prompt definitions—they are not tooling
+  overlays or runtime mutations. Overrides continue to operate at the section
+  and tool layers.
+
+Chapters should remain a coarse feature toggle rather than a rendering strategy
+or telemetry mechanism; those concerns live in adapters and runtime plumbing.
+
 ## Goals
 
 - **Explicit visibility boundaries**: Treat a chapter as the authoritative
@@ -23,6 +43,22 @@ tools.
 - **Deterministic evaluation**: Decisions about open or closed state happen
   inside adapter `evaluate()` before rendering, producing a new `Prompt`
   instance with only the active sections.
+
+## Guiding Principles
+
+- **Stable identifiers**: Keys are normalized up front and must be unique per
+  prompt. `Chapter.__post_init__` normalizes keys and validates default params,
+  while `Prompt.__init__` rejects duplicate chapter keys before registration.
+- **Closed until proven open**: Base prompts only contain their root sections;
+  chapter content is added via `Prompt.expand_chapters`, keeping new chapters
+  inert until an adapter opts in.
+- **Deterministic clones**: `Chapter.clone` deep-copies sections and default
+  params so expanded prompts cannot leak runtime state across sessions.
+- **Strict parameter handling**: Chapters with parameterized `enabled`
+  predicates require matching dataclass instances; mismatches raise
+  `PromptValidationError` instead of silently coercing types.
+- **Single-shot expansion**: Expanded prompts disable further chapter expansion
+  to prevent double-counting or divergent visibility across render calls.
 
 ## Chapter Template
 
@@ -73,6 +109,16 @@ class ChaptersExpansionPolicy(StrEnum):
 Implementations MAY extend the enum with provider-specific strategies, but they
 MUST document the additional states alongside the adapter.
 
+### Current Behavior
+
+- `Prompt.expand_chapters` implements `ALL_INCLUDED` and raises
+  `NotImplementedError` for other policies. Callers must supply additional
+  expansion strategies at the adapter layer before relying on
+  `INTENT_CLASSIFIER`.
+- Chapter parameters are optional but validated: provided parameters must match
+  the declared dataclass type and unknown chapter keys raise
+  `PromptValidationError` before any section is opened.
+
 ## Section Composition
 
 Chapters do not replace section-level `enabled` callables. When a chapter opens,
@@ -90,6 +136,20 @@ Runtime bindings (such as `Session` or `EventBus` objects accepted by tool-backe
 sections) MUST be forwarded when supplied so the cloned chapter re-registers any
 reducers or tools against the new runtime. Open/closed state never carries over;
 the destination prompt or adapter reevaluates visibility after cloning.
+
+## Implementation Notes
+
+- **Enabled predicates**: Zero-argument `enabled` callables are automatically
+  wrapped to ignore chapter parameters; predicates that accept parameters expect
+  the declared dataclass type and propagate exceptions as validation errors.
+- **Default params**: Parameterized chapters may ship `default_params`; these are
+  cloned during expansion to keep per-evaluation state isolated.
+- **Descriptor inclusion**: `PromptDescriptor.from_prompt` records declared
+  chapters (even before expansion) so override tooling and telemetry can reason
+  about the intended visibility boundaries.
+- **Tool awareness**: Because chapters never own tools, adapter tool discovery
+  continues to walk section instances only; opening a chapter simply appends
+  more sections to the registry snapshot used by the renderer.
 
 ## Evaluation Responsibilities
 
@@ -159,6 +219,19 @@ descriptor metadata and redaction guidance when sharing prompt snapshots.
   inner content.
 - **Versioning**: Include chapter metadata in prompt descriptors so versioned
   prompts capture the visibility structure.
+
+## Code References and Behaviors
+
+- **Chapter normalization and gating**: `src/weakincentives/prompt/chapter.py`
+  normalizes keys, coerces `enabled` callables, clones default params, and
+  exposes `is_enabled` for adapter use.
+- **Prompt-level expansion**: `src/weakincentives/prompt/prompt.py` enforces
+  unique chapter keys, keeps base sections separate from chapter content, and
+  expands chapters via `ALL_INCLUDED` while guarding against unknown parameter
+  keys and repeated expansion.
+- **Descriptor export**: `src/weakincentives/prompt/overrides/versioning.py`
+  adds declared chapters to `PromptDescriptor` so overrides and versioned
+  snapshots preserve visibility intent even before expansion.
 
 ## Descriptor Metadata
 
