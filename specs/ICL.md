@@ -49,10 +49,22 @@ class InContextLearningOptimizer:
 - Render an empty subsection reserved for repository-specific VFS guidance.
 - Allow overrides to populate it so optimized instructions can bake in VFS quirks without code changes.
 
+#### Installing VFS Overrides (standardized)
+
+- Persist replacement content via the prompt overrides store, never through ad hoc harness flags.
+- Use the canonical lookup key `(ns, prompt_key, section_path=("system", "vfs"), expected_hash)` and tag (for example `latest`).
+- Store files under `.weakincentives/prompts/overrides/{ns}/{prompt_key}/{tag}.json` using the `SectionOverride` schema so any orchestrator can apply them uniformly.
+
 ### Podman Optimization Target
 
 - Render an empty subsection reserved for Podman sandbox guidance.
 - Accept overrides to inject sandbox expectations (mount points, execution limits) when present.
+
+#### Installing Podman Overrides (standardized)
+
+- Write sandbox instructions into the prompt overrides store with the same mechanism as VFS.
+- Target the section path `( "system", "podman" )` and rely on descriptor hashes instead of harness-specific wiring.
+- Share tags with other overrides so callers can swap between `stable`, `latest`, or experiment-specific payloads without code changes.
 
 ## Error Handling & Normalization
 
