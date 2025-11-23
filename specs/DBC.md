@@ -2,17 +2,36 @@
 
 ## Purpose
 
-This document specifies a tiny design-by-contract (DbC) helper framework for
-`weakincentives`. The framework exposes annotation-style decorators that let
-library authors describe preconditions, postconditions, invariants, and purity
-expectations on Python callables. The decorators are intentionally inert during
-normal runtime. When the test suite runs, they activate and enforce the declared
-contracts so regressions surface early without shipping runtime overhead.
+This document specifies a tiny, internal-only design-by-contract (DbC) helper
+framework for `weakincentives`. The framework exposes annotation-style
+decorators that let library authors describe preconditions, postconditions,
+invariants, and purity expectations on Python callables. The decorators are
+intentionally inert during normal runtime; they activate inside the test suite
+and other explicitly opted-in flows so regressions surface early without
+shipping runtime overhead. The DbC helpers are a mini-framework for maintainers
+and contributors—they are **not** part of the public API and must not be
+exported or promoted to external consumers.
+
+## Guiding Principles
+
+- **Internal safety net, not a public contract**: DbC reinforces contributor
+  discipline without promising compatibility to external users. Do not export
+  `weakincentives.dbc` outside the package-level namespace or reference it in
+  public docs.
+- **Zero-cost default**: The decorators should be no-ops unless explicitly
+  enabled. Tests toggle enforcement; production paths must remain unaffected.
+- **Pragmatic coverage over total verification**: Enforcement focuses on common
+  footguns (argument validation, invariants, shallow purity checks) rather than
+  exhaustive program analysis.
+- **Clear diagnostics**: Failures should name the decorator, the callable, and
+  the offending predicate to reduce debugging time.
+- **Composable opt-ins**: Helpers like `dbc_enabled()` and environment flags let
+  developers scope DbC to specific runs without global side effects.
 
 ## Goals
 
 - Provide four decorators, `@require`, `@ensure`, `@invariant`, and `@pure`, that
-  look and feel like standard function decorators.
+  look and feel like standard function decorators and remain internal-facing.
 - Keep production code free from extra runtime cost by defaulting the
   decorators to no-ops outside the test harness.
 - Make the decorators easy to adopt incrementally across modules without
@@ -31,7 +50,7 @@ contracts so regressions surface early without shipping runtime overhead.
   author and rely on pytest failures to signal problems.
 - There is no plan to inject runtime enforcement into production builds. Any
   consumer who wants runtime DbC must opt-in explicitly through a documented
-  hook.
+  hook (`WEAKINCENTIVES_DBC`, `dbc_enabled()`, or `enable_dbc()`).
 - The scope is limited to synchronous Python callables. Asynchronous or
   generator-specific helpers can be added later if needed.
 
@@ -42,7 +61,9 @@ contracts so regressions surface early without shipping runtime overhead.
 `@require` expresses preconditions. It accepts one or more callables that take
 `*args`, `**kwargs`, and optionally the bound `self` or `cls`. The contract
 passes when all callables return truthy values. If any callable returns falsy or
-raises an exception, pytest should fail with a descriptive assertion.
+raises an exception, pytest fails with a descriptive assertion. The decorator is
+implemented in `src/weakincentives/dbc/__init__.py` and raises immediately if no
+predicates are supplied, ensuring internal callers opt into meaningful guards.
 
 ```python
 @require(lambda amount: amount >= 0, lambda account, amount: account.can_withdraw(amount))
@@ -54,9 +75,11 @@ def withdraw(account: Account, amount: int) -> None:
 
 `@ensure` declares postconditions. Callables receive the original arguments and
 keyword arguments plus the return value (or raised exception object) via the
-`result` or `exception` keyword. Decorators should support both simple boolean
+`result` or `exception` keyword. Decorators support both simple boolean
 functions and more advanced callables that return `(bool, message)` tuples for
-custom diagnostics.
+custom diagnostics. When DbC is inactive, `@ensure` is a no-op; when active, it
+evaluates predicates whether the wrapped callable returns or raises, passing the
+exception object through for inspection.
 
 ```python
 @ensure(lambda amount, result: result.balance >= 0)
@@ -69,8 +92,10 @@ def withdraw(account: Account, amount: int) -> Account:
 `@invariant` targets class definitions. When applied, it wraps `__init__` and
 public methods to validate the invariant callable(s) before and after method
 execution. Invariants run in tests whenever the instance mutates observable
-state. The decorator should expose hooks to skip enforcement for designated
-private helpers where invariants would be redundant.
+state. The decorator exposes `skip_invariant()` to mark helper methods that
+should not trigger checks. Methods beginning with `_`, static methods, class
+methods, and non-callable attributes are intentionally excluded from wrapping
+to avoid altering private or meta-level behavior.
 
 ```python
 @invariant(lambda self: self.balance >= 0)
@@ -90,38 +115,49 @@ framework wraps the target callable and instruments it to ensure:
 - It performs no I/O through tracked modules (e.g., `os`, `pathlib`, network
   sockets).
 
-Instrumentation can start simple: monkeypatch common side-effect primitives
-(`open`, `Path.write_text`, `logging.Logger.*`) to raise if invoked from a pure
-function context. The focus is to catch accidental side effects in helper
-utilities, not to provide complete effect tracking.
+Instrumentation monkeypatches common side-effect primitives (`open`,
+`Path.write_text`, `Path.write_bytes`, `logging.Logger._log`) to raise when
+invoked from a pure function context. The focus is to catch accidental side
+effects in helper utilities, not to provide complete effect tracking. Deepcopy
+failures fall back to a sentinel, so non-copyable objects are tolerated but not
+validated for mutation. Callers should keep purity contracts narrow and local to
+internal helpers rather than external entry points.
 
 ## Runtime Behavior
 
 - In production (`PYTEST_CURRENT_TEST` absent and `WEAKINCENTIVES_DBC=0` by
-  default) the decorators should return the original callable untouched. Any
-  helper context manager or pytest fixture must check a shared `dbc_active`
-  flag before running expensive validations.
+  default) the decorators return the original callable untouched. The shared
+  `dbc_active()` flag gates every enforcement path so internal code can safely
+  import decorators without impacting runtime.
 - During tests, a pytest plugin activates the flag. The plugin hooks into
   `pytest_configure` to toggle DbC checks and registers fixtures that expose
   helper utilities (e.g., capturing return values for `@ensure`).
 - Contract violations raise `AssertionError` with clear messaging. Include the
   decorator type, the callable name, and a formatted argument dump to ease
   debugging.
+- Manual overrides exist for focused debugging or local experimentation:
+  `enable_dbc()`, `disable_dbc()`, and the `dbc_enabled()` context manager force
+  the flag on/off inside a scope, while `WEAKINCENTIVES_DBC=1` flips enforcement
+  globally. These switches are for maintainers only and should not be surfaced
+  to users.
 
 ## Implementation Sketch
 
-1. Add `src/weakincentives/dbc/__init__.py` exposing the four decorators and a
-   `dbc_active()` helper.
-1. Implement `require`, `ensure`, and `pure` as decorator factories that consult
-   the activation flag and wrap the target with validation logic only when
-   active.
-1. For `invariant`, create a class decorator that proxies attribute access and
-   wraps relevant callables via a metaclass or `__init_subclass__` hook.
-1. Add `tests/test_dbc_contracts.py` exercising happy paths and failure modes.
-1. Ship a pytest plugin (`tests/conftest.py` or `src/weakincentives/testing/dbc.py`)
-   that flips the activation flag and provides helpful fixtures.
-1. Document opt-in knobs for other environments (e.g., `WEAKINCENTIVES_DBC=1`
-   environment variable) in `README.md` if needed later.
+1. `src/weakincentives/dbc/__init__.py` exposes the four decorators, enforcement
+   helpers (`dbc_active`, `enable_dbc`, `disable_dbc`, `dbc_enabled`), and
+   shared predicate handling (normalizing `(bool, message)` tuples, formatting
+   failures).
+1. `require`, `ensure`, and `pure` are decorator factories that consult
+   `dbc_active()` and only wrap the target with validation logic when active;
+   otherwise they return the original callable untouched.
+1. `invariant` wraps public instance methods and `__init__` only. The wrapper
+   checks invariants before and after calls when active and respects
+   `skip_invariant()` markers to avoid redundant checks.
+1. `tests/plugins/dbc.py` toggles the flag during pytest runs and integrates
+   diagnostics for contract failures.
+1. Additional opt-in knobs (`WEAKINCENTIVES_DBC=1` or the context manager
+   helpers) can enable enforcement in ad hoc environments, but they remain
+   internal debugging tools rather than user-facing configuration.
 
 ## Example Use Cases
 
