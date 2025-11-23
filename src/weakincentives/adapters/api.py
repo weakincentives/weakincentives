@@ -10,27 +10,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Adapter namespace exposing the :mod:`weakincentives.adapters.api` surface."""
+"""Integration adapters for optional third-party providers."""
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
+from .core import (
+    PromptEvaluationError,
+    PromptResponse,
+    ProviderAdapter,
+    SessionProtocol,
+)
 
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
-
-api: object | None = None
-
-__all__ = ["api"]
-
-
-def __getattr__(name: str) -> object:
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
+__all__ = [
+    "LITELLM_ADAPTER_NAME",
+    "OPENAI_ADAPTER_NAME",
+    "AdapterName",
+    "PromptEvaluationError",
+    "PromptResponse",
+    "ProviderAdapter",
+    "SessionProtocol",
+]
 
 
 def __dir__() -> list[str]:

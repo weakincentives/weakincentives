@@ -150,6 +150,9 @@ parsing noise.
   Model inputs precisely (using `TypeVar` bounds, `TypedDict`s, etc.) instead of
   layering `isinstance` checks, normalization shims, or redundant guards—assume
   the type checker runs for every caller.
+- Keep namespace packages thin: each subsystem exposes its public surface via an
+  `api.py` module, and the package `__init__` should only re-export that module
+  (use `__getattr__` for compatibility shims instead of expanding `__all__`).
 
 ## Release & Versioning
 

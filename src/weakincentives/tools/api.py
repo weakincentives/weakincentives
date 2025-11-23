@@ -1,0 +1,167 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Public surface for built-in tool suites."""
+
+# pyright: reportImportCycles=false
+
+from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+from .asteval import (
+    AstevalSection,
+    EvalFileRead,
+    EvalFileWrite,
+    EvalParams,
+    EvalResult,
+)
+from .digests import (
+    WorkspaceDigest,
+    WorkspaceDigestSection,
+    clear_workspace_digest,
+    latest_workspace_digest,
+    set_workspace_digest,
+)
+from .errors import DeadlineExceededError, ToolValidationError
+from .planning import (
+    AddStep,
+    ClearPlan,
+    MarkStep,
+    NewPlanStep,
+    Plan,
+    PlanningStrategy,
+    PlanningToolsSection,
+    PlanStatus,
+    PlanStep,
+    ReadPlan,
+    SetupPlan,
+    StepStatus,
+    UpdateStep,
+)
+from .subagents import (
+    DispatchSubagentsParams,
+    SubagentIsolationLevel,
+    SubagentResult,
+    SubagentsSection,
+    build_dispatch_subagents_tool,
+    dispatch_subagents,
+)
+
+if TYPE_CHECKING:
+    from .podman import (
+        PodmanSandboxSection,
+        PodmanShellParams,
+        PodmanShellResult,
+        PodmanWorkspace,
+    )
+from .vfs import (
+    DeleteEntry,
+    EditFileParams,
+    FileInfo,
+    GlobMatch,
+    GlobParams,
+    GrepMatch,
+    GrepParams,
+    HostMount,
+    ListDirectory,
+    ListDirectoryParams,
+    ListDirectoryResult,
+    ReadFile,
+    ReadFileParams,
+    ReadFileResult,
+    RemoveParams,
+    VfsFile,
+    VfsPath,
+    VfsToolsSection,
+    VirtualFileSystem,
+    WriteFile,
+    WriteFileParams,
+)
+
+__all__ = [
+    "AddStep",
+    "AstevalSection",
+    "ClearPlan",
+    "DeadlineExceededError",
+    "DeleteEntry",
+    "DispatchSubagentsParams",
+    "EditFileParams",
+    "EvalFileRead",
+    "EvalFileWrite",
+    "EvalParams",
+    "EvalResult",
+    "FileInfo",
+    "GlobMatch",
+    "GlobParams",
+    "GrepMatch",
+    "GrepParams",
+    "HostMount",
+    "ListDirectory",
+    "ListDirectoryParams",
+    "ListDirectoryResult",
+    "MarkStep",
+    "NewPlanStep",
+    "Plan",
+    "PlanStatus",
+    "PlanStep",
+    "PlanningStrategy",
+    "PlanningToolsSection",
+    "PodmanSandboxSection",
+    "PodmanShellParams",
+    "PodmanShellResult",
+    "PodmanWorkspace",
+    "ReadFile",
+    "ReadFileParams",
+    "ReadFileResult",
+    "ReadPlan",
+    "RemoveParams",
+    "SetupPlan",
+    "StepStatus",
+    "SubagentIsolationLevel",
+    "SubagentResult",
+    "SubagentsSection",
+    "ToolValidationError",
+    "UpdateStep",
+    "VfsFile",
+    "VfsPath",
+    "VfsToolsSection",
+    "VirtualFileSystem",
+    "WorkspaceDigest",
+    "WorkspaceDigestSection",
+    "WriteFile",
+    "WriteFileParams",
+    "build_dispatch_subagents_tool",
+    "clear_workspace_digest",
+    "dispatch_subagents",
+    "latest_workspace_digest",
+    "set_workspace_digest",
+]
+
+_PODMAN_EXPORTS = {
+    "PodmanShellParams",
+    "PodmanShellResult",
+    "PodmanSandboxSection",
+    "PodmanWorkspace",
+}
+_TOOLS_PACKAGE = __name__.rsplit(".", maxsplit=1)[0]
+
+
+def __getattr__(name: str) -> object:
+    if name in _PODMAN_EXPORTS:
+        module = import_module(f"{_TOOLS_PACKAGE}.podman")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)

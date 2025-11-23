@@ -10,72 +10,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Runtime primitives for :mod:`weakincentives`."""
+"""Runtime namespace exposing the :mod:`weakincentives.runtime.api` surface."""
+
+# pyright: reportImportCycles=false
 
 from __future__ import annotations
 
-from . import events, session
-from .events import (
-    EventBus,
-    HandlerFailure,
-    InProcessEventBus,
-    PromptExecuted,
-    PublishResult,
-    ToolInvoked,
-)
-from .logging import StructuredLogger, configure_logging, get_logger
-from .session import (
-    DataEvent,
-    ReducerContext,
-    ReducerContextProtocol,
-    ReducerEvent,
-    Session,
-    SessionProtocol,
-    Snapshot,
-    SnapshotProtocol,
-    SnapshotRestoreError,
-    SnapshotSerializationError,
-    TypedReducer,
-    append,
-    build_reducer_context,
-    replace_latest,
-    select_all,
-    select_latest,
-    select_where,
-    upsert_by,
-)
+from importlib import import_module
+from typing import TYPE_CHECKING
 
-__all__ = [
-    "DataEvent",
-    "EventBus",
-    "HandlerFailure",
-    "InProcessEventBus",
-    "PromptExecuted",
-    "PublishResult",
-    "ReducerContext",
-    "ReducerContextProtocol",
-    "ReducerEvent",
-    "Session",
-    "SessionProtocol",
-    "Snapshot",
-    "SnapshotProtocol",
-    "SnapshotRestoreError",
-    "SnapshotSerializationError",
-    "StructuredLogger",
-    "ToolInvoked",
-    "TypedReducer",
-    "append",
-    "build_reducer_context",
-    "configure_logging",
-    "events",
-    "get_logger",
-    "replace_latest",
-    "select_all",
-    "select_latest",
-    "select_where",
-    "session",
-    "upsert_by",
-]
+if TYPE_CHECKING:
+    from .api import *  # noqa: F403
+
+api: object | None = None
+
+__all__ = ["api"]
+
+
+def __getattr__(name: str) -> object:
+    module = globals().get("api")
+    if module is None:
+        module = import_module(f"{__name__}.api")
+        globals()["api"] = module
+    return getattr(module, name)
 
 
 def __dir__() -> list[str]:

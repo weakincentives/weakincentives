@@ -10,57 +10,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Curated public surface for :mod:`weakincentives`."""
+"""Namespace package exposing subsystem API modules."""
 
 from __future__ import annotations
 
-from .adapters import PromptResponse
-from .dbc import (
-    dbc_active,
-    dbc_enabled,
-    ensure,
-    invariant,
-    pure,
-    require,
-    skip_invariant,
-)
-from .deadlines import Deadline
-from .prompt import (
-    MarkdownSection,
-    Prompt,
-    SupportsDataclass,
-    Tool,
-    ToolContext,
-    ToolHandler,
-    ToolResult,
-    parse_structured_output,
-)
-from .runtime import StructuredLogger, configure_logging, get_logger
-from .types import JSONValue
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+from . import adapters, cli, dbc, deadlines, prompt, runtime, serde, tools, types
+
+if TYPE_CHECKING:
+    from .api import *  # noqa: F403
+
+api: object | None = None
 
 __all__ = [
-    "Deadline",
-    "JSONValue",
-    "MarkdownSection",
-    "Prompt",
-    "PromptResponse",
-    "StructuredLogger",
-    "SupportsDataclass",
-    "Tool",
-    "ToolContext",
-    "ToolHandler",
-    "ToolResult",
-    "configure_logging",
-    "dbc_active",
-    "dbc_enabled",
-    "ensure",
-    "get_logger",
-    "invariant",
-    "parse_structured_output",
-    "pure",
-    "require",
-    "skip_invariant",
+    "adapters",
+    "api",
+    "cli",
+    "dbc",
+    "deadlines",
+    "prompt",
+    "runtime",
+    "serde",
+    "tools",
+    "types",
 ]
+
+
+def __getattr__(name: str) -> object:
+    """Lazily forward legacy attributes to :mod:`weakincentives.api`."""
+
+    module = globals().get("api")
+    if module is None:
+        module = import_module(f"{__name__}.api")
+        globals()["api"] = module
+    return getattr(module, name)
 
 
 def __dir__() -> list[str]:
