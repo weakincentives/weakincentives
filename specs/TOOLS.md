@@ -13,6 +13,15 @@ against a prompt, to the context objects injected into handlers, through to the 
 semantics adapters must expose to large language models (LLMs). Treat it as the single
 source of truth for tool affordances.
 
+## Scope and Rationale
+
+The specification covers the end-to-end tool runtime as implemented in
+`src/weakincentives/prompt/` and `src/weakincentives/adapters/`. It explains how
+sections surface schemas to adapters, how the runtime dispatches provider tool calls, and
+how telemetry represents the results. Use it as a reference guide when reviewing
+adapter-specific docs—the provider guides defer to these contracts for schemas, error
+propagation, and event emission.
+
 The runtime focuses on three pillars:
 
 1. **Registration Lifecycle** – how sections declare tools and how prompts validate and
@@ -36,6 +45,27 @@ The runtime focuses on three pillars:
   `ToolContext` to keep orchestration predictable.
 - **Predictable failure semantics** – document shared success/failure handling so tool
   adapters never abort evaluation unexpectedly.
+
+## Schema Reference
+
+The runtime exposes three core schemas:
+
+- **`Tool`** – the declaration emitted by sections and the registry entry consumed by
+  adapters. It enforces name and description constraints, validates handler signatures,
+  and persists type arguments for params/result inspection at runtime (defined in
+  `src/weakincentives/prompt/tool.py`).
+- **`ToolResult`** – the structured response container that all handlers return. It
+  carries the human-readable message, typed payload, success flag, and a signal for
+  omitting payloads from provider-visible context while still persisting them for reducers
+  (`src/weakincentives/prompt/tool_result.py`).
+- **`ToolContext`** – the immutable snapshot passed into every handler. It binds the
+  active prompt, rendered prompt (when available), provider adapter, session, event bus,
+  and optional deadline so handlers can issue nested prompts or record telemetry without
+  depending on globals (`src/weakincentives/prompt/tool.py`).
+
+Downstream consumers must treat these schemas as stable: adapter integrations SHOULD read
+their fields rather than duplicating parsing logic, and tooling authors MUST preserve the
+handler signature (`params`, `*, context`) to keep runtime dispatch type-safe.
 
 ## Registration Lifecycle
 
@@ -208,6 +238,35 @@ tools = rendered.tools
 assert tools[0].name == "lookup_entity"
 ```
 
+## Runtime Dispatch Flow
+
+Adapters drive tool invocation using a shared dispatcher that handles provider payloads
+and event publication:
+
+1. **Registry lookup** – the adapter resolves the provider-supplied tool name against the
+   rendered prompt's registry, erroring early when the name is missing or the handler is
+   `None`.
+1. **Argument parsing** – tool arguments are decoded from the provider payload, validated
+   against the params dataclass with `pydantic.dataclasses.parse`, and converted into the
+   typed params instance. Validation failures produce a synthetic params object (with raw
+   arguments and error details) and a `ToolResult` marked unsuccessful.
+1. **Deadline check** – when the orchestrator passes a deadline, the dispatcher refuses to
+   invoke the handler once the deadline has elapsed and raises a prompt-level deadline
+   error instead of allowing the handler to run.
+1. **Context construction** – the runtime builds a `ToolContext` using the active prompt,
+   rendered prompt (if available), provider adapter, session, event bus, and deadline
+   before calling the handler.
+1. **Handler execution** – the handler runs with the constructed params/context pair.
+   Unexpected exceptions are caught and converted to `ToolResult(success=False, value=None)`
+   responses with an error message; successful executions log completion.
+1. **Telemetry** – the dispatcher publishes a `ToolInvoked` event that includes the
+   rendered output, dataclass payload (when present), and provider call identifier. Event
+   publication failures trigger session rollback and replace the `ToolResult.message` with
+   a formatted failure summary so downstream reducers see the publish outcome.
+1. **Response assembly** – the adapter returns the `ToolInvoked` event and `ToolResult` to
+   the calling loop, which forwards a provider-friendly tool message to the LLM and decides
+   whether additional tool calls are needed.
+
 ## Context Injection
 
 Tool handlers receive an immutable snapshot of the surrounding runtime via `ToolContext`.
@@ -302,3 +361,21 @@ handlers cooperate through a consistent contract so the LLM can recover graceful
 - Adapters never abort evaluation solely because a tool handler failed.
 - Unit tests assert the `success` semantics and nullable values.
 - Documentation (including this file and adapter specs) references the contract.
+
+## Limitations and Caveats
+
+- **Synchronous handlers** – handlers execute synchronously inside the provider loop.
+  Long-running work should offload to background primitives and return promptly with
+  progress metadata to avoid blocking streaming responses.
+- **Dataclass-only schemas** – params and results must be dataclasses (or dataclass-like
+  objects accepted by `pydantic.dataclasses.parse`). Arbitrary mappings/TypedDicts are not
+  supported in the registry and will fail validation.
+- **Payload visibility** – setting `exclude_value_from_context=True` hides the structured
+  payload from provider tool messages but not from reducers or logs; avoid using it as a
+  security boundary.
+- **Deadline enforcement** – deadlines are enforced before handler entry. Tools should not
+  assume per-invocation cancellation once started and must cooperate with the orchestrator
+  when time is tight.
+- **Adapter compatibility** – this spec describes the shared dispatcher used today. Provider
+  adapters that bypass it MUST replicate the same parsing, context construction, error
+  wrapping, and telemetry semantics to remain compliant.
