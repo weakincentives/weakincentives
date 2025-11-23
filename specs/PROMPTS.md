@@ -6,7 +6,19 @@ The `Prompt` abstraction centralizes every string template that flows to an LLM 
 inspectable source for system prompts and per-turn instructions. Each prompt is a markdown document assembled from
 typed `Section` objects whose templates rely on Python's `string.Template` engine. By forcing prompt authors to
 declare explicit data carriers we reduce the chance of mismatched placeholders, make it easy to audit prompt usage,
-and give downstream callers a predictable, debuggable API.
+and give downstream callers a predictable, debuggable API. Treat this document as both design guide and reference:
+it outlines the scope of the abstraction, enumerates the classes that realize the contract, and calls out
+limitations that implementers must respect.
+
+## Scope and terminology
+
+- **Where this applies**: Everything under `src/weakincentives/prompt/` including `Prompt` orchestration,
+  `Section`/`Chapter` composition, rendering, structured output, and override plumbing. Downstream usages (for
+  example adapters) consume the public surface but do not alter the rules defined here.
+- **Core documents**: This spec anchors prompt behavior; the glossary and runtime specs define adjacent concepts
+  (sessions, tool invocation) but do not override prompt semantics.
+- **Intended consumers**: Prompt authors, tool builders, and contract reviewers. Each audience should be able to
+  map behaviors described here to concrete classes without spelunking through implementation files.
 
 ## Goals
 
@@ -27,6 +39,27 @@ reaches an LLM. The design should be simple enough to maintain but strict enough
   complex control flow while still allowing dynamic content.
 - **Declarative over Imperative**: Prompts describe structured content (sections + params) instead of embedding logic,
   which keeps diffs clear and tooling feasible.
+
+## Reference map (classes and responsibilities)
+
+- **`Prompt` (`prompt.py`)**: Coordinates namespace/key identity, registers sections, hydrates the response-format
+  appendage when structured output is declared, and delegates rendering to `PromptRenderer`. It rejects empty namespaces
+  or keys up front and snapshots placeholder metadata for tooling.
+- **`Section` (`section.py`)**: Abstract base with metadata, `is_enabled`, `render`, child handling, and the
+  `accepts_overrides` gate used by the overrides layer. All concrete sections specialize `Section[ParamsT]` and expose
+  `params_type` plus optional defaults.
+- **`MarkdownSection` (`markdown.py`)**: Default concrete section that dedents, strips, and runs `Template.substitute`;
+  missing placeholders explode via `PromptRenderError`. It also wires optional tools and passes them through the
+  override gating defined by the base class.
+- **`Chapter` (`chapter.py`)**: A shallow grouping mechanism that expands into sections based on a declared policy; it
+  shares the numbering pipeline and must respect the same key uniqueness guarantees enforced during prompt
+  construction.
+- **Rendering pipeline (`rendering.py`)**: `PromptRenderer` builds the dataclass lookup, enforces uniqueness of types,
+  walks enabled sections depth-first, and collates rendered markdown plus tool metadata into `RenderedPrompt`. It is
+  also responsible for respecting tool overrides and cloning field description patches into immutable maps.
+- **Overrides and registry (`registry.py`, `overrides/`)**: The registry binds section paths to params types and
+  placeholder sets, while the overrides store resolves per-tag replacement bodies and tool description tweaks. Section
+  instances with `accepts_overrides=False` are excluded from these substitutions.
 
 ## Design Overview
 
@@ -58,6 +91,25 @@ to `True`. When false, the section is excluded from prompt descriptors and the o
 replacement bodies. Built-in sections provided by the framework (including the generated response format section)
 default this flag to `False` so automatic optimization infrastructure leaves them untouched, but their constructors
 expose an `accepts_overrides` argument so callers can opt in when a specific deployment is ready for tuning. When a built-in section opts in, the tools it contributes inherit the same `accepts_overrides` value so the entire suite toggles together.
+
+## Construction Rules
+
+### Rendering behavior (current implementation snapshot)
+
+- **Traversal and headings**: `PromptRenderer.render` walks the registry's section tree in depth-first order. Each
+  enabled node emits a heading with deterministic numbering derived from its path; chapters consume the same numbering
+  slots as sections so breadcrumbs remain stable for optimization tooling.
+- **Parameter lookup**: The renderer builds a map of dataclass type → instance, rejecting duplicate or unexpected
+  types before any template is evaluated. When a section lacks an override and no default is configured, the renderer
+  instantiates the declared dataclass with no arguments and surfaces `PromptRenderError` if required fields are
+  missing.
+- **Overrides and tooling**: Section overrides apply only when `accepts_overrides=True`; tool description overrides
+  follow the same flag. Effective tool param descriptions are frozen into immutable mappings on `RenderedPrompt` so
+  callers cannot mutate shared state.
+- **Structured output**: When a prompt declares structured output, `Prompt` injects a `ResponseFormatSection` keyed to
+  `response-format` and binds the resolved `StructuredOutputConfig` to the returned `RenderedPrompt`. The injected
+  section can be toggled off at render-time via `inject_output_instructions=False` for scenarios where raw text is
+  preferred.
 
 ## Construction Rules
 
@@ -146,6 +198,21 @@ should carry structured data describing the section path, the offending placehol
 code can log or surface actionable diagnostics. The library intentionally exposes no configuration switches for
 silently dropping sections or coercing mismatched data; strict failure modes keep bugs visible and avoid confusing LLM
 transcripts.
+
+## Caveats and implementation limits
+
+- **Dataclass-only inputs**: `PromptRenderer.build_param_lookup` rejects non-dataclass instances and raises if multiple
+  instances of the same type are supplied. Callers must conform to the declared `params_type` set exposed by the prompt
+  registry.
+- **Unspecialized sections are illegal**: `Section` generics must be concretely specialized (for example
+  `MarkdownSection[MyParams]`); attempts to instantiate without a concrete type or with multiple parameters are
+  blocked during section construction.
+- **Override fences**: Sections and tools default to `accepts_overrides=False` when provided by the framework. Override
+  stores simply ignore replacement bodies or description patches for fenced components to prevent accidental
+  prompt-tuning of required instructions.
+- **Limited templating surface**: Only `Template.substitute` and optional boolean `enabled` callables control
+  conditional rendering. Complex logic, loops, or computed placeholders belong in the dataclass factory code rather
+  than the template itself.
 
 ## Non-Goals
 
