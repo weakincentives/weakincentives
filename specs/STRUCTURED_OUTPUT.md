@@ -4,6 +4,12 @@
 
 Some prompts must yield machine-parseable responses (e.g., a JSON object or array) rather than free-form text. To keep authoring friction low and avoid new template concepts, structured output is declared by specializing the existing `Prompt` type with an output dataclass. Authors write `Prompt[OutputT]` (or `Prompt[list[ItemT]]`) and the framework handles the rest: injects concise JSON-only return instructions, exposes the declared type on the rendered artifact, and provides a small helper to parse and validate the final assistant message back into typed Python objects.
 
+## Rationale and Scope
+
+- **Why**: Capture schema, validation, and rendering rules in one place so adapters can request JSON responses (or fall back to text scraping) without a parallel schema DSL. The dataclass definition is the contract.
+- **Where**: Applies to prompts rendered through the shared `Prompt` class. It underpins both generic tool-free prompts and adapter flows that rely on `RenderedPrompt.structured_output` metadata to decide whether to parse.
+- **What stays out of scope**: Anything beyond strict JSON object/array payloads (streaming repair loops, schema registries, provider-specific knobs) lives in follow-on specs; this doc is the reference for the current behavior.
+
 ## Goals
 
 Keep the surface area tiny while delivering strong guarantees:
@@ -24,14 +30,38 @@ Keep the surface area tiny while delivering strong guarantees:
 
 ## Design Overview
 
-`Prompt` becomes *optionally generic*. When specialized, `Prompt[OutputT]` declares that the final assistant message must be JSON matching the dataclass `OutputT`. If the specialization is `Prompt[list[ItemT]]`, the final message must be a top-level JSON array of objects matching `ItemT`.
+`Prompt` becomes *optionally generic*. When specialized, `Prompt[OutputT]`
+declares that the final assistant message must be JSON matching the dataclass
+`OutputT`. If the specialization is `Prompt[list[ItemT]]`, the final message must
+be a top-level JSON array of objects matching `ItemT`.
 
-At render time the prompt assembles markdown from its sections (unchanged). When an output type is present and
-injection is enabled the prompt appends a builtin `ResponseFormatSection` to the end of the tree. The section renders a
-deterministic "Response Format" block with a root-level heading (`## Response Format`) that instructs the model to
-return **only** a single fenced JSON block with the required top-level container (object or array) and no extra prose.
+At render time the prompt assembles markdown from its sections (unchanged).
+When an output type is present and injection is enabled the prompt appends a
+builtin `ResponseFormatSection` to the end of the tree. The section renders a
+deterministic "Response Format" block with a root-level heading (`## Response Format`) that instructs the model to return **only** a single fenced JSON block
+with the required top-level container (object or array) and no extra prose.
 
-`RenderedPrompt` carries the declared output metadata so downstream code can call a small parser that turns the model's final message into an instance of `OutputT` (or a `list[ItemT]`) with strict validation and conservative type coercions.
+`RenderedPrompt` carries the declared output metadata so downstream code can call
+a small parser that turns the model's final message into an instance of
+`OutputT` (or a `list[ItemT]`) with strict validation and conservative type
+coercions.
+
+### Mapping to current `Prompt[OutputT]` behavior
+
+- The `Prompt.__class_getitem__` specialization stores the container hint and
+  dataclass candidate on the subclass. `_resolve_output_spec` validates that the
+  candidate is a dataclass and materializes a `StructuredOutputConfig` with the
+  container (`"object"`/`"array"`) and `allow_extra_keys` policy; otherwise a
+  `PromptValidationError` carries the offending type.
+- When structured output is present the constructor appends a
+  `ResponseFormatSection` keyed as `response-format`, populated by
+  `_build_response_format_params` so the final markdown always reflects the
+  declared container and extra-key policy. The section is enabled by default but
+  honors both `Prompt(..., inject_output_instructions=False)` and per-render
+  overrides (`prompt.render(..., inject_output_instructions=False)`).
+- `RenderedPrompt` mirrors the config through `.output_type`, `.container`, and
+  `.allow_extra_keys` so adapters can decide whether to call
+  `parse_structured_output` or request provider-native JSON handling.
 
 ## Response Format Section
 
@@ -141,6 +171,39 @@ This keeps the final prompt readable and the output contract easy to discover pr
   - Unknown keys are rejected unless `allow_extra_keys=True` (ignored if allowed).
   - Conservative coercions only: `"123"`->`int`, `"3.14"`->`float`, case-insensitive `"true"/"false"`->`bool`, `"null"/"none"`->`None`. Nested dataclasses and lists recurse.
   - No lossy or complex conversions.
+
+### Parsing helpers, fallbacks, and edge cases
+
+- `parse_structured_output` is gated by the prompt metadata: if the
+  `RenderedPrompt` lacks `structured_output`, an `OutputParseError` is raised
+  before any JSON parsing begins.
+- The fenced-block decode is strict. A malformed `json` payload yields a
+  targeted `OutputParseError` that keeps the offending dataclass on the
+  exception for diagnostics.
+- The raw JSON fallback uses `json.JSONDecoder().raw_decode` to skip prefixes
+  such as `[oops]{"title": ...}` while still requiring the first real `{` or
+  `[` to produce valid JSON.
+- Array outputs accept either a bare list payload or an object wrapper keyed as
+  `items`; anything else triggers container errors. Each element must be a JSON
+  object or the parser raises with the offending index in the message.
+- When `allow_extra_keys=True`, validation switches to an `ignore` mode; the
+  response-format section also drops the "Do not add extra keys." clause so the
+  instructions stay aligned with parser expectations.
+- Unknown container declarations (e.g., via a corrupted or overridden
+  `RenderedPrompt`) raise immediately with "Unknown output container" to avoid
+  silently treating invalid metadata as user JSON failures.
+
+### Caveats for implementers
+
+- Turning off `inject_output_instructions` (globally or per-render) only removes
+  the helper section; the prompt still expects JSON shaped per the declared
+  dataclass, so callers should avoid parsing if they intentionally request
+  free-form output.
+- The structured-output metadata flows through overrides and adapters; manual
+  overrides of `RenderedPrompt` fields can surface as parser errors, so rely on
+  the prompt factory rather than hand-editing the metadata.
+- Nested list contracts and unions remain out of scope; avoid hinting at richer
+  shapes in prompt text unless the dataclass truly models them.
 
 ## Non-Goals
 
