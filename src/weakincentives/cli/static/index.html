@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wink snapshot explorer</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="top-bar">
+      <div class="heading">
+        <p class="eyebrow">wink debug</p>
+        <h1>Snapshot Explorer</h1>
+        <p id="snapshot-path" class="muted"></p>
+      </div>
+      <div class="actions">
+        <label class="select-label">
+          <span>Switch snapshot</span>
+          <select id="snapshot-select"></select>
+        </label>
+      </div>
+    </header>
+    <main class="layout">
+      <aside class="panel">
+        <div class="panel-header">
+          <h2>Slices</h2>
+          <input
+            id="slice-filter"
+            type="search"
+            placeholder="Filter slices"
+            autocomplete="off"
+          />
+        </div>
+        <ul id="slice-list"></ul>
+      </aside>
+      <section class="content">
+        <div id="meta-card" class="card">
+          <div class="meta-grid">
+            <div>
+              <p class="label">Created at</p>
+              <p id="meta-created"></p>
+            </div>
+            <div>
+              <p class="label">Schema version</p>
+              <p id="meta-version"></p>
+            </div>
+            <div>
+              <p class="label">Slice count</p>
+              <p id="meta-count"></p>
+            </div>
+          </div>
+        </div>
+        <div id="slice-card" class="card">
+          <div class="card-header">
+            <div>
+              <p class="label">Slice</p>
+              <p id="slice-title"></p>
+            </div>
+            <div class="chip" id="item-count"></div>
+          </div>
+          <div class="pill-row" id="type-row"></div>
+          <div class="viewer">
+            <div class="viewer-toolbar">
+              <button id="copy-button" class="ghost">Copy JSON</button>
+            </div>
+            <div id="json-viewer" class="items" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -11,13 +11,27 @@
 # limitations under the License.
 
 """Command line interfaces for the weakincentives package."""
+# pyright: reportImportCycles=false
 
 from __future__ import annotations
 
-from . import wink
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import wink
 
 __all__ = ["wink"]
 
 
 def __dir__() -> list[str]:
     return sorted({*globals().keys(), *(__all__)})
+
+
+def __getattr__(name: str) -> object:
+    if name == "wink":
+        import importlib
+
+        module = importlib.import_module(".wink", __name__)
+        globals()["wink"] = module
+        return module
+    raise AttributeError(name)
