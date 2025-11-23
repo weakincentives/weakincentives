@@ -1,11 +1,30 @@
 # Session State Specification
 
-## Overview
+## Goals and Scope
 
-Sessions provide a tiny, deterministic state container for agent runs. They listen to
-the in-process event bus, collect structured tool payloads and prompt outputs, and
-expose the accumulated data through a typed API. Sessions never execute side effects;
-all state transitions are pure functions driven by the event stream.
+- **Purpose**: Offer a deterministic, side-effect-free container that mirrors the
+  full lifecycle of a run—prompt rendering, tool invocation, and prompt execution—so
+  orchestrators and inspectors can reason about every step.
+- **What Sessions cover**: In-process event subscription, typed state accumulation,
+  snapshot capture/rollback, and small helper selectors. They intentionally avoid
+  execution control, retries, or transport; those belong to the runtime and adapter
+  layers.
+- **Consumers**: Prompt/runtime adapters that publish events, higher-level planners
+  that query accumulated slices, and tooling that needs reproducible snapshots for
+  regression or audit scenarios.
+
+## Guiding Principles
+
+- **Pure state transitions**: Reducers never mutate in place; every event produces a
+  new tuple so state remains predictable and thread-friendly.
+- **Typed first**: Event payloads route by concrete dataclass type to keep slices
+  minimal and avoid ad-hoc tagging.
+- **Deterministic playback**: Sessions respond only to the supported event set,
+  making state easy to reconstruct from a recorded stream.
+- **Composable slices**: Multiple reducers per type and the ability to project onto
+  alternate slice types keep derivations explicit instead of hiding logic in callers.
+- **Snapshot fidelity**: Serialization/rollback must be transparent—restoring state
+  never rewires reducers or bus subscriptions.
 
 ## Minimal Requirements
 
@@ -61,6 +80,23 @@ Session state is an immutable mapping from a **slice type** to a tuple of datacl
 instances. When the slice type matches the data type, the tuple contains the raw
 event values. Reducers may also register an explicit slice type to store derived
 structures.
+
+## State Management Behaviors
+
+- **Lifecycle hooks**: Constructing a session immediately wires the event listeners;
+  no additional setup steps are required to start collecting data.
+- **Immutable slices**: Every dispatch path returns a fresh tuple. Default reducers
+  dedupe by equality, but callers can opt into upsert/replace semantics when
+  registering reducers.
+- **Dispatch ordering**: Events flow through reducers synchronously on the publisher
+  thread. When multiple reducers share a data type they are invoked in the order
+  they were registered so deterministic derivations are possible.
+- **Slice typing**: Each reducer owns its slice. `slice_type` controls the stored
+  tuple type and can differ from the incoming event payload type, enabling derived
+  aggregates without bolting logic onto callers.
+- **Fallback behavior**: If no reducer is registered for a payload type the default
+  append reducer is used. If no slice exists for a dispatched event, it is created
+  on demand via the registered reducer or default behavior.
 
 ## Public API Surface
 
@@ -213,6 +249,27 @@ deserialized snapshot must compare equal to the original.
 - `rollback()` raises `SnapshotRestoreError` if the snapshot schema version is
   incompatible or if referenced slice types were never registered. On failure the
   Session state remains untouched.
+
+## Known Limitations and Edge Cases
+
+- **Supported events only**: Sessions ignore any runtime events beyond
+  `PromptRendered`, `ToolInvoked`, and `PromptExecuted`. Callers that introduce new
+  event types must normalize them before publishing or extend the session to route
+  them.
+- **Synchronous reducers**: Because reducers run on the publisher thread, long-lived
+  reducer logic can block downstream listeners. Keep reducers lightweight or move
+  heavier work behind new events.
+- **Dataclass focus**: Typed slices expect dataclass payloads that are compatible
+  with the existing serde helpers. Non-dataclass payloads only populate the generic
+  `ToolInvoked` slice and cannot be serialized in snapshots unless wrapped in a
+  dataclass.
+- **No implicit eviction**: State grows with each event. Callers must register
+  reducers that compact or replace entries (e.g., `replace_latest`) when only recent
+  values matter.
+- **Snapshot compatibility**: Restoring requires the referenced slice types to be
+  available in the runtime environment and registered with the session. Incompatible
+  schema versions or missing types raise restore errors rather than partially
+  applying state.
 
 ## Testing Checklist
 
