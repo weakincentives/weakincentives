@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Protocol
+from typing import Protocol, Self
 
 from ...prompt._types import SupportsDataclass
 from ..events._types import EventBus
@@ -51,6 +51,12 @@ class SessionProtocol(Protocol):
         slice_type: type[SupportsDataclass],
         predicate: Callable[[SupportsDataclass], bool] | None = None,
     ) -> None: ...
+
+    @property
+    def parent(self) -> Self | None: ...
+
+    @property
+    def children(self) -> tuple[Self, ...]: ...
 
 
 __all__ = ["SessionProtocol", "SnapshotProtocol"]
