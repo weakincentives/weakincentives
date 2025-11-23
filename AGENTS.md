@@ -53,10 +53,7 @@ this document.
   The hook installer symlinks everything under `hooks/` into `.git/hooks/`.
 
 > **Contract**: Do not commit without running `make check`. The pre-commit hook
-> expects a clean run.
-
-> **Very important**: Always run `make check` and ensure it completes without
-> reporting any issues before committing.
+> expects a clean run—always ensure it passes before committing.
 
 ## Day-to-Day Commands (Always via `uv run`)
 
@@ -91,6 +88,9 @@ parsing noise.
 - **Coverage**: The test suite must remain at 100% coverage on
   `src/weakincentives`. Any gap is a regression. `build/run_pytest.py` only emits
   output when failures or warnings occur; investigate any noise immediately.
+- **Partial runs**: The coverage gate applies to narrowed invocations; targeted
+  `pytest path -k ...` runs may fail the floor. Iterate locally as needed, then
+  re-run `make test` to validate.
 - **Strict Pytest**: Configuration uses `--strict-config` and `--strict-markers`.
   Add new markers to `pyproject.toml` if needed.
 - **Retries**: `pytest-rerunfailures` reruns each failing test twice (0.5 s delay)
@@ -150,9 +150,20 @@ parsing noise.
   Model inputs precisely (using `TypeVar` bounds, `TypedDict`s, etc.) instead of
   layering `isinstance` checks, normalization shims, or redundant guards—assume
   the type checker runs for every caller.
-- Keep namespace packages thin: each subsystem exposes its public surface via an
-  `api.py` module, and the package `__init__` should only re-export that module
-  (use `__getattr__` for compatibility shims instead of expanding `__all__`).
+
+## Evolving Guardrails (Stay High-Level)
+
+- Favor curated public surfaces over broad re-exports; keep packages thin and
+  route new symbols through the designated API modules so callers see a stable,
+  minimal namespace.
+- Centralize cross-cutting behavior (logging, deadlines, rollback) in shared
+  helpers and context managers rather than re-implementing per call site; keep
+  wrappers thin so the shared path remains the single source of truth.
+- Extend prompt handling and structured outputs via the unified prompt
+  protocols—prefer enriching shared interfaces instead of adding
+  provider-specific branches.
+- Reuse existing concurrency and locking utilities to protect shared state; avoid
+  introducing bespoke locks or bypassing the session locking helpers.
 
 ## Release & Versioning
 
