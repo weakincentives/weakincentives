@@ -5,21 +5,25 @@ alongside the library. The script assembles a full-featured review agent that
 demonstrates prompt composition, overrides, workspace tools, and adapter
 optimization hooks in one place.
 
-## Objectives
+## Rationale, Scope, and Guardrails
 
-- Mount the `test-repositories/sunfish` fixture read-only and guide the agent
-  through code review workflows.
-- Exercise core subsystems: prompt rendering, session/event bus plumbing,
-  planning tools, workspace digests, Podman/VFS tooling, prompt overrides, and
-  adapter-driven optimization prompts.
-- Provide an interactive REPL with transparent logging (prompt renderings, tool
-  calls, plan snapshots) so operators can steer the review.
+- **Why it exists:** Serves as the canonical, end-to-end walkthrough for a
+  review agent that exercises prompt composition, overrides, workspace tooling,
+  and adapter optimization in one script. It prioritizes transparency so
+  operators can see every prompt render, tool call, and plan snapshot.
+- **Scope:** Focused on the bundled `sunfish` repository fixture and the
+  runtime stack required to review it. The design keeps mounts read-only and
+  caps workspace payloads to 600 KB to avoid bloating prompts.
+- **Guiding principles:** Prefer declarative prompt assembly, keep overrides
+  ergonomic (tagged by namespace/key), reuse shared planning/workspace tools,
+  and expose observability hooks so REPL users stay in the loop.
 
 ## Runtime Architecture
 
 `CodeReviewApp` wires together the adapter, prompt, session, overrides store,
-and event bus. The helper `_create_runtime_context` builds these pieces and
-subscribes console loggers to `PromptRendered` and `ToolInvoked` events.
+and event bus. The helper `_create_runtime_context` builds these pieces,
+subscribes console loggers to `PromptRendered`/`ToolInvoked`, and returns the
+runtime tuple so tests can reuse it without booting the REPL.
 
 On startup:
 
@@ -42,8 +46,8 @@ data is pulled from the session via `select_latest(session, Plan)`.
 ## Prompt Composition
 
 `build_task_prompt` produces `Prompt[ReviewResponse]` with namespace
-`examples/code-review` and key `code-review-session`. Sections render in this
-order:
+`examples/code-review` and key `code-review-session`. The sections are ordered
+to keep behavior predictable (previewed in the REPL before each turn):
 
 1. **Code Review Brief** (`MarkdownSection[ReviewGuidance]`):
    - Hard-coded template describing tooling, delegation strategy, and output
@@ -58,13 +62,14 @@ order:
    - Uses `PlanningStrategy.PLAN_ACT_REFLECT`, allowing multi-step plans whose
      snapshots we print after every turn.
 1. **Workspace Tools**:
-   - `_build_workspace_section` picks a `PodmanSandboxSection` when
+   - `_build_workspace_section` prefers `PodmanSandboxSection` when
      `PodmanSandboxSection.resolve_connection()` succeeds; otherwise it falls
      back to `VfsToolsSection`.
    - Both variants mount the `sunfish` repo with
      `SUNFISH_MOUNT_INCLUDE_GLOBS`, `SUNFISH_MOUNT_EXCLUDE_GLOBS`, and a
      600 KB cap to keep prompts concise. Podman inherits the base URL,
-     identity, and connection name from the resolved connection.
+     identity, and connection name from the resolved connection; VFS keeps the
+     same include/exclude caps but relies on the host file system.
 1. **Review Request** (`MarkdownSection[ReviewTurnParams]`):
    - Echoes `${request}` verbatim so the model always sees the latest operator
      question at the end of the prompt.
@@ -77,7 +82,8 @@ digest is expected to receive long-lived overrides.
 Overrides live in `LocalPromptOverridesStore`, defaulting to
 `~/.weakincentives/prompts`. `initialize_code_reviewer_runtime` is a helper
 used by tests (and other code) to get a prompt/session/bus/store/tag tuple
-without booting the REPL.
+without booting the REPL. Overrides are scoped by namespace/key/tag, so you can
+preserve multiple prompt variants in parallel.
 
 The REPL recognizes a single special command:
 
@@ -96,7 +102,8 @@ via `PromptOverridesStore.set_section_override`.
 ## Logging & Observability
 
 - `_print_rendered_prompt` prints the entire prompt whenever `PromptRendered`
-  fires. The label uses `prompt_name` or `ns:key`.
+  fires. The label uses `prompt_name` or `ns:key`, so overrides and tags stay
+  obvious in logs.
 - `_log_tool_invocation` renders tool params/results/payloads via the serde
   helpers while truncating long strings (`_LOG_STRING_LIMIT = 256`).
 - `_render_plan_snapshot` summarizes the latest plan objective, per-step status,
@@ -130,7 +137,8 @@ Interactive commands:
   concurrency checks.
 - `make test` / `make check` enforce the repository-wide guarantees
   (formatting, lint, typecheck, security scans, dependency audits, markdown
-  lint, and 100 % coverage).
+  lint, and 100 % coverage). Contract failures surface here as well, so keep
+  runtime invariants aligned with the docs.
 
 ## Future Work
 
