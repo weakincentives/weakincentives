@@ -21,15 +21,19 @@ from .core import (
     ProviderAdapter,
     SessionProtocol,
 )
+from .shared import ThrottleError, ThrottlePolicy, new_throttle_policy
 
 __all__ = [
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
     "AdapterName",
     "PromptEvaluationError",
+    "ThrottleError",
+    "ThrottlePolicy",
     "PromptResponse",
     "ProviderAdapter",
     "SessionProtocol",
+    "new_throttle_policy",
 ]
 
 
