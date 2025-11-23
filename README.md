@@ -61,6 +61,9 @@ of exposed knobs.
 The specs below dive into each area when you need exact contracts and deeper
 context:
 
+- **Architecture summary.** High-level map of packages, dependencies, and the
+  specs that govern them. See [Architecture Overview](specs/ARCHITECTURE.md).
+
 - **Observable session state with reducer hooks.** A Redux-like session ledger
   and in-process event bus keep every tool call and prompt render replayable.
   Built-in planning, virtual filesystem, and Python-evaluation sections ship
@@ -68,25 +71,30 @@ context:
   See [Session State](https://github.com/weakincentives/weakincentives/blob/main/specs/SESSIONS.md), [Prompt Event Emission](https://github.com/weakincentives/weakincentives/blob/main/specs/EVENTS.md),
   [Planning Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/PLANNING_TOOL.md), [Virtual Filesystem Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/VFS_TOOLS.md),
   and [Asteval Integration](https://github.com/weakincentives/weakincentives/blob/main/specs/ASTEVAL.md).
+
 - **Composable prompt blueprints with strict contracts.** Dataclass-backed
   sections compose into reusable blueprints that render validated Markdown and
   expose tool contracts automatically. Specs: [Prompt Overview](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS.md),
   [Prompt Composition](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS_COMPOSITION.md), and
   [Structured Output](https://github.com/weakincentives/weakincentives/blob/main/specs/STRUCTURED_OUTPUT.md).
+
 - **Chapter-driven visibility controls.** Chapters gate when prompt regions
   enter the model context, defaulting to closed until runtime policies open
   them. Expansion strategies and lifecycle guidance live in
   [Chapters Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/CHAPTERS.md).
+
 - **Override-friendly workflows that scale into optimization.** Prompt
   definitions ship with hash-based descriptors and on-disk overrides that stay
   in sync through schema validation and Git-root discovery, laying the
   groundwork for iterative optimization. Review
   [Prompt Overrides](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPT_OVERRIDES.md) for the full contract.
+
 - **Provider adapters standardize tool negotiation.** Shared conversation
   loops negotiate tool calls, apply JSON-schema response formats, and normalize
   structured payloads so the runtime stays model-agnostic. See
   [Adapter Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/ADAPTERS.md) and provider-specific docs such as
   [LiteLLM Adapter](https://github.com/weakincentives/weakincentives/blob/main/specs/LITE_LLM_ADAPTER.md).
+
 - **Local-first, deterministic execution.** Everything runs locally without
   hosted dependencies, and prompt renders stay diff-friendly so version control
   captures intent instead of churn. The code-review example ties it together
