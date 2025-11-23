@@ -6,13 +6,31 @@ Delegating agents compose a new prompt when they hand work to a subagent. The on
 parent prompt with a thin delegation header so the subagent inherits the entire context without alteration. This
 specification keeps the wrapper minimal and prescriptive so delegation stays transparent and lossless.
 
-## Core Principle
+## Rationale
 
-> **Always deliver the full parent prompt exactly as it was rendered.**
->
-> - No sections are removed, reordered, or reflowed.
-> - All policies, tool descriptions, transcripts, and variable substitutions from the parent remain intact.
-> - The parent prompt is treated as immutable input; composition stops immediately if it cannot be embedded verbatim.
+- **Auditability.** Delegation only works when the parent can see exactly what the subagent saw. Wrapping instead of
+  rewriting preserves the lineage of instructions and prevents policy drift.
+- **Determinism.** Every adapter and caller should produce the same wrapper for the same inputs. Constraining layout and
+  content avoids surprising formatting differences when composing prompts in different runtimes.
+- **Tool parity.** Subagents must receive the same tool declarations and parameter descriptions so execution stays
+  interoperable. Composition enforces inheritance rather than re-declaration to avoid divergence.
+
+## Scope
+
+This document governs every delegated prompt built from a rendered parent prompt, whether initiated by orchestration
+code, higher-level tools, or manual composition. It does not cover how parents are rendered in the first place (see
+`specs/PROMPTS.md`) or how subagents are scheduled. When a future adapter introduces new wrapping requirements, expand
+this file rather than inlining bespoke behavior.
+
+## Guiding Principles
+
+- **Always deliver the full parent prompt exactly as it was rendered.**
+- **Never mutate inherited semantics.** Avoid paraphrasing, pruning, or restating tools and policies; the wrapper adds
+  context, not reinterpretation.
+- **Prefer declarative sections.** Keep each section small, typed, and reusable so wrappers remain composable across
+  adapters.
+- **Fail closed.** If the parent cannot be embedded verbatim, abort delegation instead of silently trimming or
+  downgrading instructions.
 
 ## Required Layout
 
@@ -26,6 +44,26 @@ A subagent prompt MUST follow the structure below:
 Only these sections may appear. Skip the `Response Format` block when fallback instructions are unnecessary. Use the
 `Recap` block only when a condensed reminder is required, and never add extra sections unless a future revision explicitly
 introduces them.
+
+## Composition Logic and APIs
+
+The public composition surface lives in `weakincentives.prompt.composition`. The flow below documents how the existing
+types collaborate and what callers must provide:
+
+1. **Inputs.** Callers construct a `DelegationPrompt[ParentOutputT, DelegationOutputT]` with the rendered parent prompt
+   (`RenderedPrompt[ParentOutputT]`) plus the parent `Prompt` or `PromptProtocol`. The generic specialization is required
+   so the wrapper can infer the delegated output type—omitting it raises a `TypeError` during initialisation.
+1. **Section assembly.** The constructor always appends a `DelegationSummarySection`, optional `ResponseFormatSection`
+   (when `include_response_format=True` and the parent declared a `container`), the `ParentPromptSection`, and a trailing
+   `RecapSection`. The parent prompt body defaults to `rendered_parent.text`, and the parent tool catalog is reused so
+   tool metadata carries forward automatically. (`inject_output_instructions` remains disabled.)
+1. **Rendering.** `DelegationPrompt.render` accepts `DelegationParams` plus optional `ParentPromptParams` and
+   `RecapParams`. When omitted, the parent prompt body and recap bullets are derived from the rendered parent and
+   `DelegationParams.recap_lines`. Rendered prompts inherit the parent's deadline and merge tool parameter descriptions so
+   subagents see a superset of the parent's schema notes.
+
+These APIs keep composition declarative and centred on the parent prompt: the wrapper merely stitches sections together
+without altering the underlying semantics.
 
 ### Delegation Summary
 
@@ -362,6 +400,20 @@ These examples keep the wrapper logic declarative, reuse the parent's tool catal
 schema whenever the adapter needs explicit JSON instructions. The resulting rendered prompt complies with the required
 layout, embeds the parent prompt verbatim, and stays agnostic to additional future sections unless the specification
 changes.
+
+## Known Caveats and Edge Cases
+
+- **Response format opt-in.** Setting `include_response_format=True` only adds the fallback section when the parent prompt
+  exposed a structured `container`. Parents without schema metadata keep the wrapper minimal even when callers request the
+  extra section.
+- **Mandatory recap section.** The `RecapSection` is always present to anchor auditability. If callers do not supply
+  recap bullets, the section renders as a bare heading using the `DelegationParams.recap_lines` default. Keep recap text
+  concise so the wrapper does not bloat the context window.
+- **Parent parameters are required.** `ParentPromptSection` raises `PromptRenderError` when parameters are missing or of the
+  wrong type. When reusing the default parent body, pass `None` so the constructor-provided copy of
+  `rendered_parent.text` is used.
+- **Tool description merging.** Tool parameter descriptions from the parent override or extend the rendered wrapper's
+  descriptions. Use distinct tool names to avoid accidental collisions when subagents introduce additional tools.
 
 ## Failure Handling
 
