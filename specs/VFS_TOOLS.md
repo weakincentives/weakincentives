@@ -2,10 +2,37 @@
 
 ## Overview
 
-The virtual filesystem tool suite gives agents a deterministic, session-scoped surface for file reads and writes without
-touching the host disk. It supports lightweight workspace snapshots: list directories, inspect file metadata, edit file
-contents, and preload selected host folders during initialisation while the session stays isolated. Snapshots are
-copy-on-write, start empty automatically, and disappear when the session ends; no state persists across conversations.
+The virtual filesystem tool suite gives agents a deterministic, session-scoped surface for
+file reads and writes without touching the host disk. It supports lightweight workspace
+snapshots—list directories, inspect file metadata, edit file contents, and preload selected
+host folders during initialisation—while the session stays isolated. Snapshots are
+copy-on-write, start empty automatically, and disappear when the session ends; no state
+persists across conversations.
+
+### Rationale and scope
+
+- Provide a **safe staging area** for agent edits so reasoning, validation, and review can
+  occur before touching a real repository. Host mounts seed context only; they do not
+  grant arbitrary disk access.
+- Keep tool behaviour **deterministic and inspectable**. Reducers own all mutation, and
+  the active snapshot is always visible via selectors.
+- Match the DeepAgents tool surface so orchestrators can reuse prompts, schemas, and
+  analytics without forks.
+- Limit scope to **text-focused workflows**. Binary content is rejected, and large inputs
+  are capped to keep responses small and predictable.
+- Treat the VFS as **ephemeral**. Each session constructs its own snapshot; no state is
+  shared across conversations or between `clone`d sections.
+
+### Guiding principles
+
+- **Predictable paths**: paths are normalized, ASCII-only, and relative to the session
+  root. The same logical path always maps to the same internal representation.
+- **Single owner of state**: reducers clone snapshots and enforce version/timestamp
+  updates so handlers remain side-effect free.
+- **Fail loud, fail early**: parameter validation happens before reducer updates and
+  returns structured error messages that align with other tool suites.
+- **Prompt-first UX**: the section renders explicit reminders about emptiness,
+  configured mounts, and safe exploration patterns so agents avoid noisy commands.
 
 ## Module Surface
 
@@ -152,6 +179,42 @@ implementation so that orchestration layers can reuse the same prompts, backend 
 | `rm` | Remove files or directories | `path: str` | `DeleteResult` | Deletes the specified path. Works on individual files or directories and removes nested entries recursively. Returns structured errors when the path is missing. |
 
 The suite keeps a delete helper internally for reducers (`DeleteEntry`). Tool handlers normalise targets so `DeleteEntry` removes any file directly and prunes directories by recursively deleting files with the matching prefix. The interactive surface now exposes this behaviour through the `rm` command alongside the other DeepAgents-aligned tools above.
+
+### Behaviour details and caveats
+
+- **Path handling**: all tools accept POSIX-style paths. `"/"` resolves to the VFS
+  root, `.` and `..` are rejected, duplicate slashes are collapsed, and trailing
+  slashes are ignored. Normalisation occurs before validation so reducers never see
+  ambiguous inputs.
+- **`ls`**: the handler returns `FileInfo` entries with `type` (`file` or
+  `directory`), `size`, `created_at`, and `updated_at` when available. Listing a
+  file path raises validation errors; requesting a missing directory yields an empty
+  result instead of an error to mirror shell semantics.
+- **`read_file`**: pagination uses 0-based `offset` and `limit` counts. Missing files
+  return a human-readable error string rather than raising. The handler trims the
+  response to the requested slice and annotates line numbers in the rendered text.
+- **`write_file`**: creation is strict—existing targets raise validation errors.
+  Content is normalized to UTF-8, newline endings are preserved, and the reducer
+  sets `version=1` on success.
+- **`edit_file`**: matching is literal and case-sensitive. When `replace_all=False`
+  the handler requires exactly one match and emits a structured error message when
+  zero or multiple matches exist. Versions increment even when replacement strings
+  match the prior content to reflect the attempted edit.
+- **`glob`**: patterns follow `fnmatch` behaviour and run relative to the provided
+  path. Globs never escape the requested subtree. Results sort lexicographically for
+  deterministic prompts.
+- **`grep`**: regex compilation failures return formatted error strings. Binary file
+  detection mirrors ripgrep; skipped files appear only in debug logs rather than the
+  result payload. Matches include `file_path`, `line_number`, and `line` snippets to
+  keep downstream renderers simple.
+- **`rm`**: deletion succeeds on absent paths by returning an error payload rather
+  than raising, so agents can treat it as an idempotent cleanup step. Directory
+  removals are recursive but bounded by the current snapshot—host mounts will not be
+  rehydrated unless the section is reconstructed.
+- **Host mounts**: hydration enforces the same path normalization rules as tool
+  inputs. Globs are evaluated before size caps apply; when `max_bytes` is exceeded
+  the reducer aborts the mount with a clear error message and leaves the VFS empty
+  so callers must retry with narrower includes.
 
 ## Prompt Template Guidance
 
