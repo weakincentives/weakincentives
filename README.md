@@ -6,27 +6,10 @@ determinism, testability, and safe execution front and center without relying on
 heavy dependencies or hosted services.
 
 The core philosophy treats agent development as a structured engineering
-discipline rather than an exercise in ad-hoc scripting. The library ships a set
-of focused abstractions that reinforce that rigor:
-
-- **Prompts as code.** Prompts are typed `Prompt` objects composed from sections
-  such as `MarkdownSection`, versioned deterministically, and scoped with
-  chapters so long-form directives can stay dormant until policies open them.
-- **Structured I/O.** Declaring a dataclass output type for a `Prompt[OutputT]`
-  automatically builds a JSON schema, instructs the provider to obey it, and
-  parses the reply back into a typed Python object.
-- **Stateful, replayable sessions.** `Session` acts as a Redux-like state
-  store, letting pure reducers respond to events (for example, `ToolInvoked`)
-  so every change is observable, replayable, and snapshot-friendly.
-- **Typed and sandboxed tools.** Tools are typed callables (`Tool[ParamsT, ResultT]`) with explicit contracts for inputs and outputs, plus built-in
-  suites for planning, a secure in-memory VFS, and sandboxed Python evaluation.
-- **Provider-agnostic adapters.** Adapters connect the framework to providers
-  like OpenAI or LiteLLM by handling API calls, tool negotiation, and response
-  parsing while keeping the agent logic model-agnostic.
-- **Configuration and optimization hooks.** Structured logging via
-  `structlog`, enforced deadlines, and a powerful prompt overrides system let
-  teams A/B test and iterate on prompts through JSON files without touching the
-  application source.
+discipline rather than ad-hoc scripting. WINK favors typed prompts,
+dataclass-backed outputs, observable sessions, sandboxed tools, provider-agnostic
+adapters, and configurable overrides so deterministic, testable behavior comes
+first.
 
 ## What's novel?
 
@@ -34,63 +17,58 @@ While other agent frameworks provide a toolbox of loose components, WINK
 offers an opinionated chassis that emphasizes determinism, type
 contracts, and observable workflows:
 
-1. **Redux-like state management with reducers.** Every state change is a
-   traceable consequence of a published event processed by a pure reducer. This
-   thread of causality delivers replayability and visibility far beyond
-   free-form dictionaries or mutable object properties.
-1. **Composable prompt blueprints with typed contracts.** Prompts are built
-   from reusable sections and chapters backed by dataclasses, so composition and
-   parameter binding feel like standard software engineering instead of string
-   concatenation.
-1. **Integrated, hash-based prompt overrides.** `PromptDescriptor` content
-   hashes, tool contracts, and chapter descriptors ensure overrides only apply to
-   the intended section version while describing the declared chapter layout.
-   `LocalPromptOverridesStore` keeps the JSON artifacts in version control so
-   teams can collaborate without risking stale edits.
-1. **First-class in-memory virtual filesystem.** The sandboxed VFS ships as a
-   core tool, giving agents a secure workspace whose state is tracked like any
-   other session slice and avoiding accidental host access.
-1. **Lean dependency surface.** Avoiding heavyweight stacks such as Pydantic
-   keeps the core lightweight. Custom serde modules provide the needed
-   functionality without saddling users with sprawling dependency trees.
+- **Redux-like state management with reducers.** Every state change is a
+  traceable consequence of a published event processed by a pure reducer,
+  delivering replayability and visibility far beyond free-form dictionaries or
+  mutable object properties. A Redux-like session ledger and in-process event
+  bus keep every tool call and prompt render replayable. Built-in planning,
+  virtual filesystem, and Python-evaluation sections ship with reducers that
+  enforce domain rules while emitting structured telemetry. See [Session
+  State](https://github.com/weakincentives/weakincentives/blob/main/specs/SESSIONS.md),
+  [Prompt Event Emission](https://github.com/weakincentives/weakincentives/blob/main/specs/EVENTS.md),
+  [Planning Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/PLANNING_TOOL.md),
+  [Virtual Filesystem Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/VFS_TOOLS.md),
+  and [Asteval Integration](https://github.com/weakincentives/weakincentives/blob/main/specs/ASTEVAL.md).
+- **Composable prompt blueprints with typed contracts.** Prompts are built from
+  reusable sections and chapters backed by dataclasses, so composition and
+  parameter binding feel like standard software engineering instead of string
+  concatenation. Dataclass-backed sections compose into reusable blueprints that
+  render validated Markdown and expose tool contracts automatically. Specs:
+  [Prompt Overview](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS.md),
+  [Prompt Composition](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS_COMPOSITION.md),
+  and [Structured Output](https://github.com/weakincentives/weakincentives/blob/main/specs/STRUCTURED_OUTPUT.md).
+- **Integrated, hash-based prompt overrides.** `PromptDescriptor` content
+  hashes, tool contracts, and chapter descriptors ensure overrides only apply to
+  the intended section version while describing the declared chapter layout.
+  `LocalPromptOverridesStore` keeps the JSON artifacts in version control so
+  teams can collaborate without risking stale edits. Prompt definitions ship
+  with hash-based descriptors and on-disk overrides that stay in sync through
+  schema validation and Git-root discovery, laying the groundwork for iterative
+  optimization. Review
+  [Prompt Overrides](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPT_OVERRIDES.md)
+  for the full contract.
+- **First-class in-memory virtual filesystem.** The sandboxed VFS ships as a
+  core tool, giving agents a secure workspace whose state is tracked like any
+  other session slice and avoiding accidental host access. Everything runs
+  locally without hosted dependencies, and prompt renders stay diff-friendly so
+  version control captures intent instead of churn. The code-review example
+  ties it together with override-aware prompts, session telemetry, and
+  replayable tooling.
+- **Provider-agnostic adapters.** Adapters connect the framework to providers
+  like OpenAI or LiteLLM by handling API calls, tool negotiation, and response
+  parsing while keeping the agent logic model-agnostic. Shared conversation
+  loops negotiate tool calls, apply JSON-schema response formats, and normalize
+  structured payloads so the runtime stays model-agnostic. See
+  [Adapter Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/ADAPTERS.md)
+  and provider-specific docs such as the
+  [LiteLLM Adapter](https://github.com/weakincentives/weakincentives/blob/main/specs/LITE_LLM_ADAPTER.md).
+- **Lean dependency surface.** Avoiding heavyweight stacks such as Pydantic
+  keeps the core lightweight. Custom serde modules provide the needed
+  functionality without saddling users with sprawling dependency trees.
 
 In short, WINK favors software-engineering discipline—determinism,
 type safety, testability, and clear state management—over maximizing the number
 of exposed knobs.
-
-The specs below dive into each area when you need exact contracts and deeper
-context:
-
-- **Observable session state with reducer hooks.** A Redux-like session ledger
-  and in-process event bus keep every tool call and prompt render replayable.
-  Built-in planning, virtual filesystem, and Python-evaluation sections ship
-  with reducers that enforce domain rules while emitting structured telemetry.
-  See [Session State](https://github.com/weakincentives/weakincentives/blob/main/specs/SESSIONS.md), [Prompt Event Emission](https://github.com/weakincentives/weakincentives/blob/main/specs/EVENTS.md),
-  [Planning Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/PLANNING_TOOL.md), [Virtual Filesystem Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/VFS_TOOLS.md),
-  and [Asteval Integration](https://github.com/weakincentives/weakincentives/blob/main/specs/ASTEVAL.md).
-- **Composable prompt blueprints with strict contracts.** Dataclass-backed
-  sections compose into reusable blueprints that render validated Markdown and
-  expose tool contracts automatically. Specs: [Prompt Overview](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS.md),
-  [Prompt Composition](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS_COMPOSITION.md), and
-  [Structured Output](https://github.com/weakincentives/weakincentives/blob/main/specs/STRUCTURED_OUTPUT.md).
-- **Chapter-driven visibility controls.** Chapters gate when prompt regions
-  enter the model context, defaulting to closed until runtime policies open
-  them. Expansion strategies and lifecycle guidance live in
-  [Chapters Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/CHAPTERS.md).
-- **Override-friendly workflows that scale into optimization.** Prompt
-  definitions ship with hash-based descriptors and on-disk overrides that stay
-  in sync through schema validation and Git-root discovery, laying the
-  groundwork for iterative optimization. Review
-  [Prompt Overrides](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPT_OVERRIDES.md) for the full contract.
-- **Provider adapters standardize tool negotiation.** Shared conversation
-  loops negotiate tool calls, apply JSON-schema response formats, and normalize
-  structured payloads so the runtime stays model-agnostic. See
-  [Adapter Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/ADAPTERS.md) and provider-specific docs such as
-  [LiteLLM Adapter](https://github.com/weakincentives/weakincentives/blob/main/specs/LITE_LLM_ADAPTER.md).
-- **Local-first, deterministic execution.** Everything runs locally without
-  hosted dependencies, and prompt renders stay diff-friendly so version control
-  captures intent instead of churn. The code-review example ties it together
-  with override-aware prompts, session telemetry, and replayable tooling.
 
 ## Requirements
 
