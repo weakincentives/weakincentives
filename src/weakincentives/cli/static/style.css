@@ -395,7 +395,7 @@ p {
 }
 
 .truncated {
-  max-height: calc(1.45em * 100);
+  max-height: calc(1.45em * 25);
   overflow: hidden;
 }
 

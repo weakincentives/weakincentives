@@ -202,7 +202,7 @@ function countLines(value) {
   return String(value).split("\n").length;
 }
 
-function applyTruncation(node, lineCount, limit = 100) {
+function applyTruncation(node, lineCount, limit = 25) {
   if (lineCount <= limit) {
     return null;
   }
