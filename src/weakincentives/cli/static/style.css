@@ -378,9 +378,10 @@ p {
   border-radius: 8px;
   padding: 6px 8px;
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 4px;
   white-space: pre-wrap;
+  line-height: 1.4;
 }
 
 .compact-array {
@@ -392,13 +393,14 @@ p {
 
 .array-chip {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   padding: 6px 8px;
   background: #e2e8f0;
   border-radius: 999px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   white-space: pre-wrap;
+  line-height: 1.4;
 }
 
 .tree-toggle {
