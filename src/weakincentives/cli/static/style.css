@@ -387,14 +387,14 @@ p {
 .compact-array {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 0;
+  gap: 12px;
+  padding: 10px 0;
 }
 
 .array-chip {
   display: inline-flex;
   align-items: flex-start;
-  padding: 6px 8px;
+  padding: 8px 12px;
   background: #e2e8f0;
   border-radius: 999px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
