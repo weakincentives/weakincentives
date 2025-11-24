@@ -6,6 +6,40 @@ Release highlights for weakincentives.
 
 _Nothing yet._
 
+## v0.11.0 - 2025-11-23
+
+### Wink Debugger & Snapshot Explorer
+
+- Added a `wink debug` FastAPI UI for browsing session snapshot JSON files with
+  reload/download actions, copy-to-clipboard, and a searchable tree viewer.
+- Improved the viewer with keyword search, expand/collapse controls, compact
+  array rendering, newline preservation, scrollable truncation boxes, and
+  consistent spacing/padding so large payloads stay readable.
+
+### Snapshot Persistence & Session State
+
+- Session snapshots now log writes, skip empty payloads, and include runtime
+  events while tolerating unknown slice types during replay.
+- The code review example persists snapshots by default; snapshot writes are
+  isolated in tests, and workspace digest optimization clones ASTEval tools to
+  keep digest renders consistent.
+
+### Adapters & Throttling
+
+- Migrated the OpenAI adapter to the Responses API, updating tool negotiation,
+  structured outputs, and retry behavior to match the new endpoint and tests.
+- Added a shared throttling policy with jittered backoff and structured
+  `ThrottleError`s across OpenAI and LiteLLM adapters, plus conversation-runner
+  retry coverage.
+
+### Documentation
+
+- Added an OpenAI Responses API migration guide, a snapshot explorer walkthrough,
+  and refreshed AGENTS/session hierarchy guidance.
+- Clarified specs for throttling, deadlines, planning strategies/tools, prompts,
+  overrides, chapters, adapters, logging, structured output, VFS, Podman
+  sandboxing, and related design rationales.
+
 ## v0.10.0 - 2025-11-22
 
 ### Public API & Imports
