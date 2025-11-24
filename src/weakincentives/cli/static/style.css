@@ -397,7 +397,7 @@ p {
   border-radius: 999px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
-  white-space: nowrap;
+  white-space: pre-wrap;
 }
 
 .tree-toggle {

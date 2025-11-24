@@ -387,7 +387,7 @@ function renderTree(value, path, depth, label) {
           const chip = document.createElement("span");
           chip.className = "array-chip";
           chip.title = `[${index}]`;
-          chip.textContent = previewValue(child);
+          chip.textContent = String(child);
           childrenContainer.appendChild(chip);
         });
       } else {
