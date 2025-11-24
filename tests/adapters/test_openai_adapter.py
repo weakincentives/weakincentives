@@ -14,7 +14,7 @@ import importlib
 import json
 import sys
 import types
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from importlib import import_module as std_import_module
 from types import MethodType
 from typing import Any, Literal, TypeVar, cast
@@ -312,8 +312,8 @@ def test_openai_adapter_returns_plain_text_response() -> None:
     assert result.output is None
     assert result.tool_results == ()
 
-    request = cast(dict[str, Any], client.completions.requests[0])
-    messages = cast(list[dict[str, Any]], request["messages"])
+    request = cast(dict[str, Any], client.responses.requests[0])
+    messages = cast(list[dict[str, Any]], request["input"])
     assert messages[0]["role"] == "system"
     assert str(messages[0]["content"]).startswith("## 1. Greeting")
     assert "tools" not in request
@@ -380,14 +380,14 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     assert record.call_id == "call_1"
     assert calls == ["policies"]
 
-    first_request = cast(dict[str, Any], client.completions.requests[0])
+    first_request = cast(dict[str, Any], client.responses.requests[0])
     tools = cast(list[dict[str, Any]], first_request["tools"])
     function_spec = cast(dict[str, Any], tools[0]["function"])
     assert function_spec["name"] == "search_notes"
     assert first_request.get("tool_choice") == "auto"
 
-    second_request = cast(dict[str, Any], client.completions.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
+    second_messages = cast(list[dict[str, Any]], second_request["input"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
     message_text, rendered_text = _split_tool_message_content(tool_message["content"])
@@ -576,12 +576,12 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     assert event.result.value is None
     assert event.call_id == "call_1"
 
-    first_request = cast(dict[str, Any], client.completions.requests[0])
-    first_messages = cast(list[dict[str, Any]], first_request["messages"])
+    first_request = cast(dict[str, Any], client.responses.requests[0])
+    first_messages = cast(list[dict[str, Any]], first_request["input"])
     assert first_messages[0]["role"] == "system"
 
-    second_request = cast(dict[str, Any], client.completions.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
+    second_messages = cast(list[dict[str, Any]], second_request["input"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
     message_text, rendered_text = _split_tool_message_content(tool_message["content"])
@@ -667,8 +667,8 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
     assert event.result.value is None
     assert event.call_id == "call_1"
 
-    second_request = cast(dict[str, Any], client.completions.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
+    second_messages = cast(list[dict[str, Any]], second_request["input"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
     message_text, rendered_text = _split_tool_message_content(tool_message["content"])
@@ -710,7 +710,7 @@ def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
     assert isinstance(result.output, list)
     assert [item.answer for item in result.output] == ["First", "Second"]
 
-    request = cast(dict[str, Any], client.completions.requests[0])
+    request = cast(dict[str, Any], client.responses.requests[0])
     response_format = cast(dict[str, Any], request["response_format"])
     json_schema = cast(dict[str, Any], response_format["json_schema"])
     schema_payload = cast(dict[str, Any], json_schema["schema"])
@@ -774,9 +774,9 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
 
     assert result.text == "All done"
 
-    assert len(client.completions.requests) == 2
-    first_request = cast(dict[str, Any], client.completions.requests[0])
-    second_request = cast(dict[str, Any], client.completions.requests[1])
+    assert len(client.responses.requests) == 2
+    first_request = cast(dict[str, Any], client.responses.requests[0])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
     assert first_request.get("tool_choice") == forced_choice
     assert second_request.get("tool_choice") == "auto"
 
@@ -1404,8 +1404,8 @@ def test_openai_adapter_records_handler_failures() -> None:
     assert event.result.value is None
     assert "execution failed: boom" in event.result.message
 
-    second_request = cast(dict[str, Any], client.completions.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["messages"])
+    second_request = cast(dict[str, Any], client.responses.requests[1])
+    second_messages = cast(list[dict[str, Any]], second_request["input"])
     tool_message = second_messages[-1]
     assert tool_message["role"] == "tool"
     message_text, rendered_text = _split_tool_message_content(tool_message["content"])
@@ -1625,11 +1625,60 @@ def test_openai_adapter_delegates_to_shared_runner(
         None,
         expected_response_format,
     )
-    request_payload = cast(dict[str, Any], client.completions.requests[-1])
+    request_payload = cast(dict[str, Any], client.responses.requests[-1])
     assert request_payload["model"] == "gpt-test"
-    messages = cast(list[dict[str, Any]], request_payload["messages"])
+    messages = cast(list[dict[str, Any]], request_payload["input"])
     assert messages[0]["content"] == "hi"
     assert request_payload["response_format"] == expected_response_format
 
     choice = select_choice(response)
-    assert choice.message is message
+    content_parts = cast(Sequence[object], getattr(choice.message, "content", ()))
+    first_part = content_parts[0]
+    if isinstance(first_part, Mapping):
+        mapping_part = cast(Mapping[str, object], first_part)
+        assert mapping_part.get("text") == "hi"
+    else:
+        assert getattr(first_part, "text", None) == "hi"
+
+
+def test_openai_normalizes_tool_call_mapping_arguments() -> None:
+    module = cast(Any, _reload_module())
+
+    tool_call = {
+        "id": "call_1",
+        "function": {"name": "do_it", "arguments": {"value": 1}},
+    }
+
+    normalized = module._normalize_tool_call(tool_call)
+
+    assert normalized.id == "call_1"
+    assert normalized.function.name == "do_it"
+    assert normalized.function.arguments == json.dumps({"value": 1})
+
+
+def test_openai_normalizes_unserializable_arguments() -> None:
+    module = cast(Any, _reload_module())
+
+    class Unserializable:
+        pass
+
+    arguments = module._normalize_tool_arguments(Unserializable())
+
+    assert arguments is not None
+    assert "Unserializable" in arguments
+
+
+def test_openai_choice_requires_output_and_content() -> None:
+    module = cast(Any, _reload_module())
+
+    class MissingOutput:
+        output = None
+
+    with pytest.raises(PromptEvaluationError):
+        module._choice_from_response(MissingOutput(), prompt_name="missing-output")
+
+    class MissingContent:
+        output = (object(),)
+
+    with pytest.raises(PromptEvaluationError):
+        module._choice_from_response(MissingContent(), prompt_name="missing-content")

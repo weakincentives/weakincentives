@@ -190,6 +190,8 @@ def _jittered_backoff(
 
     jitter_seconds = random.uniform(0, base.total_seconds())  # nosec B311
     delay = timedelta(seconds=jitter_seconds)
+    if delay < policy.base_delay:
+        delay = policy.base_delay
     if retry_after is not None and delay < retry_after:
         return retry_after
     return delay

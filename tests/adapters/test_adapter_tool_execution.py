@@ -100,7 +100,7 @@ def adapter_harness(request: pytest.FixtureRequest) -> AdapterHarness:
             adapter = openai_module.OpenAIAdapter(
                 model="gpt-test", client=cast(Any, client)
             )
-            return adapter, client.completions.requests
+            return adapter, client.responses.requests
 
         return AdapterHarness(name="openai", build=build)
 
@@ -159,7 +159,12 @@ def _record_tool_events(bus: InProcessEventBus) -> list[ToolInvoked]:
 
 def _second_tool_message(requests: list[dict[str, object]]) -> dict[str, object]:
     assert len(requests) >= 2
-    messages = cast(list[dict[str, object]], requests[1]["messages"])
+    payload = requests[1]
+    message_list = cast(
+        list[dict[str, object]],
+        payload.get("input") or payload.get("messages"),
+    )
+    messages = message_list
     return messages[-1]
 
 
