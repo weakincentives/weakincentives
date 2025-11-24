@@ -360,7 +360,7 @@ def _create_runtime_context(
     resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
     prompt = build_task_prompt(session=session)
     try:
-        store.seed_if_necessary(prompt, tag=resolved_tag)
+        store.seed(prompt, tag=resolved_tag)
     except PromptOverridesError as exc:  # pragma: no cover - startup validation
         raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
 

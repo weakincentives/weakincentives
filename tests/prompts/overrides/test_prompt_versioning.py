@@ -333,7 +333,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
     ) -> None:
         raise NotImplementedError
 
-    def seed_if_necessary(
+    def seed(
         self,
         prompt: Prompt,
         *,

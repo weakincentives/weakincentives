@@ -308,7 +308,7 @@ Each `{tag}.json` file stores a single `PromptOverride` payload:
    replace the final `{tag}.json` via `os.replace`.
 1. Directory creation is idempotent; intermediate folders are created with
    `exist_ok=True` semantics.
-1. `seed_if_necessary` wraps `upsert` to bootstrap overrides:
+1. `seed` wraps `upsert` to bootstrap overrides:
    - Derive the descriptor from the provided `Prompt` to ensure hashes correspond
      to the concrete prompt body supplying the data.
    - Build a `PromptOverride` enumerating every section path with the actual
@@ -347,7 +347,7 @@ class PromptOverridesStore(Protocol):
         tag: str,
     ) -> None: ...
 
-    def seed_if_necessary(
+    def seed(
         self,
         prompt: Prompt,
         *,
@@ -366,7 +366,7 @@ Responsibilities:
    errors.
 1. Both methods raise `PromptOverridesError` when validation fails (hash
    mismatches, invalid identifiers, serialization issues).
-1. `seed_if_necessary` materializes a pristine override snapshot so CLI tooling
+1. `seed` materializes a pristine override snapshot so CLI tooling
    can surface it immediately.
 
 ## Operational Flow
@@ -397,7 +397,7 @@ Responsibilities:
   - `upsert` validation failures (invalid keys, unknown sections, hash drift).
   - Atomic write behavior using temporary directories.
   - `delete` idempotence.
-  - `seed_if_necessary` generating a complete override snapshot and refusing to
+  - `seed` generating a complete override snapshot and refusing to
     clobber existing files, including a case where the prompt body differs from
     cached descriptor state to prove the method reads from the `Prompt`
     instance.

@@ -184,7 +184,7 @@ to provide thread-based synchronization only.
 
 - Add unit tests that spin up threads publishing tool events concurrently to a
   shared `Session` and assert that all reducers observe the expected counts.
-- Introduce stress tests for `LocalPromptOverridesStore.seed_if_necessary` that
+- Introduce stress tests for `LocalPromptOverridesStore.seed` that
   call it concurrently and validate the resulting file contents.
 
 Implementing the changes above will let adapters safely share a single session

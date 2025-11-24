@@ -142,12 +142,12 @@ def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
     store.delete(ns=descriptor.ns, prompt_key=descriptor.key, tag="latest")
 
 
-def test_seed_if_necessary_captures_prompt_content(tmp_path: Path) -> None:
+def test_seed_captures_prompt_content(tmp_path: Path) -> None:
     prompt = _build_prompt_with_tool()
     descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
-    override = store.seed_if_necessary(prompt, tag="stable")
+    override = store.seed(prompt, tag="stable")
     section = descriptor.sections[0]
 
     assert section.path in override.sections
@@ -178,7 +178,7 @@ def test_root_detection_manual_traversal(
     monkeypatch.chdir(nested)
 
     store = LocalPromptOverridesStore()
-    override = store.seed_if_necessary(prompt)
+    override = store.seed(prompt)
 
     section = descriptor.sections[0]
     assert override.sections[section.path].body == "Greet ${subject} warmly."
@@ -620,31 +620,31 @@ def test_upsert_allows_none_tool_description(tmp_path: Path) -> None:
     assert resolved.tool_overrides[tool.name].description is None
 
 
-def test_seed_if_necessary_preserves_existing_override(tmp_path: Path) -> None:
+def test_seed_preserves_existing_override(tmp_path: Path) -> None:
     prompt = _build_prompt()
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
-    first = store.seed_if_necessary(prompt)
-    second = store.seed_if_necessary(prompt)
+    first = store.seed(prompt)
+    second = store.seed(prompt)
 
     assert first.sections == second.sections
     assert first.tool_overrides == second.tool_overrides
 
 
-def test_seed_if_necessary_errors_on_corrupt_file(tmp_path: Path) -> None:
+def test_seed_errors_on_corrupt_file(tmp_path: Path) -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
-    store.seed_if_necessary(prompt)
+    store.seed(prompt)
     override_path = _override_path(tmp_path, descriptor)
     override_path.write_text("not-json", encoding="utf-8")
 
     with pytest.raises(PromptOverridesError):
-        store.seed_if_necessary(prompt)
+        store.seed(prompt)
 
 
-def test_seed_if_necessary_errors_on_stale_override(tmp_path: Path) -> None:
+def test_seed_errors_on_stale_override(tmp_path: Path) -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
@@ -668,7 +668,7 @@ def test_seed_if_necessary_errors_on_stale_override(tmp_path: Path) -> None:
     override_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(PromptOverridesError):
-        store.seed_if_necessary(prompt)
+        store.seed(prompt)
 
 
 def test_root_detection_git_command_success(
@@ -690,7 +690,7 @@ def test_root_detection_git_command_success(
     monkeypatch.chdir(nested)
 
     store = LocalPromptOverridesStore()
-    override = store.seed_if_necessary(prompt)
+    override = store.seed(prompt)
 
     assert override.sections
     assert (repo_root / ".weakincentives").exists()
@@ -729,7 +729,7 @@ def test_git_toplevel_empty_output_falls_back(
     monkeypatch.chdir(nested)
 
     store = LocalPromptOverridesStore()
-    store.seed_if_necessary(prompt)
+    store.seed(prompt)
 
     assert (repo_root / ".weakincentives" / "prompts").exists()
 
