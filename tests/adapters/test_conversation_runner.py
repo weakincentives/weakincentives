@@ -35,7 +35,7 @@ from weakincentives.adapters.shared import (
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, ToolContext
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
-from weakincentives.prompt.overrides import PromptOverridesStore
+from weakincentives.prompt.overrides import PromptDescriptor, PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
@@ -191,6 +191,22 @@ def test_conversation_runner_success() -> None:
     assert response.output is None
     assert isinstance(bus.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
+
+
+def test_conversation_runner_includes_prompt_descriptor_in_event() -> None:
+    descriptor = PromptDescriptor(
+        ns="tests", key="example", sections=[], tools=[], chapters=[]
+    )
+    rendered = RenderedPrompt(text="system", descriptor=descriptor)
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
+    provider = ProviderStub(responses)
+    bus = RecordingBus()
+
+    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
+    runner.run()
+
+    event = cast(PromptExecuted, bus.events[-1])
+    assert event.descriptor is descriptor
 
 
 def test_conversation_runner_publishes_prompt_rendered_event() -> None:

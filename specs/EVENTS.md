@@ -89,6 +89,7 @@ Emitted exactly once per successful adapter evaluation, after all tool invocatio
 
 - `event_id: UUID` – immutable identifier generated with `uuid4()` when the event is constructed.
 - `prompt_name: str` – logical name taken from the `Prompt` instance.
+- `descriptor: PromptDescriptor | None` – descriptor describing the rendered prompt when available.
 - `adapter: str` – identifier for the adapter emitting the event (e.g. `openai`, `anthropic`).
 - `result: PromptResponse[Any]` – the structured result returned to the caller.
 - `session_id: UUID | None` – session identifier threading through the orchestration layer.
