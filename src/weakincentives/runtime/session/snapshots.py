@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
 from importlib import import_module
 from typing import Any, TypeGuard, cast, override
+from uuid import UUID
 
 from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
@@ -169,6 +170,8 @@ class SnapshotPayload:
     version: str
     created_at: str
     slices: tuple[SnapshotSlicePayload, ...]
+    parent_id: str | None = None
+    children_ids: tuple[str, ...] = ()
 
     @classmethod
     def from_json(cls, raw: str) -> SnapshotPayload:
@@ -189,6 +192,21 @@ class SnapshotPayload:
         if not isinstance(created_at, str):
             raise SnapshotRestoreError("Snapshot created_at must be a string")
 
+        parent_id = payload.get("parent_id")
+        if parent_id is not None and not isinstance(parent_id, str):
+            raise SnapshotRestoreError("Snapshot parent_id must be a string")
+
+        children_ids_obj = payload.get("children_ids", [])
+        if not isinstance(children_ids_obj, list):
+            raise SnapshotRestoreError("Snapshot children_ids must be a list")
+        children_ids: list[str] = []
+        for child_id in children_ids_obj:
+            if not isinstance(child_id, str):
+                raise SnapshotRestoreError(
+                    "Snapshot children_ids entries must be strings"
+                )
+            children_ids.append(child_id)
+
         slices_obj = payload.get("slices", [])
         if not isinstance(slices_obj, list):
             raise SnapshotRestoreError("Snapshot slices must be a list")
@@ -197,7 +215,13 @@ class SnapshotPayload:
         slices = tuple(
             SnapshotSlicePayload.from_object(entry) for entry in slices_source
         )
-        return cls(version=version, created_at=created_at, slices=slices)
+        return cls(
+            version=version,
+            created_at=created_at,
+            parent_id=parent_id,
+            children_ids=tuple(children_ids),
+            slices=slices,
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -205,6 +229,8 @@ class Snapshot:
     """Frozen value object representing session slice state."""
 
     created_at: datetime
+    parent_id: UUID | None = None
+    children_ids: tuple[UUID, ...] = ()
     slices: SnapshotState = field(
         default_factory=lambda: cast(
             SnapshotState,
@@ -213,6 +239,10 @@ class Snapshot:
     )
 
     def __post_init__(self) -> None:
+        normalized_parent = (
+            None if self.parent_id is None else UUID(str(self.parent_id))
+        )
+        normalized_children = tuple(UUID(str(child)) for child in self.children_ids)
         normalized: dict[SessionSliceType, SessionSlice] = {
             slice_type: tuple(values) for slice_type, values in self.slices.items()
         }
@@ -222,6 +252,8 @@ class Snapshot:
             "slices",
             cast(SnapshotState, types.MappingProxyType(normalized)),
         )
+        object.__setattr__(self, "parent_id", normalized_parent)
+        object.__setattr__(self, "children_ids", normalized_children)
 
     @override
     def __hash__(self) -> int:
@@ -231,7 +263,7 @@ class Snapshot:
                 key=lambda item: _type_identifier(item[0]),
             )
         )
-        return hash((self.created_at, ordered))
+        return hash((self.created_at, ordered, self.parent_id, self.children_ids))
 
     def to_json(self) -> str:
         """Serialize the snapshot to a JSON string."""
@@ -260,6 +292,8 @@ class Snapshot:
         payload: dict[str, JSONValue] = {
             "version": SNAPSHOT_SCHEMA_VERSION,
             "created_at": self.created_at.isoformat(),
+            "parent_id": str(self.parent_id) if self.parent_id is not None else None,
+            "children_ids": [str(child) for child in self.children_ids],
             "slices": payload_slices,
         }
         return json.dumps(payload, sort_keys=True)
@@ -282,6 +316,18 @@ class Snapshot:
         except ValueError as error:
             raise SnapshotRestoreError("Invalid created_at timestamp") from error
 
+        try:
+            parent_id = (
+                UUID(payload.parent_id) if payload.parent_id is not None else None
+            )
+        except ValueError as error:
+            raise SnapshotRestoreError("Invalid parent_id") from error
+
+        try:
+            children_ids = tuple(UUID(value) for value in payload.children_ids)
+        except ValueError as error:
+            raise SnapshotRestoreError("Invalid children_ids entry") from error
+
         restored: dict[SessionSliceType, SessionSlice] = {}
         for entry in payload.slices:
             slice_type_candidate = _resolve_type(entry.slice_type)
@@ -303,8 +349,14 @@ class Snapshot:
                     raise SnapshotRestoreError(
                         f"Failed to restore slice {slice_type.__qualname__}"
                     ) from error
-                restored_items.append(restored_item)
+                else:
+                    restored_items.append(restored_item)
 
             restored[slice_type] = tuple(restored_items)
 
-        return cls(created_at=_ensure_timezone(created_at), slices=restored)
+        return cls(
+            created_at=_ensure_timezone(created_at),
+            parent_id=parent_id,
+            children_ids=children_ids,
+            slices=restored,
+        )

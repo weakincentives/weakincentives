@@ -19,6 +19,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
+from uuid import uuid4
 
 import pytest
 
@@ -136,6 +137,29 @@ def test_snapshot_normalizes_state_and_is_hashable() -> None:
     assert hash(snapshot)
 
 
+def test_snapshot_serializes_relationship_metadata() -> None:
+    parent_id = uuid4()
+    child_one = uuid4()
+    child_two = uuid4()
+
+    snapshot = Snapshot(
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        parent_id=parent_id,
+        children_ids=(child_one, child_two),
+        slices={SnapshotItem: (SnapshotItem(1),)},
+    )
+
+    payload = json.loads(snapshot.to_json())
+
+    assert payload["parent_id"] == str(parent_id)
+    assert payload["children_ids"] == [str(child_one), str(child_two)]
+
+    restored = Snapshot.from_json(json.dumps(payload))
+
+    assert restored.parent_id == parent_id
+    assert restored.children_ids == (child_one, child_two)
+
+
 def test_snapshot_to_json_surfaces_serialization_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -162,6 +186,11 @@ def test_snapshot_to_json_surfaces_serialization_errors(
         make_snapshot_payload_with(version=2),
         make_snapshot_payload_with(created_at=123),
         make_snapshot_payload_with(created_at="not-a-timestamp"),
+        make_snapshot_payload_with(parent_id=123),
+        make_snapshot_payload_with(parent_id="not-a-uuid"),
+        make_snapshot_payload_with(children_ids="not-a-list"),
+        make_snapshot_payload_with(children_ids=[123]),
+        make_snapshot_payload_with(children_ids=["not-a-uuid"]),
         make_snapshot_payload_with(slices={}),
         make_snapshot_payload_with(slices=[1]),
         make_snapshot_payload_with_slice_mutation(slice_type=1),
@@ -187,3 +216,5 @@ def test_snapshot_from_json_success_sets_timezone() -> None:
 
     assert restored.created_at.tzinfo is UTC
     assert restored.slices[SnapshotItem] == (SnapshotItem(1),)
+    assert restored.parent_id is None
+    assert restored.children_ids == ()

@@ -567,6 +567,27 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     assert restored_tool.result["value"] == {"value": 4}
 
 
+def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> None:
+    parent, bus = session_factory()
+
+    first_child = Session(bus=bus, parent=parent)
+    parent_snapshot = parent.snapshot()
+
+    assert parent_snapshot.parent_id is None
+    assert parent_snapshot.children_ids == (first_child.session_id,)
+
+    child_snapshot = first_child.snapshot()
+
+    assert child_snapshot.parent_id == parent.session_id
+    assert child_snapshot.children_ids == ()
+
+    second_child = Session(bus=bus, parent=parent)
+
+    parent.rollback(parent_snapshot)
+
+    assert parent.children == (first_child, second_child)
+
+
 def test_snapshot_rollback_requires_registered_slices(
     session_factory: SessionFactory,
 ) -> None:
