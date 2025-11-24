@@ -61,6 +61,27 @@
           <div class="pill-row" id="type-row"></div>
           <div class="viewer">
             <div class="viewer-toolbar">
+              <div class="viewer-controls">
+                <label class="inline-label">
+                  <span>Expand to depth</span>
+                  <input
+                    id="depth-input"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value="2"
+                    aria-label="Expand tree to depth"
+                  />
+                </label>
+                <div class="button-group">
+                  <button id="expand-all" class="ghost" type="button">
+                    Expand all
+                  </button>
+                  <button id="collapse-all" class="ghost" type="button">
+                    Collapse all
+                  </button>
+                </div>
+              </div>
               <button id="copy-button" class="ghost">Copy JSON</button>
             </div>
             <div id="json-viewer" class="items" aria-live="polite"></div>

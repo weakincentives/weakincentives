@@ -233,7 +233,9 @@ p {
 
 .viewer-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   padding: 8px 10px;
   background: rgba(15, 23, 42, 0.03);
 }
@@ -244,6 +246,35 @@ p {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.viewer-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.inline-label input {
+  width: 70px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font-size: 13px;
+}
+
+.button-group {
+  display: inline-flex;
+  gap: 6px;
 }
 
 .items {
@@ -293,6 +324,79 @@ p {
 .item-body pre {
   margin: 0;
   padding: 0;
+}
+
+.tree-root {
+  background: #f8fafc;
+}
+
+.tree-node {
+  border-left: 2px solid #e2e8f0;
+  padding-left: 10px;
+  margin: 4px 0;
+}
+
+.tree-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tree-label {
+  font-weight: 700;
+}
+
+.tree-body {
+  margin-left: 8px;
+}
+
+.tree-children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+}
+
+.tree-leaf {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tree-toggle {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tree-controls {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tree-mini {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pill-quiet {
+  background: #f1f5f9;
 }
 
 .select-label {

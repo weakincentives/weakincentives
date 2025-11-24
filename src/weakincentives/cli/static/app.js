@@ -2,6 +2,10 @@ const state = {
   meta: null,
   selectedSlice: null,
   snapshots: [],
+  currentItems: [],
+  openPaths: new Set(),
+  closedPaths: new Set(),
+  expandDepth: 2,
 };
 
 const elements = {
@@ -18,6 +22,9 @@ const elements = {
   jsonViewer: document.getElementById("json-viewer"),
   reload: document.getElementById("reload-button"),
   copy: document.getElementById("copy-button"),
+  depthInput: document.getElementById("depth-input"),
+  expandAll: document.getElementById("expand-all"),
+  collapseAll: document.getElementById("collapse-all"),
 };
 
 async function fetchJSON(url, options) {
@@ -72,6 +79,8 @@ function renderSliceDetail(slice) {
   elements.sliceTitle.textContent = slice.slice_type;
   elements.itemCount.textContent = `${slice.items.length} items`;
   elements.typeRow.innerHTML = "";
+  state.currentItems = slice.items;
+  applyDepth(state.currentItems, state.expandDepth);
 
   const slicePill = document.createElement("span");
   slicePill.className = "pill";
@@ -120,11 +129,27 @@ async function refreshMeta() {
 
 elements.sliceFilter.addEventListener("input", renderSliceList);
 elements.copy.addEventListener("click", () => {
-  navigator.clipboard.writeText(
-    Array.from(document.querySelectorAll(".item-body pre"))
-      .map((node) => node.textContent || "")
-      .join("\n\n")
-  );
+  const text = JSON.stringify(state.currentItems, null, 2);
+  navigator.clipboard.writeText(text);
+});
+
+elements.depthInput.addEventListener("change", () => {
+  const value = Number(elements.depthInput.value);
+  const depth = Number.isFinite(value) ? Math.max(1, Math.min(10, value)) : 1;
+  state.expandDepth = depth;
+  elements.depthInput.value = String(depth);
+  applyDepth(state.currentItems, depth);
+  renderItems(state.currentItems);
+});
+
+elements.expandAll.addEventListener("click", () => {
+  setOpenForAll(state.currentItems, true);
+  renderItems(state.currentItems);
+});
+
+elements.collapseAll.addEventListener("click", () => {
+  setOpenForAll(state.currentItems, false);
+  renderItems(state.currentItems);
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -133,8 +158,211 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-function formatItems(items) {
-  return JSON.stringify(items, null, 2).replace(/\\n/g, "\n");
+const isObject = (value) => typeof value === "object" && value !== null;
+
+function valueType(value) {
+  if (Array.isArray(value)) return "array";
+  if (value === null) return "null";
+  return typeof value;
+}
+
+function pathKey(path) {
+  return path.join(".");
+}
+
+function shouldOpen(path, depth) {
+  const key = pathKey(path);
+  if (state.closedPaths.has(key)) return false;
+  if (state.openPaths.has(key)) return true;
+  return depth < state.expandDepth;
+}
+
+function setOpen(path, open) {
+  const key = pathKey(path);
+  if (open) {
+    state.openPaths.add(key);
+    state.closedPaths.delete(key);
+  } else {
+    state.openPaths.delete(key);
+    state.closedPaths.add(key);
+  }
+}
+
+function expandChildren(value, path, open) {
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => {
+      const childPath = path.concat(String(index));
+      setOpen(childPath, open);
+      if (isObject(child)) {
+        expandChildren(child, childPath, open);
+      }
+    });
+  } else if (isObject(value)) {
+    Object.entries(value).forEach(([key, child]) => {
+      const childPath = path.concat(key);
+      setOpen(childPath, open);
+      if (isObject(child)) {
+        expandChildren(child, childPath, open);
+      }
+    });
+  }
+}
+
+function applyDepth(items, depth) {
+  state.openPaths = new Set();
+  state.closedPaths = new Set();
+  const walk = (value, path, currentDepth) => {
+    if (!(Array.isArray(value) || isObject(value))) {
+      return;
+    }
+    if (currentDepth < depth) {
+      setOpen(path, true);
+    }
+    if (Array.isArray(value)) {
+      value.forEach((child, index) =>
+        walk(child, path.concat(String(index)), currentDepth + 1)
+      );
+    } else {
+      Object.entries(value).forEach(([key, child]) =>
+        walk(child, path.concat(key), currentDepth + 1)
+      );
+    }
+  };
+  items.forEach((item, index) => walk(item, [`item-${index}`], 0));
+}
+
+function setOpenForAll(items, open) {
+  state.openPaths = new Set();
+  state.closedPaths = new Set();
+  const update = (value, path) => {
+    if (!(Array.isArray(value) || isObject(value))) {
+      return;
+    }
+    setOpen(path, open);
+    if (Array.isArray(value)) {
+      value.forEach((child, index) =>
+        update(child, path.concat(String(index)))
+      );
+    } else {
+      Object.entries(value).forEach(([key, child]) =>
+        update(child, path.concat(key))
+      );
+    }
+  };
+  items.forEach((item, index) => update(item, [`item-${index}`]));
+}
+
+function renderTree(value, path, depth, label) {
+  const node = document.createElement("div");
+  node.className = "tree-node";
+
+  const header = document.createElement("div");
+  header.className = "tree-header";
+
+  const name = document.createElement("span");
+  name.className = "tree-label";
+  name.textContent = label;
+  header.appendChild(name);
+
+  const badge = document.createElement("span");
+  badge.className = "pill pill-quiet";
+  const type = valueType(value);
+  if (type === "array") {
+    badge.textContent = `array (${value.length})`;
+  } else if (type === "object" && value !== null) {
+    badge.textContent = `object (${Object.keys(value).length})`;
+  } else {
+    badge.textContent = type;
+  }
+  header.appendChild(badge);
+
+  const childControls = document.createElement("div");
+  childControls.className = "tree-controls";
+  header.appendChild(childControls);
+
+  const body = document.createElement("div");
+  body.className = "tree-body";
+
+  const expandable = Array.isArray(value) || isObject(value);
+
+  if (!expandable) {
+    const leaf = document.createElement("div");
+    leaf.className = "tree-leaf";
+    leaf.textContent = String(value);
+    body.appendChild(leaf);
+    node.appendChild(header);
+    node.appendChild(body);
+    return node;
+  }
+
+  const open = shouldOpen(path, depth);
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "tree-toggle";
+  toggle.textContent = open ? "Collapse" : "Expand";
+  childControls.appendChild(toggle);
+
+  const expandLevel = document.createElement("button");
+  expandLevel.type = "button";
+  expandLevel.className = "tree-mini";
+  expandLevel.textContent = "Expand children";
+  childControls.appendChild(expandLevel);
+
+  const collapseLevel = document.createElement("button");
+  collapseLevel.type = "button";
+  collapseLevel.className = "tree-mini";
+  collapseLevel.textContent = "Collapse children";
+  childControls.appendChild(collapseLevel);
+
+  const childrenContainer = document.createElement("div");
+  childrenContainer.className = "tree-children";
+
+  const renderChildren = () => {
+    childrenContainer.innerHTML = "";
+    if (!shouldOpen(path, depth)) {
+      childrenContainer.style.display = "none";
+      toggle.textContent = "Expand";
+      return;
+    }
+    childrenContainer.style.display = "block";
+    toggle.textContent = "Collapse";
+    if (Array.isArray(value)) {
+      value.forEach((child, index) => {
+        childrenContainer.appendChild(
+          renderTree(child, path.concat(String(index)), depth + 1, `[${index}]`)
+        );
+      });
+    } else {
+      Object.entries(value).forEach(([key, child]) => {
+        childrenContainer.appendChild(
+          renderTree(child, path.concat(key), depth + 1, key)
+        );
+      });
+    }
+  };
+
+  toggle.addEventListener("click", () => {
+    const next = !shouldOpen(path, depth);
+    setOpen(path, next);
+    renderItems(state.currentItems);
+  });
+
+  expandLevel.addEventListener("click", () => {
+    expandChildren(value, path, true);
+    renderItems(state.currentItems);
+  });
+
+  collapseLevel.addEventListener("click", () => {
+    expandChildren(value, path, false);
+    renderItems(state.currentItems);
+  });
+
+  renderChildren();
+
+  body.appendChild(childrenContainer);
+  node.appendChild(header);
+  node.appendChild(body);
+  return node;
 }
 
 function renderItems(items) {
@@ -150,34 +378,11 @@ function renderItems(items) {
     title.textContent = `Item ${index + 1}`;
     header.appendChild(title);
 
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "item-toggle";
-    toggle.textContent = "Collapse";
-    header.appendChild(toggle);
+    card.appendChild(header);
 
     const body = document.createElement("div");
-    body.className = "item-body";
-    const pre = document.createElement("pre");
-    pre.textContent = formatItems([item]).slice(2, -2); // strip list brackets
-    body.appendChild(pre);
-
-    const setOpen = (open) => {
-      body.style.display = open ? "block" : "none";
-      toggle.textContent = open ? "Collapse" : "Expand";
-    };
-    let open = index === 0;
-    toggle.addEventListener("click", () => {
-      open = !open;
-      setOpen(open);
-    });
-    header.addEventListener("click", () => {
-      open = !open;
-      setOpen(open);
-    });
-    setOpen(open);
-
-    card.appendChild(header);
+    body.className = "item-body tree-root";
+    body.appendChild(renderTree(item, [`item-${index}`], 0, "root"));
     card.appendChild(body);
     elements.jsonViewer.appendChild(card);
   });
