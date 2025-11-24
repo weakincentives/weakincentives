@@ -99,7 +99,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         self.calls.append((prompt, tag, path, body))
         return cast(PromptOverride, object())
 
-    def seed_if_necessary(
+    def seed(
         self,
         prompt: PromptLike,
         *,

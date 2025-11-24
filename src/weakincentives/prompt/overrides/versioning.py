@@ -260,7 +260,7 @@ class PromptOverridesStore(Protocol):
         body: str,
     ) -> PromptOverride: ...
 
-    def seed_if_necessary(
+    def seed(
         self,
         prompt: PromptLike,
         *,

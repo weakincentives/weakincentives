@@ -169,7 +169,7 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
     )
 
     def seed() -> PromptOverride:
-        return store.seed_if_necessary(prompt, tag="concurrent")
+        return store.seed(prompt, tag="concurrent")
 
     max_workers = threadstress_workers
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

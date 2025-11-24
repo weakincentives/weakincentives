@@ -265,7 +265,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         return self.upsert(descriptor, override)
 
     @override
-    def seed_if_necessary(
+    def seed(
         self,
         prompt: PromptLike,
         *,
