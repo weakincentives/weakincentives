@@ -314,6 +314,12 @@ function renderTree(value, path, depth, label) {
   const badge = document.createElement("span");
   badge.className = "pill pill-quiet";
   const type = valueType(value);
+  const childCount =
+    type === "array"
+      ? value.length
+      : type === "object" && value !== null
+        ? Object.keys(value).length
+        : 0;
   if (type === "array") {
     badge.textContent = `array (${value.length})`;
   } else if (type === "object" && value !== null) {
@@ -330,10 +336,6 @@ function renderTree(value, path, depth, label) {
     header.appendChild(preview);
   }
 
-  const childControls = document.createElement("div");
-  childControls.className = "tree-controls";
-  header.appendChild(childControls);
-
   const body = document.createElement("div");
   body.className = "tree-body";
 
@@ -349,37 +351,61 @@ function renderTree(value, path, depth, label) {
     return node;
   }
 
-  const open = shouldOpen(path, depth);
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "tree-toggle";
-  toggle.textContent = open ? "Collapse" : "Expand";
-  childControls.appendChild(toggle);
+  const hasChildren = childCount > 0;
+  let toggle;
+  if (hasChildren) {
+    const childControls = document.createElement("div");
+    childControls.className = "tree-controls";
+    header.appendChild(childControls);
 
-  const expandLevel = document.createElement("button");
-  expandLevel.type = "button";
-  expandLevel.className = "tree-mini";
-  expandLevel.textContent = "Expand children";
-  childControls.appendChild(expandLevel);
+    toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "tree-toggle";
+    childControls.appendChild(toggle);
 
-  const collapseLevel = document.createElement("button");
-  collapseLevel.type = "button";
-  collapseLevel.className = "tree-mini";
-  collapseLevel.textContent = "Collapse children";
-  childControls.appendChild(collapseLevel);
+    const expandLevel = document.createElement("button");
+    expandLevel.type = "button";
+    expandLevel.className = "tree-mini";
+    expandLevel.textContent = "Expand children";
+    childControls.appendChild(expandLevel);
+
+    const collapseLevel = document.createElement("button");
+    collapseLevel.type = "button";
+    collapseLevel.className = "tree-mini";
+    collapseLevel.textContent = "Collapse children";
+    childControls.appendChild(collapseLevel);
+
+    expandLevel.addEventListener("click", () => {
+      expandChildren(value, path, true);
+      renderItems(state.currentItems);
+    });
+
+    collapseLevel.addEventListener("click", () => {
+      expandChildren(value, path, false);
+      renderItems(state.currentItems);
+    });
+  }
 
   const childrenContainer = document.createElement("div");
   childrenContainer.className = "tree-children";
 
   const renderChildren = () => {
     childrenContainer.innerHTML = "";
+    if (!hasChildren) {
+      const empty = document.createElement("span");
+      empty.className = "muted";
+      empty.textContent = "(empty)";
+      childrenContainer.style.display = "block";
+      childrenContainer.appendChild(empty);
+      return;
+    }
     if (!shouldOpen(path, depth)) {
       childrenContainer.style.display = "none";
-      toggle.textContent = "Expand";
+      if (toggle) toggle.textContent = "Expand";
       return;
     }
     childrenContainer.style.display = "block";
-    toggle.textContent = "Collapse";
+    if (toggle) toggle.textContent = "Collapse";
     if (Array.isArray(value)) {
       if (isSimpleArray(value)) {
         childrenContainer.classList.add("compact-array");
@@ -412,21 +438,13 @@ function renderTree(value, path, depth, label) {
     }
   };
 
-  toggle.addEventListener("click", () => {
-    const next = !shouldOpen(path, depth);
-    setOpen(path, next);
-    renderItems(state.currentItems);
-  });
-
-  expandLevel.addEventListener("click", () => {
-    expandChildren(value, path, true);
-    renderItems(state.currentItems);
-  });
-
-  collapseLevel.addEventListener("click", () => {
-    expandChildren(value, path, false);
-    renderItems(state.currentItems);
-  });
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      const next = !shouldOpen(path, depth);
+      setOpen(path, next);
+      renderItems(state.currentItems);
+    });
+  }
 
   renderChildren();
 
