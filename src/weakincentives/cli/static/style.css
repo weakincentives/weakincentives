@@ -386,7 +386,8 @@ p {
 .compact-array {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+  padding: 6px 0;
 }
 
 .array-chip {
