@@ -332,6 +332,8 @@ p {
 
 .tree-root {
   background: #f8fafc;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .tree-node {
@@ -382,6 +384,7 @@ p {
   gap: 4px;
   white-space: pre-wrap;
   line-height: 1.4;
+  font-size: inherit;
 }
 
 .compact-array {
@@ -400,7 +403,7 @@ p {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: inherit;
   white-space: pre-wrap;
   line-height: 1.4;
 }
