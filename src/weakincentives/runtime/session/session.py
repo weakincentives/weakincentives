@@ -305,6 +305,8 @@ class Session(SessionProtocol):
 
         with self._locked():
             state_snapshot: dict[SessionSliceType, SessionSlice] = dict(self._state)
+            parent_id = self._parent.session_id if self._parent is not None else None
+            children_ids = tuple(child.session_id for child in self._children)
         try:
             normalized: SnapshotState = normalize_snapshot_state(state_snapshot)
         except ValueError as error:
@@ -312,7 +314,12 @@ class Session(SessionProtocol):
             raise SnapshotSerializationError(msg) from error
 
         created_at = datetime.now(UTC)
-        return Snapshot(created_at=created_at, slices=normalized)
+        return Snapshot(
+            created_at=created_at,
+            parent_id=parent_id,
+            children_ids=children_ids,
+            slices=normalized,
+        )
 
     @override
     def rollback(self, snapshot: SnapshotProtocol) -> None:
