@@ -179,6 +179,25 @@ function valueType(value) {
   return typeof value;
 }
 
+const isPrimitive = (value) =>
+  value === null || (typeof value !== "object" && !Array.isArray(value));
+
+const isSimpleArray = (value) =>
+  Array.isArray(value) && value.every((item) => isPrimitive(item));
+
+function previewValue(value, max = 24) {
+  const raw =
+    typeof value === "string" ? value : value === null ? "null" : String(value);
+  return raw.length > max ? `${raw.slice(0, max)}…` : raw;
+}
+
+function arrayPreview(array, limit = 6) {
+  const shown = array.slice(0, limit).map((entry) => previewValue(entry));
+  const suffix =
+    array.length > limit ? `, … +${array.length - limit} more` : "";
+  return `[${shown.join(", ")}${suffix}]`;
+}
+
 function getFilteredItems() {
   const query = state.searchQuery.toLowerCase().trim();
   if (!query) {
@@ -304,6 +323,13 @@ function renderTree(value, path, depth, label) {
   }
   header.appendChild(badge);
 
+  if (Array.isArray(value)) {
+    const preview = document.createElement("span");
+    preview.className = "tree-preview";
+    preview.textContent = arrayPreview(value);
+    header.appendChild(preview);
+  }
+
   const childControls = document.createElement("div");
   childControls.className = "tree-controls";
   header.appendChild(childControls);
@@ -355,11 +381,28 @@ function renderTree(value, path, depth, label) {
     childrenContainer.style.display = "block";
     toggle.textContent = "Collapse";
     if (Array.isArray(value)) {
-      value.forEach((child, index) => {
-        childrenContainer.appendChild(
-          renderTree(child, path.concat(String(index)), depth + 1, `[${index}]`)
-        );
-      });
+      if (isSimpleArray(value)) {
+        childrenContainer.classList.add("compact-array");
+        value.forEach((child, index) => {
+          const chip = document.createElement("span");
+          chip.className = "array-chip";
+          chip.title = `[${index}]`;
+          chip.textContent = previewValue(child);
+          childrenContainer.appendChild(chip);
+        });
+      } else {
+        childrenContainer.classList.remove("compact-array");
+        value.forEach((child, index) => {
+          childrenContainer.appendChild(
+            renderTree(
+              child,
+              path.concat(String(index)),
+              depth + 1,
+              `[${index}]`
+            )
+          );
+        });
+      }
     } else {
       Object.entries(value).forEach(([key, child]) => {
         childrenContainer.appendChild(

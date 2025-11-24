@@ -351,6 +351,15 @@ p {
   font-weight: 700;
 }
 
+.tree-preview {
+  color: #475569;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+}
+
 .tree-body {
   margin-left: 8px;
 }
@@ -372,6 +381,23 @@ p {
   align-items: center;
   gap: 4px;
   white-space: pre-wrap;
+}
+
+.compact-array {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.array-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 8px;
+  background: #e2e8f0;
+  border-radius: 999px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .tree-toggle {
