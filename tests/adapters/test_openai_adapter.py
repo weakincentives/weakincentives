@@ -382,15 +382,18 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
 
     first_request = cast(dict[str, Any], client.responses.requests[0])
     tools = cast(list[dict[str, Any]], first_request["tools"])
-    function_spec = cast(dict[str, Any], tools[0]["function"])
-    assert function_spec["name"] == "search_notes"
+    tool_spec = tools[0]
+    assert tool_spec["type"] == "function"
+    assert tool_spec["name"] == "search_notes"
+    assert tool_spec["parameters"]["type"] == "object"
     assert first_request.get("tool_choice") == "auto"
 
     second_request = cast(dict[str, Any], client.responses.requests[1])
     second_messages = cast(list[dict[str, Any]], second_request["input"])
     tool_message = second_messages[-1]
-    assert tool_message["role"] == "tool"
-    message_text, rendered_text = _split_tool_message_content(tool_message["content"])
+    assert tool_message["type"] == "function_call_output"
+    assert tool_message["call_id"] == "call_1"
+    message_text, rendered_text = _split_tool_message_content(tool_message["output"])
     assert message_text == "completed"
     assert rendered_text is not None
     assert json.loads(rendered_text) == {"answer": "Policy summary"}
@@ -583,8 +586,9 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     second_request = cast(dict[str, Any], client.responses.requests[1])
     second_messages = cast(list[dict[str, Any]], second_request["input"])
     tool_message = second_messages[-1]
-    assert tool_message["role"] == "tool"
-    message_text, rendered_text = _split_tool_message_content(tool_message["content"])
+    assert tool_message["type"] == "function_call_output"
+    assert tool_message["call_id"] == "call_1"
+    message_text, rendered_text = _split_tool_message_content(tool_message["output"])
     assert message_text == "Tool validation failed: invalid query"
     assert rendered_text is None
 
@@ -670,13 +674,14 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
     second_request = cast(dict[str, Any], client.responses.requests[1])
     second_messages = cast(list[dict[str, Any]], second_request["input"])
     tool_message = second_messages[-1]
-    assert tool_message["role"] == "tool"
-    message_text, rendered_text = _split_tool_message_content(tool_message["content"])
+    assert tool_message["type"] == "function_call_output"
+    assert tool_message["call_id"] == "call_1"
+    message_text, rendered_text = _split_tool_message_content(tool_message["output"])
     assert message_text == "Tool validation failed: query: value cannot be None"
     assert rendered_text is None
 
 
-def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
+def test_openai_adapter_includes_text_config_for_array_outputs() -> None:
     module = cast(Any, _reload_module())
 
     prompt = Prompt[list[StructuredAnswer]](
@@ -711,9 +716,11 @@ def test_openai_adapter_includes_response_format_for_array_outputs() -> None:
     assert [item.answer for item in result.output] == ["First", "Second"]
 
     request = cast(dict[str, Any], client.responses.requests[0])
-    response_format = cast(dict[str, Any], request["response_format"])
-    json_schema = cast(dict[str, Any], response_format["json_schema"])
-    schema_payload = cast(dict[str, Any], json_schema["schema"])
+    text_config = cast(dict[str, Any], request["text"])
+    response_format = cast(dict[str, Any], text_config["format"])
+    assert response_format["type"] == "json_schema"
+    assert response_format["name"] == "structured_list_schema"
+    schema_payload = cast(dict[str, Any], response_format["schema"])
     properties = cast(dict[str, Any], schema_payload["properties"])
     assert ARRAY_WRAPPER_KEY in properties
     items_schema = cast(dict[str, Any], properties[ARRAY_WRAPPER_KEY])
@@ -760,6 +767,7 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
         "type": "function",
         "function": {"name": tool.name},
     }
+    expected_tool_choice = {"type": "function", "name": tool.name}
     adapter = module.OpenAIAdapter(
         model="gpt-test",
         client=client,
@@ -777,7 +785,7 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
     assert len(client.responses.requests) == 2
     first_request = cast(dict[str, Any], client.responses.requests[0])
     second_request = cast(dict[str, Any], client.responses.requests[1])
-    assert first_request.get("tool_choice") == forced_choice
+    assert first_request.get("tool_choice") == expected_tool_choice
     assert second_request.get("tool_choice") == "auto"
 
 
@@ -1407,8 +1415,9 @@ def test_openai_adapter_records_handler_failures() -> None:
     second_request = cast(dict[str, Any], client.responses.requests[1])
     second_messages = cast(list[dict[str, Any]], second_request["input"])
     tool_message = second_messages[-1]
-    assert tool_message["role"] == "tool"
-    message_text, rendered_text = _split_tool_message_content(tool_message["content"])
+    assert tool_message["type"] == "function_call_output"
+    assert tool_message["call_id"] == "call_1"
+    message_text, rendered_text = _split_tool_message_content(tool_message["output"])
     assert message_text.endswith("execution failed: boom")
     assert rendered_text is None
 
@@ -1629,7 +1638,10 @@ def test_openai_adapter_delegates_to_shared_runner(
     assert request_payload["model"] == "gpt-test"
     messages = cast(list[dict[str, Any]], request_payload["input"])
     assert messages[0]["content"] == "hi"
-    assert request_payload["response_format"] == expected_response_format
+    expected_text_config = module._text_config_from_response_format(
+        expected_response_format, prompt_name="shared-runner"
+    )
+    assert request_payload["text"] == expected_text_config
 
     choice = select_choice(response)
     content_parts = cast(Sequence[object], getattr(choice.message, "content", ()))
@@ -1682,3 +1694,154 @@ def test_openai_choice_requires_output_and_content() -> None:
 
     with pytest.raises(PromptEvaluationError):
         module._choice_from_response(MissingContent(), prompt_name="missing-content")
+
+
+def test_openai_choice_handles_tool_call_output() -> None:
+    module = cast(Any, _reload_module())
+
+    class ToolOutput:
+        def __init__(self) -> None:
+            self.name = "search"
+            self.arguments = "{}"
+            self.type = "function_call"
+            self.call_id = "call_1"
+
+    class Response:
+        def __init__(self) -> None:
+            self.output = (ToolOutput(),)
+
+    choice = module._choice_from_response(Response(), prompt_name="tool-output")
+    assert choice.message.tool_calls
+    call = choice.message.tool_calls[0]
+    assert call.id == "call_1"
+    assert call.function.name == "search"
+
+
+def test_openai_tool_call_from_output_rejects_non_function_type() -> None:
+    module = cast(Any, _reload_module())
+
+    class WrongType:
+        name = "tool"
+        arguments = "{}"
+        type = "other"
+
+    assert module._tool_call_from_output(WrongType()) is None
+
+
+def test_openai_text_config_from_response_format_validates_payload() -> None:
+    module = cast(Any, _reload_module())
+    with pytest.raises(PromptEvaluationError):
+        module._text_config_from_response_format(
+            {"type": "other"}, prompt_name="prompt"
+        )
+
+    with pytest.raises(PromptEvaluationError):
+        module._text_config_from_response_format(
+            {"type": "json_schema", "json_schema": "not-a-mapping"},
+            prompt_name="prompt",
+        )
+
+    with pytest.raises(PromptEvaluationError):
+        module._text_config_from_response_format(
+            {
+                "type": "json_schema",
+                "json_schema": {"name": 123, "schema": {"type": "object"}},
+            },
+            prompt_name="prompt",
+        )
+
+
+def test_openai_text_config_from_response_format_includes_extras() -> None:
+    module = cast(Any, _reload_module())
+
+    config = module._text_config_from_response_format(
+        {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "schema",
+                "schema": {"type": "object"},
+                "description": "desc",
+                "strict": True,
+            },
+        },
+        prompt_name="prompt",
+    )
+
+    format_payload = config["format"]
+    assert format_payload["description"] == "desc"
+    assert format_payload["strict"] is True
+
+
+def test_openai_responses_tool_spec_requires_function_payload() -> None:
+    module = cast(Any, _reload_module())
+
+    with pytest.raises(PromptEvaluationError):
+        module._responses_tool_spec({"type": "non-function"}, prompt_name="prompt")
+
+    with pytest.raises(PromptEvaluationError):
+        module._responses_tool_spec({"type": "function"}, prompt_name="prompt")
+
+    with pytest.raises(PromptEvaluationError):
+        module._responses_tool_spec(
+            {"type": "function", "function": {"description": "missing name"}},
+            prompt_name="prompt",
+        )
+
+
+def test_openai_responses_tool_spec_preserves_strict() -> None:
+    module = cast(Any, _reload_module())
+    normalized = module._responses_tool_spec(
+        {
+            "type": "function",
+            "function": {"name": "do_it", "parameters": {}, "strict": True},
+        },
+        prompt_name="prompt",
+    )
+    assert normalized["strict"] is True
+
+
+def test_openai_responses_tool_choice_requires_name() -> None:
+    module = cast(Any, _reload_module())
+    with pytest.raises(PromptEvaluationError):
+        module._responses_tool_choice(
+            {"type": "function", "function": {}}, prompt_name="prompt"
+        )
+
+
+def test_openai_responses_tool_choice_supports_top_level_name() -> None:
+    module = cast(Any, _reload_module())
+    tool_choice = module._responses_tool_choice(
+        {"type": "function", "name": "do_it"}, prompt_name="prompt"
+    )
+    assert tool_choice == {"type": "function", "name": "do_it"}
+
+
+def test_openai_responses_tool_choice_rejects_unknown_type() -> None:
+    module = cast(Any, _reload_module())
+    with pytest.raises(PromptEvaluationError):
+        module._responses_tool_choice({"type": "other"}, prompt_name="prompt")
+
+
+def test_openai_normalize_input_messages_requires_tool_call_fields() -> None:
+    module = cast(Any, _reload_module())
+
+    with pytest.raises(PromptEvaluationError):
+        module._normalize_input_messages(
+            [{"role": "assistant", "tool_calls": [{"function": {"name": 1}}]}],
+            prompt_name="prompt",
+        )
+
+    with pytest.raises(PromptEvaluationError):
+        module._normalize_input_messages(
+            [{"role": "tool", "content": "result"}],
+            prompt_name="prompt",
+        )
+
+
+def test_openai_normalize_input_messages_allows_passthrough() -> None:
+    module = cast(Any, _reload_module())
+    messages = module._normalize_input_messages(
+        [{"role": "unknown", "content": "raw"}],
+        prompt_name="prompt",
+    )
+    assert messages[-1]["content"] == "raw"

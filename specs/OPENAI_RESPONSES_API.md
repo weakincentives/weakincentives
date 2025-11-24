@@ -33,9 +33,10 @@ removed.
 
 1. **Entry Point**: Update the OpenAI adapter to build `client.responses.create`
    payloads. The adapter must continue to accept the existing prompt-to-request
-   inputs and translate them into `input` + `modalities` rather than
-   `messages`. Remove any residual `ChatCompletion` branches so Responses is the
-   sole execution path.
+   inputs and translate them into an `input` array rather than the legacy
+   `messages` envelope. Remove any residual `ChatCompletion` branches so
+   Responses is the sole execution path. The Python SDK infers text modality
+   from `input`, so omit any top-level `modalities` parameter.
 1. **System and User Content**: Render prompt sections into a single markdown
    string inserted into the `input` array. Preserve the ordering of system and
    user chapters; ensure assistant-prefill messages are encoded as
@@ -45,11 +46,13 @@ removed.
    `tools=[{"type": "function", ...}]` and pass `tool_choice` exactly as
    configured by the prompt metadata. Validate that the DbC preconditions reject
    mismatched tool names or missing schemas before issuing the request; no
-   legacy `functions` envelope should remain.
+   legacy `functions` envelope should remain. Follow-on calls must encode
+   provider tool calls as `{"type": "function_call", ...}` entries and tool
+   outputs as `{"type": "function_call_output", ...}`—the Responses API does
+   not accept `tool`-role messages or `tool_calls` keys inside `input`.
 1. **Structured Outputs**: When a prompt declares a structured output type,
-   attach `response_format={"type": "json_schema", "json_schema": ...}`.
-   Preserve the fallback path to instruction-based JSON when the target model
-   does not advertise native structured outputs.
+   attach `text={"format": {"type": "json_schema", "name": "...", "schema": ...}}`. Preserve the fallback path to instruction-based JSON when the target
+   model does not advertise native structured outputs.
 1. **Streaming**: Do **not** use streaming. The adapter must avoid the
    `stream=true` flag and rely exclusively on blocking Responses requests,
    returning the final message in one pass. Remove any stream-specific event

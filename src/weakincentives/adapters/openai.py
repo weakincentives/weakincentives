@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from importlib import import_module
@@ -224,6 +224,25 @@ def _normalize_tool_call(call: object) -> _ResponseToolCall:
     )
 
 
+def _tool_call_from_output(output: object) -> _ResponseToolCall | None:
+    name = getattr(output, "name", None)
+    arguments_obj = getattr(output, "arguments", None)
+    output_type = getattr(output, "type", None)
+
+    if not isinstance(name, str) or arguments_obj is None:
+        return None
+    if output_type not in {None, "function_call"}:
+        return None
+
+    return _ResponseToolCall(
+        id=str(getattr(output, "call_id", None) or getattr(output, "id", "")) or None,
+        function=_ResponseFunctionCall(
+            name=name,
+            arguments=_normalize_tool_arguments(arguments_obj),
+        ),
+    )
+
+
 def _tool_calls_from_content(parts: Sequence[object]) -> list[_ResponseToolCall]:
     for part in parts:
         tool_calls_obj = getattr(part, "tool_calls", None)
@@ -287,8 +306,250 @@ def _normalize_content_parts(parts: Sequence[object]) -> list[object]:
     return normalized
 
 
+def _text_config_from_response_format(
+    response_format: Mapping[str, Any], *, prompt_name: str
+) -> dict[str, Any]:
+    """Translate a legacy response format payload into Responses text config."""
+
+    response_type = response_format.get("type")
+    if response_type != "json_schema":
+        raise PromptEvaluationError(
+            "Unsupported response format for OpenAI Responses API.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload={"response_format": response_format},
+        )
+
+    json_schema = response_format.get("json_schema")
+    if not isinstance(json_schema, Mapping):
+        raise PromptEvaluationError(
+            "OpenAI response format must include a JSON schema payload.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload={"response_format": response_format},
+        )
+
+    json_schema_mapping = cast(Mapping[str, Any], json_schema)
+    schema_name_obj = json_schema_mapping.get("name")
+    schema_payload_obj = json_schema_mapping.get("schema")
+    if not isinstance(schema_name_obj, str) or not isinstance(
+        schema_payload_obj, Mapping
+    ):
+        raise PromptEvaluationError(
+            "OpenAI response format schema is invalid.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload={"response_format": response_format},
+        )
+
+    schema_name = schema_name_obj
+    schema_payload = cast(Mapping[str, Any], schema_payload_obj)
+    text_format: dict[str, Any] = {
+        "type": "json_schema",
+        "name": schema_name,
+        "schema": dict(schema_payload),
+    }
+
+    description = json_schema_mapping.get("description")
+    if isinstance(description, str):
+        text_format["description"] = description
+
+    strict = json_schema_mapping.get("strict")
+    if isinstance(strict, bool):
+        text_format["strict"] = strict
+
+    return {"format": text_format}
+
+
+def _responses_tool_spec(
+    spec: Mapping[str, Any], *, prompt_name: str
+) -> dict[str, Any]:
+    """Normalize a provider-agnostic tool spec for the Responses API."""
+
+    if spec.get("type") != "function":
+        raise PromptEvaluationError(
+            "OpenAI Responses only supports function tools.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload={"tools": [spec]},
+        )
+
+    function_payload = spec.get("function")
+    if not isinstance(function_payload, Mapping):
+        raise PromptEvaluationError(
+            "OpenAI tool specification is missing a function payload.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload={"tools": [spec]},
+        )
+
+    function_mapping = cast(Mapping[str, Any], function_payload)
+    name_obj = function_mapping.get("name")
+    if not isinstance(name_obj, str) or not name_obj.strip():
+        raise PromptEvaluationError(
+            "OpenAI tool specification is missing a function name.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload={"tools": [spec]},
+        )
+
+    name = name_obj
+    normalized: dict[str, Any] = {
+        "type": "function",
+        "name": name,
+    }
+
+    description = function_mapping.get("description")
+    if isinstance(description, str) and description.strip():
+        normalized["description"] = description
+
+    parameters = function_mapping.get("parameters")
+    if parameters is not None:
+        normalized["parameters"] = parameters
+
+    strict = function_mapping.get("strict")
+    if isinstance(strict, bool):
+        normalized["strict"] = strict
+
+    return normalized
+
+
+def _responses_tool_choice(
+    tool_choice: ToolChoice | None, *, prompt_name: str
+) -> ToolChoice | dict[str, str] | None:
+    """Normalize tool choice for the Responses API."""
+
+    if tool_choice is None or isinstance(tool_choice, str):
+        return tool_choice
+
+    tool_choice_items = cast(Iterable[tuple[str, Any]], tool_choice.items())
+    tool_choice_mapping: dict[str, Any] = dict(tool_choice_items)
+    tool_type_obj = tool_choice_mapping.get("type")
+    tool_type = tool_type_obj if isinstance(tool_type_obj, str) else None
+    if tool_type == "function":
+        function_payload = tool_choice_mapping.get("function")
+        name_val: str | None = None
+        if isinstance(function_payload, Mapping):
+            function_items = cast(Iterable[tuple[str, Any]], function_payload.items())
+            function_mapping: dict[str, Any] = dict(function_items)
+            function_name = function_mapping.get("name")
+            if isinstance(function_name, str):
+                name_val = function_name
+        else:
+            alt_name = tool_choice_mapping.get("name")
+            if isinstance(alt_name, str):
+                name_val = alt_name
+
+        if name_val and name_val.strip():
+            return {"type": "function", "name": name_val}
+        raise PromptEvaluationError(
+            "OpenAI tool choice is missing a function name.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload={"tool_choice": tool_choice},
+        )
+
+    raise PromptEvaluationError(
+        "OpenAI tool choice is not supported by the Responses API.",
+        prompt_name=prompt_name,
+        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        provider_payload={"tool_choice": tool_choice},
+    )
+
+
+def _normalize_input_messages(
+    messages: Sequence[Mapping[str, Any]], *, prompt_name: str
+) -> list[dict[str, Any]]:
+    """Strip unsupported fields from request messages for the Responses API."""
+
+    normalized: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content")
+        tool_calls = message.get("tool_calls")
+
+        if role == "assistant" and tool_calls:
+            if content:
+                normalized.append(
+                    {"type": "message", "role": "assistant", "content": content}
+                )
+            for tool_call in cast(Sequence[Mapping[str, Any]], tool_calls):
+                function_payload_obj = tool_call.get("function")
+                function_payload = (
+                    cast(Mapping[str, Any], function_payload_obj)
+                    if isinstance(function_payload_obj, Mapping)
+                    else None
+                )
+                name = function_payload.get("name") if function_payload else None
+                arguments = (
+                    function_payload.get("arguments") if function_payload else None
+                )
+                call_id = tool_call.get("id") or tool_call.get("call_id")
+                if not isinstance(name, str) or not isinstance(arguments, str):
+                    raise PromptEvaluationError(
+                        "OpenAI tool call is missing name or arguments.",
+                        prompt_name=prompt_name,
+                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                        provider_payload={"tool_call": tool_call},
+                    )
+                normalized.append(
+                    {
+                        "type": "function_call",
+                        "call_id": str(call_id or ""),
+                        "name": name,
+                        "arguments": arguments,
+                    }
+                )
+            continue
+
+        if role == "tool":
+            # Mutate the original message so downstream updates (final output rewrites)
+            # are visible to recorded payloads.
+            mutable_message = cast(dict[str, Any], message)
+            call_id = mutable_message.get("tool_call_id")
+            if call_id is None:
+                raise PromptEvaluationError(
+                    "OpenAI tool message is missing tool_call_id.",
+                    prompt_name=prompt_name,
+                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    provider_payload={"message": mutable_message},
+                )
+            mutable_message.pop("role", None)
+            mutable_message.pop("tool_call_id", None)
+            mutable_message.pop("content", None)
+            mutable_message["type"] = "function_call_output"
+            mutable_message["call_id"] = str(call_id)
+            mutable_message["output"] = content or ""
+            normalized.append(mutable_message)
+            continue
+
+        if role in {"assistant", "system", "developer", "user"}:
+            mutable_message = cast(dict[str, Any], message)
+            mutable_message["type"] = "message"
+            normalized.append(
+                {
+                    "type": "message",
+                    "role": role,
+                    "content": content or "",
+                }
+            )
+            continue
+
+        normalized.append(dict(message))
+    return normalized
+
+
 def _choice_from_response(response: object, *, prompt_name: str) -> _ResponseChoice:
     output = _first_output(response, prompt_name=prompt_name)
+    tool_call_output = _tool_call_from_output(output)
+    if tool_call_output is not None:
+        message = _ResponseMessage(
+            content=(),
+            tool_calls=(tool_call_output,),
+            parsed=None,
+        )
+        return _ResponseChoice(message=message)
+
     content_parts = _content_from_output(output, prompt_name=prompt_name)
     tool_calls = _tool_calls_from_content(content_parts)
     parsed = _parsed_from_content(content_parts)
@@ -437,15 +698,21 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         ) -> object:
             request_payload: dict[str, Any] = {
                 "model": self._model,
-                "input": list(messages),
-                "modalities": ["text"],
+                "input": _normalize_input_messages(messages, prompt_name=prompt_name),
             }
             if tool_specs:
-                request_payload["tools"] = list(tool_specs)
+                request_payload["tools"] = [
+                    _responses_tool_spec(spec, prompt_name=prompt_name)
+                    for spec in tool_specs
+                ]
                 if tool_choice_directive is not None:
-                    request_payload["tool_choice"] = tool_choice_directive
+                    request_payload["tool_choice"] = _responses_tool_choice(
+                        tool_choice_directive, prompt_name=prompt_name
+                    )
             if response_format_payload is not None:
-                request_payload["response_format"] = response_format_payload
+                request_payload["text"] = _text_config_from_response_format(
+                    response_format_payload, prompt_name=prompt_name
+                )
 
             try:
                 return self._client.responses.create(**request_payload)

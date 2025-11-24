@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import MethodType
@@ -168,6 +168,13 @@ def _second_tool_message(requests: list[dict[str, object]]) -> dict[str, object]
     return messages[-1]
 
 
+def _tool_message_parts(
+    tool_message: Mapping[str, object],
+) -> tuple[str, str | None]:
+    raw = tool_message.get("output") or tool_message.get("content") or ""
+    return _split_tool_message_content(cast(str, raw))
+
+
 def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del context
@@ -214,8 +221,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
-    message_text, rendered_text = _split_tool_message_content(content_raw)
+    message_text, rendered_text = _tool_message_parts(tool_message)
     assert message_text == "completed"
     assert rendered_text is not None
     assert json.loads(rendered_text) == {"answer": "policies"}
@@ -403,8 +409,7 @@ def test_adapter_tool_execution_validation_error(
     assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
-    message_text, rendered_text = _split_tool_message_content(content_raw)
+    message_text, rendered_text = _tool_message_parts(tool_message)
     assert message_text == "Tool validation failed: invalid query"
     assert rendered_text is None
 
@@ -464,8 +469,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
-    message_text, rendered_text = _split_tool_message_content(content_raw)
+    message_text, rendered_text = _tool_message_parts(tool_message)
     assert "Extra keys not permitted" in message_text
     assert rendered_text is None
 
@@ -528,8 +532,7 @@ def test_adapter_tool_execution_rejects_type_errors(
     assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
-    message_text, rendered_text = _split_tool_message_content(content_raw)
+    message_text, rendered_text = _tool_message_parts(tool_message)
     assert message_text == "Tool validation failed: query: value cannot be None"
     assert rendered_text is None
 
@@ -582,8 +585,7 @@ def test_adapter_tool_execution_unexpected_exception(
     assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
-    message_text, rendered_text = _split_tool_message_content(content_raw)
+    message_text, rendered_text = _tool_message_parts(tool_message)
     assert message_text == "Tool 'search_notes' execution failed: handler crash"
     assert rendered_text is None
 
@@ -664,8 +666,7 @@ def test_adapter_tool_execution_rolls_back_session(
     assert latest_payload == ToolPayload(answer="baseline")
 
     tool_message = _second_tool_message(requests)
-    content_raw = cast(str, tool_message["content"])
-    message_text, rendered_text = _split_tool_message_content(content_raw)
+    message_text, rendered_text = _tool_message_parts(tool_message)
     assert message_text == invocation.result.message
     assert rendered_text is not None
     assert json.loads(rendered_text) == {"answer": "policies"}

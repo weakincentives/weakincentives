@@ -1275,9 +1275,11 @@ class ConversationRunner[OutputT]:
             and tool_message_records[-1][0].success
         ):
             last_result, last_message = tool_message_records[-1]
-            last_message["content"] = self.serialize_tool_message_fn(
-                last_result, payload=output
-            )
+            serialized = self.serialize_tool_message_fn(last_result, payload=output)
+            if "output" in last_message:
+                last_message["output"] = serialized
+            else:
+                last_message["content"] = serialized
 
         response_payload = PromptResponse(
             prompt_name=self.prompt_name,
