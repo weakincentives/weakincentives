@@ -394,11 +394,11 @@ p {
 .array-chip {
   display: inline-flex;
   align-items: flex-start;
-  padding: 6px 10px;
+  padding: 6px 8px;
   margin: 4px 6px;
-  background: #e9eef5;
-  border: 1px solid #d8e0eb;
-  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   white-space: pre-wrap;
