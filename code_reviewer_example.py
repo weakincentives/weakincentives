@@ -35,7 +35,11 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
 )
 from weakincentives.runtime.events import EventBus, PromptRendered, ToolInvoked
-from weakincentives.runtime.session import Session, select_latest
+from weakincentives.runtime.session import (
+    Session,
+    iter_sessions_bottom_up,
+    select_latest,
+)
 from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
 from weakincentives.tools.digests import WorkspaceDigestSection
@@ -161,7 +165,7 @@ class CodeReviewApp:
             print("-" * 23 + "\n")
 
         print("Goodbye.")
-        _persist_session_snapshot(self.session)
+        _persist_snapshot_tree(self.session)
 
     def _evaluate_turn(self, user_prompt: str) -> str:
         response = self.adapter.evaluate(
@@ -184,7 +188,7 @@ class CodeReviewApp:
             session=self.session,
             optimization_session=optimization_session,
         )
-        _persist_session_snapshot(optimization_session)
+        _persist_snapshot_tree(self.session)
         digest = result.digest.strip()
         print("\nWorkspace digest persisted for future review turns:\n")
         print(digest)
@@ -192,7 +196,7 @@ class CodeReviewApp:
     def _create_optimization_session(self) -> Session:
         """Provision a fresh session for optimization runs."""
 
-        return _build_logged_session()
+        return _build_logged_session(parent=self.session)
 
 
 def main() -> None:
@@ -369,8 +373,8 @@ def _create_runtime_context(
     )
 
 
-def _build_logged_session() -> Session:
-    session = Session()
+def _build_logged_session(*, parent: Session | None = None) -> Session:
+    session = Session(parent=parent)
     _attach_logging_subscribers(session.event_bus)
     _register_snapshot_persistence(session)
     return session
@@ -547,6 +551,17 @@ def _persist_session_snapshot(session: Session) -> Path | None:
             },
         )
         return snapshot_path
+
+
+def _persist_snapshot_tree(root_session: Session) -> tuple[Path, ...]:
+    """Persist snapshots for the provided session and its descendants."""
+
+    persisted: list[Path] = []
+    for session in iter_sessions_bottom_up(root_session):
+        snapshot_path = _persist_session_snapshot(session)
+        if snapshot_path is not None:
+            persisted.append(snapshot_path)
+    return tuple(persisted)
 
 
 def _register_snapshot_persistence(session: Session) -> None:

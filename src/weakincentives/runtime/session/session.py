@@ -46,6 +46,24 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "session"}
 type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
 
 
+def iter_sessions_bottom_up(root: Session) -> Iterator[Session]:
+    """Yield sessions from the leaves up to the provided root session."""
+
+    visited: set[Session] = set()
+
+    def _walk(node: Session) -> Iterator[Session]:
+        if node in visited:
+            return
+        visited.add(node)
+        children = node.children
+        if children:
+            for child in children:
+                yield from _walk(child)
+        yield node
+
+    yield from _walk(root)
+
+
 def _locked_method[SessionT: "Session", **P, R](
     func: Callable[Concatenate[SessionT, P], R],
 ) -> Callable[Concatenate[SessionT, P], R]:
@@ -109,6 +127,7 @@ class Session(SessionProtocol):
         self,
         *,
         bus: EventBus | None = None,
+        parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
     ) -> None:
@@ -134,7 +153,14 @@ class Session(SessionProtocol):
         self._reducers: dict[SessionSliceType, list[_ReducerRegistration]] = {}
         self._state: dict[SessionSliceType, SessionSlice] = {}
         self._lock = RLock()
+        self._parent = parent
+        self._children: list[Session] = []
         self._subscriptions_attached = False
+        if parent is self:
+            msg = "Session cannot be its own parent."
+            raise ValueError(msg)
+        if parent is not None:
+            parent._register_child(self)
         self._attach_to_bus(self._bus)
 
     @contextmanager
@@ -151,6 +177,7 @@ class Session(SessionProtocol):
         self,
         *,
         bus: EventBus,
+        parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
     ) -> Session:
@@ -165,6 +192,7 @@ class Session(SessionProtocol):
 
         clone = Session(
             bus=bus,
+            parent=self._parent if parent is None else parent,
             session_id=session_id if session_id is not None else self.session_id,
             created_at=created_at if created_at is not None else self.created_at,
         )
@@ -256,6 +284,21 @@ class Session(SessionProtocol):
 
         return self._bus
 
+    @property
+    @override
+    def parent(self) -> Session | None:
+        """Return the parent session if one was provided."""
+
+        return self._parent
+
+    @property
+    @override
+    def children(self) -> tuple[Session, ...]:
+        """Return direct child sessions in registration order."""
+
+        with self._locked():
+            return tuple(self._children)
+
     @override
     def snapshot(self) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state."""
@@ -300,6 +343,13 @@ class Session(SessionProtocol):
                 for registration in registrations:
                     types.add(registration.slice_type)
             return types
+
+    def _register_child(self, child: Session) -> None:
+        with self._locked():
+            for registered in self._children:
+                if registered is child:
+                    return
+            self._children.append(child)
 
     def _on_tool_invoked(self, event: object) -> None:
         tool_event = cast(ToolInvoked, event)

@@ -57,6 +57,9 @@
   types to their tuples plus metadata such as timestamps.
 - **Snapshot tuple** – The tuple stored for a specific slice within a snapshot;
   it mirrors the reducer-managed slice tuple at capture time.
+- **Session hierarchy** – Sessions can be nested. Each session knows its parent
+  (if any) and the set of directly registered child sessions to enable
+  tree-aware operations.
 
 ## Data Model
 
@@ -97,6 +100,31 @@ structures.
 - **Fallback behavior**: If no reducer is registered for a payload type the default
   append reducer is used. If no slice exists for a dispatched event, it is created
   on demand via the registered reducer or default behavior.
+- **Hierarchy plumbing**: Sessions optionally accept a parent session reference on
+  construction. Children register themselves with the parent, and each session
+  exposes its immediate descendants. Hierarchy metadata stays out of snapshots so
+  rollback remains local to each session's slices.
+
+## Session Hierarchy
+
+Sessions form a tree to mirror nested orchestration flows. Parent/child links must
+be deterministic and immutable after construction so ancestry remains stable during
+dispatch. Hierarchy awareness enables tools to walk the tree and perform
+topological operations without mutating state.
+
+- **Parent awareness**: A session stores its parent as a read-only reference.
+  Passing no parent yields a root session. Parent references are for navigation,
+  not state sharing, so reducer registration and event subscriptions remain scoped
+  to each session instance.
+- **Child registration**: Constructing a session with a parent automatically adds
+  it to the parent's direct children set. Children are tracked by identity to avoid
+  duplicate registrations and keep traversal deterministic.
+- **Snapshot fan-in**: Callers that need a whole-tree snapshot can traverse from
+  the leaves upward, capturing each session's snapshot and aggregating the results
+  in leaf-first order. Parent sessions do not implicitly serialize child state;
+  tooling must walk the tree explicitly when building aggregate reports. The
+  `iter_sessions_bottom_up` helper yields sessions from the leaves up to simplify
+  traversal without mutating session state.
 
 ## Public API Surface
 
@@ -111,14 +139,20 @@ src/weakincentives/session/
 
 ```python
 class Session:
-    def __init__(self, *, bus: EventBus,
-                 session_id: UUID | None = None,
-                 created_at: datetime | None = None) -> None: ...
+    def __init__(
+        self,
+        *,
+        bus: EventBus,
+        parent: Session | None = None,
+        session_id: UUID | None = None,
+        created_at: datetime | None = None,
+    ) -> None: ...
 
     def clone(
         self,
         *,
         bus: EventBus,
+        parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
     ) -> "Session": ...
@@ -149,22 +183,39 @@ class Snapshot:
     def from_json(cls, raw: str) -> Snapshot: ...
 ```
 
+### Hierarchy helpers
+
+```python
+from weakincentives.runtime.session import iter_sessions_bottom_up
+```
+
+- `iter_sessions_bottom_up(root: Session) -> Iterator[Session]` yields sessions
+  starting from the leaves up to the provided root session, skipping duplicates
+  to protect against accidental cycles.
+
 - Constructing with a bus subscribes to `PromptRendered`, `ToolInvoked`, and
   `PromptExecuted` immediately.
+
 - Multiple reducers may register for the same data type; they run in registration
   order and each maintains its own slice.
+
 - `slice_type` defaults to `data_type`. When provided it controls the tuple type the
   reducer receives and returns.
+
 - Reducers never mutate the previous tuple; they always return a new tuple instance.
+
 - `clone` produces a new Session instance that preserves the current state snapshot
   and reducer registrations. Passing `bus`, `session_id`, or `created_at` overrides
   the copied metadata; omitted parameters reuse the original values. Clones attach
   to the provided event bus without modifying the original session subscription.
+
 - When callers omit `session_id` or `created_at`, the constructor automatically
   generates a UUID (`uuid4()`) and captures `datetime.now(UTC)` respectively. The
   timestamp MUST be timezone-aware; naive datetimes raise `ValueError`.
+
 - `snapshot()` captures the immutable slice mapping without blocking event
   publication and returns a value object representing the captured state.
+
 - `rollback()` replaces the Session's slice mapping with the tuples stored in the
   provided snapshot without emitting new events.
 
