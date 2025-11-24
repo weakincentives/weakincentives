@@ -190,6 +190,8 @@ def _jittered_backoff(
 
     jitter_seconds = random.uniform(0, base.total_seconds())  # nosec B311
     delay = timedelta(seconds=jitter_seconds)
+    if delay < policy.base_delay:
+        delay = policy.base_delay
     if retry_after is not None and delay < retry_after:
         return retry_after
     return delay
@@ -1273,9 +1275,11 @@ class ConversationRunner[OutputT]:
             and tool_message_records[-1][0].success
         ):
             last_result, last_message = tool_message_records[-1]
-            last_message["content"] = self.serialize_tool_message_fn(
-                last_result, payload=output
-            )
+            serialized = self.serialize_tool_message_fn(last_result, payload=output)
+            if "output" in last_message:
+                last_message["output"] = serialized
+            else:
+                last_message["content"] = serialized
 
         response_payload = PromptResponse(
             prompt_name=self.prompt_name,

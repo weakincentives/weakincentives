@@ -122,6 +122,21 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
     assert "budget" in error.message
 
 
+def test_jittered_backoff_returns_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "weakincentives.adapters.shared.random.uniform", lambda _a, _b: 0.0
+    )
+
+    policy = new_throttle_policy(base_delay=timedelta(milliseconds=10))
+    retry_after = timedelta(milliseconds=30)
+
+    delay = _jittered_backoff(policy=policy, attempt=1, retry_after=retry_after)
+
+    assert delay == retry_after
+
+
 def test_throttle_policy_validation() -> None:
     with pytest.raises(ValueError):
         new_throttle_policy(max_attempts=0)

@@ -26,8 +26,8 @@ work must comply with this file.
 
 1. Install Python 3.12 and `uv`, then bootstrap with `uv sync` and
    `./install-hooks.sh`.
-2. Use `uv run` with the `Makefile` targets. Silence is success.
-3. Run **`make check` before every commit**; hooks expect a clean run.
+1. Use `uv run` with the `Makefile` targets. Silence is success.
+1. Run **`make check` before every commit**; hooks expect a clean run.
 
 ### Key Commands
 
