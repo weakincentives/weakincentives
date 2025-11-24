@@ -396,7 +396,7 @@ p {
 
 .truncated {
   max-height: calc(1.45em * 25);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .leaf-toggle {
