@@ -357,7 +357,6 @@ def test_litellm_adapter_returns_plain_text_response() -> None:
     assert result.prompt_name == "greeting"
     assert result.text == "Hello, Sam!"
     assert result.output is None
-    assert result.tool_results == ()
 
     request = completion.requests[0]
     messages = cast(list[dict[str, Any]], request["messages"])
@@ -1027,7 +1026,6 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
     assert tool_event.adapter == "litellm"
     assert tool_event.name == "search_notes"
     assert tool_event.call_id == "call_1"
-    assert tool_event is result.tool_results[0]
 
     assert len(prompt_events) == 1
     prompt_event = prompt_events[0]
@@ -1157,15 +1155,21 @@ def test_litellm_adapter_handles_invalid_tool_params() -> None:
     completion = RecordingCompletion(responses)
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
+    bus.subscribe(
+        ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
+    )
     result = _evaluate_with_bus(
         adapter,
         prompt,
         ToolParams(query="policies"),
+        bus=bus,
     )
 
     assert result.text == "Try again"
-    assert len(result.tool_results) == 1
-    invocation = result.tool_results[0]
+    assert len(tool_events) == 1
+    invocation = tool_events[0]
     assert invocation.result.success is False
     assert invocation.result.value is None
     assert "Missing required field" in invocation.result.message
@@ -1284,7 +1288,7 @@ def test_litellm_adapter_records_provider_payload_from_mapping() -> None:
         bus=NullEventBus(),
     )
 
-    assert result.provider_payload == {"meta": "value"}
+    assert not hasattr(result, "provider_payload")
 
 
 def test_litellm_adapter_ignores_non_mapping_model_dump() -> None:
@@ -1316,7 +1320,7 @@ def test_litellm_adapter_ignores_non_mapping_model_dump() -> None:
         bus=NullEventBus(),
     )
 
-    assert result.provider_payload is None
+    assert not hasattr(result, "provider_payload")
 
 
 def test_litellm_adapter_handles_response_without_model_dump() -> None:
@@ -1348,7 +1352,7 @@ def test_litellm_adapter_handles_response_without_model_dump() -> None:
         bus=NullEventBus(),
     )
 
-    assert result.provider_payload is None
+    assert not hasattr(result, "provider_payload")
 
 
 @pytest.mark.parametrize(
@@ -1714,8 +1718,6 @@ def test_litellm_adapter_delegates_to_shared_runner(
         prompt_name="shared-runner",
         text="sentinel",
         output=None,
-        tool_results=(),
-        provider_payload=None,
     )
 
     captured: dict[str, Any] = {}

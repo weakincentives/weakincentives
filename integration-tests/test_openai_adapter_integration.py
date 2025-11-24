@@ -201,7 +201,6 @@ def test_openai_adapter_returns_text(adapter: OpenAIAdapter) -> None:
     assert response.prompt_name == "greeting"
     assert response.text is not None
     assert response.text.strip()
-    assert response.tool_results == ()
 
 
 def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
@@ -220,16 +219,6 @@ def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
     )
 
     assert response.prompt_name == "uppercase_workflow"
-    assert response.tool_results, "Expected at least one tool invocation."
-
-    first_call = response.tool_results[0]
-    assert first_call.name == tool.name
-    call_params = cast(TransformRequest, first_call.params)
-    call_result = cast(TransformResult, first_call.result.value)
-    assert call_params.text
-    assert call_result.text == call_params.text.upper()
-    assert first_call.result.message
-
     assert response.text is not None and response.text.strip()
     assert params.text.upper() in response.text
 

@@ -138,7 +138,6 @@ class RecordingAdapter(ProviderAdapter[Any]):
                     prompt_name=prompt_name,
                     text="",
                     output=None,
-                    tool_results=(),
                 )
             )
         structured = self._structured_outputs.get(reason)
@@ -148,7 +147,6 @@ class RecordingAdapter(ProviderAdapter[Any]):
                     prompt_name=prompt_name,
                     text="",
                     output=structured,
-                    tool_results=(),
                 )
             )
         raw_output = self._raw_outputs.get(reason)
@@ -158,7 +156,6 @@ class RecordingAdapter(ProviderAdapter[Any]):
                     prompt_name=prompt_name,
                     text="",
                     output=raw_output,
-                    tool_results=(),
                 )
             )
         return _emit(
@@ -166,7 +163,6 @@ class RecordingAdapter(ProviderAdapter[Any]):
                 prompt_name=prompt_name,
                 text=f"child:{reason}",
                 output=None,
-                tool_results=(),
             )
         )
 

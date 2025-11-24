@@ -165,7 +165,6 @@ class _RecordingAdapter(ProviderAdapter):
             prompt_name=prompt.name or prompt.key,
             text=text,
             output=output,
-            tool_results=(),
         )
 
 

@@ -36,8 +36,6 @@ class PromptResponseProtocol(Protocol[AdapterOutputT]):
     prompt_name: str
     text: str | None
     output: AdapterOutputT | None
-    tool_results: tuple[object, ...]
-    provider_payload: Mapping[str, Any] | None
 
 
 class RenderedPromptProtocol(Protocol[RenderedOutputT]):

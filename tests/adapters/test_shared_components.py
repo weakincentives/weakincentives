@@ -122,14 +122,14 @@ def test_tool_executor_success() -> None:
     )
 
     messages, next_choice = executor.execute([cast(Any, tool_call)], None)
+    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
 
     assert len(messages) == 1
     assert messages[0]["role"] == "tool"
     assert messages[0]["tool_call_id"] == "call-1"
     assert messages[0]["content"] == {"message": "echoed", "payload": None}
     assert next_choice == "auto"
-    assert len(executor.tool_events) == 1
-    assert isinstance(executor.tool_events[0], ToolInvoked)
+    assert len(tool_events) == 1
     assert len(executor.tool_message_records) == 1
 
 

@@ -41,8 +41,6 @@ def make_prompt_response(prompt_name: str) -> PromptResponse[object]:
             prompt_name=prompt_name,
             text="hello",
             output="hello",
-            tool_results=(),
-            provider_payload=None,
         ),
     )
 

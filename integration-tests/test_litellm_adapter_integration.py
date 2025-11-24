@@ -206,7 +206,6 @@ def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
     assert response.prompt_name == "greeting"
     assert response.text is not None
     assert response.text.strip()
-    assert response.tool_results == ()
 
 
 def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
@@ -225,11 +224,6 @@ def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
 
     assert response.text is not None
     assert "LITELLM INTEGRATION" in response.text.upper()
-    assert response.tool_results
-    record = response.tool_results[0]
-    assert record.name == "uppercase_text"
-    assert isinstance(record.result.value, TransformResult)
-    assert record.result.value.text == "LITELLM INTEGRATION"
 
 
 def test_litellm_adapter_parses_structured_output(adapter: LiteLLMAdapter) -> None:

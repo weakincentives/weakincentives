@@ -122,13 +122,7 @@ class PromptResponse(Generic[OutputT]):
     prompt_name: str
     text: str | None
     output: OutputT | None
-    tool_results: tuple[ToolInvoked, ...]
-    provider_payload: dict[str, Any] | None = None
 ```
-
-`tool_results` stores the exact `ToolInvoked` events emitted through the bus so downstream consumers can either inspect
-the response object or subscribe to the event stream. `provider_payload` is populated via `extract_payload` when the
-provider SDK exposes a `model_dump()` or mapping representation.
 
 `PromptEvaluationError` carries a human-readable message, the prompt name, a `phase` literal (`"request"`, `"response"`,
 or `"tool"`), and the provider payload (when available). Adapters use this exception for every failure mode so tests and
@@ -213,8 +207,8 @@ returned by `deadline_provider_payload`.
   `PromptEvaluationError` is raised and the provider turn aborts. Other exceptions are logged and converted into failed
   `ToolResult` instances that still flow back to the provider.
 - Before emitting an event, the adapter captures a session snapshot. After a handler completes it publishes a
-  `ToolInvoked` event and appends the instance to `PromptResponse.tool_results`. When the publish fails the session rolls
-  back to the saved snapshot and the tool message is replaced with the aggregated reducer errors
+  `ToolInvoked` event. When the publish fails the session rolls back to the saved snapshot and the tool message is
+  replaced with the aggregated reducer errors
   (`format_publish_failures`).
 - Tool messages forwarded to the provider contain the handler's message plus the rendered value (if the tool opted into
   sharing it). After structured output parsing succeeds, the final successful tool message is patched with the parsed

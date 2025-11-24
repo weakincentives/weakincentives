@@ -93,8 +93,6 @@ def make_prompt_event(output: object) -> PromptExecuted:
         prompt_name="example",
         text="done",
         output=output,
-        tool_results=(),
-        provider_payload=None,
     )
     prompt_value = (
         cast(SupportsDataclass, output)
@@ -271,8 +269,6 @@ def test_prompt_executed_enriches_missing_value(
                 prompt_name="example",
                 text="done",
                 output=output,
-                tool_results=(),
-                provider_payload=None,
             ),
         ),
         session_id=DEFAULT_SESSION_ID,

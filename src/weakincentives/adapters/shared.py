@@ -837,7 +837,6 @@ class ToolExecutor:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     _log: StructuredLogger = field(init=False)
-    _tool_events: list[ToolInvoked] = field(init=False)
     _tool_message_records: list[
         tuple[ToolResult[SupportsToolResult], dict[str, Any]]
     ] = field(init=False)
@@ -847,7 +846,6 @@ class ToolExecutor:
             adapter=self.adapter_name,
             prompt=self.prompt_name,
         )
-        self._tool_events = []
         self._tool_message_records = []
 
     def execute(
@@ -888,7 +886,7 @@ class ToolExecutor:
                 parse_arguments=self.parse_arguments,
                 logger_override=self.logger_override,
             ) as outcome:
-                invocation = _publish_tool_invocation(
+                _ = _publish_tool_invocation(
                     adapter_name=self.adapter_name,
                     prompt_name=self.prompt_name,
                     session=self.session,
@@ -896,7 +894,6 @@ class ToolExecutor:
                     outcome=outcome,
                     format_publish_failures=self.format_publish_failures,
                 )
-            self._tool_events.append(invocation)
 
             tool_message = {
                 "role": "tool",
@@ -907,10 +904,6 @@ class ToolExecutor:
             self._tool_message_records.append((outcome.result, tool_message))
 
         return messages, next_tool_choice
-
-    @property
-    def tool_events(self) -> list[ToolInvoked]:
-        return self._tool_events
 
     @property
     def tool_message_records(
@@ -1267,7 +1260,6 @@ class ConversationRunner[OutputT]:
             message, self._provider_payload
         )
         tool_message_records = self._tool_executor.tool_message_records
-        tool_events = self._tool_executor.tool_events
 
         if (
             output is not None
@@ -1285,8 +1277,6 @@ class ConversationRunner[OutputT]:
             prompt_name=self.prompt_name,
             text=text_value,
             output=output,
-            tool_results=tuple(tool_events),
-            provider_payload=self._provider_payload,
         )
         prompt_value: SupportsDataclass | None = None
         if is_dataclass_instance(output):
@@ -1321,7 +1311,7 @@ class ConversationRunner[OutputT]:
             "Prompt execution completed.",
             event="prompt_execution_succeeded",
             context={
-                "tool_count": len(tool_events),
+                "tool_count": len(tool_message_records),
                 "has_output": output is not None,
                 "text_length": len(text_value or "") if text_value else 0,
                 "structured_output": self._response_parser.should_parse_structured_output,

@@ -26,7 +26,7 @@ from ..prompt._types import SupportsDataclass
 from ..prompt.overrides import PromptLike, PromptOverridesStore
 from ..prompt.prompt import Prompt
 from ..prompt.section import Section
-from ..runtime.events._types import EventBus, ToolInvoked
+from ..runtime.events._types import EventBus
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
 from ..tools.asteval import AstevalSection
@@ -49,8 +49,6 @@ class PromptResponse[OutputT]:
     prompt_name: str
     text: str | None
     output: OutputT | None
-    tool_results: tuple[ToolInvoked, ...]
-    provider_payload: dict[str, Any] | None = None
 
 
 class OptimizationScope(Enum):

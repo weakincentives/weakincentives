@@ -100,7 +100,7 @@ metadata is intentionally excluded from this minimal event until we have a concr
 ### `ToolInvoked`
 
 Emitted every time an adapter executes a tool handler. The dataclass mirrors the information returned through
-`PromptResponse.tool_results` so aggregated tooling data stays consistent across APIs:
+`ToolResult` so aggregated tooling data stays consistent across APIs:
 
 - `event_id: UUID` – immutable identifier generated with `uuid4()` when the event is constructed.
 - `prompt_name: str` – name of the prompt that requested the tool invocation.

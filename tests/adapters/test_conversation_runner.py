@@ -310,8 +310,8 @@ def test_conversation_runner_formats_publish_failures() -> None:
     response = runner.run()
 
     assert response.text == "All done"
-    assert len(response.tool_results) == 1
-    failure_message = response.tool_results[0].result.message
+    tool_event = next(event for event in bus.events if isinstance(event, ToolInvoked))
+    failure_message = tool_event.result.message
     assert "Reducer errors prevented applying tool result" in failure_message
 
 

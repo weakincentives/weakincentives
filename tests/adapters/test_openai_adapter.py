@@ -310,7 +310,6 @@ def test_openai_adapter_returns_plain_text_response() -> None:
     assert result.prompt_name == "greeting"
     assert result.text == "Hello, Sam!"
     assert result.output is None
-    assert result.tool_results == ()
 
     request = cast(dict[str, Any], client.responses.requests[0])
     messages = cast(list[dict[str, Any]], request["input"])
@@ -365,16 +364,22 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
+    bus.subscribe(
+        ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
+    )
     result = _evaluate_with_bus(
         adapter,
         prompt,
         ToolParams(query="policies"),
+        bus=bus,
     )
 
     assert result.text is None
     assert result.output == StructuredAnswer(answer="Policy summary")
-    assert len(result.tool_results) == 1
-    record = result.tool_results[0]
+    assert len(tool_events) == 1
+    record = tool_events[0]
     assert record.name == "search_notes"
     assert isinstance(record.result.value, ToolPayload)
     assert record.call_id == "call_1"
@@ -852,7 +857,6 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     assert tool_event.adapter == "openai"
     assert tool_event.name == "search_notes"
     assert tool_event.call_id == "call_1"
-    assert tool_event is result.tool_results[0]
 
     assert len(prompt_events) == 1
     prompt_event = prompt_events[0]
@@ -951,14 +955,21 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
     client = DummyOpenAIClient([response_with_tool, final_response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
+    bus.subscribe(
+        ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
+    )
     result = _evaluate_with_bus(
         adapter,
         prompt,
         OptionalParams(),
+        bus=bus,
     )
 
     assert result.text == "All done"
-    record = result.tool_results[0]
+    assert tool_events
+    record = tool_events[0]
     params = cast(OptionalParams, record.params)
     assert params.query == "default"
 
@@ -1322,15 +1333,21 @@ def test_openai_adapter_handles_invalid_tool_params() -> None:
     client = DummyOpenAIClient(responses)
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
+    bus = InProcessEventBus()
+    tool_events: list[ToolInvoked] = []
+    bus.subscribe(
+        ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
+    )
     result = _evaluate_with_bus(
         adapter,
         prompt,
         ToolParams(query="policies"),
+        bus=bus,
     )
 
     assert result.text == "Try again"
-    assert len(result.tool_results) == 1
-    invocation = result.tool_results[0]
+    assert len(tool_events) == 1
+    invocation = tool_events[0]
     assert invocation.result.success is False
     assert invocation.result.value is None
     assert "Missing required field" in invocation.result.message
@@ -1450,7 +1467,7 @@ def test_openai_adapter_records_provider_payload_from_mapping() -> None:
         GreetingParams(user="Sam"),
     )
 
-    assert result.provider_payload == {"meta": "value"}
+    assert not hasattr(result, "provider_payload")
 
 
 def test_openai_adapter_ignores_non_mapping_model_dump() -> None:
@@ -1481,7 +1498,7 @@ def test_openai_adapter_ignores_non_mapping_model_dump() -> None:
         GreetingParams(user="Sam"),
     )
 
-    assert result.provider_payload is None
+    assert not hasattr(result, "provider_payload")
 
 
 def test_openai_adapter_handles_response_without_model_dump() -> None:
@@ -1512,7 +1529,7 @@ def test_openai_adapter_handles_response_without_model_dump() -> None:
         GreetingParams(user="Sam"),
     )
 
-    assert result.provider_payload is None
+    assert not hasattr(result, "provider_payload")
 
 
 @pytest.mark.parametrize(
@@ -1586,8 +1603,6 @@ def test_openai_adapter_delegates_to_shared_runner(
         prompt_name="shared-runner",
         text="sentinel",
         output=None,
-        tool_results=(),
-        provider_payload=None,
     )
 
     captured: dict[str, Any] = {}

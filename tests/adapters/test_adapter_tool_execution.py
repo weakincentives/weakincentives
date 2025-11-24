@@ -206,7 +206,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(
+    adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -218,7 +218,6 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     assert invocation.result.message == "completed"
     assert invocation.result.success is True
     assert invocation.result.value == ToolPayload(answer="policies")
-    assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -394,7 +393,7 @@ def test_adapter_tool_execution_validation_error(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(
+    adapter.evaluate(
         prompt,
         ToolParams(query="invalid"),
         bus=bus,
@@ -406,7 +405,6 @@ def test_adapter_tool_execution_validation_error(
     assert invocation.result.message == "Tool validation failed: invalid query"
     assert invocation.result.success is False
     assert invocation.result.value is None
-    assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -453,7 +451,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(
+    adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -466,7 +464,6 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     assert invocation.result.success is False
     assert invocation.result.value is None
     assert "Extra keys not permitted" in invocation.result.message
-    assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -513,7 +510,7 @@ def test_adapter_tool_execution_rejects_type_errors(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(
+    adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -529,7 +526,6 @@ def test_adapter_tool_execution_rejects_type_errors(
         invocation.result.message
         == "Tool validation failed: query: value cannot be None"
     )
-    assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -567,7 +563,7 @@ def test_adapter_tool_execution_unexpected_exception(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(
+    adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -582,7 +578,6 @@ def test_adapter_tool_execution_unexpected_exception(
     )
     assert invocation.result.success is False
     assert invocation.result.value is None
-    assert invocation is result.tool_results[0]
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -646,7 +641,7 @@ def test_adapter_tool_execution_rolls_back_session(
 
     events = _record_tool_events(bus)
 
-    result = adapter.evaluate(
+    adapter.evaluate(
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -660,7 +655,6 @@ def test_adapter_tool_execution_rolls_back_session(
     )
     assert invocation.result.success is True
     assert invocation.result.value == ToolPayload(answer="policies")
-    assert invocation is result.tool_results[0]
 
     latest_payload = select_latest(session, ToolPayload)
     assert latest_payload == ToolPayload(answer="baseline")

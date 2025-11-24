@@ -77,8 +77,6 @@ class _RepositoryOptimizationAdapter:
             prompt_name=prompt.name or prompt.key,
             text="",
             output=None,
-            tool_results=(),
-            provider_payload=None,
         )
 
     def optimize(
@@ -126,8 +124,6 @@ class _RepositoryOptimizationAdapter:
             prompt_name=prompt.name or prompt.key,
             text=self.instructions,
             output=None,
-            tool_results=(),
-            provider_payload=None,
         )
         return OptimizationResult(
             response=response,
