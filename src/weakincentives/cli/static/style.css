@@ -395,8 +395,9 @@ p {
   display: inline-flex;
   align-items: flex-start;
   padding: 8px 12px;
-  background: #e2e8f0;
-  border-radius: 999px;
+  background: #e9eef5;
+  border: 1px solid #d8e0eb;
+  border-radius: 12px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   white-space: pre-wrap;
