@@ -6,27 +6,10 @@ determinism, testability, and safe execution front and center without relying on
 heavy dependencies or hosted services.
 
 The core philosophy treats agent development as a structured engineering
-discipline rather than an exercise in ad-hoc scripting. The library ships a set
-of focused abstractions that reinforce that rigor:
-
-- **Prompts as code.** Prompts are typed `Prompt` objects composed from sections
-  such as `MarkdownSection`, versioned deterministically, and scoped with
-  chapters so long-form directives can stay dormant until policies open them.
-- **Structured I/O.** Declaring a dataclass output type for a `Prompt[OutputT]`
-  automatically builds a JSON schema, instructs the provider to obey it, and
-  parses the reply back into a typed Python object.
-- **Stateful, replayable sessions.** `Session` acts as a Redux-like state
-  store, letting pure reducers respond to events (for example, `ToolInvoked`)
-  so every change is observable, replayable, and snapshot-friendly.
-- **Typed and sandboxed tools.** Tools are typed callables (`Tool[ParamsT, ResultT]`) with explicit contracts for inputs and outputs, plus built-in
-  suites for planning, a secure in-memory VFS, and sandboxed Python evaluation.
-- **Provider-agnostic adapters.** Adapters connect the framework to providers
-  like OpenAI or LiteLLM by handling API calls, tool negotiation, and response
-  parsing while keeping the agent logic model-agnostic.
-- **Configuration and optimization hooks.** Structured logging via
-  `structlog`, enforced deadlines, and a powerful prompt overrides system let
-  teams A/B test and iterate on prompts through JSON files without touching the
-  application source.
+discipline rather than ad-hoc scripting. WINK favors typed prompts,
+dataclass-backed outputs, observable sessions, sandboxed tools, provider-agnostic
+adapters, and configurable overrides so deterministic, testable behavior comes
+first.
 
 ## What's novel?
 
