@@ -57,6 +57,8 @@
   types to their tuples plus metadata such as timestamps.
 - **Snapshot tuple** – The tuple stored for a specific slice within a snapshot;
   it mirrors the reducer-managed slice tuple at capture time.
+- **Snapshot tags** – A string-to-string mapping persisted with every snapshot to
+  annotate the capture context (e.g., role, scope, orchestration metadata).
 - **Session hierarchy** – Sessions can be nested. Each session knows its parent
   (if any) and the set of directly registered child sessions to enable
   tree-aware operations.

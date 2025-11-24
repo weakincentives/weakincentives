@@ -57,6 +57,7 @@ class SnapshotMeta:
     created_at: str
     path: str
     slices: tuple[SliceSummary, ...]
+    tags: Mapping[str, str]
     validation_error: str | None = None
 
 
@@ -135,6 +136,7 @@ def load_snapshot(snapshot_path: Path) -> LoadedSnapshot:
         created_at=payload.created_at,
         path=str(snapshot_path),
         slices=tuple(summaries),
+        tags=payload.tags,
         validation_error=validation_error,
     )
 
@@ -277,6 +279,7 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
             "version": meta.version,
             "created_at": meta.created_at,
             "path": meta.path,
+            "tags": dict(meta.tags),
             "validation_error": meta.validation_error,
             "slices": [
                 {
@@ -324,6 +327,7 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
                 "version": store.reload().version,
                 "created_at": store.meta.created_at,
                 "path": store.meta.path,
+                "tags": dict(store.meta.tags),
                 "validation_error": store.meta.validation_error,
                 "slices": [
                     {
@@ -361,6 +365,7 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
             "version": meta.version,
             "created_at": meta.created_at,
             "path": meta.path,
+            "tags": dict(meta.tags),
             "validation_error": meta.validation_error,
             "slices": [
                 {

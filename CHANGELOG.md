@@ -4,7 +4,8 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-_Nothing yet._
+- Session snapshots now persist session tags and display them in the wink debug
+  UI for easier context during inspection.
 
 ## v0.11.0 - 2025-11-23
 

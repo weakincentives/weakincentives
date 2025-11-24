@@ -35,6 +35,7 @@ def _write_snapshot(path: Path) -> None:
     snapshot = Snapshot(
         created_at=datetime.now(UTC),
         slices={_ExampleSlice: (_ExampleSlice("a"),)},
+        tags={"suite": "wink"},
     )
     path.write_text(snapshot.to_json())
 

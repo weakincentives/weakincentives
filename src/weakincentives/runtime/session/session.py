@@ -14,12 +14,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
+from types import MappingProxyType
 from typing import Any, Concatenate, cast, override
 from uuid import UUID, uuid4
 
@@ -115,6 +116,28 @@ def _created_at_is_utc(session: "Session") -> bool:  # noqa: UP037
     return session.created_at.tzinfo == UTC
 
 
+def _normalize_tags(
+    tags: Mapping[object, object] | None,
+    *,
+    session_id: UUID,
+    parent: Session | None,
+) -> Mapping[str, str]:
+    normalized: dict[str, str] = {}
+
+    if tags is not None:
+        for key, value in tags.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                msg = "Session tags must be string key/value pairs."
+                raise TypeError(msg)
+            normalized[key] = value
+
+    normalized["session_id"] = str(session_id)
+    if parent is not None:
+        _ = normalized.setdefault("parent_session_id", str(parent.session_id))
+
+    return MappingProxyType(normalized)
+
+
 @invariant(
     _session_id_is_well_formed,
     _created_at_has_tz,
@@ -130,6 +153,7 @@ class Session(SessionProtocol):
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
+        tags: Mapping[object, object] | None = None,
     ) -> None:
         super().__init__()
         resolved_session_id = session_id if session_id is not None else uuid4()
@@ -155,6 +179,7 @@ class Session(SessionProtocol):
         self._lock = RLock()
         self._parent = parent
         self._children: list[Session] = []
+        self._tags = _normalize_tags(tags, session_id=self.session_id, parent=parent)
         self._subscriptions_attached = False
         if parent is self:
             msg = "Session cannot be its own parent."
@@ -180,6 +205,7 @@ class Session(SessionProtocol):
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
+        tags: Mapping[object, object] | None = None,
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
 
@@ -195,6 +221,10 @@ class Session(SessionProtocol):
             parent=self._parent if parent is None else parent,
             session_id=session_id if session_id is not None else self.session_id,
             created_at=created_at if created_at is not None else self.created_at,
+            tags=cast(
+                Mapping[object, object] | None,
+                self.tags if tags is None else tags,
+            ),
         )
 
         for data_type, registrations in reducer_snapshot:
@@ -293,6 +323,13 @@ class Session(SessionProtocol):
 
     @property
     @override
+    def tags(self) -> Mapping[str, str]:
+        """Return immutable tags associated with this session."""
+
+        return self._tags
+
+    @property
+    @override
     def children(self) -> tuple[Session, ...]:
         """Return direct child sessions in registration order."""
 
@@ -319,6 +356,7 @@ class Session(SessionProtocol):
             parent_id=parent_id,
             children_ids=children_ids,
             slices=normalized,
+            tags=self.tags,
         )
 
     @override

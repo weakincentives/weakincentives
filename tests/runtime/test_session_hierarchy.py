@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from weakincentives.runtime.session import Session, iter_sessions_bottom_up
+from weakincentives.runtime.session import Session, Snapshot, iter_sessions_bottom_up
 
 
 def test_session_tracks_parent_and_children() -> None:
@@ -68,3 +68,22 @@ def test_session_rejects_self_parent() -> None:
 
     with pytest.raises(ValueError):
         Session.__init__(session, parent=session)
+
+
+def test_session_snapshot_carries_tags() -> None:
+    root = Session(tags={"scope": "root"})
+    child = Session(parent=root, tags={"scope": "child"})
+
+    snapshot = child.snapshot()
+
+    assert snapshot.tags["scope"] == "child"
+    assert snapshot.tags["session_id"] == str(child.session_id)
+    assert snapshot.tags["parent_session_id"] == str(root.session_id)
+
+    restored = Snapshot.from_json(snapshot.to_json())
+    assert restored.tags == snapshot.tags
+
+
+def test_session_rejects_non_string_tags() -> None:
+    with pytest.raises(TypeError):
+        Session(tags={"scope": 123})

@@ -57,6 +57,7 @@ def session_factory() -> SessionFactory:
             bus=bus,
             session_id=resolved_session_id,
             created_at=resolved_created_at,
+            tags={"suite": "tests"},
         )
         return session, bus
 

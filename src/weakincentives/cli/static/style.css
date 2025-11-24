@@ -179,6 +179,14 @@ p {
   gap: 10px;
 }
 
+.tag-section {
+  margin-top: 12px;
+}
+
+.tag-section .pill-row {
+  margin-top: 6px;
+}
+
 .label {
   text-transform: uppercase;
   letter-spacing: 1px;

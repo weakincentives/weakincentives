@@ -112,7 +112,12 @@ class ProviderAdapter(ABC):
 
         prompt_name = prompt.name or prompt.key
         outer_session = session
-        inner_session = optimization_session or Session()
+        inner_session = optimization_session or Session(
+            tags={
+                "scope": "workspace_digest_optimization",
+                "prompt": prompt_name,
+            }
+        )
         digest_section = self._require_workspace_digest_section(
             prompt, prompt_name=prompt_name
         )
