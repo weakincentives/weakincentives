@@ -1287,6 +1287,7 @@ class ConversationRunner[OutputT]:
                 prompt_name=self.prompt_name,
                 adapter=self.adapter_name,
                 result=cast(PromptResponse[object], response_payload),
+                descriptor=self.rendered.descriptor,
                 session_id=getattr(self.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 value=prompt_value,

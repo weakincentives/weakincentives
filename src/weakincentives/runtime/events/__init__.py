@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 from ...prompt._types import SupportsDataclass
+from ...prompt.overrides import PromptDescriptor
 from ..logging import StructuredLogger, get_logger
 from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
 
@@ -87,6 +88,7 @@ class PromptExecuted:
     result: Any
     session_id: UUID | None
     created_at: datetime
+    descriptor: PromptDescriptor | None = None
     value: Any | None = None
     event_id: UUID = field(default_factory=uuid4)
 
