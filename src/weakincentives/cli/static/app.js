@@ -6,6 +6,7 @@ const state = {
   openPaths: new Set(),
   closedPaths: new Set(),
   expandDepth: 2,
+  searchQuery: "",
 };
 
 const elements = {
@@ -25,6 +26,7 @@ const elements = {
   depthInput: document.getElementById("depth-input"),
   expandAll: document.getElementById("expand-all"),
   collapseAll: document.getElementById("collapse-all"),
+  itemSearch: document.getElementById("item-search"),
 };
 
 async function fetchJSON(url, options) {
@@ -80,6 +82,8 @@ function renderSliceDetail(slice) {
   elements.itemCount.textContent = `${slice.items.length} items`;
   elements.typeRow.innerHTML = "";
   state.currentItems = slice.items;
+  state.searchQuery = "";
+  elements.itemSearch.value = "";
   applyDepth(state.currentItems, state.expandDepth);
 
   const slicePill = document.createElement("span");
@@ -129,7 +133,11 @@ async function refreshMeta() {
 
 elements.sliceFilter.addEventListener("input", renderSliceList);
 elements.copy.addEventListener("click", () => {
-  const text = JSON.stringify(state.currentItems, null, 2);
+  const text = JSON.stringify(
+    getFilteredItems().map((entry) => entry.item),
+    null,
+    2
+  );
   navigator.clipboard.writeText(text);
 });
 
@@ -152,6 +160,11 @@ elements.collapseAll.addEventListener("click", () => {
   renderItems(state.currentItems);
 });
 
+elements.itemSearch.addEventListener("input", () => {
+  state.searchQuery = elements.itemSearch.value || "";
+  renderItems(state.currentItems);
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   Promise.all([refreshMeta(), refreshSnapshots()]).catch((error) => {
     elements.jsonViewer.textContent = error.message;
@@ -164,6 +177,21 @@ function valueType(value) {
   if (Array.isArray(value)) return "array";
   if (value === null) return "null";
   return typeof value;
+}
+
+function getFilteredItems() {
+  const query = state.searchQuery.toLowerCase().trim();
+  if (!query) {
+    return state.currentItems.map((item, index) => ({ item, index }));
+  }
+  return state.currentItems
+    .map((item, index) => ({
+      item,
+      index,
+      text: JSON.stringify(item).toLowerCase(),
+    }))
+    .filter((entry) => entry.text.includes(query))
+    .map(({ item, index }) => ({ item, index }));
 }
 
 function pathKey(path) {
@@ -367,7 +395,14 @@ function renderTree(value, path, depth, label) {
 
 function renderItems(items) {
   elements.jsonViewer.innerHTML = "";
-  items.forEach((item, index) => {
+  const filtered = getFilteredItems();
+  const countLabel =
+    state.searchQuery.trim().length > 0
+      ? `${filtered.length} of ${items.length} items`
+      : `${items.length} items`;
+  elements.itemCount.textContent = countLabel;
+
+  filtered.forEach(({ item, index }) => {
     const card = document.createElement("div");
     card.className = "item-card";
 

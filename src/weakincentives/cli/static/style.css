@@ -272,6 +272,10 @@ p {
   font-size: 13px;
 }
 
+.inline-label input[type="search"] {
+  width: 180px;
+}
+
 .button-group {
   display: inline-flex;
   gap: 6px;
