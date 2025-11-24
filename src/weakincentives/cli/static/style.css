@@ -387,14 +387,15 @@ p {
 .compact-array {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 10px 0;
+  gap: 0;
+  padding: 8px 0;
 }
 
 .array-chip {
   display: inline-flex;
   align-items: flex-start;
-  padding: 8px 12px;
+  padding: 6px 10px;
+  margin: 4px 6px;
   background: #e9eef5;
   border: 1px solid #d8e0eb;
   border-radius: 12px;
