@@ -1717,6 +1717,52 @@ def test_openai_choice_handles_tool_call_output() -> None:
     assert call.function.name == "search"
 
 
+def test_openai_choice_skips_reasoning_output() -> None:
+    module = cast(Any, _reload_module())
+
+    class ReasoningOutput:
+        def __init__(self) -> None:
+            self.type = "reasoning"
+            self.content = None
+            self.name = None
+            self.arguments = None
+
+    class ToolOutput:
+        def __init__(self) -> None:
+            self.name = "search"
+            self.arguments = "{}"
+            self.type = "function_call"
+            self.call_id = "call_1"
+
+    class Response:
+        def __init__(self) -> None:
+            self.output = (ReasoningOutput(), ToolOutput())
+
+    choice = module._choice_from_response(Response(), prompt_name="mixed-output")
+    assert choice.message.tool_calls
+    call = choice.message.tool_calls[0]
+    assert call.id == "call_1"
+    assert call.function.name == "search"
+
+
+def test_openai_choice_raises_when_only_reasoning_output_present() -> None:
+    module = cast(Any, _reload_module())
+
+    class ReasoningOutput:
+        def __init__(self) -> None:
+            self.type = "reasoning"
+            self.content = None
+            self.name = None
+            self.arguments = None
+
+    class Response:
+        def __init__(self) -> None:
+            self.output = (ReasoningOutput(),)
+
+    with pytest.raises(PromptEvaluationError):
+        module._choice_from_response(Response(), prompt_name="reasoning-only")
+
+
 def test_openai_tool_call_from_output_rejects_non_function_type() -> None:
     module = cast(Any, _reload_module())
 

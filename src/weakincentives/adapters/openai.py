@@ -266,22 +266,34 @@ def _parsed_from_content(parts: Sequence[object]) -> object | None:
     return None
 
 
-def _first_output(response: object, *, prompt_name: str) -> object:
-    output = getattr(response, "output", None)
-    if not isinstance(output, Sequence):
+def _select_output_with_content(response: object, *, prompt_name: str) -> object:
+    outputs = getattr(response, "output", None)
+    if not isinstance(outputs, Sequence):
         raise PromptEvaluationError(
             "Provider response did not include any output.",
             prompt_name=prompt_name,
             phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
-    try:
-        return cast(Sequence[object], output)[0]
-    except IndexError as error:  # pragma: no cover - defensive
-        raise PromptEvaluationError(
-            "Provider response did not include any output.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-        ) from error
+
+    usable_outputs: list[object] = []
+    for output in cast(Sequence[object], outputs):
+        if getattr(output, "type", None) == "reasoning":
+            continue
+        if _tool_call_from_output(output) is not None:
+            return output
+        content = getattr(output, "content", None)
+        if isinstance(content, Sequence) and content:
+            return output
+        usable_outputs.append(output)
+
+    if usable_outputs:
+        return usable_outputs[0]
+
+    raise PromptEvaluationError(
+        "Provider response did not include any content.",
+        prompt_name=prompt_name,
+        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+    )
 
 
 def _content_from_output(output: object, *, prompt_name: str) -> Sequence[object]:
@@ -540,7 +552,7 @@ def _normalize_input_messages(
 
 
 def _choice_from_response(response: object, *, prompt_name: str) -> _ResponseChoice:
-    output = _first_output(response, prompt_name=prompt_name)
+    output = _select_output_with_content(response, prompt_name=prompt_name)
     tool_call_output = _tool_call_from_output(output)
     if tool_call_output is not None:
         message = _ResponseMessage(
