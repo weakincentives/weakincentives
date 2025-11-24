@@ -568,6 +568,44 @@ def test_dispatch_subagents_full_isolation_clones_state() -> None:
     assert result.success is True
     assert session.select_all(ChildRecord) == ()
     assert adapter.sessions
+
+
+def test_dispatch_subagents_full_isolation_sets_parent_session() -> None:
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], prompt),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        delegations=(
+            DelegationParams(
+                reason="inherit-parent",
+                expected_result="preserve lineage",
+                may_delegate_further="no",
+                recap_lines=("Track parent session",),
+            ),
+        ),
+    )
+
+    handler = tool.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert adapter.sessions
+    child_session = adapter.sessions[0]
+    assert child_session is not None
+    assert child_session.parent is session
+    assert session.children == (child_session,)
     assert all(child_session is not session for child_session in adapter.sessions)
     assert all(child_bus is not bus for child_bus in adapter.buses)
 

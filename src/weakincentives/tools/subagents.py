@@ -131,11 +131,15 @@ def _clone_session(
     session: SessionProtocol,
     *,
     bus: EventBus,
+    parent: SessionProtocol | None = None,
 ) -> SessionProtocol | None:
     clone_method = getattr(session, "clone", None)
     if not callable(clone_method):
         return None
-    return cast(SessionProtocol, clone_method(bus=bus))
+    kwargs: dict[str, object] = {"bus": bus}
+    if parent is not None:
+        kwargs["parent"] = parent
+    return cast(SessionProtocol, clone_method(**kwargs))
 
 
 def _prepare_child_contexts(
@@ -152,7 +156,7 @@ def _prepare_child_contexts(
     for _ in delegations:
         child_bus = InProcessEventBus()
         try:
-            cloned = _clone_session(session, bus=child_bus)
+            cloned = _clone_session(session, bus=child_bus, parent=session)
         except Exception as error:  # pragma: no cover - defensive
             return _build_error(str(error))
         if cloned is None:
