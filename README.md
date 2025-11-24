@@ -131,6 +131,8 @@ The UI is tuned for quick inspection of captured runs:
   reproducible runs without restarting the server, and a raw download button
   fetches the full JSON for archival or diffing.
 
+![Snapshot Explorer UI (1902x1572)](snapshot_explorer.png)
+
 ## Tutorial: An Interactive Code Review Assistant
 
 Let's build a simple, interactive code review assistant. This agent will be able to browse a codebase, answer questions about it, and create plans for more complex reviews. We'll see how WINK helps build this in a structured, observable, and safe way.
