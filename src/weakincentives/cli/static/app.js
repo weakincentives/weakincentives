@@ -198,6 +198,26 @@ function arrayPreview(array, limit = 6) {
   return `[${shown.join(", ")}${suffix}]`;
 }
 
+function countLines(value) {
+  return String(value).split("\n").length;
+}
+
+function applyTruncation(node, lineCount, limit = 100) {
+  if (lineCount <= limit) {
+    return null;
+  }
+  node.classList.add("truncated");
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "leaf-toggle";
+  toggle.textContent = "Expand";
+  toggle.addEventListener("click", () => {
+    const isTruncated = node.classList.toggle("truncated");
+    toggle.textContent = isTruncated ? "Expand" : "Collapse";
+  });
+  return toggle;
+}
+
 function getFilteredItems() {
   const query = state.searchQuery.toLowerCase().trim();
   if (!query) {
@@ -342,10 +362,18 @@ function renderTree(value, path, depth, label) {
   const expandable = Array.isArray(value) || isObject(value);
 
   if (!expandable) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "leaf-wrapper";
+
     const leaf = document.createElement("div");
     leaf.className = "tree-leaf";
     leaf.textContent = String(value);
-    body.appendChild(leaf);
+    const toggle = applyTruncation(leaf, countLines(value));
+    wrapper.appendChild(leaf);
+    if (toggle) {
+      wrapper.appendChild(toggle);
+    }
+    body.appendChild(wrapper);
     node.appendChild(header);
     node.appendChild(body);
     return node;
@@ -414,7 +442,16 @@ function renderTree(value, path, depth, label) {
           chip.className = "array-chip";
           chip.title = `[${index}]`;
           chip.textContent = String(child);
-          childrenContainer.appendChild(chip);
+          const toggle = applyTruncation(chip, countLines(child));
+          if (toggle) {
+            const chipWrap = document.createElement("div");
+            chipWrap.className = "chip-wrapper";
+            chipWrap.appendChild(chip);
+            chipWrap.appendChild(toggle);
+            childrenContainer.appendChild(chipWrap);
+          } else {
+            childrenContainer.appendChild(chip);
+          }
         });
       } else {
         childrenContainer.classList.remove("compact-array");

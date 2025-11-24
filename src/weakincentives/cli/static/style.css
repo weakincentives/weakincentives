@@ -387,6 +387,28 @@ p {
   font-size: inherit;
 }
 
+.leaf-wrapper {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.truncated {
+  max-height: calc(1.45em * 100);
+  overflow: hidden;
+}
+
+.leaf-toggle {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 .compact-array {
   display: flex;
   flex-wrap: wrap;
@@ -406,6 +428,13 @@ p {
   font-size: inherit;
   white-space: pre-wrap;
   line-height: 1.4;
+}
+
+.chip-wrapper {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .tree-toggle {
