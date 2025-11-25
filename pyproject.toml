@@ -109,6 +109,11 @@ extend-select = [
     "RUF",
     "TRY",
     "PERF",
+    "S",
+    "DTZ",
+    "BLE",
+    "TID",
+    "PL",
 ]
 extend-ignore = ["TRY003"]
 
