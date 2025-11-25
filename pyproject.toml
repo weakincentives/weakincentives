@@ -111,6 +111,11 @@ extend-select = [
     "PERF",
 ]
 extend-ignore = ["TRY003"]
+fixable = ["I001", "F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["weakincentives"]
+combine-as-imports = true
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Version 2.0 \(the "License"\);

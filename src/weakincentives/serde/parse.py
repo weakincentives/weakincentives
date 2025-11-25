@@ -23,8 +23,13 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Literal, cast, get_origin, get_type_hints
-from typing import get_args as typing_get_args
+from typing import (
+    Literal,
+    cast,
+    get_args as typing_get_args,
+    get_origin,
+    get_type_hints,
+)
 from uuid import UUID
 
 from ..types import JSONValue

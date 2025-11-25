@@ -25,8 +25,13 @@ from uuid import UUID
 
 import pytest
 
-from weakincentives.serde import clone, dump, parse, schema
-from weakincentives.serde import dataclass_serde as serde_module
+from weakincentives.serde import (
+    clone,
+    dataclass_serde as serde_module,
+    dump,
+    parse,
+    schema,
+)
 from weakincentives.serde.dataclass_serde import (
     _SLOTTED_EXTRAS,
     _bool_from_str,
@@ -41,8 +46,7 @@ parse_module = importlib.import_module("weakincentives.serde.parse")
 
 
 def test_module_exports_align_with_public_api() -> None:
-    from weakincentives.serde.dump import clone as module_clone
-    from weakincentives.serde.dump import dump as module_dump
+    from weakincentives.serde.dump import clone as module_clone, dump as module_dump
     from weakincentives.serde.parse import parse as module_parse
     from weakincentives.serde.schema import schema as module_schema
 
@@ -250,7 +254,7 @@ class LiteralModel:
 # Use literal bools to exercise coercion and schema branches.
 @dataclass
 class LiteralBoolModel:
-    flag: Literal[True, False]  # noqa: RUF038 - Keep literal bools for schema coverage
+    flag: Literal[True, False]  # Keep literal bools for schema coverage
 
 
 @dataclass

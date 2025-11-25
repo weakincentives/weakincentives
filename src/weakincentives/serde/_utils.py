@@ -19,8 +19,7 @@ from collections.abc import Callable, Iterable, Mapping, Sized
 from dataclasses import dataclass
 from decimal import Decimal
 from re import Pattern
-from typing import Any as _AnyType
-from typing import Final, Literal, cast, get_args
+from typing import Any as _AnyType, Final, Literal, cast, get_args
 
 from ..types import JSONValue
 
