@@ -99,6 +99,7 @@ extend-select = [
     "B",
     "SIM",
     "C4",
+    "C90",
     "ANN",
     "RET",
     "RSE",
@@ -111,6 +112,9 @@ extend-select = [
     "PERF",
 ]
 extend-ignore = ["TRY003"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Version 2.0 \(the "License"\);

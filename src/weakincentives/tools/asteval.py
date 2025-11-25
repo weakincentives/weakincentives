@@ -571,7 +571,7 @@ class _AstevalToolSuite:
         super().__init__()
         self._section = section
 
-    def run(
+    def run(  # noqa: C901
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
         ensure_context_uses_session(context=context, session=self._section.session)

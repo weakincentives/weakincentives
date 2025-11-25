@@ -357,7 +357,7 @@ class ToolExecutionOutcome:
 
 
 @contextmanager
-def tool_execution(
+def tool_execution(  # noqa: C901
     *,
     adapter_name: AdapterName,
     adapter: ProviderAdapter[Any],

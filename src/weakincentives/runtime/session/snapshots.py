@@ -192,7 +192,7 @@ class SnapshotPayload:
     )
 
     @classmethod
-    def from_json(cls, raw: str) -> SnapshotPayload:
+    def from_json(cls, raw: str) -> SnapshotPayload:  # noqa: C901
         try:
             payload_obj: JSONValue = json.loads(raw)
         except json.JSONDecodeError as error:

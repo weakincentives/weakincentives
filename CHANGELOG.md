@@ -6,6 +6,8 @@ Release highlights for weakincentives.
 
 - Session snapshots now persist session tags and display them in the wink debug
   UI for easier context during inspection.
+- Linting now enforces Ruff C90 (McCabe) complexity checks with a threshold of
+  10 to flag overly complex functions.
 
 ## v0.11.0 - 2025-11-23
 

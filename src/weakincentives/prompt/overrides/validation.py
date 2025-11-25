@@ -193,7 +193,7 @@ def _normalize_tool_override(
 ) -> ToolOverride | None: ...
 
 
-def _normalize_tool_override(
+def _normalize_tool_override(  # noqa: C901
     *,
     name: str,
     descriptor_tool: ToolDescriptor | None,
