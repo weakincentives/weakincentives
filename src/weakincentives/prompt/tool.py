@@ -96,7 +96,30 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     _result_annotation: ResultT = field(init=False, repr=False)
     accepts_overrides: bool = True
 
-    def __post_init__(self) -> None:  # noqa: C901
+    def __post_init__(self) -> None:
+        params_type, raw_result_annotation = self._resolve_type_arguments()
+
+        result_type, result_container = self._normalize_result_annotation(
+            raw_result_annotation,
+            params_type,
+        )
+
+        self.params_type = cast(type[ParamsT], params_type)
+        self.result_type = result_type
+        self.result_container = result_container
+        self._result_annotation = raw_result_annotation
+
+        self.name = self._validate_name(params_type)
+        self.description = self._validate_description(params_type)
+
+        self._validate_handler_if_present(
+            params_type,
+            raw_result_annotation,
+        )
+
+    def _resolve_type_arguments(
+        self,
+    ) -> tuple[type[SupportsDataclass], ResultT]:
         params_attr = getattr(self, "params_type", None)
         params_type: type[SupportsDataclass] | None = (
             params_attr if isinstance(params_attr, type) else None
@@ -117,16 +140,9 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 placeholder="type_arguments",
             )
 
-        result_type, result_container = self._normalize_result_annotation(
-            raw_result_annotation,
-            params_type,
-        )
+        return params_type, cast(ResultT, raw_result_annotation)
 
-        self.params_type = cast(type[ParamsT], params_type)
-        self.result_type = result_type
-        self.result_container = result_container
-        self._result_annotation = raw_result_annotation
-
+    def _validate_name(self, params_type: type[SupportsDataclass]) -> str:
         raw_name = self.name
         stripped_name = raw_name.strip()
         if raw_name != stripped_name:
@@ -151,6 +167,9 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 placeholder=name_clean,
             )
 
+        return name_clean
+
+    def _validate_description(self, params_type: type[SupportsDataclass]) -> str:
         description_clean = self.description.strip()
         if not description_clean or len(description_clean) > 200:
             raise PromptValidationError(
@@ -166,17 +185,21 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 dataclass_type=params_type,
                 placeholder="description",
             ) from error
+        return description_clean
 
+    def _validate_handler_if_present(
+        self,
+        params_type: type[SupportsDataclass],
+        raw_result_annotation: object,
+    ) -> None:
         handler = self.handler
-        if handler is not None:
-            self._validate_handler(
-                handler,
-                params_type,
-                raw_result_annotation,
-            )
-
-        self.name = name_clean
-        self.description = description_clean
+        if handler is None:
+            return
+        self._validate_handler(
+            handler,
+            params_type,
+            raw_result_annotation,
+        )
 
     def _validate_handler(  # noqa: C901
         self,
