@@ -117,6 +117,98 @@ def _ensure_timezone(dt: datetime) -> datetime:
     return dt
 
 
+def _load_snapshot_object(raw: str) -> Mapping[str, JSONValue]:
+    try:
+        payload_obj: JSONValue = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise SnapshotRestoreError("Invalid snapshot JSON") from error
+
+    if not isinstance(payload_obj, Mapping):
+        raise SnapshotRestoreError("Snapshot payload must be an object")
+
+    return cast(Mapping[str, JSONValue], payload_obj)
+
+
+def _validate_schema_version(version: str) -> None:
+    if version != SNAPSHOT_SCHEMA_VERSION:
+        msg = (
+            "Snapshot schema version mismatch: "
+            f"expected {SNAPSHOT_SCHEMA_VERSION}, got {version!r}"
+        )
+        raise SnapshotRestoreError(msg)
+
+
+def _validate_payload_fields(
+    payload: Mapping[str, JSONValue],
+) -> tuple[str, str, str | None]:
+    version_obj = payload.get("version")
+    if not isinstance(version_obj, str):
+        raise SnapshotRestoreError("Snapshot version must be a string")
+
+    created_at_obj = payload.get("created_at")
+    if not isinstance(created_at_obj, str):
+        raise SnapshotRestoreError("Snapshot created_at must be a string")
+
+    parent_id_obj = payload.get("parent_id")
+    if parent_id_obj is not None and not isinstance(parent_id_obj, str):
+        raise SnapshotRestoreError("Snapshot parent_id must be a string")
+
+    return version_obj, created_at_obj, parent_id_obj
+
+
+def _validate_children_ids(payload: Mapping[str, JSONValue]) -> tuple[str, ...]:
+    children_ids_obj = payload.get("children_ids", [])
+    if not isinstance(children_ids_obj, list):
+        raise SnapshotRestoreError("Snapshot children_ids must be a list")
+
+    children_ids: list[str] = []
+    for child_id in children_ids_obj:
+        if not isinstance(child_id, str):
+            raise SnapshotRestoreError("Snapshot children_ids entries must be strings")
+        children_ids.append(child_id)
+
+    return tuple(children_ids)
+
+
+def _validate_slices(payload: Mapping[str, JSONValue]) -> tuple[SnapshotSlicePayload, ...]:
+    slices_obj = payload.get("slices", [])
+    if not isinstance(slices_obj, list):
+        raise SnapshotRestoreError("Snapshot slices must be a list")
+
+    slices_source = slices_obj
+    return tuple(SnapshotSlicePayload.from_object(entry) for entry in slices_source)
+
+
+def _validate_tags(payload: Mapping[str, JSONValue]) -> Mapping[str, str]:
+    tags_obj = payload.get("tags", {})
+    if not isinstance(tags_obj, Mapping):
+        raise SnapshotRestoreError("Snapshot tags must be an object")
+
+    return _normalize_tags(
+        cast(Mapping[object, object] | None, tags_obj),
+        error_cls=SnapshotRestoreError,
+    )
+
+
+def _construct_snapshot_payload(
+    cls: type[SnapshotPayload],
+    payload: Mapping[str, JSONValue],
+) -> SnapshotPayload:
+    version, created_at, parent_id = _validate_payload_fields(payload)
+    children_ids = _validate_children_ids(payload)
+    slices = _validate_slices(payload)
+    tags = _validate_tags(payload)
+
+    return cls(
+        version=version,
+        created_at=created_at,
+        slices=slices,
+        parent_id=parent_id,
+        children_ids=children_ids,
+        tags=tags,
+    )
+
+
 def _infer_item_type(
     slice_type: SessionSliceType, values: SessionSlice
 ) -> SessionSliceType:
@@ -192,64 +284,9 @@ class SnapshotPayload:
     )
 
     @classmethod
-    def from_json(cls, raw: str) -> SnapshotPayload:  # noqa: C901
-        try:
-            payload_obj: JSONValue = json.loads(raw)
-        except json.JSONDecodeError as error:
-            raise SnapshotRestoreError("Invalid snapshot JSON") from error
-
-        if not isinstance(payload_obj, Mapping):
-            raise SnapshotRestoreError("Snapshot payload must be an object")
-
-        payload = cast(Mapping[str, JSONValue], payload_obj)
-        version = payload.get("version")
-        if not isinstance(version, str):
-            raise SnapshotRestoreError("Snapshot version must be a string")
-
-        created_at = payload.get("created_at")
-        if not isinstance(created_at, str):
-            raise SnapshotRestoreError("Snapshot created_at must be a string")
-
-        parent_id = payload.get("parent_id")
-        if parent_id is not None and not isinstance(parent_id, str):
-            raise SnapshotRestoreError("Snapshot parent_id must be a string")
-
-        children_ids_obj = payload.get("children_ids", [])
-        if not isinstance(children_ids_obj, list):
-            raise SnapshotRestoreError("Snapshot children_ids must be a list")
-        children_ids: list[str] = []
-        for child_id in children_ids_obj:
-            if not isinstance(child_id, str):
-                raise SnapshotRestoreError(
-                    "Snapshot children_ids entries must be strings"
-                )
-            children_ids.append(child_id)
-
-        slices_obj = payload.get("slices", [])
-        if not isinstance(slices_obj, list):
-            raise SnapshotRestoreError("Snapshot slices must be a list")
-
-        slices_source = slices_obj
-        slices = tuple(
-            SnapshotSlicePayload.from_object(entry) for entry in slices_source
-        )
-        tags_obj = payload.get("tags", {})
-        if not isinstance(tags_obj, Mapping):
-            raise SnapshotRestoreError("Snapshot tags must be an object")
-
-        tags = _normalize_tags(
-            cast(Mapping[object, object] | None, tags_obj),
-            error_cls=SnapshotRestoreError,
-        )
-
-        return cls(
-            version=version,
-            created_at=created_at,
-            slices=slices,
-            parent_id=parent_id,
-            children_ids=tuple(children_ids),
-            tags=tags,
-        )
+    def from_json(cls, raw: str) -> SnapshotPayload:
+        payload = _load_snapshot_object(raw)
+        return _construct_snapshot_payload(cls, payload)
 
 
 @dataclass(slots=True, frozen=True)
@@ -347,12 +384,7 @@ class Snapshot:
 
         payload = SnapshotPayload.from_json(raw)
 
-        if payload.version != SNAPSHOT_SCHEMA_VERSION:
-            msg = (
-                "Snapshot schema version mismatch: "
-                f"expected {SNAPSHOT_SCHEMA_VERSION}, got {payload.version!r}"
-            )
-            raise SnapshotRestoreError(msg)
+        _validate_schema_version(payload.version)
 
         try:
             created_at = datetime.fromisoformat(payload.created_at)
