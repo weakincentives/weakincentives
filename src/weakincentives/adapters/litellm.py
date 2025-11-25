@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 from datetime import timedelta
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
@@ -34,7 +33,6 @@ from ._provider_protocols import (
 from ._tool_messages import serialize_tool_message
 from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
-    PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
     SessionProtocol,
@@ -44,11 +42,11 @@ from .shared import (
     ThrottleError,
     ThrottleKind,
     ToolChoice,
-    build_json_schema_response_format,
-    deadline_provider_payload,
+    call_provider_with_normalization,
     first_choice,
     format_publish_failures,
     parse_tool_arguments,
+    prepare_adapter_conversation,
     run_conversation,
 )
 
@@ -228,7 +226,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         self._tool_choice: ToolChoice = tool_choice
 
     @override
-    def evaluate(  # noqa: C901
+    def evaluate(
         self,
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,
@@ -239,15 +237,6 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str = "latest",
     ) -> PromptResponse[OutputT]:
-        prompt_name = prompt.name or prompt.__class__.__name__
-        render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
-        if deadline is not None and deadline.remaining() <= timedelta(0):
-            raise PromptEvaluationError(
-                "Deadline expired before evaluation started.",
-                prompt_name=prompt_name,
-                phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                provider_payload=deadline_provider_payload(deadline),
-            )
         has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
             parse_output
@@ -255,29 +244,21 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             and getattr(prompt, "inject_output_instructions", False)
         )
 
-        if should_disable_instructions:
-            rendered = prompt.render(
-                *params,
-                overrides_store=overrides_store,
-                tag=overrides_tag,
-                inject_output_instructions=False,
-            )
-        else:
-            rendered = prompt.render(
-                *params,
-                overrides_store=overrides_store,
-                tag=overrides_tag,
-            )
-        if deadline is not None:
-            rendered = replace(rendered, deadline=deadline)
-        response_format: dict[str, Any] | None = None
-        should_parse_structured_output = (
-            parse_output
-            and rendered.output_type is not None
-            and rendered.container is not None
+        render_context = prepare_adapter_conversation(
+            prompt=prompt,
+            params=params,
+            parse_output=parse_output,
+            disable_output_instructions=should_disable_instructions,
+            enable_json_schema=True,
+            deadline=deadline,
+            overrides_store=overrides_store,
+            overrides_tag=overrides_tag,
         )
-        if should_parse_structured_output:
-            response_format = build_json_schema_response_format(rendered, prompt_name)
+
+        prompt_name = render_context.prompt_name
+        rendered = render_context.rendered
+        response_format = render_context.response_format
+        render_inputs = render_context.render_inputs
 
         def _call_provider(
             messages: list[dict[str, Any]],
@@ -296,20 +277,15 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             if response_format_payload is not None:
                 request_payload["response_format"] = response_format_payload
 
-            try:
-                return self._completion(**request_payload)
-            except Exception as error:  # pragma: no cover - network/SDK failure
-                throttle_error = _normalize_litellm_throttle(
+            return call_provider_with_normalization(
+                lambda: self._completion(**request_payload),
+                prompt_name=prompt_name,
+                normalize_throttle=lambda error: _normalize_litellm_throttle(
                     error, prompt_name=prompt_name
-                )
-                if throttle_error is not None:
-                    raise throttle_error from error
-                raise PromptEvaluationError(
-                    "LiteLLM request failed.",
-                    prompt_name=prompt_name,
-                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                    provider_payload=_error_payload(error),
-                ) from error
+                ),
+                provider_payload=_error_payload,
+                request_error_message="LiteLLM request failed.",
+            )
 
         def _select_choice(response: object) -> ProviderChoice:
             return cast(

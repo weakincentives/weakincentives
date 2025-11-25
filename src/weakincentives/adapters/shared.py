@@ -22,11 +22,20 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    NoReturn,
+    Protocol,
+    TypeVar,
+    cast,
+)
 from uuid import uuid4
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass, SupportsToolResult
+from ..prompt.overrides import PromptOverridesStore
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
@@ -74,6 +83,9 @@ if TYPE_CHECKING:
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "adapters.shared"}
 )
+
+
+OutputT = TypeVar("OutputT")
 
 
 @dataclass(slots=True)
@@ -144,6 +156,16 @@ def new_throttle_policy(
         max_delay=max_delay,
         max_total_delay=max_total_delay,
     )
+
+
+@dataclass(slots=True)
+class AdapterRenderContext[OutputT]:
+    """Rendering inputs and derived metadata for adapter evaluations."""
+
+    prompt_name: str
+    render_inputs: tuple[SupportsDataclass, ...]
+    rendered: RenderedPrompt[OutputT]
+    response_format: Mapping[str, Any] | None
 
 
 class ThrottleError(PromptEvaluationError):
@@ -706,6 +728,84 @@ def extract_parsed_content(message: object) -> object | None:
     return None
 
 
+def call_provider_with_normalization(
+    call_provider: Callable[[], object],
+    *,
+    prompt_name: str,
+    normalize_throttle: Callable[[Exception], ThrottleError | None],
+    provider_payload: Callable[[Exception], dict[str, Any] | None],
+    request_error_message: str,
+) -> object:
+    """Invoke a provider callable and normalize errors into PromptEvaluationError."""
+
+    try:
+        return call_provider()
+    except Exception as error:  # pragma: no cover - network/SDK failure
+        throttle_error = normalize_throttle(error)
+        if throttle_error is not None:
+            raise throttle_error from error
+        raise PromptEvaluationError(
+            request_error_message,
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload=provider_payload(error),
+        ) from error
+
+
+def prepare_adapter_conversation[
+    OutputT,
+](
+    *,
+    prompt: Prompt[OutputT],
+    params: Sequence[SupportsDataclass],
+    parse_output: bool,
+    disable_output_instructions: bool,
+    enable_json_schema: bool,
+    deadline: Deadline | None,
+    overrides_store: PromptOverridesStore | None,
+    overrides_tag: str,
+) -> AdapterRenderContext[OutputT]:
+    """Render a prompt and compute adapter inputs shared across providers."""
+
+    prompt_name = prompt.name or prompt.__class__.__name__
+    render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
+
+    if deadline is not None and deadline.remaining() <= timedelta(0):
+        raise PromptEvaluationError(
+            "Deadline expired before evaluation started.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            provider_payload=deadline_provider_payload(deadline),
+        )
+
+    render_kwargs: dict[str, object] = {
+        "overrides_store": overrides_store,
+        "tag": overrides_tag,
+    }
+    if disable_output_instructions:
+        render_kwargs["inject_output_instructions"] = False
+
+    rendered = prompt.render(*params, **render_kwargs)
+    if deadline is not None:
+        rendered = replace(rendered, deadline=deadline)
+
+    response_format: Mapping[str, Any] | None = None
+    if (
+        enable_json_schema
+        and parse_output
+        and rendered.output_type is not None
+        and rendered.container is not None
+    ):
+        response_format = build_json_schema_response_format(rendered, prompt_name)
+
+    return AdapterRenderContext(
+        prompt_name=prompt_name,
+        render_inputs=render_inputs,
+        rendered=rendered,
+        response_format=response_format,
+    )
+
+
 def _schema_name(prompt_name: str) -> str:
     sanitized = re.sub(r"[^a-zA-Z0-9_-]+", "_", prompt_name.strip())
     cleaned = sanitized.strip("_") or "prompt"
@@ -752,13 +852,15 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
     return str_mapping
 
 
+# ruff: noqa: RUF022
 __all__ = [
-    "LITELLM_ADAPTER_NAME",
-    "OPENAI_ADAPTER_NAME",
     "AdapterName",
+    "AdapterRenderContext",
     "ChoiceSelector",
     "ConversationRequest",
     "ConversationRunner",
+    "LITELLM_ADAPTER_NAME",
+    "OPENAI_ADAPTER_NAME",
     "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
@@ -774,6 +876,7 @@ __all__ = [
     "_content_part_text",
     "_parsed_payload_from_part",
     "build_json_schema_response_format",
+    "call_provider_with_normalization",
     "deadline_provider_payload",
     "execute_tool_call",
     "extract_parsed_content",
@@ -784,14 +887,13 @@ __all__ = [
     "new_throttle_policy",
     "parse_schema_constrained_payload",
     "parse_tool_arguments",
+    "prepare_adapter_conversation",
     "run_conversation",
     "serialize_tool_call",
     "tool_execution",
     "tool_to_spec",
 ]
-
-
-OutputT = TypeVar("OutputT")
+__all__.sort()
 
 
 ConversationRequest = Callable[
