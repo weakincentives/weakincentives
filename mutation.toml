@@ -1,0 +1,14 @@
+[mutation]
+paths_to_mutate = ["src/weakincentives"]
+tests_dir = "tests"
+exclude = [
+    "snapshots",
+    "tests/snapshots",
+    "test-repositories",
+    "integration-tests",
+    "build",
+    "dist",
+]
+runner = "python -m pytest --strict-config --strict-markers -q"
+use_coverage = true
+minimum_score = 90.0
