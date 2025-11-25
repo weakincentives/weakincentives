@@ -130,19 +130,18 @@ class MarkdownSection(Section[MarkdownParamsT]):
             else None
         )
 
-        return cast(
-            Self,
-            type(self)(
-                title=self.title,
-                template=self.template,
-                key=self.key,
-                default_params=cloned_default,
-                children=cloned_children,
-                enabled=self._enabled,
-                tools=self.tools(),
-                accepts_overrides=self.accepts_overrides,
-            ),
-        )  # pyright: ignore[reportUnnecessaryCast]
+        cls: type[Any] = type(self)
+        clone = cls(
+            title=self.title,
+            template=self.template,
+            key=self.key,
+            default_params=cloned_default,
+            children=cloned_children,
+            enabled=self._enabled,
+            tools=self.tools(),
+            accepts_overrides=self.accepts_overrides,
+        )
+        return cast(Self, clone)
 
 
 __all__ = ["MarkdownSection"]

@@ -75,7 +75,9 @@ class DelegationSummarySection(MarkdownSection[DelegationParams]):
 
     @override
     def clone(self, **kwargs: object) -> Self:
-        return cast(Self, type(self)())  # pyright: ignore[reportUnnecessaryCast]
+        cls: type[Any] = type(self)
+        clone = cls()
+        return cast(Self, clone)
 
 
 class ParentPromptSection(Section[ParentPromptParams]):
@@ -120,13 +122,12 @@ class ParentPromptSection(Section[ParentPromptParams]):
             if self.default_params is not None
             else None
         )
-        return cast(
-            Self,
-            type(self)(
-                tools=self.tools(),
-                default_params=cloned_default,
-            ),
-        )  # pyright: ignore[reportUnnecessaryCast]
+        cls: type[Any] = type(self)
+        clone = cls(
+            tools=self.tools(),
+            default_params=cloned_default,
+        )
+        return cast(Self, clone)
 
 
 class RecapSection(Section[RecapParams]):
@@ -153,7 +154,9 @@ class RecapSection(Section[RecapParams]):
 
     @override
     def clone(self, **kwargs: object) -> Self:
-        return cast(Self, type(self)())  # pyright: ignore[reportUnnecessaryCast]
+        cls: type[Any] = type(self)
+        clone = cls()
+        return cast(Self, clone)
 
 
 class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP046
