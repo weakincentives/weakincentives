@@ -69,8 +69,8 @@ integration-tests:
 demo:
 	@uv run --all-extras python code_reviewer_example.py
 
-# Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, markdown, test, mutation score)
-check: format-check lint typecheck bandit deptry pip-audit markdown-check test mutation-check
+# Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, markdown, test)
+check: format-check lint typecheck bandit deptry pip-audit markdown-check test
 
 # Run all checks and fixes
 all: format lint-fix bandit deptry pip-audit typecheck test

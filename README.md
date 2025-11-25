@@ -331,7 +331,9 @@ parsing raw message strings.
      and markdown linting)
 
 `make mutation-check` mirrors the `mutation-test` target while enforcing the
-configured minimum score; CI uses it to block regressions.
+configured minimum score; CI uses a dedicated mutation step to block regressions,
+and the default `make check` target intentionally leaves mutation scoring out of the
+fast path.
 
 ### Integration tests
 
