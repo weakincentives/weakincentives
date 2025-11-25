@@ -1,15 +1,14 @@
 # Weak Incentives (WINK)
 
-WINK is a Python toolkit for building background coding agents that translate
-end-user instructions into reliable application updates. The public API is
-centered on typed prompts, tool contracts, replayable sessions, and
-provider-agnostic adapters so you can keep determinism, observability, and
-safety front and center while iterating on agent behaviors.
+WINK is a Python toolkit for orchestrating safe, deterministic coding agents
+that translate end-user instructions into application updates. The library is
+designed for human developers, but this README is written so automated coding
+agents (OpenAI Codex web/CLI, Claude Code, Cursor background agents, etc.) can
+be productive consumers of the API surface without depending on internals.
 
-Audience: the guide is written for autonomous coding agents such as OpenAI
-Codex (web and CLI), Claude Code, and Cursor Background Agents. It focuses on
-calls and data structures these agents wire up—no internal implementation
-knowledge required.
+The public API centers on typed prompts, declarative tool contracts, replayable
+sessions, and provider-agnostic adapters so you can keep determinism,
+observability, and safety front and center while iterating on agent behaviors.
 
 This document is the package README published to PyPI. It focuses on the
 supported, public API surface you can depend on when wiring WINK into your own
@@ -50,6 +49,25 @@ Optional extras enable specific providers or tooling:
   that turns model responses into typed dataclass instances.
 - **Overrides** (`PromptOverride`, `LocalPromptOverridesStore`): Hash-based
   prompt overrides that let you refine prompt text safely in version control.
+
+## Agent-facing operational notes
+
+- WINK does not run unattended background coding agents by itself. It provides
+  deterministic primitives that coding agents (or humans) drive explicitly via
+  prompts, tool handlers, and adapters.
+- Rendering is side-effect-free: `Prompt.render()` produces a typed
+  `RenderedPromptProtocol` containing message content, declared tools, and any
+  structured-output schema, but does not contact providers until you pass it to
+  an adapter.
+- Tool handlers are synchronous callables; use them to gate filesystem or
+  network access and to enforce policy before applying patches. Return
+  `ToolResult.success(...)` or `.failure(...)` to keep session logs consistent.
+- `PromptResponse` exposes `message`, `tool_calls`, and provider metadata so you
+  can safely resume after partial failures or retries.
+- Sessions are immutable ledgers: reducers consume `PromptRendered`,
+  `PromptExecuted`, and `ToolInvoked` events that include `event_id`,
+  `session_id`, timestamps, and provider metadata so you can join prompt and
+  tool flows deterministically.
 
 ## Quickstart: Build a Coding Agent
 
@@ -258,8 +276,8 @@ and structured outputs.
 Ship prompts and overrides together:
 
 1. Render a `PromptDescriptor` for your prompt and commit it.
-2. Store edits in a `LocalPromptOverridesStore` scoped to your repo root.
-3. Gate deployments by validating override hashes so prompts only change when
+1. Store edits in a `LocalPromptOverridesStore` scoped to your repo root.
+1. Gate deployments by validating override hashes so prompts only change when
    descriptors do.
 
 ## CLI (`wink` extra)
