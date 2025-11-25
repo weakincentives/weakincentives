@@ -170,7 +170,9 @@ def _validate_children_ids(payload: Mapping[str, JSONValue]) -> tuple[str, ...]:
     return tuple(children_ids)
 
 
-def _validate_slices(payload: Mapping[str, JSONValue]) -> tuple[SnapshotSlicePayload, ...]:
+def _validate_slices(
+    payload: Mapping[str, JSONValue],
+) -> tuple[SnapshotSlicePayload, ...]:
     slices_obj = payload.get("slices", [])
     if not isinstance(slices_obj, list):
         raise SnapshotRestoreError("Snapshot slices must be a list")
