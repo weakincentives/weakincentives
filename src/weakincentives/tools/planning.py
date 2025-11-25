@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Final, Literal, cast, override
+from enum import StrEnum
+from typing import Final, cast, override
 
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.errors import PromptRenderError
@@ -33,8 +33,18 @@ from ..runtime.session import (
 from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
 
-PlanStatus = Literal["active", "completed", "abandoned"]
-StepStatus = Literal["pending", "in_progress", "blocked", "done"]
+
+class PlanStatus(StrEnum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
+
+class StepStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
+    DONE = "done"
 
 
 @dataclass(slots=True, frozen=True)
@@ -301,7 +311,7 @@ _MAX_DETAIL_LENGTH: Final[int] = 512
 _STEP_ID_PREFIX: Final[str] = "S"
 
 
-class PlanningStrategy(Enum):
+class PlanningStrategy(StrEnum):
     """Predefined guidance templates for the planning section."""
 
     REACT = "react"
@@ -576,7 +586,7 @@ class _PlanningToolSuite:
         del context
         session = self._section.session
         plan = _require_plan(session)
-        if plan.status == "abandoned":
+        if plan.status == PlanStatus.ABANDONED:
             message = "Cannot mark steps on an abandoned plan."
             raise ToolValidationError(message)
         step_id = params.step_id.strip()
@@ -604,7 +614,7 @@ class _PlanningToolSuite:
         del context
         session = self._section.session
         plan = _require_plan(session)
-        if plan.status == "abandoned":
+        if plan.status == PlanStatus.ABANDONED:
             message = "Plan already abandoned."
             raise ToolValidationError(message)
         return ToolResult(message="Plan marked as abandoned.", value=params)
@@ -642,12 +652,12 @@ def _setup_plan_reducer(
             step_id=_format_step_id(index + 1),
             title=step.title,
             details=step.details,
-            status="pending",
+            status=StepStatus.PENDING,
             notes=(),
         )
         for index, step in enumerate(params.initial_steps)
     )
-    plan = Plan(objective=params.objective, status="active", steps=steps)
+    plan = Plan(objective=params.objective, status=PlanStatus.ACTIVE, steps=steps)
     return (plan,)
 
 
@@ -671,13 +681,13 @@ def _add_step_reducer(
                 step_id=_format_step_id(next_index),
                 title=step.title,
                 details=step.details,
-                status="pending",
+                status=StepStatus.PENDING,
                 notes=(),
             )
         )
     updated = Plan(
         objective=previous.objective,
-        status="active",
+        status=PlanStatus.ACTIVE,
         steps=tuple(existing),
     )
     return (updated,)
@@ -747,10 +757,10 @@ def _mark_step_reducer(
             )
         )
     plan_status: PlanStatus
-    if not updated_steps or all(step.status == "done" for step in updated_steps):
-        plan_status = "completed"
+    if not updated_steps or all(step.status == StepStatus.DONE for step in updated_steps):
+        plan_status = PlanStatus.COMPLETED
     else:
-        plan_status = "active"
+        plan_status = PlanStatus.ACTIVE
     updated_plan = Plan(
         objective=previous.objective,
         status=plan_status,
@@ -770,7 +780,9 @@ def _clear_plan_reducer(
     if previous is None:
         return slice_values
     del event
-    abandoned = Plan(objective=previous.objective, status="abandoned", steps=())
+    abandoned = Plan(
+        objective=previous.objective, status=PlanStatus.ABANDONED, steps=()
+    )
     return (abandoned,)
 
 
@@ -868,7 +880,7 @@ def _require_plan(session: Session) -> Plan:
 
 
 def _ensure_active(plan: Plan, action: str) -> None:
-    if plan.status != "active":
+    if plan.status != PlanStatus.ACTIVE:
         message = f"Plan must be active to {action}. Current status: {plan.status}."
         raise ToolValidationError(message)
 
