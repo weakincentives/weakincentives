@@ -92,10 +92,11 @@ uv add "weakincentives[wink]"
 ### Debugging snapshots with `wink`
 
 The `wink` CLI ships a debug subcommand that serves a FastAPI-based UI for
-exploring session snapshot JSON files. Install the extra and start the server:
+exploring session snapshot JSONL files (one snapshot per line). Install the
+extra and start the server:
 
 ```bash
-uv run --extra wink wink debug snapshots/5de6bba7-d699-4229-9747-d68664d8f91e.json \
+uv run --extra wink wink debug snapshots/5de6bba7-d699-4229-9747-d68664d8f91e.jsonl \
   --host 127.0.0.1 --port 8000
 ```
 
@@ -105,6 +106,8 @@ The UI is tuned for quick inspection of captured runs:
   header so you always know what file is being viewed.
 - A slice sidebar lists every slice type with item counts; selecting one streams
   the items into a JSON viewer with copy-to-clipboard and collapse controls.
+- A session selector lets you hop between snapshots captured in the same JSONL
+  file without restarting the server.
 - A reload action re-reads the snapshot from disk so you can iterate on
   reproducible runs without restarting the server, and a raw download button
   fetches the full JSON for archival or diffing.

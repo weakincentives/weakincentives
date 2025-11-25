@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""FastAPI app for exploring session snapshot JSON files."""
+"""FastAPI app for exploring session snapshot JSONL files."""
 
 from __future__ import annotations
 
@@ -56,6 +56,8 @@ class SnapshotMeta:
     version: str
     created_at: str
     path: str
+    session_id: str
+    line_number: int
     slices: tuple[SliceSummary, ...]
     tags: Mapping[str, str]
     validation_error: str | None = None
@@ -77,11 +79,11 @@ class LoadedSnapshot:
     path: Path
 
 
-SnapshotLoader = Callable[[Path], LoadedSnapshot]
+SnapshotLoader = Callable[[Path], tuple[LoadedSnapshot, ...]]
 
 
-def load_snapshot(snapshot_path: Path) -> LoadedSnapshot:
-    """Load and validate a snapshot from disk."""
+def load_snapshot(snapshot_path: Path) -> tuple[LoadedSnapshot, ...]:
+    """Load and validate one or more snapshots from disk."""
 
     if not snapshot_path.exists():
         msg = f"Snapshot file not found: {snapshot_path}"
@@ -93,25 +95,55 @@ def load_snapshot(snapshot_path: Path) -> LoadedSnapshot:
         msg = f"Snapshot file cannot be read: {snapshot_path}"
         raise SnapshotLoadError(msg) from error
 
+    entries: list[LoadedSnapshot] = []
+    for line_number, line in _extract_snapshot_lines(raw_text):
+        entries.append(_load_snapshot_line(line, line_number, snapshot_path))
+
+    if not entries:
+        msg = f"Snapshot file contained no entries: {snapshot_path}"
+        raise SnapshotLoadError(msg)
+
+    return tuple(entries)
+
+
+def _extract_snapshot_lines(raw_text: str) -> list[tuple[int, str]]:
+    lines: list[tuple[int, str]] = []
+    for index, line in enumerate(raw_text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lines.append((index, stripped))
+    return lines
+
+
+def _load_snapshot_line(
+    line: str,
+    line_number: int,
+    snapshot_path: Path,
+) -> LoadedSnapshot:
     try:
-        payload = SnapshotPayload.from_json(raw_text)
+        payload = SnapshotPayload.from_json(line)
     except SnapshotRestoreError as error:
-        msg = f"Invalid snapshot: {error}"
+        msg = f"Invalid snapshot at line {line_number}: {error}"
         raise SnapshotLoadError(msg) from error
 
     validation_error: str | None = None
     try:
-        _ = Snapshot.from_json(raw_text)
+        _ = Snapshot.from_json(line)
     except SnapshotRestoreError as error:
         validation_error = str(error)
         logger.warning(
             "Snapshot validation failed",
             event="wink.debug.snapshot_error",
-            context={"path": str(snapshot_path), "error": validation_error},
+            context={
+                "path": str(snapshot_path),
+                "line_number": line_number,
+                "error": validation_error,
+            },
         )
 
     raw_payload = MappingProxyType(
-        json.loads(raw_text, object_pairs_hook=dict),
+        json.loads(line, object_pairs_hook=dict),
     )
 
     slices: dict[str, SliceItems] = {}
@@ -131,10 +163,17 @@ def load_snapshot(snapshot_path: Path) -> LoadedSnapshot:
             )
         )
 
+    session_id = payload.tags.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        msg = f"Snapshot is missing a session_id tag at line {line_number}"
+        raise SnapshotLoadError(msg)
+
     meta = SnapshotMeta(
         version=payload.version,
         created_at=payload.created_at,
         path=str(snapshot_path),
+        session_id=session_id,
+        line_number=line_number,
         slices=tuple(summaries),
         tags=payload.tags,
         validation_error=validation_error,
@@ -144,7 +183,7 @@ def load_snapshot(snapshot_path: Path) -> LoadedSnapshot:
         meta=meta,
         slices=MappingProxyType(slices),
         raw_payload=raw_payload,
-        raw_text=raw_text,
+        raw_text=line,
         path=snapshot_path,
     )
 
@@ -164,7 +203,8 @@ class SnapshotStore:
         self._root, self._path = self._normalize_path(resolved)
         self._loader = loader
         self._logger = logger or get_logger(__name__)
-        self._current = self._loader(self._path)
+        self._entries: tuple[LoadedSnapshot, ...] = self._load_entries(self._path)
+        self._index = 0
 
     @property
     def meta(self) -> SnapshotMeta:
@@ -182,9 +222,13 @@ class SnapshotStore:
     def path(self) -> Path:
         return self._path
 
+    @property
+    def entries(self) -> tuple[LoadedSnapshot, ...]:
+        return self._entries
+
     def list_snapshots(self) -> list[Mapping[str, JSONValue]]:
         snapshots: list[tuple[float, Path]] = []
-        for candidate in sorted(self._root.glob("*.json")):
+        for candidate in sorted(self._iter_snapshot_files(self._root)):
             try:
                 stats = candidate.stat()
                 created_at = max(stats.st_ctime, stats.st_mtime)
@@ -206,6 +250,23 @@ class SnapshotStore:
             )
         return entries
 
+    def list_entries(self) -> list[Mapping[str, JSONValue]]:
+        entries: list[Mapping[str, JSONValue]] = []
+        for entry in self._entries:
+            meta = entry.meta
+            entries.append(
+                {
+                    "session_id": meta.session_id,
+                    "name": f"{meta.session_id} (line {meta.line_number})",
+                    "path": meta.path,
+                    "line_number": meta.line_number,
+                    "created_at": meta.created_at,
+                    "tags": dict(meta.tags),
+                    "selected": meta.session_id == self.meta.session_id,
+                }
+            )
+        return entries
+
     def slice_items(self, slice_type: str) -> SliceItems:
         try:
             return self._current.slices[slice_type]
@@ -213,38 +274,60 @@ class SnapshotStore:
             raise KeyError(f"Unknown slice type: {slice_type}") from error
 
     def reload(self) -> SnapshotMeta:
-        loaded = self._loader(self._path)
-        self._current = loaded
+        current_session_id = self.meta.session_id
+        self._entries = self._load_entries(self._path)
+        try:
+            self._index = self._select_index(session_id=current_session_id)
+        except SnapshotLoadError:
+            self._index = 0
         self._logger.info(
             "Snapshot reloaded",
             event="debug.server.reload",
             context={"path": str(self._path)},
         )
-        return self._current.meta
+        return self.meta
 
-    def switch(self, path: Path) -> SnapshotMeta:
+    def select(
+        self, *, session_id: str | None = None, line_number: int | None = None
+    ) -> SnapshotMeta:
+        self._index = self._select_index(
+            session_id=session_id,
+            line_number=line_number,
+        )
+        return self.meta
+
+    def switch(
+        self,
+        path: Path,
+        *,
+        session_id: str | None = None,
+        line_number: int | None = None,
+    ) -> SnapshotMeta:
         resolved = path.resolve()
         root, target = self._normalize_path(resolved)
         if root != self._root:
             msg = f"Snapshot must live under {self._root}"
             raise SnapshotLoadError(msg)
 
-        loaded = self._loader(target)
         self._root = root
         self._path = target
-        self._current = loaded
+        self._entries = self._load_entries(target)
+        self._index = self._select_index(
+            session_id=session_id,
+            line_number=line_number,
+        )
         self._logger.info(
             "Snapshot switched",
             event="debug.server.switch",
             context={"path": str(self._path)},
         )
-        return self._current.meta
+        return self.meta
 
     def _normalize_path(self, path: Path) -> tuple[Path, Path]:
         if path.is_dir():
             root = path
             candidates = sorted(
-                (p for p in root.glob("*.json") if p.is_file()),
+                self._iter_snapshot_files(root),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
@@ -257,6 +340,43 @@ class SnapshotStore:
             target = path
         return root, target
 
+    def _select_index(
+        self, *, session_id: str | None = None, line_number: int | None = None
+    ) -> int:
+        if session_id is not None:
+            for index, entry in enumerate(self._entries):
+                if entry.meta.session_id == session_id:
+                    return index
+            msg = f"Unknown session_id: {session_id}"
+            raise SnapshotLoadError(msg)
+
+        if line_number is not None:
+            for index, entry in enumerate(self._entries):
+                if entry.meta.line_number == line_number:
+                    return index
+            msg = f"Unknown line_number: {line_number}"
+            raise SnapshotLoadError(msg)
+
+        return 0
+
+    def _load_entries(self, path: Path) -> tuple[LoadedSnapshot, ...]:
+        entries = self._loader(path)
+        if not entries:
+            msg = f"No snapshots found under {path}"
+            raise SnapshotLoadError(msg)
+        return entries
+
+    @staticmethod
+    def _iter_snapshot_files(root: Path) -> list[Path]:
+        candidates: list[Path] = []
+        for pattern in ("*.jsonl", "*.json"):
+            candidates.extend(p for p in root.glob(pattern) if p.is_file())
+        return candidates
+
+    @property
+    def _current(self) -> LoadedSnapshot:
+        return self._entries[self._index]
+
 
 def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
     """Construct the FastAPI application for inspecting snapshots."""
@@ -267,18 +387,13 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
     app.state.logger = logger
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        index_path = static_dir / "index.html"
-        return index_path.read_text()
-
-    @app.get("/api/meta")
-    def get_meta() -> Mapping[str, JSONValue]:
-        meta = store.meta
+    def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
         return {
             "version": meta.version,
             "created_at": meta.created_at,
             "path": meta.path,
+            "session_id": meta.session_id,
+            "line_number": meta.line_number,
             "tags": dict(meta.tags),
             "validation_error": meta.validation_error,
             "slices": [
@@ -290,6 +405,19 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
                 for entry in meta.slices
             ],
         }
+
+    @app.get("/", response_class=HTMLResponse)
+    def index() -> str:
+        index_path = static_dir / "index.html"
+        return index_path.read_text()
+
+    @app.get("/api/meta")
+    def get_meta() -> Mapping[str, JSONValue]:
+        return _meta_response(store.meta)
+
+    @app.get("/api/entries")
+    def list_entries() -> list[Mapping[str, JSONValue]]:
+        return store.list_entries()
 
     @app.get("/api/slices/{encoded_slice_type}")
     def get_slice(
@@ -323,21 +451,8 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
     @app.post("/api/reload")
     def reload() -> Mapping[str, JSONValue]:
         try:
-            return {
-                "version": store.reload().version,
-                "created_at": store.meta.created_at,
-                "path": store.meta.path,
-                "tags": dict(store.meta.tags),
-                "validation_error": store.meta.validation_error,
-                "slices": [
-                    {
-                        "slice_type": entry.slice_type,
-                        "item_type": entry.item_type,
-                        "count": entry.count,
-                    }
-                    for entry in store.meta.slices
-                ],
-            }
+            meta = store.reload()
+            return _meta_response(meta)
         except SnapshotLoadError as error:
             logger.warning(
                 "Snapshot reload failed",
@@ -350,32 +465,60 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
     def list_snapshots() -> list[Mapping[str, JSONValue]]:
         return store.list_snapshots()
 
+    @app.post("/api/select")
+    def select(payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
+        session_value = payload.get("session_id")
+        line_value = payload.get("line_number")
+
+        if session_value is None and line_value is None:
+            raise HTTPException(
+                status_code=400,
+                detail="session_id or line_number is required",
+            )
+
+        if session_value is not None and not isinstance(session_value, str):
+            raise HTTPException(status_code=400, detail="session_id must be a string")
+
+        if line_value is not None and not isinstance(line_value, int):
+            raise HTTPException(
+                status_code=400,
+                detail="line_number must be an integer",
+            )
+
+        try:
+            meta = store.select(session_id=session_value, line_number=line_value)
+        except SnapshotLoadError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        return _meta_response(meta)
+
     @app.post("/api/switch")
     def switch(payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
         path_value = payload.get("path")
         if not isinstance(path_value, str):
             raise HTTPException(status_code=400, detail="path is required")
 
+        session_value = payload.get("session_id")
+        if session_value is not None and not isinstance(session_value, str):
+            raise HTTPException(status_code=400, detail="session_id must be a string")
+
+        line_value = payload.get("line_number")
+        if line_value is not None and not isinstance(line_value, int):
+            raise HTTPException(
+                status_code=400,
+                detail="line_number must be an integer",
+            )
+
         try:
-            meta = store.switch(Path(path_value))
+            meta = store.switch(
+                Path(path_value),
+                session_id=session_value,
+                line_number=line_value,
+            )
         except SnapshotLoadError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
-        return {
-            "version": meta.version,
-            "created_at": meta.created_at,
-            "path": meta.path,
-            "tags": dict(meta.tags),
-            "validation_error": meta.validation_error,
-            "slices": [
-                {
-                    "slice_type": entry.slice_type,
-                    "item_type": entry.item_type,
-                    "count": entry.count,
-                }
-                for entry in meta.slices
-            ],
-        }
+        return _meta_response(meta)
 
     return app
 

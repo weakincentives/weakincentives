@@ -28,6 +28,7 @@ from uuid import UUID
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import OptimizationScope, ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.debug import dump_session
 from weakincentives.prompt import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -36,7 +37,6 @@ from weakincentives.prompt.overrides import (
 from weakincentives.runtime.events import EventBus, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import (
     Session,
-    iter_sessions_bottom_up,
     select_latest,
 )
 from weakincentives.serde import dump
@@ -164,7 +164,7 @@ class CodeReviewApp:
             print("-" * 23 + "\n")
 
         print("Goodbye.")
-        _persist_snapshot_tree(self.session)
+        dump_session(self.session, SNAPSHOT_DIR)
 
     def _evaluate_turn(self, user_prompt: str) -> str:
         response = self.adapter.evaluate(
@@ -519,52 +519,6 @@ def _coerce_for_log(payload: object) -> object:
     if isinstance(payload, set):
         return sorted(_coerce_for_log(item) for item in payload)
     return str(payload)
-
-
-def _persist_session_snapshot(session: Session) -> Path | None:
-    """Persist the session snapshot to `snapshots/<session_id>.json`."""
-
-    snapshot_path = SNAPSHOT_DIR / f"{session.session_id}.json"
-    snapshot = session.snapshot()
-    if not snapshot.slices:
-        _LOGGER.info(
-            "Session snapshot skipped; no slices to persist.",
-            extra={
-                "session_id": str(session.session_id),
-                "snapshot_path": str(snapshot_path),
-            },
-        )
-        return None
-    try:
-        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-        snapshot_json = snapshot.to_json()
-        snapshot_path.write_text(snapshot_json, encoding="utf-8")
-    except Exception:  # pragma: no cover - defensive logging
-        _LOGGER.exception(
-            "Failed to persist session snapshot.",
-            extra={"session_id": str(session.session_id), "path": str(snapshot_path)},
-        )
-        return None
-    else:
-        _LOGGER.info(
-            "Session snapshot persisted.",
-            extra={
-                "session_id": str(session.session_id),
-                "snapshot_path": str(snapshot_path),
-            },
-        )
-        return snapshot_path
-
-
-def _persist_snapshot_tree(root_session: Session) -> tuple[Path, ...]:
-    """Persist snapshots for the provided session and its descendants."""
-
-    persisted: list[Path] = []
-    for session in iter_sessions_bottom_up(root_session):
-        snapshot_path = _persist_session_snapshot(session)
-        if snapshot_path is not None:
-            persisted.append(snapshot_path)
-    return tuple(persisted)
 
 
 if __name__ == "__main__":

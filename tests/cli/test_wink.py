@@ -35,9 +35,9 @@ def _write_snapshot(path: Path) -> None:
     snapshot = Snapshot(
         created_at=datetime.now(UTC),
         slices={_ExampleSlice: (_ExampleSlice("a"),)},
-        tags={"suite": "wink"},
+        tags={"suite": "wink", "session_id": path.stem},
     )
-    path.write_text(snapshot.to_json())
+    path.write_text(snapshot.to_json() + "\n")
 
 
 def test_cli_namespace_lists_wink_module() -> None:
@@ -47,7 +47,7 @@ def test_cli_namespace_lists_wink_module() -> None:
 def test_main_runs_debug_command(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path = tmp_path / "snapshot.jsonl"
     _write_snapshot(snapshot_path)
 
     calls: dict[str, Any] = {}
@@ -138,7 +138,7 @@ def test_main_runs_debug_command(
 def test_main_handles_invalid_snapshot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    snapshot_path = tmp_path / "missing.json"
+    snapshot_path = tmp_path / "missing.jsonl"
 
     def fake_configure_logging(*, level: object, json_mode: object) -> None:
         return None

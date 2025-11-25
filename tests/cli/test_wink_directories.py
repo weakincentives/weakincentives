@@ -36,16 +36,20 @@ def _write_snapshot(path: Path, *, created_at: datetime) -> None:
     snapshot = Snapshot(
         created_at=created_at,
         slices={_ExampleSlice: (_ExampleSlice(path.name),)},
-        tags={"suite": "wink-directories", "name": path.name},
+        tags={
+            "suite": "wink-directories",
+            "name": path.name,
+            "session_id": path.stem,
+        },
     )
-    path.write_text(snapshot.to_json())
+    path.write_text(snapshot.to_json() + "\n")
 
 
 def test_directory_argument_loads_latest_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    older = tmp_path / "old.json"
-    newer = tmp_path / "new.json"
+    older = tmp_path / "old.jsonl"
+    newer = tmp_path / "new.jsonl"
     now = datetime.now(UTC)
     _write_snapshot(older, created_at=now - timedelta(days=1))
     _write_snapshot(newer, created_at=now)

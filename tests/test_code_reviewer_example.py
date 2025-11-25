@@ -28,7 +28,6 @@ from code_reviewer_example import (
     CodeReviewApp,
     ReviewResponse,
     ReviewTurnParams,
-    _persist_session_snapshot,
     build_task_prompt,
     initialize_code_reviewer_runtime,
 )
@@ -39,6 +38,7 @@ from weakincentives.adapters.core import (
     OptimizationScope,
     ProviderAdapter,
 )
+from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -269,37 +269,39 @@ def _redirect_snapshots(
     return snapshot_dir
 
 
-def test_persist_session_snapshot_logs_success(
-    tmp_path: Path,
+def test_dump_session_logs_success(
     caplog: pytest.LogCaptureFixture,
     _redirect_snapshots: Path,
 ) -> None:
-    caplog.set_level(logging.INFO, logger=reviewer_example.__name__)
+    caplog.set_level(logging.INFO, logger="weakincentives.debug")
     session = Session()
     set_workspace_digest(session, "workspace-digest", "body")
 
-    snapshot_path = _persist_session_snapshot(session)
+    snapshot_path = dump_session(session, _redirect_snapshots)
 
-    assert snapshot_path == _redirect_snapshots / f"{session.session_id}.json"
+    assert snapshot_path == _redirect_snapshots / f"{session.session_id}.jsonl"
     assert snapshot_path is not None and snapshot_path.exists()
+    content = snapshot_path.read_text().splitlines()
+    assert len(content) == 1
     record = next(
         rec
         for rec in caplog.records
         if getattr(rec, "session_id", None) == str(session.session_id)
     )
     assert record.levelno == logging.INFO
-    assert "Session snapshot persisted" in record.getMessage()
+    assert "Session snapshots persisted" in record.getMessage()
     assert record.snapshot_path == str(snapshot_path)
+    assert record.snapshot_count == 1
 
 
-def test_persist_session_snapshot_skips_empty_session(
+def test_dump_session_skips_empty_session(
     caplog: pytest.LogCaptureFixture,
     _redirect_snapshots: Path,
 ) -> None:
-    caplog.set_level(logging.INFO, logger=reviewer_example.__name__)
+    caplog.set_level(logging.INFO, logger="weakincentives.debug")
     session = Session()
 
-    snapshot_path = _persist_session_snapshot(session)
+    snapshot_path = dump_session(session, _redirect_snapshots)
 
     assert snapshot_path is None
     assert not any(_redirect_snapshots.iterdir())

@@ -67,7 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _ = debug_parser.add_argument(
         "snapshot_path",
-        help="Path to a session snapshot JSON file or a directory containing snapshots.",
+        help="Path to a session snapshot JSONL file or a directory containing snapshots.",
     )
     _ = debug_parser.add_argument(
         "--host",
@@ -93,7 +93,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
     snapshot_path = Path(args.snapshot_path)
 
-    def _bootstrap_loader(path: Path) -> debug_app.LoadedSnapshot:
+    def _bootstrap_loader(path: Path) -> tuple[debug_app.LoadedSnapshot, ...]:
         return debug_app.load_snapshot(path)
 
     try:

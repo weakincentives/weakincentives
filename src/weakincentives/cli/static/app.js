@@ -2,6 +2,7 @@ const state = {
   meta: null,
   selectedSlice: null,
   snapshots: [],
+  entries: [],
   currentItems: [],
   openPaths: new Set(),
   closedPaths: new Set(),
@@ -12,6 +13,7 @@ const state = {
 const elements = {
   path: document.getElementById("snapshot-path"),
   snapshotSelect: document.getElementById("snapshot-select"),
+  sessionTree: document.getElementById("session-tree"),
   created: document.getElementById("meta-created"),
   version: document.getElementById("meta-version"),
   count: document.getElementById("meta-count"),
@@ -65,6 +67,78 @@ function renderMeta(meta) {
       pill.textContent = `${key}: ${value}`;
       elements.tagRow.appendChild(pill);
     });
+}
+
+function renderSessionTree() {
+  const container = elements.sessionTree;
+  container.innerHTML = "";
+
+  if (!state.entries.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No sessions captured yet.";
+    container.appendChild(empty);
+    return;
+  }
+
+  const grouped = new Map();
+  state.entries.forEach((entry) => {
+    const bucket = grouped.get(entry.path) || [];
+    bucket.push(entry);
+    grouped.set(entry.path, bucket);
+  });
+
+  grouped.forEach((entries, path) => {
+    entries.sort((a, b) => (a.line_number || 0) - (b.line_number || 0));
+    const group = document.createElement("div");
+    group.className =
+      "session-group" + (state.meta && state.meta.path === path ? " active" : "");
+
+    const header = document.createElement("div");
+    header.className = "session-group-header";
+    header.textContent = path.split("/").pop() || path;
+
+    const badge = document.createElement("span");
+    badge.className = "pill";
+    badge.textContent = `${entries.length} session${entries.length === 1 ? "" : "s"}`;
+    header.appendChild(badge);
+    header.addEventListener("click", () => switchSnapshot(path));
+
+    const list = document.createElement("div");
+    list.className = "session-items";
+
+    entries.forEach((entry) => {
+      const item = document.createElement("div");
+      item.className = "session-item" + (entry.selected ? " active" : "");
+
+      const title = document.createElement("div");
+      title.className = "session-item-title";
+      title.textContent = entry.session_id;
+
+      const meta = document.createElement("div");
+      meta.className = "session-item-meta";
+      const parts = [];
+      if (entry.line_number !== undefined) parts.push(`line ${entry.line_number}`);
+      if (entry.created_at) parts.push(entry.created_at);
+      meta.textContent = parts.join(" · ");
+
+      item.appendChild(title);
+      item.appendChild(meta);
+      item.addEventListener("click", () => {
+        if (state.meta && state.meta.path === entry.path) {
+          selectEntry(entry.session_id);
+        } else {
+          switchSnapshot(entry.path, entry.session_id);
+        }
+      });
+
+      list.appendChild(item);
+    });
+
+    group.appendChild(header);
+    group.appendChild(list);
+    container.appendChild(group);
+  });
 }
 
 function renderSliceList() {
@@ -188,9 +262,12 @@ elements.itemSearch.addEventListener("input", () => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
-  Promise.all([refreshMeta(), refreshSnapshots()]).catch((error) => {
-    elements.jsonViewer.textContent = error.message;
-  });
+  refreshMeta()
+    .then(refreshEntries)
+    .then(refreshSnapshots)
+    .catch((error) => {
+      elements.jsonViewer.textContent = error.message;
+    });
 });
 
 const isObject = (value) => typeof value === "object" && value !== null;
@@ -543,6 +620,13 @@ function renderItems(items) {
   });
 }
 
+async function refreshEntries() {
+  const entries = await fetchJSON("/api/entries");
+  state.entries = entries;
+
+  renderSessionTree();
+}
+
 async function refreshSnapshots() {
   const snapshots = await fetchJSON("/api/snapshots");
   state.snapshots = snapshots;
@@ -560,16 +644,35 @@ async function refreshSnapshots() {
   }
 }
 
-async function switchSnapshot(path) {
+async function selectEntry(sessionId) {
+  try {
+    await fetchJSON("/api/select", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    await refreshMeta();
+    await refreshEntries();
+  } catch (error) {
+    alert(`Select failed: ${error.message}`);
+  }
+}
+
+async function switchSnapshot(path, sessionId) {
   try {
     await fetchJSON("/api/switch", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ path }),
+      body: JSON.stringify(
+        sessionId ? { path, session_id: sessionId } : { path }
+      ),
     });
     await refreshMeta();
+    await refreshEntries();
     await refreshSnapshots();
   } catch (error) {
     alert(`Switch failed: ${error.message}`);

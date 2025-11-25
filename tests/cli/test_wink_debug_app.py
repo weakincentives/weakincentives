@@ -17,10 +17,11 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from urllib.parse import quote
 
 import pytest
@@ -36,28 +37,44 @@ class _ExampleSlice:
     value: str
 
 
-def _write_snapshot(path: Path, values: list[str]) -> None:
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={_ExampleSlice: tuple(_ExampleSlice(value) for value in values)},
-        tags={"suite": "wink-debug"},
-    )
-    path.write_text(snapshot.to_json())
+def _write_snapshot(path: Path, values: list[str]) -> list[str]:
+    session_ids: list[str] = []
+    entries: list[str] = []
+    for index, value in enumerate(values):
+        session_id = f"{path.stem}-{index}"
+        snapshot = Snapshot(
+            created_at=datetime.now(UTC),
+            slices={_ExampleSlice: (_ExampleSlice(value),)},
+            tags={"suite": "wink-debug", "session_id": session_id},
+        )
+        entries.append(snapshot.to_json())
+        session_ids.append(session_id)
+    path.write_text("\n".join(entries))
+    return session_ids
 
 
 def test_load_snapshot_validates_schema(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
-    _write_snapshot(snapshot_path, ["one"])
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    session_ids = _write_snapshot(snapshot_path, ["one"])
 
     loaded = debug_app.load_snapshot(snapshot_path)
 
-    assert loaded.meta.version == "1"
-    assert loaded.meta.tags == {"suite": "wink-debug"}
-    assert loaded.meta.slices[0].count == 1
+    assert len(loaded) == 1
+    meta = loaded[0].meta
+    assert meta.version == "1"
+    assert meta.tags["suite"] == "wink-debug"
+    assert meta.session_id == session_ids[0]
+    assert meta.line_number == 1
+    assert meta.slices[0].count == 1
 
 
 def test_load_snapshot_errors(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "missing.json"
+    snapshot_path = tmp_path / "missing.jsonl"
+
+    with pytest.raises(debug_app.SnapshotLoadError):
+        debug_app.load_snapshot(snapshot_path)
+
+    snapshot_path.write_text("")
 
     with pytest.raises(debug_app.SnapshotLoadError):
         debug_app.load_snapshot(snapshot_path)
@@ -67,9 +84,20 @@ def test_load_snapshot_errors(tmp_path: Path) -> None:
     with pytest.raises(debug_app.SnapshotLoadError):
         debug_app.load_snapshot(snapshot_path)
 
+    payload_missing_session = {
+        "version": "1",
+        "created_at": datetime.now(UTC).isoformat(),
+        "slices": [],
+        "tags": {},
+    }
+    snapshot_path.write_text(json.dumps(payload_missing_session))
+
+    with pytest.raises(debug_app.SnapshotLoadError):
+        debug_app.load_snapshot(snapshot_path)
+
 
 def test_load_snapshot_recovers_from_unknown_types(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path = tmp_path / "snapshot.jsonl"
     payload = {
         "version": "1",
         "created_at": datetime.now(UTC).isoformat(),
@@ -80,20 +108,23 @@ def test_load_snapshot_recovers_from_unknown_types(tmp_path: Path) -> None:
                 "items": [{"value": "one"}],
             }
         ],
+        "tags": {"session_id": "unknown"},
     }
     snapshot_path.write_text(json.dumps(payload))
 
     loaded = debug_app.load_snapshot(snapshot_path)
 
-    assert loaded.meta.validation_error
-    assert "__main__:UnknownType" in loaded.slices
-    unknown_slice = loaded.slices["__main__:UnknownType"]
+    assert len(loaded) == 1
+    entry = loaded[0]
+    assert entry.meta.validation_error
+    assert "__main__:UnknownType" in entry.slices
+    unknown_slice = entry.slices["__main__:UnknownType"]
     assert unknown_slice.items == ({"value": "one"},)
 
 
 def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
-    _write_snapshot(snapshot_path, ["a", "b", "c"])
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    session_ids = _write_snapshot(snapshot_path, ["a", "b", "c"])
     logger = debug_app.get_logger("test.api")
     store = debug_app.SnapshotStore(
         snapshot_path, loader=debug_app.load_snapshot, logger=logger
@@ -104,11 +135,23 @@ def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
     meta_response = client.get("/api/meta")
     assert meta_response.status_code == 200
     meta = meta_response.json()
+    assert meta["session_id"] == session_ids[0]
+    assert meta["line_number"] == 1
     assert len(meta["slices"]) == 1
-    assert meta["tags"] == {"suite": "wink-debug"}
+    assert meta["tags"]["suite"] == "wink-debug"
     slice_type = meta["slices"][0]["slice_type"]
 
-    detail_response = client.get(f"/api/slices/{quote(slice_type)}?offset=1&limit=1")
+    entries_response = client.get("/api/entries")
+    entries = entries_response.json()
+    assert [entry["session_id"] for entry in entries] == session_ids
+    assert entries[0]["selected"] is True
+
+    select_response = client.post("/api/select", json={"session_id": session_ids[1]})
+    assert select_response.status_code == 200
+    selected_meta = select_response.json()
+    assert selected_meta["session_id"] == session_ids[1]
+
+    detail_response = client.get(f"/api/slices/{quote(slice_type)}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["items"] == [{"value": "b"}]
@@ -117,11 +160,11 @@ def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
     assert raw_response.status_code == 200
     raw = raw_response.json()
     assert raw["version"] == "1"
-    assert raw["slices"][0]["items"][0]["value"] == "a"
+    assert raw["slices"][0]["items"][0]["value"] == "b"
 
 
 def test_reload_endpoint_replaces_snapshot(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path = tmp_path / "snapshot.jsonl"
     _write_snapshot(snapshot_path, ["one"])
     logger = debug_app.get_logger("test.reload")
     store = debug_app.SnapshotStore(
@@ -130,16 +173,17 @@ def test_reload_endpoint_replaces_snapshot(tmp_path: Path) -> None:
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
-    _write_snapshot(snapshot_path, ["two", "three"])
+    updated_session_ids = _write_snapshot(snapshot_path, ["two", "three"])
 
     reload_response = client.post("/api/reload")
     assert reload_response.status_code == 200
     meta = reload_response.json()
-    assert meta["slices"][0]["count"] == 2
+    assert meta["session_id"] == updated_session_ids[0]
+    assert meta["slices"][0]["count"] == 1
     slice_type = meta["slices"][0]["slice_type"]
 
     detail = client.get(f"/api/slices/{quote(slice_type)}").json()
-    assert [item["value"] for item in detail["items"]] == ["two", "three"]
+    assert [item["value"] for item in detail["items"]] == ["two"]
 
     _write_snapshot(snapshot_path, ["invalid"])
     snapshot_path.write_text("not-json")
@@ -147,12 +191,13 @@ def test_reload_endpoint_replaces_snapshot(tmp_path: Path) -> None:
     assert reload_failed.status_code == 400
 
     meta_after_failure = client.get("/api/meta").json()
-    assert meta_after_failure["slices"][0]["count"] == 2
+    assert meta_after_failure["session_id"] == updated_session_ids[0]
+    assert meta_after_failure["slices"][0]["count"] == 1
 
 
 def test_snapshot_listing_and_switch(tmp_path: Path) -> None:
-    snapshot_one = tmp_path / "one.json"
-    snapshot_two = tmp_path / "two.json"
+    snapshot_one = tmp_path / "one.jsonl"
+    snapshot_two = tmp_path / "two.jsonl"
     _write_snapshot(snapshot_one, ["a"])
     _write_snapshot(snapshot_two, ["b", "c"])
 
@@ -171,8 +216,8 @@ def test_snapshot_listing_and_switch(tmp_path: Path) -> None:
     client = TestClient(app)
 
     listing = client.get("/api/snapshots").json()
-    assert listing[0]["name"] == "two.json"
-    assert listing[1]["name"] == "one.json"
+    assert listing[0]["name"] == "two.jsonl"
+    assert listing[1]["name"] == "one.jsonl"
 
     switch_response = client.post("/api/switch", json={"path": str(snapshot_two)})
     assert switch_response.status_code == 200
@@ -181,14 +226,15 @@ def test_snapshot_listing_and_switch(tmp_path: Path) -> None:
 
     detail = client.get("/api/meta").json()
     assert detail["path"] == str(snapshot_two)
+    assert detail["session_id"] == "two-0"
 
 
 def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path = tmp_path / "snapshot.jsonl"
     _write_snapshot(snapshot_path, ["one"])
 
-    missing_target = tmp_path / "missing.json"
-    broken_link = tmp_path / "broken.json"
+    missing_target = tmp_path / "missing.jsonl"
+    broken_link = tmp_path / "broken.jsonl"
     broken_link.symlink_to(missing_target)
 
     store = debug_app.SnapshotStore(
@@ -197,24 +243,185 @@ def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
         logger=debug_app.get_logger(__name__),
     )
 
-    assert store.raw_payload["version"] == "1"
-    assert store.raw_payload["tags"] == {"suite": "wink-debug"}
+    raw_payload = store.raw_payload
+    assert raw_payload["version"] == "1"
+    tags_value = raw_payload.get("tags")
+    assert isinstance(tags_value, Mapping)
+    tags = cast(Mapping[str, object], tags_value)
+    assert tags.get("suite") == "wink-debug"
+    assert "session_id" in tags
     assert store.path == snapshot_path.resolve()
+    assert len(store.entries) == 1
 
     listing = store.list_snapshots()
     names = {entry["name"] for entry in listing}
-    assert "snapshot.json" in names
-    assert "broken.json" not in names
+    assert "snapshot.jsonl" in names
+    assert "broken.jsonl" not in names
+
+    entry_listing = store.list_entries()
+    assert entry_listing[0]["selected"] is True
 
     with pytest.raises(KeyError, match="Unknown slice type: missing"):
         store.slice_items("missing")
 
 
+def test_snapshot_loading_ignores_blank_lines(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    session_ids = _write_snapshot(snapshot_path, ["first", "second"])
+    snapshot_path.write_text("\n" + snapshot_path.read_text() + "\n\n")
+
+    loaded = debug_app.load_snapshot(snapshot_path)
+
+    assert [entry.meta.session_id for entry in loaded] == session_ids
+
+
+def test_api_slice_offset_and_errors(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={
+            _ExampleSlice: (
+                _ExampleSlice("one"),
+                _ExampleSlice("two"),
+                _ExampleSlice("three"),
+            )
+        },
+        tags={"session_id": "multi"},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+    logger = debug_app.get_logger("test.api.slices")
+    store = debug_app.SnapshotStore(
+        snapshot_path, loader=debug_app.load_snapshot, logger=logger
+    )
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
+    limited = client.get(f"/api/slices/{quote(slice_type)}?offset=1&limit=1").json()
+    assert [item["value"] for item in limited["items"]] == ["two"]
+
+    missing = client.get("/api/slices/unknown")
+    assert missing.status_code == 404
+
+
+def test_api_select_errors_and_recover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["alpha"])
+    logger = debug_app.get_logger("test.api.select")
+    store = debug_app.SnapshotStore(
+        snapshot_path, loader=debug_app.load_snapshot, logger=logger
+    )
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    bad_session = client.post("/api/select", json={"session_id": "missing"})
+    assert bad_session.status_code == 400
+
+    bad_line = client.post("/api/select", json={"line_number": 99})
+    assert bad_line.status_code == 400
+
+    by_line = client.post("/api/select", json={"line_number": 1})
+    assert by_line.status_code == 200
+
+    snapshot_path.write_text(
+        "\n".join(
+            Snapshot(
+                created_at=datetime.now(UTC),
+                slices={_ExampleSlice: (_ExampleSlice("beta"),)},
+                tags={"session_id": "beta"},
+            ).to_json()
+            for _ in range(1)
+        )
+    )
+    reload_response = client.post("/api/reload")
+    assert reload_response.status_code == 200
+    assert reload_response.json()["session_id"] == "beta"
+
+
+def test_list_snapshots_skips_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = tmp_path / "base.jsonl"
+    _write_snapshot(base, ["value"])
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text("invalid")
+
+    original_stat = Path.stat
+
+    def fake_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        if path.name == "bad.jsonl":
+            raise OSError("fail")
+        return original_stat(path, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    monkeypatch.setattr(
+        debug_app.SnapshotStore,
+        "_iter_snapshot_files",
+        staticmethod(lambda root: [base, bad]),
+    )
+
+    store = debug_app.SnapshotStore(
+        base, loader=debug_app.load_snapshot, logger=debug_app.get_logger("test.list")
+    )
+    entries = store.list_snapshots()
+
+    assert [entry["name"] for entry in entries] == ["base.jsonl"]
+
+
+def test_snapshot_store_reload_fallbacks(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["original"])
+    store = debug_app.SnapshotStore(
+        snapshot_path,
+        loader=debug_app.load_snapshot,
+        logger=debug_app.get_logger("test.reload_fallback"),
+    )
+
+    _write_snapshot(snapshot_path, ["replacement"])
+    meta = store.reload()
+
+    assert meta.session_id.endswith("0")
+
+
+def test_snapshot_store_select_errors(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["only"])
+    store = debug_app.SnapshotStore(
+        snapshot_path,
+        loader=debug_app.load_snapshot,
+        logger=debug_app.get_logger("test.select_errors"),
+    )
+
+    with pytest.raises(debug_app.SnapshotLoadError):
+        store.select(session_id="missing")
+
+    with pytest.raises(debug_app.SnapshotLoadError):
+        store.select(line_number=99)
+
+
+def test_snapshot_store_rejects_empty_loader(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["value"])
+
+    def _empty_loader(path: Path) -> tuple[debug_app.LoadedSnapshot, ...]:
+        assert path == snapshot_path
+        return ()
+
+    with pytest.raises(debug_app.SnapshotLoadError):
+        debug_app.SnapshotStore(
+            snapshot_path,
+            loader=_empty_loader,
+            logger=debug_app.get_logger("test.empty_loader"),
+        )
+
+
 def test_snapshot_store_switch_rejects_outside_root(tmp_path: Path) -> None:
-    base_snapshot = tmp_path / "base.json"
+    base_snapshot = tmp_path / "base.jsonl"
     other_dir = tmp_path / "other"
     other_dir.mkdir()
-    other_snapshot = other_dir / "other.json"
+    other_snapshot = other_dir / "other.jsonl"
 
     _write_snapshot(base_snapshot, ["base"])
     _write_snapshot(other_snapshot, ["other"])
@@ -249,12 +456,12 @@ def test_normalize_path_requires_snapshots(tmp_path: Path) -> None:
 
 
 def test_index_and_error_endpoints(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path = tmp_path / "snapshot.jsonl"
     _write_snapshot(snapshot_path, ["a"])
 
     other_dir = tmp_path / "other"
     other_dir.mkdir()
-    other_snapshot = other_dir / "other.json"
+    other_snapshot = other_dir / "other.jsonl"
     _write_snapshot(other_snapshot, ["b"])
 
     logger = debug_app.get_logger("test.routes")
@@ -279,6 +486,27 @@ def test_index_and_error_endpoints(tmp_path: Path) -> None:
     wrong_root = client.post("/api/switch", json={"path": str(other_snapshot)})
     assert wrong_root.status_code == 400
     assert "Snapshot must live under" in wrong_root.json()["detail"]
+
+    bad_switch_session = client.post(
+        "/api/switch", json={"path": str(snapshot_path), "session_id": 123}
+    )
+    assert bad_switch_session.status_code == 400
+
+    bad_switch_line = client.post(
+        "/api/switch", json={"path": str(snapshot_path), "line_number": "one"}
+    )
+    assert bad_switch_line.status_code == 400
+
+    missing_selection = client.post("/api/select", json={})
+    assert missing_selection.status_code == 400
+    assert "session_id or line_number is required" in missing_selection.json()["detail"]
+
+    bad_line_number = client.post("/api/select", json={"line_number": "one"})
+    assert bad_line_number.status_code == 400
+    assert "line_number must be an integer" in bad_line_number.json()["detail"]
+
+    bad_session = client.post("/api/select", json={"session_id": 123})
+    assert bad_session.status_code == 400
 
 
 def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None:

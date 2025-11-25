@@ -101,6 +101,12 @@ p {
   align-items: start;
 }
 
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .panel {
   background: #fff;
   border-radius: 14px;
@@ -502,6 +508,77 @@ p {
   transition: box-shadow 120ms ease, border-color 120ms ease;
   box-shadow: 0 0 0 2px #94a3b8;
   border-color: #94a3b8;
+}
+
+.session-panel {
+  position: sticky;
+  top: 16px;
+}
+
+.session-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.session-group {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.session-group.active {
+  border-color: #94a3b8;
+  background: #eef2f7;
+}
+
+.session-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.session-group-header .pill {
+  background: #0f172a;
+  color: #fff;
+}
+
+.session-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  background: #fff;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.session-item.active {
+  border-color: #94a3b8;
+  background: #eef2f7;
+}
+
+.session-item-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.session-item-meta {
+  color: #475569;
+  font-size: 12px;
 }
 
 @media (max-width: 960px) {

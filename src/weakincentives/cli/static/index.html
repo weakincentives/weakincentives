@@ -15,23 +15,32 @@
       </div>
       <div class="actions">
         <label class="select-label">
-          <span>Switch snapshot</span>
+          <span>Switch snapshot file</span>
           <select id="snapshot-select"></select>
         </label>
       </div>
     </header>
     <main class="layout">
-      <aside class="panel">
-        <div class="panel-header">
-          <h2>Slices</h2>
-          <input
-            id="slice-filter"
-            type="search"
-            placeholder="Filter slices"
-            autocomplete="off"
-          />
+      <aside class="sidebar">
+        <div class="panel session-panel">
+          <div class="panel-header">
+            <h2>Sessions</h2>
+            <p class="muted">File → session tree</p>
+          </div>
+          <div id="session-tree" class="session-tree"></div>
         </div>
-        <ul id="slice-list"></ul>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Slices</h2>
+            <input
+              id="slice-filter"
+              type="search"
+              placeholder="Filter slices"
+              autocomplete="off"
+            />
+          </div>
+          <ul id="slice-list"></ul>
+        </div>
       </aside>
       <section class="content">
         <div id="meta-card" class="card">
