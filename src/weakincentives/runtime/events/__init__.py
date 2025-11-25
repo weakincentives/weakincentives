@@ -88,7 +88,6 @@ class PromptExecuted:
     result: Any
     session_id: UUID | None
     created_at: datetime
-    descriptor: PromptDescriptor | None = None
     value: Any | None = None
     event_id: UUID = field(default_factory=uuid4)
 
@@ -105,6 +104,7 @@ class PromptRendered:
     render_inputs: tuple[Any, ...]
     rendered_prompt: str
     created_at: datetime
+    descriptor: PromptDescriptor | None = None
     event_id: UUID = field(default_factory=uuid4)
 
     @property
