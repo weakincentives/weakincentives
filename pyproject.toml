@@ -81,6 +81,7 @@ dev = [
     "pytest-randomly>=4.0.1",
     "pytest-rerunfailures>=16.1",
     "pip-audit>=2.9.0",
+    "mutmut>=3.2.1",
     "ruff>=0.14.5",
     "pyright>=1.1.407",
     "ty>=0.0.1a26",
@@ -175,6 +176,20 @@ reportUnnecessaryTypeIgnoreComment = "error"
 reportUnreachable = "error"
 reportUnusedCallResult = "error"
 reportUnusedExpression = "error"
+
+[tool.mutmut]
+paths_to_mutate = ["src/weakincentives"]
+tests_dir = ["tests"]
+do_not_mutate = [
+    "snapshots/**",
+    "snapshots/**/*.py",
+    "test-repositories/**",
+    "build/**",
+    "dist/**",
+    ".uv-cache/**",
+]
+mutate_only_covered_lines = true
+pytest_add_cli_args = ["--strict-config", "--strict-markers", "-q"]
 
 [tool.ty]
 

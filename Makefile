@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check integration-tests demo all clean
+.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check mutation-test mutation-check integration-tests demo all clean
 
 # Format code with ruff
 format:
@@ -49,11 +49,19 @@ typecheck:
 test:
 	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= tests
 
+# Run mutation tests
+mutation-test:
+	@uv run --all-extras python build/run_mutation.py
+
+# Run mutation tests and enforce the score floor
+mutation-check:
+	@uv run --all-extras python build/run_mutation.py --check
+
 # Run OpenAI integration tests
 integration-tests:
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
-	        echo "OPENAI_API_KEY is not set; export it to run integration tests." >&2; \
-	        exit 1; \
+	echo "OPENAI_API_KEY is not set; export it to run integration tests." >&2; \
+	exit 1; \
 	fi
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
 

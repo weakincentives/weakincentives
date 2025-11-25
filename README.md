@@ -326,8 +326,16 @@ parsing raw message strings.
    - `make lint` / `make lint-fix`
    - `make typecheck` (Ty + Pyright, warnings fail the build)
    - `make test` (pytest via `build/run_pytest.py`, 100% coverage enforced)
+   - `make mutation-test` (mutmut via `build/run_mutation.py`); use `make mutation-check` to enforce the configured score gate
    - `make check` (aggregates the quiet checks above plus Bandit, Deptry, pip-audit,
      and markdown linting)
+
+Mutation testing is scoped to `src/weakincentives` via `mutation.toml`, which also
+excludes generated assets (for example `snapshots/` and `test-repositories/`). The
+mutation score reflects the percentage of exercised mutants killed by the tests;
+timeouts and suspicious mutants count against the score because they represent
+untested or weakly guarded branches. CI enforces the minimum score from
+`mutation.toml` to match the coverage gate's role for statement coverage.
 
 ### Integration tests
 

@@ -1,0 +1,16 @@
+[mutmut]
+paths_to_mutate = ["src/weakincentives"]
+tests_dir = ["tests"]
+do_not_mutate = [
+  "snapshots/**",
+  "snapshots/**/*.py",
+  "test-repositories/**",
+  "build/**",
+  "dist/**",
+  ".uv-cache/**",
+]
+mutate_only_covered_lines = true
+pytest_add_cli_args = ["--strict-config", "--strict-markers", "-q"]
+
+[gates]
+minimum_mutation_score = 90

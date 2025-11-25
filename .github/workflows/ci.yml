@@ -35,3 +35,6 @@ jobs:
     
     - name: Run tests
       run: make test
+
+    - name: Run mutation check
+      run: make mutation-check
