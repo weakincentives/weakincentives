@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
@@ -24,13 +24,11 @@ from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass, SupportsToolResult
 
-SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
-
-class Section(GenericParamsSpecializer[SectionParamsT], ABC):
+class Section[SectionParamsT: SupportsDataclass](
+    GenericParamsSpecializer[SectionParamsT], ABC
+):
     """Abstract building block for prompt content."""
-
-    _generic_owner_name: ClassVar[str | None] = "Section"
 
     def __init__(
         self,
