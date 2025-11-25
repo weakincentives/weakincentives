@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import ClassVar, TypeVar, cast
+from typing import cast
 
 from ..serde import clone as clone_dataclass
 from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
@@ -34,11 +34,10 @@ class ChaptersExpansionPolicy(StrEnum):
     INTENT_CLASSIFIER = "intent_classifier"
 
 
-ChapterParamsT = TypeVar("ChapterParamsT", bound=SupportsDataclass, covariant=True)
-
-
 @dataclass
-class Chapter(GenericParamsSpecializer[ChapterParamsT]):
+class Chapter[ChapterParamsT: SupportsDataclass](
+    GenericParamsSpecializer[ChapterParamsT]
+):
     """Container grouping sections under a shared visibility boundary."""
 
     key: str
@@ -50,8 +49,6 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
     _enabled_callable: Callable[[SupportsDataclass | None], bool] | None = field(
         init=False, repr=False, default=None
     )
-
-    _generic_owner_name: ClassVar[str | None] = "Chapter"
 
     def __post_init__(self) -> None:
         params_candidate = getattr(self.__class__, "_params_type", None)

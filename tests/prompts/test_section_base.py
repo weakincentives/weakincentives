@@ -164,36 +164,14 @@ def test_section_rejects_multiple_type_arguments() -> None:
     with pytest.raises(TypeError) as excinfo:
         Section.__class_getitem__((int, str))
 
-    assert str(excinfo.value) == "Section[...] expects a single type argument."
+    assert "Too many arguments for" in str(excinfo.value)
 
 
-def test_section_specialization_preserves_metadata() -> None:
-    specialized = Section[ExampleParams]
-
-    assert specialized.__module__ == Section.__module__
-    assert specialized.__qualname__ == Section.__qualname__
-    assert specialized.__name__ == Section.__name__
-
-
-def test_generic_params_specializer_defaults_to_class_name() -> None:
+def test_generic_params_specializer_rejects_multiple_type_arguments() -> None:
     with pytest.raises(TypeError) as excinfo:
         bad_args = (GenericParams, GenericParams)
         GenericParamsSpecializer.__class_getitem__(bad_args)
 
-    assert (
-        str(excinfo.value)
-        == "GenericParamsSpecializer[...] expects a single type argument."
-    )
-
-
-def test_generic_params_specializer_fallbacks_to_component_name() -> None:
-    class NamelessSpecializer(GenericParamsSpecializer[GenericParams]):
-        pass
-
-    NamelessSpecializer.__name__ = ""
-
-    with pytest.raises(TypeError) as excinfo:
-        bad_args = (GenericParams, GenericParams)
-        NamelessSpecializer.__class_getitem__(bad_args)
-
-    assert str(excinfo.value) == "Component[...] expects a single type argument."
+    message = str(excinfo.value)
+    assert "Too many arguments for" in message
+    assert "GenericParamsSpecializer" in message

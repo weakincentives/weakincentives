@@ -12,53 +12,44 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, Generic, TypeVar, cast
+from typing import ClassVar, get_args, get_origin
 
 from ._types import SupportsDataclass
 
-ParamsT = TypeVar("ParamsT", bound=SupportsDataclass, covariant=True)
 
-SelfClass = TypeVar(
-    "SelfClass",
-    bound="GenericParamsSpecializer[SupportsDataclass]",
-    covariant=True,
-)
-
-
-class GenericParamsSpecializer(Generic[ParamsT]):  # noqa: UP046
+class GenericParamsSpecializer[ParamsT: SupportsDataclass]:
     """Mixin providing ``ParamsT`` specialization for prompt components."""
 
     _params_type: ClassVar[type[SupportsDataclass] | None] = None
-    _generic_owner_name: ClassVar[str | None] = None
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        cls._params_type = cls._extract_params_type()
 
     @classmethod
-    def __class_getitem__(cls: type[SelfClass], item: object) -> type[SelfClass]:
-        params_type = cls._normalize_generic_argument(item)
-        specialized = cast(
-            "type[SelfClass]",
-            type(cls.__name__, (cls,), {}),
-        )
-        specialized.__name__ = cls.__name__
-        specialized.__qualname__ = cls.__qualname__
-        specialized.__module__ = cls.__module__
-        specialized._params_type = cast(type[SupportsDataclass], params_type)
-        return specialized
+    def _extract_params_type(cls) -> type[SupportsDataclass] | None:
+        for base in getattr(cls, "__orig_bases__", ()):  # type: ignore[attr-defined]
+            origin = get_origin(base) or base
+            if not isinstance(origin, type) or not issubclass(
+                origin, GenericParamsSpecializer
+            ):
+                continue
 
-    @classmethod
-    def _normalize_generic_argument(cls, item: object) -> object:
-        if isinstance(item, tuple):
-            raise TypeError(f"{cls._owner_name()}[...] expects a single type argument.")
-        return item
+            args = get_args(base)
+            if not args:
+                continue
 
-    @classmethod
-    def _owner_name(cls) -> str:
-        owner_name = getattr(cls, "_generic_owner_name", None)
-        if isinstance(owner_name, str) and owner_name:
-            return owner_name
-        name = getattr(cls, "__name__", None)
-        if isinstance(name, str) and name:
-            return name
-        return "Component"
+            candidate = args[0]
+            if isinstance(candidate, type):
+                return candidate
+
+        for base in cls.__mro__[1:]:
+            if isinstance(base, type) and issubclass(base, GenericParamsSpecializer):
+                parent_params_type = getattr(base, "_params_type", None)
+                if isinstance(parent_params_type, type):
+                    return parent_params_type
+
+        return None
 
 
 __all__ = ["GenericParamsSpecializer"]
