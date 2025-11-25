@@ -162,7 +162,9 @@ try:
         bus=event_bus,
         session=session,
     )
-    plan = response.output or parse_structured_output(Plan, response.text or "")
+    plan = response.output or parse_structured_output(
+        response.text or "", prompt.render()
+    )
     print("Plan:", plan)
 except PromptEvaluationError as exc:
     # Inspect exc.response for partial data or retry cues.
