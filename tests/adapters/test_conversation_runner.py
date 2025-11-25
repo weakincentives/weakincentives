@@ -205,8 +205,10 @@ def test_conversation_runner_includes_prompt_descriptor_in_event() -> None:
     runner = build_runner(rendered=rendered, provider=provider, bus=bus)
     runner.run()
 
-    event = cast(PromptExecuted, bus.events[-1])
-    assert event.descriptor is descriptor
+    rendered_event = next(
+        event for event in bus.events if isinstance(event, PromptRendered)
+    )
+    assert rendered_event.descriptor is descriptor
 
 
 def test_conversation_runner_publishes_prompt_rendered_event() -> None:
