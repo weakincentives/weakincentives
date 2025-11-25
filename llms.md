@@ -6,6 +6,11 @@ centered on typed prompts, tool contracts, replayable sessions, and
 provider-agnostic adapters so you can keep determinism, observability, and
 safety front and center while iterating on agent behaviors.
 
+Audience: the guide is written for autonomous coding agents such as OpenAI
+Codex (web and CLI), Claude Code, and Cursor Background Agents. It focuses on
+calls and data structures these agents wire up—no internal implementation
+knowledge required.
+
 This document is the package README published to PyPI. It focuses on the
 supported, public API surface you can depend on when wiring WINK into your own
 agent or orchestration system.
@@ -214,6 +219,28 @@ except PromptEvaluationError as exc:
 - **Logging**: `configure_logging()` wires a structured logger; `get_logger`
   retrieves a module-level logger. `StructuredLogger` is a protocol you can
   implement for custom sinks.
+
+## Session Snapshots for Debugging
+
+Use `Session.snapshot()` to capture an immutable JSON bundle of the session's
+state for offline debugging, replay, or handoff to another agent. Snapshots can
+be stored, shared, or restored with `Snapshot.from_json(...)` and
+`Session.rollback(...)` when you need to rehydrate session slices.
+
+Snapshot payloads follow a stable, schema-versioned layout:
+
+- **Envelope**: `version` (currently `"1"`), `created_at` (ISO timestamp), and
+  optional `parent_id` plus `children_ids` when sessions are nested.
+- **Slices**: Each entry captures one session slice. Fields include
+  `slice_type` (module-qualified dataclass for the slice key), `item_type`
+  (dataclass type stored within the slice), and `items` (a list of serialized
+  dataclass mappings produced by `weakincentives.serde.dump`).
+- **Deterministic ordering**: Slices and items are sorted during serialization
+  so diffs stay stable in version control.
+
+You can export snapshots as files, feed them into analysis tools, or inspect the
+raw JSON to understand what prompts, tool invocations, and reducer-managed data
+existed at a point in time—without needing live provider access.
 
 ## Deadlines (`weakincentives.Deadline`)
 

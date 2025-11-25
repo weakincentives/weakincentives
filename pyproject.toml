@@ -2,7 +2,7 @@
 name = "weakincentives"
 dynamic = ["version"]
 description = "Tools for developing and optimizing side effect free background agents"
-readme = "llms.txt"
+readme = "llms.md"
 authors = [
     { name = "Andrei Savu", email = "andrei@weakincentives.com" }
 ]
