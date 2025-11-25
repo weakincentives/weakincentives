@@ -326,8 +326,14 @@ parsing raw message strings.
    - `make lint` / `make lint-fix`
    - `make typecheck` (Ty + Pyright, warnings fail the build)
    - `make test` (pytest via `build/run_pytest.py`, 100% coverage enforced)
+   - `make mutation-test` (mutmut driven from `mutation.toml` for mutation coverage)
    - `make check` (aggregates the quiet checks above plus Bandit, Deptry, pip-audit,
      and markdown linting)
+
+`make mutation-check` mirrors the `mutation-test` target while enforcing the
+configured minimum score; CI uses a dedicated mutation step to block regressions,
+and the default `make check` target intentionally leaves mutation scoring out of the
+fast path.
 
 ### Integration tests
 
@@ -346,6 +352,16 @@ make integration-tests
 `make integration-tests` forwards `--no-cov` to pytest so you can exercise the adapter
 scenarios without tripping the 100% coverage gate configured for the unit test suite. The
 tests remain skipped when `OPENAI_API_KEY` is not present.
+
+### Mutation testing
+
+Mutation coverage complements the strict line-coverage floor. Mutants focus on the
+session reducer and serde hotspots (see `paths_to_mutate` in `mutation.toml`) and
+exclude generated assets and snapshots that would inflate the workload without
+improving signal. Run `make mutation-test` to execute mutmut locally; `make mutation-check`
+enforces an 80% score gate that CI uses alongside the coverage gate. The reported percentage reflects
+the share of mutants that were killed or timed out relative to all generated mutants;
+survivors and suspicious mutants reduce the score, and a run with no mutants scores 0%.
 
 ## Documentation
 

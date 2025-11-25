@@ -85,12 +85,13 @@ dev = [
     "pyright>=1.1.407",
     "ty>=0.0.1a26",
     "mdformat>=1.0.0",
+    "mutmut>=3.1.0",
 ]
 
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-extend-exclude = ["test-repositories"]
+extend-exclude = ["test-repositories", "mutants"]
 
 [tool.ruff.lint]
 extend-select = [
@@ -151,6 +152,45 @@ markers = [
 norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 reruns = 2
 reruns_delay = 0.5
+
+[tool.mutmut]
+paths_to_mutate = [
+    "src/weakincentives/runtime/session/reducers.py",
+    "src/weakincentives/runtime/session/session.py",
+    "src/weakincentives/serde/dataclass_serde.py",
+]
+tests_dir = ["tests"]
+do_not_mutate = [
+    "snapshots/*",
+    "tests/snapshots/*",
+    "test-repositories/*",
+    "integration-tests/*",
+    "build/*",
+    "dist/*",
+    "src/weakincentives/prompt/**",
+    "src/weakincentives/tools/**",
+]
+also_copy = ["code_reviewer_example.py", "test-repositories", "src/weakincentives"]
+pytest_add_cli_args = [
+    "-o",
+    "addopts=",
+    "--strict-config",
+    "--strict-markers",
+    "--no-cov",
+    "--maxfail=1",
+    "-q",
+]
+pytest_add_cli_args_test_selection = [
+    "-o",
+    "addopts=",
+    "--strict-config",
+    "--strict-markers",
+    "--no-cov",
+    "--maxfail=1",
+    "-q",
+]
+mutate_only_covered_lines = true
+debug = false
 
 [tool.coverage.run]
 
