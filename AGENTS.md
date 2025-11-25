@@ -50,6 +50,11 @@ work must comply with this file.
   the coverage floor; finish with `make test`.
 - Pytest is strict (`--strict-config`, `--strict-markers`) and retries flakes
   twice. Add fixtures to `tests/helpers/` when contracts need support.
+- Mutation testing protects behavioral intent. When you add tests for areas
+  covered by `mutation.toml` (runtime session reducers and serde hotspots), run
+  `make mutation-test` locally to ensure new assertions kill the generated
+  mutants. Survivors indicate missing checks; extend the test to exercise the
+  mutated behavior before relying on the mutation gate in CI.
 
 ## Code Conventions
 
