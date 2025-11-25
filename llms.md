@@ -57,14 +57,17 @@ Optional extras enable specific providers or tooling:
   deterministic primitives that research/review/coding agents (or humans) drive
   explicitly via prompts, tool handlers, and adapters.
 - Rendering is side-effect-free: `Prompt.render()` produces a typed
-  `RenderedPromptProtocol` containing message content, declared tools, and any
+  `RenderedPrompt` containing message content, declared tools, and any
   structured-output schema, but does not contact providers until you pass it to
   an adapter.
 - Tool handlers are synchronous callables; use them to gate filesystem or
-  network access and to enforce policy before applying patches. Return
-  `ToolResult.success(...)` or `.failure(...)` to keep session logs consistent.
-- `PromptResponse` exposes `message`, `tool_calls`, and provider metadata so you
-  can safely resume after partial failures or retries.
+  network access and to enforce policy before applying patches. Handlers accept
+  the typed params plus a keyword-only `context` and return `ToolResult`
+  instances (`ToolResult(message=..., value=..., success=True/False)`) to keep
+  session logs consistent.
+- `PromptResponse` carries the prompt name, rendered text, and parsed output
+  (when structured output is requested) so you can safely resume after partial
+  failures or retries.
 - Sessions are immutable ledgers: reducers consume `PromptRendered`,
   `PromptExecuted`, and `ToolInvoked` events that include `event_id`,
   `session_id`, timestamps, and provider metadata so you can join prompt and
@@ -79,23 +82,16 @@ replayable session.
 ```python
 from dataclasses import dataclass
 from weakincentives import (
-    Prompt,
     MarkdownSection,
+    Prompt,
     Tool,
     ToolContext,
     ToolResult,
-    PromptResponse,
     parse_structured_output,
 )
-from weakincentives.adapters import ProviderAdapter, PromptEvaluationError
-from weakincentives.adapters.api import OPENAI_ADAPTER_NAME
-from weakincentives.runtime import (
-    InProcessEventBus,
-    Session,
-    append,
-    select_latest,
-    configure_logging,
-)
+from weakincentives.adapters import PromptEvaluationError
+from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.runtime import InProcessEventBus, Session, configure_logging
 
 # 1) Define the structured plan you expect the model to return.
 @dataclass
@@ -110,56 +106,59 @@ class ApplyPatchArgs:
     diff: str
 
 
-def apply_patch(context: ToolContext[ApplyPatchArgs]) -> ToolResult:
-    patch = context.args.diff
+def apply_patch(params: ApplyPatchArgs, *, context: ToolContext) -> ToolResult[dict[str, bool]]:
+    patch = params.diff
     # ...apply the patch to the local filesystem...
-    return context.success(result={"applied": True})
+    return ToolResult(message="applied", value={"applied": True})
 
-apply_patch_tool = Tool(
+
+apply_patch_tool = Tool[ApplyPatchArgs, dict[str, bool]](
     name="apply_patch",
-    description="Apply a unified diff to the workspace",
-    args=ApplyPatchArgs,
+    description="Apply a unified diff to the workspace.",
     handler=apply_patch,
 )
 
 # 3) Compose a prompt with Markdown sections and the tool.
 user_goal = "Add a health-check endpoint to the FastAPI app"
-prompt = Prompt(
+prompt = Prompt[
+    Plan
+](
+    ns="agent",  # Namespace for grouping related prompts.
+    key="coding-agent",  # Unique identifier for overrides and session events.
     name="coding-agent",
     sections=[
         MarkdownSection(
-            heading="Goal",
-            content=user_goal,
+            title="Goal",
+            template=user_goal,
+            key="goal",
         ),
         MarkdownSection(
-            heading="Instructions",
-            content=(
+            title="Instructions",
+            template=(
                 "Propose a plan, then call `apply_patch` with a diff that satisfies"
                 " the goal."
             ),
+            key="instructions",
         ),
     ],
-    tools=[apply_patch_tool],
-    structured_output=Plan,  # Optional: request a typed plan before tools run.
+    tools=(apply_patch_tool,),
 )
 
 # 4) Run the prompt through an adapter and capture the response.
-adapter: ProviderAdapter = ProviderAdapter.for_name(
-    OPENAI_ADAPTER_NAME,
-    model="gpt-4o-mini",
-)
+adapter = OpenAIAdapter(model="gpt-4o-mini")
 
 configure_logging()
 event_bus = InProcessEventBus()
-session = Session(event_bus=event_bus)
+session = Session(bus=event_bus)
 
 try:
-    rendered = prompt.render()
-    response: PromptResponse = adapter.evaluate(rendered, session=session)
-    plan = parse_structured_output(Plan, response.message)
-    latest_patch_call = select_latest(session, event_type="tool_invocation")
+    response = adapter.evaluate(
+        prompt,
+        bus=event_bus,
+        session=session,
+    )
+    plan = response.output or parse_structured_output(Plan, response.text or "")
     print("Plan:", plan)
-    print("Last tool call:", latest_patch_call)
 except PromptEvaluationError as exc:
     # Inspect exc.response for partial data or retry cues.
     raise
@@ -177,25 +176,24 @@ except PromptEvaluationError as exc:
 
 ## Prompt Authoring (`weakincentives.prompt`)
 
-- **`Prompt`**: Construct with `name`, ordered `sections` (typically
-  `MarkdownSection`), optional `tools`, and optional `structured_output` (a
-  dataclass or `StructuredOutputConfig`). Call `render()` to obtain a
-  `RenderedPromptProtocol` instance the adapters accept.
-- **`MarkdownSection`**: Simple Markdown content with an optional `heading`. Use
-  multiple sections to keep prompt text modular and override-friendly.
-- **`Tool`**: Declarative tool description. Key fields:
+- **`Prompt`**: Construct with `ns`, `key`, optional `name`, ordered `sections`
+  (typically `MarkdownSection`), optional `tools`, and an optional
+  structured-output specialization (e.g., `Prompt[Plan]`). Call `render()` to
+  obtain a `RenderedPrompt` if you need to inspect the provider payload;
+  adapters render internally when you call `evaluate`.
+- **`MarkdownSection`**: Simple Markdown content built from a `title`,
+  `template`, and unique `key`. Use multiple sections to keep prompt text modular
+  and override-friendly.
+- **`Tool`**: Declarative tool description parameterized as `Tool[Params, Result]`. Key fields:
   - `name`: Identifier exposed to the model.
-  - `description`: Natural-language guidance.
-  - `args`: Dataclass defining argument schema.
-  - `handler`: Callable accepting `ToolContext[TArgs]` and returning
-    `ToolResult`.
-  - `renderable_result`: Optional `ToolRenderableResult` to predeclare the shape
-    of results.
-- **`ToolContext`**: Passed to tool handlers. Provides `args`, `session`, and
-  helpers like `success(result=...)` or `failure(error=...)` to build a
-  `ToolResult` with consistent metadata.
-- **`ToolResult`**: Immutable record of a handler outcome (`result` or
-  `error`).
+  - `description`: Natural-language guidance (1-200 ASCII characters).
+  - `handler`: Callable accepting `(params: Params, *, context: ToolContext)`
+    and returning `ToolResult[Result]`.
+- **`ToolContext`**: Passed to tool handlers. Provides `prompt`, optional
+  `rendered_prompt`, `adapter`, `session`, `event_bus`, and optional
+  `deadline`—use these to enforce policy and publish custom events.
+- **`ToolResult`**: Structured handler response with `message`, `value`, and a
+  `success` flag.
 - **`StructuredOutputConfig` / `parse_structured_output`**: Attach a
   dataclass-driven schema to a prompt or parse the final model message into a
   concrete instance. `OutputParseError` surfaces validation issues.
@@ -211,13 +209,12 @@ except PromptEvaluationError as exc:
 
 ## Adapter Layer (`weakincentives.adapters`)
 
-- **`ProviderAdapter`**: Primary entrypoint for sending rendered prompts to a
-  model provider. Construct via `ProviderAdapter.for_name(name, **kwargs)` using
-  `OPENAI_ADAPTER_NAME` or `LITELLM_ADAPTER_NAME` constants. The adapter handles
-  tool negotiation, streaming, and structured-output contracts.
-- **`PromptResponse`**: Carries the final model message, any emitted tool calls,
-  and provider metadata. Available even when `PromptEvaluationError` is raised
-  so you can inspect partial results.
+- **`OpenAIAdapter` / `LiteLLMAdapter`**: Primary entrypoints for sending prompts
+  to their respective providers. They handle tool negotiation, streaming, and
+  structured-output contracts.
+- **`PromptResponse`**: Carries the prompt name, rendered text, and parsed output
+  (when you request structured output). Available even when
+  `PromptEvaluationError` is raised so you can inspect partial results.
 - **`SessionProtocol`**: Minimal interface adapters expect when you pass
   `session=` to `evaluate`. `runtime.Session` implements it out of the box.
 - **Throttling**: Use `new_throttle_policy` or `ThrottlePolicy` to limit
