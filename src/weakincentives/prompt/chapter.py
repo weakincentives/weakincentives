@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import ClassVar, TypeVar, cast
 
-from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ..serde import clone as clone_dataclass
+from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass
@@ -32,6 +32,7 @@ class ChaptersExpansionPolicy(StrEnum):
 
     ALL_INCLUDED = "all_included"
     INTENT_CLASSIFIER = "intent_classifier"
+
 
 ChapterParamsT = TypeVar("ChapterParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -117,4 +118,6 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
             default_params=cloned_default,
             enabled=self.enabled,
         )
+
+
 __all__ = ["Chapter", "ChaptersExpansionPolicy"]

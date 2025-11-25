@@ -51,9 +51,7 @@ def test_normalize_enabled_predicate_handles_parameterized_callable() -> None:
     def enabled(params: ToggleParams) -> bool:
         return params.include
 
-    predicate = normalize_enabled_predicate(
-        enabled, params_type=ToggleParams
-    )
+    predicate = normalize_enabled_predicate(enabled, params_type=ToggleParams)
 
     assert predicate is not None
     assert predicate(ToggleParams(include=True)) is True

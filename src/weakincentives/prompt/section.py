@@ -26,6 +26,7 @@ from ._types import SupportsDataclass, SupportsToolResult
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
+
 class Section(GenericParamsSpecializer[SectionParamsT], ABC):
     """Abstract building block for prompt content."""
 
@@ -122,5 +123,6 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
                 raise TypeError("Section tools must be Tool instances.")
             normalized.append(cast(Tool[SupportsDataclass, SupportsToolResult], tool))
         return tuple(normalized)
+
 
 __all__ = ["Section"]
