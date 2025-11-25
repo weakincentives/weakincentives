@@ -353,7 +353,7 @@ def _create_runtime_context(
     override_tag: str | None = None,
 ) -> RuntimeContext:
     store = overrides_store or LocalPromptOverridesStore()
-    session = _build_logged_session(tags={"app": "code-reviewer", "role": "root"})
+    session = _build_logged_session(tags={"app": "code-reviewer"})
     bus = session.event_bus
     resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
     prompt = build_task_prompt(session=session)
@@ -375,10 +375,6 @@ def _build_logged_session(
     *, parent: Session | None = None, tags: Mapping[str, str] | None = None
 ) -> Session:
     session_tags: dict[str, str] = {"app": "code-reviewer"}
-    if parent is None:
-        session_tags["role"] = "root"
-    else:
-        session_tags["role"] = "child"
     if tags:
         session_tags.update(tags)
 
