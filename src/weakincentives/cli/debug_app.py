@@ -21,12 +21,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from types import MappingProxyType
 from urllib.parse import unquote
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -378,48 +379,121 @@ class SnapshotStore:
         return self._entries[self._index]
 
 
-def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:  # noqa: C901
+def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
     """Construct the FastAPI application for inspecting snapshots."""
 
     static_dir = files(__package__).joinpath("static")
-    app = FastAPI(title="wink snapshot debug server")
+    app = _create_app()
+    _configure_dependencies(app, store, logger)
+    _configure_middleware(app)
+    _mount_static_files(app, static_dir)
+    _register_routes(app, store, logger, static_dir)
+    return app
+
+
+def _create_app() -> FastAPI:
+    return FastAPI(title="wink snapshot debug server")
+
+
+def _configure_dependencies(
+    app: FastAPI, store: SnapshotStore, logger: StructuredLogger
+) -> None:
     app.state.snapshot_store = store
     app.state.logger = logger
+
+
+def _configure_middleware(app: FastAPI) -> None:
+    del app  # Middleware hook placeholder for future instrumentation.
+
+
+def _mount_static_files(app: FastAPI, static_dir: Traversable) -> None:
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
-        return {
-            "version": meta.version,
-            "created_at": meta.created_at,
-            "path": meta.path,
-            "session_id": meta.session_id,
-            "line_number": meta.line_number,
-            "tags": dict(meta.tags),
-            "validation_error": meta.validation_error,
-            "slices": [
-                {
-                    "slice_type": entry.slice_type,
-                    "item_type": entry.item_type,
-                    "count": entry.count,
-                }
-                for entry in meta.slices
-            ],
-        }
 
-    @app.get("/", response_class=HTMLResponse)
+def _register_routes(
+    app: FastAPI,
+    store: SnapshotStore,
+    logger: StructuredLogger,
+    static_dir: Traversable,
+) -> None:
+    router = APIRouter()
+    router.add_api_route(
+        "/",
+        _build_index_handler(static_dir),
+        methods=["GET"],
+        response_class=HTMLResponse,
+    )
+    router.add_api_route(
+        "/api/meta",
+        _build_meta_handler(store),
+        methods=["GET"],
+    )
+    router.add_api_route(
+        "/api/entries",
+        _build_entries_handler(store),
+        methods=["GET"],
+    )
+    router.add_api_route(
+        "/api/slices/{encoded_slice_type}",
+        _build_slice_handler(store),
+        methods=["GET"],
+    )
+    router.add_api_route(
+        "/api/raw",
+        _build_raw_handler(store),
+        methods=["GET"],
+    )
+    router.add_api_route(
+        "/api/reload",
+        _build_reload_handler(store, logger),
+        methods=["POST"],
+    )
+    router.add_api_route(
+        "/api/snapshots",
+        _build_snapshots_handler(store),
+        methods=["GET"],
+    )
+    router.add_api_route(
+        "/api/select",
+        _build_select_handler(store),
+        methods=["POST"],
+    )
+    router.add_api_route(
+        "/api/switch",
+        _build_switch_handler(store),
+        methods=["POST"],
+    )
+
+    app.include_router(router)
+
+
+def _build_index_handler(static_dir: Traversable) -> Callable[[], str]:
     def index() -> str:
         index_path = static_dir / "index.html"
         return index_path.read_text()
 
-    @app.get("/api/meta")
+    return index
+
+
+def _build_meta_handler(store: SnapshotStore) -> Callable[[], Mapping[str, JSONValue]]:
     def get_meta() -> Mapping[str, JSONValue]:
         return _meta_response(store.meta)
 
-    @app.get("/api/entries")
+    return get_meta
+
+
+def _build_entries_handler(
+    store: SnapshotStore,
+) -> Callable[[], list[Mapping[str, JSONValue]]]:
     def list_entries() -> list[Mapping[str, JSONValue]]:
         return store.list_entries()
 
-    @app.get("/api/slices/{encoded_slice_type}")
+    return list_entries
+
+
+def _build_slice_handler(
+    store: SnapshotStore,
+) -> Callable[..., Mapping[str, JSONValue]]:
     def get_slice(
         encoded_slice_type: str,
         *,
@@ -444,11 +518,19 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI: 
             "items": items,
         }
 
-    @app.get("/api/raw")
+    return get_slice
+
+
+def _build_raw_handler(store: SnapshotStore) -> Callable[[], JSONResponse]:
     def get_raw() -> JSONResponse:
         return JSONResponse(json.loads(store.raw_text))
 
-    @app.post("/api/reload")
+    return get_raw
+
+
+def _build_reload_handler(
+    store: SnapshotStore, logger: StructuredLogger
+) -> Callable[[], Mapping[str, JSONValue]]:
     def reload() -> Mapping[str, JSONValue]:
         try:
             meta = store.reload()
@@ -461,11 +543,21 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI: 
             )
             raise HTTPException(status_code=400, detail=str(error)) from error
 
-    @app.get("/api/snapshots")
+    return reload
+
+
+def _build_snapshots_handler(
+    store: SnapshotStore,
+) -> Callable[[], list[Mapping[str, JSONValue]]]:
     def list_snapshots() -> list[Mapping[str, JSONValue]]:
         return store.list_snapshots()
 
-    @app.post("/api/select")
+    return list_snapshots
+
+
+def _build_select_handler(
+    store: SnapshotStore,
+) -> Callable[[dict[str, JSONValue]], Mapping[str, JSONValue]]:
     def select(payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
         session_value = payload.get("session_id")
         line_value = payload.get("line_number")
@@ -492,7 +584,12 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI: 
 
         return _meta_response(meta)
 
-    @app.post("/api/switch")
+    return select
+
+
+def _build_switch_handler(
+    store: SnapshotStore,
+) -> Callable[[dict[str, JSONValue]], Mapping[str, JSONValue]]:
     def switch(payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
         path_value = payload.get("path")
         if not isinstance(path_value, str):
@@ -520,7 +617,27 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI: 
 
         return _meta_response(meta)
 
-    return app
+    return switch
+
+
+def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
+    return {
+        "version": meta.version,
+        "created_at": meta.created_at,
+        "path": meta.path,
+        "session_id": meta.session_id,
+        "line_number": meta.line_number,
+        "tags": dict(meta.tags),
+        "validation_error": meta.validation_error,
+        "slices": [
+            {
+                "slice_type": entry.slice_type,
+                "item_type": entry.item_type,
+                "count": entry.count,
+            }
+            for entry in meta.slices
+        ],
+    }
 
 
 def run_debug_server(
