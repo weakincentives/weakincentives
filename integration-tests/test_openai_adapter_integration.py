@@ -38,7 +38,7 @@ pytestmark = [
 ]
 
 _MODEL_ENV_VAR = "OPENAI_TEST_MODEL"
-_DEFAULT_MODEL = "gpt-5.1-codex"
+_DEFAULT_MODEL = "gpt-5.1"
 _PROMPT_NS = "integration/openai"
 
 

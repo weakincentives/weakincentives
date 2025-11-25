@@ -19,7 +19,6 @@ import logging
 import os
 import sys
 import textwrap
-import weakref
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -188,7 +187,6 @@ class CodeReviewApp:
             session=self.session,
             optimization_session=optimization_session,
         )
-        _persist_snapshot_tree(self.session)
         digest = result.digest.strip()
         print("\nWorkspace digest persisted for future review turns:\n")
         print(digest)
@@ -213,7 +211,7 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
 
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
-    model = os.getenv("OPENAI_MODEL", "gpt-5.1-codex")
+    model = os.getenv("OPENAI_MODEL", "gpt-5.1")
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
@@ -355,7 +353,7 @@ def _create_runtime_context(
     override_tag: str | None = None,
 ) -> RuntimeContext:
     store = overrides_store or LocalPromptOverridesStore()
-    session = _build_logged_session()
+    session = _build_logged_session(tags={"app": "code-reviewer"})
     bus = session.event_bus
     resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
     prompt = build_task_prompt(session=session)
@@ -373,10 +371,15 @@ def _create_runtime_context(
     )
 
 
-def _build_logged_session(*, parent: Session | None = None) -> Session:
-    session = Session(parent=parent)
+def _build_logged_session(
+    *, parent: Session | None = None, tags: Mapping[str, str] | None = None
+) -> Session:
+    session_tags: dict[str, str] = {"app": "code-reviewer"}
+    if tags:
+        session_tags.update(tags)
+
+    session = Session(parent=parent, tags=cast(Mapping[object, object], session_tags))
     _attach_logging_subscribers(session.event_bus)
-    _register_snapshot_persistence(session)
     return session
 
 
@@ -562,20 +565,6 @@ def _persist_snapshot_tree(root_session: Session) -> tuple[Path, ...]:
         if snapshot_path is not None:
             persisted.append(snapshot_path)
     return tuple(persisted)
-
-
-def _register_snapshot_persistence(session: Session) -> None:
-    """Register a finalizer that saves the session snapshot when it is collected."""
-
-    session_ref = weakref.ref(session)
-
-    def _finalize() -> None:
-        session_obj = session_ref()
-        if session_obj is None:
-            return
-        _persist_session_snapshot(session_obj)
-
-    weakref.finalize(session, _finalize)
 
 
 if __name__ == "__main__":

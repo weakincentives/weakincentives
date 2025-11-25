@@ -40,6 +40,7 @@ def _write_snapshot(path: Path, values: list[str]) -> None:
     snapshot = Snapshot(
         created_at=datetime.now(UTC),
         slices={_ExampleSlice: tuple(_ExampleSlice(value) for value in values)},
+        tags={"suite": "wink-debug"},
     )
     path.write_text(snapshot.to_json())
 
@@ -51,6 +52,7 @@ def test_load_snapshot_validates_schema(tmp_path: Path) -> None:
     loaded = debug_app.load_snapshot(snapshot_path)
 
     assert loaded.meta.version == "1"
+    assert loaded.meta.tags == {"suite": "wink-debug"}
     assert loaded.meta.slices[0].count == 1
 
 
@@ -103,6 +105,7 @@ def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
     assert meta_response.status_code == 200
     meta = meta_response.json()
     assert len(meta["slices"]) == 1
+    assert meta["tags"] == {"suite": "wink-debug"}
     slice_type = meta["slices"][0]["slice_type"]
 
     detail_response = client.get(f"/api/slices/{quote(slice_type)}?offset=1&limit=1")
@@ -195,6 +198,7 @@ def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
     )
 
     assert store.raw_payload["version"] == "1"
+    assert store.raw_payload["tags"] == {"suite": "wink-debug"}
     assert store.path == snapshot_path.resolve()
 
     listing = store.list_snapshots()

@@ -43,6 +43,21 @@ class SnapshotRestoreError(RuntimeError):
     """Raised when snapshot restoration fails due to incompatible payloads."""
 
 
+def _normalize_tags(
+    tags: Mapping[object, object] | None, *, error_cls: type[Exception]
+) -> Mapping[str, str]:
+    normalized: dict[str, str] = {}
+
+    if tags is not None:
+        for key, value in tags.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                msg = "Snapshot tags must be string key/value pairs"
+                raise error_cls(msg)
+            normalized[key] = value
+
+    return cast(Mapping[str, str], types.MappingProxyType(normalized))
+
+
 def normalize_snapshot_state(
     state: Mapping[SessionSliceType, SessionSlice],
 ) -> SnapshotState:
@@ -172,6 +187,9 @@ class SnapshotPayload:
     slices: tuple[SnapshotSlicePayload, ...]
     parent_id: str | None = None
     children_ids: tuple[str, ...] = ()
+    tags: Mapping[str, str] = field(
+        default_factory=lambda: cast(Mapping[str, str], types.MappingProxyType({}))
+    )
 
     @classmethod
     def from_json(cls, raw: str) -> SnapshotPayload:
@@ -215,12 +233,22 @@ class SnapshotPayload:
         slices = tuple(
             SnapshotSlicePayload.from_object(entry) for entry in slices_source
         )
+        tags_obj = payload.get("tags", {})
+        if not isinstance(tags_obj, Mapping):
+            raise SnapshotRestoreError("Snapshot tags must be an object")
+
+        tags = _normalize_tags(
+            cast(Mapping[object, object] | None, tags_obj),
+            error_cls=SnapshotRestoreError,
+        )
+
         return cls(
             version=version,
             created_at=created_at,
+            slices=slices,
             parent_id=parent_id,
             children_ids=tuple(children_ids),
-            slices=slices,
+            tags=tags,
         )
 
 
@@ -236,6 +264,9 @@ class Snapshot:
             SnapshotState,
             types.MappingProxyType({}),
         )
+    )
+    tags: Mapping[str, str] = field(
+        default_factory=lambda: cast(Mapping[str, str], types.MappingProxyType({}))
     )
 
     def __post_init__(self) -> None:
@@ -254,6 +285,14 @@ class Snapshot:
         )
         object.__setattr__(self, "parent_id", normalized_parent)
         object.__setattr__(self, "children_ids", normalized_children)
+        object.__setattr__(
+            self,
+            "tags",
+            _normalize_tags(
+                cast(Mapping[object, object], self.tags),
+                error_cls=SnapshotSerializationError,
+            ),
+        )
 
     @override
     def __hash__(self) -> int:
@@ -263,7 +302,10 @@ class Snapshot:
                 key=lambda item: _type_identifier(item[0]),
             )
         )
-        return hash((self.created_at, ordered, self.parent_id, self.children_ids))
+        ordered_tags = tuple(sorted(self.tags.items()))
+        return hash(
+            (self.created_at, ordered, self.parent_id, self.children_ids, ordered_tags)
+        )
 
     def to_json(self) -> str:
         """Serialize the snapshot to a JSON string."""
@@ -295,6 +337,7 @@ class Snapshot:
             "parent_id": str(self.parent_id) if self.parent_id is not None else None,
             "children_ids": [str(child) for child in self.children_ids],
             "slices": payload_slices,
+            "tags": dict(sorted(self.tags.items())),
         }
         return json.dumps(payload, sort_keys=True)
 
@@ -359,4 +402,5 @@ class Snapshot:
             parent_id=parent_id,
             children_ids=children_ids,
             slices=restored,
+            tags=payload.tags,
         )

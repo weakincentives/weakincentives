@@ -20,6 +20,7 @@ const elements = {
   sliceTitle: document.getElementById("slice-title"),
   itemCount: document.getElementById("item-count"),
   typeRow: document.getElementById("type-row"),
+  tagRow: document.getElementById("tag-row"),
   jsonViewer: document.getElementById("json-viewer"),
   reload: document.getElementById("reload-button"),
   copy: document.getElementById("copy-button"),
@@ -43,6 +44,27 @@ function renderMeta(meta) {
   elements.created.textContent = meta.created_at;
   elements.version.textContent = meta.version;
   elements.count.textContent = `${meta.slices.length} slices`;
+  elements.tagRow.innerHTML = "";
+
+  const tags = meta.tags || {};
+  const entries = Object.entries(tags);
+
+  if (!entries.length) {
+    const pill = document.createElement("span");
+    pill.className = "pill pill-quiet";
+    pill.textContent = "No tags set";
+    elements.tagRow.appendChild(pill);
+    return;
+  }
+
+  entries
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([key, value]) => {
+      const pill = document.createElement("span");
+      pill.className = "pill";
+      pill.textContent = `${key}: ${value}`;
+      elements.tagRow.appendChild(pill);
+    });
 }
 
 function renderSliceList() {

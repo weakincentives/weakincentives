@@ -217,7 +217,7 @@ bus = InProcessEventBus()
 session = Session(bus=bus)
 
 # The adapter connects to the LLM provider.
-adapter = OpenAIAdapter(model="gpt-4o-mini")
+adapter = OpenAIAdapter(model="gpt-5.1")
 
 # This is the main evaluation loop.
 response = adapter.evaluate(
@@ -334,8 +334,8 @@ coverage enforcement automatically:
 
 ```bash
 export OPENAI_API_KEY="sk-your-key"
-# Optionally override the default model (`gpt-4.1`).
-export OPENAI_TEST_MODEL="gpt-4.1-mini"
+# Optionally override the default model (`gpt-5.1`).
+export OPENAI_TEST_MODEL="gpt-5.1"
 
 make integration-tests
 ```

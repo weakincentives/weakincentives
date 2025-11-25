@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Protocol, Self
 
 from ...prompt._types import SupportsDataclass
@@ -57,6 +57,9 @@ class SessionProtocol(Protocol):
 
     @property
     def children(self) -> tuple[Self, ...]: ...
+
+    @property
+    def tags(self) -> Mapping[str, str]: ...
 
 
 __all__ = ["SessionProtocol", "SnapshotProtocol"]

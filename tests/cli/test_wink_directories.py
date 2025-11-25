@@ -36,6 +36,7 @@ def _write_snapshot(path: Path, *, created_at: datetime) -> None:
     snapshot = Snapshot(
         created_at=created_at,
         slices={_ExampleSlice: (_ExampleSlice(path.name),)},
+        tags={"suite": "wink-directories", "name": path.name},
     )
     path.write_text(snapshot.to_json())
 

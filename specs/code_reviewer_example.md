@@ -118,7 +118,7 @@ OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 
 Environment knobs:
 
-- `OPENAI_API_KEY` is required. `OPENAI_MODEL` defaults to `gpt-5.1-codex`.
+- `OPENAI_API_KEY` is required. `OPENAI_MODEL` defaults to `gpt-5.1`.
 - `CODE_REVIEW_PROMPT_TAG` customizes the overrides tag shared across runs.
 
 Interactive commands:
