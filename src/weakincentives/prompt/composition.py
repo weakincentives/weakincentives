@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any, ClassVar, Generic, TypeVar, cast, override
+from typing import Any, ClassVar, Generic, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
@@ -74,8 +74,10 @@ class DelegationSummarySection(MarkdownSection[DelegationParams]):
         )
 
     @override
-    def clone(self, **kwargs: object) -> DelegationSummarySection:
-        return DelegationSummarySection()
+    def clone(self, **kwargs: object) -> Self:
+        cls: type[Any] = type(self)
+        clone = cls()
+        return cast(Self, clone)
 
 
 class ParentPromptSection(Section[ParentPromptParams]):
@@ -114,16 +116,18 @@ class ParentPromptSection(Section[ParentPromptParams]):
         )
 
     @override
-    def clone(self, **kwargs: object) -> ParentPromptSection:
+    def clone(self, **kwargs: object) -> Self:
         cloned_default = (
             clone_dataclass(self.default_params)
             if self.default_params is not None
             else None
         )
-        return ParentPromptSection(
+        cls: type[Any] = type(self)
+        clone = cls(
             tools=self.tools(),
             default_params=cloned_default,
         )
+        return cast(Self, clone)
 
 
 class RecapSection(Section[RecapParams]):
@@ -149,8 +153,10 @@ class RecapSection(Section[RecapParams]):
         return prefix
 
     @override
-    def clone(self, **kwargs: object) -> RecapSection:
-        return RecapSection()
+    def clone(self, **kwargs: object) -> Self:
+        cls: type[Any] = type(self)
+        clone = cls()
+        return cast(Self, clone)
 
 
 class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP046

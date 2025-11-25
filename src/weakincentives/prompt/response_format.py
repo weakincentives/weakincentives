@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Final, Literal, override
+from typing import Any, Final, Literal, Self, cast, override
 
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
@@ -61,13 +61,15 @@ class ResponseFormatSection(MarkdownSection[ResponseFormatParams]):
         )
 
     @override
-    def clone(self, **kwargs: object) -> ResponseFormatSection:
+    def clone(self, **kwargs: object) -> Self:
         if self.default_params is None:
             msg = "ResponseFormatSection cannot clone without default_params."
             raise ValueError(msg)
         cloned_params = clone_dataclass(self.default_params)
-        return ResponseFormatSection(
+        cls: type[Any] = type(self)
+        clone = cls(
             params=cloned_params,
             enabled=self._enabled,
             accepts_overrides=self.accepts_overrides,
         )
+        return cast(Self, clone)

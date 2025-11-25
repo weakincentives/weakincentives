@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
+from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
     from .tool import Tool
@@ -91,7 +91,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         return set()
 
     @abstractmethod
-    def clone(self, **kwargs: object) -> Section[SectionParamsT]:
+    def clone(self: Self, **kwargs: object) -> Self:
         """Return a deep copy of the section and its children."""
 
     def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:

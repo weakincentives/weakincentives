@@ -16,7 +16,7 @@ import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any, TypeVar, override
+from typing import Any, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
@@ -115,7 +115,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
         return self.template
 
     @override
-    def clone(self, **kwargs: object) -> MarkdownSection[MarkdownParamsT]:
+    def clone(self, **kwargs: object) -> Self:
         cloned_children: list[Section[SupportsDataclass]] = []
         for child in self.children:
             if not hasattr(child, "clone"):
@@ -130,7 +130,8 @@ class MarkdownSection(Section[MarkdownParamsT]):
             else None
         )
 
-        return self.__class__(
+        cls: type[Any] = type(self)
+        clone = cls(
             title=self.title,
             template=self.template,
             key=self.key,
@@ -140,6 +141,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
             tools=self.tools(),
             accepts_overrides=self.accepts_overrides,
         )
+        return cast(Self, clone)
 
 
 __all__ = ["MarkdownSection"]
