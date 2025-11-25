@@ -2,7 +2,7 @@
 .weakincentives/
 
 # Session snapshots
-snapshots/*.json
+snapshots/*.jsonl
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
