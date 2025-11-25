@@ -352,25 +352,44 @@ button.ghost:hover {
 
 /* --- Slice List --- */
 
-#slice-list {
+.slice-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px;
+}
+
+.slice-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slice-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.slice-list {
   list-style: none;
   margin: 0;
-  padding: 8px;
+  padding: 6px 0 0;
   overflow-y: auto;
-  max-height: 80vh;
+  max-height: 36vh;
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
 }
 
-#slice-list::-webkit-scrollbar {
+.slice-list::-webkit-scrollbar {
   width: 6px;
 }
 
-#slice-list::-webkit-scrollbar-track {
+.slice-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
-#slice-list::-webkit-scrollbar-thumb {
+.slice-list::-webkit-scrollbar-thumb {
   background-color: var(--color-border);
   border-radius: 20px;
 }

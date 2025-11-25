@@ -8,6 +8,7 @@ const state = {
   closedPaths: new Set(),
   expandDepth: 2,
   searchQuery: "",
+  sliceBuckets: { state: [], event: [] },
 };
 
 const elements = {
@@ -17,7 +18,10 @@ const elements = {
   created: document.getElementById("meta-created"),
   version: document.getElementById("meta-version"),
   count: document.getElementById("meta-count"),
-  sliceList: document.getElementById("slice-list"),
+  stateSliceList: document.getElementById("state-slice-list"),
+  eventSliceList: document.getElementById("event-slice-list"),
+  stateSliceCount: document.getElementById("state-slice-count"),
+  eventSliceCount: document.getElementById("event-slice-count"),
   sliceFilter: document.getElementById("slice-filter"),
   sliceTitle: document.getElementById("slice-title"),
   itemCount: document.getElementById("item-count"),
@@ -141,22 +145,58 @@ function renderSessionTree() {
   });
 }
 
+async function isEventSlice(entry) {
+  if (!entry.count) {
+    return false;
+  }
+  try {
+    const encoded = encodeURIComponent(entry.slice_type);
+    const detail = await fetchJSON(`/api/slices/${encoded}?limit=1`);
+    const sample = detail.items[0];
+    if (sample && typeof sample === "object") {
+      const hasEventId = Object.prototype.hasOwnProperty.call(sample, "event_id");
+      const hasCreatedAt = Object.prototype.hasOwnProperty.call(sample, "created_at");
+      return hasEventId && hasCreatedAt;
+    }
+  } catch (error) {
+    console.warn("Failed to classify slice", entry.slice_type, error);
+  }
+  return false;
+}
+
+async function bucketSlices(entries) {
+  const buckets = { state: [], event: [] };
+  await Promise.all(
+    entries.map(async (entry) => {
+      const isEvent = await isEventSlice(entry);
+      buckets[isEvent ? "event" : "state"].push(entry);
+    })
+  );
+  return buckets;
+}
+
 function renderSliceList() {
   const filter = elements.sliceFilter.value.toLowerCase().trim();
-  elements.sliceList.innerHTML = "";
-  const slices = state.meta ? state.meta.slices : [];
-
-  slices
-    .filter(
+  const renderBucket = (target, entries, emptyLabel) => {
+    target.innerHTML = "";
+    const filtered = entries.filter(
       (entry) =>
         entry.slice_type.toLowerCase().includes(filter) ||
         entry.item_type.toLowerCase().includes(filter)
-    )
-    .forEach((entry) => {
+    );
+
+    if (!filtered.length) {
+      const empty = document.createElement("li");
+      empty.className = "slice-item muted";
+      empty.textContent = emptyLabel;
+      target.appendChild(empty);
+      return;
+    }
+
+    filtered.forEach((entry) => {
       const item = document.createElement("li");
       item.className =
-        "slice-item" +
-        (entry.slice_type === state.selectedSlice ? " active" : "");
+        "slice-item" + (entry.slice_type === state.selectedSlice ? " active" : "");
 
       const title = document.createElement("div");
       title.className = "slice-title";
@@ -169,8 +209,22 @@ function renderSliceList() {
       item.appendChild(title);
       item.appendChild(subtitle);
       item.addEventListener("click", () => selectSlice(entry.slice_type));
-      elements.sliceList.appendChild(item);
+      target.appendChild(item);
     });
+  };
+
+  renderBucket(
+    elements.stateSliceList,
+    state.sliceBuckets.state,
+    "No state slices match"
+  );
+  renderBucket(
+    elements.eventSliceList,
+    state.sliceBuckets.event,
+    "No event slices match"
+  );
+  elements.stateSliceCount.textContent = `${state.sliceBuckets.state.length} total`;
+  elements.eventSliceCount.textContent = `${state.sliceBuckets.event.length} total`;
 }
 
 function renderSliceDetail(slice) {
@@ -211,6 +265,7 @@ async function selectSlice(sliceType) {
 async function refreshMeta() {
   const meta = await fetchJSON("/api/meta");
   state.meta = meta;
+  state.sliceBuckets = await bucketSlices(meta.slices);
   renderMeta(meta);
   renderSliceList();
   if (!state.selectedSlice && meta.slices.length > 0) {

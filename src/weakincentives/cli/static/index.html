@@ -39,7 +39,22 @@
               autocomplete="off"
             />
           </div>
-          <ul id="slice-list"></ul>
+          <div class="slice-sections">
+            <div class="slice-section">
+              <div class="slice-section-header">
+                <p class="label">State Slices</p>
+                <span class="pill pill-quiet" id="state-slice-count"></span>
+              </div>
+              <ul id="state-slice-list" class="slice-list"></ul>
+            </div>
+            <div class="slice-section">
+              <div class="slice-section-header">
+                <p class="label">Event Slices</p>
+                <span class="pill pill-quiet" id="event-slice-count"></span>
+              </div>
+              <ul id="event-slice-list" class="slice-list"></ul>
+            </div>
+          </div>
         </div>
       </aside>
       <section class="content">
