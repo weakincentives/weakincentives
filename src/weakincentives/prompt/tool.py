@@ -201,7 +201,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
             raw_result_annotation,
         )
 
-    def _validate_handler(  # noqa: C901
+    def _validate_handler(
         self,
         handler: object,
         params_type: type[SupportsDataclass],
@@ -218,6 +218,35 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         signature = inspect.signature(callable_handler)
         parameters = list(signature.parameters.values())
 
+        parameter, context_parameter = self._validate_parameter_count(
+            parameters,
+            params_type,
+        )
+
+        self._validate_parameter_kind(parameter, params_type)
+        self._validate_context_parameter(context_parameter, params_type)
+
+        hints = self._resolve_annotations(callable_handler)
+        annotation = hints.get(parameter.name, parameter.annotation)
+        self._validate_parameter_annotation(annotation, params_type)
+
+        context_annotation = hints.get(
+            context_parameter.name, context_parameter.annotation
+        )
+        self._validate_context_annotation(context_annotation, params_type)
+
+        self._validate_return_annotation(
+            hints,
+            signature,
+            result_annotation,
+            params_type,
+        )
+
+    @staticmethod
+    def _validate_parameter_count(
+        parameters: list[inspect.Parameter],
+        params_type: type[SupportsDataclass],
+    ) -> tuple[inspect.Parameter, inspect.Parameter]:
         if len(parameters) != 2:
             raise PromptValidationError(
                 "Tool handler must accept exactly one positional argument and the keyword-only 'context' parameter.",
@@ -227,7 +256,13 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
         parameter = parameters[0]
         context_parameter = parameters[1]
+        return parameter, context_parameter
 
+    @staticmethod
+    def _validate_parameter_kind(
+        parameter: inspect.Parameter,
+        params_type: type[SupportsDataclass],
+    ) -> None:
         if parameter.kind not in (
             inspect.Parameter.POSITIONAL_ONLY,
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
@@ -238,6 +273,11 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 placeholder="handler",
             )
 
+    @staticmethod
+    def _validate_context_parameter(
+        context_parameter: inspect.Parameter,
+        params_type: type[SupportsDataclass],
+    ) -> None:
         if context_parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
             raise PromptValidationError(
                 "Tool handler must declare a keyword-only 'context' parameter.",
@@ -257,12 +297,20 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 placeholder="handler",
             )
 
+    @staticmethod
+    def _resolve_annotations(
+        callable_handler: Callable[..., ToolResult[ResultT]],
+    ) -> dict[str, object]:
         try:
-            hints = get_type_hints(callable_handler, include_extras=True)
+            return get_type_hints(callable_handler, include_extras=True)
         except Exception:
-            hints = {}
+            return {}
 
-        annotation = hints.get(parameter.name, parameter.annotation)
+    @staticmethod
+    def _validate_parameter_annotation(
+        annotation: object,
+        params_type: type[SupportsDataclass],
+    ) -> None:
         if annotation is inspect.Parameter.empty:
             raise PromptValidationError(
                 "Tool handler parameter must be annotated with ParamsT.",
@@ -278,9 +326,11 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 placeholder="handler",
             )
 
-        context_annotation = hints.get(
-            context_parameter.name, context_parameter.annotation
-        )
+    @staticmethod
+    def _validate_context_annotation(
+        context_annotation: object,
+        params_type: type[SupportsDataclass],
+    ) -> None:
         if context_annotation is inspect.Parameter.empty:
             raise PromptValidationError(
                 "Tool handler must annotate the 'context' parameter with ToolContext.",
@@ -296,6 +346,13 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 placeholder="handler",
             )
 
+    def _validate_return_annotation(
+        self,
+        hints: dict[str, object],
+        signature: inspect.Signature,
+        result_annotation: object,
+        params_type: type[SupportsDataclass],
+    ) -> None:
         return_annotation = hints.get("return", signature.return_annotation)
         if return_annotation is inspect.Signature.empty:
             raise PromptValidationError(
