@@ -96,7 +96,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     _result_annotation: ResultT = field(init=False, repr=False)
     accepts_overrides: bool = True
 
-    def __post_init__(self) -> None:
+    def __post_init__(self) -> None:  # noqa: C901
         params_attr = getattr(self, "params_type", None)
         params_type: type[SupportsDataclass] | None = (
             params_attr if isinstance(params_attr, type) else None
@@ -178,7 +178,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         self.name = name_clean
         self.description = description_clean
 
-    def _validate_handler(
+    def _validate_handler(  # noqa: C901
         self,
         handler: object,
         params_type: type[SupportsDataclass],

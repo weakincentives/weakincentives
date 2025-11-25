@@ -108,121 +108,190 @@ def _apply_constraints[ConstrainedT](
     if not meta:
         return value
 
-    result: object = value
-    if isinstance(result, str):
-        if meta.get("strip"):
-            result = result.strip()
-        if meta.get("lower") or meta.get("lowercase"):
-            result = result.lower()
-        if meta.get("upper") or meta.get("uppercase"):
-            result = result.upper()
+    normalized_value = _normalize_string(value, meta)
+    _validate_numeric_constraints(normalized_value, meta, path)
+    _validate_length(normalized_value, meta, path)
+    _validate_pattern(normalized_value, meta, path)
+    _validate_membership(normalized_value, meta, path)
+    validated = _run_validators(normalized_value, meta, path)
+    converted = _apply_converter(validated, meta, path)
+    return cast(ConstrainedT, converted)
 
-    def _normalize_option(option: JSONValue) -> JSONValue:
-        if isinstance(result, str) and isinstance(option, str):
-            candidate: str = option
-            if meta.get("strip"):
-                candidate = candidate.strip()
-            if meta.get("lower") or meta.get("lowercase"):
-                candidate = candidate.lower()
-            if meta.get("upper") or meta.get("uppercase"):
-                candidate = candidate.upper()
-            return candidate
-        return option
 
-    def _fail(message: str) -> None:
-        raise ValueError(f"{path}: {message}")
+def _normalize_string(value: object, meta: Mapping[str, object]) -> object:
+    if not isinstance(value, str):
+        return value
 
-    numeric_value = result
-    if isinstance(numeric_value, (int, float, Decimal)):
-        numeric = numeric_value
-        minimum_candidate = meta.get("ge", meta.get("minimum"))
-        if (
-            isinstance(minimum_candidate, (int, float, Decimal))
-            and numeric < minimum_candidate
-        ):
-            _fail(f"must be >= {minimum_candidate}")
-        exclusive_min_candidate = meta.get("gt", meta.get("exclusiveMinimum"))
-        if (
-            isinstance(exclusive_min_candidate, (int, float, Decimal))
-            and numeric <= exclusive_min_candidate
-        ):
-            _fail(f"must be > {exclusive_min_candidate}")
-        maximum_candidate = meta.get("le", meta.get("maximum"))
-        if (
-            isinstance(maximum_candidate, (int, float, Decimal))
-            and numeric > maximum_candidate
-        ):
-            _fail(f"must be <= {maximum_candidate}")
-        exclusive_max_candidate = meta.get("lt", meta.get("exclusiveMaximum"))
-        if (
-            isinstance(exclusive_max_candidate, (int, float, Decimal))
-            and numeric >= exclusive_max_candidate
-        ):
-            _fail(f"must be < {exclusive_max_candidate}")
+    result = value
+    if meta.get("strip"):
+        result = result.strip()
+    if meta.get("lower") or meta.get("lowercase"):
+        result = result.lower()
+    if meta.get("upper") or meta.get("uppercase"):
+        result = result.upper()
+    return result
 
-    if isinstance(result, Sized):
-        min_length_candidate = meta.get("min_length", meta.get("minLength"))
-        if isinstance(min_length_candidate, int) and len(result) < min_length_candidate:
-            _fail(f"length must be >= {min_length_candidate}")
-        max_length_candidate = meta.get("max_length", meta.get("maxLength"))
-        if isinstance(max_length_candidate, int) and len(result) > max_length_candidate:
-            _fail(f"length must be <= {max_length_candidate}")
+
+def _validate_numeric_constraints(
+    candidate: object, meta: Mapping[str, object], path: str
+) -> None:
+    if not isinstance(candidate, (int, float, Decimal)):
+        return
+
+    numeric = candidate
+    _enforce_bound(numeric, meta.get("ge", meta.get("minimum")), path, "ge")
+    _enforce_bound(numeric, meta.get("gt", meta.get("exclusiveMinimum")), path, "gt")
+    _enforce_bound(numeric, meta.get("le", meta.get("maximum")), path, "le")
+    _enforce_bound(numeric, meta.get("lt", meta.get("exclusiveMaximum")), path, "lt")
+
+
+def _enforce_bound(
+    numeric: Decimal | float | int, bound: object, path: str, kind: str
+) -> None:
+    if not isinstance(bound, (int, float, Decimal)):
+        return
+
+    match kind:
+        case "ge" if numeric < bound:
+            _fail(path, f"must be >= {bound}")
+        case "gt" if numeric <= bound:
+            _fail(path, f"must be > {bound}")
+        case "le" if numeric > bound:
+            _fail(path, f"must be <= {bound}")
+        case "lt" if numeric >= bound:
+            _fail(path, f"must be < {bound}")
+        case _:
+            pass
+
+
+def _validate_length(candidate: object, meta: Mapping[str, object], path: str) -> None:
+    if not isinstance(candidate, Sized):
+        return
+
+    min_length_candidate = meta.get("min_length", meta.get("minLength"))
+    if isinstance(min_length_candidate, int) and len(candidate) < min_length_candidate:
+        _fail(path, f"length must be >= {min_length_candidate}")
+
+    max_length_candidate = meta.get("max_length", meta.get("maxLength"))
+    if isinstance(max_length_candidate, int) and len(candidate) > max_length_candidate:
+        _fail(path, f"length must be <= {max_length_candidate}")
+
+
+def _validate_pattern(candidate: object, meta: Mapping[str, object], path: str) -> None:
+    if not isinstance(candidate, str):
+        return
 
     pattern = meta.get("regex", meta.get("pattern"))
-    if isinstance(pattern, str) and isinstance(result, str):
-        if not re.search(pattern, result):
-            _fail(f"does not match pattern {pattern}")
-    elif isinstance(pattern, Pattern) and isinstance(result, str):
+    if isinstance(pattern, str):
+        if not re.search(pattern, candidate):
+            _fail(path, f"does not match pattern {pattern}")
+    elif isinstance(pattern, Pattern):
         compiled_pattern = cast(Pattern[str], pattern)
-        if not compiled_pattern.search(result):
-            _fail(f"does not match pattern {pattern}")
+        if not compiled_pattern.search(candidate):
+            _fail(path, f"does not match pattern {pattern}")
 
+
+def _validate_membership(
+    candidate: object, meta: Mapping[str, object], path: str
+) -> None:
+    _validate_inclusion(candidate, meta, path)
+    _validate_exclusion(candidate, meta, path)
+
+
+def _validate_inclusion(
+    candidate: object, meta: Mapping[str, object], path: str
+) -> None:
     members = meta.get("in") or meta.get("enum")
-    if isinstance(members, Iterable) and not isinstance(members, (str, bytes)):
-        options_iter = cast(Iterable[JSONValue], members)
-        options = _ordered_values(options_iter)
-        normalized_options = [_normalize_option(option) for option in options]
-        if result not in normalized_options:
-            _fail(f"must be one of {normalized_options}")
+    if not isinstance(members, Iterable) or isinstance(members, (str, bytes)):
+        return
 
+    options_iter = cast(Iterable[JSONValue], members)
+    options = _ordered_values(options_iter)
+    normalized_options = [
+        _normalize_option(option, candidate, meta) for option in options
+    ]
+    if candidate not in normalized_options:
+        _fail(path, f"must be one of {normalized_options}")
+
+
+def _validate_exclusion(
+    candidate: object, meta: Mapping[str, object], path: str
+) -> None:
     not_members = meta.get("not_in")
-    if isinstance(not_members, Iterable) and not isinstance(not_members, (str, bytes)):
-        forbidden_iter = cast(Iterable[JSONValue], not_members)
-        forbidden = _ordered_values(forbidden_iter)
-        normalized_forbidden = [_normalize_option(option) for option in forbidden]
-        if result in normalized_forbidden:
-            _fail(f"may not be one of {normalized_forbidden}")
+    if not isinstance(not_members, Iterable) or isinstance(not_members, (str, bytes)):
+        return
 
+    forbidden_iter = cast(Iterable[JSONValue], not_members)
+    forbidden = _ordered_values(forbidden_iter)
+    normalized_forbidden = [
+        _normalize_option(option, candidate, meta) for option in forbidden
+    ]
+    if candidate in normalized_forbidden:
+        _fail(path, f"may not be one of {normalized_forbidden}")
+
+
+def _normalize_option(
+    option: JSONValue, candidate: object, meta: Mapping[str, object]
+) -> JSONValue:
+    if not isinstance(candidate, str) or not isinstance(option, str):
+        return option
+
+    normalized_option = option
+    if meta.get("strip"):
+        normalized_option = normalized_option.strip()
+    if meta.get("lower") or meta.get("lowercase"):
+        normalized_option = normalized_option.lower()
+    if meta.get("upper") or meta.get("uppercase"):
+        normalized_option = normalized_option.upper()
+    return normalized_option
+
+
+def _run_validators(candidate: object, meta: Mapping[str, object], path: str) -> object:
     validators = meta.get("validators", meta.get("validate"))
-    if validators:
-        callables: Iterable[Callable[[ConstrainedT], ConstrainedT]]
-        if isinstance(validators, Iterable) and not isinstance(
-            validators, (str, bytes)
-        ):
-            callables = cast(
-                Iterable[Callable[[ConstrainedT], ConstrainedT]], validators
-            )
-        else:
-            callables = (cast(Callable[[ConstrainedT], ConstrainedT], validators),)
-        for validator in callables:
-            try:
-                result = validator(cast(ConstrainedT, result))
-            except (TypeError, ValueError) as error:
-                raise type(error)(f"{path}: {error}") from error
-            except Exception as error:  # pragma: no cover - defensive
-                raise ValueError(f"{path}: validator raised {error!r}") from error
+    if not validators:
+        return candidate
 
+    callables: Iterable[Callable[[object], object]]
+    if isinstance(validators, Iterable) and not isinstance(validators, (str, bytes)):
+        callables = cast(Iterable[Callable[[object], object]], validators)
+    else:
+        callables = (cast(Callable[[object], object], validators),)
+
+    current = candidate
+    for validator in callables:
+        current = _run_validator(validator, current, path)
+    return current
+
+
+def _run_validator(
+    validator: Callable[[object], object], candidate: object, path: str
+) -> object:
+    try:
+        return validator(candidate)
+    except (TypeError, ValueError) as error:
+        raise type(error)(f"{path}: {error}") from error
+    except Exception as error:  # pragma: no cover - defensive
+        raise ValueError(f"{path}: validator raised {error!r}") from error
+
+
+def _apply_converter(
+    candidate: object, meta: Mapping[str, object], path: str
+) -> object:
     converter = meta.get("convert", meta.get("transform"))
-    if converter:
-        converter_fn = cast(Callable[[ConstrainedT], ConstrainedT], converter)
-        try:
-            result = converter_fn(cast(ConstrainedT, result))
-        except (TypeError, ValueError) as error:
-            raise type(error)(f"{path}: {error}") from error
-        except Exception as error:  # pragma: no cover - defensive
-            raise ValueError(f"{path}: converter raised {error!r}") from error
+    if not converter:
+        return candidate
 
-    return cast(ConstrainedT, result)
+    converter_fn = cast(Callable[[object], object], converter)
+    try:
+        return converter_fn(candidate)
+    except (TypeError, ValueError) as error:
+        raise type(error)(f"{path}: {error}") from error
+    except Exception as error:  # pragma: no cover - defensive
+        raise ValueError(f"{path}: converter raised {error!r}") from error
+
+
+def _fail(path: str, message: str) -> None:
+    raise ValueError(f"{path}: {message}")
 
 
 __all__ = [

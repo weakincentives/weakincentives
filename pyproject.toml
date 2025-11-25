@@ -99,6 +99,7 @@ extend-select = [
     "B",
     "SIM",
     "C4",
+    "C90",
     "ANN",
     "RET",
     "RSE",
@@ -116,6 +117,9 @@ fixable = ["I001", "F401"]
 [tool.ruff.lint.isort]
 known-first-party = ["weakincentives"]
 combine-as-imports = true
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Version 2.0 \(the "License"\);

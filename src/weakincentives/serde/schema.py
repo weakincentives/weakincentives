@@ -67,7 +67,7 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
     return schema_meta
 
 
-def _schema_for_type(
+def _schema_for_type(  # noqa: C901
     typ: object,
     meta: Mapping[str, object] | None,
     alias_generator: Callable[[str], str] | None,

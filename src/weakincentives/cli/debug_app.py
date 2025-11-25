@@ -378,7 +378,7 @@ class SnapshotStore:
         return self._entries[self._index]
 
 
-def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
+def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:  # noqa: C901
     """Construct the FastAPI application for inspecting snapshots."""
 
     static_dir = files(__package__).joinpath("static")

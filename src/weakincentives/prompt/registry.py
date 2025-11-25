@@ -230,7 +230,7 @@ class PromptRegistry:
 
         self._register_section(section, path=path, depth=depth)
 
-    def _register_section(
+    def _register_section(  # noqa: C901
         self,
         section: Section[SupportsDataclass],
         *,

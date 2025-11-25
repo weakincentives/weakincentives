@@ -228,7 +228,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         self._tool_choice: ToolChoice = tool_choice
 
     @override
-    def evaluate(
+    def evaluate(  # noqa: C901
         self,
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,

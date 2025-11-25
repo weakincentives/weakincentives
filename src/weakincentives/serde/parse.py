@@ -56,7 +56,7 @@ def _bool_from_str(value: str) -> bool:
     raise TypeError(f"Cannot interpret '{value}' as boolean")
 
 
-def _coerce_to_type(
+def _coerce_to_type(  # noqa: C901
     value: object,
     typ: object,
     meta: Mapping[str, object] | None,
@@ -336,7 +336,7 @@ def _find_key(
     return None
 
 
-def parse[T](
+def parse[T](  # noqa: C901
     cls: type[T],
     data: Mapping[str, object] | object,
     *,

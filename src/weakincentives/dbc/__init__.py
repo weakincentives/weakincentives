@@ -244,7 +244,7 @@ def _check_invariants(
         )
 
 
-def invariant(*predicates: ContractCallable) -> Callable[[type[T]], type[T]]:
+def invariant(*predicates: ContractCallable) -> Callable[[type[T]], type[T]]:  # noqa: C901
     """Enforce invariants before and after public method calls."""
 
     if not predicates:
@@ -253,7 +253,7 @@ def invariant(*predicates: ContractCallable) -> Callable[[type[T]], type[T]]:
 
     predicate_tuple = tuple(predicates)
 
-    def decorator(cls: type[T]) -> type[T]:
+    def decorator(cls: type[T]) -> type[T]:  # noqa: C901
         original_init = cls.__init__
 
         @wraps(original_init)

@@ -648,7 +648,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._use_native_response_format = use_native_response_format
 
     @override
-    def evaluate(
+    def evaluate(  # noqa: C901
         self,
         prompt: Prompt[OutputT],
         *params: SupportsDataclass,

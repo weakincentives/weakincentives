@@ -1327,7 +1327,7 @@ class _PodmanVfsSuite:
         self._section.touch_workspace()
         return ToolResult(message=message, value=tuple(matches))
 
-    def grep(
+    def grep(  # noqa: C901
         self, params: GrepParams, *, context: ToolContext
     ) -> ToolResult[tuple[GrepMatch, ...]]:
         ensure_context_uses_session(context=context, session=self._section.session)
