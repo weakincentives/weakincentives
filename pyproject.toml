@@ -244,11 +244,15 @@ exclude = [
 ]
 deprecateTypingAliases = true
 reportCallInDefaultInitializer = "error"
+reportMissingTypeStubs = "error"
 reportImplicitOverride = "error"
 reportImplicitStringConcatenation = "error"
 reportImportCycles = "error"
+reportPrivateUsage = "error"
 reportMissingSuperCall = "error"
+reportShadowedImports = "error"
 reportPropertyTypeMismatch = "error"
+reportUnknownMemberType = "error"
 reportUninitializedInstanceVariable = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
 reportUnreachable = "error"
