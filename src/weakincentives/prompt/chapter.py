@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import ClassVar, TypeVar, cast
+from typing import ClassVar, Self, TypeVar, cast
 
 from ..serde import clone as clone_dataclass
 from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
@@ -102,7 +102,7 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
     def _normalize_key(key: str) -> str:
         return normalize_component_key(key, owner="Chapter")
 
-    def clone(self, **kwargs: object) -> Chapter[ChapterParamsT]:
+    def clone(self, **kwargs: object) -> Self:
         cloned_sections = tuple(section.clone(**kwargs) for section in self.sections)
         cloned_default = (
             clone_dataclass(self.default_params)
@@ -110,14 +110,17 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
             else None
         )
 
-        return Chapter(
-            key=self.key,
-            title=self.title,
-            description=self.description,
-            sections=cloned_sections,
-            default_params=cloned_default,
-            enabled=self.enabled,
-        )
+        return cast(
+            Self,
+            type(self)(
+                key=self.key,
+                title=self.title,
+                description=self.description,
+                sections=cloned_sections,
+                default_params=cloned_default,
+                enabled=self.enabled,
+            ),
+        )  # pyright: ignore[reportUnnecessaryCast]
 
 
 __all__ = ["Chapter", "ChaptersExpansionPolicy"]
