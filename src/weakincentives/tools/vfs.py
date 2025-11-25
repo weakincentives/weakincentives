@@ -1317,8 +1317,9 @@ def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
     if root.is_file():
         yield root
         return
-    for dirpath, _dirnames, filenames in os.walk(root, followlinks=follow_symlinks):
-        current = Path(dirpath)
+    for current, _dirnames, filenames in root.walk(
+        follow_symlinks=follow_symlinks,
+    ):
         for name in filenames:
             yield current / name
 
