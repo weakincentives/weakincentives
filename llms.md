@@ -106,13 +106,18 @@ class ApplyPatchArgs:
     diff: str
 
 
-def apply_patch(params: ApplyPatchArgs, *, context: ToolContext) -> ToolResult[dict[str, bool]]:
+@dataclass
+class ApplyPatchResult:
+    applied: bool
+
+
+def apply_patch(params: ApplyPatchArgs, *, context: ToolContext) -> ToolResult[ApplyPatchResult]:
     patch = params.diff
     # ...apply the patch to the local filesystem...
-    return ToolResult(message="applied", value={"applied": True})
+    return ToolResult(message="applied", value=ApplyPatchResult(applied=True))
 
 
-apply_patch_tool = Tool[ApplyPatchArgs, dict[str, bool]](
+apply_patch_tool = Tool[ApplyPatchArgs, ApplyPatchResult](
     name="apply_patch",
     description="Apply a unified diff to the workspace.",
     handler=apply_patch,
@@ -184,7 +189,7 @@ except PromptEvaluationError as exc:
 - **`MarkdownSection`**: Simple Markdown content built from a `title`,
   `template`, and unique `key`. Use multiple sections to keep prompt text modular
   and override-friendly.
-- **`Tool`**: Declarative tool description parameterized as `Tool[Params, Result]`. Key fields:
+- **`Tool`**: Declarative tool description parameterized as `Tool[Params, Result]` where `Params` **must** be a dataclass type and `Result` is a dataclass (or sequence of dataclasses). Key fields:
   - `name`: Identifier exposed to the model.
   - `description`: Natural-language guidance (1-200 ASCII characters).
   - `handler`: Callable accepting `(params: Params, *, context: ToolContext)`
