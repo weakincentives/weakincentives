@@ -17,7 +17,7 @@ from __future__ import annotations
 import textwrap
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal, TypeVar, cast
 
 from ..deadlines import Deadline
@@ -51,7 +51,7 @@ class PromptResponse[OutputT]:
     output: OutputT | None
 
 
-class OptimizationScope(Enum):
+class OptimizationScope(StrEnum):
     """Control where optimized digests are persisted."""
 
     SESSION = "session"
