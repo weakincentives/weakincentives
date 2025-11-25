@@ -18,7 +18,7 @@ import textwrap
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, TypeVar, assert_never, cast
 
 from ..deadlines import Deadline
 from ..prompt import MarkdownSection
@@ -182,25 +182,29 @@ class ProviderAdapter(ABC):
 
         digest = self._extract_digest(response=response, prompt_name=prompt_name)
 
-        if store_scope is OptimizationScope.SESSION:
-            _ = set_workspace_digest(outer_session, digest_section.key, digest)
+        match store_scope:
+            case OptimizationScope.SESSION:
+                _ = set_workspace_digest(outer_session, digest_section.key, digest)
 
-        if store_scope is OptimizationScope.GLOBAL:
-            if overrides_store is None or overrides_tag is None:
-                message = "Global scope requires overrides_store and overrides_tag."
-                raise PromptEvaluationError(
-                    message,
-                    prompt_name=prompt_name,
-                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            case OptimizationScope.GLOBAL:
+                if overrides_store is None or overrides_tag is None:
+                    message = "Global scope requires overrides_store and overrides_tag."
+                    raise PromptEvaluationError(
+                        message,
+                        prompt_name=prompt_name,
+                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    )
+                section_path = self._find_section_path(prompt, digest_section.key)
+                _ = overrides_store.set_section_override(
+                    cast(PromptLike, prompt),
+                    tag=overrides_tag,
+                    path=section_path,
+                    body=digest,
                 )
-            section_path = self._find_section_path(prompt, digest_section.key)
-            _ = overrides_store.set_section_override(
-                cast(PromptLike, prompt),
-                tag=overrides_tag,
-                path=section_path,
-                body=digest,
-            )
-            clear_workspace_digest(outer_session, digest_section.key)
+                clear_workspace_digest(outer_session, digest_section.key)
+
+            case _:
+                assert_never(store_scope)
 
         return OptimizationResult(
             response=response,

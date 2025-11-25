@@ -300,6 +300,26 @@ def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
     assert getattr(latest, "body", None) == "existing"
 
 
+def test_optimize_rejects_unknown_scope() -> None:
+    adapter = _RecordingAdapter(mode="dataclass")
+    prompt = _build_prompt()
+    session = Session()
+    _ = set_workspace_digest(session, "workspace-digest", "existing")
+
+    with pytest.raises(AssertionError):
+        adapter.optimize(
+            prompt,
+            store_scope=cast(OptimizationScope, "unknown"),
+            overrides_store=_RecordingOverridesStore(),
+            overrides_tag="tag",
+            session=session,
+        )
+
+    latest = latest_workspace_digest(session, "workspace-digest")
+    assert latest is not None
+    assert getattr(latest, "body", None) == "existing"
+
+
 def test_optimize_requires_workspace_section() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     digest_only_prompt = Prompt[_PromptOutput](
