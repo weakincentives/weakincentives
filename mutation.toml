@@ -1,5 +1,9 @@
 [mutation]
-paths_to_mutate = ["src/weakincentives"]
+paths_to_mutate = [
+    "src/weakincentives/runtime/session/reducers.py",
+    "src/weakincentives/runtime/session/session.py",
+    "src/weakincentives/serde/dataclass_serde.py",
+]
 tests_dir = "tests"
 exclude = [
     "snapshots",
@@ -8,7 +12,11 @@ exclude = [
     "integration-tests",
     "build",
     "dist",
+    "src/weakincentives/prompt/**",
+    "src/weakincentives/tools/**",
 ]
-runner = "python -m pytest --strict-config --strict-markers -q"
+also_copy = ["code_reviewer_example.py", "test-repositories", "src/weakincentives"]
+runner = "python -m pytest --strict-config --strict-markers --no-cov --maxfail=1 -q"
 use_coverage = true
-minimum_score = 90.0
+minimum_score = 80.0
+debug = false

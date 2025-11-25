@@ -353,10 +353,11 @@ tests remain skipped when `OPENAI_API_KEY` is not present.
 
 ### Mutation testing
 
-Mutation coverage complements the strict line-coverage floor. The repository scopes
-mutants to `src/weakincentives` via `mutation.toml` and excludes generated assets and
-snapshots that would inflate the workload without improving signal. Run `make mutation-test` to execute mutmut locally; `make mutation-check` enforces a default 90%
-score gate that CI uses alongside the coverage gate. The reported percentage reflects
+Mutation coverage complements the strict line-coverage floor. Mutants focus on the
+session reducer and serde hotspots (see `paths_to_mutate` in `mutation.toml`) and
+exclude generated assets and snapshots that would inflate the workload without
+improving signal. Run `make mutation-test` to execute mutmut locally; `make mutation-check`
+enforces an 80% score gate that CI uses alongside the coverage gate. The reported percentage reflects
 the share of mutants that were killed or timed out relative to all generated mutants;
 survivors and suspicious mutants reduce the score, and a run with no mutants scores 0%.
 

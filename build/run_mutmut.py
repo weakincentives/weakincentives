@@ -33,6 +33,7 @@ class MutationConfig:
     paths_to_mutate: list[str]
     tests_dir: str
     exclude: list[str]
+    also_copy: list[str]
     runner: str
     use_coverage: bool
     minimum_score: float
@@ -85,6 +86,7 @@ def _load_config() -> MutationConfig:
         paths_to_mutate=list(data.get("paths_to_mutate", [])),
         tests_dir=str(data.get("tests_dir", "tests")),
         exclude=list(data.get("exclude", [])),
+        also_copy=list(data.get("also_copy", [])),
         runner=str(data.get("runner", "python -m pytest -q")),
         use_coverage=bool(data.get("use_coverage", True)),
         minimum_score=float(data.get("minimum_score", 0.0)),
@@ -92,23 +94,7 @@ def _load_config() -> MutationConfig:
 
 
 def _run_mutmut(config: MutationConfig, extra_args: list[str]) -> int:
-    command = [
-        "mutmut",
-        "run",
-        "--paths-to-mutate",
-        ",".join(config.paths_to_mutate),
-        "--tests-dir",
-        config.tests_dir,
-        "--runner",
-        config.runner,
-    ]
-
-    for path in config.exclude:
-        command.extend(["--exclude", path])
-
-    if config.use_coverage:
-        command.append("--use-coverage")
-
+    command = ["mutmut", "run"]
     command.extend(extra_args)
 
     result = subprocess.run(command, check=False)
@@ -117,12 +103,31 @@ def _run_mutmut(config: MutationConfig, extra_args: list[str]) -> int:
 
 def _load_results() -> dict[str, Any]:
     result = subprocess.run(
-        ["mutmut", "results", "--json"],
+        ["mutmut", "results", "--all", "true"],
         check=True,
         capture_output=True,
         text=True,
     )
-    return json.loads(result.stdout or "{}")
+
+    stats: dict[str, int] = {
+        "killed": 0,
+        "survived": 0,
+        "timeout": 0,
+        "suspicious": 0,
+        "incompetent": 0,
+        "skipped": 0,
+    }
+
+    for line in result.stdout.splitlines():
+        if ":" not in line:
+            continue
+
+        *_, status_part = line.rsplit(":", maxsplit=1)
+        status = status_part.strip().split()[0]
+        if status in stats:
+            stats[status] += 1
+
+    return stats
 
 
 def _mutation_score(stats: dict[str, Any]) -> float:
