@@ -14,12 +14,12 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import ClassVar, TypeVar, cast
 
+from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ..serde import clone as clone_dataclass
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
@@ -33,9 +33,7 @@ class ChaptersExpansionPolicy(StrEnum):
     ALL_INCLUDED = "all_included"
     INTENT_CLASSIFIER = "intent_classifier"
 
-
 ChapterParamsT = TypeVar("ChapterParamsT", bound=SupportsDataclass, covariant=True)
-EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
 
 
 @dataclass
@@ -64,7 +62,7 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
 
         self.sections = tuple(self.sections or ())
 
-        self._enabled_callable = self._normalize_enabled(self.enabled, params_type)
+        self._enabled_callable = normalize_enabled_predicate(self.enabled, params_type)
 
         if params_type is None:
             if self.default_params is not None:
@@ -103,28 +101,6 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
     def _normalize_key(key: str) -> str:
         return normalize_component_key(key, owner="Chapter")
 
-    @staticmethod
-    def _normalize_enabled(
-        enabled: EnabledPredicate | None,
-        params_type: type[SupportsDataclass] | None,
-    ) -> Callable[[SupportsDataclass | None], bool] | None:
-        if enabled is None:
-            return None
-        if params_type is None and not _callable_requires_positional_argument(enabled):
-            zero_arg = cast(Callable[[], bool], enabled)
-
-            def _without_params(_: SupportsDataclass | None) -> bool:
-                return bool(zero_arg())
-
-            return _without_params
-
-        coerced = cast(Callable[[SupportsDataclass], bool], enabled)
-
-        def _with_params(value: SupportsDataclass | None) -> bool:
-            return bool(coerced(cast(SupportsDataclass, value)))
-
-        return _with_params
-
     def clone(self, **kwargs: object) -> Chapter[ChapterParamsT]:
         cloned_sections = tuple(section.clone(**kwargs) for section in self.sections)
         cloned_default = (
@@ -141,24 +117,4 @@ class Chapter(GenericParamsSpecializer[ChapterParamsT]):
             default_params=cloned_default,
             enabled=self.enabled,
         )
-
-
-def _callable_requires_positional_argument(callback: EnabledPredicate) -> bool:
-    try:
-        signature = inspect.signature(callback)
-    except (TypeError, ValueError):
-        return True
-    for parameter in signature.parameters.values():
-        if (
-            parameter.kind
-            in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-            and parameter.default is inspect.Signature.empty
-        ):
-            return True
-    return False
-
-
 __all__ = ["Chapter", "ChaptersExpansionPolicy"]

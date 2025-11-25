@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
@@ -20,14 +19,12 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 if TYPE_CHECKING:
     from .tool import Tool
 
+from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass, SupportsToolResult
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
-
-EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
-
 
 class Section(GenericParamsSpecializer[SectionParamsT], ABC):
     """Abstract building block for prompt content."""
@@ -72,7 +69,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             normalized_children.append(cast(Section[SupportsDataclass], child))
         self.children = tuple(normalized_children)
         self._enabled: Callable[[SupportsDataclass | None], bool] | None = (
-            self._normalize_enabled(enabled, params_type)
+            normalize_enabled_predicate(enabled, params_type)
         )
         self._tools = self._normalize_tools(tools)
 
@@ -125,46 +122,5 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
                 raise TypeError("Section tools must be Tool instances.")
             normalized.append(cast(Tool[SupportsDataclass, SupportsToolResult], tool))
         return tuple(normalized)
-
-    @staticmethod
-    def _normalize_enabled(
-        enabled: EnabledPredicate | None,
-        params_type: type[SupportsDataclass] | None,
-    ) -> Callable[[SupportsDataclass | None], bool] | None:
-        if enabled is None:
-            return None
-        if params_type is None and not _callable_requires_positional_argument(enabled):
-            zero_arg = cast(Callable[[], bool], enabled)
-
-            def _without_params(_: SupportsDataclass | None) -> bool:
-                return bool(zero_arg())
-
-            return _without_params
-
-        coerced = cast(Callable[[SupportsDataclass], bool], enabled)
-
-        def _with_params(value: SupportsDataclass | None) -> bool:
-            return bool(coerced(cast(SupportsDataclass, value)))
-
-        return _with_params
-
-
-def _callable_requires_positional_argument(callback: EnabledPredicate) -> bool:
-    try:
-        signature = inspect.signature(callback)
-    except (TypeError, ValueError):
-        return True
-    for parameter in signature.parameters.values():
-        if (
-            parameter.kind
-            in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-            and parameter.default is inspect.Signature.empty
-        ):
-            return True
-    return False
-
 
 __all__ = ["Section"]
