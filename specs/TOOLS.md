@@ -48,7 +48,7 @@ The runtime focuses on three pillars:
 
 ## Schema Reference
 
-The runtime exposes three core schemas:
+The runtime exposes three core schemas plus an example helper:
 
 - **`Tool`** – the declaration emitted by sections and the registry entry consumed by
   adapters. It enforces name and description constraints, validates handler signatures,
@@ -62,6 +62,10 @@ The runtime exposes three core schemas:
   active prompt, rendered prompt (when available), provider adapter, session, event bus,
   and optional deadline so handlers can issue nested prompts or record telemetry without
   depending on globals (`src/weakincentives/prompt/tool.py`).
+- **`ToolExample`** – a typed helper—parameterized the same way as `Tool`—that documents a
+  representative invocation for a tool by pairing a single input and rendered output.
+  Each `Tool` carries its own examples so adapters can forward consistent demonstrations
+  without needing a separate section-level registry.
 
 Downstream consumers must treat these schemas as stable: adapter integrations SHOULD read
 their fields rather than duplicating parsing logic, and tooling authors MUST preserve the
@@ -134,6 +138,10 @@ class ToolRenderableResult(Protocol):
 - `accepts_overrides: bool` – flag that determines whether tooling participates in
   automatic override pipelines. Tools opt in by default (`True`), and sections can disable
   overrides on a case-by-case basis when contracts are still stabilizing.
+- `examples: tuple[ToolExample[ParamsT, ResultT], ...]` – optional collection of
+  representative invocations bound directly to the tool. Examples validate against the
+  tool's params/result dataclasses to ensure they reflect the same schema surfaced to
+  the LLM.
 
 Handlers follow the canonical signature:
 
@@ -151,8 +159,9 @@ return value with `ToolResult[ResultT]`.
 ### Section Integration
 
 `Section.__init__` accepts an optional `tools` sequence. Sections normalize, validate, and
-expose that collection via `Section.tools()`. Because every section supports the same
-interface, authors can:
+expose that collection via `Section.tools()`. Each `Tool` embeds its own examples, so
+sections no longer need to maintain a parallel example mapping. Because every section
+supports the same interface, authors can:
 
 - Attach tools to existing `MarkdownSection`s without inventing bespoke subclasses.
 - Register tooling on otherwise minimal sections that only emit headings or act as
@@ -166,6 +175,8 @@ interface, authors can:
 that tree depth-first to validate all contributed tools:
 
 1. Duplicate names trigger `PromptValidationError`.
+1. Tool examples are validated against each tool's declared params/result dataclasses so
+   sections cannot drift from the session's tool registry.
 1. Parameter and result dataclasses reuse existing placeholder validation rules—required
    fields must be supplied when rendering.
 1. Declaration order is cached so callers can retrieve tools without re-traversing the
@@ -190,7 +201,14 @@ responsible for:
 ```python
 from dataclasses import dataclass, field
 
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    Tool,
+    ToolContext,
+    ToolExample,
+    ToolResult,
+)
 
 
 @dataclass
@@ -217,6 +235,16 @@ lookup_tool = Tool[LookupParams, LookupResult](
     name="lookup_entity",
     description="Fetch structured information for a given entity id.",
     handler=lookup_handler,
+    examples=(
+        ToolExample[LookupParams, LookupResult](
+            description="Direct lookup with related entities",
+            input=LookupParams(entity_id="abc-123", include_related=True),
+            output=LookupResult(
+                entity_id="abc-123",
+                document_url="https://example.com/entities/abc-123",
+            ),
+        ),
+    ),
 )
 
 prompt = Prompt(
@@ -322,6 +350,69 @@ class ToolContext:
   the prompt or session.
 - Nested prompt calls must publish their events through the shared bus so the session
   state remains coherent.
+
+## Tool Examples
+
+### Data Model
+
+`ToolExample[ParamsT, ResultT]` captures a representative invocation for a tool using the
+same type parameters as `Tool`:
+
+```python
+from dataclasses import dataclass
+from typing import Generic, TypeVar
+
+
+ParamsT = TypeVar("ParamsT")
+ResultT = TypeVar("ResultT")
+
+
+@dataclass(slots=True, frozen=True)
+class ToolExample(Generic[ParamsT, ResultT]):
+    description: str
+    input: ParamsT
+    output: ResultT
+```
+
+- `description` – short human-readable context for the example (≤200 characters) that
+  explains what the example demonstrates.
+- `input` – a concrete params dataclass instance for the tool, validated against the
+  tool's `ParamsT`. This keeps examples aligned with the same schema enforced at runtime.
+- `output` – the structured result dataclass instance produced by the tool, validated as
+  `ResultT`. Renderers rely on `ToolResult.render()` to convert the example to text, so
+  examples must use the same payload shapes the handler returns.
+
+### Serialization Rules
+
+Tools carry their own `examples` tuple. When rendering, sections emit examples immediately
+after the tool's description using a stable, adapter-friendly markdown shape. Inputs and
+outputs are serialized with the same serde helpers used for params/result payloads
+(`weakincentives.serde.dump(..., exclude_none=True)`) and rendered as fenced JSON blocks
+to preserve structure:
+
+````
+- <tool_name> examples:
+  - description: <short explanation>
+    input:
+      ```json
+      {"param_a": "value"}
+      ```
+    output:
+      ```json
+      {"field": "rendered"}
+      ```
+````
+
+Rules for serialization:
+
+1. Examples are rendered in the same order they appear in the `ToolExample` sequence.
+1. Each example occupies a single list item with `description`, `input`, and `output` as
+   sibling fields; adapters may parse them by keyword.
+1. Sections **must** omit the examples block when a tool defines no examples and must
+   raise validation errors when example payload dataclasses do not match the tool's
+   params/result types.
+1. Renderers should avoid additional nesting or prose so providers can reliably forward
+   the examples without post-processing.
 
 ## Failure Semantics
 
