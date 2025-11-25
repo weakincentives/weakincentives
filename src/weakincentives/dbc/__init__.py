@@ -244,51 +244,82 @@ def _check_invariants(
         )
 
 
-def invariant(*predicates: ContractCallable) -> Callable[[type[T]], type[T]]:  # noqa: C901
-    """Enforce invariants before and after public method calls."""
-
+def _validate_invariant_predicates(
+    predicates: tuple[ContractCallable, ...],
+) -> tuple[ContractCallable, ...]:
     if not predicates:
         msg = "@invariant expects at least one predicate"
         raise ValueError(msg)
+    return predicates
 
-    predicate_tuple = tuple(predicates)
 
-    def decorator(cls: type[T]) -> type[T]:  # noqa: C901
-        original_init = cls.__init__
+def _wrap_init_with_invariants(
+    cls: type[object],
+    *,
+    predicates: tuple[ContractCallable, ...],
+) -> None:
+    original_init = cls.__init__
 
-        @wraps(original_init)
-        def init_wrapper(self: T, *args: object, **kwargs: object) -> None:
-            original_init(self, *args, **kwargs)
-            if dbc_active():
-                _check_invariants(predicate_tuple, instance=self, func=original_init)
+    @wraps(original_init)
+    def init_wrapper(self: T, *args: object, **kwargs: object) -> None:
+        original_init(self, *args, **kwargs)
+        if dbc_active():
+            _check_invariants(predicates, instance=self, func=original_init)
 
-        type.__setattr__(cls, "__init__", init_wrapper)
+    type.__setattr__(cls, "__init__", init_wrapper)
 
-        for attribute_name, attribute in list(cls.__dict__.items()):
-            if attribute_name.startswith("_"):
-                continue
-            if getattr(attribute, "__dbc_skip_invariant__", False):
-                continue
-            if isinstance(attribute, (staticmethod, classmethod)):
-                continue
-            if not callable(attribute):
-                continue
 
-            def make_wrapper(method: Callable[..., object]) -> Callable[..., object]:
-                @wraps(method)
-                def wrapper(self: T, *args: object, **kwargs: object) -> object:
-                    if not dbc_active():
-                        return method(self, *args, **kwargs)
-                    _check_invariants(predicate_tuple, instance=self, func=method)
-                    try:
-                        return method(self, *args, **kwargs)
-                    finally:
-                        _check_invariants(predicate_tuple, instance=self, func=method)
+def _should_wrap_invariants(attribute_name: str, attribute: object) -> bool:
+    if attribute_name.startswith("_"):
+        return False
+    if getattr(attribute, "__dbc_skip_invariant__", False):
+        return False
+    if isinstance(attribute, (staticmethod, classmethod)):
+        return False
+    return callable(attribute)
 
-                return wrapper
 
-            setattr(cls, attribute_name, make_wrapper(attribute))
+def _wrap_method_with_invariants(
+    method: Callable[..., object],
+    *,
+    predicates: tuple[ContractCallable, ...],
+) -> Callable[..., object]:
+    @wraps(method)
+    def wrapper(self: T, *args: object, **kwargs: object) -> object:
+        if not dbc_active():
+            return method(self, *args, **kwargs)
+        _check_invariants(predicates, instance=self, func=method)
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            _check_invariants(predicates, instance=self, func=method)
 
+    return wrapper
+
+
+def _wrap_methods_with_invariants(
+    cls: type[object],
+    *,
+    predicates: tuple[ContractCallable, ...],
+) -> None:
+    for attribute_name, attribute in list(cls.__dict__.items()):
+        if not _should_wrap_invariants(attribute_name, attribute):
+            continue
+        setattr(
+            cls,
+            attribute_name,
+            _wrap_method_with_invariants(attribute, predicates=predicates),
+        )
+
+
+def invariant(*predicates: ContractCallable) -> Callable[[type[T]], type[T]]:
+    """Enforce invariants before and after public method calls."""
+
+    predicate_tuple = _validate_invariant_predicates(tuple(predicates))
+
+    def decorator(cls: type[T]) -> type[T]:
+        _wrap_init_with_invariants(cls, predicates=predicate_tuple)
+        _wrap_methods_with_invariants(cls, predicates=predicate_tuple)
         return cls
 
     return decorator
