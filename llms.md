@@ -1,10 +1,11 @@
 # Weak Incentives (WINK)
 
-WINK is a Python toolkit for orchestrating safe, deterministic coding agents
-that translate end-user instructions into application updates. The library is
-designed for human developers, but this README is written so automated coding
-agents (OpenAI Codex web/CLI, Claude Code, Cursor background agents, etc.) can
-be productive consumers of the API surface without depending on internals.
+WINK is an open source toolkit for developing and optimizing side-effect-free
+background agents (e.g., research, review, and coding agents) that translate
+end-user instructions into deterministic actions. The library is designed for
+human developers, but this README is written so automated coding agents (OpenAI
+Codex web/CLI, Claude Code, Cursor background agents, etc.) can be productive
+consumers of the API surface without depending on internals.
 
 The public API centers on typed prompts, declarative tool contracts, replayable
 sessions, and provider-agnostic adapters so you can keep determinism,
@@ -52,9 +53,9 @@ Optional extras enable specific providers or tooling:
 
 ## Agent-facing operational notes
 
-- WINK does not run unattended background coding agents by itself. It provides
-  deterministic primitives that coding agents (or humans) drive explicitly via
-  prompts, tool handlers, and adapters.
+- WINK does not run unattended background agents by itself. It provides
+  deterministic primitives that research/review/coding agents (or humans) drive
+  explicitly via prompts, tool handlers, and adapters.
 - Rendering is side-effect-free: `Prompt.render()` produces a typed
   `RenderedPromptProtocol` containing message content, declared tools, and any
   structured-output schema, but does not contact providers until you pass it to
