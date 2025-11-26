@@ -24,6 +24,7 @@ from ._types import SupportsDataclass, SupportsToolResult
 from .errors import PromptRenderError
 from .section import Section
 from .tool import Tool
+from .tool_result import render_tool_payload
 
 MarkdownParamsT = TypeVar(
     "MarkdownParamsT",
@@ -183,37 +184,53 @@ def _render_tool_examples_block(
 def _render_examples_for_tool(tool: Tool[SupportsDataclass, SupportsToolResult]) -> str:
     lines: list[str] = [f"- {tool.name} examples:"]
     for example in tool.examples:
+        rendered_output = _render_example_output(
+            example.output, container=tool.result_container
+        )
         lines.extend(
             [
                 f"  - description: {example.description}",
                 "    input:",
-                "      ```json",
-                f"      {_render_example_value(example.input, container='object')}",
-                "      ```",
-                "    output:",
-                "      ```json",
-                "      "
-                + _render_example_value(
-                    example.output, container=tool.result_container
+                *_render_fenced_block(
+                    _render_example_value(example.input),
+                    indent="      ",
+                    language="json",
                 ),
-                "      ```",
+                "    output:",
+                *_render_fenced_block(rendered_output, indent="      ", language=None),
             ]
         )
     return "\n".join(lines)
 
 
-def _render_example_value(
+def _render_example_value(value: SupportsDataclass) -> str:
+    serialized_value = dump(value, exclude_none=True)
+
+    return json.dumps(serialized_value, ensure_ascii=False)
+
+
+def _render_example_output(
     value: SupportsDataclass | Sequence[SupportsDataclass],
     *,
     container: Literal["object", "array"],
 ) -> str:
     if container == "array":
         sequence_value = cast(Sequence[SupportsDataclass], value)
-        serialized_value = [dump(item, exclude_none=True) for item in sequence_value]
-    else:
-        serialized_value = dump(cast(SupportsDataclass, value), exclude_none=True)
+        return render_tool_payload(list(sequence_value))
 
-    return json.dumps(serialized_value, ensure_ascii=False)
+    return render_tool_payload(cast(SupportsDataclass, value))
+
+
+def _render_fenced_block(
+    content: str, *, indent: str, language: str | None
+) -> list[str]:
+    fence = "```" if language is None else f"```{language}"
+    indented_lines = content.splitlines() or [""]
+    return [
+        f"{indent}{fence}",
+        *[f"{indent}{line}" for line in indented_lines],
+        f"{indent}```",
+    ]
 
 
 __all__ = ["MarkdownSection"]

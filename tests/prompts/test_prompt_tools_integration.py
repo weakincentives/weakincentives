@@ -53,6 +53,15 @@ class LookupResultWithOptional:
     note: str | None = None
 
 
+@dataclass
+class RenderedLookupResult:
+    entity_id: str
+    description: str
+
+    def render(self) -> str:
+        return f"{self.entity_id}: {self.description}"
+
+
 def _lookup_handler(
     params: LookupParams, *, context: ToolContext
 ) -> ToolResult[LookupResult]:
@@ -75,6 +84,17 @@ def _lookup_handler_with_optional_list(
     )
     message = f"Fetched entity {result.entity_id}."
     return ToolResult(message=message, value=[result])
+
+
+def _lookup_handler_with_render(
+    params: LookupParams, *, context: ToolContext
+) -> ToolResult[RenderedLookupResult]:
+    del context
+    result = RenderedLookupResult(
+        entity_id=params.entity_id,
+        description="Rendered value from handler.",
+    )
+    return ToolResult(message="Rendered output", value=result)
 
 
 def test_prompt_tools_integration_example() -> None:
@@ -121,8 +141,63 @@ def test_prompt_tools_integration_example() -> None:
     tools = rendered.tools
 
     assert tools == (lookup_tool,)
-    assert tools[0].handler is _lookup_handler
-    assert tools[0].result_type is LookupResult
+
+
+def test_prompt_renders_tool_examples_with_rendered_output() -> None:
+    lookup_tool = Tool[LookupParams, RenderedLookupResult](
+        name="lookup_entity",
+        description="Fetch structured information for a given entity id.",
+        handler=_lookup_handler_with_render,
+        examples=(
+            ToolExample[LookupParams, RenderedLookupResult](
+                description="Rendered lookup",
+                input=LookupParams(entity_id="abc-123", include_related=False),
+                output=RenderedLookupResult(
+                    entity_id="abc-123",
+                    description="Rendered value from handler.",
+                ),
+            ),
+        ),
+    )
+
+    tools_section = MarkdownSection[ToolDescriptionParams](
+        title="Available Tools",
+        template="Invoke ${primary_tool} whenever you need fresh entity context.",
+        key="available-tools",
+        tools=[lookup_tool],
+        default_params=ToolDescriptionParams(),
+    )
+
+    prompt = Prompt(
+        ns="tests/prompts",
+        key="tools-rendered-output",
+        name="tools_rendered_output",
+        sections=[tools_section],
+    )
+
+    rendered = prompt.render()
+
+    assert rendered.text == (
+        "## 1. Available Tools\n\n"
+        "Invoke lookup_entity whenever you need fresh entity context.\n\n"
+        "Tools:\n"
+        "- lookup_entity: Fetch structured information for a given entity id.\n"
+        "  - lookup_entity examples:\n"
+        "    - description: Rendered lookup\n"
+        "      input:\n"
+        "        ```json\n"
+        '        {"entity_id": "abc-123", "include_related": false}\n'
+        "        ```\n"
+        "      output:\n"
+        "        ```\n"
+        "        abc-123: Rendered value from handler.\n"
+        "        ```"
+    )
+    tools = rendered.tools
+
+    assert tools == (lookup_tool,)
+    assert tools[0].handler is _lookup_handler_with_render
+    assert tools[0].result_type is RenderedLookupResult
 
 
 def test_prompt_renders_tool_examples_inline() -> None:
@@ -185,7 +260,7 @@ def test_prompt_renders_tool_examples_inline() -> None:
         '        {"entity_id": "abc-123", "include_related": true}\n'
         "        ```\n"
         "      output:\n"
-        "        ```json\n"
+        "        ```\n"
         '        [{"entity_id": "abc-123", "document_url": "https://example.com/entities/abc-123"}]\n'
         "        ```"
     )
