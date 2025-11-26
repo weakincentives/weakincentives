@@ -317,16 +317,19 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         )
 
 
+# ruff: noqa: RUF022
 __all__ = [
     "LiteLLMAdapter",
     "LiteLLMCompletion",
     "create_litellm_completion",
+    "build_json_schema_response_format",
     "extract_parsed_content",
     "message_text_content",
     "parse_schema_constrained_payload",
 ]
 
 
+build_json_schema_response_format = _shared.build_json_schema_response_format
 message_text_content = _shared.message_text_content
 extract_parsed_content = _shared.extract_parsed_content
 parse_schema_constrained_payload = _shared.parse_schema_constrained_payload

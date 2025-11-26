@@ -85,6 +85,16 @@ logger: StructuredLogger = get_logger(
 )
 
 
+_EXPORTED_ADAPTER_NAMES = (LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME)
+_EXPORTED_PROVIDER_PROTOCOLS = (
+    ProviderCompletionCallable,
+    ProviderCompletionResponse,
+    ProviderFunctionCall,
+    ProviderMessage,
+    ProviderToolCall,
+)
+
+
 OutputT = TypeVar("OutputT")
 
 
@@ -778,14 +788,18 @@ def prepare_adapter_conversation[
             provider_payload=deadline_provider_payload(deadline),
         )
 
-    render_kwargs: dict[str, object] = {
-        "overrides_store": overrides_store,
-        "tag": overrides_tag,
-    }
+    render_overrides_store = overrides_store
+    render_tag = overrides_tag
+    render_inject_output_instructions: bool | None = None
     if disable_output_instructions:
-        render_kwargs["inject_output_instructions"] = False
+        render_inject_output_instructions = False
 
-    rendered = prompt.render(*params, **render_kwargs)
+    rendered = prompt.render(
+        *render_inputs,
+        overrides_store=render_overrides_store,
+        tag=render_tag,
+        inject_output_instructions=render_inject_output_instructions,
+    )
     if deadline is not None:
         rendered = replace(rendered, deadline=deadline)
 
@@ -893,7 +907,6 @@ __all__ = [
     "tool_execution",
     "tool_to_spec",
 ]
-__all__.sort()
 
 
 ConversationRequest = Callable[
