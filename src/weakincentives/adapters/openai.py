@@ -18,12 +18,13 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from functools import partial
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
-from ..prompt.prompt import Prompt
+from ..prompt.prompt import Prompt, RenderedPrompt
 from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
@@ -647,22 +648,13 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._tool_choice: ToolChoice = tool_choice
         self._use_native_response_format = use_native_response_format
 
-    @override
-    def evaluate(  # noqa: C901
-        self,
-        prompt: Prompt[OutputT],
-        *params: SupportsDataclass,
-        parse_output: bool = True,
-        bus: EventBus,
-        session: SessionProtocol,
-        deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
-    ) -> PromptResponse[OutputT]:
-        prompt_name = prompt.name or prompt.__class__.__name__
-        render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
+    def _ensure_deadline_not_expired(
+        self, deadline: Deadline | None, prompt_name: str
+    ) -> None:
+        if deadline is None:
+            return
 
-        if deadline is not None and deadline.remaining() <= timedelta(0):
+        if deadline.remaining() <= timedelta(0):
             raise PromptEvaluationError(
                 "Deadline expired before evaluation started.",
                 prompt_name=prompt_name,
@@ -670,6 +662,15 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                 provider_payload=deadline_provider_payload(deadline),
             )
 
+    def _render_prompt(
+        self,
+        prompt: Prompt[OutputT],
+        params: tuple[SupportsDataclass, ...],
+        parse_output: bool,
+        overrides_store: PromptOverridesStore | None,
+        overrides_tag: str,
+        deadline: Deadline | None,
+    ) -> RenderedPrompt[OutputT]:
         has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
             parse_output
@@ -691,60 +692,98 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                 overrides_store=overrides_store,
                 tag=overrides_tag,
             )
+
         if deadline is not None:
             rendered = replace(rendered, deadline=deadline)
-        response_format: dict[str, Any] | None = None
+
+        return rendered
+
+    def _response_format(
+        self,
+        rendered: RenderedPrompt[OutputT],
+        parse_output: bool,
+        prompt_name: str,
+    ) -> Mapping[str, Any] | None:
         should_parse_structured_output = (
             parse_output
             and rendered.output_type is not None
             and rendered.container is not None
         )
         if should_parse_structured_output and self._use_native_response_format:
-            response_format = build_json_schema_response_format(rendered, prompt_name)
+            return build_json_schema_response_format(rendered, prompt_name)
 
-        def _call_provider(
-            messages: list[dict[str, Any]],
-            tool_specs: Sequence[Mapping[str, Any]],
-            tool_choice_directive: ToolChoice | None,
-            response_format_payload: Mapping[str, Any] | None,
-        ) -> object:
-            request_payload: dict[str, Any] = {
-                "model": self._model,
-                "input": _normalize_input_messages(messages, prompt_name=prompt_name),
-            }
-            if tool_specs:
-                request_payload["tools"] = [
-                    _responses_tool_spec(spec, prompt_name=prompt_name)
-                    for spec in tool_specs
-                ]
-                if tool_choice_directive is not None:
-                    request_payload["tool_choice"] = _responses_tool_choice(
-                        tool_choice_directive, prompt_name=prompt_name
-                    )
-            if response_format_payload is not None:
-                request_payload["text"] = _text_config_from_response_format(
-                    response_format_payload, prompt_name=prompt_name
+        return None
+
+    def _call_provider(
+        self,
+        prompt_name: str,
+        messages: list[dict[str, Any]],
+        tool_specs: Sequence[Mapping[str, Any]],
+        tool_choice_directive: ToolChoice | None,
+        response_format_payload: Mapping[str, Any] | None,
+    ) -> object:
+        request_payload: dict[str, Any] = {
+            "model": self._model,
+            "input": _normalize_input_messages(messages, prompt_name=prompt_name),
+        }
+        if tool_specs:
+            request_payload["tools"] = [
+                _responses_tool_spec(spec, prompt_name=prompt_name)
+                for spec in tool_specs
+            ]
+            if tool_choice_directive is not None:
+                request_payload["tool_choice"] = _responses_tool_choice(
+                    tool_choice_directive, prompt_name=prompt_name
                 )
-
-            try:
-                return self._client.responses.create(**request_payload)
-            except Exception as error:  # pragma: no cover - network/SDK failure
-                throttle_error = _normalize_openai_throttle(
-                    error, prompt_name=prompt_name
-                )
-                if throttle_error is not None:
-                    raise throttle_error from error
-                raise PromptEvaluationError(
-                    "OpenAI request failed.",
-                    prompt_name=prompt_name,
-                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                    provider_payload=_error_payload(error),
-                ) from error
-
-        def _select_choice(response: object) -> ProviderChoice:
-            return cast(
-                ProviderChoice, _choice_from_response(response, prompt_name=prompt_name)
+        if response_format_payload is not None:
+            request_payload["text"] = _text_config_from_response_format(
+                response_format_payload, prompt_name=prompt_name
             )
+
+        try:
+            return self._client.responses.create(**request_payload)
+        except Exception as error:  # pragma: no cover - network/SDK failure
+            throttle_error = _normalize_openai_throttle(error, prompt_name=prompt_name)
+            if throttle_error is not None:
+                raise throttle_error from error
+            raise PromptEvaluationError(
+                "OpenAI request failed.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                provider_payload=_error_payload(error),
+            ) from error
+
+    def _select_choice(self, prompt_name: str, response: object) -> ProviderChoice:
+        return cast(
+            ProviderChoice, _choice_from_response(response, prompt_name=prompt_name)
+        )
+
+    @override
+    def evaluate(
+        self,
+        prompt: Prompt[OutputT],
+        *params: SupportsDataclass,
+        parse_output: bool = True,
+        bus: EventBus,
+        session: SessionProtocol,
+        deadline: Deadline | None = None,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
+    ) -> PromptResponse[OutputT]:
+        prompt_name = prompt.name or prompt.__class__.__name__
+        render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
+
+        self._ensure_deadline_not_expired(deadline, prompt_name)
+
+        rendered = self._render_prompt(
+            prompt,
+            render_inputs,
+            parse_output,
+            overrides_store,
+            overrides_tag,
+            deadline,
+        )
+        response_format = self._response_format(rendered, parse_output, prompt_name)
 
         return run_conversation(
             adapter_name=OPENAI_ADAPTER_NAME,
@@ -760,8 +799,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             tool_choice=self._tool_choice,
             response_format=response_format,
             require_structured_output_text=False,
-            call_provider=_call_provider,
-            select_choice=_select_choice,
+            call_provider=partial(self._call_provider, prompt_name),
+            select_choice=partial(self._select_choice, prompt_name),
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
