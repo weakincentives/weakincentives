@@ -163,6 +163,71 @@ def _normalize_section_override(
     )
 
 
+def _validate_tool_contract_digest(
+    *,
+    name: str,
+    descriptor_tool: ToolDescriptor | None,
+    expected_hash: JSONValue,
+    strict: bool,
+) -> HexDigest | None:
+    if descriptor_tool is None:
+        if strict:
+            raise PromptOverridesError(f"Unknown tool override: {name}")
+        _LOGGER.debug(
+            "Skipping unknown tool override.",
+            event="prompt_override_unknown_tool",
+            context={"tool": name},
+        )
+        return None
+    expected_digest = ensure_hex_digest(
+        cast(HexDigest | str, expected_hash),
+        field_name="Tool expected_contract_hash",
+    )
+    if expected_digest != descriptor_tool.contract_hash:
+        if strict:
+            raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
+        _LOGGER.debug(
+            "Skipping stale tool override.",
+            event="prompt_override_stale_tool",
+            context={
+                "tool": name,
+                "expected_hash": str(descriptor_tool.contract_hash),
+                "found_hash": str(expected_digest),
+            },
+        )
+        return None
+    return expected_digest
+
+
+def _normalize_tool_description(
+    description: JSONValue, *, description_error_message: str
+) -> str | None:
+    if description is None:
+        return None
+    if not isinstance(description, str):
+        raise PromptOverridesError(description_error_message)
+    return description
+
+
+def _parse_param_descriptions(
+    param_descriptions: JSONValue,
+    *,
+    param_mapping_error_message: str,
+    param_entry_error_message: str,
+) -> dict[str, str]:
+    if param_descriptions is None:
+        return {}
+    if not isinstance(param_descriptions, Mapping):
+        raise PromptOverridesError(param_mapping_error_message)
+    mapping_params = cast(Mapping[str, JSONValue], param_descriptions)
+    normalized_params: dict[str, str] = {}
+    for key, value in mapping_params.items():
+        if not isinstance(value, str):
+            raise PromptOverridesError(param_entry_error_message)
+        normalized_params[key] = value
+    return normalized_params
+
+
 @overload
 def _normalize_tool_override(
     *,
@@ -193,7 +258,7 @@ def _normalize_tool_override(
 ) -> ToolOverride | None: ...
 
 
-def _normalize_tool_override(  # noqa: C901
+def _normalize_tool_override(
     *,
     name: str,
     descriptor_tool: ToolDescriptor | None,
@@ -205,51 +270,25 @@ def _normalize_tool_override(  # noqa: C901
     param_mapping_error_message: str,
     param_entry_error_message: str,
 ) -> ToolOverride | None:
-    if descriptor_tool is None:
-        if strict:
-            raise PromptOverridesError(f"Unknown tool override: {name}")
-        _LOGGER.debug(
-            "Skipping unknown tool override.",
-            event="prompt_override_unknown_tool",
-            context={"tool": name},
-        )
-        return None
-    expected_digest = ensure_hex_digest(
-        cast(HexDigest | str, expected_hash),
-        field_name="Tool expected_contract_hash",
+    validated_digest = _validate_tool_contract_digest(
+        name=name,
+        descriptor_tool=descriptor_tool,
+        expected_hash=expected_hash,
+        strict=strict,
     )
-    if expected_digest != descriptor_tool.contract_hash:
-        if strict:
-            raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
-        _LOGGER.debug(
-            "Skipping stale tool override.",
-            event="prompt_override_stale_tool",
-            context={
-                "tool": name,
-                "expected_hash": str(descriptor_tool.contract_hash),
-                "found_hash": str(expected_digest),
-            },
-        )
+    if validated_digest is None:
         return None
-    if description is not None and not isinstance(description, str):
-        raise PromptOverridesError(description_error_message)
-    if param_descriptions is None:
-        param_descriptions = {}
-    if not isinstance(param_descriptions, Mapping):
-        raise PromptOverridesError(param_mapping_error_message)
-    mapping_params = cast(Mapping[str, JSONValue], param_descriptions)
-    normalized_params: dict[str, str] = {}
-    for key, value in mapping_params.items():
-        if not isinstance(value, str):
-            raise PromptOverridesError(param_entry_error_message)
-        normalized_params[key] = value
-    if description is None:
-        normalized_description: str | None = None
-    else:
-        normalized_description = description
+    normalized_description = _normalize_tool_description(
+        description, description_error_message=description_error_message
+    )
+    normalized_params = _parse_param_descriptions(
+        param_descriptions,
+        param_mapping_error_message=param_mapping_error_message,
+        param_entry_error_message=param_entry_error_message,
+    )
     return ToolOverride(
         name=name,
-        expected_contract_hash=expected_digest,
+        expected_contract_hash=validated_digest,
         description=normalized_description,
         param_descriptions=normalized_params,
     )
