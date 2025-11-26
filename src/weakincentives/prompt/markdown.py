@@ -12,16 +12,19 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any, Self, TypeVar, cast, override
+from typing import Any, Literal, Self, TypeVar, cast, override
 
-from ..serde import clone as clone_dataclass
-from ._types import SupportsDataclass
+from ..serde import clone as clone_dataclass, dump
+from ._types import SupportsDataclass, SupportsToolResult
 from .errors import PromptRenderError
 from .section import Section
+from .tool import Tool
+from .tool_result import render_tool_payload
 
 MarkdownParamsT = TypeVar(
     "MarkdownParamsT",
@@ -80,8 +83,18 @@ class MarkdownSection(Section[MarkdownParamsT]):
                 "Missing placeholder during render.",
                 placeholder=str(missing),
             ) from error
-        if rendered_body:
-            return f"{heading}\n\n{rendered_body.strip()}"
+        rendered_tools = _render_tool_examples_block(self.tools())
+        normalized_body = rendered_body.strip()
+        combined_body = normalized_body
+        if rendered_tools:
+            combined_body = (
+                f"{normalized_body}\n\n{rendered_tools}"
+                if normalized_body
+                else rendered_tools
+            )
+
+        if combined_body:
+            return f"{heading}\n\n{combined_body}"
         return heading
 
     @override
@@ -142,6 +155,82 @@ class MarkdownSection(Section[MarkdownParamsT]):
             accepts_overrides=self.accepts_overrides,
         )
         return cast(Self, clone)
+
+
+def _render_tool_examples_block(
+    tools: Sequence[Tool[SupportsDataclass, SupportsToolResult]],
+) -> str:
+    rendered: list[str] = []
+    for tool in tools:
+        if not tool.examples:
+            continue
+
+        examples_block = _render_examples_for_tool(tool)
+        rendered.append(
+            "\n".join(
+                [
+                    f"- {tool.name}: {tool.description}",
+                    textwrap.indent(examples_block, "  "),
+                ]
+            )
+        )
+
+    if not rendered:
+        return ""
+
+    return "\n".join(["Tools:", *rendered])
+
+
+def _render_examples_for_tool(tool: Tool[SupportsDataclass, SupportsToolResult]) -> str:
+    lines: list[str] = [f"- {tool.name} examples:"]
+    for example in tool.examples:
+        rendered_output = _render_example_output(
+            example.output, container=tool.result_container
+        )
+        lines.extend(
+            [
+                f"  - description: {example.description}",
+                "    input:",
+                *_render_fenced_block(
+                    _render_example_value(example.input),
+                    indent="      ",
+                    language="json",
+                ),
+                "    output:",
+                *_render_fenced_block(rendered_output, indent="      ", language=None),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _render_example_value(value: SupportsDataclass) -> str:
+    serialized_value = dump(value, exclude_none=True)
+
+    return json.dumps(serialized_value, ensure_ascii=False)
+
+
+def _render_example_output(
+    value: SupportsDataclass | Sequence[SupportsDataclass],
+    *,
+    container: Literal["object", "array"],
+) -> str:
+    if container == "array":
+        sequence_value = cast(Sequence[SupportsDataclass], value)
+        return render_tool_payload(list(sequence_value))
+
+    return render_tool_payload(cast(SupportsDataclass, value))
+
+
+def _render_fenced_block(
+    content: str, *, indent: str, language: str | None
+) -> list[str]:
+    fence = "```" if language is None else f"```{language}"
+    indented_lines = content.splitlines() or [""]
+    return [
+        f"{indent}{fence}",
+        *[f"{indent}{line}" for line in indented_lines],
+        f"{indent}```",
+    ]
 
 
 __all__ = ["MarkdownSection"]
