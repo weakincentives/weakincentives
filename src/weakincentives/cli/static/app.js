@@ -11,6 +11,8 @@ const state = {
   sliceBuckets: { state: [], event: [] },
 };
 
+const MARKDOWN_KEY = "__markdown__";
+
 const elements = {
   path: document.getElementById("snapshot-path"),
   snapshotSelect: document.getElementById("snapshot-select"),
@@ -327,7 +329,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
 const isObject = (value) => typeof value === "object" && value !== null;
 
+function getMarkdownPayload(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !Object.prototype.hasOwnProperty.call(value, MARKDOWN_KEY)
+  ) {
+    return null;
+  }
+
+  const payload = value[MARKDOWN_KEY];
+  if (
+    payload &&
+    typeof payload === "object" &&
+    typeof payload.text === "string" &&
+    typeof payload.html === "string"
+  ) {
+    return payload;
+  }
+
+  return null;
+}
+
 function valueType(value) {
+  if (getMarkdownPayload(value)) return "markdown";
   if (Array.isArray(value)) return "array";
   if (value === null) return "null";
   return typeof value;
@@ -487,6 +513,7 @@ function renderTree(value, path, depth, label) {
 
   const badge = document.createElement("span");
   badge.className = "pill pill-quiet";
+  const markdown = getMarkdownPayload(value);
   const type = valueType(value);
   const childCount =
     type === "array"
@@ -496,6 +523,8 @@ function renderTree(value, path, depth, label) {
         : 0;
   if (type === "array") {
     badge.textContent = `array (${value.length})`;
+  } else if (type === "markdown") {
+    badge.textContent = "markdown";
   } else if (type === "object" && value !== null) {
     badge.textContent = `object (${Object.keys(value).length})`;
   } else {
@@ -508,24 +537,57 @@ function renderTree(value, path, depth, label) {
     preview.className = "tree-preview";
     preview.textContent = arrayPreview(value);
     header.appendChild(preview);
+  } else if (markdown) {
+    const preview = document.createElement("span");
+    preview.className = "tree-preview";
+    preview.textContent = previewValue(markdown.text, 64);
+    header.appendChild(preview);
   }
 
   const body = document.createElement("div");
   body.className = "tree-body";
 
-  const expandable = Array.isArray(value) || isObject(value);
+  const expandable = !markdown && (Array.isArray(value) || isObject(value));
 
   if (!expandable) {
     const wrapper = document.createElement("div");
     wrapper.className = "leaf-wrapper";
 
-    const leaf = document.createElement("div");
-    leaf.className = "tree-leaf";
-    leaf.textContent = String(value);
-    const toggle = applyTruncation(leaf, countLines(value));
-    wrapper.appendChild(leaf);
-    if (toggle) {
-      wrapper.appendChild(toggle);
+    if (markdown) {
+      const renderedLabel = document.createElement("p");
+      renderedLabel.className = "markdown-label";
+      renderedLabel.textContent = "Rendered markdown";
+
+      const rendered = document.createElement("div");
+      rendered.className = "markdown-rendered";
+      rendered.innerHTML = markdown.html;
+
+      const rawLabel = document.createElement("p");
+      rawLabel.className = "markdown-label";
+      rawLabel.textContent = "Raw markdown";
+
+      const raw = document.createElement("pre");
+      raw.className = "markdown-raw";
+      raw.textContent = markdown.text;
+      const toggle = applyTruncation(raw, countLines(markdown.text));
+
+      wrapper.classList.add("markdown-leaf");
+      wrapper.appendChild(renderedLabel);
+      wrapper.appendChild(rendered);
+      wrapper.appendChild(rawLabel);
+      wrapper.appendChild(raw);
+      if (toggle) {
+        wrapper.appendChild(toggle);
+      }
+    } else {
+      const leaf = document.createElement("div");
+      leaf.className = "tree-leaf";
+      leaf.textContent = String(value);
+      const toggle = applyTruncation(leaf, countLines(value));
+      wrapper.appendChild(leaf);
+      if (toggle) {
+        wrapper.appendChild(toggle);
+      }
     }
     body.appendChild(wrapper);
     node.appendChild(header);

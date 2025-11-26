@@ -652,6 +652,61 @@ button.ghost:hover {
   width: 100%;
 }
 
+.markdown-leaf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--color-bg-subtle);
+}
+
+.markdown-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.markdown-rendered {
+  font-family: var(--font-sans);
+  color: var(--color-text-main);
+  line-height: 1.6;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.markdown-rendered code {
+  background: var(--color-bg);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.markdown-rendered pre {
+  background: var(--color-bg);
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.markdown-raw {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--color-bg);
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .truncated {
   max-height: 200px;
   overflow-y: auto;

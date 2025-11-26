@@ -2236,6 +2236,7 @@ podman = [
 ]
 wink = [
     { name = "fastapi" },
+    { name = "markdown-it-py", extra = ["linkify"] },
     { name = "uvicorn" },
 ]
 
@@ -2261,6 +2262,7 @@ requires-dist = [
     { name = "asteval", marker = "extra == 'asteval'", specifier = ">=1.0.7" },
     { name = "fastapi", marker = "extra == 'wink'", specifier = ">=0.115.0" },
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.79.3" },
+    { name = "markdown-it-py", extras = ["linkify"], marker = "extra == 'wink'", specifier = ">=4.0.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.8.0" },
     { name = "podman", marker = "extra == 'podman'", specifier = ">=5.6.0" },
     { name = "uvicorn", marker = "extra == 'wink'", specifier = ">=0.30.0" },
