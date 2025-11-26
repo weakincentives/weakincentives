@@ -4,10 +4,37 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- Session snapshots now persist session tags and display them in the wink debug
-  UI for easier context during inspection.
-- Linting now enforces Ruff C90 (McCabe) complexity checks with a threshold of
-  10 to flag overly complex functions.
+### Wink Debugger & Snapshots
+
+- Snapshot viewer now renders markdown-rich values with a toggle between
+  rendered HTML and raw markdown, refreshed styling, and separate state/event
+  panels plus refresh controls.
+- Snapshots persist session tags and parent/child relationships, surfacing tags
+  in the debug UI and filtering out stray `.jsonl` bundles when listing
+  snapshots.
+
+### Sessions & Subagents
+
+- Isolated subagents now inherit their parent session so reducers, tags, and
+  event context stay consistent across nested runs.
+
+### Prompts & Events
+
+- Prompt render/execution events include the prompt descriptor, clone methods
+  return `Self` for stricter typing, and `OptimizationScope` is now a `StrEnum`
+  (update any comparisons against the enum values).
+
+### Tools, VFS & Sandboxes
+
+- Host mount traversal now uses `Path.walk` for more reliable discovery in VFS
+  and Podman-backed workspaces.
+- Tool validation tightened with explicit `ToolExample` support and new examples
+  covering VFS, planning, ASTEval, subagents, and Podman tools.
+
+### Quality & Testing
+
+- Added mutation-testing support and broader Ruff quality checks to catch issues
+  earlier.
 
 ## v0.11.0 - 2025-11-23
 
