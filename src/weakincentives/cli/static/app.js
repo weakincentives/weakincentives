@@ -6,6 +6,7 @@ const state = {
   currentItems: [],
   openPaths: new Set(),
   closedPaths: new Set(),
+  markdownViews: new Map(),
   expandDepth: 2,
   searchQuery: "",
   sliceBuckets: { state: [], event: [] },
@@ -234,6 +235,7 @@ function renderSliceDetail(slice) {
   elements.itemCount.textContent = `${slice.items.length} items`;
   elements.typeRow.innerHTML = "";
   state.currentItems = slice.items;
+  state.markdownViews = new Map();
   state.searchQuery = "";
   elements.itemSearch.value = "";
   applyDepth(state.currentItems, state.expandDepth);
@@ -417,6 +419,14 @@ function pathKey(path) {
   return path.join(".");
 }
 
+function getMarkdownView(path) {
+  return state.markdownViews.get(pathKey(path)) || "html";
+}
+
+function setMarkdownView(path, view) {
+  state.markdownViews.set(pathKey(path), view);
+}
+
 function shouldOpen(path, depth) {
   const key = pathKey(path);
   if (state.closedPaths.has(key)) return false;
@@ -554,6 +564,20 @@ function renderTree(value, path, depth, label) {
     wrapper.className = "leaf-wrapper";
 
     if (markdown) {
+      const view = getMarkdownView(path);
+      const toggle = document.createElement("div");
+      toggle.className = "markdown-toggle";
+
+      const htmlButton = document.createElement("button");
+      htmlButton.type = "button";
+      htmlButton.textContent = "Rendered HTML";
+      toggle.appendChild(htmlButton);
+
+      const rawButton = document.createElement("button");
+      rawButton.type = "button";
+      rawButton.textContent = "Raw Markdown";
+      toggle.appendChild(rawButton);
+
       const renderedLabel = document.createElement("p");
       renderedLabel.className = "markdown-label";
       renderedLabel.textContent = "Rendered markdown";
@@ -569,16 +593,37 @@ function renderTree(value, path, depth, label) {
       const raw = document.createElement("pre");
       raw.className = "markdown-raw";
       raw.textContent = markdown.text;
-      const toggle = applyTruncation(raw, countLines(markdown.text));
+      const truncationToggle = applyTruncation(raw, countLines(markdown.text));
+
+      const renderedSection = document.createElement("div");
+      renderedSection.className = "markdown-section";
+      renderedSection.appendChild(renderedLabel);
+      renderedSection.appendChild(rendered);
+
+      const rawSection = document.createElement("div");
+      rawSection.className = "markdown-section";
+      rawSection.appendChild(rawLabel);
+      rawSection.appendChild(raw);
+      if (truncationToggle) {
+        rawSection.appendChild(truncationToggle);
+      }
+
+      const applyView = (nextView) => {
+        setMarkdownView(path, nextView);
+        htmlButton.classList.toggle("active", nextView === "html");
+        rawButton.classList.toggle("active", nextView === "raw");
+        renderedSection.style.display = nextView === "html" ? "flex" : "none";
+        rawSection.style.display = nextView === "raw" ? "flex" : "none";
+      };
+
+      htmlButton.addEventListener("click", () => applyView("html"));
+      rawButton.addEventListener("click", () => applyView("raw"));
+      applyView(view);
 
       wrapper.classList.add("markdown-leaf");
-      wrapper.appendChild(renderedLabel);
-      wrapper.appendChild(rendered);
-      wrapper.appendChild(rawLabel);
-      wrapper.appendChild(raw);
-      if (toggle) {
-        wrapper.appendChild(toggle);
-      }
+      wrapper.appendChild(toggle);
+      wrapper.appendChild(renderedSection);
+      wrapper.appendChild(rawSection);
     } else {
       const leaf = document.createElement("div");
       leaf.className = "tree-leaf";
