@@ -25,7 +25,7 @@ from typing import Final, Literal, cast, override
 
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -691,42 +691,142 @@ def _build_tools(
                 description="List directory entries under a relative path.",
                 handler=suite.list_directory,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description=(
+                            "List the source directory to see top-level modules."
+                        ),
+                        input=ListDirectoryParams(path="src"),
+                        output=(
+                            FileInfo(
+                                path=VfsPath(("src", "tests")),
+                                kind="directory",
+                            ),
+                            FileInfo(
+                                path=VfsPath(("src", "weakincentives")),
+                                kind="directory",
+                            ),
+                        ),
+                    ),
+                ),
             ),
             Tool[ReadFileParams, ReadFileResult](
                 name="read_file",
                 description="Read UTF-8 file contents with pagination support.",
                 handler=suite.read_file,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Read the repository README header.",
+                        input=ReadFileParams(file_path="README.md", offset=0, limit=2),
+                        output=ReadFileResult(
+                            path=VfsPath(("README.md",)),
+                            content=(
+                                "   1 | # Weak Incentives\n"
+                                "   2 | Open-source agent orchestration platform."
+                            ),
+                            offset=0,
+                            limit=2,
+                            total_lines=120,
+                        ),
+                    ),
+                ),
             ),
             Tool[WriteFileParams, WriteFile](
                 name="write_file",
                 description="Create a new UTF-8 text file.",
                 handler=suite.write_file,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Create a scratch note in the workspace.",
+                        input=WriteFileParams(
+                            file_path="notes/todo.txt",
+                            content="- Outline VFS design decisions",
+                        ),
+                        output=WriteFile(
+                            path=VfsPath(("notes", "todo.txt")),
+                            content="- Outline VFS design decisions",
+                            mode="create",
+                        ),
+                    ),
+                ),
             ),
             Tool[EditFileParams, WriteFile](
                 name="edit_file",
                 description="Replace occurrences of a string within a file.",
                 handler=suite.edit_file,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Update a configuration value in place.",
+                        input=EditFileParams(
+                            file_path="src/weakincentives/config.py",
+                            old_string="DEBUG = True",
+                            new_string="DEBUG = False",
+                            replace_all=False,
+                        ),
+                        output=WriteFile(
+                            path=VfsPath(("src", "weakincentives", "config.py")),
+                            content='DEBUG = False\nLOG_LEVEL = "info"',
+                            mode="overwrite",
+                        ),
+                    ),
+                ),
             ),
             Tool[GlobParams, tuple[GlobMatch, ...]](
                 name="glob",
                 description="Match files beneath a directory using shell patterns.",
                 handler=suite.glob,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Find Python tests under the tests directory.",
+                        input=GlobParams(pattern="**/test_*.py", path="tests"),
+                        output=(
+                            GlobMatch(
+                                path=VfsPath(("tests", "unit", "test_vfs.py")),
+                                size_bytes=2048,
+                                version=3,
+                                updated_at=datetime(2024, 1, 5, tzinfo=UTC),
+                            ),
+                        ),
+                    ),
+                ),
             ),
             Tool[GrepParams, tuple[GrepMatch, ...]](
                 name="grep",
                 description="Search files for a regular expression pattern.",
                 handler=suite.grep,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Search for log level constants in config files.",
+                        input=GrepParams(
+                            pattern=r"LOG_LEVEL", path="src/weakincentives"
+                        ),
+                        output=(
+                            GrepMatch(
+                                path=VfsPath(("src", "weakincentives", "config.py")),
+                                line_number=5,
+                                line='LOG_LEVEL = "info"',
+                            ),
+                        ),
+                    ),
+                ),
             ),
             Tool[RemoveParams, DeleteEntry](
                 name="rm",
                 description="Remove files or directories recursively.",
                 handler=suite.remove,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Delete a temporary build directory.",
+                        input=RemoveParams(path="tmp/build"),
+                        output=DeleteEntry(path=VfsPath(("tmp", "build"))),
+                    ),
+                ),
             ),
         ),
     )
