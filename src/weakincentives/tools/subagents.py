@@ -27,7 +27,7 @@ from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.prompt import RenderedPrompt
 from ..prompt.protocols import PromptResponseProtocol
-from ..prompt.tool import Tool, ToolContext
+from ..prompt.tool import Tool, ToolContext, ToolExample
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
 from ..runtime.events._types import EventBus
@@ -172,6 +172,52 @@ def build_dispatch_subagents_tool(
 ) -> Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]:
     """Return a configured dispatch tool bound to the desired isolation level."""
 
+    examples: tuple[
+        ToolExample[DispatchSubagentsParams, tuple[SubagentResult, ...]], ...
+    ] = (
+        ToolExample(
+            description="Fan out competitor research and FAQ drafting in parallel.",
+            input=DispatchSubagentsParams(
+                delegations=(
+                    DelegationParams(
+                        reason="Summarize feature gaps across direct competitors.",
+                        expected_result="Three bullets highlighting strengths and weaknesses.",
+                        may_delegate_further="No follow-on delegation expected.",
+                        recap_lines=(
+                            "Scan Acme and Globex product docs.",
+                            "Call out notable differentiators.",
+                        ),
+                    ),
+                    DelegationParams(
+                        reason="Draft concise FAQ responses from support backlog.",
+                        expected_result="Five ready-to-send FAQ answers.",
+                        may_delegate_further="May consult style guide if needed.",
+                        recap_lines=(
+                            "Use the latest ticket summaries.",
+                            "Keep each answer under 50 words.",
+                        ),
+                    ),
+                )
+            ),
+            output=(
+                SubagentResult(
+                    output=(
+                        "Acme focuses on analytics depth; Globex excels in billing flexibility; "
+                        "both advertise 99.9% uptime SLAs."
+                    ),
+                    success=True,
+                ),
+                SubagentResult(
+                    output=(
+                        "Auth setup, SSO access, refund timeline, data export, and plan upgrade "
+                        "FAQs drafted with concise answers."
+                    ),
+                    success=True,
+                ),
+            ),
+        ),
+    )
+
     def _dispatch_subagents(
         params: DispatchSubagentsParams,
         *,
@@ -289,6 +335,7 @@ def build_dispatch_subagents_tool(
         description="Run delegated child prompts in parallel.",
         handler=_dispatch_subagents,
         accepts_overrides=accepts_overrides,
+        examples=examples,
     )
 
 
