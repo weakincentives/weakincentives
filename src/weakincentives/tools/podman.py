@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
 from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session, replace_latest, select_latest
 from . import vfs as vfs_module
@@ -609,48 +609,210 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 name="ls",
                 description="List directory entries under a relative path.",
                 handler=self._vfs_suite.list_directory,
+                examples=(
+                    ToolExample[
+                        ListDirectoryParams, tuple[FileInfo, ...]
+                    ](
+                        description="List the workspace root",
+                        input=ListDirectoryParams(path="/workspace"),
+                        output=(
+                            FileInfo(
+                                path=VfsPath(("workspace", "README.md")),
+                                kind="file",
+                                size_bytes=4_096,
+                                version=1,
+                                updated_at=datetime(2024, 1, 1, tzinfo=UTC),
+                            ),
+                            FileInfo(
+                                path=VfsPath(("workspace", "src")),
+                                kind="directory",
+                                size_bytes=None,
+                                version=None,
+                                updated_at=None,
+                            ),
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
             Tool[ReadFileParams, ReadFileResult](
                 name="read_file",
                 description="Read UTF-8 file contents with pagination support.",
                 handler=self._vfs_suite.read_file,
+                examples=(
+                    ToolExample[ReadFileParams, ReadFileResult](
+                        description="Read the top of README.md",
+                        input=ReadFileParams(
+                            file_path="/workspace/README.md", offset=0, limit=3
+                        ),
+                        output=ReadFileResult(
+                            path=VfsPath(("workspace", "README.md")),
+                            content=(
+                                "   1 | # weakincentives\n"
+                                "   2 | Open source automation harness\n"
+                                "   3 | for safe agents"
+                            ),
+                            offset=0,
+                            limit=3,
+                            total_lines=120,
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
             Tool[WriteFileParams, WriteFile](
                 name="write_file",
                 description="Create a new UTF-8 text file.",
                 handler=self._vfs_suite.write_file,
+                examples=(
+                    ToolExample[WriteFileParams, WriteFile](
+                        description="Create a notes file in the container",
+                        input=WriteFileParams(
+                            file_path="/workspace/notes.txt",
+                            content="Remember to run make check",
+                        ),
+                        output=WriteFile(
+                            path=VfsPath(("workspace", "notes.txt")),
+                            content="Remember to run make check",
+                            mode="create",
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
             Tool[EditFileParams, WriteFile](
                 name="edit_file",
                 description="Replace occurrences of a string within a file.",
                 handler=self._vfs_suite.edit_file,
+                examples=(
+                    ToolExample[EditFileParams, WriteFile](
+                        description="Update a TODO entry",
+                        input=EditFileParams(
+                            file_path="/workspace/notes.txt",
+                            old_string="TODO: add tests",
+                            new_string="TODO: add integration tests",
+                            replace_all=False,
+                        ),
+                        output=WriteFile(
+                            path=VfsPath(("workspace", "notes.txt")),
+                            content="Completed: scaffold\nTODO: add integration tests",
+                            mode="overwrite",
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
             Tool[GlobParams, tuple[GlobMatch, ...]](
                 name="glob",
                 description="Match files beneath a directory using shell patterns.",
                 handler=self._vfs_suite.glob,
+                examples=(
+                    ToolExample[
+                        GlobParams, tuple[GlobMatch, ...]
+                    ](
+                        description="Find Python files under src",
+                        input=GlobParams(pattern="**/*.py", path="/workspace/src"),
+                        output=(
+                            GlobMatch(
+                                path=VfsPath(("workspace", "src", "__init__.py")),
+                                size_bytes=128,
+                                version=1,
+                                updated_at=datetime(2024, 1, 1, tzinfo=UTC),
+                            ),
+                            GlobMatch(
+                                path=VfsPath(
+                                    (
+                                        "workspace",
+                                        "src",
+                                        "weakincentives",
+                                        "__init__.py",
+                                    )
+                                ),
+                                size_bytes=256,
+                                version=2,
+                                updated_at=datetime(2024, 1, 2, tzinfo=UTC),
+                            ),
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
             Tool[GrepParams, tuple[GrepMatch, ...]](
                 name="grep",
                 description="Search files for a regular expression pattern.",
                 handler=self._vfs_suite.grep,
+                examples=(
+                    ToolExample[GrepParams, tuple[GrepMatch, ...]](
+                        description="Search for TODO comments",
+                        input=GrepParams(
+                            pattern="TODO", path="/workspace/src", glob="**/*.py"
+                        ),
+                        output=(
+                            GrepMatch(
+                                path=VfsPath(
+                                    (
+                                        "workspace",
+                                        "src",
+                                        "weakincentives",
+                                        "tools",
+                                        "podman.py",
+                                    )
+                                ),
+                                line_number=42,
+                                line="# TODO: improve sandbox docs",
+                            ),
+                            GrepMatch(
+                                path=VfsPath(
+                                    (
+                                        "workspace",
+                                        "src",
+                                        "weakincentives",
+                                        "runtime",
+                                        "__init__.py",
+                                    )
+                                ),
+                                line_number=10,
+                                line="TODO: replace placeholder logger",
+                            ),
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
             Tool[RemoveParams, DeleteEntry](
                 name="rm",
                 description="Remove files or directories recursively.",
                 handler=self._vfs_suite.remove,
+                examples=(
+                    ToolExample[RemoveParams, DeleteEntry](
+                        description="Delete a stale build artifact",
+                        input=RemoveParams(path="/workspace/build/output"),
+                        output=DeleteEntry(
+                            path=VfsPath(("workspace", "build", "output"))
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
             Tool[PodmanShellParams, PodmanShellResult](
                 name="shell_execute",
                 description="Run a short command inside the Podman workspace.",
                 handler=self._shell_suite.run_shell,
+                examples=(
+                    ToolExample[PodmanShellParams, PodmanShellResult](
+                        description="Check the current working directory",
+                        input=PodmanShellParams(command=("pwd",), cwd=None),
+                        output=PodmanShellResult(
+                            command=("pwd",),
+                            cwd="/workspace",
+                            exit_code=0,
+                            stdout="/workspace",
+                            stderr="",
+                            duration_ms=12,
+                            timed_out=False,
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
             Tool[EvalParams, EvalResult](
@@ -660,6 +822,20 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                     "Captures stdout/stderr and reports the exit code."
                 ),
                 handler=self._eval_suite.evaluate_python,
+                examples=(
+                    ToolExample[EvalParams, EvalResult](
+                        description="Run a small calculation",
+                        input=EvalParams(code="print(3 * 7)"),
+                        output=EvalResult(
+                            value_repr=None,
+                            stdout="21\n",
+                            stderr="",
+                            globals={},
+                            reads=(),
+                            writes=(),
+                        ),
+                    ),
+                ),
                 accepts_overrides=accepts_overrides,
             ),
         )
