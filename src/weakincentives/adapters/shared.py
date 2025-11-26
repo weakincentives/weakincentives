@@ -216,6 +216,95 @@ def _raise_tool_deadline_error(
     )
 
 
+def _lookup_tool(
+    *,
+    tool_call: ProviderToolCall,
+    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
+    prompt_name: str,
+    provider_payload: dict[str, Any] | None,
+) -> tuple[Tool[SupportsDataclass, SupportsToolResult], Callable[..., ToolResult], str]:
+    function = tool_call.function
+    tool_name = function.name
+    tool = tool_registry.get(tool_name)
+    if tool is None:
+        raise PromptEvaluationError(
+            f"Unknown tool '{tool_name}' requested by provider.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_TOOL,
+            provider_payload=provider_payload,
+        )
+    handler = tool.handler
+    if handler is None:
+        raise PromptEvaluationError(
+            f"Tool '{tool_name}' does not have a registered handler.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_TOOL,
+            provider_payload=provider_payload,
+        )
+
+    return tool, handler, tool_name
+
+
+def _parse_tool_arguments(
+    *,
+    tool_call: ProviderToolCall,
+    parse_arguments: ToolArgumentsParser,
+    prompt_name: str,
+    provider_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return parse_arguments(
+        tool_call.function.arguments,
+        prompt_name=prompt_name,
+        provider_payload=provider_payload,
+    )
+
+
+def _parse_tool_params(
+    *,
+    tool: Tool[SupportsDataclass, SupportsToolResult],
+    arguments_mapping: Mapping[str, Any],
+) -> SupportsDataclass:
+    try:
+        return parse(tool.params_type, arguments_mapping, extra="forbid")
+    except (TypeError, ValueError) as error:
+        raise ToolValidationError(str(error)) from error
+
+
+def _enforce_tool_deadline(
+    *, deadline: Deadline | None, prompt_name: str, tool_name: str
+) -> None:
+    if deadline is not None and deadline.remaining() <= timedelta(0):
+        _raise_tool_deadline_error(
+            prompt_name=prompt_name, tool_name=tool_name, deadline=deadline
+        )
+
+
+def _log_handler_exception(
+    *,
+    log: StructuredLogger,
+    provider_payload: dict[str, Any] | None,
+    error: Exception,
+) -> None:
+    log.exception(
+        "Tool handler raised an unexpected exception.",
+        event="tool_handler_exception",
+        context={"provider_payload": provider_payload},
+    )
+
+
+def _log_handler_completed(
+    *, log: StructuredLogger, tool_result: ToolResult[Any]
+) -> None:
+    log.info(
+        "Tool handler completed.",
+        event="tool_handler_completed",
+        context={
+            "success": tool_result.success,
+            "has_value": tool_result.value is not None,
+        },
+    )
+
+
 def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
     """Summarize publish failures encountered while applying tool results."""
 
@@ -357,7 +446,7 @@ class ToolExecutionOutcome:
 
 
 @contextmanager
-def tool_execution(  # noqa: C901
+def tool_execution(
     *,
     adapter_name: AdapterName,
     adapter: ProviderAdapter[Any],
@@ -375,27 +464,15 @@ def tool_execution(  # noqa: C901
 ) -> Iterator[ToolExecutionOutcome]:
     """Context manager that executes a tool call and standardizes logging."""
 
-    function = tool_call.function
-    tool_name = function.name
-    tool = tool_registry.get(tool_name)
-    if tool is None:
-        raise PromptEvaluationError(
-            f"Unknown tool '{tool_name}' requested by provider.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_TOOL,
-            provider_payload=provider_payload,
-        )
-    handler = tool.handler
-    if handler is None:
-        raise PromptEvaluationError(
-            f"Tool '{tool_name}' does not have a registered handler.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_TOOL,
-            provider_payload=provider_payload,
-        )
-
-    arguments_mapping = parse_arguments(
-        function.arguments,
+    tool, handler, tool_name = _lookup_tool(
+        tool_call=tool_call,
+        tool_registry=tool_registry,
+        prompt_name=prompt_name,
+        provider_payload=provider_payload,
+    )
+    arguments_mapping = _parse_tool_arguments(
+        tool_call=tool_call,
+        parse_arguments=parse_arguments,
         prompt_name=prompt_name,
         provider_payload=provider_payload,
     )
@@ -410,23 +487,13 @@ def tool_execution(  # noqa: C901
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsToolResult]
     try:
-        try:
-            parsed_params = parse(tool.params_type, arguments_mapping, extra="forbid")
-        except (TypeError, ValueError) as error:
-            tool_params = cast(
-                SupportsDataclass,
-                _RejectedToolParams(
-                    raw_arguments=dict(arguments_mapping),
-                    error=str(error),
-                ),
-            )
-            raise ToolValidationError(str(error)) from error
-
-        tool_params = parsed_params
-        if deadline is not None and deadline.remaining() <= timedelta(0):
-            _raise_tool_deadline_error(
-                prompt_name=prompt_name, tool_name=tool_name, deadline=deadline
-            )
+        tool_params = _parse_tool_params(
+            tool=tool,
+            arguments_mapping=arguments_mapping,
+        )
+        _enforce_tool_deadline(
+            deadline=deadline, prompt_name=prompt_name, tool_name=tool_name
+        )
         context = ToolContext(
             prompt=cast(PromptProtocol[Any], prompt),
             rendered_prompt=rendered_prompt,
@@ -465,25 +532,14 @@ def tool_execution(  # noqa: C901
             provider_payload=deadline_provider_payload(deadline),
         ) from error
     except Exception as error:  # propagate message via ToolResult
-        log.exception(
-            "Tool handler raised an unexpected exception.",
-            event="tool_handler_exception",
-            context={"provider_payload": provider_payload},
-        )
+        _log_handler_exception(log=log, provider_payload=provider_payload, error=error)
         tool_result = ToolResult(
             message=f"Tool '{tool_name}' execution failed: {error}",
             value=None,
             success=False,
         )
     else:
-        log.info(
-            "Tool handler completed.",
-            event="tool_handler_completed",
-            context={
-                "success": tool_result.success,
-                "has_value": tool_result.value is not None,
-            },
-        )
+        _log_handler_completed(log=log, tool_result=tool_result)
 
     if tool_params is None:  # pragma: no cover - defensive
         raise RuntimeError("Tool parameters were not parsed.")
