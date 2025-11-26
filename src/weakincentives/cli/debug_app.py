@@ -52,6 +52,7 @@ _MARKDOWN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\n\n"),
     re.compile(r"\*\*[^\s].+?\*\*"),
 )
+_MIN_MARKDOWN_LENGTH = 16
 _markdown = MarkdownIt("commonmark", {"linkify": True})
 
 # pyright: reportUnusedFunction=false
@@ -63,7 +64,7 @@ class SnapshotLoadError(RuntimeError):
 
 def _looks_like_markdown(text: str) -> bool:
     candidate = text.strip()
-    if len(candidate) < 16:
+    if len(candidate) < _MIN_MARKDOWN_LENGTH:
         return False
     return any(pattern.search(candidate) for pattern in _MARKDOWN_PATTERNS)
 
