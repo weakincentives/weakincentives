@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import webbrowser
 from collections.abc import Callable, Mapping
@@ -24,12 +25,14 @@ from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from types import MappingProxyType
+from typing import cast
 from urllib.parse import unquote
 
 import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from markdown_it import MarkdownIt
 
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.snapshots import Snapshot, SnapshotPayload, SnapshotRestoreError
@@ -38,11 +41,60 @@ from ..types import JSONValue
 # Module-level logger keeps loader warnings consistent with the debug server.
 logger: StructuredLogger = get_logger(__name__)
 
+
+_MARKDOWN_WRAPPER_KEY = "__markdown__"
+_MARKDOWN_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(^|\n)#{1,6}\s"),
+    re.compile(r"(^|\n)[-*+]\s"),
+    re.compile(r"(^|\n)\d+\.\s"),
+    re.compile(r"`{1,3}[^`]+`{1,3}"),
+    re.compile(r"\[.+?\]\(.+?\)"),
+    re.compile(r"\n\n"),
+    re.compile(r"\*\*[^\s].+?\*\*"),
+)
+_MIN_MARKDOWN_LENGTH = 16
+_markdown = MarkdownIt("commonmark", {"linkify": True})
+
 # pyright: reportUnusedFunction=false
 
 
 class SnapshotLoadError(RuntimeError):
     """Raised when a snapshot cannot be loaded or validated."""
+
+
+def _looks_like_markdown(text: str) -> bool:
+    candidate = text.strip()
+    if len(candidate) < _MIN_MARKDOWN_LENGTH:
+        return False
+    return any(pattern.search(candidate) for pattern in _MARKDOWN_PATTERNS)
+
+
+def _render_markdown(text: str) -> Mapping[str, str]:
+    return {
+        "text": text,
+        "html": _markdown.render(text),
+    }
+
+
+def _render_markdown_values(value: JSONValue) -> JSONValue:
+    if isinstance(value, str):
+        if _looks_like_markdown(value):
+            return {_MARKDOWN_WRAPPER_KEY: _render_markdown(value)}
+        return value
+
+    if isinstance(value, Mapping):
+        if _MARKDOWN_WRAPPER_KEY in value:
+            return value
+        mapping_value = cast(Mapping[str, JSONValue], value)
+        normalized: dict[str, JSONValue] = {}
+        for key, item in mapping_value.items():
+            normalized[str(key)] = _render_markdown_values(item)
+        return normalized
+
+    if isinstance(value, list):
+        return [_render_markdown_values(item) for item in value]
+
+    return value
 
 
 @dataclass(slots=True, frozen=True)
@@ -512,10 +564,12 @@ def _build_slice_handler(
         if limit is not None:
             items = items[:limit]
 
+        rendered_items = [_render_markdown_values(item) for item in items]
+
         return {
             "slice_type": slice_items.slice_type,
             "item_type": slice_items.item_type,
-            "items": items,
+            "items": rendered_items,
         }
 
     return get_slice

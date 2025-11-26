@@ -37,6 +37,11 @@ class _ExampleSlice:
     value: str
 
 
+@dataclass(slots=True, frozen=True)
+class _ListSlice:
+    value: object
+
+
 def _write_snapshot(path: Path, values: list[str]) -> list[str]:
     session_ids: list[str] = []
     entries: list[str] = []
@@ -302,6 +307,64 @@ def test_api_slice_offset_and_errors(tmp_path: Path) -> None:
 
     missing = client.get("/api/slices/unknown")
     assert missing.status_code == 404
+
+
+def test_api_slice_renders_markdown(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    markdown_text = "# Heading\n\nSome **bold** markdown content."
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={_ExampleSlice: (_ExampleSlice(markdown_text),)},
+        tags={"session_id": "markdown"},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+    logger = debug_app.get_logger("test.api.markdown")
+    store = debug_app.SnapshotStore(
+        snapshot_path, loader=debug_app.load_snapshot, logger=logger
+    )
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
+    detail = client.get(f"/api/slices/{quote(slice_type)}").json()
+
+    item = detail["items"][0]["value"]
+    assert item["__markdown__"]["text"] == markdown_text
+    assert "<h1" in item["__markdown__"]["html"]
+    assert "<strong>bold</strong>" in item["__markdown__"]["html"]
+
+
+def test_markdown_renderer_handles_nested_values(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    pre_rendered = {"__markdown__": {"text": "keep", "html": "<p>keep</p>\n"}}
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={
+            _ListSlice: (
+                _ListSlice(
+                    {
+                        "content": ["* bullet point with detail", pre_rendered, 7],
+                    }
+                ),
+            )
+        },
+        tags={"session_id": "nested"},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+    logger = debug_app.get_logger("test.api.markdown.nested")
+    store = debug_app.SnapshotStore(
+        snapshot_path, loader=debug_app.load_snapshot, logger=logger
+    )
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
+    detail = client.get(f"/api/slices/{quote(slice_type)}").json()
+
+    content = detail["items"][0]["value"]["content"]
+    assert content[0]["__markdown__"]["html"].startswith("<ul>")
+    assert content[1] == pre_rendered
+    assert content[2] == 7
 
 
 def test_api_select_errors_and_recover(
