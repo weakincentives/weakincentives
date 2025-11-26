@@ -29,7 +29,7 @@ from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast, override
 
 from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import (
     ReducerContextProtocol,
@@ -852,6 +852,38 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             ),
             handler=tool_suite.run,
             accepts_overrides=accepts_overrides,
+            examples=(
+                ToolExample(
+                    description=(
+                        "Sum contents of a staged VFS file and capture stdout."
+                    ),
+                    input=EvalParams(
+                        code=(
+                            "total = sum(int(value) for value in "
+                            "read_text('numbers.txt').split())\nprint(total)\n"
+                            "total"
+                        ),
+                        globals={},
+                        reads=(
+                            EvalFileRead(
+                                path=VfsPath(segments=("numbers.txt",)),
+                            ),
+                        ),
+                        writes=(),
+                    ),
+                    output=EvalResult(
+                        value_repr="6",
+                        stdout="6\n",
+                        stderr="",
+                        globals={
+                            "total": "6",
+                            "vfs:numbers.txt": "1\n2\n3\n",
+                        },
+                        reads=(EvalFileRead(path=VfsPath(segments=("numbers.txt",))),),
+                        writes=(),
+                    ),
+                ),
+            ),
         )
         super().__init__(
             title="Python Evaluation Tool",
