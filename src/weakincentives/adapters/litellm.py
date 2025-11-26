@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import timedelta
+from http import HTTPStatus
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
@@ -167,7 +168,7 @@ def _normalize_litellm_throttle(
     if "insufficient_quota" in lower or code == "insufficient_quota":
         kind = "quota_exhausted"
     elif (
-        status_code == 429
+        status_code == HTTPStatus.TOO_MANY_REQUESTS
         or "ratelimit" in class_name
         or code
         in {
