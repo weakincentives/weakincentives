@@ -379,16 +379,19 @@ class ToolExample(Generic[ParamsT, ResultT]):
 - `input` – a concrete params dataclass instance for the tool, validated against the
   tool's `ParamsT`. This keeps examples aligned with the same schema enforced at runtime.
 - `output` – the structured result dataclass instance produced by the tool, validated as
-  `ResultT`. Renderers rely on `ToolResult.render()` to convert the example to text, so
-  examples must use the same payload shapes the handler returns.
+  `ResultT`. Renderers call the result payload's `render()` method (via
+  `render_tool_payload`) to convert the example to text, so examples must use the same
+  payload shapes the handler returns.
 
 ### Serialization Rules
 
 Tools carry their own `examples` tuple. When rendering, sections emit examples immediately
-after the tool's description using a stable, adapter-friendly markdown shape. Inputs and
-outputs are serialized with the same serde helpers used for params/result payloads
+after the tool's description using a stable, adapter-friendly markdown shape. Inputs are
+serialized with the same serde helpers used for params/result payloads
 (`weakincentives.serde.dump(..., exclude_none=True)`) and rendered as fenced JSON blocks
-to preserve structure:
+to preserve structure. Outputs use each result object's `render()` method (or
+`render_tool_payload`) to mirror the provider-visible tool message and are wrapped in an
+unlabelled fenced block:
 
 ````
 - <tool_name> examples:
@@ -398,8 +401,8 @@ to preserve structure:
       {"param_a": "value"}
       ```
     output:
-      ```json
-      {"field": "rendered"}
+      ```
+      rendered output string
       ```
 ````
 

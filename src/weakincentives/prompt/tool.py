@@ -15,7 +15,7 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable, Sequence as SequenceABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -49,6 +49,15 @@ if TYPE_CHECKING:
 
 ParamsT_contra = TypeVar("ParamsT_contra", bound=SupportsDataclass, contravariant=True)
 ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
+
+
+@dataclass(slots=True, frozen=True)
+class ToolExample[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
+    """Representative invocation for a tool documenting inputs and outputs."""
+
+    description: str
+    input: ParamsT
+    output: ResultT
 
 
 @dataclass(slots=True, frozen=True)
@@ -87,6 +96,9 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     name: str
     description: str
     handler: ToolHandler[ParamsT, ResultT] | None
+    examples: tuple[ToolExample[ParamsT, ResultT], ...] = field(
+        default_factory=tuple,
+    )
     params_type: type[ParamsT] = field(init=False, repr=False)
     result_type: type[SupportsDataclass] = field(init=False, repr=False)
     result_container: Literal["object", "array"] = field(
@@ -111,6 +123,10 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
         self.name = self._validate_name(params_type)
         self.description = self._validate_description(params_type)
+        self.examples = self._validate_examples(
+            params_type,
+            result_type,
+        )
 
         self._validate_handler_if_present(
             params_type,
@@ -186,6 +202,117 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 placeholder="description",
             ) from error
         return description_clean
+
+    @staticmethod
+    def _validate_example_description(
+        description: str, params_type: type[SupportsDataclass]
+    ) -> None:
+        description_clean = description.strip()
+        if not description_clean or len(description_clean) > 200:
+            raise PromptValidationError(
+                "Tool example description must be 1-200 ASCII characters.",
+                dataclass_type=params_type,
+                placeholder="description",
+            )
+        try:
+            _ = description_clean.encode("ascii")
+        except UnicodeEncodeError as error:
+            raise PromptValidationError(
+                "Tool example description must be ASCII.",
+                dataclass_type=params_type,
+                placeholder="description",
+            ) from error
+
+    @staticmethod
+    def _is_dataclass_instance(candidate: object) -> bool:
+        return is_dataclass(candidate) and not isinstance(candidate, type)
+
+    def _validate_example_input(
+        self,
+        example_input: object,
+        params_type: type[SupportsDataclass],
+    ) -> None:
+        if not self._is_dataclass_instance(example_input):
+            raise PromptValidationError(
+                "Tool example input must be a ParamsT dataclass instance.",
+                dataclass_type=params_type,
+                placeholder="examples",
+            )
+        if type(example_input) is not params_type:
+            raise PromptValidationError(
+                "Tool example input must match the tool params type.",
+                dataclass_type=params_type,
+                placeholder="examples",
+            )
+
+    def _validate_example_output(
+        self,
+        example_output: object,
+        params_type: type[SupportsDataclass],
+        result_type: type[SupportsDataclass],
+    ) -> None:
+        if self.result_container == "array":
+            if not isinstance(example_output, SequenceABC) or isinstance(
+                example_output, (str, bytes, bytearray)
+            ):
+                raise PromptValidationError(
+                    "Tool example output must be a sequence of ResultT dataclass instances.",
+                    dataclass_type=params_type,
+                    placeholder="examples",
+                )
+
+            sequence_output = cast(SequenceABC[object], example_output)
+            for item in sequence_output:
+                if (
+                    not self._is_dataclass_instance(item)
+                    or type(item) is not result_type
+                ):
+                    raise PromptValidationError(
+                        "Tool example output must be a sequence of ResultT dataclass instances.",
+                        dataclass_type=params_type,
+                        placeholder="examples",
+                    )
+            return
+
+        if (
+            not self._is_dataclass_instance(example_output)
+            or type(example_output) is not result_type
+        ):
+            raise PromptValidationError(
+                "Tool example output must be a ResultT dataclass instance.",
+                dataclass_type=params_type,
+                placeholder="examples",
+            )
+
+    def _validate_examples(
+        self,
+        params_type: type[SupportsDataclass],
+        result_type: type[SupportsDataclass],
+    ) -> tuple[ToolExample[ParamsT, ResultT], ...]:
+        examples_value = cast(tuple[object, ...], self.examples)
+        if not examples_value:
+            return ()
+
+        normalized_examples: list[ToolExample[ParamsT, ResultT]] = []
+        for example in examples_value:
+            if not isinstance(example, ToolExample):
+                raise PromptValidationError(
+                    "Tool examples must be ToolExample instances.",
+                    dataclass_type=params_type,
+                    placeholder="examples",
+                )
+
+            typed_example = cast(ToolExample[ParamsT, ResultT], example)
+
+            self._validate_example_description(typed_example.description, params_type)
+            self._validate_example_input(typed_example.input, params_type)
+            self._validate_example_output(
+                typed_example.output, params_type, result_type
+            )
+
+            normalized_examples.append(typed_example)
+
+        return tuple(normalized_examples)
 
     def _validate_handler_if_present(
         self,
@@ -473,4 +600,4 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         )
 
 
-__all__ = ["Tool", "ToolContext", "ToolHandler", "ToolResult"]
+__all__ = ["Tool", "ToolContext", "ToolExample", "ToolHandler", "ToolResult"]

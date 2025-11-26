@@ -55,7 +55,7 @@ from .structured_output import (
     StructuredOutputConfig,
     parse_structured_output,
 )
-from .tool import Tool, ToolContext, ToolHandler
+from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
@@ -94,6 +94,7 @@ __all__ = [
     "Tool",
     "ToolContext",
     "ToolDescriptor",
+    "ToolExample",
     "ToolHandler",
     "ToolOverride",
     "ToolRenderableResult",
