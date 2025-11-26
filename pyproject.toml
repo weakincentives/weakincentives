@@ -110,6 +110,7 @@ extend-select = [
     "A",
     "RUF",
     "TRY",
+    "PLR",
     "PERF",
 ]
 extend-ignore = ["TRY003"]
@@ -118,6 +119,34 @@ fixable = ["I001", "F401"]
 [tool.ruff.lint.isort]
 known-first-party = ["weakincentives"]
 combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Tests rely on readable inline status codes, simple fixtures, and helper signatures.
+"tests/**" = ["PLR2004", "PLR0913", "PLR0914", "PLR0402", "PLR6301"]
+"src/weakincentives/prompt/overrides/_fs.py" = ["PLR6301"]
+"src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
+"src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
+"src/weakincentives/prompt/protocols.py" = ["PLR0913"]
+"src/weakincentives/prompt/registry.py" = ["PLR0911", "PLR0912"]
+"src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]
+"src/weakincentives/adapters/openai.py" = ["PLR0913"]
+"src/weakincentives/adapters/shared.py" = ["PLR0913", "PLR1730", "PLR5501"]
+"src/weakincentives/dbc/__init__.py" = ["PLR0913"]
+"src/weakincentives/prompt/_enabled_predicate.py" = ["PLR6201"]
+"src/weakincentives/prompt/composition.py" = ["PLR6301"]
+"src/weakincentives/prompt/markdown.py" = ["PLR0913"]
+"src/weakincentives/prompt/rendering.py" = ["PLR6301"]
+"src/weakincentives/prompt/section.py" = ["PLR0913", "PLR6301"]
+"src/weakincentives/prompt/structured_output.py" = ["PLR0913"]
+"src/weakincentives/prompt/tool.py" = ["PLR2004", "PLR6201"]
+"src/weakincentives/prompt/tool_result.py" = ["PLR0911"]
+"src/weakincentives/tools/podman.py" = ["PLR0912", "PLR0913", "PLR6301", "PLR6104", "PLR0124", "PLR2004"]
+"src/weakincentives/tools/vfs.py" = ["PLR0914"]
+"src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915"]
+"src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
+"src/weakincentives/tools/asteval.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
+"src/weakincentives/tools/planning.py" = ["PLR6301"]
+"src/weakincentives/runtime/session/session.py" = ["PLR2004"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

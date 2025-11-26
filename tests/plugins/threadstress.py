@@ -171,8 +171,7 @@ def _marker_bounds(
     if override:
         max_workers = max(int(override), min_workers)
 
-    if max_workers < min_workers:
-        max_workers = min_workers
+    max_workers = max(max_workers, min_workers)
 
     return min_workers, max_workers
 
