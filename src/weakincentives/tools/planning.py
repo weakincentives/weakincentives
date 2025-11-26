@@ -22,7 +22,7 @@ from typing import Final, Literal, cast, override
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -435,6 +435,40 @@ def _build_tools(
                 ),
                 handler=suite.setup_plan,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample[
+                        SetupPlan,
+                        SetupPlan,
+                    ](
+                        description="Create a plan with an objective and two seed steps.",
+                        input=SetupPlan(
+                            objective="Publish migration guide for new API",
+                            initial_steps=(
+                                NewPlanStep(
+                                    title="Audit existing customer guides",
+                                    details="Collect current onboarding decks and FAQs",
+                                ),
+                                NewPlanStep(
+                                    title="List breaking changes to cover",
+                                    details="Pull highlights from the API changelog",
+                                ),
+                            ),
+                        ),
+                        output=SetupPlan(
+                            objective="Publish migration guide for new API",
+                            initial_steps=(
+                                NewPlanStep(
+                                    title="Audit existing customer guides",
+                                    details="Collect current onboarding decks and FAQs",
+                                ),
+                                NewPlanStep(
+                                    title="List breaking changes to cover",
+                                    details="Pull highlights from the API changelog",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
             ),
             Tool[AddStep, AddStep](
                 name="planning_add_step",
@@ -445,6 +479,35 @@ def _build_tools(
                 ),
                 handler=suite.add_step,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample[AddStep, AddStep](
+                        description="Queue two follow-up steps after initial planning.",
+                        input=AddStep(
+                            steps=(
+                                NewPlanStep(
+                                    title="Draft outline for migration doc",
+                                    details="Sections for auth, webhooks, and rate limits",
+                                ),
+                                NewPlanStep(
+                                    title="Review outline with support lead",
+                                    details="Confirm common customer blockers are covered",
+                                ),
+                            ),
+                        ),
+                        output=AddStep(
+                            steps=(
+                                NewPlanStep(
+                                    title="Draft outline for migration doc",
+                                    details="Sections for auth, webhooks, and rate limits",
+                                ),
+                                NewPlanStep(
+                                    title="Review outline with support lead",
+                                    details="Confirm common customer blockers are covered",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
             ),
             Tool[UpdateStep, UpdateStep](
                 name="planning_update_step",
@@ -454,6 +517,21 @@ def _build_tools(
                 ),
                 handler=suite.update_step,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample[UpdateStep, UpdateStep](
+                        description="Retitle a step and add more detail using its ID.",
+                        input=UpdateStep(
+                            step_id="S002",
+                            title="Finalize migration doc outline",
+                            details="Incorporate feedback from support and solutions team",
+                        ),
+                        output=UpdateStep(
+                            step_id="S002",
+                            title="Finalize migration doc outline",
+                            details="Incorporate feedback from support and solutions team",
+                        ),
+                    ),
+                ),
             ),
             Tool[MarkStep, MarkStep](
                 name="planning_mark_step",
@@ -463,6 +541,21 @@ def _build_tools(
                 ),
                 handler=suite.mark_step,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample[MarkStep, MarkStep](
+                        description="Mark a drafted step as done and log where results live.",
+                        input=MarkStep(
+                            step_id="S003",
+                            status="done",
+                            note="Uploaded draft to docs/migrations.md",
+                        ),
+                        output=MarkStep(
+                            step_id="S003",
+                            status="done",
+                            note="Uploaded draft to docs/migrations.md",
+                        ),
+                    ),
+                ),
             ),
             Tool[ClearPlan, ClearPlan](
                 name="planning_clear_plan",
@@ -471,6 +564,13 @@ def _build_tools(
                 ),
                 handler=suite.clear_plan,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample[ClearPlan, ClearPlan](
+                        description="Abandon the plan after pivoting to a new priority.",
+                        input=ClearPlan(),
+                        output=ClearPlan(),
+                    ),
+                ),
             ),
             Tool[ReadPlan, Plan](
                 name="planning_read_plan",
@@ -480,6 +580,39 @@ def _build_tools(
                 ),
                 handler=suite.read_plan,
                 accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample[ReadPlan, Plan](
+                        description="Inspect the current plan with three tracked steps.",
+                        input=ReadPlan(),
+                        output=Plan(
+                            objective="Publish migration guide for new API",
+                            status="active",
+                            steps=(
+                                PlanStep(
+                                    step_id="S001",
+                                    title="Audit existing customer guides",
+                                    details="Collect current onboarding decks and FAQs",
+                                    status="in_progress",
+                                    notes=("Docs gathered from shared drive",),
+                                ),
+                                PlanStep(
+                                    step_id="S002",
+                                    title="Finalize migration doc outline",
+                                    details="Incorporate feedback from support and solutions team",
+                                    status="pending",
+                                    notes=(),
+                                ),
+                                PlanStep(
+                                    step_id="S003",
+                                    title="Draft outline for migration doc",
+                                    details="Sections for auth, webhooks, and rate limits",
+                                    status="done",
+                                    notes=("Uploaded draft to docs/migrations.md",),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
     )
