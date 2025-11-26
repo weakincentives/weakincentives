@@ -6,10 +6,13 @@ const state = {
   currentItems: [],
   openPaths: new Set(),
   closedPaths: new Set(),
+  markdownViews: new Map(),
   expandDepth: 2,
   searchQuery: "",
   sliceBuckets: { state: [], event: [] },
 };
+
+const MARKDOWN_KEY = "__markdown__";
 
 const elements = {
   path: document.getElementById("snapshot-path"),
@@ -232,6 +235,7 @@ function renderSliceDetail(slice) {
   elements.itemCount.textContent = `${slice.items.length} items`;
   elements.typeRow.innerHTML = "";
   state.currentItems = slice.items;
+  state.markdownViews = new Map();
   state.searchQuery = "";
   elements.itemSearch.value = "";
   applyDepth(state.currentItems, state.expandDepth);
@@ -327,7 +331,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
 const isObject = (value) => typeof value === "object" && value !== null;
 
+function getMarkdownPayload(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !Object.prototype.hasOwnProperty.call(value, MARKDOWN_KEY)
+  ) {
+    return null;
+  }
+
+  const payload = value[MARKDOWN_KEY];
+  if (
+    payload &&
+    typeof payload === "object" &&
+    typeof payload.text === "string" &&
+    typeof payload.html === "string"
+  ) {
+    return payload;
+  }
+
+  return null;
+}
+
 function valueType(value) {
+  if (getMarkdownPayload(value)) return "markdown";
   if (Array.isArray(value)) return "array";
   if (value === null) return "null";
   return typeof value;
@@ -389,6 +417,14 @@ function getFilteredItems() {
 
 function pathKey(path) {
   return path.join(".");
+}
+
+function getMarkdownView(path) {
+  return state.markdownViews.get(pathKey(path)) || "html";
+}
+
+function setMarkdownView(path, view) {
+  state.markdownViews.set(pathKey(path), view);
 }
 
 function shouldOpen(path, depth) {
@@ -487,6 +523,7 @@ function renderTree(value, path, depth, label) {
 
   const badge = document.createElement("span");
   badge.className = "pill pill-quiet";
+  const markdown = getMarkdownPayload(value);
   const type = valueType(value);
   const childCount =
     type === "array"
@@ -496,6 +533,8 @@ function renderTree(value, path, depth, label) {
         : 0;
   if (type === "array") {
     badge.textContent = `array (${value.length})`;
+  } else if (type === "markdown") {
+    badge.textContent = "markdown";
   } else if (type === "object" && value !== null) {
     badge.textContent = `object (${Object.keys(value).length})`;
   } else {
@@ -508,24 +547,92 @@ function renderTree(value, path, depth, label) {
     preview.className = "tree-preview";
     preview.textContent = arrayPreview(value);
     header.appendChild(preview);
+  } else if (markdown) {
+    const preview = document.createElement("span");
+    preview.className = "tree-preview";
+    preview.textContent = previewValue(markdown.text, 64);
+    header.appendChild(preview);
   }
 
   const body = document.createElement("div");
   body.className = "tree-body";
 
-  const expandable = Array.isArray(value) || isObject(value);
+  const expandable = !markdown && (Array.isArray(value) || isObject(value));
 
   if (!expandable) {
     const wrapper = document.createElement("div");
     wrapper.className = "leaf-wrapper";
 
-    const leaf = document.createElement("div");
-    leaf.className = "tree-leaf";
-    leaf.textContent = String(value);
-    const toggle = applyTruncation(leaf, countLines(value));
-    wrapper.appendChild(leaf);
-    if (toggle) {
+    if (markdown) {
+      const view = getMarkdownView(path);
+      const toggle = document.createElement("div");
+      toggle.className = "markdown-toggle";
+
+      const htmlButton = document.createElement("button");
+      htmlButton.type = "button";
+      htmlButton.textContent = "Rendered HTML";
+      toggle.appendChild(htmlButton);
+
+      const rawButton = document.createElement("button");
+      rawButton.type = "button";
+      rawButton.textContent = "Raw Markdown";
+      toggle.appendChild(rawButton);
+
+      const renderedLabel = document.createElement("p");
+      renderedLabel.className = "markdown-label";
+      renderedLabel.textContent = "Rendered markdown";
+
+      const rendered = document.createElement("div");
+      rendered.className = "markdown-rendered";
+      rendered.innerHTML = markdown.html;
+
+      const rawLabel = document.createElement("p");
+      rawLabel.className = "markdown-label";
+      rawLabel.textContent = "Raw markdown";
+
+      const raw = document.createElement("pre");
+      raw.className = "markdown-raw";
+      raw.textContent = markdown.text;
+      const truncationToggle = applyTruncation(raw, countLines(markdown.text));
+
+      const renderedSection = document.createElement("div");
+      renderedSection.className = "markdown-section";
+      renderedSection.appendChild(renderedLabel);
+      renderedSection.appendChild(rendered);
+
+      const rawSection = document.createElement("div");
+      rawSection.className = "markdown-section";
+      rawSection.appendChild(rawLabel);
+      rawSection.appendChild(raw);
+      if (truncationToggle) {
+        rawSection.appendChild(truncationToggle);
+      }
+
+      const applyView = (nextView) => {
+        setMarkdownView(path, nextView);
+        htmlButton.classList.toggle("active", nextView === "html");
+        rawButton.classList.toggle("active", nextView === "raw");
+        renderedSection.style.display = nextView === "html" ? "flex" : "none";
+        rawSection.style.display = nextView === "raw" ? "flex" : "none";
+      };
+
+      htmlButton.addEventListener("click", () => applyView("html"));
+      rawButton.addEventListener("click", () => applyView("raw"));
+      applyView(view);
+
+      wrapper.classList.add("markdown-leaf");
       wrapper.appendChild(toggle);
+      wrapper.appendChild(renderedSection);
+      wrapper.appendChild(rawSection);
+    } else {
+      const leaf = document.createElement("div");
+      leaf.className = "tree-leaf";
+      leaf.textContent = String(value);
+      const toggle = applyTruncation(leaf, countLines(value));
+      wrapper.appendChild(leaf);
+      if (toggle) {
+        wrapper.appendChild(toggle);
+      }
     }
     body.appendChild(wrapper);
     node.appendChild(header);

@@ -53,6 +53,7 @@ podman = [
 ]
 wink = [
     "fastapi>=0.115.0",
+    "markdown-it-py[linkify]>=4.0.0",
     "uvicorn>=0.30.0",
 ]
 
