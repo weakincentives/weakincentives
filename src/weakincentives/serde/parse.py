@@ -58,23 +58,51 @@ def _bool_from_str(value: str) -> bool:
 
 _NOT_HANDLED = object()
 
-_PRIMITIVE_COERCERS: dict[type[object], Callable[[object], object]] = {
-    int: int,
-    float: float,
-    str: str,
-    Decimal: lambda value: Decimal(str(value)),
-    UUID: lambda value: UUID(str(value)),
-    Path: lambda value: Path(str(value)),
-    datetime: lambda value: datetime.fromisoformat(str(value)),
-    date: lambda value: date.fromisoformat(str(value)),
-    time: lambda value: time.fromisoformat(str(value)),
-}
+
+def _decimal_from_any(value: object) -> object:
+    return Decimal(str(value))
+
+
+def _uuid_from_any(value: object) -> object:
+    return UUID(str(value))
+
+
+def _path_from_any(value: object) -> object:
+    return Path(str(value))
+
+
+def _datetime_from_any(value: object) -> object:
+    return datetime.fromisoformat(str(value))
+
+
+def _date_from_any(value: object) -> object:
+    return date.fromisoformat(str(value))
+
+
+def _time_from_any(value: object) -> object:
+    return time.fromisoformat(str(value))
+
+
+_PRIMITIVE_COERCERS: dict[type[object], Callable[[object], object]] = cast(
+    dict[type[object], Callable[[object], object]],
+    {
+        int: int,
+        float: float,
+        str: str,
+        Decimal: _decimal_from_any,
+        UUID: _uuid_from_any,
+        Path: _path_from_any,
+        datetime: _datetime_from_any,
+        date: _date_from_any,
+        time: _time_from_any,
+    },
+)
 
 
 def _coerce_union(
     value: object,
     base_type: object,
-    merged_meta: Mapping[str, object] | None,
+    merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
@@ -113,7 +141,7 @@ def _coerce_union(
 def _coerce_literal(
     value: object,
     base_type: object,
-    merged_meta: Mapping[str, object] | None,
+    merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
@@ -157,7 +185,7 @@ def _coerce_none(value: object, base_type: object, path: str) -> object:
 def _coerce_primitive(
     value: object,
     base_type: object,
-    merged_meta: Mapping[str, object] | None,
+    merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
@@ -182,7 +210,7 @@ def _coerce_primitive(
 def _coerce_dataclass(
     value: object,
     base_type: object,
-    merged_meta: Mapping[str, object] | None,
+    merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
@@ -196,7 +224,7 @@ def _coerce_dataclass(
         raise TypeError(f"{path}: expected mapping for dataclass {type_name}")
     try:
         parsed = parse(
-            cast(type[object], dataclass_type),
+            dataclass_type,
             cast(Mapping[str, object], value),
             extra=config.extra,
             coerce=config.coerce,
@@ -252,7 +280,7 @@ def _normalize_tuple_value(
 
 
 def _normalize_sequence_value(
-    value: object, origin: object, path: str, config: _ParseConfig
+    value: object, origin: type[object] | None, path: str, config: _ParseConfig
 ) -> list[JSONValue]:
     if origin in {list, Sequence}:
         return _normalize_list_like(value, path, config)
@@ -264,11 +292,16 @@ def _normalize_sequence_value(
 def _coerce_sequence_items(
     items: list[JSONValue],
     args: tuple[object, ...],
-    origin: object,
+    origin: type[object] | None,
     path: str,
     config: _ParseConfig,
 ) -> list[object]:
-    if origin is tuple and args and args[-1] is not Ellipsis and len(args) != len(items):
+    if (
+        origin is tuple
+        and args
+        and args[-1] is not Ellipsis
+        and len(args) != len(items)
+    ):
         raise ValueError(f"{path}: expected {len(args)} items")
     coerced_items: list[object] = []
     for index, item in enumerate(items):
@@ -284,11 +317,11 @@ def _coerce_sequence_items(
 def _coerce_sequence(
     value: object,
     base_type: object,
-    merged_meta: Mapping[str, object] | None,
+    merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
-    origin = get_origin(base_type)
+    origin = cast(type[object] | None, get_origin(base_type))
     if origin not in {list, Sequence, tuple, set}:
         return _NOT_HANDLED
     items = _normalize_sequence_value(value, origin, path, config)
@@ -306,7 +339,7 @@ def _coerce_sequence(
 def _coerce_mapping(
     value: object,
     base_type: object,
-    merged_meta: Mapping[str, object] | None,
+    merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
@@ -315,7 +348,9 @@ def _coerce_mapping(
         return _NOT_HANDLED
     if not isinstance(value, Mapping):
         raise TypeError(f"{path}: expected mapping")
-    key_type, value_type = get_args(base_type) if get_args(base_type) else (object, object)
+    key_type, value_type = (
+        get_args(base_type) if get_args(base_type) else (object, object)
+    )
     mapping_value = cast(Mapping[JSONValue, JSONValue], value)
     result_dict: dict[object, object] = {}
     for key, item in mapping_value.items():
@@ -330,7 +365,7 @@ def _coerce_mapping(
 def _coerce_enum(
     value: object,
     base_type: object,
-    merged_meta: Mapping[str, object] | None,
+    merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
@@ -339,17 +374,18 @@ def _coerce_enum(
     if isinstance(value, base_type):
         enum_value = value
     elif config.coerce:
-        try:
-            enum_value = base_type[value]
-        except KeyError:
+        if isinstance(value, str):
+            try:
+                enum_value = base_type[value]
+            except KeyError:
+                try:
+                    enum_value = base_type(value)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"{path}: invalid enum value {value!r}") from error
+        else:
             try:
                 enum_value = base_type(value)
-            except ValueError as error:
-                raise ValueError(f"{path}: invalid enum value {value!r}") from error
-        except TypeError:
-            try:
-                enum_value = base_type(value)
-            except ValueError as error:
+            except (TypeError, ValueError) as error:
                 raise ValueError(f"{path}: invalid enum value {value!r}") from error
     else:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
@@ -360,7 +396,7 @@ def _coerce_enum(
 def _coerce_bool(
     value: object,
     base_type: object,
-    merged_meta: Mapping[str, object] | None,
+    merged_meta: Mapping[str, object],
     path: str,
     config: _ParseConfig,
 ) -> object:
