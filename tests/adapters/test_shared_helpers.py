@@ -118,6 +118,18 @@ def test_run_conversation_requires_message_payload() -> None:
     prompt = Prompt(ns="tests", key="example")
     session = Session(bus=bus)
 
+    conversation_config = shared.ConversationConfig(
+        bus=bus,
+        session=session,
+        tool_choice="auto",
+        response_format=None,
+        require_structured_output_text=False,
+        call_provider=call_provider,
+        select_choice=select_choice,
+        serialize_tool_message_fn=serialize_stub,
+        parse_output=False,
+    )
+
     with pytest.raises(PromptEvaluationError):
         shared.run_conversation(
             adapter_name=TEST_ADAPTER_NAME,
@@ -127,13 +139,5 @@ def test_run_conversation_requires_message_payload() -> None:
             rendered=rendered,
             render_inputs=(),
             initial_messages=[{"role": "system", "content": rendered.text}],
-            parse_output=False,
-            bus=bus,
-            session=session,
-            tool_choice="auto",
-            response_format=None,
-            require_structured_output_text=False,
-            call_provider=call_provider,
-            select_choice=select_choice,
-            serialize_tool_message_fn=serialize_stub,
+            config=conversation_config,
         )

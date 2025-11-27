@@ -40,6 +40,7 @@ from .core import (
     SessionProtocol,
 )
 from .shared import (
+    ConversationConfig,
     OPENAI_ADAPTER_NAME,
     ThrottleError,
     ThrottleKind,
@@ -689,15 +690,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             overrides_tag=overrides_tag,
         )
 
-        return run_conversation(
-            adapter_name=OPENAI_ADAPTER_NAME,
-            adapter=cast("ProviderAdapter[OutputT]", self),
-            prompt=prompt,
-            prompt_name=context.prompt_name,
-            rendered=context.rendered,
-            render_inputs=context.render_inputs,
-            initial_messages=[{"role": "system", "content": context.rendered.text}],
-            parse_output=parse_output,
+        conversation_config = ConversationConfig(
             bus=bus,
             session=session,
             tool_choice=self._tool_choice,
@@ -706,10 +699,22 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             call_provider=self._build_provider_invoker(context.prompt_name),
             select_choice=self._build_choice_selector(context.prompt_name),
             serialize_tool_message_fn=serialize_tool_message,
+            parse_output=parse_output,
             format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=self._conversation_logger(),
             deadline=deadline,
+        )
+
+        return run_conversation(
+            adapter_name=OPENAI_ADAPTER_NAME,
+            adapter=cast("ProviderAdapter[OutputT]", self),
+            prompt=prompt,
+            prompt_name=context.prompt_name,
+            rendered=context.rendered,
+            render_inputs=context.render_inputs,
+            initial_messages=[{"role": "system", "content": context.rendered.text}],
+            config=conversation_config,
         )
 
     def _setup_evaluation(

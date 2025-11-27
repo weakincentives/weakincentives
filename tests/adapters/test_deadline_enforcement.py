@@ -288,15 +288,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
     def select_choice(response: SimpleNamespace) -> shared.ProviderChoice:
         return cast(shared.ProviderChoice, response.choices[0])
 
-    result = shared.run_conversation(
-        adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[BodyResult], object()),
-        prompt=prompt,
-        prompt_name="deadline",
-        rendered=rendered,
-        render_inputs=(BodyParams(content="ready"),),
-        initial_messages=[{"role": "system", "content": rendered.text}],
-        parse_output=False,
+    conversation_config = shared.ConversationConfig(
         bus=bus,
         session=session,
         tool_choice="auto",
@@ -305,10 +297,21 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         call_provider=call_provider,
         select_choice=select_choice,
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
+        parse_output=False,
         format_publish_failures=shared.format_publish_failures,
         parse_arguments=shared.parse_tool_arguments,
-        logger_override=None,
         deadline=deadline,
+    )
+
+    result = shared.run_conversation(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[BodyResult], object()),
+        prompt=prompt,
+        prompt_name="deadline",
+        rendered=rendered,
+        render_inputs=(BodyParams(content="ready"),),
+        initial_messages=[{"role": "system", "content": rendered.text}],
+        config=conversation_config,
     )
 
     assert isinstance(result, PromptResponse)
