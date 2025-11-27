@@ -245,8 +245,8 @@ class PromptRegistry:
         self._register_section_tools_if_present(section, path, params_type)
         self._register_child_sections(section, path, depth)
 
+    @staticmethod
     def _validate_section_params(
-        self,
         section: Section[SupportsDataclass],
         path: SectionPath,
     ) -> type[SupportsDataclass] | None:
