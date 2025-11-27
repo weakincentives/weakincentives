@@ -22,8 +22,8 @@ from typing import Any, cast
 
 import pytest
 
+from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
-from weakincentives import deadlines
 from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
@@ -123,14 +123,14 @@ def test_conversation_runner_raise_deadline_error() -> None:
 
 
 def test_conversation_runner_detects_expired_deadline(
-    monkeypatch: pytest.MonkeyPatch,
+    frozen_utcnow: FrozenUtcNow,
 ) -> None:
     prompt = _build_prompt()
     rendered = _build_rendered(prompt)
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
     runner = shared.ConversationRunner[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
@@ -151,11 +151,7 @@ def test_conversation_runner_detects_expired_deadline(
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
         deadline=deadline,
     )
-    monkeypatch.setattr(
-        deadlines,
-        "_utcnow",
-        lambda: anchor + timedelta(seconds=10),
-    )
+    frozen_utcnow.advance(timedelta(seconds=10))
     with pytest.raises(PromptEvaluationError):
         runner._ensure_deadline_remaining(
             "expired", phase=PROMPT_EVALUATION_PHASE_REQUEST
@@ -163,7 +159,7 @@ def test_conversation_runner_detects_expired_deadline(
 
 
 def test_execute_tool_call_raises_when_deadline_expired(
-    monkeypatch: pytest.MonkeyPatch,
+    frozen_utcnow: FrozenUtcNow,
 ) -> None:
     prompt = _build_prompt()
     rendered = _build_rendered(prompt)
@@ -186,13 +182,9 @@ def test_execute_tool_call_raises_when_deadline_expired(
         id="call", function=SimpleNamespace(name="echo", arguments='{"content": "hi"}')
     )
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
-    monkeypatch.setattr(
-        deadlines,
-        "_utcnow",
-        lambda: anchor + timedelta(seconds=10),
-    )
+    frozen_utcnow.advance(timedelta(seconds=10))
     with pytest.raises(PromptEvaluationError) as excinfo:
         shared.execute_tool_call(
             adapter_name=TEST_ADAPTER_NAME,

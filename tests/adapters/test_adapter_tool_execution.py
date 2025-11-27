@@ -21,6 +21,8 @@ from typing import Any, cast
 
 import pytest
 
+from tests.helpers import FrozenUtcNow
+
 try:
     from tests.adapters._test_stubs import (
         DummyChoice,
@@ -46,7 +48,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         ToolPayload,
     )
 
-from weakincentives import deadlines
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -314,7 +315,7 @@ def test_adapter_tool_deadline_exceeded(
 
 
 def test_adapter_deadline_preflight_rejection(
-    adapter_harness: AdapterHarness, monkeypatch: pytest.MonkeyPatch
+    adapter_harness: AdapterHarness, frozen_utcnow: FrozenUtcNow
 ) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
@@ -341,9 +342,9 @@ def test_adapter_deadline_preflight_rejection(
     bus = InProcessEventBus()
     session = Session(bus=bus)
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor + timedelta(seconds=10))
+    frozen_utcnow.advance(timedelta(seconds=10))
 
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(

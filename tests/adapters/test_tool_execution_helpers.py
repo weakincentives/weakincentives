@@ -23,7 +23,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     from ._test_stubs import DummyToolCall, ToolParams, ToolPayload
 
-from weakincentives import deadlines
+from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
@@ -138,7 +138,7 @@ def test_tool_execution_records_validation_failure() -> None:
 
 
 def test_tool_execution_raises_on_expired_deadline(
-    monkeypatch: pytest.MonkeyPatch,
+    frozen_utcnow: FrozenUtcNow,
 ) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
@@ -146,8 +146,9 @@ def test_tool_execution_raises_on_expired_deadline(
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
     anchor = datetime.now(UTC)
+    frozen_utcnow.set(anchor)
     expired_deadline = Deadline(anchor + timedelta(seconds=2))
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor + timedelta(seconds=5))
+    frozen_utcnow.advance(timedelta(seconds=5))
     kwargs = _base_kwargs(
         tool, _tool_call({"query": "policies"}), deadline=expired_deadline
     )

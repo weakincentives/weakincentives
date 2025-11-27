@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from weakincentives import deadlines
+from tests.helpers import FrozenUtcNow
 from weakincentives.deadlines import Deadline
 
 
@@ -28,23 +28,23 @@ def test_deadline_rejects_naive_datetime() -> None:
         Deadline(naive)
 
 
-def test_deadline_rejects_past_datetime(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deadline_rejects_past_datetime(frozen_utcnow: FrozenUtcNow) -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    frozen_utcnow.set(anchor)
     with pytest.raises(ValueError):
         Deadline(anchor - timedelta(seconds=10))
 
 
-def test_deadline_requires_future_second(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deadline_requires_future_second(frozen_utcnow: FrozenUtcNow) -> None:
     anchor = datetime(2024, 1, 1, 12, 0, 0, 123456, tzinfo=UTC)
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    frozen_utcnow.set(anchor)
     with pytest.raises(ValueError):
         Deadline(anchor + timedelta(milliseconds=500))
 
 
-def test_deadline_remaining_uses_override(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deadline_remaining_uses_override(frozen_utcnow: FrozenUtcNow) -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=30))
 
     remaining = deadline.remaining(now=anchor + timedelta(seconds=5))
@@ -53,10 +53,10 @@ def test_deadline_remaining_uses_override(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_deadline_remaining_rejects_naive_datetime(
-    monkeypatch: pytest.MonkeyPatch,
+    frozen_utcnow: FrozenUtcNow,
 ) -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=30))
 
     with pytest.raises(ValueError):
