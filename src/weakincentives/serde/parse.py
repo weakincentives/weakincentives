@@ -336,7 +336,97 @@ def _find_key(
     return None
 
 
-def parse[T](  # noqa: C901
+def _resolve_field_alias(
+    field: dataclasses.Field[object],
+    aliases: Mapping[str, str] | None,
+    alias_generator: Callable[[str], str] | None,
+    field_meta: dict[str, object],
+) -> str | None:
+    if aliases and field.name in aliases:
+        return aliases[field.name]
+    alias_value = field_meta.get("alias")
+    if alias_value is not None:
+        return cast(str, alias_value)
+    if alias_generator is not None:
+        return alias_generator(field.name)
+    return None
+
+
+def _coerce_field_value(
+    field: dataclasses.Field[object],
+    raw_value: object,
+    field_meta: Mapping[str, object],
+    field_type: object,
+    config: _ParseConfig,
+) -> object:
+    try:
+        return _coerce_to_type(raw_value, field_type, field_meta, field.name, config)
+    except (TypeError, ValueError) as error:
+        raise type(error)(str(error)) from error
+
+
+def _collect_field_kwargs(
+    cls: type[object],
+    mapping_data: Mapping[str, object],
+    type_hints: Mapping[str, object],
+    config: _ParseConfig,
+    *,
+    aliases: Mapping[str, str] | None,
+    alias_generator: Callable[[str], str] | None,
+) -> tuple[dict[str, object], set[str]]:
+    kwargs: dict[str, object] = {}
+    used_keys: set[str] = set()
+
+    for field in dataclasses.fields(cls):
+        if not field.init:
+            continue
+        field_meta = dict(field.metadata)
+        field_alias = _resolve_field_alias(field, aliases, alias_generator, field_meta)
+
+        key = _find_key(mapping_data, field.name, field_alias, config.case_insensitive)
+        if key is None:
+            if field.default is MISSING and field.default_factory is MISSING:
+                raise ValueError(f"Missing required field: '{field.name}'")
+            continue
+        used_keys.add(key)
+        raw_value = mapping_data[key]
+        field_type = type_hints.get(field.name, field.type)
+        kwargs[field.name] = _coerce_field_value(
+            field, raw_value, field_meta, field_type, config
+        )
+
+    return kwargs, used_keys
+
+
+def _apply_extra_fields(
+    instance: object,
+    mapping_data: Mapping[str, object],
+    used_keys: set[str],
+    extra: Literal["ignore", "forbid", "allow"],
+) -> None:
+    extras = {key: mapping_data[key] for key in mapping_data if key not in used_keys}
+    if not extras:
+        return
+    if extra == "forbid":
+        raise ValueError(f"Extra keys not permitted: {list(extras.keys())}")
+    if extra == "allow":
+        if hasattr(instance, "__dict__"):
+            for key, value in extras.items():
+                object.__setattr__(instance, key, value)
+        else:
+            _set_extras(instance, extras)
+
+
+def _run_validation_hooks(instance: object) -> None:
+    validator = getattr(instance, "__validate__", None)
+    if callable(validator):
+        _ = validator()
+    post_validator = getattr(instance, "__post_validate__", None)
+    if callable(post_validator):
+        _ = post_validator()
+
+
+def parse[T](
     cls: type[T],
     data: Mapping[str, object] | object,
     *,
@@ -365,56 +455,19 @@ def parse[T](  # noqa: C901
 
     mapping_data = cast(Mapping[str, object], data)
     type_hints = get_type_hints(cls, include_extras=True)
-    kwargs: dict[str, object] = {}
-    used_keys: set[str] = set()
-
-    for field in dataclasses.fields(cls):
-        if not field.init:
-            continue
-        field_meta = dict(field.metadata)
-        field_alias = None
-        if aliases and field.name in aliases:
-            field_alias = aliases[field.name]
-        elif (alias := field_meta.get("alias")) is not None:
-            field_alias = alias
-        elif alias_generator is not None:
-            field_alias = alias_generator(field.name)
-
-        key = _find_key(mapping_data, field.name, field_alias, case_insensitive)
-        if key is None:
-            if field.default is MISSING and field.default_factory is MISSING:
-                raise ValueError(f"Missing required field: '{field.name}'")
-            continue
-        used_keys.add(key)
-        raw_value = mapping_data[key]
-        field_type = type_hints.get(field.name, field.type)
-        try:
-            value = _coerce_to_type(
-                raw_value, field_type, field_meta, field.name, config
-            )
-        except (TypeError, ValueError) as error:
-            raise type(error)(str(error)) from error
-        kwargs[field.name] = value
+    kwargs, used_keys = _collect_field_kwargs(
+        cls,
+        mapping_data,
+        type_hints,
+        config,
+        aliases=aliases,
+        alias_generator=alias_generator,
+    )
 
     instance = cls(**kwargs)
 
-    extras = {key: mapping_data[key] for key in mapping_data if key not in used_keys}
-    if extras:
-        if extra == "forbid":
-            raise ValueError(f"Extra keys not permitted: {list(extras.keys())}")
-        if extra == "allow":
-            if hasattr(instance, "__dict__"):
-                for key, value in extras.items():
-                    object.__setattr__(instance, key, value)
-            else:
-                _set_extras(instance, extras)
-
-    validator = getattr(instance, "__validate__", None)
-    if callable(validator):
-        _ = validator()
-    post_validator = getattr(instance, "__post_validate__", None)
-    if callable(post_validator):
-        _ = post_validator()
+    _apply_extra_fields(instance, mapping_data, used_keys, extra)
+    _run_validation_hooks(instance)
 
     return instance
 
