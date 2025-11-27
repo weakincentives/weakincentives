@@ -67,7 +67,7 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
     return schema_meta
 
 
-def _schema_for_type(  # noqa: C901
+def _schema_for_type(
     typ: object,
     meta: Mapping[str, object] | None,
     alias_generator: Callable[[str], str] | None,
@@ -75,141 +75,187 @@ def _schema_for_type(  # noqa: C901
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
     origin = get_origin(base_type)
 
-    if base_type is object or base_type is _AnyType:
-        schema_data: dict[str, JSONValue] = {}
-    elif dataclasses.is_dataclass(base_type):
-        dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
-        schema_data = schema(dataclass_type, alias_generator=alias_generator)
-    elif base_type is type(None):
-        schema_data = {"type": "null"}
-    elif isinstance(base_type, type) and issubclass(base_type, Enum):
-        enum_values = [member.value for member in base_type]
-        schema_data = {"enum": enum_values}
-        if enum_values:
-            if all(isinstance(value, str) for value in enum_values):
-                schema_data["type"] = "string"
-            elif all(isinstance(value, bool) for value in enum_values):
-                schema_data["type"] = "boolean"
-            elif all(
-                isinstance(value, int) and not isinstance(value, bool)
-                for value in enum_values
-            ):
-                schema_data["type"] = "integer"
-            elif all(isinstance(value, (float, Decimal)) for value in enum_values):
-                schema_data["type"] = "number"
-    elif base_type is bool:
-        schema_data = {"type": "boolean"}
-    elif base_type is int:
-        schema_data = {"type": "integer"}
-    elif base_type in {float, Decimal}:
-        schema_data = {"type": "number"}
-    elif base_type is str:
-        schema_data = {"type": "string"}
-    elif base_type is datetime:
-        schema_data = {"type": "string", "format": "date-time"}
-    elif base_type is date:
-        schema_data = {"type": "string", "format": "date"}
-    elif base_type is time:
-        schema_data = {"type": "string", "format": "time"}
-    elif base_type is UUID:
-        schema_data = {"type": "string", "format": "uuid"}
-    elif base_type is Path:
-        schema_data = {"type": "string"}
-    elif origin is Literal:
-        literal_values = list(get_args(base_type))
-        schema_data = {"enum": literal_values}
-        if literal_values:
-            if all(isinstance(value, bool) for value in literal_values):
-                schema_data["type"] = "boolean"
-            elif all(isinstance(value, str) for value in literal_values):
-                schema_data["type"] = "string"
-            elif all(
-                isinstance(value, int) and not isinstance(value, bool)
-                for value in literal_values
-            ):
-                schema_data["type"] = "integer"
-            elif all(isinstance(value, (float, Decimal)) for value in literal_values):
-                schema_data["type"] = "number"
-    elif origin in {list, Sequence}:
-        item_type = get_args(base_type)[0] if get_args(base_type) else object
-        schema_data = {
-            "type": "array",
-            "items": _schema_for_type(item_type, None, alias_generator),
-        }
-    elif origin is set:
-        item_type = get_args(base_type)[0] if get_args(base_type) else object
-        schema_data = {
-            "type": "array",
-            "items": _schema_for_type(item_type, None, alias_generator),
-            "uniqueItems": True,
-        }
-    elif origin is tuple:
-        args = get_args(base_type)
-        if args and args[-1] is Ellipsis:
-            schema_data = {
-                "type": "array",
-                "items": _schema_for_type(args[0], None, alias_generator),
-            }
-        else:
-            schema_data = {
-                "type": "array",
-                "prefixItems": [
-                    _schema_for_type(arg, None, alias_generator) for arg in args
-                ],
-                "minItems": len(args),
-                "maxItems": len(args),
-            }
-    elif origin in {dict, Mapping}:
-        args = get_args(base_type)
-        value_type = args[1] if len(args) == 2 else object
-        schema_data = {
-            "type": "object",
-            "additionalProperties": _schema_for_type(value_type, None, alias_generator),
-        }
-    elif origin is _UNION_TYPE:
-        subschemas = []
-        includes_null = False
-        base_schema_ref: Mapping[str, object] | None = None
-        for arg in get_args(base_type):
-            if arg is type(None):
-                includes_null = True
-                continue
-            subschema = _schema_for_type(arg, None, alias_generator)
-            subschemas.append(subschema)
-            if (
-                base_schema_ref is None
-                and isinstance(subschema, Mapping)
-                and subschema.get("type") == "object"
-            ):
-                base_schema_ref = subschema
-        any_of = list(subschemas)
-        if includes_null:
-            any_of.append({"type": "null"})
-        if base_schema_ref is not None and len(subschemas) == 1:
-            schema_data = dict(base_schema_ref)
-        else:
-            schema_data = {}
-        schema_data["anyOf"] = any_of
-        non_null_types = [
-            subschema.get("type")
-            for subschema in subschemas
-            if isinstance(subschema.get("type"), str)
-            and subschema.get("type") != "null"
-        ]
-        if non_null_types and len(set(non_null_types)) == 1:
-            schema_data["type"] = non_null_types[0]
-        if len(subschemas) == 1 and base_schema_ref is None:
-            title = subschemas[0].get("title")
-            if isinstance(title, str):  # pragma: no cover - not triggered in tests
-                _ = schema_data.setdefault("title", title)
-            required = subschemas[0].get("required")
-            if isinstance(required, (list, tuple)):  # pragma: no cover - defensive
-                _ = schema_data.setdefault("required", list(required))
-    else:
+    schema_data = _schema_for_dataclass(base_type, alias_generator)
+    if schema_data is None:
+        schema_data = _schema_for_literal(base_type)
+    if schema_data is None and origin is _UNION_TYPE:
+        schema_data = _schema_for_union(base_type, alias_generator)
+    if schema_data is None:
+        schema_data = _schema_for_collection(base_type, origin, alias_generator)
+    if schema_data is None:
+        schema_data = _schema_for_enum(base_type)
+    if schema_data is None:
+        schema_data = _schema_for_primitive(base_type)
+    if schema_data is None:
         schema_data = {}
 
     schema_data.update(_schema_constraints(merged_meta))
     return schema_data
+
+
+def _schema_for_dataclass(
+    base_type: object, alias_generator: Callable[[str], str] | None
+) -> dict[str, JSONValue] | None:
+    if base_type is object or base_type is _AnyType:
+        return {}
+    if not dataclasses.is_dataclass(base_type):
+        return None
+    dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
+    return schema(dataclass_type, alias_generator=alias_generator)
+
+
+def _schema_for_literal(base_type: object) -> dict[str, JSONValue] | None:
+    if base_type is type(None):
+        return {"type": "null"}
+    if get_origin(base_type) is not Literal:
+        return None
+
+    literal_values = list(get_args(base_type))
+    schema_data: dict[str, JSONValue] = {"enum": literal_values}
+    if not literal_values:
+        return schema_data  # pragma: no cover - defensive
+
+    if all(isinstance(value, bool) for value in literal_values):
+        schema_data["type"] = "boolean"
+    elif all(isinstance(value, str) for value in literal_values):
+        schema_data["type"] = "string"
+    elif all(
+        isinstance(value, int) and not isinstance(value, bool)
+        for value in literal_values
+    ):
+        schema_data["type"] = "integer"
+    elif all(isinstance(value, (float, Decimal)) for value in literal_values):
+        schema_data["type"] = "number"
+    return schema_data
+
+
+def _schema_for_union(
+    base_type: object, alias_generator: Callable[[str], str] | None
+) -> dict[str, JSONValue]:
+    subschemas = []
+    includes_null = False
+    base_schema_ref: Mapping[str, object] | None = None
+    for arg in get_args(base_type):
+        if arg is type(None):
+            includes_null = True
+            continue
+        subschema = _schema_for_type(arg, None, alias_generator)
+        subschemas.append(subschema)
+        if (
+            base_schema_ref is None
+            and isinstance(subschema, Mapping)
+            and subschema.get("type") == "object"
+        ):
+            base_schema_ref = subschema
+
+    any_of = list(subschemas)
+    if includes_null:
+        any_of.append({"type": "null"})
+    if base_schema_ref is not None and len(subschemas) == 1:
+        schema_data: dict[str, JSONValue] = dict(base_schema_ref)
+    else:
+        schema_data = {}
+    schema_data["anyOf"] = any_of
+
+    non_null_types = [
+        subschema.get("type")
+        for subschema in subschemas
+        if isinstance(subschema.get("type"), str) and subschema.get("type") != "null"
+    ]
+    if non_null_types and len(set(non_null_types)) == 1:
+        schema_data["type"] = non_null_types[0]
+    if len(subschemas) == 1 and base_schema_ref is None:
+        title = subschemas[0].get("title")
+        if isinstance(title, str):  # pragma: no cover - not triggered in tests
+            _ = schema_data.setdefault("title", title)
+        required = subschemas[0].get("required")
+        if isinstance(required, (list, tuple)):  # pragma: no cover - defensive
+            _ = schema_data.setdefault("required", list(required))
+    return schema_data
+
+
+def _schema_for_collection(
+    base_type: object,
+    origin: object,
+    alias_generator: Callable[[str], str] | None,
+) -> dict[str, JSONValue] | None:
+    if origin is list or origin is Sequence:
+        item_type = get_args(base_type)[0] if get_args(base_type) else object
+        return {
+            "type": "array",
+            "items": _schema_for_type(item_type, None, alias_generator),
+        }
+    if origin is set:
+        item_type = get_args(base_type)[0] if get_args(base_type) else object
+        return {
+            "type": "array",
+            "items": _schema_for_type(item_type, None, alias_generator),
+            "uniqueItems": True,
+        }
+    if origin is tuple:
+        args = get_args(base_type)
+        if args and args[-1] is Ellipsis:
+            return {
+                "type": "array",
+                "items": _schema_for_type(args[0], None, alias_generator),
+            }
+        return {
+            "type": "array",
+            "prefixItems": [
+                _schema_for_type(arg, None, alias_generator) for arg in args
+            ],
+            "minItems": len(args),
+            "maxItems": len(args),
+        }
+    if origin is dict or origin is Mapping:
+        args = get_args(base_type)
+        value_type = args[1] if len(args) == 2 else object
+        return {
+            "type": "object",
+            "additionalProperties": _schema_for_type(value_type, None, alias_generator),
+        }
+    return None
+
+
+def _schema_for_enum(base_type: object) -> dict[str, JSONValue] | None:
+    if not isinstance(base_type, type) or not issubclass(base_type, Enum):
+        return None
+
+    enum_values = [member.value for member in base_type]
+    schema_data: dict[str, JSONValue] = {"enum": enum_values}
+    if not enum_values:
+        return schema_data  # pragma: no cover - defensive
+
+    if all(isinstance(value, str) for value in enum_values):
+        schema_data["type"] = "string"
+    elif all(isinstance(value, bool) for value in enum_values):
+        schema_data["type"] = "boolean"
+    elif all(
+        isinstance(value, int) and not isinstance(value, bool) for value in enum_values
+    ):
+        schema_data["type"] = "integer"
+    elif all(isinstance(value, (float, Decimal)) for value in enum_values):
+        schema_data["type"] = "number"
+    return schema_data
+
+
+def _schema_for_primitive(base_type: object) -> dict[str, JSONValue] | None:
+    primitive_formats: dict[type[object], dict[str, JSONValue]] = {
+        bool: {"type": "boolean"},
+        int: {"type": "integer"},
+        float: {"type": "number"},
+        Decimal: {"type": "number"},
+        str: {"type": "string"},
+        datetime: {"type": "string", "format": "date-time"},
+        date: {"type": "string", "format": "date"},
+        time: {"type": "string", "format": "time"},
+        UUID: {"type": "string", "format": "uuid"},
+        Path: {"type": "string"},
+    }
+    for primitive, schema_data in primitive_formats.items():
+        if base_type is primitive:
+            return dict(schema_data)
+    return None
 
 
 def schema(
