@@ -40,6 +40,7 @@ from .core import (
 )
 from .shared import (
     LITELLM_ADAPTER_NAME,
+    ConversationConfig,
     ThrottleError,
     ThrottleKind,
     ToolChoice,
@@ -294,15 +295,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 first_choice(response, prompt_name=prompt_name),
             )
 
-        return run_conversation(
-            adapter_name=LITELLM_ADAPTER_NAME,
-            adapter=cast("ProviderAdapter[OutputT]", self),
-            prompt=prompt,
-            prompt_name=prompt_name,
-            rendered=rendered,
-            render_inputs=render_inputs,
-            initial_messages=[{"role": "system", "content": rendered.text}],
-            parse_output=parse_output,
+        conversation_config = ConversationConfig(
             bus=bus,
             session=session,
             tool_choice=self._tool_choice,
@@ -311,10 +304,22 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             call_provider=_call_provider,
             select_choice=_select_choice,
             serialize_tool_message_fn=serialize_tool_message,
+            parse_output=parse_output,
             format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=logger,
             deadline=deadline,
+        )
+
+        return run_conversation(
+            adapter_name=LITELLM_ADAPTER_NAME,
+            adapter=cast("ProviderAdapter[OutputT]", self),
+            prompt=prompt,
+            prompt_name=prompt_name,
+            rendered=rendered,
+            render_inputs=render_inputs,
+            initial_messages=[{"role": "system", "content": rendered.text}],
+            config=conversation_config,
         )
 
 

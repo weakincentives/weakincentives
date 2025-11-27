@@ -1634,12 +1634,14 @@ def test_openai_adapter_delegates_to_shared_runner(
     expected_response_format = module.build_json_schema_response_format(
         expected_rendered, "shared-runner"
     )
-    assert captured["response_format"] == expected_response_format
-    assert captured["require_structured_output_text"] is False
-    assert captured["serialize_tool_message_fn"] is module.serialize_tool_message
+    config = captured["config"]
+    assert isinstance(config, module.ConversationConfig)
+    assert config.response_format == expected_response_format
+    assert config.require_structured_output_text is False
+    assert config.serialize_tool_message_fn is module.serialize_tool_message
 
-    call_provider = captured["call_provider"]
-    select_choice = captured["select_choice"]
+    call_provider = config.call_provider
+    select_choice = config.select_choice
     assert callable(call_provider)
     assert callable(select_choice)
 

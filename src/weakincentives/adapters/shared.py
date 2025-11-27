@@ -1004,6 +1004,7 @@ __all__ = [
     "AdapterName",
     "AdapterRenderContext",
     "ChoiceSelector",
+    "ConversationConfig",
     "ConversationRequest",
     "ConversationRunner",
     "LITELLM_ADAPTER_NAME",
@@ -1065,6 +1066,33 @@ class ToolMessageSerializer(Protocol):
         *,
         payload: object | None = ...,
     ) -> object: ...
+
+
+@dataclass(slots=True)
+class ConversationConfig:
+    """Configuration and collaborators required to run a conversation."""
+
+    bus: EventBus
+    session: SessionProtocol
+    tool_choice: ToolChoice
+    response_format: Mapping[str, Any] | None
+    require_structured_output_text: bool
+    call_provider: ConversationRequest
+    select_choice: ChoiceSelector
+    serialize_tool_message_fn: ToolMessageSerializer
+    parse_output: bool = True
+    format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
+        format_publish_failures
+    )
+    parse_arguments: ToolArgumentsParser = parse_tool_arguments
+    logger_override: StructuredLogger | None = None
+    deadline: Deadline | None = None
+    throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
+
+    def with_defaults(self, rendered: RenderedPrompt[object]) -> ConversationConfig:
+        """Fill in optional settings using rendered prompt metadata."""
+
+        return replace(self, deadline=self.deadline or rendered.deadline)
 
 
 @dataclass(slots=True)
@@ -1581,29 +1609,16 @@ def run_conversation[
     rendered: RenderedPrompt[OutputT],
     render_inputs: tuple[SupportsDataclass, ...],
     initial_messages: list[dict[str, Any]],
-    parse_output: bool,
-    bus: EventBus,
-    session: SessionProtocol,
-    tool_choice: ToolChoice,
-    response_format: Mapping[str, Any] | None,
-    require_structured_output_text: bool,
-    call_provider: ConversationRequest,
-    select_choice: ChoiceSelector,
-    serialize_tool_message_fn: ToolMessageSerializer,
-    format_publish_failures: Callable[
-        [Sequence[HandlerFailure]], str
-    ] = format_publish_failures,
-    parse_arguments: ToolArgumentsParser = parse_tool_arguments,
-    logger_override: StructuredLogger | None = None,
-    deadline: Deadline | None = None,
-    throttle_policy: ThrottlePolicy | None = None,
+    config: ConversationConfig,
 ) -> PromptResponse[OutputT]:
     """Execute a conversational exchange with a provider and return the result."""
 
-    effective_deadline = deadline or rendered.deadline
+    normalized_config = config.with_defaults(rendered)
     rendered_with_deadline = rendered
-    if effective_deadline is not None and rendered.deadline is not effective_deadline:
-        rendered_with_deadline = replace(rendered, deadline=effective_deadline)
+    if normalized_config.deadline is not None and (
+        rendered.deadline is not normalized_config.deadline
+    ):
+        rendered_with_deadline = replace(rendered, deadline=normalized_config.deadline)
 
     runner = ConversationRunner[OutputT](
         adapter_name=adapter_name,
@@ -1613,19 +1628,19 @@ def run_conversation[
         rendered=rendered_with_deadline,
         render_inputs=render_inputs,
         initial_messages=initial_messages,
-        parse_output=parse_output,
-        bus=bus,
-        session=session,
-        tool_choice=tool_choice,
-        response_format=response_format,
-        require_structured_output_text=require_structured_output_text,
-        call_provider=call_provider,
-        select_choice=select_choice,
-        serialize_tool_message_fn=serialize_tool_message_fn,
-        format_publish_failures=format_publish_failures,
-        parse_arguments=parse_arguments,
-        logger_override=logger_override,
-        deadline=effective_deadline,
-        throttle_policy=throttle_policy or new_throttle_policy(),
+        parse_output=normalized_config.parse_output,
+        bus=normalized_config.bus,
+        session=normalized_config.session,
+        tool_choice=normalized_config.tool_choice,
+        response_format=normalized_config.response_format,
+        require_structured_output_text=normalized_config.require_structured_output_text,
+        call_provider=normalized_config.call_provider,
+        select_choice=normalized_config.select_choice,
+        serialize_tool_message_fn=normalized_config.serialize_tool_message_fn,
+        format_publish_failures=normalized_config.format_publish_failures,
+        parse_arguments=normalized_config.parse_arguments,
+        logger_override=normalized_config.logger_override,
+        deadline=normalized_config.deadline,
+        throttle_policy=normalized_config.throttle_policy,
     )
     return runner.run()
