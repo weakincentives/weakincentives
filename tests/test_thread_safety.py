@@ -15,11 +15,12 @@
 from __future__ import annotations
 
 import json
+from random import shuffle
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Callable, cast
 from uuid import uuid4
 
 import pytest
@@ -30,6 +31,7 @@ from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOve
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.session.snapshots import Snapshot
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from weakincentives.prompt.overrides.versioning import ChapterLike
@@ -154,6 +156,62 @@ def test_session_collects_tool_data_across_threads(
     result_slice = session.select_all(ExampleResult)
     assert len(result_slice) == total_events
     assert {value.value for value in result_slice} == set(range(total_events))
+
+
+@pytest.mark.threadstress(min_workers=2, max_workers=8)
+def test_session_snapshots_restore_across_threads(
+    threadstress_workers: int,
+) -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    max_workers = threadstress_workers
+    total_events = max(24, max_workers * 6)
+    snapshot_requests = max_workers * 4
+
+    mutation_tasks = [
+        (lambda idx=index: _publish_tool_event(bus, idx))
+        for index in range(total_events)
+    ]
+    snapshot_tasks = [session.snapshot for _ in range(snapshot_requests)]
+    tasks: list[Callable[[], Snapshot | None]] = [
+        *mutation_tasks,
+        *snapshot_tasks,
+    ]
+    shuffle(tasks)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(task) for task in tasks]
+
+    snapshots: list[Snapshot] = []
+    for future in futures:
+        result = future.result()
+        if isinstance(result, Snapshot):
+            snapshots.append(result)
+
+    assert len(snapshots) == snapshot_requests
+    snapshots.append(session.snapshot())
+
+    for snapshot in snapshots:
+        expected_tool_events = snapshot.slices.get(ToolInvoked, ())
+        expected_results = snapshot.slices.get(ExampleResult, ())
+
+        restored = Session(bus=InProcessEventBus())
+        restored.seed_slice(ToolInvoked, ())
+        restored.seed_slice(ExampleResult, ())
+        restored.rollback(snapshot)
+
+        restored_tool_events = restored.select_all(ToolInvoked)
+        restored_results = restored.select_all(ExampleResult)
+
+        assert restored_tool_events == expected_tool_events
+        assert restored_results == expected_results
+        assert len(restored_tool_events) == len(restored_results) <= total_events
+
+        for tool_event, result in zip(restored_tool_events, restored_results):
+            assert isinstance(tool_event.value, ExampleResult)
+            assert tool_event.value == result
+            assert int(tool_event.call_id) == result.value
 
 
 @pytest.mark.threadstress(min_workers=2, max_workers=6)
