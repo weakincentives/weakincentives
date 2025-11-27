@@ -18,6 +18,7 @@ import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from http import HTTPStatus
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
@@ -606,7 +607,7 @@ def _normalize_openai_throttle(
     if "insufficient_quota" in lower_message or code == "insufficient_quota":
         kind = "quota_exhausted"
     elif (
-        status_code == 429
+        status_code == HTTPStatus.TOO_MANY_REQUESTS
         or "ratelimit" in class_name
         or code
         in {
@@ -744,8 +745,9 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             response_format=response_format,
         )
 
+    @staticmethod
     def _ensure_deadline_not_expired(
-        self, deadline: Deadline | None, prompt_name: str
+        deadline: Deadline | None, prompt_name: str
     ) -> None:
         if deadline is not None and deadline.remaining() <= timedelta(0):
             raise PromptEvaluationError(
@@ -848,8 +850,9 @@ class OpenAIAdapter(ProviderAdapter[Any]):
 
         return _call_provider
 
+    @staticmethod
     def _build_choice_selector(
-        self, prompt_name: str
+        prompt_name: str,
     ) -> Callable[[object], ProviderChoice]:
         def _select_choice(response: object) -> ProviderChoice:
             return cast(
@@ -858,7 +861,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
 
         return _select_choice
 
-    def _conversation_logger(self) -> StructuredLogger:
+    @staticmethod
+    def _conversation_logger() -> StructuredLogger:
         return logger
 
 
