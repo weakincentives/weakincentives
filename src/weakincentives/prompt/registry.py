@@ -230,13 +230,26 @@ class PromptRegistry:
 
         self._register_section(section, path=path, depth=depth)
 
-    def _register_section(  # noqa: C901
+    def _register_section(
         self,
         section: Section[SupportsDataclass],
         *,
         path: SectionPath,
         depth: int,
     ) -> None:
+        params_type = self._validate_section_params(section, path)
+        node = self._register_section_node(section, path, depth)
+        self._register_params_registry(params_type, node)
+        self._register_section_defaults(section, path, params_type)
+        self._register_placeholders(section, path, params_type)
+        self._register_section_tools_if_present(section, path, params_type)
+        self._register_child_sections(section, path, depth)
+
+    @staticmethod
+    def _validate_section_params(
+        section: Section[SupportsDataclass],
+        path: SectionPath,
+    ) -> type[SupportsDataclass] | None:
         params_type = section.param_type
         if params_type is not None and not is_dataclass(params_type):
             raise PromptValidationError(
@@ -244,33 +257,60 @@ class PromptRegistry:
                 section_path=path,
                 dataclass_type=params_type,
             )
+        return params_type
 
+    def _register_section_node(
+        self,
+        section: Section[SupportsDataclass],
+        path: SectionPath,
+        depth: int,
+    ) -> SectionNode[SupportsDataclass]:
         number = self._next_section_number(depth)
         node: SectionNode[SupportsDataclass] = SectionNode(
             section=section, depth=depth, path=path, number=number
         )
         self._section_nodes.append(node)
+        return node
 
+    def _register_params_registry(
+        self,
+        params_type: type[SupportsDataclass] | None,
+        node: SectionNode[SupportsDataclass],
+    ) -> None:
         if params_type is not None:
             self._params_registry.setdefault(params_type, []).append(node)
 
-        if params_type is not None and section.default_params is not None:
-            default_value = section.default_params
-            if isinstance(default_value, type) or not is_dataclass(default_value):
-                raise PromptValidationError(
-                    "Section defaults must be dataclass instances.",
-                    section_path=path,
-                    dataclass_type=params_type,
-                )
-            if type(default_value) is not params_type:
-                raise PromptValidationError(
-                    "Section defaults must match section params type.",
-                    section_path=path,
-                    dataclass_type=params_type,
-                )
-            self._defaults_by_path[path] = default_value
-            _ = self._defaults_by_type.setdefault(params_type, default_value)
+    def _register_section_defaults(
+        self,
+        section: Section[SupportsDataclass],
+        path: SectionPath,
+        params_type: type[SupportsDataclass] | None,
+    ) -> None:
+        if params_type is None or section.default_params is None:
+            return
 
+        default_value = section.default_params
+        if isinstance(default_value, type) or not is_dataclass(default_value):
+            raise PromptValidationError(
+                "Section defaults must be dataclass instances.",
+                section_path=path,
+                dataclass_type=params_type,
+            )
+        if type(default_value) is not params_type:
+            raise PromptValidationError(
+                "Section defaults must match section params type.",
+                section_path=path,
+                dataclass_type=params_type,
+            )
+        self._defaults_by_path[path] = default_value
+        _ = self._defaults_by_type.setdefault(params_type, default_value)
+
+    def _register_placeholders(
+        self,
+        section: Section[SupportsDataclass],
+        path: SectionPath,
+        params_type: type[SupportsDataclass] | None,
+    ) -> None:
         section_placeholders = section.placeholder_names()
         self._placeholders[path] = set(section_placeholders)
         if params_type is None:
@@ -281,33 +321,48 @@ class PromptRegistry:
                     section_path=path,
                     placeholder=placeholder,
                 )
-        else:
-            param_fields = {field.name for field in fields(params_type)}
-            unknown_placeholders = section_placeholders - param_fields
-            if unknown_placeholders:
-                placeholder = sorted(unknown_placeholders)[0]
+            return
+
+        param_fields = {field.name for field in fields(params_type)}
+        unknown_placeholders = section_placeholders - param_fields
+        if unknown_placeholders:
+            placeholder = sorted(unknown_placeholders)[0]
+            raise PromptValidationError(
+                "Template references unknown placeholder.",
+                section_path=path,
+                dataclass_type=params_type,
+                placeholder=placeholder,
+            )
+
+    def _register_section_tools_if_present(
+        self,
+        section: Section[SupportsDataclass],
+        path: SectionPath,
+        params_type: type[SupportsDataclass] | None,
+    ) -> None:
+        section_tools = cast(tuple[object, ...], section.tools())
+        if not section_tools:
+            return
+
+        for tool in section_tools:
+            if not isinstance(tool, Tool):
                 raise PromptValidationError(
-                    "Template references unknown placeholder.",
+                    "Section tools must be Tool instances.",
                     section_path=path,
                     dataclass_type=params_type,
-                    placeholder=placeholder,
                 )
+            typed_tool = cast(Tool[SupportsDataclass, SupportsToolResult], tool)
+            self._register_section_tools(
+                typed_tool,
+                path,
+            )
 
-        section_tools = cast(tuple[object, ...], section.tools())
-        if section_tools:
-            for tool in section_tools:
-                if not isinstance(tool, Tool):
-                    raise PromptValidationError(
-                        "Section tools must be Tool instances.",
-                        section_path=path,
-                        dataclass_type=params_type,
-                    )
-                typed_tool = cast(Tool[SupportsDataclass, SupportsToolResult], tool)
-                self._register_section_tools(
-                    typed_tool,
-                    path,
-                )
-
+    def _register_child_sections(
+        self,
+        section: Section[SupportsDataclass],
+        path: SectionPath,
+        depth: int,
+    ) -> None:
         for child in section.children:
             child_path = (*path, child.key)
             self._register_section(child, path=child_path, depth=depth + 1)
