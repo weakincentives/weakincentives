@@ -43,24 +43,24 @@ class ToolResult[ResultValueT]:
 def render_tool_payload(value: object) -> str:
     """Convert tool payloads into textual output for adapters and telemetry."""
 
+    rendered = ""
     if value is None:
-        return ""
+        return rendered
 
     if _is_dataclass_instance(value):
-        return _render_dataclass(cast(SupportsDataclass, value))
-
-    if isinstance(value, Mapping):
+        rendered = _render_dataclass(cast(SupportsDataclass, value))
+    elif isinstance(value, Mapping):
         typed_mapping = cast(Mapping[Any, object], value)
-        return _render_mapping(typed_mapping)
-
-    if isinstance(value, Sequence) and not isinstance(value, _SEQUENCE_EXCLUSIONS):
+        rendered = _render_mapping(typed_mapping)
+    elif isinstance(value, Sequence) and not isinstance(value, _SEQUENCE_EXCLUSIONS):
         sequence_items = cast(Sequence[object], value)
-        return _render_sequence(sequence_items)
+        rendered = _render_sequence(sequence_items)
+    elif isinstance(value, bytes):
+        rendered = value.decode("utf-8", errors="replace")
+    else:
+        rendered = str(value)
 
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-
-    return str(value)
+    return rendered
 
 
 def _is_dataclass_instance(value: object) -> bool:
@@ -69,6 +69,7 @@ def _is_dataclass_instance(value: object) -> bool:
 
 def _render_dataclass(value: SupportsDataclass) -> str:
     render_method = getattr(value, "render", None)
+    rendered: str | None = None
     if callable(render_method):
         try:
             rendered = render_method()
@@ -83,8 +84,11 @@ def _render_dataclass(value: SupportsDataclass) -> str:
     try:
         payload = dump(value, exclude_none=True)
     except TypeError:
-        return repr(value)
-    return json.dumps(payload, ensure_ascii=False)
+        rendered = repr(value)
+    else:
+        rendered = json.dumps(payload, ensure_ascii=False)
+
+    return rendered
 
 
 def _render_mapping(mapping: Mapping[Any, object]) -> str:
@@ -95,38 +99,46 @@ def _render_mapping(mapping: Mapping[Any, object]) -> str:
 
 
 def _normalize_mapping_value(value: object) -> object:
+    normalized: object
     if _is_dataclass_instance(value):
         try:
-            return dump(value, exclude_none=True)
+            normalized = dump(value, exclude_none=True)
         except TypeError:
-            return repr(value)
-    if isinstance(value, Mapping):
+            normalized = repr(value)
+    elif isinstance(value, Mapping):
         typed_mapping = cast(Mapping[Any, object], value)
-        return {
+        normalized = {
             str(key): _normalize_mapping_value(item)
             for key, item in typed_mapping.items()
         }
-    if isinstance(value, Sequence) and not isinstance(value, _SEQUENCE_EXCLUSIONS):
+    elif isinstance(value, Sequence) and not isinstance(value, _SEQUENCE_EXCLUSIONS):
         sequence_values = cast(Sequence[object], value)
-        return [_normalize_mapping_value(item) for item in sequence_values]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
+        normalized = [_normalize_mapping_value(item) for item in sequence_values]
+    elif isinstance(value, (str, int, float, bool)) or value is None:
+        normalized = value
+    elif isinstance(value, bytes):
+        normalized = value.decode("utf-8", errors="replace")
+    else:
+        normalized = str(value)
+
+    return normalized
 
 
 def _render_sequence(items: Sequence[object]) -> str:
+    rendered_sequence = "[]"
     if not items:
-        return "[]"
+        return rendered_sequence
 
     rendered_items = [render_tool_payload(item) for item in items]
     try:
         normalized = [json.loads(item) for item in rendered_items]
     except (TypeError, ValueError):
         trimmed = [item for item in rendered_items if item]
-        return "\n\n".join(trimmed) if trimmed else "[]"
-    return json.dumps(normalized, ensure_ascii=False)
+        rendered_sequence = "\n\n".join(trimmed) if trimmed else rendered_sequence
+    else:
+        rendered_sequence = json.dumps(normalized, ensure_ascii=False)
+
+    return rendered_sequence
 
 
 __all__ = ["ToolResult", "render_tool_payload"]

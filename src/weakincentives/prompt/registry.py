@@ -119,22 +119,23 @@ def _registry_paths_are_registered(
     tool_name_registry = registry._tool_name_registry  # pyright: ignore[reportPrivateUsage]
     defaults_by_type = registry._defaults_by_type  # pyright: ignore[reportPrivateUsage]
 
+    failure: str | None = None
+
     unknown_default_paths = [
         path for path in defaults_by_path if path not in node_by_path
     ]
     if unknown_default_paths:
-        return (
-            False,
-            f"defaults reference unknown paths: {sorted(unknown_default_paths)!r}",
-        )
+        failure = f"defaults reference unknown paths: {sorted(unknown_default_paths)!r}"
 
     for path, default in defaults_by_path.items():
+        if failure is not None:
+            break
         node = node_by_path[path]
         params_type = node.section.param_type
         if params_type is None:
-            return False, f"section at {path!r} does not accept params but has defaults"
-        if type(default) is not params_type:
-            return False, (
+            failure = f"section at {path!r} does not accept params but has defaults"
+        elif type(default) is not params_type:
+            failure = (
                 "default params type mismatch for path "
                 f"{path!r}: expected {params_type.__name__}, got {type(default).__name__}"
             )
@@ -142,8 +143,8 @@ def _registry_paths_are_registered(
     unknown_placeholder_paths = [
         path for path in placeholders if path not in node_by_path
     ]
-    if unknown_placeholder_paths:
-        return False, (
+    if failure is None and unknown_placeholder_paths:
+        failure = (
             "placeholders reference unknown paths: "
             f"{sorted(unknown_placeholder_paths)!r}"
         )
@@ -151,15 +152,20 @@ def _registry_paths_are_registered(
     unknown_tool_paths = [
         path for path in tool_name_registry.values() if path not in node_by_path
     ]
-    if unknown_tool_paths:
-        return False, f"tools reference unknown paths: {sorted(unknown_tool_paths)!r}"
+    if failure is None and unknown_tool_paths:
+        failure = f"tools reference unknown paths: {sorted(unknown_tool_paths)!r}"
 
     for params_type, default in defaults_by_type.items():
+        if failure is not None:
+            break
         if type(default) is not params_type:
-            return False, (
+            failure = (
                 "default by type mismatch for "
                 f"{params_type.__name__}: got {type(default).__name__}"
             )
+
+    if failure is not None:
+        return False, failure
 
     return True
 
