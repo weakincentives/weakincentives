@@ -30,11 +30,16 @@ Release highlights for weakincentives.
   and Podman-backed workspaces.
 - Tool validation tightened with explicit `ToolExample` support and new examples
   covering VFS, planning, ASTEval, subagents, and Podman tools.
+- Tool execution flow now relies on focused helpers for argument parsing,
+  deadline checks, handler invocation, and result logging to reduce complexity
+  while preserving structured events.
 
 ### Quality & Testing
 
 - Added mutation-testing support and broader Ruff quality checks to catch issues
   earlier.
+- Added unit coverage for tool execution success cases, validation failures,
+  deadline expirations, and unexpected handler exceptions.
 
 ## v0.11.0 - 2025-11-23
 
