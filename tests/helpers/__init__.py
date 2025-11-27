@@ -13,5 +13,6 @@
 """Test-only helper utilities for weakincentives."""
 
 from .events import NullEventBus
+from .time import FrozenUtcNow, frozen_utcnow
 
-__all__ = ["NullEventBus"]
+__all__ = ["FrozenUtcNow", "NullEventBus", "frozen_utcnow"]

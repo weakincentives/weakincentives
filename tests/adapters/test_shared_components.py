@@ -20,8 +20,8 @@ from typing import Any, cast
 
 import pytest
 
+from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
-from weakincentives import deadlines
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -203,7 +203,7 @@ def test_response_parser_structured_output_failure() -> None:
 
 
 def test_tool_executor_raises_when_deadline_expired(
-    monkeypatch: pytest.MonkeyPatch,
+    frozen_utcnow: FrozenUtcNow,
 ) -> None:
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
@@ -224,9 +224,9 @@ def test_tool_executor_raises_when_deadline_expired(
     )
 
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor)
+    frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
-    monkeypatch.setattr(deadlines, "_utcnow", lambda: anchor + timedelta(seconds=10))
+    frozen_utcnow.advance(timedelta(seconds=10))
 
     executor = ToolExecutor(
         adapter_name=TEST_ADAPTER_NAME,
