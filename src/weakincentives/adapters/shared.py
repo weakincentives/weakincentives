@@ -35,7 +35,7 @@ from ..prompt.structured_output import (
     parse_dataclass_payload,
     parse_structured_output,
 )
-from ..prompt.tool import Tool, ToolContext, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ..runtime.events import (
     EventBus,
     HandlerFailure,
@@ -222,7 +222,11 @@ def _lookup_tool(
     tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
     prompt_name: str,
     provider_payload: dict[str, Any] | None,
-) -> tuple[Tool[SupportsDataclass, SupportsToolResult], Callable[..., ToolResult], str]:
+) -> tuple[
+    Tool[SupportsDataclass, SupportsToolResult],
+    ToolHandler[SupportsDataclass, SupportsToolResult],
+    str,
+]:
     function = tool_call.function
     tool_name = function.name
     tool = tool_registry.get(tool_name)
@@ -242,7 +246,7 @@ def _lookup_tool(
             provider_payload=provider_payload,
         )
 
-    return tool, handler, tool_name
+    return (tool, handler, tool_name)
 
 
 def _parse_tool_arguments(
