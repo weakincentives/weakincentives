@@ -22,14 +22,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.resources import files
-from importlib.resources.abc import Traversable
 from pathlib import Path
 from types import MappingProxyType
 from typing import cast
 from urllib.parse import unquote
 
 import uvicorn
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
@@ -40,7 +39,6 @@ from ..types import JSONValue
 
 # Module-level logger keeps loader warnings consistent with the debug server.
 logger: StructuredLogger = get_logger(__name__)
-
 
 _MARKDOWN_WRAPPER_KEY = "__markdown__"
 _MARKDOWN_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -431,249 +429,6 @@ class SnapshotStore:
         return self._entries[self._index]
 
 
-def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
-    """Construct the FastAPI application for inspecting snapshots."""
-
-    static_dir = files(__package__).joinpath("static")
-    app = _create_app()
-    _configure_dependencies(app, store, logger)
-    _configure_middleware(app)
-    _mount_static_files(app, static_dir)
-    _register_routes(app, store, logger, static_dir)
-    return app
-
-
-def _create_app() -> FastAPI:
-    return FastAPI(title="wink snapshot debug server")
-
-
-def _configure_dependencies(
-    app: FastAPI, store: SnapshotStore, logger: StructuredLogger
-) -> None:
-    app.state.snapshot_store = store
-    app.state.logger = logger
-
-
-def _configure_middleware(app: FastAPI) -> None:
-    del app  # Middleware hook placeholder for future instrumentation.
-
-
-def _mount_static_files(app: FastAPI, static_dir: Traversable) -> None:
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
-
-def _register_routes(
-    app: FastAPI,
-    store: SnapshotStore,
-    logger: StructuredLogger,
-    static_dir: Traversable,
-) -> None:
-    router = APIRouter()
-    router.add_api_route(
-        "/",
-        _build_index_handler(static_dir),
-        methods=["GET"],
-        response_class=HTMLResponse,
-    )
-    router.add_api_route(
-        "/api/meta",
-        _build_meta_handler(store),
-        methods=["GET"],
-    )
-    router.add_api_route(
-        "/api/entries",
-        _build_entries_handler(store),
-        methods=["GET"],
-    )
-    router.add_api_route(
-        "/api/slices/{encoded_slice_type}",
-        _build_slice_handler(store),
-        methods=["GET"],
-    )
-    router.add_api_route(
-        "/api/raw",
-        _build_raw_handler(store),
-        methods=["GET"],
-    )
-    router.add_api_route(
-        "/api/reload",
-        _build_reload_handler(store, logger),
-        methods=["POST"],
-    )
-    router.add_api_route(
-        "/api/snapshots",
-        _build_snapshots_handler(store),
-        methods=["GET"],
-    )
-    router.add_api_route(
-        "/api/select",
-        _build_select_handler(store),
-        methods=["POST"],
-    )
-    router.add_api_route(
-        "/api/switch",
-        _build_switch_handler(store),
-        methods=["POST"],
-    )
-
-    app.include_router(router)
-
-
-def _build_index_handler(static_dir: Traversable) -> Callable[[], str]:
-    def index() -> str:
-        index_path = static_dir / "index.html"
-        return index_path.read_text()
-
-    return index
-
-
-def _build_meta_handler(store: SnapshotStore) -> Callable[[], Mapping[str, JSONValue]]:
-    def get_meta() -> Mapping[str, JSONValue]:
-        return _meta_response(store.meta)
-
-    return get_meta
-
-
-def _build_entries_handler(
-    store: SnapshotStore,
-) -> Callable[[], list[Mapping[str, JSONValue]]]:
-    def list_entries() -> list[Mapping[str, JSONValue]]:
-        return store.list_entries()
-
-    return list_entries
-
-
-def _build_slice_handler(
-    store: SnapshotStore,
-) -> Callable[..., Mapping[str, JSONValue]]:
-    def get_slice(
-        encoded_slice_type: str,
-        *,
-        offset: int = Query(0, ge=0),  # pyright: ignore[reportCallInDefaultInitializer]
-        limit: int | None = Query(None, ge=0),  # pyright: ignore[reportCallInDefaultInitializer]
-    ) -> Mapping[str, JSONValue]:
-        slice_type = unquote(encoded_slice_type)
-        try:
-            slice_items = store.slice_items(slice_type)
-        except KeyError as error:
-            raise HTTPException(status_code=404, detail=str(error)) from error
-
-        items = list(slice_items.items)
-        if offset:
-            items = items[offset:]
-        if limit is not None:
-            items = items[:limit]
-
-        rendered_items = [_render_markdown_values(item) for item in items]
-
-        return {
-            "slice_type": slice_items.slice_type,
-            "item_type": slice_items.item_type,
-            "items": rendered_items,
-        }
-
-    return get_slice
-
-
-def _build_raw_handler(store: SnapshotStore) -> Callable[[], JSONResponse]:
-    def get_raw() -> JSONResponse:
-        return JSONResponse(json.loads(store.raw_text))
-
-    return get_raw
-
-
-def _build_reload_handler(
-    store: SnapshotStore, logger: StructuredLogger
-) -> Callable[[], Mapping[str, JSONValue]]:
-    def reload() -> Mapping[str, JSONValue]:
-        try:
-            meta = store.reload()
-            return _meta_response(meta)
-        except SnapshotLoadError as error:
-            logger.warning(
-                "Snapshot reload failed",
-                event="debug.server.reload_failed",
-                context={"path": store.meta.path, "error": str(error)},
-            )
-            raise HTTPException(status_code=400, detail=str(error)) from error
-
-    return reload
-
-
-def _build_snapshots_handler(
-    store: SnapshotStore,
-) -> Callable[[], list[Mapping[str, JSONValue]]]:
-    def list_snapshots() -> list[Mapping[str, JSONValue]]:
-        return store.list_snapshots()
-
-    return list_snapshots
-
-
-def _build_select_handler(
-    store: SnapshotStore,
-) -> Callable[[dict[str, JSONValue]], Mapping[str, JSONValue]]:
-    def select(payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
-        session_value = payload.get("session_id")
-        line_value = payload.get("line_number")
-
-        if session_value is None and line_value is None:
-            raise HTTPException(
-                status_code=400,
-                detail="session_id or line_number is required",
-            )
-
-        if session_value is not None and not isinstance(session_value, str):
-            raise HTTPException(status_code=400, detail="session_id must be a string")
-
-        if line_value is not None and not isinstance(line_value, int):
-            raise HTTPException(
-                status_code=400,
-                detail="line_number must be an integer",
-            )
-
-        try:
-            meta = store.select(session_id=session_value, line_number=line_value)
-        except SnapshotLoadError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-
-        return _meta_response(meta)
-
-    return select
-
-
-def _build_switch_handler(
-    store: SnapshotStore,
-) -> Callable[[dict[str, JSONValue]], Mapping[str, JSONValue]]:
-    def switch(payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
-        path_value = payload.get("path")
-        if not isinstance(path_value, str):
-            raise HTTPException(status_code=400, detail="path is required")
-
-        session_value = payload.get("session_id")
-        if session_value is not None and not isinstance(session_value, str):
-            raise HTTPException(status_code=400, detail="session_id must be a string")
-
-        line_value = payload.get("line_number")
-        if line_value is not None and not isinstance(line_value, int):
-            raise HTTPException(
-                status_code=400,
-                detail="line_number must be an integer",
-            )
-
-        try:
-            meta = store.switch(
-                Path(path_value),
-                session_id=session_value,
-                line_number=line_value,
-            )
-        except SnapshotLoadError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-
-        return _meta_response(meta)
-
-    return switch
-
-
 def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
     return {
         "version": meta.version,
@@ -692,6 +447,182 @@ def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
             for entry in meta.slices
         ],
     }
+
+
+class _DebugAppHandlers:
+    def __init__(
+        self, *, store: SnapshotStore, logger: StructuredLogger, static_dir: Path
+    ) -> None:
+        super().__init__()
+        self._store = store
+        self._logger = logger
+        self._static_dir = static_dir
+
+    def index(self) -> str:
+        index_path = self._static_dir / "index.html"
+        return index_path.read_text()
+
+    def get_meta(self) -> Mapping[str, JSONValue]:
+        return _meta_response(self._store.meta)
+
+    def list_entries(self) -> list[Mapping[str, JSONValue]]:
+        return self._store.list_entries()
+
+    def get_slice(
+        self,
+        encoded_slice_type: str,
+        *,
+        offset: int = Query(0, ge=0),  # pyright: ignore[reportCallInDefaultInitializer]
+        limit: int | None = Query(None, ge=0),  # pyright: ignore[reportCallInDefaultInitializer]
+    ) -> Mapping[str, JSONValue]:
+        slice_items = self._slice_items(encoded_slice_type)
+        items = self._paginate_items(
+            list(slice_items.items), offset=offset, limit=limit
+        )
+        rendered_items = [_render_markdown_values(item) for item in items]
+        return {
+            "slice_type": slice_items.slice_type,
+            "item_type": slice_items.item_type,
+            "items": rendered_items,
+        }
+
+    def get_raw(self) -> JSONResponse:
+        return JSONResponse(json.loads(self._store.raw_text))
+
+    def reload(self) -> Mapping[str, JSONValue]:
+        return _meta_response(self._execute_reload())
+
+    def list_snapshots(self) -> list[Mapping[str, JSONValue]]:
+        return self._store.list_snapshots()
+
+    def select(self, payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
+        session_id, line_number = self._parse_select_payload(payload)
+        meta = self._execute_snapshot_command(
+            lambda: self._store.select(session_id=session_id, line_number=line_number)
+        )
+        return _meta_response(meta)
+
+    def switch(self, payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
+        path, session_id, line_number = self._parse_switch_payload(payload)
+        meta = self._execute_snapshot_command(
+            lambda: self._store.switch(
+                path,
+                session_id=session_id,
+                line_number=line_number,
+            )
+        )
+        return _meta_response(meta)
+
+    def _slice_items(self, encoded_slice_type: str) -> SliceItems:
+        slice_type = unquote(encoded_slice_type)
+        try:
+            return self._store.slice_items(slice_type)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @staticmethod
+    def _paginate_items(
+        items: list[Mapping[str, JSONValue]], *, offset: int, limit: int | None
+    ) -> list[Mapping[str, JSONValue]]:
+        if offset:
+            items = items[offset:]
+        if limit is not None:
+            items = items[:limit]
+        return items
+
+    def _execute_reload(self) -> SnapshotMeta:
+        try:
+            return self._store.reload()
+        except SnapshotLoadError as error:
+            self._logger.warning(
+                "Snapshot reload failed",
+                event="debug.server.reload_failed",
+                context={"path": self._store.meta.path, "error": str(error)},
+            )
+            raise self._translate_snapshot_error(error) from error
+
+    @staticmethod
+    def _translate_snapshot_error(error: SnapshotLoadError) -> HTTPException:
+        return HTTPException(status_code=400, detail=str(error))
+
+    def _execute_snapshot_command(
+        self, command: Callable[[], SnapshotMeta]
+    ) -> SnapshotMeta:
+        try:
+            return command()
+        except SnapshotLoadError as error:
+            raise self._translate_snapshot_error(error) from error
+
+    @staticmethod
+    def _parse_select_payload(
+        payload: Mapping[str, JSONValue],
+    ) -> tuple[str | None, int | None]:
+        session_value = payload.get("session_id")
+        line_value = payload.get("line_number")
+
+        if session_value is None and line_value is None:
+            raise HTTPException(
+                status_code=400,
+                detail="session_id or line_number is required",
+            )
+
+        _validate_optional_session_id(session_value)
+        _validate_optional_line_number(line_value)
+        return cast(str | None, session_value), cast(int | None, line_value)
+
+    @staticmethod
+    def _parse_switch_payload(
+        payload: Mapping[str, JSONValue],
+    ) -> tuple[Path, str | None, int | None]:
+        path_value = payload.get("path")
+        if not isinstance(path_value, str):
+            raise HTTPException(status_code=400, detail="path is required")
+
+        session_value = payload.get("session_id")
+        _validate_optional_session_id(session_value)
+
+        line_value = payload.get("line_number")
+        _validate_optional_line_number(line_value)
+
+        return (
+            Path(path_value),
+            cast(str | None, session_value),
+            cast(int | None, line_value),
+        )
+
+
+def _validate_optional_session_id(value: JSONValue | None) -> None:
+    if value is not None and not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="session_id must be a string")
+
+
+def _validate_optional_line_number(value: JSONValue | None) -> None:
+    if value is not None and not isinstance(value, int):
+        raise HTTPException(status_code=400, detail="line_number must be an integer")
+
+
+def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
+    """Construct the FastAPI application for inspecting snapshots."""
+
+    static_dir = Path(str(files(__package__).joinpath("static")))
+    handlers = _DebugAppHandlers(store=store, logger=logger, static_dir=static_dir)
+
+    app = FastAPI(title="wink snapshot debug server")
+    app.state.snapshot_store = store
+    app.state.logger = logger
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    _ = app.get("/", response_class=HTMLResponse)(handlers.index)
+    _ = app.get("/api/meta")(handlers.get_meta)
+    _ = app.get("/api/entries")(handlers.list_entries)
+    _ = app.get("/api/slices/{encoded_slice_type}")(handlers.get_slice)
+    _ = app.get("/api/raw")(handlers.get_raw)
+    _ = app.post("/api/reload")(handlers.reload)
+    _ = app.get("/api/snapshots")(handlers.list_snapshots)
+    _ = app.post("/api/select")(handlers.select)
+    _ = app.post("/api/switch")(handlers.switch)
+
+    return app
 
 
 def run_debug_server(
