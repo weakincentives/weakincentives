@@ -261,7 +261,7 @@ def _wrap_init_with_invariants(
     original_init = cls.__init__
 
     @wraps(original_init)
-    def init_wrapper(self: T, *args: object, **kwargs: object) -> None:
+    def init_wrapper(self: object, *args: object, **kwargs: object) -> None:
         original_init(self, *args, **kwargs)
         if dbc_active():
             _check_invariants(predicates, instance=self, func=original_init)
@@ -285,7 +285,7 @@ def _wrap_method_with_invariants(
     predicates: tuple[ContractCallable, ...],
 ) -> Callable[..., object]:
     @wraps(method)
-    def wrapper(self: T, *args: object, **kwargs: object) -> object:
+    def wrapper(self: object, *args: object, **kwargs: object) -> object:
         if not dbc_active():
             return method(self, *args, **kwargs)
         _check_invariants(predicates, instance=self, func=method)
