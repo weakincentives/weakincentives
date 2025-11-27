@@ -126,6 +126,10 @@ def _str_dict_factory() -> dict[str, str]:
     return {}
 
 
+def _str_set_factory() -> set[str]:
+    return set()
+
+
 @dataclass(slots=True, frozen=True)
 class EvalFileRead:
     """File that should be read from the virtual filesystem before execution."""
@@ -566,12 +570,93 @@ def _execute_with_timeout(
     return False, result_container.get("value"), error_container["message"]
 
 
+@dataclass(slots=True)
+class _SandboxState:
+    interpreter: InterpreterProtocol = field(
+        metadata={"description": "Interpreter configured for sandboxed execution."}
+    )
+    stdout_buffer: io.StringIO = field(
+        metadata={"description": "Buffer capturing stdout during evaluation."}
+    )
+    stderr_buffer: io.StringIO = field(
+        metadata={"description": "Buffer capturing stderr during evaluation."}
+    )
+    symtable: dict[str, object] = field(
+        metadata={"description": "Interpreter symbol table used during execution."}
+    )
+    write_queue: list[EvalFileWrite] = field(
+        metadata={"description": "User-declared writes pending template resolution."}
+    )
+    helper_writes: list[EvalFileWrite] = field(
+        metadata={"description": "Writes staged via helper functions during execution."}
+    )
+    write_targets: set[tuple[str, ...]] = field(
+        metadata={"description": "Paths reserved by declared and helper writes."}
+    )
+    pending_write_attempted: bool = field(
+        metadata={"description": "Tracks whether any write helper was invoked."}
+    )
+    initial_keys: set[str] = field(
+        default_factory=_str_set_factory,
+        metadata={"description": "Symtable keys captured before evaluation."},
+    )
+
+
+@dataclass(slots=True)
+class _ExecutionOutcome:
+    value_repr: str | None = field(
+        metadata={"description": "repr of the evaluation result when available."}
+    )
+    stdout: str = field(
+        metadata={"description": "Captured stdout text truncated to stream limits."}
+    )
+    stderr: str = field(
+        metadata={"description": "Captured stderr text including interpreter errors."}
+    )
+    timed_out: bool = field(
+        metadata={"description": "Indicates whether evaluation exceeded the timeout."}
+    )
+
+
+@dataclass(slots=True)
+class _ResultAssemblyContext:
+    reads: tuple[EvalFileRead, ...] = field(
+        metadata={"description": "Normalized read descriptors for the current run."}
+    )
+    final_writes: tuple[EvalFileWrite, ...] = field(
+        metadata={"description": "Resolved writes queued after evaluation."}
+    )
+    sandbox: _SandboxState = field(
+        metadata={"description": "Sandbox state containing interpreter metadata."}
+    )
+    user_globals: Mapping[str, object] = field(
+        metadata={"description": "User-provided globals injected into the sandbox."}
+    )
+    read_globals: Mapping[str, str] = field(
+        metadata={"description": "Contents of VFS reads made available to the sandbox."}
+    )
+    execution: _ExecutionOutcome = field(
+        metadata={"description": "Captured interpreter outputs for result assembly."}
+    )
+    pending_sources: tuple[EvalFileWrite, ...] = field(
+        metadata={"description": "Pending writes considered when summarizing output."}
+    )
+    pending_writes: bool = field(
+        metadata={"description": "Indicates whether any writes were requested."}
+    )
+    base_message: str = field(
+        metadata={
+            "description": "Base result message before appending write summaries."
+        }
+    )
+
+
 class _AstevalToolSuite:
     def __init__(self, *, section: AstevalSection) -> None:
         super().__init__()
         self._section = section
 
-    def run(  # noqa: C901
+    def run(
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
         ensure_context_uses_session(context=context, session=self._section.session)
@@ -589,14 +674,81 @@ class _AstevalToolSuite:
         read_globals = _build_eval_globals(snapshot, reads)
         user_globals = _parse_user_globals(params.globals)
 
+        sandbox = self._initialize_sandbox(
+            reads=reads,
+            writes=writes,
+            snapshot=snapshot,
+            read_globals=read_globals,
+            user_globals=user_globals,
+        )
+        execution = self._execute_interpreter(
+            interpreter=sandbox.interpreter,
+            code=code,
+            stdout_buffer=sandbox.stdout_buffer,
+            stderr_buffer=sandbox.stderr_buffer,
+        )
+        (
+            final_writes,
+            message,
+            pending_sources,
+            pending_writes,
+        ) = self._resolve_writes(
+            symtable=sandbox.symtable,
+            param_writes=tuple(sandbox.write_queue),
+            helper_writes=tuple(sandbox.helper_writes),
+            pending_write_attempted=sandbox.pending_write_attempted,
+            execution=execution,
+        )
+        result = self._assemble_result(
+            _ResultAssemblyContext(
+                reads=reads,
+                final_writes=final_writes,
+                sandbox=sandbox,
+                user_globals=user_globals,
+                read_globals=read_globals,
+                execution=execution,
+                pending_sources=pending_sources,
+                pending_writes=pending_writes,
+                base_message=message,
+            )
+        )
+
+        _LOGGER.debug(
+            "Asteval evaluation completed.",
+            event="asteval_run",
+            context={
+                "stdout_len": len(execution.stdout),
+                "stderr_len": len(execution.stderr),
+                "write_count": len(final_writes),
+                "code_preview": code[:200],
+            },
+        )
+
+        return result
+
+    @staticmethod
+    def _initialize_sandbox(
+        *,
+        reads: tuple[EvalFileRead, ...],
+        writes: tuple[EvalFileWrite, ...],
+        snapshot: VirtualFileSystem,
+        read_globals: Mapping[str, str],
+        user_globals: Mapping[str, object],
+    ) -> _SandboxState:
         interpreter = _create_interpreter()
-        stdout_buffer = io.StringIO()
-        stderr_buffer = io.StringIO()
         write_queue: list[EvalFileWrite] = list(writes)
-        helper_writes: list[EvalFileWrite] = []
-        write_targets = {write.path.segments for write in write_queue}
+        state = _SandboxState(
+            interpreter=interpreter,
+            stdout_buffer=io.StringIO(),
+            stderr_buffer=io.StringIO(),
+            symtable=cast(dict[str, object], interpreter.symtable),
+            write_queue=write_queue,
+            helper_writes=[],
+            write_targets={write.path.segments for write in write_queue},
+            pending_write_attempted=bool(write_queue),
+        )
+        read_paths = {read.path.segments for read in reads}
         builtin_print = builtins.print
-        pending_write_attempted = bool(write_queue)
 
         def sandbox_print(
             *args: object,
@@ -617,10 +769,10 @@ class _AstevalToolSuite:
                 )
                 return
             text = actual_sep.join(str(arg) for arg in args)
-            _ = stdout_buffer.write(text)
-            _ = stdout_buffer.write(actual_end)
+            _ = state.stdout_buffer.write(text)
+            _ = state.stdout_buffer.write(actual_end)
             if flush:
-                _ = stdout_buffer.flush()
+                _ = state.stdout_buffer.flush()
 
         def read_text(path: str) -> str:
             normalized = _normalize_vfs_path(_parse_string_path(path))
@@ -628,8 +780,7 @@ class _AstevalToolSuite:
             return file.content
 
         def write_text(path: str, content: str, mode: str = "create") -> None:
-            nonlocal pending_write_attempted
-            pending_write_attempted = True
+            state.pending_write_attempted = True
             normalized_path = _normalize_vfs_path(_parse_string_path(path))
             helper_write = _normalize_write(
                 EvalFileWrite(
@@ -643,22 +794,32 @@ class _AstevalToolSuite:
                 raise ToolValidationError(
                     "Writes queued during execution must not target read paths."
                 )
-            if key in write_targets:
+            if key in state.write_targets:
                 raise ToolValidationError("Duplicate write targets detected.")
-            write_targets.add(key)
-            helper_writes.append(helper_write)
+            state.write_targets.add(key)
+            state.helper_writes.append(helper_write)
 
-        symtable = interpreter.symtable
+        symtable = state.symtable
         symtable.update(_merge_globals(read_globals, user_globals))
         symtable["vfs_reads"] = dict(read_globals)
         symtable["read_text"] = read_text
         symtable["write_text"] = write_text
         symtable["print"] = sandbox_print
+        state.initial_keys = set(symtable)
+        return state
 
-        all_keys = set(symtable)
+    @staticmethod
+    def _execute_interpreter(
+        *,
+        interpreter: InterpreterProtocol,
+        code: str,
+        stdout_buffer: io.StringIO,
+        stderr_buffer: io.StringIO,
+    ) -> _ExecutionOutcome:
         captured_errors: list[str] = []
         value_repr: str | None = None
         stderr_text = ""
+        timed_out = False
         try:
             with (
                 contextlib.redirect_stdout(stdout_buffer),
@@ -685,10 +846,29 @@ class _AstevalToolSuite:
             stderr_text or "\n".join(captured_errors) or stderr_buffer.getvalue()
         )
         stderr = _truncate_stream(stderr_raw)
+        return _ExecutionOutcome(
+            value_repr=value_repr,
+            stdout=stdout,
+            stderr=stderr,
+            timed_out=timed_out,
+        )
 
-        param_writes = tuple(write_queue)
+    @staticmethod
+    def _resolve_writes(
+        *,
+        symtable: Mapping[str, object],
+        param_writes: tuple[EvalFileWrite, ...],
+        helper_writes: tuple[EvalFileWrite, ...],
+        pending_write_attempted: bool,
+        execution: _ExecutionOutcome,
+    ) -> tuple[
+        tuple[EvalFileWrite, ...],
+        str,
+        tuple[EvalFileWrite, ...],
+        bool,
+    ]:
         pending_writes = pending_write_attempted or bool(helper_writes)
-        if stderr and not value_repr:
+        if execution.stderr and not execution.value_repr:
             final_writes: tuple[EvalFileWrite, ...] = ()
             if pending_writes:
                 message = (
@@ -697,85 +877,79 @@ class _AstevalToolSuite:
                 )
             else:
                 message = "Evaluation failed; review stderr details in the payload."
-        else:
-            format_context = {
-                key: value for key, value in symtable.items() if not key.startswith("_")
-            }
-            resolved_param_writes: list[EvalFileWrite] = []
-            for write in param_writes:
-                try:
-                    resolved_content = write.content.format_map(format_context)
-                except KeyError as error:
-                    missing = error.args[0]
-                    raise ToolValidationError(
-                        f"Missing template variable '{missing}' in write request."
-                    ) from error
-                resolved_param_writes.append(
-                    _normalize_write(
-                        EvalFileWrite(
-                            path=write.path,
-                            content=resolved_content,
-                            mode=write.mode,
-                        )
+            pending_sources = final_writes or param_writes + helper_writes
+            return final_writes, message, pending_sources, pending_writes
+
+        format_context = {
+            key: value for key, value in symtable.items() if not key.startswith("_")
+        }
+        resolved_param_writes: list[EvalFileWrite] = []
+        for write in param_writes:
+            try:
+                resolved_content = write.content.format_map(format_context)
+            except KeyError as error:
+                missing = error.args[0]
+                raise ToolValidationError(
+                    f"Missing template variable '{missing}' in write request."
+                ) from error
+            resolved_param_writes.append(
+                _normalize_write(
+                    EvalFileWrite(
+                        path=write.path,
+                        content=resolved_content,
+                        mode=write.mode,
                     )
                 )
-            final_writes = tuple(resolved_param_writes + helper_writes)
-            seen_targets: set[tuple[str, ...]] = set()
-            for write in final_writes:
-                key = write.path.segments
-                if key in seen_targets:
-                    raise ToolValidationError(
-                        "Duplicate write targets detected."
-                    )  # pragma: no cover - upstream checks prevent duplicates
-                seen_targets.add(key)
-            if final_writes:
-                message = (
-                    "Evaluation succeeded with "
-                    f"{len(final_writes)} pending file write"
-                    f"{'s' if len(final_writes) != 1 else ''}."
-                )
-            else:
-                message = "Evaluation succeeded without pending file writes."
+            )
+        final_writes = tuple(resolved_param_writes + list(helper_writes))
+        seen_targets: set[tuple[str, ...]] = set()
+        for write in final_writes:
+            key = write.path.segments
+            if key in seen_targets:
+                raise ToolValidationError(
+                    "Duplicate write targets detected."
+                )  # pragma: no cover - upstream checks prevent duplicates
+            seen_targets.add(key)
+        if final_writes:
+            message = (
+                "Evaluation succeeded with "
+                f"{len(final_writes)} pending file write"
+                f"{'s' if len(final_writes) != 1 else ''}."
+            )
+        else:
+            message = "Evaluation succeeded without pending file writes."
+        pending_sources = final_writes or param_writes + helper_writes
+        return final_writes, message, pending_sources, pending_writes
 
-        helper_writes_tuple = tuple(helper_writes)
-        pending_sources: Sequence[EvalFileWrite] = (
-            final_writes or param_writes + helper_writes_tuple
-        )
-        summary = _summarize_writes(pending_sources)
-        if pending_writes and summary:
+    @staticmethod
+    def _assemble_result(context: _ResultAssemblyContext) -> ToolResult[EvalResult]:
+        summary = _summarize_writes(context.pending_sources)
+        message = context.base_message
+        if context.pending_writes and summary:
             message = f"{message} {summary}"
 
         globals_payload: dict[str, str] = {}
+        symtable = context.sandbox.symtable
         visible_keys = {
-            key for key in symtable if key not in all_keys and not key.startswith("_")
+            key
+            for key in symtable
+            if key not in context.sandbox.initial_keys and not key.startswith("_")
         }
-        visible_keys.update(user_globals.keys())
+        visible_keys.update(context.user_globals.keys())
         for key in visible_keys:
             globals_payload[key] = _format_value(symtable.get(key))
         globals_payload.update(
-            {f"vfs:{alias}": content for alias, content in read_globals.items()}
+            {f"vfs:{alias}": content for alias, content in context.read_globals.items()}
         )
 
         result = EvalResult(
-            value_repr=value_repr,
-            stdout=stdout,
-            stderr=stderr,
+            value_repr=context.execution.value_repr,
+            stdout=context.execution.stdout,
+            stderr=context.execution.stderr,
             globals=globals_payload,
-            reads=reads,
-            writes=final_writes,
+            reads=context.reads,
+            writes=context.final_writes,
         )
-
-        _LOGGER.debug(
-            "Asteval evaluation completed.",
-            event="asteval_run",
-            context={
-                "stdout_len": len(stdout),
-                "stderr_len": len(stderr),
-                "write_count": len(final_writes),
-                "code_preview": code[:200],
-            },
-        )
-
         return ToolResult(message=message, value=result)
 
 

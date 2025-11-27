@@ -191,6 +191,16 @@ def test_expression_success() -> None:
     assert snapshot is None or not snapshot.files
 
 
+def test_success_without_writes_message_is_simple() -> None:
+    session, bus, _vfs_section, tool = _setup_sections()
+
+    result = invoke_tool(bus, tool, EvalParams(code="2"), session=session)
+
+    assert result.message == "Evaluation succeeded without pending file writes."
+    assert result.value is not None
+    assert result.value.writes == ()
+
+
 def test_multiline_reads_and_writes() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
@@ -271,6 +281,27 @@ def test_helper_write_appends() -> None:
     assert files["logs", "activity.log"] == "started-continued"
 
 
+def test_helper_write_success_reports_pending_writes() -> None:
+    session, bus, _vfs_section, tool = _setup_sections()
+
+    result = invoke_tool(
+        bus,
+        tool,
+        EvalParams(code="write_text('logs/activity.log', 'started')\n'done'"),
+        session=session,
+    )
+
+    assert result.message.startswith("Evaluation succeeded with 1 pending file write.")
+    assert result.value is not None
+    assert result.value.writes == (
+        EvalFileWrite(
+            path=VfsPath(("logs", "activity.log")),
+            content="started",
+            mode="create",
+        ),
+    )
+
+
 def test_invalid_globals_raise() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 
@@ -315,6 +346,40 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert snapshot is None or not snapshot.files
 
 
+def test_timeout_reports_discarded_writes_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, bus, _vfs_section, tool = _setup_sections()
+
+    def fake_timeout(func: Callable[[], object]) -> tuple[bool, object | None, str]:
+        _ = func
+        return True, None, "Execution timed out."
+
+    monkeypatch.setattr(
+        "weakincentives.tools.asteval._execute_with_timeout", fake_timeout
+    )
+
+    result = invoke_tool(
+        bus,
+        tool,
+        EvalParams(
+            code="1 + 1",
+            writes=(
+                EvalFileWrite(
+                    path=VfsPath(("tmp", "file.txt")),
+                    content="should not write",
+                ),
+            ),
+        ),
+        session=session,
+    )
+
+    _assert_failure_message(result, had_pending_writes=True)
+    assert result.value is not None
+    assert result.value.writes == ()
+    assert result.value.stderr == "Execution timed out."
+
+
 def test_stdout_truncation_and_flush() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 
@@ -354,6 +419,32 @@ def test_print_invalid_end_reports_error() -> None:
     assert result.value is not None
     payload = result.value
     assert "end must be None or a string." in payload.stderr
+
+
+def test_stdout_preserved_when_exception_occurs() -> None:
+    session, bus, _vfs_section, tool = _setup_sections()
+
+    result = invoke_tool(
+        bus,
+        tool,
+        EvalParams(
+            code="print('before error')\n1/0",
+            writes=(
+                EvalFileWrite(
+                    path=VfsPath(("logs", "pending.txt")),
+                    content="value",
+                ),
+            ),
+        ),
+        session=session,
+    )
+
+    _assert_failure_message(result, had_pending_writes=True)
+    assert result.value is not None
+    payload = result.value
+    assert payload.stdout == "before error\n"
+    assert "division by zero" in payload.stderr
+    assert payload.writes == ()
 
 
 def test_invalid_global_names_raise() -> None:
@@ -696,6 +787,22 @@ def test_write_text_rejects_empty_path() -> None:
     _assert_failure_message(result, had_pending_writes=True)
     assert result.value is not None
     assert "Path must be non-empty." in result.value.stderr
+
+
+def test_helper_write_validation_error_bubbles() -> None:
+    session, bus, _vfs_section, tool = _setup_sections()
+
+    result = invoke_tool(
+        bus,
+        tool,
+        EvalParams(code="write_text('../invalid', 'data')"),
+        session=session,
+    )
+
+    _assert_failure_message(result, had_pending_writes=True)
+    assert result.value is not None
+    assert "Path segments may not include '.' or '..'." in result.value.stderr
+    assert result.value.writes == ()
 
 
 def test_globals_formatting_covers_primitives() -> None:
