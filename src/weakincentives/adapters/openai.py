@@ -15,8 +15,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
+from ..prompt.rendering import RenderedPrompt
 from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
@@ -43,10 +44,10 @@ from .shared import (
     ThrottleError,
     ThrottleKind,
     ToolChoice,
-    call_provider_with_normalization,
+    build_json_schema_response_format,
+    deadline_provider_payload,
     format_publish_failures,
     parse_tool_arguments,
-    prepare_adapter_conversation,
     run_conversation,
 )
 
@@ -104,6 +105,25 @@ class _ResponseMessage:
     content: object
     tool_calls: Sequence[_ResponseToolCall] | None
     parsed: object | None = None
+
+
+@dataclass(slots=True)
+class _EvaluationContext[OutputT]:
+    prompt_name: str
+    render_inputs: tuple[SupportsDataclass, ...]
+    rendered: RenderedPrompt[OutputT]
+    response_format: dict[str, Any] | None
+
+
+ProviderInvoker = Callable[
+    [
+        list[dict[str, Any]],
+        Sequence[Mapping[str, Any]],
+        ToolChoice | None,
+        Mapping[str, Any] | None,
+    ],
+    object,
+]
 
 
 def _load_openai_module() -> _OpenAIModule:
@@ -660,6 +680,93 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str = "latest",
     ) -> PromptResponse[OutputT]:
+        context = self._setup_evaluation(
+            prompt,
+            params,
+            parse_output=parse_output,
+            deadline=deadline,
+            overrides_store=overrides_store,
+            overrides_tag=overrides_tag,
+        )
+
+        return run_conversation(
+            adapter_name=OPENAI_ADAPTER_NAME,
+            adapter=cast("ProviderAdapter[OutputT]", self),
+            prompt=prompt,
+            prompt_name=context.prompt_name,
+            rendered=context.rendered,
+            render_inputs=context.render_inputs,
+            initial_messages=[{"role": "system", "content": context.rendered.text}],
+            parse_output=parse_output,
+            bus=bus,
+            session=session,
+            tool_choice=self._tool_choice,
+            response_format=context.response_format,
+            require_structured_output_text=False,
+            call_provider=self._build_provider_invoker(context.prompt_name),
+            select_choice=self._build_choice_selector(context.prompt_name),
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=format_publish_failures,
+            parse_arguments=parse_tool_arguments,
+            logger_override=self._conversation_logger(),
+            deadline=deadline,
+        )
+
+    def _setup_evaluation(
+        self,
+        prompt: Prompt[OutputT],
+        params: tuple[SupportsDataclass, ...],
+        *,
+        parse_output: bool,
+        deadline: Deadline | None,
+        overrides_store: PromptOverridesStore | None,
+        overrides_tag: str,
+    ) -> _EvaluationContext[OutputT]:
+        prompt_name = prompt.name or prompt.__class__.__name__
+        render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
+        self._ensure_deadline_not_expired(deadline, prompt_name)
+        rendered = self._render_prompt(
+            prompt,
+            render_inputs,
+            parse_output=parse_output,
+            deadline=deadline,
+            overrides_store=overrides_store,
+            overrides_tag=overrides_tag,
+        )
+        response_format = self._build_response_format(
+            rendered,
+            parse_output=parse_output,
+            prompt_name=prompt_name,
+        )
+        return _EvaluationContext(
+            prompt_name=prompt_name,
+            render_inputs=render_inputs,
+            rendered=rendered,
+            response_format=response_format,
+        )
+
+    @staticmethod
+    def _ensure_deadline_not_expired(
+        deadline: Deadline | None, prompt_name: str
+    ) -> None:
+        if deadline is not None and deadline.remaining() <= timedelta(0):
+            raise PromptEvaluationError(
+                "Deadline expired before evaluation started.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                provider_payload=deadline_provider_payload(deadline),
+            )
+
+    def _render_prompt(
+        self,
+        prompt: Prompt[OutputT],
+        render_inputs: tuple[SupportsDataclass, ...],
+        *,
+        parse_output: bool,
+        deadline: Deadline | None,
+        overrides_store: PromptOverridesStore | None,
+        overrides_tag: str,
+    ) -> RenderedPrompt[OutputT]:
         has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
             parse_output
@@ -668,22 +775,40 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             and getattr(prompt, "inject_output_instructions", False)
         )
 
-        render_context = prepare_adapter_conversation(
-            prompt=prompt,
-            params=params,
-            parse_output=parse_output,
-            disable_output_instructions=should_disable_instructions,
-            enable_json_schema=self._use_native_response_format,
-            deadline=deadline,
-            overrides_store=overrides_store,
-            overrides_tag=overrides_tag,
+        if should_disable_instructions:
+            rendered = prompt.render(
+                *render_inputs,
+                overrides_store=overrides_store,
+                tag=overrides_tag,
+                inject_output_instructions=False,
+            )
+        else:
+            rendered = prompt.render(
+                *render_inputs,
+                overrides_store=overrides_store,
+                tag=overrides_tag,
+            )
+        if deadline is not None:
+            rendered = replace(rendered, deadline=deadline)
+        return rendered
+
+    def _build_response_format(
+        self,
+        rendered: RenderedPrompt[Any],
+        *,
+        parse_output: bool,
+        prompt_name: str,
+    ) -> dict[str, Any] | None:
+        should_parse_structured_output = (
+            parse_output
+            and rendered.output_type is not None
+            and rendered.container is not None
         )
+        if should_parse_structured_output and self._use_native_response_format:
+            return build_json_schema_response_format(rendered, prompt_name)
+        return None
 
-        prompt_name = render_context.prompt_name
-        rendered = render_context.rendered
-        response_format = render_context.response_format
-        render_inputs = render_context.render_inputs
-
+    def _build_provider_invoker(self, prompt_name: str) -> ProviderInvoker:
         def _call_provider(
             messages: list[dict[str, Any]],
             tool_specs: Sequence[Mapping[str, Any]],
@@ -708,56 +833,48 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     response_format_payload, prompt_name=prompt_name
                 )
 
-            return call_provider_with_normalization(
-                lambda: self._client.responses.create(**request_payload),
-                prompt_name=prompt_name,
-                normalize_throttle=lambda error: _normalize_openai_throttle(
+            try:
+                return self._client.responses.create(**request_payload)
+            except Exception as error:  # pragma: no cover - network/SDK failure
+                throttle_error = _normalize_openai_throttle(
                     error, prompt_name=prompt_name
-                ),
-                provider_payload=_error_payload,
-                request_error_message="OpenAI request failed.",
-            )
+                )
+                if throttle_error is not None:
+                    raise throttle_error from error
+                raise PromptEvaluationError(
+                    "OpenAI request failed.",
+                    prompt_name=prompt_name,
+                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    provider_payload=_error_payload(error),
+                ) from error
 
+        return _call_provider
+
+    @staticmethod
+    def _build_choice_selector(
+        prompt_name: str,
+    ) -> Callable[[object], ProviderChoice]:
         def _select_choice(response: object) -> ProviderChoice:
             return cast(
                 ProviderChoice, _choice_from_response(response, prompt_name=prompt_name)
             )
 
-        return run_conversation(
-            adapter_name=OPENAI_ADAPTER_NAME,
-            adapter=cast("ProviderAdapter[OutputT]", self),
-            prompt=prompt,
-            prompt_name=prompt_name,
-            rendered=rendered,
-            render_inputs=render_inputs,
-            initial_messages=[{"role": "system", "content": rendered.text}],
-            parse_output=parse_output,
-            bus=bus,
-            session=session,
-            tool_choice=self._tool_choice,
-            response_format=response_format,
-            require_structured_output_text=False,
-            call_provider=_call_provider,
-            select_choice=_select_choice,
-            serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=format_publish_failures,
-            parse_arguments=parse_tool_arguments,
-            logger_override=logger,
-            deadline=deadline,
-        )
+        return _select_choice
+
+    @staticmethod
+    def _conversation_logger() -> StructuredLogger:
+        return logger
 
 
 __all__ = [
     "OpenAIAdapter",
     "OpenAIProtocol",
-    "build_json_schema_response_format",
     "extract_parsed_content",
     "message_text_content",
     "parse_schema_constrained_payload",
 ]
 
 
-build_json_schema_response_format = _shared.build_json_schema_response_format
 message_text_content = _shared.message_text_content
 extract_parsed_content = _shared.extract_parsed_content
 parse_schema_constrained_payload = _shared.parse_schema_constrained_payload
