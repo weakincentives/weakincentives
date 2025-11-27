@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from enum import StrEnum
 from functools import wraps
 from threading import RLock
 from types import MappingProxyType
@@ -45,6 +46,14 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "session"}
 
 
 type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
+
+
+class SessionTag(StrEnum):
+    SESSION_ID = "session_id"
+    PARENT_SESSION_ID = "parent_session_id"
+
+
+SESSION_ID_NUM_BYTES = 16
 
 
 def iter_sessions_bottom_up(root: Session) -> Iterator[Session]:
@@ -83,6 +92,9 @@ _TOOL_INVOKED_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], Tool
 _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
     type[SupportsDataclass], PromptExecuted
 )
+_DEFAULT_EVENT_REDUCER_TYPES: frozenset[SessionSliceType] = frozenset(
+    {_TOOL_INVOKED_TYPE, _PROMPT_EXECUTED_TYPE}
+)
 
 EMPTY_SLICE: SessionSlice = ()
 
@@ -105,7 +117,7 @@ class _ReducerRegistration:
 
 
 def _session_id_is_well_formed(session: "Session") -> bool:  # noqa: UP037
-    return len(session.session_id.bytes) == 16
+    return len(session.session_id.bytes) == SESSION_ID_NUM_BYTES
 
 
 def _created_at_has_tz(session: "Session") -> bool:  # noqa: UP037
@@ -131,9 +143,11 @@ def _normalize_tags(
                 raise TypeError(msg)
             normalized[key] = value
 
-    normalized["session_id"] = str(session_id)
+    normalized[SessionTag.SESSION_ID.value] = str(session_id)
     if parent is not None:
-        _ = normalized.setdefault("parent_session_id", str(parent.session_id))
+        _ = normalized.setdefault(
+            SessionTag.PARENT_SESSION_ID.value, str(parent.session_id)
+        )
 
     return MappingProxyType(normalized)
 
@@ -469,7 +483,7 @@ class Session(SessionProtocol):
             registrations = list(self._reducers.get(data_type, ()))
             if not registrations:
                 default_reducer: TypedReducer[Any]
-                if data_type in {_TOOL_INVOKED_TYPE, _PROMPT_EXECUTED_TYPE}:
+                if data_type in _DEFAULT_EVENT_REDUCER_TYPES:
                     default_reducer = cast(TypedReducer[Any], _append_event)
                 else:
                     default_reducer = cast(TypedReducer[Any], append)
