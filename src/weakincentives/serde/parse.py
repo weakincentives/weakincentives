@@ -48,13 +48,6 @@ get_args = typing_get_args
 _UNHANDLED = object()
 
 
-def _is_union_origin(origin: object) -> bool:
-    return origin is _UNION_TYPE or (
-        getattr(origin, "__module__", "") == "typing"
-        and getattr(origin, "__qualname__", "") == "Union"
-    )
-
-
 def _bool_from_str(value: str) -> bool:
     lowered = value.strip().lower()
     truthy = {"true", "1", "yes", "on"}
@@ -74,7 +67,7 @@ def _coerce_union(
     config: _ParseConfig,
 ) -> object:
     origin = get_origin(base_type)
-    if not _is_union_origin(origin):
+    if origin is not _UNION_TYPE:
         return _UNHANDLED
     if (
         config.coerce
@@ -113,6 +106,10 @@ def _coerce_none_value(
             raise TypeError(f"{path}: expected None")
         return None
     if value is None:
+        if get_origin(base_type) is _UNION_TYPE and any(
+            arg is type(None) for arg in get_args(base_type)
+        ):
+            return None
         raise TypeError(f"{path}: value cannot be None")
     return _UNHANDLED
 
@@ -135,12 +132,18 @@ def _coerce_literal(
         message = str(last_literal_error)
         if not message.startswith(f"{path}:"):
             message = f"{path}: {message}"
-        raise type(last_literal_error)(message) from last_literal_error
+        if isinstance(last_literal_error, TypeError):
+            raise TypeError(
+                message
+            ) from last_literal_error  # pragma: no cover - defensive
+        if isinstance(last_literal_error, ValueError):
+            raise ValueError(message) from last_literal_error
+        raise last_literal_error  # pragma: no cover - defensive fallback
     raise ValueError(f"{path}: expected one of {list(literals)}")
 
 
 def _convert_literal_value(literal: object, value: object) -> object:
-    literal_type: type[object] = type(literal)
+    literal_type = type(literal)
     if isinstance(literal, bool) and isinstance(value, str):
         return _bool_from_str(value)
     return literal_type(value)
@@ -153,14 +156,15 @@ def _match_literal_value(
     for literal in literals:
         if value == literal:
             return literal, None
-        if config.coerce:
-            try:
-                coerced_literal = _convert_literal_value(literal, value)
-            except Exception as error:  # pragma: no cover - defensive guard
-                last_literal_error = error
-                continue
-            if coerced_literal == literal:
-                return literal, None
+        if not config.coerce:  # pragma: no cover - short-circuit already tested
+            continue
+        try:
+            coerced_literal = _convert_literal_value(literal, value)
+        except Exception as error:  # pragma: no cover - defensive guard
+            last_literal_error = error
+            continue
+        if coerced_literal == literal:
+            return literal, None
     return None, last_literal_error
 
 
@@ -190,9 +194,6 @@ def _coerce_primitives(
     path: str,
     config: _ParseConfig,
 ) -> object:
-    if not isinstance(base_type, type):  # pragma: no cover - defensive guard
-        return _UNHANDLED
-
     if base_type is bool:
         return _coerce_bool(value, merged_meta, path, config)
 
@@ -208,7 +209,7 @@ def _coerce_primitives(
         time: lambda raw: time.fromisoformat(str(raw)),
     }
 
-    literal_type: type[object] = base_type
+    literal_type = cast(type[object], base_type)
     constructor = constructors.get(literal_type)
     if constructor is None:
         return _UNHANDLED
@@ -289,7 +290,7 @@ def _normalize_sequence_input(
         return [value]
     if isinstance(value, Iterable):
         return list(cast(Iterable[JSONValue], value))
-    raise TypeError(f"{path}: expected iterable")  # pragma: no cover - defensive guard
+    raise TypeError(f"{path}: expected iterable")  # pragma: no cover - defensive
 
 
 def _coerce_sequence_items(
@@ -322,6 +323,7 @@ def _coerce_sequence_value(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
+    *,
     config: _ParseConfig,
     origin: type[object] | None,
 ) -> object:
@@ -345,6 +347,7 @@ def _coerce_mapping_value(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
+    *,
     config: _ParseConfig,
     origin: type[object] | None,
 ) -> object:
@@ -372,6 +375,7 @@ def _coerce_enum_value(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
+    *,
     config: _ParseConfig,
     type_name: str,
 ) -> object:
@@ -382,14 +386,12 @@ def _coerce_enum_value(
         enum_value = value
     elif config.coerce:
         try:
-            enum_value = (
-                base_type[value] if isinstance(value, str) else base_type(value)
-            )
-        except (KeyError, TypeError, ValueError):
-            try:
+            if isinstance(value, str):
+                enum_value = base_type[value]
+            else:
                 enum_value = base_type(value)
-            except (TypeError, ValueError) as error:
-                raise ValueError(f"{path}: invalid enum value {value!r}") from error
+        except (KeyError, ValueError, TypeError) as error:
+            raise ValueError(f"{path}: invalid enum value {value!r}") from error
     else:
         raise TypeError(f"{path}: expected {type_name}")
     return _apply_constraints(enum_value, merged_meta, path)
@@ -403,30 +405,43 @@ def _coerce_to_type(
     config: _ParseConfig,
 ) -> object:
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
-    origin = cast(type[object] | None, get_origin(base_type))
+    origin = get_origin(base_type)
     type_name = getattr(base_type, "__name__", type(base_type).__name__)
 
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
-    coercers: tuple[Callable[[], object], ...] = (
-        lambda: _coerce_union(value, base_type, merged_meta, path, config),
-        lambda: _coerce_none_value(value, base_type, path, merged_meta),
-        lambda: _coerce_literal(value, base_type, merged_meta, path, config),
-        lambda: _coerce_dataclass_value(value, base_type, merged_meta, path, config),
-        lambda: _coerce_sequence_value(
-            value, base_type, merged_meta, path, config, origin
+    for result in (
+        _coerce_union(value, base_type, merged_meta, path, config),
+        _coerce_none_value(value, base_type, path, merged_meta),
+        _coerce_literal(value, base_type, merged_meta, path, config),
+        _coerce_dataclass_value(value, base_type, merged_meta, path, config),
+        _coerce_sequence_value(
+            value,
+            base_type,
+            merged_meta,
+            path,
+            config=config,
+            origin=origin,
         ),
-        lambda: _coerce_mapping_value(
-            value, base_type, merged_meta, path, config, origin
+        _coerce_mapping_value(
+            value,
+            base_type,
+            merged_meta,
+            path,
+            config=config,
+            origin=origin,
         ),
-        lambda: _coerce_enum_value(
-            value, base_type, merged_meta, path, config, type_name
+        _coerce_enum_value(
+            value,
+            base_type,
+            merged_meta,
+            path,
+            config=config,
+            type_name=type_name,
         ),
-        lambda: _coerce_primitives(value, base_type, merged_meta, path, config),
-    )
-    for coercer in coercers:
-        result = coercer()
+        _coerce_primitives(value, base_type, merged_meta, path, config),
+    ):
         if result is not _UNHANDLED:
             return result
 
