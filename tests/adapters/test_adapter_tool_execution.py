@@ -21,6 +21,8 @@ from typing import Any, cast
 
 import pytest
 
+from tests.helpers import FrozenUtcNow
+
 try:
     from tests.adapters._test_stubs import (
         DummyChoice,
@@ -46,7 +48,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         ToolPayload,
     )
 
-from weakincentives import deadlines
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -71,7 +72,6 @@ from weakincentives.runtime.session import (
     select_latest,
 )
 from weakincentives.tools import DeadlineExceededError, ToolValidationError
-from tests.helpers import FrozenUtcNow
 
 
 def _split_tool_message_content(content: str) -> tuple[str, str | None]:

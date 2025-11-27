@@ -18,8 +18,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from weakincentives.deadlines import Deadline
 from tests.helpers import FrozenUtcNow
+from weakincentives.deadlines import Deadline
 
 
 def test_deadline_rejects_naive_datetime() -> None:

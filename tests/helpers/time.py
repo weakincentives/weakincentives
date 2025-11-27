@@ -24,7 +24,9 @@ from weakincentives import deadlines
 class FrozenUtcNow:
     """Controller for :func:`weakincentives.deadlines._utcnow` during tests."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, *, anchor: datetime | None = None):
+    def __init__(
+        self, monkeypatch: pytest.MonkeyPatch, *, anchor: datetime | None = None
+    ) -> None:
         self._current = anchor if anchor is not None else datetime.now(UTC)
         monkeypatch.setattr(deadlines, "_utcnow", self.now)
 
