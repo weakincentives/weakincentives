@@ -40,8 +40,8 @@ from .core import (
     SessionProtocol,
 )
 from .shared import (
-    ConversationConfig,
     OPENAI_ADAPTER_NAME,
+    ConversationConfig,
     ThrottleError,
     ThrottleKind,
     ToolChoice,

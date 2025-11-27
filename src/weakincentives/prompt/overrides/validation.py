@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Literal, cast, overload
+from typing import cast
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
@@ -98,28 +98,6 @@ class SectionValidationConfig:
     body_error_message: str
 
 
-@overload
-def _normalize_section_override(
-    *,
-    path: tuple[str, ...],
-    descriptor_section: SectionDescriptor | None,
-    expected_hash: JSONValue,
-    body: JSONValue,
-    config: SectionValidationConfig,
-) -> SectionOverride: ...
-
-
-@overload
-def _normalize_section_override(
-    *,
-    path: tuple[str, ...],
-    descriptor_section: SectionDescriptor | None,
-    expected_hash: JSONValue,
-    body: JSONValue,
-    config: SectionValidationConfig,
-) -> SectionOverride | None: ...
-
-
 def _normalize_section_override(
     *,
     path: tuple[str, ...],
@@ -172,30 +150,6 @@ class ToolValidationConfig:
     description_error_message: str
     param_mapping_error_message: str
     param_entry_error_message: str
-
-
-@overload
-def _normalize_tool_override(
-    *,
-    name: str,
-    descriptor_tool: ToolDescriptor | None,
-    expected_hash: JSONValue,
-    description: JSONValue,
-    param_descriptions: JSONValue,
-    config: ToolValidationConfig,
-) -> ToolOverride: ...
-
-
-@overload
-def _normalize_tool_override(
-    *,
-    name: str,
-    descriptor_tool: ToolDescriptor | None,
-    expected_hash: JSONValue,
-    description: JSONValue,
-    param_descriptions: JSONValue,
-    config: ToolValidationConfig,
-) -> ToolOverride | None: ...
 
 
 def _validate_tool_descriptor(
@@ -507,7 +461,7 @@ def validate_sections_for_write(
             body=section_override.body,
             config=section_config,
         )
-        validated[path] = normalized_section
+        validated[path] = cast(SectionOverride, normalized_section)
     return validated
 
 
@@ -540,7 +494,7 @@ def validate_tools_for_write(
             param_descriptions=tool_override.param_descriptions,
             config=tool_config,
         )
-        validated[name] = normalized_tool
+        validated[name] = cast(ToolOverride, normalized_tool)
     return validated
 
 

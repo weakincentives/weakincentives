@@ -954,16 +954,12 @@ class ConversationConfig:
     parse_arguments: ToolArgumentsParser = parse_tool_arguments
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
-    throttle_policy: ThrottlePolicy | None = None
+    throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
 
-    def with_defaults(self, rendered: RenderedPrompt[object]) -> "ConversationConfig":
+    def with_defaults(self, rendered: RenderedPrompt[object]) -> ConversationConfig:
         """Fill in optional settings using rendered prompt metadata."""
 
-        return replace(
-            self,
-            deadline=self.deadline or rendered.deadline,
-            throttle_policy=self.throttle_policy or new_throttle_policy(),
-        )
+        return replace(self, deadline=self.deadline or rendered.deadline)
 
 
 @dataclass(slots=True)
@@ -1489,9 +1485,7 @@ def run_conversation[
     if normalized_config.deadline is not None and (
         rendered.deadline is not normalized_config.deadline
     ):
-        rendered_with_deadline = replace(
-            rendered, deadline=normalized_config.deadline
-        )
+        rendered_with_deadline = replace(rendered, deadline=normalized_config.deadline)
 
     runner = ConversationRunner[OutputT](
         adapter_name=adapter_name,
