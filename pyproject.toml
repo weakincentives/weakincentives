@@ -87,6 +87,7 @@ dev = [
     "ty>=0.0.1a26",
     "mdformat>=1.0.0",
     "mutmut>=3.1.0",
+    "hypothesis>=6.100.0",
 ]
 
 [tool.ruff]
