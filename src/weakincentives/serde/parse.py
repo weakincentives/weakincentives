@@ -370,6 +370,7 @@ def _collect_field_kwargs(
     mapping_data: Mapping[str, object],
     type_hints: Mapping[str, object],
     config: _ParseConfig,
+    *,
     aliases: Mapping[str, str] | None,
     alias_generator: Callable[[str], str] | None,
 ) -> tuple[dict[str, object], set[str]]:
@@ -455,7 +456,12 @@ def parse[T](
     mapping_data = cast(Mapping[str, object], data)
     type_hints = get_type_hints(cls, include_extras=True)
     kwargs, used_keys = _collect_field_kwargs(
-        cls, mapping_data, type_hints, config, aliases, alias_generator
+        cls,
+        mapping_data,
+        type_hints,
+        config,
+        aliases=aliases,
+        alias_generator=alias_generator,
     )
 
     instance = cls(**kwargs)
