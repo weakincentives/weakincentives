@@ -204,7 +204,7 @@ class ProviderAdapter(ABC):
                 clear_workspace_digest(outer_session, digest_section.key)
 
             case _:
-                assert_never(store_scope)
+                assert_never(store_scope)  # pyright: ignore[reportUnreachable]
 
         return OptimizationResult(
             response=response,
