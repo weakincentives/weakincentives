@@ -2699,6 +2699,8 @@ def test_grep_rejects_invalid_regex(
         context=build_tool_context(bus, session),
     )
     assert not result.success
+    assert result.value is None
+    assert "Invalid regular expression" in result.message
 
 
 def test_grep_honors_glob_argument(
@@ -2709,6 +2711,7 @@ def test_grep_honors_glob_argument(
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
     (handle.overlay_path / "main.py").write_text("match", encoding="utf-8")
+    (handle.overlay_path / "notes.txt").write_text("match", encoding="utf-8")
     tool = find_tool(section, "grep")
     handler = tool.handler
     assert handler is not None
@@ -2720,6 +2723,31 @@ def test_grep_honors_glob_argument(
     assert result.value is not None
     matches = cast(tuple[GrepMatch, ...], result.value)
     assert matches[0].path.segments == ("main.py",)
+    assert len(matches) == 1
+
+
+def test_grep_supports_default_path(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "main.txt").write_text("match", encoding="utf-8")
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path=None, glob=None),
+        context=build_tool_context(bus, session),
+    )
+
+    assert result.value is not None
+    matches = cast(tuple[GrepMatch, ...], result.value)
+    assert matches == (
+        GrepMatch(path=vfs_module.VfsPath(("main.txt",)), line_number=1, line="match"),
+    )
 
 
 def test_grep_respects_glob_filter(
@@ -2739,6 +2767,30 @@ def test_grep_respects_glob_filter(
         context=build_tool_context(bus, session),
     )
     assert result.value == ()
+
+
+def test_grep_ignores_blank_glob(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "notes.txt").write_text("match", encoding="utf-8")
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob="  "),
+        context=build_tool_context(bus, session),
+    )
+
+    assert result.value is not None
+    matches = cast(tuple[GrepMatch, ...], result.value)
+    assert matches == (
+        GrepMatch(path=vfs_module.VfsPath(("notes.txt",)), line_number=1, line="match"),
+    )
 
 
 def test_grep_skips_invalid_relative_path(
@@ -2836,8 +2888,10 @@ def test_grep_skips_invalid_file_encoding(
     target = handle.overlay_path / "main.txt"
     target.write_text("match", encoding="utf-8")
 
-    def _fake_read_text(self: Path, *args: object, **kwargs: object) -> str:
-        raise UnicodeDecodeError("utf-8", b"x", 0, 1, "bad")
+    def _fake_read_text(
+        self: Path, encoding: str | None = None, errors: str | None = None
+    ) -> str:
+        raise UnicodeDecodeError(encoding or "utf-8", b"x", 0, 1, "bad")
 
     monkeypatch.setattr(Path, "read_text", _fake_read_text)
     tool = find_tool(section, "grep")
@@ -2862,9 +2916,16 @@ def test_grep_handles_oserror(
     handle = section.ensure_workspace()
     target = handle.overlay_path / "main.txt"
     target.write_text("match", encoding="utf-8")
+    secondary = handle.overlay_path / "other.txt"
+    secondary.write_text("match", encoding="utf-8")
+    original = Path.read_text
 
-    def _fake_read_text(self: Path, *args: object, **kwargs: object) -> str:
-        raise OSError("boom")
+    def _fake_read_text(
+        self: Path, encoding: str | None = None, errors: str | None = None
+    ) -> str:
+        if self == target:
+            raise OSError("boom")
+        return original(self, encoding=encoding, errors=errors)
 
     monkeypatch.setattr(Path, "read_text", _fake_read_text)
     tool = find_tool(section, "grep")
@@ -2875,7 +2936,11 @@ def test_grep_handles_oserror(
         GrepParams(pattern="match", path="/", glob=None),
         context=build_tool_context(bus, session),
     )
-    assert result.value == ()
+    assert result.value is not None
+    matches = cast(tuple[GrepMatch, ...], result.value)
+    assert matches == (
+        GrepMatch(path=vfs_module.VfsPath(("other.txt",)), line_number=1, line="match"),
+    )
 
 
 def test_grep_honors_result_limit(
@@ -2901,6 +2966,35 @@ def test_grep_honors_result_limit(
     assert result.value is not None
     grep_matches = cast(tuple[GrepMatch, ...], result.value)
     assert len(grep_matches) == 1
+
+
+def test_grep_skips_binary_and_collects_match(
+    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+) -> None:
+    session, bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+    handle = section.ensure_workspace()
+    (handle.overlay_path / "binary.bin").write_bytes(b"\xff\xfe\x00")
+    (handle.overlay_path / "valid.txt").write_text("line with match", encoding="utf-8")
+    tool = find_tool(section, "grep")
+    handler = tool.handler
+    assert handler is not None
+
+    result = handler(
+        GrepParams(pattern="match", path="/", glob=None),
+        context=build_tool_context(bus, session),
+    )
+
+    assert result.value is not None
+    matches = cast(tuple[GrepMatch, ...], result.value)
+    assert matches == (
+        GrepMatch(
+            path=vfs_module.VfsPath(("valid.txt",)),
+            line_number=1,
+            line="line with match",
+        ),
+    )
 
 
 def test_remove_rejects_root_and_missing(

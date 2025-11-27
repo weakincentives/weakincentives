@@ -1499,31 +1499,66 @@ class _PodmanVfsSuite:
         self._section.touch_workspace()
         return ToolResult(message=message, value=tuple(matches))
 
-    def grep(  # noqa: C901
+    def grep(
         self, params: GrepParams, *, context: ToolContext
     ) -> ToolResult[tuple[GrepMatch, ...]]:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
+        compiled = self._compile_grep_pattern(params.pattern)
+        if isinstance(compiled, ToolResult):
+            return compiled
+        base_path = self._normalize_grep_base_path(params.path)
+        glob_pattern = self._normalize_glob_pattern(params.glob)
+        handle = self._section.ensure_workspace()
+        host_base = _host_path_for(handle.overlay_path, base_path or VfsPath(()))
+        _assert_within_overlay(handle.overlay_path, host_base)
+        matches = self._collect_grep_matches(
+            pattern=compiled,
+            host_base=host_base,
+            overlay_root=handle.overlay_path,
+            base_path=base_path or VfsPath(()),
+            glob_pattern=glob_pattern,
+        )
+        message = self._format_grep_result(params.pattern, matches)
+        self._section.touch_workspace()
+        return ToolResult(message=message, value=matches)
+
+    def _compile_grep_pattern(
+        self, pattern: str
+    ) -> re.Pattern[str] | ToolResult[tuple[GrepMatch, ...]]:
         try:
-            pattern = re.compile(params.pattern)
+            return re.compile(pattern)
         except re.error as error:
             return ToolResult(
                 message=f"Invalid regular expression: {error}",
                 value=None,
                 success=False,
             )
-        base_path: VfsPath | None = None
-        if params.path is not None:
-            base_path = vfs_module.normalize_string_path(
-                params.path, allow_empty=True, field="path"
-            )
-        glob_pattern = params.glob.strip() if params.glob is not None else None
-        if glob_pattern:
-            _ = vfs_module.ensure_ascii(glob_pattern, "glob")
-        handle = self._section.ensure_workspace()
-        host_base = _host_path_for(handle.overlay_path, base_path or VfsPath(()))
-        _assert_within_overlay(handle.overlay_path, host_base)
-        matches: list[GrepMatch] = []
+
+    def _normalize_grep_base_path(self, raw_path: str | None) -> VfsPath | None:
+        if raw_path is None:
+            return None
+        return vfs_module.normalize_string_path(
+            raw_path, allow_empty=True, field="path"
+        )
+
+    def _normalize_glob_pattern(self, raw_glob: str | None) -> str | None:
+        if raw_glob is None:
+            return None
+        glob_pattern = raw_glob.strip()
+        if not glob_pattern:
+            return None
+        _ = vfs_module.ensure_ascii(glob_pattern, "glob")
+        return glob_pattern
+
+    def _iter_grep_targets(
+        self,
+        *,
+        host_base: Path,
+        overlay_root: Path,
+        base_path: VfsPath,
+        glob_pattern: str | None,
+    ) -> Iterator[tuple[VfsPath, Path]]:
         for file_path in _iter_workspace_files(host_base):
             try:
                 relative = file_path.relative_to(host_base)
@@ -1532,18 +1567,39 @@ class _PodmanVfsSuite:
             relative_label = relative.as_posix()
             if glob_pattern and not fnmatch.fnmatchcase(relative_label, glob_pattern):
                 continue
-            target_path = _compose_relative_path(base_path or VfsPath(()), relative)
+            target_path = _compose_relative_path(base_path, relative)
             if target_path is None:
                 continue
             try:
-                _assert_within_overlay(handle.overlay_path, file_path)
+                _assert_within_overlay(overlay_root, file_path)
             except ToolValidationError:
                 continue
-            try:
-                content = file_path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            except OSError:
+            yield target_path, file_path
+
+    def _read_candidate_content(self, file_path: Path) -> str | None:
+        try:
+            return file_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            return None
+
+    def _collect_grep_matches(
+        self,
+        *,
+        pattern: re.Pattern[str],
+        host_base: Path,
+        overlay_root: Path,
+        base_path: VfsPath,
+        glob_pattern: str | None,
+    ) -> tuple[GrepMatch, ...]:
+        matches: list[GrepMatch] = []
+        for target_path, host_path in self._iter_grep_targets(
+            host_base=host_base,
+            overlay_root=overlay_root,
+            base_path=base_path,
+            glob_pattern=glob_pattern,
+        ):
+            content = self._read_candidate_content(host_path)
+            if content is None:
                 continue
             for index, line in enumerate(content.splitlines(), start=1):
                 if pattern.search(line):
@@ -1555,12 +1611,11 @@ class _PodmanVfsSuite:
                         )
                     )
                     if len(matches) >= _MAX_MATCH_RESULTS:
-                        break
-            if len(matches) >= _MAX_MATCH_RESULTS:
-                break
-        message = vfs_module.format_grep_message(params.pattern, matches)
-        self._section.touch_workspace()
-        return ToolResult(message=message, value=tuple(matches))
+                        return tuple(matches)
+        return tuple(matches)
+
+    def _format_grep_result(self, pattern: str, matches: tuple[GrepMatch, ...]) -> str:
+        return vfs_module.format_grep_message(pattern, matches)
 
     def remove(
         self, params: RemoveParams, *, context: ToolContext
