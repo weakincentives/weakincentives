@@ -15,24 +15,16 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from importlib import import_module
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Final,
-    Protocol,
-    TypeVar,
-    cast,
-    override,
-)
+from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
+from ..prompt.rendering import RenderedPrompt
 from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
@@ -115,15 +107,20 @@ class _ResponseMessage:
 
 
 @dataclass(slots=True)
-class _EvaluationContext:
+class _EvaluationContext[OutputT]:
     prompt_name: str
     render_inputs: tuple[SupportsDataclass, ...]
-    rendered: object
+    rendered: RenderedPrompt[OutputT]
     response_format: dict[str, Any] | None
 
 
 ProviderInvoker = Callable[
-    [list[dict[str, Any]], Sequence[Mapping[str, Any]], ToolChoice | None, Mapping[str, Any] | None],
+    [
+        list[dict[str, Any]],
+        Sequence[Mapping[str, Any]],
+        ToolChoice | None,
+        Mapping[str, Any] | None,
+    ],
     object,
 ]
 
@@ -723,7 +720,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         deadline: Deadline | None,
         overrides_store: PromptOverridesStore | None,
         overrides_tag: str,
-    ) -> _EvaluationContext:
+    ) -> _EvaluationContext[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
         render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
         self._ensure_deadline_not_expired(deadline, prompt_name)
@@ -767,7 +764,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         deadline: Deadline | None,
         overrides_store: PromptOverridesStore | None,
         overrides_tag: str,
-    ) -> object:
+    ) -> RenderedPrompt[OutputT]:
         has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
             parse_output
@@ -795,15 +792,15 @@ class OpenAIAdapter(ProviderAdapter[Any]):
 
     def _build_response_format(
         self,
-        rendered: object,
+        rendered: RenderedPrompt[Any],
         *,
         parse_output: bool,
         prompt_name: str,
     ) -> dict[str, Any] | None:
         should_parse_structured_output = (
             parse_output
-            and cast(object, rendered).output_type is not None
-            and cast(object, rendered).container is not None
+            and rendered.output_type is not None
+            and rendered.container is not None
         )
         if should_parse_structured_output and self._use_native_response_format:
             return build_json_schema_response_format(rendered, prompt_name)
