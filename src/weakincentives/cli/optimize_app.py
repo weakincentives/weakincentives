@@ -17,9 +17,10 @@ from __future__ import annotations
 import json
 import threading
 import webbrowser
+from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Mapping, MutableMapping, cast
+from typing import cast
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -166,7 +167,10 @@ def load_snapshot(snapshot_path: Path) -> LoadedOptimizeSnapshot:
 class OptimizeStore:
     """In-memory override store backed by a snapshot on disk."""
 
-    def __init__(self, loaded: LoadedOptimizeSnapshot, logger: StructuredLogger) -> None:
+    def __init__(
+        self, loaded: LoadedOptimizeSnapshot, logger: StructuredLogger
+    ) -> None:
+        super().__init__()
         self._loaded = loaded
         self._logger = logger
         self._lock = threading.RLock()
@@ -193,7 +197,9 @@ class OptimizeStore:
         allowed = prompt.allowed_fields()
         for field in updates:
             if field not in allowed:
-                raise HTTPException(status_code=400, detail=f"Unknown override field: {field}")
+                raise HTTPException(
+                    status_code=400, detail=f"Unknown override field: {field}"
+                )
 
         with self._lock:
             prompt.overrides.update(updates)
@@ -223,7 +229,7 @@ class OptimizeStore:
 
             try:
                 payload = updated.to_json()
-                self._loaded.path.write_text(payload + "\n", encoding="utf-8")
+                _ = self._loaded.path.write_text(payload + "\n", encoding="utf-8")
             except Exception as error:  # pragma: no cover - defensive
                 msg = "Failed to persist snapshot"
                 raise SnapshotLoadError(msg) from error
@@ -248,8 +254,14 @@ class OptimizeStore:
     def _build_prompts(self) -> None:
         snapshot = self._loaded.snapshot
         prompt_slice = snapshot.slices.get(PromptRendered, ())
-        overrides_slice = snapshot.slices.get(PromptOverrideSnapshotEntry, ())
-        overrides_index = {entry.prompt_id: entry.overrides for entry in overrides_slice}
+        overrides_slice: tuple[PromptOverrideSnapshotEntry, ...] = tuple(
+            entry
+            for entry in snapshot.slices.get(PromptOverrideSnapshotEntry, ())
+            if isinstance(entry, PromptOverrideSnapshotEntry)
+        )
+        overrides_index = {
+            entry.prompt_id: entry.overrides for entry in overrides_slice
+        }
 
         entries: list[PromptEntry] = []
         for index, value in enumerate(prompt_slice):
@@ -260,7 +272,10 @@ class OptimizeStore:
                 continue
 
             prompt_id = _build_prompt_id(descriptor, index)
-            stored_overrides = dict(overrides_index.get(prompt_id, {}))
+            stored_overrides = {
+                key: cast(JSONValue, value)
+                for key, value in overrides_index.get(prompt_id, {}).items()
+            }
             entries.append(
                 PromptEntry(
                     prompt_id=prompt_id,
@@ -273,6 +288,10 @@ class OptimizeStore:
 
         self._prompts = entries
 
+    @property
+    def path(self) -> Path:
+        return self._loaded.path
+
 
 def _serialize_descriptor(descriptor: PromptDescriptor) -> Mapping[str, JSONValue]:
     return cast(Mapping[str, JSONValue], json.loads(json.dumps(asdict(descriptor))))
@@ -280,10 +299,12 @@ def _serialize_descriptor(descriptor: PromptDescriptor) -> Mapping[str, JSONValu
 
 class _OptimizeHandlers:
     def __init__(self, store: OptimizeStore, logger: StructuredLogger) -> None:
+        super().__init__()
         self._store = store
         self._logger = logger
 
-    def index(self) -> HTMLResponse:
+    @staticmethod
+    def index() -> HTMLResponse:
         html = """
         <!doctype html>
         <html>
@@ -300,18 +321,16 @@ class _OptimizeHandlers:
         return HTMLResponse(content=html)
 
     def list_prompts(self) -> list[Mapping[str, JSONValue]]:
-        prompts: list[Mapping[str, JSONValue]] = []
-        for entry in self._store.prompts:
-            prompts.append(
-                {
-                    "prompt_id": entry.prompt_id,
-                    "descriptor": _serialize_descriptor(entry.descriptor),
-                    "overrides": dict(entry.overrides),
-                    "original_overrides": dict(entry.original_overrides),
-                    "has_unsaved_changes": entry.has_unsaved_changes(),
-                }
-            )
-        return prompts
+        return [
+            {
+                "prompt_id": entry.prompt_id,
+                "descriptor": _serialize_descriptor(entry.descriptor),
+                "overrides": dict(entry.overrides),
+                "original_overrides": dict(entry.original_overrides),
+                "has_unsaved_changes": entry.has_unsaved_changes(),
+            }
+            for entry in self._store.prompts
+        ]
 
     def get_prompt(self, prompt_id: str) -> Mapping[str, JSONValue]:
         entry = self._store.get_prompt(prompt_id)
@@ -326,8 +345,6 @@ class _OptimizeHandlers:
     def update_overrides(
         self, prompt_id: str, payload: Mapping[str, JSONValue]
     ) -> Mapping[str, JSONValue]:
-        if not isinstance(payload, Mapping):
-            raise HTTPException(status_code=400, detail="Payload must be an object")
         entry = self._store.update_overrides(prompt_id, payload)
         return {
             "prompt_id": entry.prompt_id,
@@ -340,7 +357,7 @@ class _OptimizeHandlers:
             self._store.save()
         except SnapshotLoadError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return {"status": "ok", "path": str(self._store._loaded.path)}
+        return {"status": "ok", "path": str(self._store.path)}
 
     def reset(self) -> list[Mapping[str, JSONValue]]:
         try:
@@ -406,4 +423,3 @@ def _open_browser(url: str, logger: StructuredLogger) -> None:
             event="optimize.server.browser",
             context={"url": url, "error": repr(error)},
         )
-

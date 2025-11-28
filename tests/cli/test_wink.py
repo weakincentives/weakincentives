@@ -22,8 +22,7 @@ from typing import Any
 import pytest
 
 from weakincentives import cli
-from weakincentives.cli import wink
-from weakincentives.cli import optimize_app
+from weakincentives.cli import optimize_app, wink
 from weakincentives.runtime.session.snapshots import Snapshot
 
 
@@ -254,6 +253,30 @@ def test_main_handles_invalid_snapshot(
     monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
 
     exit_code = wink.main(["debug", str(snapshot_path)])
+
+    assert exit_code == 2
+
+
+def test_optimize_handles_invalid_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_configure_logging(*, level: object, json_mode: object) -> None:
+        return None
+
+    class FakeLogger:
+        def exception(self, *_: object, **__: object) -> None:
+            return None
+
+    def fake_get_logger(name: str) -> FakeLogger:
+        return FakeLogger()
+
+    def fake_load_snapshot(path: Path) -> object:
+        msg = f"{path} missing"
+        raise optimize_app.SnapshotLoadError(msg)
+
+    monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
+    monkeypatch.setattr(wink, "get_logger", fake_get_logger)
+    monkeypatch.setattr(optimize_app, "load_snapshot", fake_load_snapshot)
+
+    exit_code = wink.main(["optimize", "missing.jsonl"])
 
     assert exit_code == 2
 
