@@ -38,8 +38,12 @@ persist those overrides back to disk—no runtime mutation, no remote services.
 ## Data Loading and Override Store
 
 - Load the snapshot via `Snapshot.from_json`; reuse the same schema as `wink debug` without adding slices.
-- Extract every `PromptExecuted` record, pull its `PromptDescriptor`, and load
-  the associated local override entries into an in-memory override store.
+- Seed the editable list from `PromptRendered` entries because they carry the
+  `PromptDescriptor` payload; `PromptExecuted` events do not include descriptor
+  or override data.
+- Populate the in-memory override store from the snapshot's override slice when
+  present; otherwise initialize empty overrides keyed by descriptor identity so
+  the UI still renders descriptors even when no overrides were captured.
 - Key the store by prompt identity (descriptor name/version plus execution
   index) so edits remain traceable to specific prompt executions.
 - Preserve the original execution order when listing prompts to maintain the
@@ -99,8 +103,8 @@ persist those overrides back to disk—no runtime mutation, no remote services.
 - Unit tests:
   - Argument parsing for `wink optimize` and parity with `wink debug`
     validations.
-  - Snapshot loading that builds the override store from `PromptExecuted`
-    records.
+  - Snapshot loading that builds the override store from `PromptRendered`
+    records (and tolerates missing override slices).
   - API routes for listing prompts, retrieving details, applying override
     updates, saving, and resetting (including invalid-field and IO error
     paths).
