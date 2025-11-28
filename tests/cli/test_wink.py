@@ -23,6 +23,7 @@ import pytest
 
 from weakincentives import cli
 from weakincentives.cli import wink
+from weakincentives.cli import optimize_app
 from weakincentives.runtime.session.snapshots import Snapshot
 
 
@@ -130,6 +131,97 @@ def test_main_runs_debug_command(
         "app": "app",
         "host": "0.0.0.0",
         "port": 9001,
+        "open_browser": False,
+        "logger": fake_logger,
+    }
+
+
+def test_main_runs_optimize_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path)
+
+    calls: dict[str, Any] = {}
+
+    def fake_configure_logging(*, level: object, json_mode: object) -> None:
+        calls["configure"] = {"level": level, "json_mode": json_mode}
+
+    class FakeLogger:
+        def __init__(self) -> None:
+            self.logs: list[tuple[str, dict[str, object]]] = []
+
+        def info(
+            self, message: str, *, event: str, context: object | None = None
+        ) -> None:
+            self.logs.append((message, {"event": event, "context": context}))
+
+        def error(
+            self, message: str, *, event: str, context: object | None = None
+        ) -> None:
+            self.logs.append((message, {"event": event, "context": context}))
+
+        def exception(
+            self, message: str, *, event: str, context: object | None = None
+        ) -> None:
+            self.logs.append((message, {"event": event, "context": context}))
+
+    fake_logger = FakeLogger()
+
+    def fake_get_logger(name: str) -> FakeLogger:
+        calls["logger_name"] = name
+        return fake_logger
+
+    real_loader = optimize_app.load_snapshot
+
+    def fake_load_snapshot(path: Path) -> object:
+        calls["loaded_path"] = path
+        return real_loader(path)
+
+    def fake_build_app(*args: object, **kwargs: object) -> str:
+        calls["app_args"] = {"store": args[0], **kwargs}
+        return "app"
+
+    def fake_run_server(
+        app: object, *, host: str, port: int, open_browser: bool, logger: object
+    ) -> int:
+        calls["run_args"] = {
+            "app": app,
+            "host": host,
+            "port": port,
+            "open_browser": open_browser,
+            "logger": logger,
+        }
+        return 0
+
+    monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
+    monkeypatch.setattr(wink, "get_logger", fake_get_logger)
+    monkeypatch.setattr(optimize_app, "load_snapshot", fake_load_snapshot)
+    monkeypatch.setattr(optimize_app, "build_optimize_app", fake_build_app)
+    monkeypatch.setattr(optimize_app, "run_optimize_server", fake_run_server)
+
+    exit_code = wink.main(
+        [
+            "optimize",
+            str(snapshot_path),
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9002",
+            "--no-open-browser",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls["configure"] == {"level": None, "json_mode": True}
+    assert calls["logger_name"] == "weakincentives.cli.wink"
+    assert calls["loaded_path"] == snapshot_path
+    assert isinstance(calls["app_args"]["store"], optimize_app.OptimizeStore)
+    assert calls["app_args"]["logger"] == fake_logger
+    assert calls["run_args"] == {
+        "app": "app",
+        "host": "0.0.0.0",
+        "port": 9002,
         "open_browser": False,
         "logger": fake_logger,
     }
