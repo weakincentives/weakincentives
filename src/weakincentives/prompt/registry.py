@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
 from types import MappingProxyType
 from typing import Any, cast
@@ -107,6 +107,80 @@ class RegistrySnapshot:
         return set(self.params_registry.keys())
 
 
+def _unknown_paths_failure(
+    paths: Iterable[SectionPath],
+    known_paths: set[SectionPath],
+    kind: str,
+) -> str | None:
+    """Return a failure message if any paths are not known."""
+
+    unknown_paths = [path for path in paths if path not in known_paths]
+    if unknown_paths:
+        return f"{kind} reference unknown paths: {sorted(unknown_paths)!r}"
+
+    return None
+
+
+def _defaults_by_path_failure(
+    defaults_by_path: Mapping[SectionPath, SupportsDataclass],
+    node_by_path: Mapping[SectionPath, SectionNode[SupportsDataclass]],
+) -> str | None:
+    """Validate defaults keyed by path point at compatible nodes."""
+
+    failure = _unknown_paths_failure(defaults_by_path, set(node_by_path), "defaults")
+    if failure is not None:
+        return failure
+
+    for path, default in defaults_by_path.items():
+        node = node_by_path[path]
+        params_type = node.section.param_type
+        if params_type is None:
+            return f"section at {path!r} does not accept params but has defaults"
+        if type(default) is not params_type:
+            return (
+                "default params type mismatch for path "
+                f"{path!r}: expected {params_type.__name__}, "
+                f"got {type(default).__name__}"
+            )
+
+    return None
+
+
+def _placeholders_failure(
+    placeholders: Mapping[SectionPath, Iterable[str]],
+    node_by_path: Mapping[SectionPath, SectionNode[SupportsDataclass]],
+) -> str | None:
+    """Validate placeholders reference known paths."""
+
+    return _unknown_paths_failure(placeholders, set(node_by_path), "placeholders")
+
+
+def _tool_names_failure(
+    tool_name_registry: Mapping[str, SectionPath],
+    node_by_path: Mapping[SectionPath, SectionNode[SupportsDataclass]],
+) -> str | None:
+    """Validate tool names map to known paths."""
+
+    return _unknown_paths_failure(
+        tool_name_registry.values(), set(node_by_path), "tools"
+    )
+
+
+def _defaults_by_type_failure(
+    defaults_by_type: Mapping[type[SupportsDataclass], SupportsDataclass],
+) -> str | None:
+    """Validate defaults keyed by type match their declared dataclass."""
+
+    for params_type, default in defaults_by_type.items():
+        if type(default) is not params_type:
+            return (
+                "default by type mismatch for "
+                f"{params_type.__name__}: got {type(default).__name__}"
+            )
+
+    return None
+
+
 def _registry_paths_are_registered(
     registry: PromptRegistry,
 ) -> tuple[bool, str] | bool:
@@ -119,53 +193,16 @@ def _registry_paths_are_registered(
     tool_name_registry = registry._tool_name_registry  # pyright: ignore[reportPrivateUsage]
     defaults_by_type = registry._defaults_by_type  # pyright: ignore[reportPrivateUsage]
 
-    failure: str | None = None
+    checkers: Iterable[str | None] = (
+        _defaults_by_path_failure(defaults_by_path, node_by_path),
+        _placeholders_failure(placeholders, node_by_path),
+        _tool_names_failure(tool_name_registry, node_by_path),
+        _defaults_by_type_failure(defaults_by_type),
+    )
 
-    unknown_default_paths = [
-        path for path in defaults_by_path if path not in node_by_path
-    ]
-    if unknown_default_paths:
-        failure = f"defaults reference unknown paths: {sorted(unknown_default_paths)!r}"
-
-    for path, default in defaults_by_path.items():
+    for failure in checkers:
         if failure is not None:
-            break
-        node = node_by_path[path]
-        params_type = node.section.param_type
-        if params_type is None:
-            failure = f"section at {path!r} does not accept params but has defaults"
-        elif type(default) is not params_type:
-            failure = (
-                "default params type mismatch for path "
-                f"{path!r}: expected {params_type.__name__}, got {type(default).__name__}"
-            )
-
-    unknown_placeholder_paths = [
-        path for path in placeholders if path not in node_by_path
-    ]
-    if failure is None and unknown_placeholder_paths:
-        failure = (
-            "placeholders reference unknown paths: "
-            f"{sorted(unknown_placeholder_paths)!r}"
-        )
-
-    unknown_tool_paths = [
-        path for path in tool_name_registry.values() if path not in node_by_path
-    ]
-    if failure is None and unknown_tool_paths:
-        failure = f"tools reference unknown paths: {sorted(unknown_tool_paths)!r}"
-
-    for params_type, default in defaults_by_type.items():
-        if failure is not None:
-            break
-        if type(default) is not params_type:
-            failure = (
-                "default by type mismatch for "
-                f"{params_type.__name__}: got {type(default).__name__}"
-            )
-
-    if failure is not None:
-        return False, failure
+            return False, failure
 
     return True
 

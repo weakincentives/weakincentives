@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, is_dataclass
 from typing import Any, cast
 
@@ -68,18 +68,18 @@ def _is_dataclass_instance(value: object) -> bool:
 
 
 def _render_dataclass(value: SupportsDataclass) -> str:
-    render_method = getattr(value, "render", None)
-    rendered: str | None = None
+    render_method = cast(Callable[[], object] | None, getattr(value, "render", None))
+    render_result: object | None = None
     if callable(render_method):
         try:
-            rendered = render_method()
+            render_result = render_method()
         except Exception:
-            rendered = None
-        else:
-            if not isinstance(rendered, str):
-                rendered = str(rendered)
-        if rendered is not None:
-            return rendered
+            render_result = None
+
+        if render_result is not None:
+            return (
+                render_result if isinstance(render_result, str) else str(render_result)
+            )
 
     try:
         payload = dump(value, exclude_none=True)
