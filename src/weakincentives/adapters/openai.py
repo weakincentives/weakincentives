@@ -41,6 +41,7 @@ from .core import (
 )
 from .shared import (
     OPENAI_ADAPTER_NAME,
+    AdapterRenderContext,
     ConversationConfig,
     ThrottleError,
     ThrottleKind,
@@ -106,14 +107,6 @@ class _ResponseMessage:
     content: object
     tool_calls: Sequence[_ResponseToolCall] | None
     parsed: object | None = None
-
-
-@dataclass(slots=True)
-class _EvaluationContext[OutputT]:
-    prompt_name: str
-    render_inputs: tuple[SupportsDataclass, ...]
-    rendered: RenderedPrompt[OutputT]
-    response_format: dict[str, Any] | None
 
 
 ProviderInvoker = Callable[
@@ -726,7 +719,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         deadline: Deadline | None,
         overrides_store: PromptOverridesStore | None,
         overrides_tag: str,
-    ) -> _EvaluationContext[OutputT]:
+    ) -> AdapterRenderContext[OutputT]:
         prompt_name = prompt.name or prompt.__class__.__name__
         render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
         self._ensure_deadline_not_expired(deadline, prompt_name)
@@ -743,7 +736,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             parse_output=parse_output,
             prompt_name=prompt_name,
         )
-        return _EvaluationContext(
+        return AdapterRenderContext(
             prompt_name=prompt_name,
             render_inputs=render_inputs,
             rendered=rendered,
@@ -803,7 +796,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         *,
         parse_output: bool,
         prompt_name: str,
-    ) -> dict[str, Any] | None:
+    ) -> Mapping[str, Any] | None:
         should_parse_structured_output = (
             parse_output
             and rendered.output_type is not None
