@@ -12,13 +12,6 @@
 
 """Dataclass schema generation helpers."""
 
-# pyright: reportUnknownArgumentType=false
-# pyright: reportUnknownVariableType=false
-# pyright: reportUnknownMemberType=false
-# pyright: reportArgumentType=false
-# pyright: reportUnnecessaryIsInstance=false
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 import dataclasses
@@ -31,8 +24,9 @@ from pathlib import Path
 from typing import Literal, cast, get_args, get_origin, get_type_hints
 from uuid import UUID
 
+from ..prompt._types import SupportsDataclass
 from ..types import JSONValue
-from ._utils import _UNION_TYPE, _AnyType, _merge_annotated_meta, _ordered_values
+from ._utils import AnyType, UnionType, merge_annotated_meta, ordered_values
 
 NULL_TYPE = type(None)
 NULL_JSON_TYPE = "null"
@@ -80,7 +74,7 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
             schema_meta[target] = cast(JSONValue, meta[key])
     members = meta.get("enum") or meta.get("in")
     if isinstance(members, Iterable) and not isinstance(members, (str, bytes)):
-        enum_values = _ordered_values(cast(Iterable[JSONValue], members))
+        enum_values = ordered_values(cast(Iterable[JSONValue], members))
         _ = schema_meta.setdefault("enum", enum_values)
     not_members = meta.get("not_in")
     if (
@@ -89,7 +83,7 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
         and "not" not in schema_meta
     ):
         schema_meta["not"] = {
-            "enum": _ordered_values(cast(Iterable[JSONValue], not_members))
+            "enum": ordered_values(cast(Iterable[JSONValue], not_members))
         }
     return schema_meta
 
@@ -118,7 +112,7 @@ def _schema_for_type(
     meta: Mapping[str, object] | None,
     alias_generator: Callable[[str], str] | None,
 ) -> dict[str, JSONValue]:
-    base_type, merged_meta = _merge_annotated_meta(typ, meta)
+    base_type, merged_meta = merge_annotated_meta(typ, meta)
     origin = get_origin(base_type)
 
     schema_data = _resolve_schema(base_type, origin, alias_generator) or {}
@@ -130,7 +124,7 @@ def _schema_for_type(
 def _schema_for_dataclass(
     base_type: object, alias_generator: Callable[[str], str] | None, origin: object
 ) -> dict[str, JSONValue] | None:
-    if base_type is object or base_type is _AnyType:
+    if base_type is object or base_type is AnyType:
         return {}
     if not dataclasses.is_dataclass(base_type):
         return None
@@ -228,7 +222,7 @@ def _apply_union_metadata(
 def _schema_for_union(
     base_type: object, alias_generator: Callable[[str], str] | None, origin: object
 ) -> dict[str, JSONValue] | None:
-    if origin is not _UNION_TYPE:
+    if origin is not UnionType:
         return None
 
     includes_null, subschemas, base_schema_ref = _collect_union_subschemas(
@@ -345,8 +339,8 @@ def _schema_for_primitive(
     return None
 
 
-def schema(
-    cls: type[object],
+def schema[SchemaDataclass: SupportsDataclass](
+    cls: type[SchemaDataclass],
     *,
     alias_generator: Callable[[str], str] | None = None,
     extra: Literal["ignore", "forbid", "allow"] = IGNORE_EXTRA,

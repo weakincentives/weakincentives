@@ -12,8 +12,6 @@
 
 """Dataclass parsing helpers."""
 
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPossiblyUnboundVariable=false, reportPrivateUsage=false
-
 from __future__ import annotations
 
 import dataclasses
@@ -32,14 +30,15 @@ from typing import (
 )
 from uuid import UUID
 
+from ..prompt._types import SupportsDataclass
 from ..types import JSONValue
 from ._utils import (
-    _UNION_TYPE,
-    _AnyType,
-    _apply_constraints,
-    _merge_annotated_meta,
-    _ParseConfig,
-    _set_extras,
+    AnyType,
+    ParseConfig,
+    UnionType,
+    apply_constraints,
+    merge_annotated_meta,
+    set_extras,
 )
 
 get_args = typing_get_args
@@ -104,10 +103,10 @@ def _coerce_union(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     origin = get_origin(base_type)
-    if origin is not _UNION_TYPE:
+    if origin is not UnionType:
         return _NOT_HANDLED
     if (
         config.coerce
@@ -115,19 +114,19 @@ def _coerce_union(
         and value.strip() == ""
         and any(arg is type(None) for arg in get_args(base_type))
     ):
-        return _apply_constraints(None, merged_meta, path)
+        return apply_constraints(None, merged_meta, path)
     last_error: Exception | None = None
     for arg in get_args(base_type):
         if arg is type(None):
             if value is None:
-                return _apply_constraints(None, merged_meta, path)
+                return apply_constraints(None, merged_meta, path)
             continue
         try:
             coerced = _coerce_to_type(value, arg, None, path, config)
         except (TypeError, ValueError) as error:
             last_error = error
             continue
-        return _apply_constraints(coerced, merged_meta, path)
+        return apply_constraints(coerced, merged_meta, path)
     if last_error is not None:
         message = str(last_error)
         if message.startswith(f"{path}:") or message.startswith(f"{path}."):
@@ -143,7 +142,7 @@ def _coerce_literal(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     origin = get_origin(base_type)
     if origin is not Literal:
@@ -152,9 +151,9 @@ def _coerce_literal(
     last_literal_error: Exception | None = None
     for literal in literals:
         if value == literal:
-            return _apply_constraints(literal, merged_meta, path)
+            return apply_constraints(literal, merged_meta, path)
         if config.coerce:
-            literal_type = cast(type[object], type(literal))
+            literal_type = cast(Callable[[object], object], type(literal))
             try:
                 if isinstance(literal, bool) and isinstance(value, str):
                     coerced_literal = _bool_from_str(value)
@@ -164,7 +163,7 @@ def _coerce_literal(
                 last_literal_error = error
                 continue
             if coerced_literal == literal:
-                return _apply_constraints(literal, merged_meta, path)
+                return apply_constraints(literal, merged_meta, path)
     if last_literal_error is not None:
         raise type(last_literal_error)(
             f"{path}: {last_literal_error}"
@@ -187,7 +186,7 @@ def _coerce_primitive(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     coercer = _PRIMITIVE_COERCERS.get(cast(type[object], base_type))
     if coercer is None:
@@ -195,7 +194,7 @@ def _coerce_primitive(
 
     literal_type = cast(type[object], base_type)
     if isinstance(value, literal_type):
-        return _apply_constraints(value, merged_meta, path)
+        return apply_constraints(value, merged_meta, path)
     if not config.coerce:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: expected {type_name}")
@@ -204,7 +203,7 @@ def _coerce_primitive(
     except Exception as error:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: unable to coerce {value!r} to {type_name}") from error
-    return _apply_constraints(coerced_value, merged_meta, path)
+    return apply_constraints(coerced_value, merged_meta, path)
 
 
 def _coerce_dataclass(
@@ -212,13 +211,13 @@ def _coerce_dataclass(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     if not dataclasses.is_dataclass(base_type):
         return _NOT_HANDLED
     dataclass_type = base_type if isinstance(base_type, type) else type(base_type)
     if isinstance(value, dataclass_type):
-        return _apply_constraints(value, merged_meta, path)
+        return apply_constraints(value, merged_meta, path)
     if not isinstance(value, Mapping):
         type_name = getattr(dataclass_type, "__name__", type(dataclass_type).__name__)
         raise TypeError(f"{path}: expected mapping for dataclass {type_name}")
@@ -243,11 +242,11 @@ def _coerce_dataclass(
         else:
             message = f"{path}: {message}"
         raise type(error)(message) from error
-    return _apply_constraints(parsed, merged_meta, path)
+    return apply_constraints(parsed, merged_meta, path)
 
 
 def _normalize_list_like(
-    value: object, path: str, config: _ParseConfig
+    value: object, path: str, config: ParseConfig
 ) -> list[JSONValue]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return list(cast(Iterable[JSONValue], value))
@@ -257,7 +256,7 @@ def _normalize_list_like(
 
 
 def _normalize_set_value(
-    value: object, path: str, config: _ParseConfig
+    value: object, path: str, config: ParseConfig
 ) -> list[JSONValue]:
     if isinstance(value, (set, list, tuple)):
         return list(cast(Iterable[JSONValue], value))
@@ -270,7 +269,7 @@ def _normalize_set_value(
 
 
 def _normalize_tuple_value(
-    value: object, path: str, config: _ParseConfig
+    value: object, path: str, config: ParseConfig
 ) -> list[JSONValue]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return list(cast(Iterable[JSONValue], value))
@@ -280,7 +279,7 @@ def _normalize_tuple_value(
 
 
 def _normalize_sequence_value(
-    value: object, origin: type[object] | None, path: str, config: _ParseConfig
+    value: object, origin: type[object] | None, path: str, config: ParseConfig
 ) -> list[JSONValue]:
     if origin in {list, Sequence}:
         return _normalize_list_like(value, path, config)
@@ -294,7 +293,7 @@ def _coerce_sequence_items(
     args: tuple[object, ...],
     origin: type[object] | None,
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> list[object]:
     if (
         origin is tuple
@@ -319,7 +318,7 @@ def _coerce_sequence(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     origin = cast(type[object] | None, get_origin(base_type))
     if origin not in {list, Sequence, tuple, set}:
@@ -333,7 +332,7 @@ def _coerce_sequence(
         value_out = tuple(coerced_items)
     else:
         value_out = list(coerced_items)
-    return _apply_constraints(value_out, merged_meta, path)
+    return apply_constraints(value_out, merged_meta, path)
 
 
 def _coerce_mapping(
@@ -341,7 +340,7 @@ def _coerce_mapping(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     origin = get_origin(base_type)
     if origin is not dict and origin is not Mapping:
@@ -359,7 +358,7 @@ def _coerce_mapping(
             item, value_type, None, f"{path}[{coerced_key}]", config
         )
         result_dict[coerced_key] = coerced_value
-    return _apply_constraints(result_dict, merged_meta, path)
+    return apply_constraints(result_dict, merged_meta, path)
 
 
 def _coerce_enum(
@@ -367,7 +366,7 @@ def _coerce_enum(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     if not (isinstance(base_type, type) and issubclass(base_type, Enum)):
         return _NOT_HANDLED
@@ -390,7 +389,7 @@ def _coerce_enum(
     else:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: expected {type_name}")
-    return _apply_constraints(enum_value, merged_meta, path)
+    return apply_constraints(enum_value, merged_meta, path)
 
 
 def _coerce_bool(
@@ -398,20 +397,20 @@ def _coerce_bool(
     base_type: object,
     merged_meta: Mapping[str, object],
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     if base_type is not bool:
         return _NOT_HANDLED
     if isinstance(value, bool):
-        return _apply_constraints(value, merged_meta, path)
+        return apply_constraints(value, merged_meta, path)
     if config.coerce and isinstance(value, str):
         try:
             coerced_bool = _bool_from_str(value)
         except TypeError as error:
             raise TypeError(f"{path}: {error}") from error
-        return _apply_constraints(coerced_bool, merged_meta, path)
+        return apply_constraints(coerced_bool, merged_meta, path)
     if config.coerce and isinstance(value, (int, float)):
-        return _apply_constraints(bool(value), merged_meta, path)
+        return apply_constraints(bool(value), merged_meta, path)
     raise TypeError(f"{path}: expected bool")
 
 
@@ -420,12 +419,12 @@ def _coerce_to_type(
     typ: object,
     meta: Mapping[str, object] | None,
     path: str,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
-    base_type, merged_meta = _merge_annotated_meta(typ, meta)
+    base_type, merged_meta = merge_annotated_meta(typ, meta)
 
-    if base_type is object or base_type is _AnyType:
-        return _apply_constraints(value, merged_meta, path)
+    if base_type is object or base_type is AnyType:
+        return apply_constraints(value, merged_meta, path)
 
     coercers = (
         lambda: _coerce_union(value, base_type, merged_meta, path, config),
@@ -443,11 +442,19 @@ def _coerce_to_type(
         if result is not _NOT_HANDLED:
             return result
 
+    if not callable(base_type):
+        raise TypeError(
+            f"{path}: {base_type!r} is not callable"
+        )  # pragma: no cover - defensive fallback
+
     try:
-        coerced = base_type(value)
+        call_target = cast(
+            Callable[[object], object], base_type
+        )  # pragma: no cover - exercised via type-specific coercers
+        coerced = call_target(value)
     except Exception as error:
         raise type(error)(str(error)) from error
-    return _apply_constraints(coerced, merged_meta, path)
+    return apply_constraints(coerced, merged_meta, path)
 
 
 def _find_key(
@@ -461,12 +468,9 @@ def _find_key(
             return candidate
     if not case_insensitive:
         return None
-    lowered_map: dict[str, str] = {}
-    for key in data:
-        if isinstance(key, str):
-            _ = lowered_map.setdefault(key.lower(), key)
+    lowered_map: dict[str, str] = {key.lower(): key for key in data}
     for candidate in candidates:
-        if candidate is None or not isinstance(candidate, str):
+        if candidate is None:
             continue
         lowered = candidate.lower()
         if lowered in lowered_map:
@@ -495,7 +499,7 @@ def _coerce_field_value(
     raw_value: object,
     field_meta: Mapping[str, object],
     field_type: object,
-    config: _ParseConfig,
+    config: ParseConfig,
 ) -> object:
     try:
         return _coerce_to_type(raw_value, field_type, field_meta, field.name, config)
@@ -504,10 +508,10 @@ def _coerce_field_value(
 
 
 def _collect_field_kwargs(
-    cls: type[object],
+    cls: type[SupportsDataclass],
     mapping_data: Mapping[str, object],
     type_hints: Mapping[str, object],
-    config: _ParseConfig,
+    config: ParseConfig,
     *,
     aliases: Mapping[str, str] | None,
     alias_generator: Callable[[str], str] | None,
@@ -537,7 +541,7 @@ def _collect_field_kwargs(
 
 
 def _apply_extra_fields(
-    instance: object,
+    instance: SupportsDataclass,
     mapping_data: Mapping[str, object],
     used_keys: set[str],
     extra: Literal["ignore", "forbid", "allow"],
@@ -552,10 +556,10 @@ def _apply_extra_fields(
             for key, value in extras.items():
                 object.__setattr__(instance, key, value)
         else:
-            _set_extras(instance, extras)
+            set_extras(instance, extras)
 
 
-def _run_validation_hooks(instance: object) -> None:
+def _run_validation_hooks(instance: SupportsDataclass) -> None:
     validator = getattr(instance, "__validate__", None)
     if callable(validator):
         _ = validator()
@@ -564,8 +568,8 @@ def _run_validation_hooks(instance: object) -> None:
         _ = post_validator()
 
 
-def parse[T](
-    cls: type[T],
+def parse[ParsedDataclass: SupportsDataclass](
+    cls: type[ParsedDataclass],
     data: Mapping[str, object] | object,
     *,
     extra: Literal["ignore", "forbid", "allow"] = "ignore",
@@ -573,17 +577,17 @@ def parse[T](
     case_insensitive: bool = False,
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
-) -> T:
+) -> ParsedDataclass:
     """Parse a mapping into a dataclass instance."""
 
-    if not dataclasses.is_dataclass(cls) or not isinstance(cls, type):
+    if not dataclasses.is_dataclass(cls):
         raise TypeError("parse() requires a dataclass type")
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")
     if extra not in {"ignore", "forbid", "allow"}:
         raise ValueError("extra must be one of 'ignore', 'forbid', or 'allow'")
 
-    config = _ParseConfig(
+    config = ParseConfig(
         extra=extra,
         coerce=coerce,
         case_insensitive=case_insensitive,
