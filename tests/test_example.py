@@ -14,8 +14,11 @@
 
 from typing import Any, cast
 
+import pytest
+
 import weakincentives
 from weakincentives import adapters, prompt, runtime, tools
+from weakincentives.api import Prompt
 
 
 def test_example() -> None:
@@ -25,10 +28,15 @@ def test_example() -> None:
 def test_package_dir_lists_public_symbols() -> None:
     symbols = weakincentives.__dir__()
 
+    assert symbols == sorted(symbols)
     assert "api" in symbols
     assert "prompt" in symbols
     assert "tools" in symbols
-    assert cast(Any, weakincentives).Prompt is cast(Any, weakincentives.api).Prompt
+
+
+def test_package_does_not_forward_api_attributes() -> None:
+    with pytest.raises(AttributeError):
+        _ = cast(Any, weakincentives).Prompt
 
 
 def test_adapters_dir_lists_public_symbols() -> None:
@@ -45,6 +53,10 @@ def test_namespace_forwarding() -> None:
     tools_plan = cast(Any, tools.api).Plan
     adapters_response = cast(Any, adapters.api).PromptResponse
 
+    prompt_api = cast(Any, prompt).api
+
+    assert Prompt is prompt_api.Prompt
+
     assert cast(Any, runtime).Session is runtime_session
     assert cast(Any, tools).Plan is tools_plan
     assert cast(Any, adapters).PromptResponse is adapters_response
@@ -55,6 +67,13 @@ def test_runtime_getattr_reimports_api() -> None:
 
     reloaded_session = cast(Any, runtime).Session
     assert reloaded_session is cast(Any, runtime.api).Session
+
+
+def test_adapters_getattr_reimports_api() -> None:
+    adapters.api = None
+
+    reloaded_response = cast(Any, adapters).PromptResponse
+    assert reloaded_response is cast(Any, adapters.api).PromptResponse
 
 
 def test_api_dir_helpers() -> None:
