@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompt import Chapter, MarkdownSection
+from weakincentives.prompt import MarkdownSection
 from weakincentives.prompt.composition import (
     DelegationSummarySection,
     ParentPromptParams,
@@ -56,23 +56,6 @@ def test_markdown_section_clone_deep_copies_children_and_defaults() -> None:
     assert clone is not section
     assert clone.default_params is not section.default_params
     assert clone.children and clone.children[0] is not child
-
-
-def test_chapter_clone_copies_sections_and_defaults() -> None:
-    section = MarkdownSection[_SampleParams](
-        title="Solo", template="${value}", key="solo", default_params=_SampleParams()
-    )
-    chapter = Chapter[_SampleParams](
-        key="chapter",
-        title="Chapter",
-        sections=(section,),
-    )
-
-    clone = chapter.clone()
-
-    assert clone is not chapter
-    assert clone.default_params is chapter.default_params
-    assert clone.sections[0] is not section
 
 
 def test_response_format_clone_preserves_params() -> None:

@@ -194,9 +194,7 @@ def test_conversation_runner_success() -> None:
 
 
 def test_conversation_runner_includes_prompt_descriptor_in_event() -> None:
-    descriptor = PromptDescriptor(
-        ns="tests", key="example", sections=[], tools=[], chapters=[]
-    )
+    descriptor = PromptDescriptor(ns="tests", key="example", sections=[], tools=[])
     rendered = RenderedPrompt(text="system", descriptor=descriptor)
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)

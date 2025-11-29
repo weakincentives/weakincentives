@@ -10,13 +10,6 @@ session-scoped virtual filesystem. The [`AstevalSection`](specs/ASTEVAL.md)
 registers the tool, enforces strict globals, captures stdout/stderr, and records
 any VFS mutations for traceability.
 
-## Chapter
-
-A chapter groups prompt sections behind a single visibility switch so adapters
-determine which regions of a prompt reach the model. Chapters default to the
-closed state and wrap existing sections without rewriting them. See the
-[Chapters specification](specs/CHAPTERS.md).
-
 ## Dataclass Serde Utilities
 
 Helpers in `weakincentives.serde` parse, validate, and serialize standard library
@@ -90,7 +83,7 @@ calls and returning typed responses. Shared requirements live in the
 ## Section
 
 Sections are typed building blocks that render markdown, register tools, and can
-be composed into prompts or chapters. They rely on dataclass payloads and Python
+be composed into prompts. They rely on dataclass payloads and Python
 `string.Template` formatting. See [Prompt specification](specs/PROMPTS.md).
 
 ## Session

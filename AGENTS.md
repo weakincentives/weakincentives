@@ -9,7 +9,7 @@ work must comply with this file.
   background agents.
 - **Runtime core** (`src/weakincentives/runtime/`): Session orchestration,
   concurrency helpers, and event loops.
-- **Prompt system** (`src/weakincentives/prompt/`): Chapters, sections, and tool
+- **Prompt system** (`src/weakincentives/prompt/`): Sections and tool
   wiring for model-facing prompts.
 - **Adapters** (`src/weakincentives/adapters/`): Model and tool adapters, plus
   structured-output integration.
@@ -77,7 +77,6 @@ work must comply with this file.
   or modifying adapters.
 - **ASTEVAL.md**: Asteval tool behavior—when touching expression evaluation or
   sandboxing.
-- **CHAPTERS.md**: Prompt chapter composition—when structuring prompt chapters.
 - **DATACLASS_SERDE.md**: Dataclass serialization contract—when adding serde
   helpers or dataclass models.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered

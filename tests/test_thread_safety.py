@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from random import shuffle
-from typing import TYPE_CHECKING, cast
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -34,9 +34,6 @@ from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from weakincentives.prompt.overrides.versioning import ChapterLike
 
 THREAD_SESSION_ID = uuid4()
 
@@ -79,10 +76,6 @@ class _DummyPrompt:
     @property
     def sections(self) -> tuple[_DummySectionNode, ...]:
         return self._sections
-
-    @property
-    def chapters(self) -> tuple[ChapterLike, ...]:
-        return ()
 
 
 def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:

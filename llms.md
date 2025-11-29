@@ -184,14 +184,14 @@ except PromptEvaluationError as exc:
 ## Prompt Authoring (`weakincentives.prompt`)
 
 - **`Prompt`**: Construct with `ns`, `key`, optional `name`, ordered `sections`
-  (typically `MarkdownSection`) or `chapters`, and an optional structured-output
-  specialization (e.g., `Prompt[Plan]`). Call `render()` to obtain a
-  `RenderedPrompt` if you need to inspect the provider payload; adapters render
-  internally when you call `evaluate`.
+  (typically `MarkdownSection`), and an optional structured-output specialization
+  (e.g., `Prompt[Plan]`). Call `render()` to obtain a `RenderedPrompt` if you need
+  to inspect the provider payload; adapters render internally when you call
+  `evaluate`.
 - **`MarkdownSection`**: Simple Markdown content built from a `title`,
   `template`, and unique `key`. Use multiple sections to keep prompt text modular
   and override-friendly. Pass `tools=(...)` to expose tool contracts within a
-  section (or supply them on sections nested inside `Chapter`).
+  section.
 - **`Tool`**: Declarative tool description parameterized as `Tool[Params, Result]` where `Params` **must** be a dataclass type and `Result` is a dataclass (or sequence of dataclasses). Key fields:
   - `name`: Identifier exposed to the model.
   - `description`: Natural-language guidance (1-200 ASCII characters).
@@ -205,9 +205,7 @@ except PromptEvaluationError as exc:
 - **`StructuredOutputConfig` / `parse_structured_output`**: Attach a
   dataclass-driven schema to a prompt or parse the final model message into a
   concrete instance. `OutputParseError` surfaces validation issues.
-- **`Chapter` and `Section`**: Lower-level composition primitives for advanced
-  prompt layouts. Use `ChaptersExpansionPolicy` to control how nested chapters
-  expand.
+- **`Section`**: Lower-level composition primitive for advanced prompt layouts.
 - **Delegation helpers**: `DelegationPrompt`, `DelegationSummarySection`,
   `ParentPromptSection`, and related params let you compose supervising agents
   that delegate subtasks while maintaining typed contracts.

@@ -13,7 +13,7 @@ limitations that implementers must respect.
 ## Scope and terminology
 
 - **Where this applies**: Everything under `src/weakincentives/prompt/` including `Prompt` orchestration,
-  `Section`/`Chapter` composition, rendering, structured output, and override plumbing. Downstream usages (for
+  section composition, rendering, structured output, and override plumbing. Downstream usages (for
   example adapters) consume the public surface but do not alter the rules defined here.
 - **Core documents**: This spec anchors prompt behavior; the glossary and runtime specs define adjacent concepts
   (sessions, tool invocation) but do not override prompt semantics.
@@ -51,9 +51,6 @@ reaches an LLM. The design should be simple enough to maintain but strict enough
 - **`MarkdownSection` (`markdown.py`)**: Default concrete section that dedents, strips, and runs `Template.substitute`;
   missing placeholders explode via `PromptRenderError`. It also wires optional tools and passes them through the
   override gating defined by the base class.
-- **`Chapter` (`chapter.py`)**: A shallow grouping mechanism that expands into sections based on a declared policy; it
-  shares the numbering pipeline and must respect the same key uniqueness guarantees enforced during prompt
-  construction.
 - **Rendering pipeline (`rendering.py`)**: `PromptRenderer` builds the dataclass lookup, enforces uniqueness of types,
   walks enabled sections depth-first, and collates rendered markdown plus tool metadata into `RenderedPrompt`. It is
   also responsible for respecting tool overrides and cloning field description patches into immutable maps.
@@ -68,8 +65,7 @@ an ordered tree of `Section` instances. Rendering walks this tree depth first an
 heading level is `##` for roots and adds one `#` per level of depth (so depth one becomes `###`, depth two `####`,
 and so on). Each heading is also prefixed with a hierarchical number derived from its position in the traversal:
 top-level sections start at `1`, their first child becomes `1.1`, its child becomes `1.1.1`, and so on.
-Chapters participate in this same numbering scheme so the rendered document exposes a stable breadcrumb for every
-visible fragment. The namespace
+A prompt's namespace
 groups prompts by logical domain (for example `webapp/agents`, `backoffice/cron`, `infra/sweeper`) and participates
 in versioning plus override resolution to prevent collisions across applications. The implementation keeps
 `Section` as the abstract base class that defines the shared contract—metadata, parameter typing, optional defaults,
@@ -97,8 +93,7 @@ expose an `accepts_overrides` argument so callers can opt in when a specific dep
 ### Rendering behavior (current implementation snapshot)
 
 - **Traversal and headings**: `PromptRenderer.render` walks the registry's section tree in depth-first order. Each
-  enabled node emits a heading with deterministic numbering derived from its path; chapters consume the same numbering
-  slots as sections so breadcrumbs remain stable for optimization tooling.
+  enabled node emits a heading with deterministic numbering derived from its path.
 - **Parameter lookup**: The renderer builds a map of dataclass type → instance, rejecting duplicate or unexpected
   types before any template is evaluated. When a section lacks an override and no default is configured, the renderer
   instantiates the declared dataclass with no arguments and surfaces `PromptRenderError` if required fields are
@@ -125,12 +120,12 @@ absent we rely on the dataclass' own default field values by instantiating it wi
 
 ## Cloning and reuse
 
-Sections and chapters MUST expose a `clone(**kwargs)` method that returns a deep copy of the
-component tree suitable for insertion into a new prompt. Clones behave as if they were
-constructed from scratch: numbering restarts from the destination prompt, default parameter
-dataclasses are duplicated (not reused), and the cloned objects share no references to the
-original prompt, `Session`, or `EventBus` instances. Implementations must recursively clone
-children so the entire subtree remains decoupled.
+Sections MUST expose a `clone(**kwargs)` method that returns a deep copy of the component tree
+suited for insertion into a new prompt. Clones behave as if they were constructed from scratch:
+numbering restarts from the destination prompt, default parameter dataclasses are duplicated
+(not reused), and the cloned objects share no references to the original prompt, `Session`, or
+`EventBus` instances. Implementations must recursively clone children so the entire subtree
+remains decoupled.
 
 Tool-backed sections MAY accept runtime objects (for example `session` or `bus`) as keyword
 arguments to `clone`. When supplied, the clone MUST wire reducers and tool handlers against the
@@ -187,8 +182,8 @@ the object surfaces:
 - `.tools` – ordered tuple of tools contributed by enabled sections.
 - `.tool_param_descriptions` – optional mapping of tool name → field description overrides supplied by the
   override system.
-- Prompt descriptors MUST capture the numbering string assigned to each section (and chapter) so callers can map
-  section keys or `SectionPath`s back to the human-facing headings rendered in `.text`.
+- Prompt descriptors MUST capture the numbering string assigned to each section so callers can map section keys or
+  `SectionPath`s back to the human-facing headings rendered in `.text`.
 
 ## Validation and Error Handling
 

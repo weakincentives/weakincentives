@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from ._types import SupportsDataclass, SupportsToolResult, ToolRenderableResult
-from .chapter import Chapter, ChaptersExpansionPolicy
 from .composition import (
     DelegationParams,
     DelegationPrompt,
@@ -33,7 +32,6 @@ from .errors import (
 )
 from .markdown import MarkdownSection
 from .overrides import (
-    ChapterDescriptor,
     LocalPromptOverridesStore,
     PromptDescriptor,
     PromptLike,
@@ -59,9 +57,6 @@ from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
-    "Chapter",
-    "ChapterDescriptor",
-    "ChaptersExpansionPolicy",
     "DelegationParams",
     "DelegationPrompt",
     "DelegationSummarySection",
