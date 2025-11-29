@@ -14,15 +14,7 @@
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
-
-from . import adapters, cli, deadlines, debug, prompt, runtime, serde, tools, types
-
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
-
-api: object | None = None
+from . import adapters, api, cli, deadlines, debug, prompt, runtime, serde, tools, types
 
 __all__ = [
     "adapters",
@@ -36,16 +28,6 @@ __all__ = [
     "tools",
     "types",
 ]
-
-
-def __getattr__(name: str) -> object:
-    """Lazily forward legacy attributes to :mod:`weakincentives.api`."""
-
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
 
 
 def __dir__() -> list[str]:

@@ -81,7 +81,7 @@ replayable session.
 
 ```python
 from dataclasses import dataclass
-from weakincentives import (
+from weakincentives.api import (
     MarkdownSection,
     Prompt,
     Tool,
@@ -264,7 +264,7 @@ You can export snapshots as files, feed them into analysis tools, or inspect the
 raw JSON to understand what prompts, tool invocations, and reducer-managed data
 existed at a point in time—without needing live provider access.
 
-## Deadlines (`weakincentives.Deadline`)
+## Deadlines (`weakincentives.api.Deadline`)
 
 `Deadline` instances communicate time budgets across prompts, tools, and
 provider calls. Pass them into prompts or adapters to ensure long-running tasks
