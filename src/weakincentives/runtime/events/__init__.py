@@ -21,7 +21,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
-from ...prompt._types import SupportsDataclass
 from ...prompt.overrides import PromptDescriptor
 from ..logging import StructuredLogger, get_logger
 from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
@@ -106,12 +105,6 @@ class PromptRendered:
     created_at: datetime
     descriptor: PromptDescriptor | None = None
     event_id: UUID = field(default_factory=uuid4)
-
-    @property
-    def value(self) -> SupportsDataclass:
-        """Expose the dataclass instance for reducer compatibility."""
-
-        return self
 
 
 __all__ = [

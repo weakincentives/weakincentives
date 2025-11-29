@@ -34,6 +34,7 @@ from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
+    ReducerEventWithValue,
     Session,
     TypedReducer,
     select_latest,
@@ -962,6 +963,10 @@ def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
     ) -> tuple[VirtualFileSystem, ...]:
         del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
+        if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
+            msg = "Eval result reducer requires an event with a value payload."
+            raise TypeError(msg)
+
         value = cast(EvalResult, event.value)
         if not value.writes:
             return (previous,)
