@@ -12,8 +12,6 @@
 
 """Dataclass serialization helpers."""
 
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportCallIssue=false, reportArgumentType=false, reportPrivateUsage=false
-
 from __future__ import annotations
 
 import dataclasses
@@ -22,15 +20,21 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Protocol, cast, no_type_check
+from typing import TypeVar, cast, overload
 from uuid import UUID
 
+from ..prompt._types import SupportsDataclass
 from ..types import JSONValue
-from ._utils import MISSING_SENTINEL, _set_extras
+from ._utils import MISSING_SENTINEL, set_extras
+
+DataclassInstance = SupportsDataclass
+TDataclass = TypeVar("TDataclass", bound=SupportsDataclass)
 
 
-class DataclassInstance(Protocol):
-    __dataclass_fields__: Mapping[str, dataclasses.Field[object]]
+def _require_dataclass_instance(obj: object) -> SupportsDataclass:
+    if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
+        raise TypeError("dump() requires a dataclass instance")
+    return cast(SupportsDataclass, obj)
 
 
 def _serialize(
@@ -44,9 +48,9 @@ def _serialize(
     if primitive is not None:
         return primitive
 
-    if dataclasses.is_dataclass(value):
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return _serialize_dataclass(
-            value,
+            cast(DataclassInstance, value),
             by_alias,
             exclude_none,
             alias_generator,
@@ -66,7 +70,12 @@ def _serialize(
             alias_generator,
         )
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return _serialize_sequence(value, by_alias, exclude_none, alias_generator)
+        return _serialize_sequence(
+            cast(Sequence[object], value),
+            by_alias,
+            exclude_none,
+            alias_generator,
+        )
     return value
 
 
@@ -85,7 +94,7 @@ def _serialize_primitive(
 
 
 def _serialize_dataclass(
-    value: object,
+    value: DataclassInstance,
     by_alias: bool,
     exclude_none: bool,
     alias_generator: Callable[[str], str] | None,
@@ -163,6 +172,28 @@ def _serialize_iterable(
     return serialized_items
 
 
+@overload
+def dump(
+    obj: SupportsDataclass,
+    *,
+    by_alias: bool = True,
+    exclude_none: bool = False,
+    computed: bool = False,
+    alias_generator: Callable[[str], str] | None = None,
+) -> dict[str, JSONValue]: ...
+
+
+@overload
+def dump(
+    obj: object,
+    *,
+    by_alias: bool = True,
+    exclude_none: bool = False,
+    computed: bool = False,
+    alias_generator: Callable[[str], str] | None = None,
+) -> dict[str, JSONValue]: ...
+
+
 def dump(
     obj: object,
     *,
@@ -173,11 +204,9 @@ def dump(
 ) -> dict[str, JSONValue]:
     """Serialize a dataclass instance to a JSON-compatible dictionary."""
 
-    if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
-        raise TypeError("dump() requires a dataclass instance")
+    dataclass_obj = _require_dataclass_instance(obj)
 
     result: dict[str, JSONValue] = {}
-    dataclass_obj = cast(DataclassInstance, obj)
     _serialize_fields(dataclass_obj, result, by_alias, exclude_none, alias_generator)
     if computed and hasattr(obj.__class__, "__computed__"):
         _serialize_computed_fields(
@@ -187,7 +216,6 @@ def dump(
     return result
 
 
-@no_type_check
 def _serialize_fields(
     obj: DataclassInstance,
     result: dict[str, JSONValue],
@@ -258,29 +286,49 @@ def _serialize_field_value(
     )
 
 
-def clone[T](obj: T, **updates: object) -> T:
+@overload
+def clone[TDataclass: DataclassInstance](
+    obj: TDataclass, **updates: object
+) -> TDataclass: ...
+
+
+@overload
+def clone[TDataclass: DataclassInstance](
+    obj: TDataclass | None, **updates: object
+) -> TDataclass: ...
+
+
+@overload
+def clone(obj: object, **updates: object) -> SupportsDataclass: ...
+
+
+def clone[TDataclass: DataclassInstance](
+    obj: TDataclass | None, **updates: object
+) -> TDataclass:
     """Clone a dataclass instance and re-run model-level validation hooks."""
 
-    if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
-        raise TypeError("clone() requires a dataclass instance")
-    field_names = {field.name for field in dataclasses.fields(obj)}
+    dataclass_obj = _require_dataclass_instance(obj)
+    typed_obj = cast(TDataclass, dataclass_obj)
+    field_names = {field.name for field in dataclasses.fields(dataclass_obj)}
     extras: dict[str, object] = {}
-    extras_attr = getattr(obj, "__extras__", None)
-    if hasattr(obj, "__dict__"):
+    extras_attr = getattr(dataclass_obj, "__extras__", None)
+    if hasattr(dataclass_obj, "__dict__"):
         extras = {
-            key: value for key, value in obj.__dict__.items() if key not in field_names
+            key: value
+            for key, value in dataclass_obj.__dict__.items()
+            if key not in field_names
         }
     elif isinstance(extras_attr, Mapping):
-        extras = dict(extras_attr)
+        extras = dict(cast(Mapping[str, object], extras_attr))
 
-    cloned = dataclasses.replace(obj, **updates)
+    cloned: TDataclass = dataclasses.replace(typed_obj, **updates)
 
     if extras:
         if hasattr(cloned, "__dict__"):
             for key, value in extras.items():
                 object.__setattr__(cloned, key, value)
         else:
-            _set_extras(cloned, extras)
+            set_extras(cloned, extras)
 
     validator = getattr(cloned, "__validate__", None)
     if callable(validator):

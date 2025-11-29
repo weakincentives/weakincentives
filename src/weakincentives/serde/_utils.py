@@ -24,7 +24,7 @@ from typing import Any as _AnyType, Final, Literal, cast, get_args
 from ..types import JSONValue
 
 MISSING_SENTINEL: Final[object] = object()
-_UNION_TYPE = type(int | str)
+UNION_TYPE: Final[type[object]] = type(int | str)
 
 
 class _ExtrasDescriptor:
@@ -196,6 +196,22 @@ def _validate_membership(
 ) -> None:
     _validate_inclusion(candidate, meta, path)
     _validate_exclusion(candidate, meta, path)
+
+
+# Public aliases for private helpers used across serde modules.
+# The leading-underscore names remain for backward compatibility, but
+# type checkers should prefer the exported versions below.
+UnionType = UNION_TYPE
+AnyType = _AnyType
+ParseConfig = _ParseConfig
+ExtrasDescriptor = _ExtrasDescriptor
+apply_constraints = _apply_constraints
+merge_annotated_meta = _merge_annotated_meta
+ordered_values = _ordered_values
+set_extras = _set_extras
+
+# Backward-compatible aliases.
+_UNION_TYPE = UNION_TYPE
 
 
 def _validate_inclusion(
