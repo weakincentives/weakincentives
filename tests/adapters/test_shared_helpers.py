@@ -20,8 +20,9 @@ import pytest
 
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from tests.helpers.events import NullEventBus
-from weakincentives.adapters import PromptEvaluationError, shared
+from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
+    PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
     SessionProtocol,

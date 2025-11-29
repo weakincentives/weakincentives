@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import weakincentives.prompt.tool as prompt_tool
 from weakincentives import prompt
 from weakincentives.prompt import MarkdownSection, Prompt
 
@@ -106,7 +107,18 @@ def test_prompt_integration_handles_disabled_sections() -> None:
 
 
 def test_prompt_module_public_exports() -> None:
-    for symbol in ("Prompt", "Section", "MarkdownSection"):
-        assert hasattr(prompt, symbol), f"prompt module missing export: {symbol}"
-        assert getattr(prompt, symbol) is getattr(prompt.api, symbol)
-    assert prompt.__all__ == ["api"]
+    assert prompt.Prompt is Prompt
+    assert prompt.MarkdownSection is MarkdownSection
+    assert prompt.ToolHandler is prompt_tool.ToolHandler
+    assert prompt.__all__ == [
+        "MarkdownSection",
+        "OutputParseError",
+        "Prompt",
+        "StructuredOutputConfig",
+        "Tool",
+        "ToolContext",
+        "ToolExample",
+        "ToolHandler",
+        "ToolResult",
+        "parse_structured_output",
+    ]

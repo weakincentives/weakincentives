@@ -10,28 +10,58 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt namespace exposing the :mod:`weakincentives.prompt.api` surface."""
+"""Prompt namespace."""
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from ._types import SupportsDataclass, SupportsToolResult
+from .composition import (
+    DelegationParams,
+    DelegationPrompt,
+    ParentPromptParams,
+    ParentPromptSection,
+    RecapParams,
+    RecapSection,
+)
+from .errors import PromptRenderError, PromptValidationError
+from .markdown import MarkdownSection
+from .prompt import Prompt
+from .section import Section
+from .structured_output import (
+    OutputParseError,
+    StructuredOutputConfig,
+    parse_structured_output,
+)
+from .tool import Tool, ToolContext, ToolExample, ToolHandler
+from .tool_result import ToolResult
 
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
+__all__ = [
+    "MarkdownSection",
+    "OutputParseError",
+    "Prompt",
+    "StructuredOutputConfig",
+    "Tool",
+    "ToolContext",
+    "ToolExample",
+    "ToolHandler",
+    "ToolResult",
+    "parse_structured_output",
+]
 
-api: object | None = None
+_ADDITIONAL_EXPORTS = [
+    DelegationParams,
+    DelegationPrompt,
+    ParentPromptParams,
+    ParentPromptSection,
+    PromptRenderError,
+    PromptValidationError,
+    RecapParams,
+    RecapSection,
+    Section,
+    SupportsDataclass,
+    SupportsToolResult,
+]
 
-__all__ = ["api"]
 
-
-def __getattr__(name: str) -> object:
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
-
-
-def __dir__() -> list[str]:
+def __dir__() -> list[str]:  # pragma: no cover - convenience shim
     return sorted({*globals().keys(), *__all__})

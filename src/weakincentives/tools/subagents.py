@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, is_dataclass
 from enum import Enum, auto
 from typing import Any, Final, cast, override
 
-from ..prompt import SupportsDataclass
+from ..prompt._types import SupportsDataclass
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection

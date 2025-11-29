@@ -25,6 +25,7 @@ from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
+    PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
     SessionProtocol,
@@ -72,7 +73,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         simple_handler,
     )
 from tests.helpers.events import NullEventBus
-from weakincentives.adapters import PromptEvaluationError
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,

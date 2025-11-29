@@ -81,15 +81,10 @@ replayable session.
 
 ```python
 from dataclasses import dataclass
-from weakincentives.api import (
-    MarkdownSection,
-    Prompt,
-    Tool,
-    ToolContext,
-    ToolResult,
-    parse_structured_output,
-)
-from weakincentives.adapters import PromptEvaluationError
+from weakincentives.prompt import MarkdownSection, Prompt, parse_structured_output
+from weakincentives.prompt.tool import Tool, ToolContext
+from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.runtime import InProcessEventBus, Session, configure_logging
 
@@ -264,7 +259,7 @@ You can export snapshots as files, feed them into analysis tools, or inspect the
 raw JSON to understand what prompts, tool invocations, and reducer-managed data
 existed at a point in time—without needing live provider access.
 
-## Deadlines (`weakincentives.api.Deadline`)
+## Deadlines (`weakincentives.deadlines.Deadline`)
 
 `Deadline` instances communicate time budgets across prompts, tools, and
 provider calls. Pass them into prompts or adapters to ensure long-running tasks
@@ -298,7 +293,7 @@ without writing additional code.
 
 ## Versioning & Stability
 
-- Public APIs are the objects exported from `weakincentives.api` and the
+- Public APIs are the objects exported from `weakincentives` modules and the
   submodules documented above.
 - Adapters are optional; include only the extras you need.
 - Keep `StructuredOutputConfig`, tool schemas, and overrides in version control
