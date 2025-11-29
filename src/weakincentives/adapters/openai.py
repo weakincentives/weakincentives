@@ -29,7 +29,14 @@ from ..prompt.rendering import RenderedPrompt
 from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
-from ._provider_protocols import ProviderChoice, ProviderCompletionResponse
+from ._provider_protocols import (
+    ProviderChoice,
+    ProviderChoiceData,
+    ProviderCompletionResponse,
+    ProviderFunctionCallData,
+    ProviderMessageData,
+    ProviderToolCallData,
+)
 from ._tool_messages import serialize_tool_message
 from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
@@ -82,30 +89,6 @@ OpenAIProtocol = _OpenAIProtocol
 
 class _OpenAIModule(Protocol):
     OpenAI: _OpenAIClientFactory
-
-
-@dataclass(slots=True)
-class _ResponseFunctionCall:
-    name: str
-    arguments: str | None
-
-
-@dataclass(slots=True)
-class _ResponseToolCall:
-    id: str | None
-    function: _ResponseFunctionCall
-
-
-@dataclass(slots=True)
-class _ResponseChoice:
-    message: object
-
-
-@dataclass(slots=True)
-class _ResponseMessage:
-    content: object
-    tool_calls: Sequence[_ResponseToolCall] | None
-    parsed: object | None = None
 
 
 @dataclass(slots=True)
@@ -222,7 +205,7 @@ def _normalize_tool_arguments(arguments: object) -> str | None:
         return str(arguments)
 
 
-def _normalize_tool_call(call: object) -> _ResponseToolCall:
+def _normalize_tool_call(call: object) -> ProviderToolCallData:
     call_id = getattr(call, "id", None)
     function_obj = getattr(call, "function", None)
     if isinstance(call, Mapping):
@@ -237,16 +220,16 @@ def _normalize_tool_call(call: object) -> _ResponseToolCall:
         function_name = function_mapping.get("name", function_name)
         arguments_obj = function_mapping.get("arguments", arguments_obj)
 
-    return _ResponseToolCall(
+    return ProviderToolCallData(
         id=str(call_id) if call_id is not None else None,
-        function=_ResponseFunctionCall(
+        function=ProviderFunctionCallData(
             name=function_name if isinstance(function_name, str) else "tool",
             arguments=_normalize_tool_arguments(arguments_obj),
         ),
     )
 
 
-def _tool_call_from_output(output: object) -> _ResponseToolCall | None:
+def _tool_call_from_output(output: object) -> ProviderToolCallData | None:
     name = getattr(output, "name", None)
     arguments_obj = getattr(output, "arguments", None)
     output_type = getattr(output, "type", None)
@@ -256,16 +239,16 @@ def _tool_call_from_output(output: object) -> _ResponseToolCall | None:
     if output_type not in {None, "function_call"}:
         return None
 
-    return _ResponseToolCall(
+    return ProviderToolCallData(
         id=str(getattr(output, "call_id", None) or getattr(output, "id", "")) or None,
-        function=_ResponseFunctionCall(
+        function=ProviderFunctionCallData(
             name=name,
             arguments=_normalize_tool_arguments(arguments_obj),
         ),
     )
 
 
-def _tool_calls_from_content(parts: Sequence[object]) -> list[_ResponseToolCall]:
+def _tool_calls_from_content(parts: Sequence[object]) -> list[ProviderToolCallData]:
     for part in parts:
         tool_calls_obj = getattr(part, "tool_calls", None)
         if tool_calls_obj is None and isinstance(part, Mapping):
@@ -573,26 +556,26 @@ def _normalize_input_messages(
     return normalized
 
 
-def _choice_from_response(response: object, *, prompt_name: str) -> _ResponseChoice:
+def _choice_from_response(response: object, *, prompt_name: str) -> ProviderChoiceData:
     output = _select_output_with_content(response, prompt_name=prompt_name)
     tool_call_output = _tool_call_from_output(output)
     if tool_call_output is not None:
-        message = _ResponseMessage(
+        message = ProviderMessageData(
             content=(),
             tool_calls=(tool_call_output,),
             parsed=None,
         )
-        return _ResponseChoice(message=message)
+        return ProviderChoiceData(message=message)
 
     content_parts = _content_from_output(output, prompt_name=prompt_name)
     tool_calls = _tool_calls_from_content(content_parts)
     parsed = _parsed_from_content(content_parts)
-    message = _ResponseMessage(
+    message = ProviderMessageData(
         content=_normalize_content_parts(content_parts),
         tool_calls=tool_calls or None,
         parsed=parsed,
     )
-    return _ResponseChoice(message=message)
+    return ProviderChoiceData(message=message)
 
 
 def _normalize_openai_throttle(
