@@ -15,15 +15,20 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 __all__ = [
     "ProviderChoice",
+    "ProviderChoiceData",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
     "ProviderFunctionCall",
+    "ProviderFunctionCallData",
     "ProviderMessage",
+    "ProviderMessageData",
     "ProviderToolCall",
+    "ProviderToolCallData",
 ]
 
 
@@ -67,3 +72,35 @@ class ProviderCompletionCallable(Protocol):
     def __call__(
         self, *args: object, **kwargs: object
     ) -> ProviderCompletionResponse: ...
+
+
+@dataclass(slots=True)
+class ProviderFunctionCallData:
+    """Dataclass implementation of ``ProviderFunctionCall``."""
+
+    name: str
+    arguments: str | None
+
+
+@dataclass(slots=True)
+class ProviderToolCallData:
+    """Dataclass implementation of ``ProviderToolCall``."""
+
+    function: ProviderFunctionCallData
+    id: str | None = None
+
+
+@dataclass(slots=True)
+class ProviderMessageData:
+    """Dataclass implementation of ``ProviderMessage``."""
+
+    content: str | Sequence[object] | None
+    tool_calls: Sequence[ProviderToolCallData] | None
+    parsed: object | None = None
+
+
+@dataclass(slots=True)
+class ProviderChoiceData:
+    """Dataclass implementation of ``ProviderChoice``."""
+
+    message: ProviderMessageData
