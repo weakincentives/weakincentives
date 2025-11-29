@@ -34,7 +34,12 @@ from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
 
 from ..runtime.logging import StructuredLogger, get_logger
-from ..runtime.session.snapshots import Snapshot, SnapshotPayload, SnapshotRestoreError
+from ..runtime.session.snapshots import (
+    Snapshot,
+    SnapshotPayload,
+    SnapshotRestoreError,
+    SnapshotSlicePayload,
+)
 from ..types import JSONValue
 
 # Module-level logger keeps loader warnings consistent with the debug server.
@@ -115,16 +120,9 @@ class SnapshotMeta:
 
 
 @dataclass(slots=True, frozen=True)
-class SliceItems:
-    slice_type: str
-    item_type: str
-    items: tuple[Mapping[str, JSONValue], ...]
-
-
-@dataclass(slots=True, frozen=True)
 class LoadedSnapshot:
     meta: SnapshotMeta
-    slices: Mapping[str, SliceItems]
+    slices: Mapping[str, SnapshotSlicePayload]
     raw_payload: Mapping[str, JSONValue]
     raw_text: str
     path: Path
@@ -167,6 +165,25 @@ def _extract_snapshot_lines(raw_text: str) -> list[tuple[int, str]]:
     return lines
 
 
+def _slice_lookup(
+    slices: tuple[SnapshotSlicePayload, ...],
+) -> Mapping[str, SnapshotSlicePayload]:
+    return MappingProxyType({entry.slice_type: entry for entry in slices})
+
+
+def _summaries_from_slices(
+    slices: tuple[SnapshotSlicePayload, ...],
+) -> tuple[SliceSummary, ...]:
+    return tuple(
+        SliceSummary(
+            slice_type=entry.slice_type,
+            item_type=entry.item_type,
+            count=len(entry.items),
+        )
+        for entry in slices
+    )
+
+
 def _load_snapshot_line(
     line: str,
     line_number: int,
@@ -197,22 +214,8 @@ def _load_snapshot_line(
         json.loads(line, object_pairs_hook=dict),
     )
 
-    slices: dict[str, SliceItems] = {}
-    summaries: list[SliceSummary] = []
-    for entry in payload.slices:
-        items = tuple(entry.items)
-        slices[entry.slice_type] = SliceItems(
-            slice_type=entry.slice_type,
-            item_type=entry.item_type,
-            items=items,
-        )
-        summaries.append(
-            SliceSummary(
-                slice_type=entry.slice_type,
-                item_type=entry.item_type,
-                count=len(items),
-            )
-        )
+    slices = _slice_lookup(payload.slices)
+    summaries = _summaries_from_slices(payload.slices)
 
     session_id = payload.tags.get("session_id")
     if not isinstance(session_id, str) or not session_id:
@@ -232,7 +235,7 @@ def _load_snapshot_line(
 
     return LoadedSnapshot(
         meta=meta,
-        slices=MappingProxyType(slices),
+        slices=slices,
         raw_payload=raw_payload,
         raw_text=line,
         path=snapshot_path,
@@ -318,7 +321,7 @@ class SnapshotStore:
             )
         return entries
 
-    def slice_items(self, slice_type: str) -> SliceItems:
+    def slice_items(self, slice_type: str) -> SnapshotSlicePayload:
         try:
             return self._current.slices[slice_type]
         except KeyError as error:
@@ -513,7 +516,7 @@ class _DebugAppHandlers:
         )
         return _meta_response(meta)
 
-    def _slice_items(self, encoded_slice_type: str) -> SliceItems:
+    def _slice_items(self, encoded_slice_type: str) -> SnapshotSlicePayload:
         slice_type = unquote(encoded_slice_type)
         try:
             return self._store.slice_items(slice_type)
