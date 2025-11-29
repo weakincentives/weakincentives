@@ -258,6 +258,9 @@ def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
     assert tags.get("suite") == "wink-debug"
     assert "session_id" in tags
     assert store.path == snapshot_path.resolve()
+    restored = store.snapshot()
+    items = cast(tuple[_ExampleSlice, ...], restored.slices[_ExampleSlice])
+    assert items[0].value == "one"
     assert len(store.entries) == 1
 
     listing = store.list_snapshots()

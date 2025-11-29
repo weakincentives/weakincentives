@@ -47,13 +47,13 @@ class SnapshotRestoreError(RuntimeError):
 class SnapshotDocument:
     """Parsed snapshot document with lazy dataclass restoration."""
 
-    payload: "SnapshotPayload"
+    payload: SnapshotPayload
 
     @classmethod
-    def from_json(cls, raw: str) -> "SnapshotDocument":
+    def from_json(cls, raw: str) -> SnapshotDocument:
         return cls(payload=SnapshotPayload.from_json(raw))
 
-    def restore(self) -> "Snapshot":
+    def restore(self) -> Snapshot:
         """Restore dataclass instances contained in the snapshot."""
 
         return _restore_snapshot_from_payload(self.payload)

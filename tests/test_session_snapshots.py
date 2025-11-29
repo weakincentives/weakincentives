@@ -163,7 +163,7 @@ def test_snapshot_serializes_relationship_metadata() -> None:
 
 def test_snapshot_document_restores_snapshot() -> None:
     payload = make_snapshot_payload()
-    document = snapshots.SnapshotDocument.from_json(json.dumps(payload))
+    document = SnapshotDocument.from_json(json.dumps(payload))
 
     restored = document.restore()
 
@@ -184,7 +184,7 @@ def test_snapshot_document_defers_dataclass_resolution() -> None:
         "tags": {"session_id": "lazy"},
     }
 
-    document = snapshots.SnapshotDocument.from_json(json.dumps(payload))
+    document = SnapshotDocument.from_json(json.dumps(payload))
 
     assert document.payload.slices[0].slice_type == "__main__:UnknownSnapshotSlice"
 
