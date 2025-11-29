@@ -82,12 +82,6 @@ def latest_workspace_digest(
     return None
 
 
-def _digest_key(digest: WorkspaceDigest) -> str:
-    """Key helper retained for compatibility with descriptor tests."""
-
-    return digest.section_key
-
-
 _LOGGER: StructuredLogger = get_logger(
     __name__, context={"component": "tools.workspace_digest"}
 )
@@ -175,7 +169,6 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
 __all__ = [
     "WorkspaceDigest",
     "WorkspaceDigestSection",
-    "_digest_key",
     "clear_workspace_digest",
     "latest_workspace_digest",
     "set_workspace_digest",
