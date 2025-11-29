@@ -25,21 +25,14 @@ from uuid import UUID
 
 import pytest
 
-from weakincentives.serde import (
-    clone,
-    dataclass_serde as serde_module,
-    dump,
-    parse,
-    schema,
-)
-from weakincentives.serde.dataclass_serde import (
+from weakincentives.serde import clone, dump, parse, schema
+from weakincentives.serde._utils import (
     _SLOTTED_EXTRAS,
-    _bool_from_str,
-    _coerce_to_type,
+    _ParseConfig,
     _merge_annotated_meta,
     _ordered_values,
-    _ParseConfig,
 )
+from weakincentives.serde.parse import _bool_from_str, _coerce_to_type
 from weakincentives.types import JSONValue
 
 parse_module = importlib.import_module("weakincentives.serde.parse")
@@ -1140,7 +1133,6 @@ def test_union_without_matching_type_reports_error(
         return original_get_args(typ)
 
     monkeypatch.setattr(parse_module, "get_args", fake_get_args)
-    monkeypatch.setattr(serde_module, "get_args", fake_get_args)
 
     with pytest.raises(TypeError) as exc:
         _coerce_to_type("value", union_type, None, "field", config)

@@ -10,46 +10,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Backward compatible exports for dataclass serde helpers."""
+"""Deprecated shim for dataclass serde helpers.
 
-# pyright: reportPrivateUsage=false
+Prefer importing symbols from their authoritative modules:
+
+* :mod:`weakincentives.serde.dump`
+* :mod:`weakincentives.serde.parse`
+* :mod:`weakincentives.serde.schema`
+* :mod:`weakincentives.serde._utils`
+"""
 
 from __future__ import annotations
 
-from typing import get_args
-
-from ._utils import (
-    _SLOTTED_EXTRAS,
-    _UNION_TYPE,
-    MISSING_SENTINEL,
-    _AnyType,
-    _apply_constraints,
-    _ExtrasDescriptor,
-    _merge_annotated_meta,
-    _ordered_values,
-    _ParseConfig,
-    _set_extras,
-)
-from .dump import clone, dump
-from .parse import _bool_from_str, _coerce_to_type, parse
-from .schema import schema
-
-__all__ = [
-    "MISSING_SENTINEL",
-    "_SLOTTED_EXTRAS",
-    "_UNION_TYPE",
-    "_AnyType",
-    "_ExtrasDescriptor",
-    "_ParseConfig",
-    "_apply_constraints",
-    "_bool_from_str",
-    "_coerce_to_type",
-    "_merge_annotated_meta",
-    "_ordered_values",
-    "_set_extras",
-    "clone",
-    "dump",
-    "get_args",
-    "parse",
-    "schema",
-]
+__all__: list[str] = []
