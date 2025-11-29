@@ -3,6 +3,12 @@
 Canonical guidance for agents working in the `weakincentives` repository. All
 work must comply with this file.
 
+## Stability Notice
+
+This project is alpha-quality software. All APIs may change in backwards
+incompatible ways without notice, and maintaining backward compatibility is not
+a goal at any time.
+
 ## Architectural Overview
 
 - **Domain**: A design-by-contract platform for orchestrating side-effect-free
