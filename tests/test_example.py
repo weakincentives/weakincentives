@@ -12,13 +12,12 @@
 
 """Smoke tests to verify the test harness is wired correctly."""
 
-from typing import Any, cast
-
-import pytest
-
 import weakincentives
+import weakincentives.prompt.tool as prompt_tool
+import weakincentives.runtime.logging as runtime_logging
+import weakincentives.tools.errors as tool_errors
 from weakincentives import adapters, prompt, runtime, tools
-from weakincentives.api import Prompt
+from weakincentives.prompt import Prompt
 
 
 def test_example() -> None:
@@ -29,55 +28,27 @@ def test_package_dir_lists_public_symbols() -> None:
     symbols = weakincentives.__dir__()
 
     assert symbols == sorted(symbols)
-    assert "api" in symbols
-    assert "prompt" in symbols
-    assert "tools" in symbols
+    assert "api" not in symbols
+    assert {"prompt", "tools", "runtime", "adapters"}.issubset(symbols)
 
 
 def test_package_does_not_forward_api_attributes() -> None:
-    with pytest.raises(AttributeError):
-        _ = cast(Any, weakincentives).Prompt
+    assert not hasattr(weakincentives, "Prompt")
 
 
 def test_adapters_dir_lists_public_symbols() -> None:
     symbols = adapters.__dir__()
 
     assert symbols == sorted(symbols)
-    for symbol in ("PromptEvaluationError", "PromptResponse", "ProviderAdapter"):
-        assert hasattr(adapters, symbol)
-        assert getattr(adapters, symbol) is getattr(adapters.api, symbol)
+    assert {"_names", "core", "litellm", "openai", "shared"}.issubset(symbols)
 
 
 def test_namespace_forwarding() -> None:
-    runtime_session = cast(Any, runtime.api).Session
-    tools_plan = cast(Any, tools.api).Plan
-    adapters_response = cast(Any, adapters.api).PromptResponse
+    assert Prompt is prompt.Prompt
+    assert prompt.ToolHandler is prompt_tool.ToolHandler
 
-    prompt_api = cast(Any, prompt).api
+    assert runtime.configure_logging is runtime_logging.configure_logging
+    assert runtime.StructuredLogger is runtime_logging.StructuredLogger
 
-    assert Prompt is prompt_api.Prompt
-
-    assert cast(Any, runtime).Session is runtime_session
-    assert cast(Any, tools).Plan is tools_plan
-    assert cast(Any, adapters).PromptResponse is adapters_response
-
-
-def test_runtime_getattr_reimports_api() -> None:
-    runtime.api = None
-
-    reloaded_session = cast(Any, runtime).Session
-    assert reloaded_session is cast(Any, runtime.api).Session
-
-
-def test_adapters_getattr_reimports_api() -> None:
-    adapters.api = None
-
-    reloaded_response = cast(Any, adapters).PromptResponse
-    assert reloaded_response is cast(Any, adapters.api).PromptResponse
-
-
-def test_api_dir_helpers() -> None:
-    assert "Prompt" in weakincentives.api.__dir__()
-    assert "PromptResponse" in adapters.api.__dir__()
-    assert "api" in prompt.__dir__()
-    assert "api" in tools.__dir__()
+    assert tools.DeadlineExceededError is tool_errors.DeadlineExceededError
+    assert tools.ToolValidationError is tool_errors.ToolValidationError

@@ -32,7 +32,7 @@ from code_reviewer_example import (
     initialize_code_reviewer_runtime,
 )
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
-from weakincentives.adapters import PromptResponse
+from weakincentives.adapters.core import PromptResponse
 from weakincentives.adapters.core import (
     OptimizationResult,
     OptimizationScope,

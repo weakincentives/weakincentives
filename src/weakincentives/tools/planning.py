@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Final, Literal, cast, override
 
-from ..prompt import SupportsDataclass, SupportsToolResult
+from ..prompt._types import SupportsDataclass, SupportsToolResult
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult

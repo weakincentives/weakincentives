@@ -10,29 +10,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tools namespace exposing the :mod:`weakincentives.tools.api` surface."""
+"""Tools namespace."""
 
 # pyright: reportImportCycles=false
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from . import asteval, digests, errors, planning, podman, subagents, vfs
+from .errors import DeadlineExceededError, ToolValidationError
 
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
-
-api: object | None = None
-
-__all__ = ["api"]
-
-
-def __getattr__(name: str) -> object:
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
+__all__ = [
+    "DeadlineExceededError",
+    "ToolValidationError",
+    "asteval",
+    "digests",
+    "errors",
+    "planning",
+    "podman",
+    "subagents",
+    "vfs",
+]
 
 
 def __dir__() -> list[str]:

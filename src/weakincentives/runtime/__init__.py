@@ -10,29 +10,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Runtime namespace exposing the :mod:`weakincentives.runtime.api` surface."""
+"""Runtime namespace."""
 
 # pyright: reportImportCycles=false
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from .logging import StructuredLogger, configure_logging, get_logger
 
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
-
-api: object | None = None
-
-__all__ = ["api"]
-
-
-def __getattr__(name: str) -> object:
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
+__all__ = [
+    "StructuredLogger",
+    "configure_logging",
+    "events",
+    "get_logger",
+    "logging",
+    "session",
+]
 
 
 def __dir__() -> list[str]:

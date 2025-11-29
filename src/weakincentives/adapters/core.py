@@ -21,8 +21,8 @@ from enum import StrEnum
 from typing import Any, Literal, TypeVar, cast
 
 from ..deadlines import Deadline
-from ..prompt import MarkdownSection
 from ..prompt._types import SupportsDataclass
+from ..prompt.markdown import MarkdownSection
 from ..prompt.overrides import PromptLike, PromptOverridesStore
 from ..prompt.prompt import Prompt
 from ..prompt.section import Section

@@ -216,7 +216,7 @@ This keeps the final prompt readable and the output contract easy to discover pr
 
 ```python
 from dataclasses import dataclass
-from weakincentives.api import MarkdownSection, Prompt, parse_structured_output
+from weakincentives.prompt import MarkdownSection, Prompt, parse_structured_output
 
 # 1) Declare the output type as a dataclass
 @dataclass

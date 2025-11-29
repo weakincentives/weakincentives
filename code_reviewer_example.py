@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-from weakincentives.adapters import PromptResponse
+from weakincentives.adapters.core import PromptResponse
 from weakincentives.adapters.core import OptimizationScope, ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.debug import dump_session

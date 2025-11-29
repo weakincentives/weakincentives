@@ -21,15 +21,13 @@ from typing import Any, Literal, TypeVar, cast
 
 import pytest
 
-from weakincentives.adapters import (
-    LITELLM_ADAPTER_NAME,
-    PromptEvaluationError,
-    PromptResponse,
-    shared,
-)
+from weakincentives.adapters import shared
+from weakincentives.adapters._names import LITELLM_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
+    PromptEvaluationError,
+    PromptResponse,
     ProviderAdapter,
     SessionProtocol,
 )

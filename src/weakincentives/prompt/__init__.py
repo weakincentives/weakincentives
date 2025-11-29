@@ -10,27 +10,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt namespace exposing the :mod:`weakincentives.prompt.api` surface."""
+"""Prompt namespace."""
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from .markdown import MarkdownSection
+from .prompt import Prompt
+from .structured_output import OutputParseError, StructuredOutputConfig, parse_structured_output
+from .tool import Tool, ToolContext, ToolExample, ToolHandler
+from .tool_result import ToolResult
 
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
-
-api: object | None = None
-
-__all__ = ["api"]
-
-
-def __getattr__(name: str) -> object:
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
+__all__ = [
+    "MarkdownSection",
+    "OutputParseError",
+    "Prompt",
+    "StructuredOutputConfig",
+    "Tool",
+    "ToolContext",
+    "ToolExample",
+    "ToolHandler",
+    "ToolResult",
+    "parse_structured_output",
+]
 
 
 def __dir__() -> list[str]:
