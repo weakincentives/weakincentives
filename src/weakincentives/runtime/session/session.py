@@ -104,15 +104,15 @@ class _ReducerRegistration:
     slice_type: SessionSliceType
 
 
-def _session_id_is_well_formed(session: "Session") -> bool:  # noqa: UP037
+def _session_id_is_well_formed(session: Session) -> bool:
     return len(session.session_id.bytes) == 16
 
 
-def _created_at_has_tz(session: "Session") -> bool:  # noqa: UP037
+def _created_at_has_tz(session: Session) -> bool:
     return session.created_at.tzinfo is not None
 
 
-def _created_at_is_utc(session: "Session") -> bool:  # noqa: UP037
+def _created_at_is_utc(session: Session) -> bool:
     return session.created_at.tzinfo == UTC
 
 
