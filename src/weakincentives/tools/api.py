@@ -10,14 +10,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Public surface for built-in tool suites."""
+"""Public surface for built-in tool suites.
+
+Podman support is optional; install ``weakincentives[podman]`` to enable the
+sandbox types exported below. The symbols are always present for import and type
+checking, but resolve to ``None`` at runtime when the optional dependency is
+missing.
+"""
 
 # pyright: reportImportCycles=false
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from .asteval import (
     AstevalSection,
@@ -66,6 +71,22 @@ if TYPE_CHECKING:
         PodmanShellResult,
         PodmanWorkspace,
     )
+else:
+    try:
+        from .podman import (
+            PodmanSandboxConfig,
+            PodmanSandboxSection,
+            PodmanShellParams,
+            PodmanShellResult,
+            PodmanWorkspace,
+        )
+    except ImportError:
+        PodmanSandboxConfig = cast(type[Any], None)
+        PodmanSandboxSection = cast(type[Any], None)
+        PodmanShellParams = cast(type[Any], None)
+        PodmanShellResult = cast(type[Any], None)
+        PodmanWorkspace = cast(type[Any], None)
+
 from .vfs import (
     DeleteEntry,
     EditFileParams,
@@ -149,22 +170,3 @@ __all__ = [
     "latest_workspace_digest",
     "set_workspace_digest",
 ]
-
-_PODMAN_EXPORTS = {
-    "PodmanSandboxConfig",
-    "PodmanShellParams",
-    "PodmanShellResult",
-    "PodmanSandboxSection",
-    "PodmanWorkspace",
-}
-_TOOLS_PACKAGE = __name__.rsplit(".", maxsplit=1)[0]
-
-
-def __getattr__(name: str) -> object:
-    if name in _PODMAN_EXPORTS:
-        module = import_module(f"{_TOOLS_PACKAGE}.podman")
-        value = getattr(module, name)
-        globals()[name] = value
-        return value
-    msg = f"module {__name__!r} has no attribute {name!r}"
-    raise AttributeError(msg)

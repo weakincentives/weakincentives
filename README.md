@@ -162,8 +162,7 @@ Here, we create a main prompt that includes:
 
 ```python
 from weakincentives.api import MarkdownSection, Prompt
-from weakincentives.tools.planning import PlanningToolsSection
-from weakincentives.tools.vfs import VfsToolsSection
+from weakincentives.tools import PlanningToolsSection, VfsToolsSection
 
 # Sections are reusable components for building prompts.
 guidance_section = MarkdownSection(...)
@@ -192,7 +191,7 @@ This "prompt as code" approach makes our agent's logic modular, reusable, and ea
 To let the agent review code, we need to give it access to the files. But we don't want it to have unrestricted access to the host machine. The `VfsToolsSection` provides a sandboxed in-memory filesystem. We can `mount` a real directory into this virtual workspace.
 
 ```python
-from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
+from weakincentives.tools import HostMount, VfsPath, VfsToolsSection
 
 # Mount the 'sunfish' test repository into the agent's virtual workspace.
 # The agent will see it at the path 'sunfish/'.
@@ -219,8 +218,7 @@ With the prompt defined, we need a `Session` to track state and an `Adapter` to 
 The `Session` is a central state store. All events, like tool calls and prompt evaluations, are recorded in the session. This makes the agent's execution fully observable and replayable.
 
 ```python
-from weakincentives.runtime.session import Session
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime import InProcessEventBus, Session
 from weakincentives.adapters.openai import OpenAIAdapter
 
 # The event bus allows us to listen to events from the session.
@@ -251,8 +249,8 @@ If the model's output doesn't match our `ReviewResponse` dataclass, the adapter 
 Because every action is tracked in the `Session`, we can inspect the agent's state at any time. For example, we can retrieve the final plan the agent came up with.
 
 ```python
-from weakincentives.runtime.session import select_latest
-from weakincentives.tools.planning import Plan
+from weakincentives.runtime import select_latest
+from weakincentives.tools import Plan
 
 # Select the latest plan from the session state.
 latest_plan = select_latest(session, Plan)

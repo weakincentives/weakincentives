@@ -16,23 +16,127 @@
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from . import api
+from .api import (
+    AddStep,
+    AstevalSection,
+    ClearPlan,
+    DeadlineExceededError,
+    DeleteEntry,
+    DispatchSubagentsParams,
+    EditFileParams,
+    EvalFileRead,
+    EvalFileWrite,
+    EvalParams,
+    EvalResult,
+    FileInfo,
+    GlobMatch,
+    GlobParams,
+    GrepMatch,
+    GrepParams,
+    HostMount,
+    ListDirectory,
+    ListDirectoryParams,
+    ListDirectoryResult,
+    MarkStep,
+    NewPlanStep,
+    Plan,
+    PlanStatus,
+    PlanStep,
+    PlanningStrategy,
+    PlanningToolsSection,
+    PodmanSandboxConfig,
+    PodmanSandboxSection,
+    PodmanShellParams,
+    PodmanShellResult,
+    PodmanWorkspace,
+    ReadFile,
+    ReadFileParams,
+    ReadFileResult,
+    ReadPlan,
+    RemoveParams,
+    SetupPlan,
+    StepStatus,
+    SubagentIsolationLevel,
+    SubagentResult,
+    SubagentsSection,
+    ToolValidationError,
+    UpdateStep,
+    VfsFile,
+    VfsPath,
+    VfsToolsSection,
+    VirtualFileSystem,
+    WorkspaceDigest,
+    WorkspaceDigestSection,
+    WriteFile,
+    WriteFileParams,
+    build_dispatch_subagents_tool,
+    clear_workspace_digest,
+    dispatch_subagents,
+    latest_workspace_digest,
+    set_workspace_digest,
+)
 
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
-
-api: object | None = None
-
-__all__ = ["api"]
-
-
-def __getattr__(name: str) -> object:
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
+__all__ = [
+    "AddStep",
+    "AstevalSection",
+    "ClearPlan",
+    "DeadlineExceededError",
+    "DeleteEntry",
+    "DispatchSubagentsParams",
+    "EditFileParams",
+    "EvalFileRead",
+    "EvalFileWrite",
+    "EvalParams",
+    "EvalResult",
+    "FileInfo",
+    "GlobMatch",
+    "GlobParams",
+    "GrepMatch",
+    "GrepParams",
+    "HostMount",
+    "ListDirectory",
+    "ListDirectoryParams",
+    "ListDirectoryResult",
+    "MarkStep",
+    "NewPlanStep",
+    "Plan",
+    "PlanStatus",
+    "PlanStep",
+    "PlanningStrategy",
+    "PlanningToolsSection",
+    "PodmanSandboxConfig",
+    "PodmanSandboxSection",
+    "PodmanShellParams",
+    "PodmanShellResult",
+    "PodmanWorkspace",
+    "ReadFile",
+    "ReadFileParams",
+    "ReadFileResult",
+    "ReadPlan",
+    "RemoveParams",
+    "SetupPlan",
+    "StepStatus",
+    "SubagentIsolationLevel",
+    "SubagentResult",
+    "SubagentsSection",
+    "ToolValidationError",
+    "UpdateStep",
+    "VfsFile",
+    "VfsPath",
+    "VfsToolsSection",
+    "VirtualFileSystem",
+    "WorkspaceDigest",
+    "WorkspaceDigestSection",
+    "WriteFile",
+    "WriteFileParams",
+    "api",
+    "build_dispatch_subagents_tool",
+    "clear_workspace_digest",
+    "dispatch_subagents",
+    "latest_workspace_digest",
+    "set_workspace_digest",
+]
 
 
 def __dir__() -> list[str]:

@@ -16,23 +16,73 @@
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import TYPE_CHECKING
+from . import api
+from .api import (
+    DataEvent,
+    EventBus,
+    HandlerFailure,
+    InProcessEventBus,
+    PromptExecuted,
+    PublishResult,
+    ReducerContext,
+    ReducerContextProtocol,
+    ReducerEvent,
+    ReducerEventWithValue,
+    Session,
+    SessionProtocol,
+    Snapshot,
+    SnapshotProtocol,
+    SnapshotRestoreError,
+    SnapshotSerializationError,
+    StructuredLogger,
+    ToolInvoked,
+    TypedReducer,
+    append,
+    build_reducer_context,
+    configure_logging,
+    events,
+    get_logger,
+    replace_latest,
+    select_all,
+    select_latest,
+    select_where,
+    session,
+    upsert_by,
+)
 
-if TYPE_CHECKING:
-    from .api import *  # noqa: F403
-
-api: object | None = None
-
-__all__ = ["api"]
-
-
-def __getattr__(name: str) -> object:
-    module = globals().get("api")
-    if module is None:
-        module = import_module(f"{__name__}.api")
-        globals()["api"] = module
-    return getattr(module, name)
+__all__ = [
+    "DataEvent",
+    "EventBus",
+    "HandlerFailure",
+    "InProcessEventBus",
+    "PromptExecuted",
+    "PublishResult",
+    "ReducerContext",
+    "ReducerContextProtocol",
+    "ReducerEvent",
+    "ReducerEventWithValue",
+    "Session",
+    "SessionProtocol",
+    "Snapshot",
+    "SnapshotProtocol",
+    "SnapshotRestoreError",
+    "SnapshotSerializationError",
+    "StructuredLogger",
+    "ToolInvoked",
+    "TypedReducer",
+    "api",
+    "append",
+    "build_reducer_context",
+    "configure_logging",
+    "events",
+    "get_logger",
+    "replace_latest",
+    "select_all",
+    "select_latest",
+    "select_where",
+    "session",
+    "upsert_by",
+]
 
 
 def __dir__() -> list[str]:
