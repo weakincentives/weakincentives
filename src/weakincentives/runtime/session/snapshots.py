@@ -43,6 +43,22 @@ class SnapshotRestoreError(RuntimeError):
     """Raised when snapshot restoration fails due to incompatible payloads."""
 
 
+@dataclass(slots=True, frozen=True)
+class SnapshotDocument:
+    """Parsed snapshot document with lazy dataclass restoration."""
+
+    payload: "SnapshotPayload"
+
+    @classmethod
+    def from_json(cls, raw: str) -> "SnapshotDocument":
+        return cls(payload=SnapshotPayload.from_json(raw))
+
+    def restore(self) -> "Snapshot":
+        """Restore dataclass instances contained in the snapshot."""
+
+        return _restore_snapshot_from_payload(self.payload)
+
+
 def _normalize_tags(
     tags: Mapping[object, object] | None, *, error_cls: type[Exception]
 ) -> Mapping[str, str]:
@@ -384,57 +400,58 @@ class Snapshot:
     def from_json(cls, raw: str) -> Snapshot:
         """Deserialize a snapshot from its JSON representation."""
 
-        payload = SnapshotPayload.from_json(raw)
+        document = SnapshotDocument.from_json(raw)
+        return document.restore()
 
-        _validate_schema_version(payload.version)
 
-        try:
-            created_at = datetime.fromisoformat(payload.created_at)
-        except ValueError as error:
-            raise SnapshotRestoreError("Invalid created_at timestamp") from error
+def _restore_snapshot_from_payload(payload: SnapshotPayload) -> Snapshot:
+    _validate_schema_version(payload.version)
 
-        try:
-            parent_id = (
-                UUID(payload.parent_id) if payload.parent_id is not None else None
-            )
-        except ValueError as error:
-            raise SnapshotRestoreError("Invalid parent_id") from error
+    try:
+        created_at = datetime.fromisoformat(payload.created_at)
+    except ValueError as error:
+        raise SnapshotRestoreError("Invalid created_at timestamp") from error
 
-        try:
-            children_ids = tuple(UUID(value) for value in payload.children_ids)
-        except ValueError as error:
-            raise SnapshotRestoreError("Invalid children_ids entry") from error
+    try:
+        parent_id = UUID(payload.parent_id) if payload.parent_id is not None else None
+    except ValueError as error:
+        raise SnapshotRestoreError("Invalid parent_id") from error
 
-        restored: dict[SessionSliceType, SessionSlice] = {}
-        for entry in payload.slices:
-            slice_type_candidate = _resolve_type(entry.slice_type)
-            item_type_candidate = _resolve_type(entry.item_type)
+    try:
+        children_ids = tuple(UUID(value) for value in payload.children_ids)
+    except ValueError as error:
+        raise SnapshotRestoreError("Invalid children_ids entry") from error
 
-            if not _is_dataclass_type(slice_type_candidate) or not _is_dataclass_type(
-                item_type_candidate
-            ):
-                raise SnapshotRestoreError("Snapshot types must be dataclasses")
+    restored: dict[SessionSliceType, SessionSlice] = {}
+    for entry in payload.slices:
+        slice_type_candidate = _resolve_type(entry.slice_type)
+        item_type_candidate = _resolve_type(entry.item_type)
 
-            slice_type = slice_type_candidate
-            item_type = item_type_candidate
+        if not _is_dataclass_type(slice_type_candidate) or not _is_dataclass_type(
+            item_type_candidate
+        ):
+            raise SnapshotRestoreError("Snapshot types must be dataclasses")
 
-            restored_items: list[SupportsDataclass] = []
-            for item_mapping in entry.items:
-                try:
-                    restored_item = parse(item_type, item_mapping)
-                except Exception as error:
-                    raise SnapshotRestoreError(
-                        f"Failed to restore slice {slice_type.__qualname__}"
-                    ) from error
-                else:
-                    restored_items.append(restored_item)
+        slice_type = slice_type_candidate
+        item_type = item_type_candidate
 
-            restored[slice_type] = tuple(restored_items)
+        restored_items: list[SupportsDataclass] = []
+        for item_mapping in entry.items:
+            try:
+                restored_item = parse(item_type, item_mapping)
+            except Exception as error:
+                raise SnapshotRestoreError(
+                    f"Failed to restore slice {slice_type.__qualname__}"
+                ) from error
+            else:
+                restored_items.append(restored_item)
 
-        return cls(
-            created_at=_ensure_timezone(created_at),
-            parent_id=parent_id,
-            children_ids=children_ids,
-            slices=restored,
-            tags=payload.tags,
-        )
+        restored[slice_type] = tuple(restored_items)
+
+    return Snapshot(
+        created_at=_ensure_timezone(created_at),
+        parent_id=parent_id,
+        children_ids=children_ids,
+        slices=restored,
+        tags=payload.tags,
+    )

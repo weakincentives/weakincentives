@@ -26,6 +26,7 @@ import pytest
 from weakincentives.runtime.session import snapshots
 from weakincentives.runtime.session.snapshots import (
     Snapshot,
+    SnapshotDocument,
     SnapshotRestoreError,
     SnapshotSerializationError,
     SnapshotState,
@@ -158,6 +159,37 @@ def test_snapshot_serializes_relationship_metadata() -> None:
 
     assert restored.parent_id == parent_id
     assert restored.children_ids == (child_one, child_two)
+
+
+def test_snapshot_document_restores_snapshot() -> None:
+    payload = make_snapshot_payload()
+    document = snapshots.SnapshotDocument.from_json(json.dumps(payload))
+
+    restored = document.restore()
+
+    assert restored.slices[SnapshotItem] == (SnapshotItem(1),)
+
+
+def test_snapshot_document_defers_dataclass_resolution() -> None:
+    payload = {
+        "version": "1",
+        "created_at": datetime.now(UTC).isoformat(),
+        "slices": [
+            {
+                "slice_type": "__main__:UnknownSnapshotSlice",
+                "item_type": "__main__:UnknownSnapshotSlice",
+                "items": [{"value": "one"}],
+            }
+        ],
+        "tags": {"session_id": "lazy"},
+    }
+
+    document = snapshots.SnapshotDocument.from_json(json.dumps(payload))
+
+    assert document.payload.slices[0].slice_type == "__main__:UnknownSnapshotSlice"
+
+    with pytest.raises(SnapshotRestoreError):
+        document.restore()
 
 
 def test_snapshot_to_json_surfaces_serialization_errors(

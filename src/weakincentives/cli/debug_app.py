@@ -36,7 +36,7 @@ from markdown_it import MarkdownIt
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.snapshots import (
     Snapshot,
-    SnapshotPayload,
+    SnapshotDocument,
     SnapshotRestoreError,
     SnapshotSlicePayload,
 )
@@ -126,6 +126,10 @@ class LoadedSnapshot:
     raw_payload: Mapping[str, JSONValue]
     raw_text: str
     path: Path
+    document: SnapshotDocument
+
+    def restore(self) -> Snapshot:
+        return self.document.restore()
 
 
 SnapshotLoader = Callable[[Path], tuple[LoadedSnapshot, ...]]
@@ -190,47 +194,31 @@ def _load_snapshot_line(
     snapshot_path: Path,
 ) -> LoadedSnapshot:
     try:
-        payload = SnapshotPayload.from_json(line)
+        document = SnapshotDocument.from_json(line)
     except SnapshotRestoreError as error:
         msg = f"Invalid snapshot at line {line_number}: {error}"
         raise SnapshotLoadError(msg) from error
-
-    validation_error: str | None = None
-    try:
-        _ = Snapshot.from_json(line)
-    except SnapshotRestoreError as error:
-        validation_error = str(error)
-        logger.warning(
-            "Snapshot validation failed",
-            event="wink.debug.snapshot_error",
-            context={
-                "path": str(snapshot_path),
-                "line_number": line_number,
-                "error": validation_error,
-            },
-        )
 
     raw_payload = MappingProxyType(
         json.loads(line, object_pairs_hook=dict),
     )
 
-    slices = _slice_lookup(payload.slices)
-    summaries = _summaries_from_slices(payload.slices)
+    slices = _slice_lookup(document.payload.slices)
+    summaries = _summaries_from_slices(document.payload.slices)
 
-    session_id = payload.tags.get("session_id")
+    session_id = document.payload.tags.get("session_id")
     if not isinstance(session_id, str) or not session_id:
         msg = f"Snapshot is missing a session_id tag at line {line_number}"
         raise SnapshotLoadError(msg)
 
     meta = SnapshotMeta(
-        version=payload.version,
-        created_at=payload.created_at,
+        version=document.payload.version,
+        created_at=document.payload.created_at,
         path=str(snapshot_path),
         session_id=session_id,
         line_number=line_number,
         slices=tuple(summaries),
-        tags=payload.tags,
-        validation_error=validation_error,
+        tags=document.payload.tags,
     )
 
     return LoadedSnapshot(
@@ -239,6 +227,7 @@ def _load_snapshot_line(
         raw_payload=raw_payload,
         raw_text=line,
         path=snapshot_path,
+        document=document,
     )
 
 
@@ -279,6 +268,9 @@ class SnapshotStore:
     @property
     def entries(self) -> tuple[LoadedSnapshot, ...]:
         return self._entries
+
+    def snapshot(self) -> Snapshot:
+        return self._current.restore()
 
     def list_snapshots(self) -> list[Mapping[str, JSONValue]]:
         snapshots: list[tuple[float, Path]] = []
