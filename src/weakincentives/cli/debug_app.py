@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from types import MappingProxyType
-from typing import cast
+from typing import Annotated, cast
 from urllib.parse import unquote
 
 import uvicorn
@@ -475,8 +475,8 @@ class _DebugAppHandlers:
         self,
         encoded_slice_type: str,
         *,
-        offset: int = Query(0, ge=0),  # pyright: ignore[reportCallInDefaultInitializer]
-        limit: int | None = Query(None, ge=0),  # pyright: ignore[reportCallInDefaultInitializer]
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=0)] = None,
     ) -> Mapping[str, JSONValue]:
         slice_items = self._slice_items(encoded_slice_type)
         items = self._paginate_items(

@@ -168,6 +168,43 @@ def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
     assert raw["slices"][0]["items"][0]["value"] == "b"
 
 
+def test_slice_pagination_with_query_params(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={
+            _ExampleSlice: tuple(
+                _ExampleSlice(value) for value in ("zero", "one", "two", "three")
+            )
+        },
+        tags={"session_id": "paginate"},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+
+    logger = debug_app.get_logger("test.pagination")
+    store = debug_app.SnapshotStore(
+        snapshot_path, loader=debug_app.load_snapshot, logger=logger
+    )
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
+
+    default_items = client.get(f"/api/slices/{quote(slice_type)}").json()["items"]
+    assert [item["value"] for item in default_items] == [
+        "zero",
+        "one",
+        "two",
+        "three",
+    ]
+
+    paginated_items = client.get(
+        f"/api/slices/{quote(slice_type)}", params={"offset": 1, "limit": 2}
+    ).json()["items"]
+
+    assert [item["value"] for item in paginated_items] == ["one", "two"]
+
+
 def test_reload_endpoint_replaces_snapshot(tmp_path: Path) -> None:
     snapshot_path = tmp_path / "snapshot.jsonl"
     _write_snapshot(snapshot_path, ["one"])
