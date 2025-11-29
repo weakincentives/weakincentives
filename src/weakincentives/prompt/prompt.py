@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import is_dataclass
 from typing import (
     TYPE_CHECKING,
@@ -26,9 +26,8 @@ from typing import (
 
 from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
-from .chapter import Chapter, ChaptersExpansionPolicy
 from .errors import PromptValidationError, SectionPath
-from .registry import PromptRegistry, RegistrySnapshot, SectionNode, clone_dataclass
+from .registry import PromptRegistry, RegistrySnapshot, SectionNode
 from .rendering import PromptRenderer, RenderedPrompt
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
@@ -81,7 +80,6 @@ class Prompt[OutputT]:
         key: str,
         name: str | None = None,
         sections: Sequence[Section[SupportsDataclass]] | None = None,
-        chapters: Sequence[Chapter[SupportsDataclass]] | None = None,
         inject_output_instructions: bool = True,
         allow_extra_keys: bool = False,
     ) -> None:
@@ -101,21 +99,6 @@ class Prompt[OutputT]:
         self._registry = PromptRegistry()
         self.placeholders: dict[SectionPath, set[str]] = {}
         self._allow_extra_keys_requested = allow_extra_keys
-
-        seen_chapter_keys: set[str] = set()
-        provided_chapters = tuple(chapters or ())
-        for chapter in provided_chapters:
-            if chapter.key in seen_chapter_keys:
-                raise PromptValidationError(
-                    "Prompt chapters must use unique keys.",
-                    section_path=(chapter.key,),
-                )
-            seen_chapter_keys.add(chapter.key)
-        self._chapters: tuple[Chapter[SupportsDataclass], ...] = provided_chapters
-        self._chapter_key_registry: dict[str, Chapter[SupportsDataclass]] = {
-            chapter.key: chapter for chapter in self._chapters
-        }
-        self._chapter_expansion_enabled = bool(self._chapters)
 
         self._structured_output: StructuredOutputConfig[SupportsDataclass] | None
         self._structured_output = self._resolve_output_spec(allow_extra_keys)
@@ -198,10 +181,6 @@ class Prompt[OutputT]:
 
         return self._structured_output
 
-    @property
-    def chapters(self) -> tuple[Chapter[SupportsDataclass], ...]:
-        return self._chapters
-
     def find_section(
         self,
         selector: type[Section[SupportsDataclass]]
@@ -223,110 +202,6 @@ class Prompt[OutputT]:
         raise KeyError(
             f"Section matching {candidates!r} not found in prompt {self.ns}:{self.key}."
         )
-
-    def expand_chapters(
-        self,
-        policy: ChaptersExpansionPolicy,
-        *,
-        chapter_params: Mapping[str, SupportsDataclass | None] | None = None,
-    ) -> Prompt[OutputT]:
-        """Return a prompt snapshot with chapters opened per the supplied policy."""
-
-        if not self._chapters or not self._chapter_expansion_enabled:
-            return self
-
-        if policy is ChaptersExpansionPolicy.ALL_INCLUDED:
-            return self._expand_chapters_all_included(
-                chapter_params=chapter_params or {}
-            )
-
-        raise NotImplementedError(
-            f"Chapters expansion policy '{policy.value}' is not supported."
-        )
-
-    def _expand_chapters_all_included(
-        self,
-        *,
-        chapter_params: Mapping[str, SupportsDataclass | None],
-    ) -> Prompt[OutputT]:
-        provided_lookup = dict(chapter_params)
-        unknown_keys = set(provided_lookup) - set(self._chapter_key_registry.keys())
-        if unknown_keys:
-            unknown_key = sorted(unknown_keys)[0]
-            raise PromptValidationError(
-                "Chapter parameters reference unknown chapter key.",
-                section_path=(unknown_key,),
-            )
-
-        open_sections: list[Section[SupportsDataclass]] = list(self._base_sections)
-
-        for chapter in self._chapters:
-            key_present = chapter.key in provided_lookup
-            params = provided_lookup.get(chapter.key)
-            if key_present:
-                params = self._normalize_chapter_params(chapter, params)
-            elif chapter.default_params is not None:
-                params = clone_dataclass(chapter.default_params)
-            should_open = True
-
-            if chapter.enabled is not None:
-                if params is None and chapter.param_type is not None:
-                    raise PromptValidationError(
-                        "Chapter requires parameters for enabled predicate.",
-                        section_path=(chapter.key,),
-                        dataclass_type=chapter.param_type,
-                    )
-                try:
-                    enabled = chapter.is_enabled(params)
-                except Exception as error:
-                    raise PromptValidationError(
-                        "Chapter enabled predicate failed.",
-                        section_path=(chapter.key,),
-                        dataclass_type=chapter.param_type,
-                    ) from error
-                if not enabled:
-                    should_open = False
-
-            if not should_open:
-                continue
-
-            open_sections.extend(chapter.sections)
-
-        prompt_cls = type(self)
-
-        expanded = prompt_cls(
-            ns=self.ns,
-            key=self.key,
-            name=self.name,
-            sections=open_sections,
-            chapters=self._chapters,
-            inject_output_instructions=self.inject_output_instructions,
-            allow_extra_keys=self._allow_extra_keys_requested,
-        )
-        expanded._chapter_expansion_enabled = False
-        return expanded
-
-    def _normalize_chapter_params(
-        self,
-        chapter: Chapter[SupportsDataclass],
-        params: SupportsDataclass | None,
-    ) -> SupportsDataclass | None:
-        params_type = chapter.param_type
-        if params_type is None:
-            if params is not None:
-                raise PromptValidationError(
-                    "Chapter does not accept parameters.",
-                    section_path=(chapter.key,),
-                )
-            return None
-
-        if params is None:
-            raise PromptValidationError(
-                "Chapter requires parameters.",
-                section_path=(chapter.key,),
-                dataclass_type=params_type,
-            )
-        return params
 
     def _resolve_output_spec(
         self, allow_extra_keys: bool

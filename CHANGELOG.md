@@ -23,6 +23,8 @@ Release highlights for weakincentives.
 - Prompt render/execution events include the prompt descriptor, clone methods
   return `Self` for stricter typing, and `OptimizationScope` is now a `StrEnum`
   (update any comparisons against the enum values).
+- Removed the prompt chapter abstraction; prompts now compose sections only and
+  chapter-focused specs and tests have been removed.
 
 ### Tools, VFS & Sandboxes
 
@@ -72,7 +74,7 @@ Release highlights for weakincentives.
 - Added an OpenAI Responses API migration guide, a snapshot explorer walkthrough,
   and refreshed AGENTS/session hierarchy guidance.
 - Clarified specs for throttling, deadlines, planning strategies/tools, prompts,
-  overrides, chapters, adapters, logging, structured output, VFS, Podman
+  overrides, adapters, logging, structured output, VFS, Podman
   sandboxing, and related design rationales.
 
 ## v0.10.0 - 2025-11-22
@@ -88,8 +90,8 @@ Release highlights for weakincentives.
 - Rendered prompts now include hierarchical numbering (with punctuation) on
   section headings and descriptors so multi-section outputs remain readable and
   traceable.
-- Prompts, chapters, and sections have explicit clone contracts that rebind to
-  new sessions and event buses, keeping reusable prompt trees isolated.
+- Prompts and sections have explicit clone contracts that rebind to new sessions
+  and event buses, keeping reusable prompt trees isolated.
 - The prompt overrides store protocol is unified and re-exported through the
   versioned overrides module so custom stores and adapters target the same
   interface.
@@ -228,8 +230,8 @@ Release highlights for weakincentives.
 
 ### Prompt Authoring & Subagents
 
-- Parameterless prompts, sections, and chapters now accept zero-argument
-  `enabled` callables, keeping declarative gating logic concise.
+- Parameterless prompts and sections now accept zero-argument `enabled`
+  callables, keeping declarative gating logic concise.
 - The subagent dispatch tool gained explicit isolation levels that can clone
   sessions and event buses per delegation when sandboxing is required.
 - Centralized structured output payload parsing into shared helpers used by the

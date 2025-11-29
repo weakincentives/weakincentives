@@ -22,7 +22,6 @@ from .inspection import (
 from .local_store import LocalPromptOverridesStore
 from .validation import filter_override_for_descriptor
 from .versioning import (
-    ChapterDescriptor,
     HexDigest,
     PromptDescriptor,
     PromptLike,
@@ -39,7 +38,6 @@ from .versioning import (
 )
 
 __all__ = [
-    "ChapterDescriptor",
     "HexDigest",
     "LocalPromptOverridesStore",
     "OverrideFileMetadata",

@@ -39,7 +39,7 @@ removed.
    from `input`, so omit any top-level `modalities` parameter.
 1. **System and User Content**: Render prompt sections into a single markdown
    string inserted into the `input` array. Preserve the ordering of system and
-   user chapters; ensure assistant-prefill messages are encoded as
+   user content; ensure assistant-prefill messages are encoded as
    `{"role": "assistant", "content": ...}` entries inside `input` when
    necessary for guardrails.
 1. **Tools and Functions**: Map each registered tool definition into

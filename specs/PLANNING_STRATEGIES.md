@@ -34,7 +34,7 @@ the planning tools section of a prompt. They do **not**:
 
 - Alter the structure or schema of plan objects.
 - Change tool schemas or the routing logic for planning vs. direct tool calls.
-- Replace prompt sections outside the planning block (e.g., safety chapters,
+- Replace prompt sections outside the planning block (e.g., safety sections,
   workspace overviews, or structured output constraints).
 
 Use a strategy when you need to steer the model toward a specific workflow without
@@ -55,9 +55,8 @@ layout can support multiple reasoning flavours.
 
 - **Section entrypoint**: Strategies are selected via the `strategy` argument on
   `PlanningToolsSection` in `weakincentives.tools.planning.section`. The section
-  wiring and prompt assembly patterns live in `specs/PROMPTS_COMPOSITION.md` and
-  `specs/CHAPTERS.md`—reuse those patterns rather than inventing bespoke
-  templates.
+  wiring and prompt assembly patterns live in `specs/PROMPTS_COMPOSITION.md`—reuse
+  those patterns rather than inventing bespoke templates.
 - **Prompt templates**: The base planning copy currently mirrors the planning
   templates documented in `specs/PLANNING_TOOL.md` and the broader prompt
   conventions in `specs/PROMPTS.md`. When editing strategy text, cross-check the
@@ -129,7 +128,7 @@ following guidance:
   markdown with the examples in `specs/PLANNING_TOOL.md` to ensure the plan
   lifecycle remains aligned.
 - **Section ordering**: The planning section may appear alongside safety or
-  workspace context chapters. Strategies must not assume they are the first or
+  workspace context sections. Strategies must not assume they are the first or
   only instructions the model sees; avoid references like "above" or "previous"
   that depend on placement.
 - **Session constraints**: Some orchestration flows may disable planning tools in

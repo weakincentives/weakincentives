@@ -30,17 +30,17 @@ contracts, and observable workflows:
   [Virtual Filesystem Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/VFS_TOOLS.md),
   and [Asteval Integration](https://github.com/weakincentives/weakincentives/blob/main/specs/ASTEVAL.md).
 - **Composable prompt blueprints with typed contracts.** Prompts are built from
-  reusable sections and chapters backed by dataclasses, so composition and
-  parameter binding feel like standard software engineering instead of string
-  concatenation. Dataclass-backed sections compose into reusable blueprints that
-  render validated Markdown and expose tool contracts automatically. Specs:
+  reusable sections backed by dataclasses, so composition and parameter binding
+  feel like standard software engineering instead of string concatenation.
+  Dataclass-backed sections compose into reusable blueprints that render
+  validated Markdown and expose tool contracts automatically. Specs:
   [Prompt Overview](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS.md),
   [Prompt Composition](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS_COMPOSITION.md),
   and [Structured Output](https://github.com/weakincentives/weakincentives/blob/main/specs/STRUCTURED_OUTPUT.md).
-- **Integrated, hash-based prompt overrides.** `PromptDescriptor` content
-  hashes, tool contracts, and chapter descriptors ensure overrides only apply to
-  the intended section version while describing the declared chapter layout.
-  `LocalPromptOverridesStore` keeps the JSON artifacts in version control so
+- **Integrated, hash-based prompt overrides.** `PromptDescriptor` content hashes
+  and tool contracts ensure overrides only apply to the intended section
+  version. `LocalPromptOverridesStore` keeps the JSON artifacts in version
+  control so
   teams can collaborate without risking stale edits. Prompt definitions ship
   with hash-based descriptors and on-disk overrides that stay in sync through
   schema validation and Git-root discovery, laying the groundwork for iterative
