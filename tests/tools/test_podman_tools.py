@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -46,6 +46,7 @@ from weakincentives.tools import (
     GrepParams,
     HostMount,
     ListDirectoryParams,
+    PodmanSandboxConfig,
     PodmanSandboxSection,
     PodmanShellParams,
     PodmanShellResult,
@@ -231,19 +232,7 @@ def _make_section(
 ) -> PodmanSandboxSection:
     exec_runner = runner if runner is not None else _FakeCliRunner()
     allowed_roots = tuple(allowed_host_roots)
-    if auto_connect:
-        return PodmanSandboxSection(
-            session=session,
-            client_factory=lambda: client,
-            cache_dir=cache_dir,
-            base_environment={"PATH": "/usr/bin"},
-            connection_name=connection_name,
-            exec_runner=exec_runner,
-            mounts=mounts,
-            allowed_host_roots=allowed_roots,
-        )
-    return PodmanSandboxSection(
-        session=session,
+    base_config = PodmanSandboxConfig(
         client_factory=lambda: client,
         cache_dir=cache_dir,
         base_environment={"PATH": "/usr/bin"},
@@ -251,9 +240,15 @@ def _make_section(
         exec_runner=exec_runner,
         mounts=mounts,
         allowed_host_roots=allowed_roots,
+    )
+    if auto_connect:
+        return PodmanSandboxSection(session=session, config=base_config)
+    configured = replace(
+        base_config,
         base_url="ssh://example",
         identity="/tmp/identity",
     )
+    return PodmanSandboxSection(session=session, config=configured)
 
 
 def _setup_host_mount(
@@ -508,9 +503,7 @@ def test_copy_mount_respects_include_glob(tmp_path: Path) -> None:
     resolved, file_path, overlay = _prepare_resolved_mount(
         tmp_path, include_glob=("*.py",)
     )
-    dummy_section = cast(podman_module.PodmanSandboxSection, SimpleNamespace())
     podman_module.PodmanSandboxSection._copy_mount_into_overlay(
-        dummy_section,
         overlay=overlay,
         mount=resolved,
     )
@@ -522,9 +515,7 @@ def test_copy_mount_respects_exclude_glob(tmp_path: Path) -> None:
     resolved, file_path, overlay = _prepare_resolved_mount(
         tmp_path, exclude_glob=("*.txt",)
     )
-    dummy_section = cast(podman_module.PodmanSandboxSection, SimpleNamespace())
     podman_module.PodmanSandboxSection._copy_mount_into_overlay(
-        dummy_section,
         overlay=overlay,
         mount=resolved,
     )
@@ -545,9 +536,7 @@ def test_copy_mount_stat_failure_raises(
 
     monkeypatch.setattr(Path, "stat", _raise)
     with pytest.raises(ToolValidationError):
-        dummy_section = cast(podman_module.PodmanSandboxSection, SimpleNamespace())
         podman_module.PodmanSandboxSection._copy_mount_into_overlay(
-            dummy_section,
             overlay=overlay,
             mount=resolved,
         )
@@ -556,9 +545,7 @@ def test_copy_mount_stat_failure_raises(
 def test_copy_mount_max_bytes_guard(tmp_path: Path) -> None:
     resolved, _file_path, overlay = _prepare_resolved_mount(tmp_path, max_bytes=1)
     with pytest.raises(ToolValidationError):
-        dummy_section = cast(podman_module.PodmanSandboxSection, SimpleNamespace())
         podman_module.PodmanSandboxSection._copy_mount_into_overlay(
-            dummy_section,
             overlay=overlay,
             mount=resolved,
         )
@@ -788,10 +775,12 @@ def test_section_auto_resolves_connection(
 
     section = PodmanSandboxSection(
         session=session,
-        cache_dir=tmp_path,
-        client_factory=lambda: client,
-        base_environment={"PATH": "/usr/bin"},
-        exec_runner=cli_runner,
+        config=PodmanSandboxConfig(
+            cache_dir=tmp_path,
+            client_factory=lambda: client,
+            base_environment={"PATH": "/usr/bin"},
+            exec_runner=cli_runner,
+        ),
     )
     handler = find_tool(section, "shell_execute").handler
     assert handler is not None
@@ -1039,10 +1028,12 @@ def test_section_requires_connection_when_detection_fails(
     with pytest.raises(ToolValidationError):
         PodmanSandboxSection(
             session=session,
-            cache_dir=tmp_path,
-            client_factory=lambda: client,
-            base_environment={"PATH": "/usr/bin"},
-            exec_runner=_FakeCliRunner(),
+            config=PodmanSandboxConfig(
+                cache_dir=tmp_path,
+                client_factory=lambda: client,
+                base_environment={"PATH": "/usr/bin"},
+                exec_runner=_FakeCliRunner(),
+            ),
         )
 
 
@@ -1952,18 +1943,17 @@ def test_write_via_container_appends_existing_content(
     cp_payloads: list[str] = []
 
     def _fake_exec(
-        self: PodmanSandboxSection,
-        *,
-        command: Sequence[str],
-        stdin: str | None = None,
-        cwd: str | None = None,
-        environment: Mapping[str, str] | None = None,
-        timeout: float | None = None,
-        capture_output: bool = True,
+        self: PodmanSandboxSection, *, config: podman_module._ExecConfig
     ) -> CompletedProcess[str]:
-        del stdin, environment, timeout, capture_output
-        exec_calls.append(list(command))
-        return CompletedProcess(command, 0, stdout="", stderr="")
+        del self
+        _ = (
+            config.stdin,
+            config.environment,
+            config.timeout,
+            config.capture_output,
+        )
+        exec_calls.append(list(config.command))
+        return CompletedProcess(config.command, 0, stdout="", stderr="")
 
     def _fake_cp(
         self: PodmanSandboxSection,
@@ -2032,17 +2022,16 @@ def test_write_via_container_reports_mkdir_failure(
     cp_calls = 0
 
     def _fail_exec(
-        self: PodmanSandboxSection,
-        *,
-        command: Sequence[str],
-        stdin: str | None = None,
-        cwd: str | None = None,
-        environment: Mapping[str, str] | None = None,
-        timeout: float | None = None,
-        capture_output: bool = True,
+        self: PodmanSandboxSection, *, config: podman_module._ExecConfig
     ) -> CompletedProcess[str]:
-        del self, command, stdin, cwd, environment, timeout, capture_output
-        return CompletedProcess(["mkdir", "-p"], 1, stdout="", stderr="boom")
+        del self
+        _ = (
+            config.stdin,
+            config.environment,
+            config.timeout,
+            config.capture_output,
+        )
+        return CompletedProcess(list(config.command), 1, stdout="", stderr="boom")
 
     def _fake_cp(
         self: PodmanSandboxSection,
@@ -2081,14 +2070,7 @@ def test_write_via_container_rejects_non_utf8_append(
     target.write_bytes(b"\xff\xff")
 
     def _unexpected(
-        self: PodmanSandboxSection,
-        *,
-        command: Sequence[str],
-        stdin: str | None = None,
-        cwd: str | None = None,
-        environment: Mapping[str, str] | None = None,
-        timeout: float | None = None,
-        capture_output: bool = True,
+        self: PodmanSandboxSection, *, config: podman_module._ExecConfig
     ) -> CompletedProcess[str]:
         raise AssertionError("run_cli_exec should not be called")
 
@@ -2137,14 +2119,7 @@ def test_write_via_container_propagates_read_oserror(
     monkeypatch.setattr(Path, "read_text", _raise)
 
     def _unexpected(
-        self: PodmanSandboxSection,
-        *,
-        command: Sequence[str],
-        stdin: str | None = None,
-        cwd: str | None = None,
-        environment: Mapping[str, str] | None = None,
-        timeout: float | None = None,
-        capture_output: bool = True,
+        self: PodmanSandboxSection, *, config: podman_module._ExecConfig
     ) -> CompletedProcess[str]:
         raise AssertionError("run_cli_exec should not be called")
 
