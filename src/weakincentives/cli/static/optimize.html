@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wink optimize</title>
+    <link rel="stylesheet" href="/static/optimize.css" />
+  </head>
+  <body>
+    <header>
+      <div class="title">
+        <h1>wink optimize</h1>
+        <p>Edit prompt overrides captured in a snapshot.</p>
+      </div>
+      <div class="actions">
+        <button id="reset">Reset</button>
+        <button id="save-snapshot" class="primary">Save snapshot</button>
+      </div>
+    </header>
+    <main>
+      <section class="sidebar">
+        <h2>Prompts</h2>
+        <ul id="prompt-list"></ul>
+      </section>
+      <section class="detail">
+        <div id="prompt-detail" class="card hidden"></div>
+        <div id="status" class="status"></div>
+      </section>
+    </main>
+    <script src="/static/optimize.js"></script>
+  </body>
+</html>

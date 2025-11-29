@@ -114,6 +114,22 @@ The UI is tuned for quick inspection of captured runs:
 
 ![Snapshot Explorer UI (1902x1572)](snapshot_explorer.png)
 
+### Optimizing prompt overrides with `wink`
+
+The optimize subcommand reuses snapshot files to expose captured
+`PromptRendered` entries and their prompt override data through a lightweight
+UI. Start the server with a snapshot path and the usual host/port flags:
+
+```bash
+uv run --extra wink wink optimize snapshots/5de6bba7-d699-4229-9747-d68664d8f91e.jsonl \
+  --host 127.0.0.1 --port 8000
+```
+
+The UI lists prompt executions (preserving their original order) and lets you
+edit section and tool overrides inline. Saving persists the overrides back to
+the snapshot file, while Reset reloads the snapshot from disk to discard local
+edits.
+
 ## Tutorial: An Interactive Code Review Assistant
 
 Let's build a simple, interactive code review assistant. This agent will be able to browse a codebase, answer questions about it, and create plans for more complex reviews. We'll see how WINK helps build this in a structured, observable, and safe way.
