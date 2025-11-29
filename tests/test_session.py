@@ -34,6 +34,7 @@ from weakincentives.runtime.events import (
 from weakincentives.runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
+    ReducerEventWithValue,
     Session,
     Snapshot,
     SnapshotRestoreError,
@@ -180,7 +181,6 @@ def test_prompt_rendered_appends_start_event(
     lifecycle = session.select_all(PromptRendered)
     assert lifecycle == (event,)
     assert lifecycle[0].rendered_prompt == "Rendered prompt text"
-    assert lifecycle[0].value is event
     assert isinstance(event.event_id, UUID)
 
 
@@ -218,6 +218,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     ) -> tuple[FirstSlice, ...]:
         del context
         call_order.append("first")
+        assert isinstance(event, ReducerEventWithValue)
         value = cast(ExampleOutput, event.value)
         return (*slice_values, FirstSlice(value.text))
 
@@ -229,6 +230,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     ) -> tuple[SecondSlice, ...]:
         del context
         call_order.append("second")
+        assert isinstance(event, ReducerEventWithValue)
         value = cast(ExampleOutput, event.value)
         return (*slice_values, SecondSlice(value.text))
 
@@ -495,6 +497,7 @@ def test_snapshot_preserves_custom_reducer_behavior(
         context: ReducerContextProtocol,
     ) -> tuple[Summary, ...]:
         del context
+        assert isinstance(event, ReducerEventWithValue)
         value = cast(ExampleOutput, event.value)
         entries = slice_values[-1].entries if slice_values else ()
         return (Summary((*entries, value.text)),)

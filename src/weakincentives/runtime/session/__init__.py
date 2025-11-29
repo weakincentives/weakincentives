@@ -12,7 +12,12 @@
 
 """Session state container for agent runs."""
 
-from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
+from ._types import (
+    ReducerContextProtocol,
+    ReducerEvent,
+    ReducerEventWithValue,
+    TypedReducer,
+)
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducer_context import ReducerContext, build_reducer_context
 from .reducers import append, replace_latest, replace_latest_by, upsert_by
@@ -29,6 +34,7 @@ __all__ = [
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
+    "ReducerEventWithValue",
     "Session",
     "SessionProtocol",
     "Snapshot",

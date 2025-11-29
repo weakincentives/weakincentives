@@ -47,8 +47,7 @@
 
 - `DataEvent[T]` – Events dispatched to reducers. `ToolInvoked` and
   `PromptExecuted` provide a `.value` field that may reference a dataclass payload
-  or `None`. `PromptRendered` exposes itself via `.value` to align with the same
-  reducer contract.
+  or `None`. `PromptRendered` is delivered directly as the reducer input.
 - **Slice** – The tuple of accumulated dataclass instances managed for a reducer.
   The slice element type may be the same as `T` or a separate dataclass.
 - **Reducer** – A pure function responsible for producing a new slice when a

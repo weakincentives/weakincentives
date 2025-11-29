@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 
 from weakincentives.cli import wink
+from weakincentives.dbc import dbc_enabled
 from weakincentives.runtime.session.snapshots import Snapshot
 
 
@@ -42,7 +43,8 @@ def _write_snapshot(path: Path, *, created_at: datetime) -> None:
             "session_id": path.stem,
         },
     )
-    path.write_text(snapshot.to_json() + "\n")
+    with dbc_enabled(False):
+        path.write_text(snapshot.to_json() + "\n")
 
 
 def test_directory_argument_loads_latest_snapshot(

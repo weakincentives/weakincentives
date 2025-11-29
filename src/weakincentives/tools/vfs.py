@@ -29,6 +29,7 @@ from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
+    ReducerEventWithValue,
     Session,
     TypedReducer,
     replace_latest,
@@ -1433,6 +1434,9 @@ def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
     ) -> tuple[VirtualFileSystem, ...]:
         del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
+        if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
+            msg = "VFS reducer requires an event with a value payload."
+            raise TypeError(msg)
         params = cast(WriteFile, event.value)
         timestamp = _now()
         files = list(previous.files)
@@ -1479,6 +1483,9 @@ def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
     ) -> tuple[VirtualFileSystem, ...]:
         del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
+        if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
+            msg = "VFS reducer requires an event with a value payload."
+            raise TypeError(msg)
         params = cast(DeleteEntry, event.value)
         target = params.path.segments
         files = [

@@ -26,6 +26,7 @@ from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
+    ReducerEventWithValue,
     Session,
     replace_latest,
     select_latest,
@@ -769,6 +770,9 @@ def _setup_plan_reducer(
     context: ReducerContextProtocol,
 ) -> tuple[Plan, ...]:
     del context
+    if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
+        msg = "Planning reducer requires an event with a value payload."
+        raise TypeError(msg)
     params = cast(SetupPlan, event.value)
     steps = tuple(
         PlanStep(
@@ -794,6 +798,9 @@ def _add_step_reducer(
     previous = _latest_plan(slice_values)
     if previous is None:
         return slice_values
+    if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
+        msg = "Planning reducer requires an event with a value payload."
+        raise TypeError(msg)
     params = cast(AddStep, event.value)
     existing = list(previous.steps)
     next_index = _next_step_index(existing)
@@ -826,6 +833,9 @@ def _update_step_reducer(
     previous = _latest_plan(slice_values)
     if previous is None:
         return slice_values
+    if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
+        msg = "Planning reducer requires an event with a value payload."
+        raise TypeError(msg)
     params = cast(UpdateStep, event.value)
     updated_steps: list[PlanStep] = []
     for step in previous.steps:
@@ -861,6 +871,9 @@ def _mark_step_reducer(
     previous = _latest_plan(slice_values)
     if previous is None:
         return slice_values
+    if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
+        msg = "Planning reducer requires an event with a value payload."
+        raise TypeError(msg)
     params = cast(MarkStep, event.value)
     updated_steps: list[PlanStep] = []
     for step in previous.steps:
