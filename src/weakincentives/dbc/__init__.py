@@ -22,7 +22,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from functools import wraps
 from pathlib import Path
-from typing import ParamSpec, TypeVar, cast
+from typing import ParamSpec, Protocol, TypeVar, cast
 
 from ..types import ContractResult
 
@@ -224,7 +224,11 @@ def ensure(*predicates: ContractCallable) -> Callable[[Callable[P, R]], Callable
 def skip_invariant(func: Callable[Q, S]) -> Callable[Q, S]:  # noqa: UP047
     """Mark a method so invariants are not evaluated around it."""
 
-    func.__dbc_skip_invariant__ = True  # type: ignore[attr-defined]
+    class _InvariantSkippable(Protocol):
+        __dbc_skip_invariant__: bool
+
+    skippable_func = cast(_InvariantSkippable, func)
+    skippable_func.__dbc_skip_invariant__ = True
     return func
 
 
