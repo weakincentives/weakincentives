@@ -29,7 +29,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from weakincentives.cli import debug_app
-from weakincentives.runtime.session.snapshots import Snapshot
+from weakincentives.runtime.session.snapshots import Snapshot, SnapshotRestoreError
 
 
 @dataclass(slots=True, frozen=True)
@@ -121,10 +121,12 @@ def test_load_snapshot_recovers_from_unknown_types(tmp_path: Path) -> None:
 
     assert len(loaded) == 1
     entry = loaded[0]
-    assert entry.meta.validation_error
     assert "__main__:UnknownType" in entry.slices
     unknown_slice = entry.slices["__main__:UnknownType"]
     assert unknown_slice.items == ({"value": "one"},)
+
+    with pytest.raises(SnapshotRestoreError):
+        entry.restore()
 
 
 def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
@@ -256,6 +258,9 @@ def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
     assert tags.get("suite") == "wink-debug"
     assert "session_id" in tags
     assert store.path == snapshot_path.resolve()
+    restored = store.snapshot()
+    items = cast(tuple[_ExampleSlice, ...], restored.slices[_ExampleSlice])
+    assert items[0].value == "one"
     assert len(store.entries) == 1
 
     listing = store.list_snapshots()

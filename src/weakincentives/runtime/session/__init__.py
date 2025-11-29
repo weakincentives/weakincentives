@@ -25,6 +25,7 @@ from .selectors import select_all, select_latest, select_where
 from .session import DataEvent, Session, iter_sessions_bottom_up
 from .snapshots import (
     Snapshot,
+    SnapshotDocument,
     SnapshotRestoreError,
     SnapshotSerializationError,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "Session",
     "SessionProtocol",
     "Snapshot",
+    "SnapshotDocument",
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
