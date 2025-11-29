@@ -28,14 +28,20 @@ import pytest
 from weakincentives.serde import clone, dump, parse, schema
 from weakincentives.serde._utils import (
     _SLOTTED_EXTRAS,
-    _ParseConfig,
     _merge_annotated_meta,
     _ordered_values,
+    _ParseConfig,
 )
 from weakincentives.serde.parse import _bool_from_str, _coerce_to_type
 from weakincentives.types import JSONValue
 
 parse_module = importlib.import_module("weakincentives.serde.parse")
+
+
+def test_shim_module_remains_importable() -> None:
+    shim = importlib.import_module("weakincentives.serde.dataclass_serde")
+
+    assert shim.__all__ == []
 
 
 def test_module_exports_align_with_public_api() -> None:
