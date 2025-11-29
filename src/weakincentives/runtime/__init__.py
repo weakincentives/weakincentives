@@ -10,10 +10,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Runtime namespace exposing the :mod:`weakincentives.runtime.api` surface."""
+"""Runtime primitives for coordinating sessions and events."""
 
 # pyright: reportImportCycles=false
-
 from __future__ import annotations
 
 from importlib import import_module
@@ -22,9 +21,39 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .api import *  # noqa: F403
 
-api: object | None = None
+__all__ = [
+    "DataEvent",
+    "EventBus",
+    "HandlerFailure",
+    "InProcessEventBus",
+    "PromptExecuted",
+    "PublishResult",
+    "ReducerContext",
+    "ReducerContextProtocol",
+    "ReducerEvent",
+    "ReducerEventWithValue",
+    "Session",
+    "SessionProtocol",
+    "Snapshot",
+    "SnapshotProtocol",
+    "SnapshotRestoreError",
+    "SnapshotSerializationError",
+    "StructuredLogger",
+    "ToolInvoked",
+    "TypedReducer",
+    "api",
+    "append",
+    "build_reducer_context",
+    "configure_logging",
+    "get_logger",
+    "replace_latest",
+    "select_all",
+    "select_latest",
+    "select_where",
+    "upsert_by",
+]
 
-__all__ = ["api"]
+api: object | None = None
 
 
 def __getattr__(name: str) -> object:
@@ -36,4 +65,4 @@ def __getattr__(name: str) -> object:
 
 
 def __dir__() -> list[str]:
-    return sorted({*globals().keys(), *__all__})  # pragma: no cover - convenience shim
+    return sorted(__all__)

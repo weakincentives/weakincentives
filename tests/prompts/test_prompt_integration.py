@@ -106,7 +106,10 @@ def test_prompt_integration_handles_disabled_sections() -> None:
 
 
 def test_prompt_module_public_exports() -> None:
-    for symbol in ("Prompt", "Section", "MarkdownSection"):
+    exported = {"Prompt", "Section", "MarkdownSection"}
+
+    for symbol in exported:
         assert hasattr(prompt, symbol), f"prompt module missing export: {symbol}"
         assert getattr(prompt, symbol) is getattr(prompt.api, symbol)
-    assert prompt.__all__ == ["api"]
+
+    assert exported.issubset(set(prompt.__all__))

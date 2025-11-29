@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt namespace exposing the :mod:`weakincentives.prompt.api` surface."""
+"""Prompt authoring primitives."""
 
 from __future__ import annotations
 
@@ -20,9 +20,51 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .api import *  # noqa: F403
 
-api: object | None = None
+__all__ = [
+    "DelegationParams",
+    "DelegationPrompt",
+    "DelegationSummarySection",
+    "LocalPromptOverridesStore",
+    "MarkdownSection",
+    "OutputParseError",
+    "ParentPromptParams",
+    "ParentPromptSection",
+    "Prompt",
+    "PromptDescriptor",
+    "PromptError",
+    "PromptLike",
+    "PromptOverride",
+    "PromptOverridesError",
+    "PromptOverridesStore",
+    "PromptProtocol",
+    "PromptRenderError",
+    "PromptValidationError",
+    "ProviderAdapterProtocol",
+    "RecapParams",
+    "RecapSection",
+    "RenderedPromptProtocol",
+    "Section",
+    "SectionDescriptor",
+    "SectionOverride",
+    "SectionPath",
+    "StructuredOutputConfig",
+    "SupportsDataclass",
+    "SupportsToolResult",
+    "Tool",
+    "ToolContext",
+    "ToolDescriptor",
+    "ToolExample",
+    "ToolHandler",
+    "ToolOverride",
+    "ToolRenderableResult",
+    "ToolResult",
+    "api",
+    "hash_json",
+    "hash_text",
+    "parse_structured_output",
+]
 
-__all__ = ["api"]
+api: object | None = None
 
 
 def __getattr__(name: str) -> object:
@@ -34,4 +76,4 @@ def __getattr__(name: str) -> object:
 
 
 def __dir__() -> list[str]:
-    return sorted({*globals().keys(), *__all__})
+    return sorted(__all__)

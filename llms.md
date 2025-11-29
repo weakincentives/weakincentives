@@ -81,17 +81,15 @@ replayable session.
 
 ```python
 from dataclasses import dataclass
-from weakincentives.api import (
-    MarkdownSection,
-    Prompt,
-    Tool,
-    ToolContext,
-    ToolResult,
-    parse_structured_output,
-)
-from weakincentives.adapters import PromptEvaluationError
+from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import InProcessEventBus, Session, configure_logging
+from weakincentives.prompt.markdown import MarkdownSection
+from weakincentives.prompt.prompt import Prompt
+from weakincentives.prompt.structured_output import parse_structured_output
+from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.logging import configure_logging
+from weakincentives.runtime.session import Session
 
 # 1) Define the structured plan you expect the model to return.
 @dataclass
@@ -264,7 +262,7 @@ You can export snapshots as files, feed them into analysis tools, or inspect the
 raw JSON to understand what prompts, tool invocations, and reducer-managed data
 existed at a point in time—without needing live provider access.
 
-## Deadlines (`weakincentives.api.Deadline`)
+## Deadlines (`weakincentives.deadlines.Deadline`)
 
 `Deadline` instances communicate time budgets across prompts, tools, and
 provider calls. Pass them into prompts or adapters to ensure long-running tasks
@@ -298,8 +296,7 @@ without writing additional code.
 
 ## Versioning & Stability
 
-- Public APIs are the objects exported from `weakincentives.api` and the
-  submodules documented above.
+- Public APIs are the objects exported by the package modules documented above.
 - Adapters are optional; include only the extras you need.
 - Keep `StructuredOutputConfig`, tool schemas, and overrides in version control
   so your agents remain deterministic and auditable.

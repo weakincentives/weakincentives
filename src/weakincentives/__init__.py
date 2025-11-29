@@ -10,15 +10,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Namespace package exposing subsystem API modules."""
+"""Namespace package exposing subsystem modules."""
 
 from __future__ import annotations
 
-from . import adapters, api, cli, deadlines, debug, prompt, runtime, serde, tools, types
+from . import adapters, cli, deadlines, debug, prompt, runtime, serde, tools, types
 
 __all__ = [
     "adapters",
-    "api",
     "cli",
     "deadlines",
     "debug",

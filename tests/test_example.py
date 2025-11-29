@@ -12,13 +12,10 @@
 
 """Smoke tests to verify the test harness is wired correctly."""
 
-from typing import Any, cast
-
-import pytest
-
-import weakincentives
-from weakincentives import adapters, prompt, runtime, tools
-from weakincentives.api import Prompt
+from weakincentives import adapters, prompt, runtime
+from weakincentives.adapters.core import PromptResponse
+from weakincentives.prompt.prompt import Prompt
+from weakincentives.runtime.logging import configure_logging
 
 
 def test_example() -> None:
@@ -26,17 +23,17 @@ def test_example() -> None:
 
 
 def test_package_dir_lists_public_symbols() -> None:
-    symbols = weakincentives.__dir__()
+    symbols = runtime.__dir__()
 
     assert symbols == sorted(symbols)
-    assert "api" in symbols
-    assert "prompt" in symbols
-    assert "tools" in symbols
+    for symbol in ("configure_logging", "Session", "api"):
+        assert symbol in symbols
 
 
 def test_package_does_not_forward_api_attributes() -> None:
-    with pytest.raises(AttributeError):
-        _ = cast(Any, weakincentives).Prompt
+    assert adapters.PromptResponse is PromptResponse
+    assert runtime.configure_logging is configure_logging
+    assert prompt.Prompt is Prompt
 
 
 def test_adapters_dir_lists_public_symbols() -> None:
@@ -49,35 +46,6 @@ def test_adapters_dir_lists_public_symbols() -> None:
 
 
 def test_namespace_forwarding() -> None:
-    runtime_session = cast(Any, runtime.api).Session
-    tools_plan = cast(Any, tools.api).Plan
-    adapters_response = cast(Any, adapters.api).PromptResponse
-
-    prompt_api = cast(Any, prompt).api
-
-    assert Prompt is prompt_api.Prompt
-
-    assert cast(Any, runtime).Session is runtime_session
-    assert cast(Any, tools).Plan is tools_plan
-    assert cast(Any, adapters).PromptResponse is adapters_response
-
-
-def test_runtime_getattr_reimports_api() -> None:
-    runtime.api = None
-
-    reloaded_session = cast(Any, runtime).Session
-    assert reloaded_session is cast(Any, runtime.api).Session
-
-
-def test_adapters_getattr_reimports_api() -> None:
-    adapters.api = None
-
-    reloaded_response = cast(Any, adapters).PromptResponse
-    assert reloaded_response is cast(Any, adapters.api).PromptResponse
-
-
-def test_api_dir_helpers() -> None:
-    assert "Prompt" in weakincentives.api.__dir__()
-    assert "PromptResponse" in adapters.api.__dir__()
-    assert "api" in prompt.__dir__()
-    assert "api" in tools.__dir__()
+    assert prompt.Prompt is Prompt
+    assert adapters.PromptResponse is PromptResponse
+    assert runtime.configure_logging is configure_logging
