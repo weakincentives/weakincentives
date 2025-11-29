@@ -109,7 +109,7 @@ work must comply with this file.
 - **SUBAGENTS.md**: Sub-agent orchestration—when coordinating nested agents.
 - **THREAD_SAFETY.md**: Thread safety guarantees—when touching concurrency
   helpers or shared state.
-- **THROTLING.md**: (Intentional spelling) Throttling rules—when adjusting rate
+- **THROTTLING.md**: Throttling rules—when adjusting rate
   limiting or throttling paths.
 - **TOOLS.md**: Tool catalog and contracts—before adding or modifying tools.
 - **VFS_TOOLS.md**: Virtual file system tools—when editing VFS behavior.
