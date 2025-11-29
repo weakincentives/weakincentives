@@ -52,6 +52,8 @@ _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_SEGMENT_LENGTH: Final[int] = 80
 _ASCII: Final[str] = "ascii"
 _TIMEOUT_SECONDS: Final[float] = 5.0
+_MIN_PRINTABLE_CODE_POINT: Final[int] = 32
+_ALLOWED_CONTROL_CHARACTERS: Final[frozenset[str]] = frozenset({"\n", "\t"})
 _MISSING_DEPENDENCY_MESSAGE: Final[str] = (
     "Install weakincentives[asteval] to enable the Python evaluation tool."
 )
@@ -347,7 +349,10 @@ def _normalize_code(code: str) -> str:
         raise ToolValidationError("Code exceeds maximum length of 2,000 characters.")
     for char in code:
         code_point = ord(char)
-        if code_point < 32 and char not in {"\n", "\t"}:
+        if (
+            code_point < _MIN_PRINTABLE_CODE_POINT
+            and char not in _ALLOWED_CONTROL_CHARACTERS
+        ):
             raise ToolValidationError("Code contains unsupported control characters.")
     return code
 
@@ -377,6 +382,15 @@ def _normalize_reads(reads: Iterable[EvalFileRead]) -> tuple[EvalFileRead, ...]:
         seen.add(key)
         normalized.append(EvalFileRead(path=path))
     return tuple(normalized)
+
+
+def _ensure_paths_are_disjoint(
+    *, reads: Iterable[EvalFileRead], writes: Iterable[EvalFileWrite]
+) -> None:
+    read_paths = {read.path.segments for read in reads}
+    write_paths = {write.path.segments for write in writes}
+    if read_paths & write_paths:
+        raise ToolValidationError("Reads and writes must not target the same path.")
 
 
 def _normalize_writes(writes: Iterable[EvalFileWrite]) -> tuple[EvalFileWrite, ...]:
@@ -652,6 +666,52 @@ class _ResultAssemblyContext:
     )
 
 
+@dataclass(slots=True, frozen=True)
+class _EvaluationInputs:
+    code: str = field(
+        metadata={"description": "Normalized code ready for interpreter execution."}
+    )
+    reads: tuple[EvalFileRead, ...] = field(
+        metadata={"description": "Validated read descriptors staged for sandbox setup."}
+    )
+    writes: tuple[EvalFileWrite, ...] = field(
+        metadata={
+            "description": "Validated write descriptors staged for sandbox setup."
+        }
+    )
+    snapshot: VirtualFileSystem = field(
+        metadata={"description": "Latest VFS snapshot used to resolve read targets."}
+    )
+    read_globals: Mapping[str, str] = field(
+        metadata={
+            "description": "File contents injected into the sandbox symbol table."
+        }
+    )
+    user_globals: Mapping[str, object] = field(
+        metadata={
+            "description": "User-provided globals injected into the sandbox symbol table."
+        }
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class _WriteResolution:
+    final_writes: tuple[EvalFileWrite, ...] = field(
+        metadata={"description": "Resolved writes queued after interpreter execution."}
+    )
+    message: str = field(
+        metadata={"description": "Base result message summarizing write handling."}
+    )
+    pending_sources: tuple[EvalFileWrite, ...] = field(
+        metadata={
+            "description": "All writes considered when reporting pending operations."
+        }
+    )
+    pending_writes: bool = field(
+        metadata={"description": "Indicates whether any writes were requested."}
+    )
+
+
 class _AstevalToolSuite:
     def __init__(self, *, section: AstevalSection) -> None:
         super().__init__()
@@ -662,38 +722,22 @@ class _AstevalToolSuite:
     ) -> ToolResult[EvalResult]:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
-        session = self._section.session
-        code = _normalize_code(params.code)
-        reads = _normalize_reads(params.reads)
-        writes = _normalize_writes(params.writes)
-        read_paths = {read.path.segments for read in reads}
-        write_paths = {write.path.segments for write in writes}
-        if read_paths & write_paths:
-            raise ToolValidationError("Reads and writes must not target the same path.")
-
-        snapshot = select_latest(session, VirtualFileSystem) or VirtualFileSystem()
-        read_globals = _build_eval_globals(snapshot, reads)
-        user_globals = _parse_user_globals(params.globals)
+        evaluation = self._prepare_evaluation_inputs(params)
 
         sandbox = self._initialize_sandbox(
-            reads=reads,
-            writes=writes,
-            snapshot=snapshot,
-            read_globals=read_globals,
-            user_globals=user_globals,
+            reads=evaluation.reads,
+            writes=evaluation.writes,
+            snapshot=evaluation.snapshot,
+            read_globals=evaluation.read_globals,
+            user_globals=evaluation.user_globals,
         )
         execution = self._execute_interpreter(
             interpreter=sandbox.interpreter,
-            code=code,
+            code=evaluation.code,
             stdout_buffer=sandbox.stdout_buffer,
             stderr_buffer=sandbox.stderr_buffer,
         )
-        (
-            final_writes,
-            message,
-            pending_sources,
-            pending_writes,
-        ) = self._resolve_writes(
+        write_resolution = self._resolve_writes(
             symtable=sandbox.symtable,
             param_writes=tuple(sandbox.write_queue),
             helper_writes=tuple(sandbox.helper_writes),
@@ -702,30 +746,59 @@ class _AstevalToolSuite:
         )
         result = self._assemble_result(
             _ResultAssemblyContext(
-                reads=reads,
-                final_writes=final_writes,
+                reads=evaluation.reads,
+                final_writes=write_resolution.final_writes,
                 sandbox=sandbox,
-                user_globals=user_globals,
-                read_globals=read_globals,
+                user_globals=evaluation.user_globals,
+                read_globals=evaluation.read_globals,
                 execution=execution,
-                pending_sources=pending_sources,
-                pending_writes=pending_writes,
-                base_message=message,
+                pending_sources=write_resolution.pending_sources,
+                pending_writes=write_resolution.pending_writes,
+                base_message=write_resolution.message,
             )
         )
 
+        self._log_completion(
+            code=evaluation.code,
+            execution=execution,
+            write_count=len(write_resolution.final_writes),
+        )
+
+        return result
+
+    def _prepare_evaluation_inputs(self, params: EvalParams) -> _EvaluationInputs:
+        session = self._section.session
+        code = _normalize_code(params.code)
+        reads = _normalize_reads(params.reads)
+        writes = _normalize_writes(params.writes)
+        _ensure_paths_are_disjoint(reads=reads, writes=writes)
+
+        snapshot = select_latest(session, VirtualFileSystem) or VirtualFileSystem()
+        read_globals = _build_eval_globals(snapshot, reads)
+        user_globals = _parse_user_globals(params.globals)
+        return _EvaluationInputs(
+            code=code,
+            reads=reads,
+            writes=writes,
+            snapshot=snapshot,
+            read_globals=read_globals,
+            user_globals=user_globals,
+        )
+
+    @staticmethod
+    def _log_completion(
+        *, code: str, execution: _ExecutionOutcome, write_count: int
+    ) -> None:
         _LOGGER.debug(
             "Asteval evaluation completed.",
             event="asteval_run",
             context={
                 "stdout_len": len(execution.stdout),
                 "stderr_len": len(execution.stderr),
-                "write_count": len(final_writes),
+                "write_count": write_count,
                 "code_preview": code[:200],
             },
         )
-
-        return result
 
     @staticmethod
     def _initialize_sandbox(
@@ -862,12 +935,7 @@ class _AstevalToolSuite:
         helper_writes: tuple[EvalFileWrite, ...],
         pending_write_attempted: bool,
         execution: _ExecutionOutcome,
-    ) -> tuple[
-        tuple[EvalFileWrite, ...],
-        str,
-        tuple[EvalFileWrite, ...],
-        bool,
-    ]:
+    ) -> _WriteResolution:
         pending_writes = pending_write_attempted or bool(helper_writes)
         if execution.stderr and not execution.value_repr:
             final_writes: tuple[EvalFileWrite, ...] = ()
@@ -879,7 +947,12 @@ class _AstevalToolSuite:
             else:
                 message = "Evaluation failed; review stderr details in the payload."
             pending_sources = final_writes or param_writes + helper_writes
-            return final_writes, message, pending_sources, pending_writes
+            return _WriteResolution(
+                final_writes=final_writes,
+                message=message,
+                pending_sources=pending_sources,
+                pending_writes=pending_writes,
+            )
 
         format_context = {
             key: value for key, value in symtable.items() if not key.startswith("_")
@@ -920,7 +993,12 @@ class _AstevalToolSuite:
         else:
             message = "Evaluation succeeded without pending file writes."
         pending_sources = final_writes or param_writes + helper_writes
-        return final_writes, message, pending_sources, pending_writes
+        return _WriteResolution(
+            final_writes=final_writes,
+            message=message,
+            pending_sources=pending_sources,
+            pending_writes=pending_writes,
+        )
 
     @staticmethod
     def _assemble_result(context: _ResultAssemblyContext) -> ToolResult[EvalResult]:
