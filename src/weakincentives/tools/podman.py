@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import math
 import os
 import posixpath
 import re
@@ -82,6 +83,8 @@ _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_PATH_SEGMENT: Final[int] = 80
 _EVAL_MAX_STREAM_LENGTH: Final[int] = 4_096
 _ASCII: Final[str] = "ascii"
+_LOWEST_PRINTABLE_CODEPOINT: Final[int] = 32
+_ALLOWED_CONTROL_CHARACTERS: Final[tuple[str, str]] = ("\n", "\t")
 _CAPTURE_DISABLED: Final[str] = "capture disabled"
 _CACHE_ENV: Final[str] = "WEAKINCENTIVES_CACHE"
 _PODMAN_BASE_URL_ENV: Final[str] = "PODMAN_BASE_URL"
@@ -146,9 +149,37 @@ class _ExecRunner(Protocol):
 
 
 @dataclass(slots=True, frozen=True)
+class _ExecConfig:
+    command: Sequence[str]
+    stdin: str | None = None
+    cwd: str | None = None
+    environment: Mapping[str, str] | None = None
+    timeout: float | None = None
+    capture_output: bool = True
+
+
+@dataclass(slots=True, frozen=True)
 class _PodmanSectionParams:
     image: str = _DEFAULT_IMAGE
     workspace_root: str = _DEFAULT_WORKDIR
+
+
+@dataclass(slots=True, frozen=True)
+class PodmanSandboxConfig:
+    """Configuration for :class:`PodmanSandboxSection`."""
+
+    image: str = _DEFAULT_IMAGE
+    mounts: Sequence[HostMount] = ()
+    allowed_host_roots: Sequence[os.PathLike[str] | str] = ()
+    base_url: str | None = None
+    identity: str | os.PathLike[str] | None = None
+    base_environment: Mapping[str, str] | None = None
+    cache_dir: os.PathLike[str] | str | None = None
+    client_factory: _ClientFactory | None = None
+    clock: Callable[[], datetime] | None = None
+    connection_name: str | None = None
+    exec_runner: _ExecRunner | None = None
+    accepts_overrides: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -463,7 +494,7 @@ def _normalize_env(env: Mapping[str, str]) -> dict[str, str]:
 
 
 def _normalize_timeout(timeout_seconds: float) -> float:
-    if timeout_seconds != timeout_seconds:  # NaN guard
+    if math.isnan(timeout_seconds):
         raise ToolValidationError("timeout_seconds must be a real number.")
     return max(_MIN_TIMEOUT, min(_MAX_TIMEOUT, timeout_seconds))
 
@@ -510,73 +541,83 @@ def _truncate_eval_stream(value: str) -> str:
 def _normalize_podman_eval_code(code: str) -> str:
     for char in code:
         code_point = ord(char)
-        if code_point < 32 and char not in {"\n", "\t"}:
+        if (
+            code_point < _LOWEST_PRINTABLE_CODEPOINT
+            and char not in _ALLOWED_CONTROL_CHARACTERS
+        ):
             raise ToolValidationError("Code contains unsupported control characters.")
     return code
+
+
+def _resolve_connection_settings(
+    *,
+    base_url: str | None,
+    identity: str | os.PathLike[str] | None,
+    connection_name: str | None,
+) -> tuple[str, str | None, str | None]:
+    env_connection = os.environ.get(_PODMAN_CONNECTION_ENV)
+    preferred_connection = connection_name or env_connection
+    resolved_connection: _PodmanConnectionInfo | None = None
+    if base_url is None or identity is None:
+        resolved_connection = _resolve_podman_connection(
+            preferred_name=preferred_connection
+        )
+    resolved_base_url = base_url or (
+        resolved_connection.base_url if resolved_connection is not None else None
+    )
+    resolved_identity = identity or (
+        resolved_connection.identity if resolved_connection is not None else None
+    )
+    resolved_connection_name = (
+        connection_name
+        or (
+            resolved_connection.connection_name
+            if resolved_connection is not None
+            else None
+        )
+        or env_connection
+    )
+    if resolved_base_url is None:
+        message = (
+            "Podman connection could not be resolved. Configure `podman system connection` {}"
+        ).format("or set PODMAN_BASE_URL/PODMAN_IDENTITY.")
+        raise ToolValidationError(message)
+    identity_str = str(resolved_identity) if resolved_identity is not None else None
+    return resolved_base_url, identity_str, resolved_connection_name
 
 
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     """Prompt section exposing the Podman ``shell_execute`` tool."""
 
     def __init__(
-        self,
-        *,
-        session: Session,
-        image: str = _DEFAULT_IMAGE,
-        mounts: Sequence[HostMount] = (),
-        allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
-        base_url: str | None = None,
-        identity: str | os.PathLike[str] | None = None,
-        base_environment: Mapping[str, str] | None = None,
-        cache_dir: os.PathLike[str] | str | None = None,
-        client_factory: _ClientFactory | None = None,
-        clock: Callable[[], datetime] | None = None,
-        connection_name: str | None = None,
-        exec_runner: _ExecRunner | None = None,
-        accepts_overrides: bool = False,
+        self, *, session: Session, config: PodmanSandboxConfig | None = None
     ) -> None:
+        config = config or PodmanSandboxConfig()
         self._session = session
-        self._image = image
-        self._mounts = tuple(mounts)
-        env_connection = os.environ.get(_PODMAN_CONNECTION_ENV)
-        preferred_connection = connection_name or env_connection
-        resolved_connection: _PodmanConnectionInfo | None = None
-        if base_url is None or identity is None:
-            resolved_connection = _resolve_podman_connection(
-                preferred_name=preferred_connection
-            )
-        if base_url is None and resolved_connection is not None:
-            base_url = resolved_connection.base_url
-        if identity is None and resolved_connection is not None:
-            identity = resolved_connection.identity
-        if connection_name is None:
-            if resolved_connection is not None:
-                connection_name = resolved_connection.connection_name
-            else:
-                connection_name = env_connection
-        if base_url is None:
-            message = (
-                "Podman connection could not be resolved. Configure `podman system connection` {}"
-            ).format("or set PODMAN_BASE_URL/PODMAN_IDENTITY.")
-            raise ToolValidationError(message)
-        identity_str = str(identity) if identity is not None else None
-        self._client_factory = client_factory or _build_client_factory(
+        self._image = config.image
+        self._mounts = tuple(config.mounts)
+        base_url, identity_str, connection_name = _resolve_connection_settings(
+            base_url=config.base_url,
+            identity=config.identity,
+            connection_name=config.connection_name,
+        )
+        self._client_factory = config.client_factory or _build_client_factory(
             base_url=base_url,
             identity=identity_str,
         )
         self._base_url = base_url
         self._identity = identity_str
         self._base_env = tuple(
-            sorted((base_environment or {}).items(), key=lambda item: item[0])
+            sorted((config.base_environment or {}).items(), key=lambda item: item[0])
         )
         self._overlay_root = (
-            Path(cache_dir).expanduser()
-            if cache_dir is not None
+            Path(config.cache_dir).expanduser()
+            if config.cache_dir is not None
             else _default_cache_root()
         )
         self._overlay_root.mkdir(parents=True, exist_ok=True)
         allowed_roots = tuple(
-            vfs_module.normalize_host_root(path) for path in allowed_host_roots
+            vfs_module.normalize_host_root(path) for path in config.allowed_host_roots
         )
         self._allowed_roots = allowed_roots
         (
@@ -584,13 +625,27 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._mount_previews,
         ) = _resolve_podman_host_mounts(self._mounts, self._allowed_roots)
         self._mount_snapshot = VirtualFileSystem()
-        self._clock = clock or (lambda: datetime.now(UTC))
+        self._clock = config.clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
         self._connection_name = connection_name
-        self._exec_runner: _ExecRunner = exec_runner or _default_exec_runner
+        self._exec_runner: _ExecRunner = config.exec_runner or _default_exec_runner
         self._finalizer = weakref.finalize(
             self, PodmanSandboxSection._cleanup_from_finalizer, weakref.ref(self)
+        )
+        self._config = PodmanSandboxConfig(
+            image=self._image,
+            mounts=self._mounts,
+            allowed_host_roots=self._allowed_roots,
+            base_url=self._base_url,
+            identity=self._identity,
+            base_environment=dict(self._base_env),
+            cache_dir=self._overlay_root,
+            client_factory=self._client_factory,
+            clock=self._clock,
+            connection_name=self._connection_name,
+            exec_runner=self._exec_runner,
+            accepts_overrides=config.accepts_overrides,
         )
 
         session.register_reducer(PodmanWorkspace, replace_latest)
@@ -604,6 +659,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         self._vfs_suite = _PodmanVfsSuite(section=self)
         self._shell_suite = _PodmanShellSuite(section=self)
         self._eval_suite = _PodmanEvalSuite(section=self)
+        accepts_overrides = config.accepts_overrides
         tools = (
             Tool[ListDirectoryParams, tuple[FileInfo, ...]](
                 name="ls",
@@ -844,7 +900,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             key="podman.shell",
             template=template,
             default_params=_PodmanSectionParams(
-                image=image, workspace_root=_DEFAULT_WORKDIR
+                image=self._image, workspace_root=_DEFAULT_WORKDIR
             ),
             tools=tools,
             accepts_overrides=accepts_overrides,
@@ -864,21 +920,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         if provided_bus is not None and provided_bus is not session.event_bus:
             msg = "Provided bus must match the target session's event bus."
             raise TypeError(msg)
-        return PodmanSandboxSection(
-            session=session,
-            image=self._image,
-            mounts=self._mounts,
-            allowed_host_roots=self._allowed_roots,
-            base_url=self._base_url,
-            identity=self._identity,
-            base_environment=dict(self._base_env),
-            cache_dir=self._overlay_root,
-            client_factory=self._client_factory,
-            clock=self._clock,
-            connection_name=self._connection_name,
-            exec_runner=self._exec_runner,
-            accepts_overrides=self.accepts_overrides,
-        )
+        return PodmanSandboxSection(session=session, config=self._config)
 
     def _initialize_vfs_state(self, session: Session) -> None:
         session.register_reducer(VirtualFileSystem, replace_latest)
@@ -1004,8 +1046,8 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             else dict(self._base_env)
         )
 
+    @staticmethod
     def _copy_mount_into_overlay(
-        self,
         *,
         overlay: Path,
         mount: _ResolvedHostMount,
@@ -1096,39 +1138,30 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     def touch_workspace(self) -> None:
         self._touch_workspace()
 
-    def run_cli_exec(
-        self,
-        *,
-        command: Sequence[str],
-        stdin: str | None = None,
-        cwd: str | None = None,
-        environment: Mapping[str, str] | None = None,
-        timeout: float | None = None,
-        capture_output: bool = True,
-    ) -> subprocess.CompletedProcess[str]:
+    def run_cli_exec(self, *, config: _ExecConfig) -> subprocess.CompletedProcess[str]:
         handle = self.ensure_workspace()
         env = self.workspace_environment()
-        if environment:
-            env.update(environment)
+        if config.environment:
+            env.update(config.environment)
 
         exec_cmd: list[str] = ["podman"]
         if self._connection_name:
             exec_cmd.extend(["--connection", self._connection_name])
         exec_cmd.append("exec")
-        if stdin is not None:
+        if config.stdin is not None:
             exec_cmd.append("--interactive")
-        exec_cmd.extend(["--workdir", cwd or _DEFAULT_WORKDIR])
+        exec_cmd.extend(["--workdir", config.cwd or _DEFAULT_WORKDIR])
         for key, value in env.items():
             exec_cmd.extend(["--env", f"{key}={value}"])
         exec_cmd.append(handle.descriptor.container_name)
-        exec_cmd.extend(command)
+        exec_cmd.extend(config.command)
         runner = self._exec_runner
         return runner(
             exec_cmd,
-            input=stdin,
+            input=config.stdin,
             text=True,
-            capture_output=capture_output,
-            timeout=timeout,
+            capture_output=config.capture_output,
+            timeout=config.timeout,
         )
 
     def run_cli_cp(
@@ -1158,8 +1191,9 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return self.run_cli_exec(
-            command=["python3", "-c", script, *args],
-            timeout=timeout,
+            config=_ExecConfig(
+                command=["python3", "-c", script, *args], timeout=timeout
+            ),
         )
 
     def write_via_container(
@@ -1184,8 +1218,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         parent = posixpath.dirname(container_path)
         if parent and parent != "/":
             mkdir_result = self.run_cli_exec(
-                command=["mkdir", "-p", parent],
-                cwd="/",
+                config=_ExecConfig(command=["mkdir", "-p", parent], cwd="/"),
             )
             if mkdir_result.returncode != 0:
                 message = (
@@ -1244,7 +1277,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
 def _host_path_for(root: Path, path: VfsPath) -> Path:
     host = root
     for segment in path.segments:
-        host = host / segment
+        host /= segment
     return host
 
 
@@ -1523,8 +1556,9 @@ class _PodmanVfsSuite:
         self._section.touch_workspace()
         return ToolResult(message=message, value=matches)
 
+    @staticmethod
     def _compile_grep_pattern(
-        self, pattern: str
+        pattern: str,
     ) -> re.Pattern[str] | ToolResult[tuple[GrepMatch, ...]]:
         try:
             return re.compile(pattern)
@@ -1535,14 +1569,16 @@ class _PodmanVfsSuite:
                 success=False,
             )
 
-    def _normalize_grep_base_path(self, raw_path: str | None) -> VfsPath | None:
+    @staticmethod
+    def _normalize_grep_base_path(raw_path: str | None) -> VfsPath | None:
         if raw_path is None:
             return None
         return vfs_module.normalize_string_path(
             raw_path, allow_empty=True, field="path"
         )
 
-    def _normalize_glob_pattern(self, raw_glob: str | None) -> str | None:
+    @staticmethod
+    def _normalize_glob_pattern(raw_glob: str | None) -> str | None:
         if raw_glob is None:
             return None
         glob_pattern = raw_glob.strip()
@@ -1551,8 +1587,8 @@ class _PodmanVfsSuite:
         _ = vfs_module.ensure_ascii(glob_pattern, "glob")
         return glob_pattern
 
+    @staticmethod
     def _iter_grep_targets(
-        self,
         *,
         host_base: Path,
         overlay_root: Path,
@@ -1576,7 +1612,8 @@ class _PodmanVfsSuite:
                 continue
             yield target_path, file_path
 
-    def _read_candidate_content(self, file_path: Path) -> str | None:
+    @staticmethod
+    def _read_candidate_content(file_path: Path) -> str | None:
         try:
             return file_path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
@@ -1614,7 +1651,8 @@ class _PodmanVfsSuite:
                         return tuple(matches)
         return tuple(matches)
 
-    def _format_grep_result(self, pattern: str, matches: tuple[GrepMatch, ...]) -> str:
+    @staticmethod
+    def _format_grep_result(pattern: str, matches: tuple[GrepMatch, ...]) -> str:
         return vfs_module.format_grep_message(pattern, matches)
 
     def remove(
@@ -1701,8 +1739,8 @@ class _PodmanVfsSuite:
         entries.sort(key=lambda entry: entry.path.segments)
         return entries[:_MAX_MATCH_RESULTS]
 
+    @staticmethod
     def _build_file_info(
-        self,
         *,
         path: VfsPath,
         host_file: Path,
@@ -1722,8 +1760,8 @@ class _PodmanVfsSuite:
             updated_at=updated,
         )
 
+    @staticmethod
     def _build_glob_match(
-        self,
         *,
         target: VfsPath,
         host_path: Path,
@@ -1792,7 +1830,8 @@ class _PodmanEvalSuite:
         self._section.touch_workspace()
         return ToolResult(message=message, value=result, success=success)
 
-    def _ensure_passthrough_payload_is_empty(self, params: EvalParams) -> None:
+    @staticmethod
+    def _ensure_passthrough_payload_is_empty(params: EvalParams) -> None:
         if params.reads:
             raise ToolValidationError(
                 "Podman evaluate_python reads are not supported; access the workspace directly."
@@ -1806,7 +1845,8 @@ class _PodmanEvalSuite:
                 "Podman evaluate_python globals are not supported."
             )
 
-    def _timeout_result(self) -> ToolResult[EvalResult]:
+    @staticmethod
+    def _timeout_result() -> ToolResult[EvalResult]:
         result = EvalResult(
             value_repr=None,
             stdout="",
@@ -1858,12 +1898,14 @@ class _PodmanShellSuite:
         start = time.perf_counter()
         try:
             completed = self._section.run_cli_exec(
-                command=exec_cmd,
-                stdin=params.stdin if params.stdin else None,
-                cwd=cwd,
-                environment=environment,
-                timeout=timeout_seconds,
-                capture_output=params.capture_output,
+                config=_ExecConfig(
+                    command=exec_cmd,
+                    stdin=params.stdin if params.stdin else None,
+                    cwd=cwd,
+                    environment=environment,
+                    timeout=timeout_seconds,
+                    capture_output=params.capture_output,
+                )
             )
             timed_out = False
             exit_code = completed.returncode

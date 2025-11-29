@@ -43,7 +43,7 @@ from weakincentives.serde import dump
 from weakincentives.tools import SubagentsSection
 from weakincentives.tools.digests import WorkspaceDigestSection
 from weakincentives.tools.planning import Plan, PlanningStrategy, PlanningToolsSection
-from weakincentives.tools.podman import PodmanSandboxSection
+from weakincentives.tools.podman import PodmanSandboxConfig, PodmanSandboxSection
 from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -315,11 +315,13 @@ def _build_workspace_section(
 
     return PodmanSandboxSection(
         session=session,
-        mounts=mounts,
-        allowed_host_roots=allowed_roots,
-        base_url=connection.get("base_url"),
-        identity=connection.get("identity"),
-        connection_name=connection.get("connection_name"),
+        config=PodmanSandboxConfig(
+            mounts=mounts,
+            allowed_host_roots=allowed_roots,
+            base_url=connection.get("base_url"),
+            identity=connection.get("identity"),
+            connection_name=connection.get("connection_name"),
+        ),
     )
 
 

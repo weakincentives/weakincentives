@@ -60,6 +60,7 @@ from .subagents import (
 
 if TYPE_CHECKING:
     from .podman import (
+        PodmanSandboxConfig,
         PodmanSandboxSection,
         PodmanShellParams,
         PodmanShellResult,
@@ -117,6 +118,7 @@ __all__ = [
     "PlanStep",
     "PlanningStrategy",
     "PlanningToolsSection",
+    "PodmanSandboxConfig",
     "PodmanSandboxSection",
     "PodmanShellParams",
     "PodmanShellResult",
@@ -149,6 +151,7 @@ __all__ = [
 ]
 
 _PODMAN_EXPORTS = {
+    "PodmanSandboxConfig",
     "PodmanShellParams",
     "PodmanShellResult",
     "PodmanSandboxSection",
