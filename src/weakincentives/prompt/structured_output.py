@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Final, Literal, cast
 
 from ..serde.parse import parse as parse_dataclass
@@ -26,6 +27,7 @@ from .protocols import RenderedPromptProtocol
 __all__ = [
     "ARRAY_WRAPPER_KEY",
     "OutputParseError",
+    "PayloadParsingConfig",
     "StructuredOutputConfig",
     "parse_structured_output",
 ]
@@ -51,6 +53,17 @@ class OutputParseError(Exception):
         self.dataclass_type = dataclass_type
 
 
+@dataclass(frozen=True, slots=True)
+class PayloadParsingConfig:
+    """Configuration for parsing structured payloads into dataclasses."""
+
+    container: Literal["object", "array"]
+    allow_extra_keys: bool
+    object_error: str
+    array_error: str
+    array_item_error: str
+
+
 def parse_structured_output[PayloadT](
     output_text: str, rendered: RenderedPromptProtocol[PayloadT]
 ) -> PayloadT:
@@ -61,18 +74,19 @@ def parse_structured_output[PayloadT](
         raise OutputParseError("Prompt does not declare structured output.")
 
     dataclass_type = config.dataclass_type
-    container = config.container
-    allow_extra_keys = config.allow_extra_keys
     payload = _extract_json_payload(output_text, dataclass_type)
+    parsing_config = PayloadParsingConfig(
+        container=config.container,
+        allow_extra_keys=config.allow_extra_keys,
+        object_error="Expected top-level JSON object.",
+        array_error="Expected top-level JSON array.",
+        array_item_error="Array item at index {index} is not an object.",
+    )
     try:
         parsed = parse_dataclass_payload(
             dataclass_type,
-            container,
             payload,
-            allow_extra_keys=allow_extra_keys,
-            object_error="Expected top-level JSON object.",
-            array_error="Expected top-level JSON array.",
-            array_item_error="Array item at index {index} is not an object.",
+            parsing_config,
         )
     except (TypeError, ValueError) as error:
         raise OutputParseError(str(error), dataclass_type=dataclass_type) from error
@@ -119,39 +133,36 @@ def _extract_json_payload(
 
 def parse_dataclass_payload(
     dataclass_type: type[ParseableDataclassT],
-    container: Literal["object", "array"],
     payload: JSONValue,
-    *,
-    allow_extra_keys: bool,
-    object_error: str,
-    array_error: str,
-    array_item_error: str,
+    config: PayloadParsingConfig,
 ) -> ParseableDataclassT | list[ParseableDataclassT]:
-    if container not in {"object", "array"}:
+    if config.container not in {"object", "array"}:
         raise TypeError("Unknown output container declared.")
 
-    extra_mode: Literal["ignore", "forbid"] = "ignore" if allow_extra_keys else "forbid"
+    extra_mode: Literal["ignore", "forbid"] = (
+        "ignore" if config.allow_extra_keys else "forbid"
+    )
 
-    if container == "object":
+    if config.container == "object":
         if not isinstance(payload, Mapping):
-            raise TypeError(object_error)
+            raise TypeError(config.object_error)
         mapping_payload = cast(Mapping[str, JSONValue], payload)
         return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
 
     if isinstance(payload, Mapping):
         mapping_payload = cast(Mapping[str, JSONValue], payload)
         if ARRAY_WRAPPER_KEY not in mapping_payload:
-            raise TypeError(array_error)
+            raise TypeError(config.array_error)
         payload = mapping_payload[ARRAY_WRAPPER_KEY]
     if not isinstance(payload, Sequence) or isinstance(
         payload, (str, bytes, bytearray)
     ):
-        raise TypeError(array_error)
+        raise TypeError(config.array_error)
     sequence_payload = cast(Sequence[JSONValue], payload)
     parsed_items: list[ParseableDataclassT] = []
     for index, item in enumerate(sequence_payload):
         if not isinstance(item, Mapping):
-            raise TypeError(array_item_error.format(index=index))
+            raise TypeError(config.array_item_error.format(index=index))
         mapping_item = cast(Mapping[str, JSONValue], item)
         parsed_item = parse_dataclass(
             dataclass_type,
