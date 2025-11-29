@@ -113,6 +113,29 @@ def _reload_module() -> types.ModuleType:
     return importlib.reload(std_import_module(MODULE_PATH))
 
 
+def _text_config_from_json_schema(
+    response_format: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if response_format is None:
+        return None
+
+    json_schema = cast(dict[str, Any], response_format["json_schema"])
+    text_config: dict[str, Any] = {
+        "format": {
+            "type": "json_schema",
+            "name": json_schema["name"],
+            "schema": json_schema["schema"],
+        }
+    }
+    description = json_schema.get("description")
+    if isinstance(description, str):
+        text_config["format"]["description"] = description
+    strict = json_schema.get("strict")
+    if isinstance(strict, bool):
+        text_config["format"]["strict"] = strict
+    return text_config
+
+
 OutputT = TypeVar("OutputT")
 
 
@@ -1634,9 +1657,10 @@ def test_openai_adapter_delegates_to_shared_runner(
     expected_response_format = module.build_json_schema_response_format(
         expected_rendered, "shared-runner"
     )
+    expected_text_config = _text_config_from_json_schema(expected_response_format)
     config = captured["config"]
     assert isinstance(config, module.ConversationConfig)
-    assert config.response_format == expected_response_format
+    assert config.response_format == expected_text_config
     assert config.require_structured_output_text is False
     assert config.serialize_tool_message_fn is module.serialize_tool_message
 
@@ -1649,16 +1673,14 @@ def test_openai_adapter_delegates_to_shared_runner(
         [{"role": "system", "content": "hi"}],
         [],
         None,
-        expected_response_format,
+        expected_text_config,
     )
     request_payload = cast(dict[str, Any], client.responses.requests[-1])
     assert request_payload["model"] == "gpt-test"
     messages = cast(list[dict[str, Any]], request_payload["input"])
     assert messages[0]["content"] == "hi"
-    expected_text_config = module._text_config_from_response_format(
-        expected_response_format, prompt_name="shared-runner"
-    )
     assert request_payload["text"] == expected_text_config
+    assert config.response_format == expected_text_config
 
     choice = select_choice(response)
     content_parts = cast(Sequence[object], getattr(choice.message, "content", ()))
@@ -1789,50 +1811,6 @@ def test_openai_tool_call_from_output_rejects_non_function_type() -> None:
         type = "other"
 
     assert module._tool_call_from_output(WrongType()) is None
-
-
-def test_openai_text_config_from_response_format_validates_payload() -> None:
-    module = cast(Any, _reload_module())
-    with pytest.raises(PromptEvaluationError):
-        module._text_config_from_response_format(
-            {"type": "other"}, prompt_name="prompt"
-        )
-
-    with pytest.raises(PromptEvaluationError):
-        module._text_config_from_response_format(
-            {"type": "json_schema", "json_schema": "not-a-mapping"},
-            prompt_name="prompt",
-        )
-
-    with pytest.raises(PromptEvaluationError):
-        module._text_config_from_response_format(
-            {
-                "type": "json_schema",
-                "json_schema": {"name": 123, "schema": {"type": "object"}},
-            },
-            prompt_name="prompt",
-        )
-
-
-def test_openai_text_config_from_response_format_includes_extras() -> None:
-    module = cast(Any, _reload_module())
-
-    config = module._text_config_from_response_format(
-        {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "schema",
-                "schema": {"type": "object"},
-                "description": "desc",
-                "strict": True,
-            },
-        },
-        prompt_name="prompt",
-    )
-
-    format_payload = config["format"]
-    assert format_payload["description"] == "desc"
-    assert format_payload["strict"] is True
 
 
 def test_openai_responses_tool_spec_requires_function_payload() -> None:
