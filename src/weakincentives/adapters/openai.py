@@ -323,61 +323,6 @@ def _normalize_content_parts(parts: Sequence[object]) -> list[object]:
     return normalized
 
 
-def _text_config_from_response_format(
-    response_format: Mapping[str, Any], *, prompt_name: str
-) -> dict[str, Any]:
-    """Translate a legacy response format payload into Responses text config."""
-
-    response_type = response_format.get("type")
-    if response_type != "json_schema":
-        raise PromptEvaluationError(
-            "Unsupported response format for OpenAI Responses API.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            provider_payload={"response_format": response_format},
-        )
-
-    json_schema = response_format.get("json_schema")
-    if not isinstance(json_schema, Mapping):
-        raise PromptEvaluationError(
-            "OpenAI response format must include a JSON schema payload.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            provider_payload={"response_format": response_format},
-        )
-
-    json_schema_mapping = cast(Mapping[str, Any], json_schema)
-    schema_name_obj = json_schema_mapping.get("name")
-    schema_payload_obj = json_schema_mapping.get("schema")
-    if not isinstance(schema_name_obj, str) or not isinstance(
-        schema_payload_obj, Mapping
-    ):
-        raise PromptEvaluationError(
-            "OpenAI response format schema is invalid.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            provider_payload={"response_format": response_format},
-        )
-
-    schema_name = schema_name_obj
-    schema_payload = cast(Mapping[str, Any], schema_payload_obj)
-    text_format: dict[str, Any] = {
-        "type": "json_schema",
-        "name": schema_name,
-        "schema": dict(schema_payload),
-    }
-
-    description = json_schema_mapping.get("description")
-    if isinstance(description, str):
-        text_format["description"] = description
-
-    strict = json_schema_mapping.get("strict")
-    if isinstance(strict, bool):
-        text_format["strict"] = strict
-
-    return {"format": text_format}
-
-
 def _responses_tool_spec(
     spec: Mapping[str, Any], *, prompt_name: str
 ) -> dict[str, Any]:
@@ -793,7 +738,18 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             and rendered.container is not None
         )
         if should_parse_structured_output and self._use_native_response_format:
-            return build_json_schema_response_format(rendered, prompt_name)
+            response_format = cast(
+                Mapping[str, Any],
+                build_json_schema_response_format(rendered, prompt_name),
+            )
+            json_schema = cast(Mapping[str, Any], response_format["json_schema"])
+            text_format: dict[str, Any] = {
+                "type": "json_schema",
+                "name": json_schema["name"],
+                "schema": dict(cast(Mapping[str, Any], json_schema["schema"])),
+            }
+
+            return {"format": text_format}
         return None
 
     def _build_provider_invoker(self, prompt_name: str) -> ProviderInvoker:
@@ -817,9 +773,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                         tool_choice_directive, prompt_name=prompt_name
                     )
             if response_format_payload is not None:
-                request_payload["text"] = _text_config_from_response_format(
-                    response_format_payload, prompt_name=prompt_name
-                )
+                request_payload["text"] = response_format_payload
 
             try:
                 return self._client.responses.create(**request_payload)
