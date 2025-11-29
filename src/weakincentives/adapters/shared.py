@@ -1006,8 +1006,9 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
     return str_mapping
 
 
-# ruff: noqa: RUF022
-__all__ = [
+__all__ = (
+    "LITELLM_ADAPTER_NAME",
+    "OPENAI_ADAPTER_NAME",
     "AdapterName",
     "AdapterRenderContext",
     "AdapterRenderOptions",
@@ -1015,8 +1016,6 @@ __all__ = [
     "ConversationConfig",
     "ConversationRequest",
     "ConversationRunner",
-    "LITELLM_ADAPTER_NAME",
-    "OPENAI_ADAPTER_NAME",
     "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
@@ -1048,7 +1047,7 @@ __all__ = [
     "serialize_tool_call",
     "tool_execution",
     "tool_to_spec",
-]
+)
 
 
 ConversationRequest = Callable[
