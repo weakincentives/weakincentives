@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterable, Mapping, Sized
 from dataclasses import dataclass
 from decimal import Decimal
 from re import Pattern
-from typing import Any as _AnyType, Final, Literal, cast, get_args
+from typing import Final, Literal, cast, get_args
 
 from ..types import JSONValue
 
@@ -27,7 +27,7 @@ MISSING_SENTINEL: Final[object] = object()
 UNION_TYPE: Final[type[object]] = type(int | str)
 
 
-class _ExtrasDescriptor:
+class ExtrasDescriptor:
     """Descriptor storing extras for slotted dataclasses."""
 
     def __init__(self) -> None:
@@ -49,10 +49,10 @@ class _ExtrasDescriptor:
             self._store[key] = dict(value)
 
 
-_SLOTTED_EXTRAS: Final[dict[type[object], _ExtrasDescriptor]] = {}
+_SLOTTED_EXTRAS: Final[dict[type[object], ExtrasDescriptor]] = {}
 
 
-def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
+def ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     """Return a deterministic list of metadata values."""
 
     items = list(values)
@@ -61,7 +61,7 @@ def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     return items
 
 
-def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
+def set_extras(instance: object, extras: Mapping[str, object]) -> None:
     """Attach extras to an instance, handling slotted dataclasses."""
 
     extras_dict = dict(extras)
@@ -71,14 +71,14 @@ def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
         cls = instance.__class__
         descriptor = _SLOTTED_EXTRAS.get(cls)
         if descriptor is None:
-            descriptor = _ExtrasDescriptor()
+            descriptor = ExtrasDescriptor()
             _SLOTTED_EXTRAS[cls] = descriptor
             cls.__extras__ = descriptor  # type: ignore[attr-defined]
         descriptor.__set__(instance, extras_dict)
 
 
 @dataclass(frozen=True)
-class _ParseConfig:
+class ParseConfig:
     extra: Literal["ignore", "forbid", "allow"]
     coerce: bool
     case_insensitive: bool
@@ -86,7 +86,7 @@ class _ParseConfig:
     aliases: Mapping[str, str] | None
 
 
-def _merge_annotated_meta(
+def merge_annotated_meta(
     typ: object, meta: Mapping[str, object] | None
 ) -> tuple[object, dict[str, object]]:
     merged: dict[str, object] = dict(meta or {})
@@ -102,7 +102,7 @@ def _merge_annotated_meta(
     return base, merged
 
 
-def _apply_constraints[ConstrainedT](
+def apply_constraints[ConstrainedT](
     value: ConstrainedT, meta: Mapping[str, object], path: str
 ) -> ConstrainedT:
     if not meta:
@@ -198,22 +198,6 @@ def _validate_membership(
     _validate_exclusion(candidate, meta, path)
 
 
-# Public aliases for private helpers used across serde modules.
-# The leading-underscore names remain for backward compatibility, but
-# type checkers should prefer the exported versions below.
-UnionType = UNION_TYPE
-AnyType = _AnyType
-ParseConfig = _ParseConfig
-ExtrasDescriptor = _ExtrasDescriptor
-apply_constraints = _apply_constraints
-merge_annotated_meta = _merge_annotated_meta
-ordered_values = _ordered_values
-set_extras = _set_extras
-
-# Backward-compatible aliases.
-_UNION_TYPE = UNION_TYPE
-
-
 def _validate_inclusion(
     candidate: object, meta: Mapping[str, object], path: str
 ) -> None:
@@ -222,7 +206,7 @@ def _validate_inclusion(
         return
 
     options_iter = cast(Iterable[JSONValue], members)
-    options = _ordered_values(options_iter)
+    options = ordered_values(options_iter)
     normalized_options = [
         _normalize_option(option, candidate, meta) for option in options
     ]
@@ -238,7 +222,7 @@ def _validate_exclusion(
         return
 
     forbidden_iter = cast(Iterable[JSONValue], not_members)
-    forbidden = _ordered_values(forbidden_iter)
+    forbidden = ordered_values(forbidden_iter)
     normalized_forbidden = [
         _normalize_option(option, candidate, meta) for option in forbidden
     ]
@@ -310,15 +294,15 @@ def _fail(path: str, message: str) -> None:
     raise ValueError(f"{path}: {message}")
 
 
+# ruff: noqa: RUF022
 __all__ = [
-    "MISSING_SENTINEL",
     "_SLOTTED_EXTRAS",
-    "_UNION_TYPE",
-    "_AnyType",
-    "_ExtrasDescriptor",
-    "_ParseConfig",
-    "_apply_constraints",
-    "_merge_annotated_meta",
-    "_ordered_values",
-    "_set_extras",
+    "apply_constraints",
+    "ExtrasDescriptor",
+    "merge_annotated_meta",
+    "MISSING_SENTINEL",
+    "ordered_values",
+    "ParseConfig",
+    "set_extras",
+    "UNION_TYPE",
 ]

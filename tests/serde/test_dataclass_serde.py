@@ -34,11 +34,11 @@ from weakincentives.serde import (
 )
 from weakincentives.serde.dataclass_serde import (
     _SLOTTED_EXTRAS,
+    ParseConfig,
     _bool_from_str,
     _coerce_to_type,
-    _merge_annotated_meta,
-    _ordered_values,
-    _ParseConfig,
+    merge_annotated_meta,
+    ordered_values,
 )
 from weakincentives.types import JSONValue
 
@@ -967,15 +967,15 @@ def test_internal_helpers_and_extras_descriptor() -> None:
     assert getattr(slotted, "__extras__", None) is None
 
     unordered = {"a", 1}
-    assert _ordered_values(unordered) == sorted(unordered, key=repr)
-    assert _ordered_values(["x", "y"]) == ["x", "y"]
+    assert ordered_values(unordered) == sorted(unordered, key=repr)
+    assert ordered_values(["x", "y"]) == ["x", "y"]
 
 
 def test_merge_annotated_meta_and_bool_parsing() -> None:
     class Placeholder:
         __metadata__ = ()
 
-    base, meta = _merge_annotated_meta(Placeholder, {"x": 1})
+    base, meta = merge_annotated_meta(Placeholder, {"x": 1})
     assert base is Placeholder
     assert meta == {"x": 1}
 
@@ -1099,7 +1099,7 @@ def test_object_type_and_union_handling() -> None:
         def __init__(self, value: object) -> None:
             raise ValueError("boom2")
 
-    config = _ParseConfig(
+    config = ParseConfig(
         extra="ignore",
         coerce=True,
         case_insensitive=False,
@@ -1124,7 +1124,7 @@ def test_union_without_matching_type_reports_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     union_type = int | None
-    config = _ParseConfig(
+    config = ParseConfig(
         extra="ignore",
         coerce=True,
         case_insensitive=False,
@@ -1148,7 +1148,7 @@ def test_union_without_matching_type_reports_error(
 
 
 def test_none_branch_and_literal_coercion() -> None:
-    config = _ParseConfig(
+    config = ParseConfig(
         extra="ignore",
         coerce=True,
         case_insensitive=False,

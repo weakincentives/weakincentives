@@ -22,6 +22,7 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import (
+    Any,
     Literal,
     cast,
     get_args as typing_get_args,
@@ -33,9 +34,8 @@ from uuid import UUID
 from ..prompt._types import SupportsDataclass
 from ..types import JSONValue
 from ._utils import (
-    AnyType,
+    UNION_TYPE,
     ParseConfig,
-    UnionType,
     apply_constraints,
     merge_annotated_meta,
     set_extras,
@@ -106,7 +106,7 @@ def _coerce_union(
     config: ParseConfig,
 ) -> object:
     origin = get_origin(base_type)
-    if origin is not UnionType:
+    if origin is not UNION_TYPE:
         return _NOT_HANDLED
     if (
         config.coerce
@@ -423,7 +423,7 @@ def _coerce_to_type(
 ) -> object:
     base_type, merged_meta = merge_annotated_meta(typ, meta)
 
-    if base_type is object or base_type is AnyType:
+    if base_type is object or base_type is Any:
         return apply_constraints(value, merged_meta, path)
 
     coercers = (

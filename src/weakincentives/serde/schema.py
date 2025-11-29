@@ -21,12 +21,12 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Literal, cast, get_args, get_origin, get_type_hints
+from typing import Any, Literal, cast, get_args, get_origin, get_type_hints
 from uuid import UUID
 
 from ..prompt._types import SupportsDataclass
 from ..types import JSONValue
-from ._utils import AnyType, UnionType, merge_annotated_meta, ordered_values
+from ._utils import UNION_TYPE, merge_annotated_meta, ordered_values
 
 NULL_TYPE = type(None)
 NULL_JSON_TYPE = "null"
@@ -124,7 +124,7 @@ def _schema_for_type(
 def _schema_for_dataclass(
     base_type: object, alias_generator: Callable[[str], str] | None, origin: object
 ) -> dict[str, JSONValue] | None:
-    if base_type is object or base_type is AnyType:
+    if base_type is object or base_type is Any:
         return {}
     if not dataclasses.is_dataclass(base_type):
         return None
@@ -222,7 +222,7 @@ def _apply_union_metadata(
 def _schema_for_union(
     base_type: object, alias_generator: Callable[[str], str] | None, origin: object
 ) -> dict[str, JSONValue] | None:
-    if origin is not UnionType:
+    if origin is not UNION_TYPE:
         return None
 
     includes_null, subschemas, base_schema_ref = _collect_union_subschemas(
