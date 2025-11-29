@@ -41,6 +41,7 @@ from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     OutputParseError,
+    PayloadParsingConfig,
     parse_dataclass_payload,
     parse_structured_output,
 )
@@ -176,6 +177,18 @@ class AdapterRenderContext[OutputT]:
     render_inputs: tuple[SupportsDataclass, ...]
     rendered: RenderedPrompt[OutputT]
     response_format: Mapping[str, Any] | None
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterRenderOptions:
+    """Configuration for rendering prompts ahead of provider evaluation."""
+
+    parse_output: bool
+    disable_output_instructions: bool
+    enable_json_schema: bool
+    deadline: Deadline | None
+    overrides_store: PromptOverridesStore | None
+    overrides_tag: str = "latest"
 
 
 class ThrottleError(PromptEvaluationError):
@@ -821,15 +834,14 @@ def parse_schema_constrained_payload(
     if dataclass_type is None or container is None:
         raise TypeError("Prompt does not declare structured output.")
 
-    return parse_dataclass_payload(
-        dataclass_type,
-        container,
-        payload,
+    config = PayloadParsingConfig(
+        container=container,
         allow_extra_keys=bool(allow_extra_keys),
         object_error="Expected provider payload to be a JSON object.",
         array_error="Expected provider payload to be a JSON array.",
         array_item_error="Array item at index {index} is not an object.",
     )
+    return parse_dataclass_payload(dataclass_type, payload, config)
 
 
 def message_text_content(content: object) -> str:
@@ -901,30 +913,25 @@ def prepare_adapter_conversation[
     *,
     prompt: Prompt[OutputT],
     params: Sequence[SupportsDataclass],
-    parse_output: bool,
-    disable_output_instructions: bool,
-    enable_json_schema: bool,
-    deadline: Deadline | None,
-    overrides_store: PromptOverridesStore | None,
-    overrides_tag: str,
+    options: AdapterRenderOptions,
 ) -> AdapterRenderContext[OutputT]:
     """Render a prompt and compute adapter inputs shared across providers."""
 
     prompt_name = prompt.name or prompt.__class__.__name__
     render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
 
-    if deadline is not None and deadline.remaining() <= timedelta(0):
+    if options.deadline is not None and options.deadline.remaining() <= timedelta(0):
         raise PromptEvaluationError(
             "Deadline expired before evaluation started.",
             prompt_name=prompt_name,
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            provider_payload=deadline_provider_payload(deadline),
+            provider_payload=deadline_provider_payload(options.deadline),
         )
 
-    render_overrides_store = overrides_store
-    render_tag = overrides_tag
+    render_overrides_store = options.overrides_store
+    render_tag = options.overrides_tag
     render_inject_output_instructions: bool | None = None
-    if disable_output_instructions:
+    if options.disable_output_instructions:
         render_inject_output_instructions = False
 
     rendered = prompt.render(
@@ -933,13 +940,13 @@ def prepare_adapter_conversation[
         tag=render_tag,
         inject_output_instructions=render_inject_output_instructions,
     )
-    if deadline is not None:
-        rendered = replace(rendered, deadline=deadline)
+    if options.deadline is not None:
+        rendered = replace(rendered, deadline=options.deadline)
 
     response_format: Mapping[str, Any] | None = None
     if (
-        enable_json_schema
-        and parse_output
+        options.enable_json_schema
+        and options.parse_output
         and rendered.output_type is not None
         and rendered.container is not None
     ):
@@ -1003,6 +1010,7 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
 __all__ = [
     "AdapterName",
     "AdapterRenderContext",
+    "AdapterRenderOptions",
     "ChoiceSelector",
     "ConversationConfig",
     "ConversationRequest",

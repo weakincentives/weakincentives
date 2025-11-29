@@ -40,6 +40,7 @@ from .core import (
 )
 from .shared import (
     LITELLM_ADAPTER_NAME,
+    AdapterRenderOptions,
     ConversationConfig,
     ThrottleError,
     ThrottleKind,
@@ -246,15 +247,19 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             and getattr(prompt, "inject_output_instructions", False)
         )
 
-        render_context = prepare_adapter_conversation(
-            prompt=prompt,
-            params=params,
+        render_options = AdapterRenderOptions(
             parse_output=parse_output,
             disable_output_instructions=should_disable_instructions,
             enable_json_schema=True,
             deadline=deadline,
             overrides_store=overrides_store,
             overrides_tag=overrides_tag,
+        )
+
+        render_context = prepare_adapter_conversation(
+            prompt=prompt,
+            params=params,
+            options=render_options,
         )
 
         prompt_name = render_context.prompt_name
