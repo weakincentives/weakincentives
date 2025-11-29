@@ -965,7 +965,10 @@ def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
         value = cast(EvalResult, event.value)
         if not value.writes:
             return (previous,)
-        snapshot = _apply_writes(previous, value.writes)
+        try:
+            snapshot = _apply_writes(previous, value.writes)
+        except ToolValidationError:
+            return (previous,)
         return (snapshot,)
 
     return reducer

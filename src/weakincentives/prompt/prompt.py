@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import is_dataclass
+from dataclasses import dataclass, is_dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -44,6 +44,22 @@ def _format_specialization_argument(argument: object | None) -> str:
     if isinstance(argument, type):
         return argument.__name__
     return repr(argument)
+
+
+@dataclass(frozen=True, slots=True)
+class _ChapterState:
+    chapters: tuple[Chapter[SupportsDataclass], ...]
+    registry: dict[str, Chapter[SupportsDataclass]]
+    expansion_enabled: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _RegistryState:
+    sections: tuple[Section[SupportsDataclass], ...]
+    registry: PromptRegistry
+    snapshot: RegistrySnapshot
+    placeholders: dict[SectionPath, set[str]]
+    response_section: ResponseFormatSection | None
 
 
 class Prompt[OutputT]:
@@ -86,24 +102,50 @@ class Prompt[OutputT]:
         allow_extra_keys: bool = False,
     ) -> None:
         super().__init__()
+        stripped_ns, stripped_key = self._validate_identity(ns, key)
+        self.ns = stripped_ns
+        self.key = stripped_key
+        self.name = name
+        self._base_sections = tuple(sections or ())
+        self._sections = self._base_sections
+        self._allow_extra_keys_requested = allow_extra_keys
+        chapter_state = self._build_chapter_state(chapters)
+        self._chapters = chapter_state.chapters
+        self._chapter_key_registry = chapter_state.registry
+        self._chapter_expansion_enabled = chapter_state.expansion_enabled
+
+        self._structured_output: StructuredOutputConfig[SupportsDataclass] | None
+        self._structured_output = self._resolve_output_spec(allow_extra_keys)
+        self.inject_output_instructions = inject_output_instructions
+
+        registry_state = self._build_registry_state(self._base_sections)
+        self._sections = registry_state.sections
+        self._registry = registry_state.registry
+        self._response_section = registry_state.response_section
+        self._registry_snapshot = registry_state.snapshot
+        self.placeholders = registry_state.placeholders
+
+        self._renderer: PromptRenderer[OutputT] = PromptRenderer(
+            registry=registry_state.snapshot,
+            structured_output=self._structured_output,
+            response_section=self._response_section,
+        )
+
+    @staticmethod
+    def _validate_identity(ns: str, key: str) -> tuple[str, str]:
         stripped_ns = ns.strip()
         if not stripped_ns:
             raise PromptValidationError("Prompt namespace must be a non-empty string.")
         stripped_key = key.strip()
         if not stripped_key:
             raise PromptValidationError("Prompt key must be a non-empty string.")
-        self.ns = stripped_ns
-        self.key = stripped_key
-        self.name = name
-        base_sections = tuple(sections or ())
-        self._base_sections: tuple[Section[SupportsDataclass], ...] = base_sections
-        self._sections: tuple[Section[SupportsDataclass], ...] = base_sections
-        self._registry = PromptRegistry()
-        self.placeholders: dict[SectionPath, set[str]] = {}
-        self._allow_extra_keys_requested = allow_extra_keys
+        return stripped_ns, stripped_key
 
-        seen_chapter_keys: set[str] = set()
+    def _build_chapter_state(
+        self, chapters: Sequence[Chapter[SupportsDataclass]] | None
+    ) -> _ChapterState:
         provided_chapters = tuple(chapters or ())
+        seen_chapter_keys: set[str] = set()
         for chapter in provided_chapters:
             if chapter.key in seen_chapter_keys:
                 raise PromptValidationError(
@@ -111,43 +153,44 @@ class Prompt[OutputT]:
                     section_path=(chapter.key,),
                 )
             seen_chapter_keys.add(chapter.key)
-        self._chapters: tuple[Chapter[SupportsDataclass], ...] = provided_chapters
-        self._chapter_key_registry: dict[str, Chapter[SupportsDataclass]] = {
-            chapter.key: chapter for chapter in self._chapters
-        }
-        self._chapter_expansion_enabled = bool(self._chapters)
+        return _ChapterState(
+            chapters=provided_chapters,
+            registry={chapter.key: chapter for chapter in provided_chapters},
+            expansion_enabled=bool(provided_chapters),
+        )
 
-        self._structured_output: StructuredOutputConfig[SupportsDataclass] | None
-        self._structured_output = self._resolve_output_spec(allow_extra_keys)
-
-        self.inject_output_instructions = inject_output_instructions
-
-        self._registry.register_sections(self._sections)
-
-        self._response_section: ResponseFormatSection | None = None
-        if self._structured_output is not None:
-            response_params = self._build_response_format_params()
-            response_section = ResponseFormatSection(
-                params=response_params,
-                enabled=lambda _params, prompt=self: prompt.inject_output_instructions,
-            )
-            self._response_section = response_section
+    def _build_registry_state(
+        self, base_sections: tuple[Section[SupportsDataclass], ...]
+    ) -> _RegistryState:
+        registry = PromptRegistry()
+        registry.register_sections(base_sections)
+        response_section = self._maybe_build_response_section()
+        sections = base_sections
+        if response_section is not None:
             section_for_registry = cast(Section[SupportsDataclass], response_section)
-            self._sections += (section_for_registry,)
-            self._registry.register_section(
+            sections += (section_for_registry,)
+            registry.register_section(
                 section_for_registry, path=(response_section.key,), depth=0
             )
 
-        snapshot = self._registry.snapshot()
-        self._registry_snapshot: RegistrySnapshot = snapshot
-        self.placeholders = {
-            path: set(names) for path, names in snapshot.placeholders.items()
-        }
+        snapshot = registry.snapshot()
+        return _RegistryState(
+            sections=sections,
+            registry=registry,
+            snapshot=snapshot,
+            placeholders={
+                path: set(names) for path, names in snapshot.placeholders.items()
+            },
+            response_section=response_section,
+        )
 
-        self._renderer: PromptRenderer[OutputT] = PromptRenderer(
-            registry=snapshot,
-            structured_output=self._structured_output,
-            response_section=self._response_section,
+    def _maybe_build_response_section(self) -> ResponseFormatSection | None:
+        if self._structured_output is None:
+            return None
+        response_params = self._build_response_format_params()
+        return ResponseFormatSection(
+            params=response_params,
+            enabled=lambda _params, prompt=self: prompt.inject_output_instructions,
         )
 
     def render(
