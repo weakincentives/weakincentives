@@ -12,6 +12,8 @@
 
 """Adapter namespace."""
 
+# pyright: reportUnsupportedDunderAll=false, reportImportCycles=false
+
 from __future__ import annotations
 
 from . import _names, core, litellm, openai, shared

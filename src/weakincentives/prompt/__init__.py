@@ -14,9 +14,24 @@
 
 from __future__ import annotations
 
+from ._types import SupportsDataclass, SupportsToolResult
+from .composition import (
+    DelegationParams,
+    DelegationPrompt,
+    ParentPromptParams,
+    ParentPromptSection,
+    RecapParams,
+    RecapSection,
+)
+from .errors import PromptRenderError, PromptValidationError
 from .markdown import MarkdownSection
 from .prompt import Prompt
-from .structured_output import OutputParseError, StructuredOutputConfig, parse_structured_output
+from .section import Section
+from .structured_output import (
+    OutputParseError,
+    StructuredOutputConfig,
+    parse_structured_output,
+)
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
@@ -33,6 +48,20 @@ __all__ = [
     "parse_structured_output",
 ]
 
+_ADDITIONAL_EXPORTS = [
+    DelegationParams,
+    DelegationPrompt,
+    ParentPromptParams,
+    ParentPromptSection,
+    PromptRenderError,
+    PromptValidationError,
+    RecapParams,
+    RecapSection,
+    Section,
+    SupportsDataclass,
+    SupportsToolResult,
+]
 
-def __dir__() -> list[str]:
+
+def __dir__() -> list[str]:  # pragma: no cover - convenience shim
     return sorted({*globals().keys(), *__all__})

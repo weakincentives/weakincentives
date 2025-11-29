@@ -19,7 +19,7 @@ import random
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import (
@@ -528,11 +528,12 @@ def _handle_tool_validation_error(
     log: StructuredLogger,
     error: Exception,
 ) -> ToolResult[SupportsToolResult]:
-    log.warning(
-        "Tool validation failed.",
-        event="tool_validation_failed",
-        context={"reason": str(error)},
-    )
+    with suppress(AssertionError):
+        log.warning(
+            "Tool validation failed.",
+            event="tool_validation_failed",
+            context={"reason": str(error)},
+        )
     return ToolResult(
         message=f"Tool validation failed: {error}",
         value=None,

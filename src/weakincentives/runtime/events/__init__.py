@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import RLock
@@ -61,14 +62,15 @@ class InProcessEventBus:
             try:
                 handler(event)
             except Exception as error:
-                logger.exception(
-                    "Error delivering event.",
-                    event="event_delivery_failed",
-                    context={
-                        "handler": _describe_handler(handler),
-                        "event_type": type(event).__name__,
-                    },
-                )
+                with suppress(AssertionError):
+                    logger.exception(
+                        "Error delivering event.",
+                        event="event_delivery_failed",
+                        context={
+                            "handler": _describe_handler(handler),
+                            "event_type": type(event).__name__,
+                        },
+                    )
                 failures.append(HandlerFailure(handler=handler, error=error))
 
         return PublishResult(
