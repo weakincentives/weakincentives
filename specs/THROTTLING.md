@@ -102,29 +102,52 @@ matter.
   via a helper in `adapters.shared` so both adapters stay aligned and new
   providers can opt in without duplicating constants.
 
-## Current implementation reference and gaps
+## Current implementation reference
 
-- **Error surfacing today**: `run_conversation` currently calls the provider
-  once and raises `PromptEvaluationError` immediately when payloads are missing
-  or invalid (for example, when a provider response lacks a `message` or when
-  parsing structured output fails). Throttle responses therefore bubble up as
-  generic request/response failures rather than a typed throttle path.
-- **Backoff status**: No retry loop or jittered delay exists yet. The
-  conversation runner only checks `Deadline` guards before each provider call
-  and aborts if the budget is exhausted, so any future backoff implementation
-  must account for time already consumed before a throttle signal arrives.
-- **Provider nuance coverage**:
-  - OpenAI: `_call_provider` wraps any SDK exception in a request-phase
-    `PromptEvaluationError` without inspecting status codes or headers. There is
-    no normalization of `Retry-After`, `RateLimitError`, or quota payloads.
-  - LiteLLM: `_call_provider` similarly wraps SDK exceptions as request-phase
-    failures with no throttle-specific parsing or retry hints. This keeps the
-    surface aligned with OpenAI but offers no provider-specific guidance yet.
-- **Caveats**: Because errors are not typed as throttle events, telemetry and
-  observability hooks cannot distinguish throttling from other provider
-  failures. Implementers should expect to introduce a `ThrottleError` wrapper
-  and structured logging before enabling backoff to avoid silent behavior
-  changes.
+- **Throttle policy defaults**: The shared adapter layer exposes a validated
+  `ThrottlePolicy` (defaults: 5 attempts, 500 ms base delay, 8 s cap, 30 s total
+  delay window) plus `new_throttle_policy` for constructing alternative budgets.
+  `ConversationConfig` carries the policy, and `ConversationRunner` consumes it
+  directly.
+- **Typed throttling**: Provider-specific normalizers raise `ThrottleError`
+  with a classified `kind`, optional `retry_after`, accumulated `attempts`, and
+  `retry_safe` flag. The error subclasses `PromptEvaluationError` and retains
+  the provider payload where available.
+- **Retry/backoff loop**: `ConversationRunner._issue_provider_request` wraps the
+  provider call in a retry loop. It updates the `attempts` count on re-raised
+  `ThrottleError`, enforces `max_attempts`, and uses `_jittered_backoff` (full
+  jitter, exponential growth capped by `max_delay`, honoring `retry_after` as a
+  floor). Accumulated delay is bounded by `max_total_delay`, and retries abort
+  early if the active `Deadline` lacks enough remaining time.
+- **Deadline protection**: Deadlines are checked before each provider call and
+  again before sleeping; retries that would outlive the budget raise a terminal
+  `ThrottleError` with `retry_safe=False` so callers do not loop externally.
+- **Logging**: Each throttle retry emits a `prompt_throttled` warning with
+  attempt number, delay, retry-after hint, and throttle kind. Prompt lifecycle
+  logging (start, render publish results) remains unchanged.
+
+## Provider normalization responsibilities
+
+- **OpenAI**: `_call_provider` catches SDK exceptions and routes them through
+  `_normalize_openai_throttle`, which classifies quota exhaustion (message or
+  `code` containing `insufficient_quota`), rate limits (HTTP 429, `RateLimit`
+  class names, or rate limit codes), and timeouts. It captures `retry_after`
+  hints from error attributes or headers and preserves provider payloads from
+  `response` or `json_body` on the raised `ThrottleError`. Non-throttle errors
+  surface as request-phase `PromptEvaluationError` with the serialized payload.
+- **LiteLLM**: Provider calls go through `call_provider_with_normalization`
+  using `_normalize_litellm_throttle`, which mirrors the OpenAI classifications
+  against LiteLLM error shapes. It also extracts `Retry-After` headers or error
+  attributes for backoff guidance and attaches any response mapping to the
+  resulting `ThrottleError`.
+
+## Known gaps after alignment
+
+- **Telemetry/metrics**: Throttle events are only logged; no dedicated events or
+  counters exist to track retry rates, durations, or provider-specific throttle
+  frequency.
+- **Configuration surface**: Adapters construct `ConversationConfig` with the
+  default throttle policy and do not yet expose policy overrides to callers.
 
 ## Retry policy
 
