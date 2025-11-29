@@ -12,7 +12,12 @@
 
 """Dataclass schema generation helpers."""
 
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportArgumentType=false, reportUnnecessaryIsInstance=false, reportPrivateUsage=false
+# pyright: reportUnknownArgumentType=false
+# pyright: reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false
+# pyright: reportArgumentType=false
+# pyright: reportUnnecessaryIsInstance=false
+# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 
@@ -28,6 +33,28 @@ from uuid import UUID
 
 from ..types import JSONValue
 from ._utils import _UNION_TYPE, _AnyType, _merge_annotated_meta, _ordered_values
+
+NULL_TYPE = type(None)
+NULL_JSON_TYPE = "null"
+ELLIPSIS_SENTINEL = Ellipsis
+IGNORE_EXTRA = "ignore"
+FORBID_EXTRA = "forbid"
+ALLOW_EXTRA = "allow"
+EXTRA_MODES = {IGNORE_EXTRA, FORBID_EXTRA, ALLOW_EXTRA}
+NULL_TYPE_SCHEMA: dict[str, JSONValue] = {"type": NULL_JSON_TYPE}
+
+PRIMITIVE_FORMATS: dict[type[object], dict[str, JSONValue]] = {
+    bool: {"type": "boolean"},
+    int: {"type": "integer"},
+    float: {"type": "number"},
+    Decimal: {"type": "number"},
+    str: {"type": "string"},
+    datetime: {"type": "string", "format": "date-time"},
+    date: {"type": "string", "format": "date"},
+    time: {"type": "string", "format": "time"},
+    UUID: {"type": "string", "format": "uuid"},
+    Path: {"type": "string"},
+}
 
 
 def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
@@ -67,6 +94,25 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
     return schema_meta
 
 
+def _resolve_schema(
+    base_type: object,
+    origin: object,
+    alias_generator: Callable[[str], str] | None,
+) -> dict[str, JSONValue] | None:
+    for builder in (
+        _schema_for_dataclass,
+        _schema_for_literal,
+        _schema_for_union,
+        _schema_for_collection,
+        _schema_for_enum,
+        _schema_for_primitive,
+    ):
+        schema_data = builder(base_type, alias_generator, origin)
+        if schema_data is not None:
+            return schema_data
+    return None
+
+
 def _schema_for_type(
     typ: object,
     meta: Mapping[str, object] | None,
@@ -75,26 +121,14 @@ def _schema_for_type(
     base_type, merged_meta = _merge_annotated_meta(typ, meta)
     origin = get_origin(base_type)
 
-    schema_data = _schema_for_dataclass(base_type, alias_generator)
-    if schema_data is None:
-        schema_data = _schema_for_literal(base_type)
-    if schema_data is None and origin is _UNION_TYPE:
-        schema_data = _schema_for_union(base_type, alias_generator)
-    if schema_data is None:
-        schema_data = _schema_for_collection(base_type, origin, alias_generator)
-    if schema_data is None:
-        schema_data = _schema_for_enum(base_type)
-    if schema_data is None:
-        schema_data = _schema_for_primitive(base_type)
-    if schema_data is None:
-        schema_data = {}
+    schema_data = _resolve_schema(base_type, origin, alias_generator) or {}
 
     schema_data.update(_schema_constraints(merged_meta))
     return schema_data
 
 
 def _schema_for_dataclass(
-    base_type: object, alias_generator: Callable[[str], str] | None
+    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
 ) -> dict[str, JSONValue] | None:
     if base_type is object or base_type is _AnyType:
         return {}
@@ -104,10 +138,12 @@ def _schema_for_dataclass(
     return schema(dataclass_type, alias_generator=alias_generator)
 
 
-def _schema_for_literal(base_type: object) -> dict[str, JSONValue] | None:
-    if base_type is type(None):
-        return {"type": "null"}
-    if get_origin(base_type) is not Literal:
+def _schema_for_literal(
+    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+) -> dict[str, JSONValue] | None:
+    if base_type is NULL_TYPE:
+        return dict(NULL_TYPE_SCHEMA)
+    if origin is not Literal:
         return None
 
     literal_values = list(get_args(base_type))
@@ -129,38 +165,54 @@ def _schema_for_literal(base_type: object) -> dict[str, JSONValue] | None:
     return schema_data
 
 
-def _schema_for_union(
+def _is_object_schema(schema_data: Mapping[str, JSONValue]) -> bool:
+    return schema_data.get("type") == "object"
+
+
+def _collect_union_subschemas(
     base_type: object, alias_generator: Callable[[str], str] | None
-) -> dict[str, JSONValue]:
-    subschemas = []
+) -> tuple[bool, list[dict[str, JSONValue]], Mapping[str, JSONValue] | None]:
     includes_null = False
-    base_schema_ref: Mapping[str, object] | None = None
+    subschemas: list[dict[str, JSONValue]] = []
+    base_schema_ref: Mapping[str, JSONValue] | None = None
     for arg in get_args(base_type):
-        if arg is type(None):
+        if arg is NULL_TYPE:
             includes_null = True
             continue
         subschema = _schema_for_type(arg, None, alias_generator)
         subschemas.append(subschema)
-        if (
-            base_schema_ref is None
-            and isinstance(subschema, Mapping)
-            and subschema.get("type") == "object"
-        ):
+        if base_schema_ref is None and _is_object_schema(subschema):
             base_schema_ref = subschema
+    return includes_null, subschemas, base_schema_ref
 
+
+def _merge_union_schema(
+    subschemas: Sequence[dict[str, JSONValue]],
+    base_schema_ref: Mapping[str, JSONValue] | None,
+    includes_null: bool,
+) -> dict[str, JSONValue]:
     any_of = list(subschemas)
     if includes_null:
-        any_of.append({"type": "null"})
-    if base_schema_ref is not None and len(subschemas) == 1:
-        schema_data: dict[str, JSONValue] = dict(base_schema_ref)
-    else:
-        schema_data = {}
+        any_of.append(dict(NULL_TYPE_SCHEMA))
+    schema_data: dict[str, JSONValue] = (
+        dict(base_schema_ref)
+        if base_schema_ref is not None and len(subschemas) == 1
+        else {}
+    )
     schema_data["anyOf"] = any_of
+    return schema_data
 
+
+def _apply_union_metadata(
+    schema_data: dict[str, JSONValue],
+    subschemas: Sequence[dict[str, JSONValue]],
+    base_schema_ref: Mapping[str, JSONValue] | None,
+) -> None:
     non_null_types = [
         subschema.get("type")
         for subschema in subschemas
-        if isinstance(subschema.get("type"), str) and subschema.get("type") != "null"
+        if isinstance(subschema.get("type"), str)
+        and subschema.get("type") != NULL_JSON_TYPE
     ]
     if non_null_types and len(set(non_null_types)) == 1:
         schema_data["type"] = non_null_types[0]
@@ -171,53 +223,98 @@ def _schema_for_union(
         required = subschemas[0].get("required")
         if isinstance(required, (list, tuple)):  # pragma: no cover - defensive
             _ = schema_data.setdefault("required", list(required))
+
+
+def _schema_for_union(
+    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+) -> dict[str, JSONValue] | None:
+    if origin is not _UNION_TYPE:
+        return None
+
+    includes_null, subschemas, base_schema_ref = _collect_union_subschemas(
+        base_type, alias_generator
+    )
+    schema_data = _merge_union_schema(subschemas, base_schema_ref, includes_null)
+    _apply_union_metadata(schema_data, subschemas, base_schema_ref)
     return schema_data
+
+
+def _collection_item_type(base_type: object, index: int = 0) -> object:
+    args = get_args(base_type)
+    return args[index] if len(args) > index else object
+
+
+def _list_schema(
+    base_type: object, alias_generator: Callable[[str], str] | None
+) -> dict[str, JSONValue]:
+    item_type = _collection_item_type(base_type)
+    return {
+        "type": "array",
+        "items": _schema_for_type(item_type, None, alias_generator),
+    }
+
+
+def _set_schema(
+    base_type: object, alias_generator: Callable[[str], str] | None
+) -> dict[str, JSONValue]:
+    schema_data = _list_schema(base_type, alias_generator)
+    schema_data["uniqueItems"] = True
+    return schema_data
+
+
+def _tuple_schema(
+    base_type: object, alias_generator: Callable[[str], str] | None
+) -> dict[str, JSONValue]:
+    args = get_args(base_type)
+    if args and args[-1] is ELLIPSIS_SENTINEL:
+        return {
+            "type": "array",
+            "items": _schema_for_type(args[0], None, alias_generator),
+        }
+    return {
+        "type": "array",
+        "prefixItems": [_schema_for_type(arg, None, alias_generator) for arg in args],
+        "minItems": len(args),
+        "maxItems": len(args),
+    }
+
+
+def _mapping_schema(
+    base_type: object, alias_generator: Callable[[str], str] | None
+) -> dict[str, JSONValue]:
+    value_type = _collection_item_type(base_type, index=1)
+    return {
+        "type": "object",
+        "additionalProperties": _schema_for_type(value_type, None, alias_generator),
+    }
+
+
+_COLLECTION_BUILDERS: Mapping[
+    object, Callable[[object, Callable[[str], str] | None], dict[str, JSONValue]]
+] = {
+    list: _list_schema,
+    Sequence: _list_schema,
+    set: _set_schema,
+    tuple: _tuple_schema,
+    dict: _mapping_schema,
+    Mapping: _mapping_schema,
+}
 
 
 def _schema_for_collection(
     base_type: object,
-    origin: object,
     alias_generator: Callable[[str], str] | None,
+    origin: object,
 ) -> dict[str, JSONValue] | None:
-    if origin is list or origin is Sequence:
-        item_type = get_args(base_type)[0] if get_args(base_type) else object
-        return {
-            "type": "array",
-            "items": _schema_for_type(item_type, None, alias_generator),
-        }
-    if origin is set:
-        item_type = get_args(base_type)[0] if get_args(base_type) else object
-        return {
-            "type": "array",
-            "items": _schema_for_type(item_type, None, alias_generator),
-            "uniqueItems": True,
-        }
-    if origin is tuple:
-        args = get_args(base_type)
-        if args and args[-1] is Ellipsis:
-            return {
-                "type": "array",
-                "items": _schema_for_type(args[0], None, alias_generator),
-            }
-        return {
-            "type": "array",
-            "prefixItems": [
-                _schema_for_type(arg, None, alias_generator) for arg in args
-            ],
-            "minItems": len(args),
-            "maxItems": len(args),
-        }
-    if origin is dict or origin is Mapping:
-        args = get_args(base_type)
-        value_type = args[1] if len(args) == 2 else object
-        return {
-            "type": "object",
-            "additionalProperties": _schema_for_type(value_type, None, alias_generator),
-        }
-    return None
+    builder = _COLLECTION_BUILDERS.get(origin)
+    if builder is None:
+        return None
+    return builder(base_type, alias_generator)
 
 
-def _schema_for_enum(base_type: object) -> dict[str, JSONValue] | None:
+def _schema_for_enum(
+    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+) -> dict[str, JSONValue] | None:
     if not isinstance(base_type, type) or not issubclass(base_type, Enum):
         return None
 
@@ -239,20 +336,10 @@ def _schema_for_enum(base_type: object) -> dict[str, JSONValue] | None:
     return schema_data
 
 
-def _schema_for_primitive(base_type: object) -> dict[str, JSONValue] | None:
-    primitive_formats: dict[type[object], dict[str, JSONValue]] = {
-        bool: {"type": "boolean"},
-        int: {"type": "integer"},
-        float: {"type": "number"},
-        Decimal: {"type": "number"},
-        str: {"type": "string"},
-        datetime: {"type": "string", "format": "date-time"},
-        date: {"type": "string", "format": "date"},
-        time: {"type": "string", "format": "time"},
-        UUID: {"type": "string", "format": "uuid"},
-        Path: {"type": "string"},
-    }
-    for primitive, schema_data in primitive_formats.items():
+def _schema_for_primitive(
+    base_type: object, alias_generator: Callable[[str], str] | None, origin: object
+) -> dict[str, JSONValue] | None:
+    for primitive, schema_data in PRIMITIVE_FORMATS.items():
         if base_type is primitive:
             return dict(schema_data)
     return None
@@ -262,13 +349,13 @@ def schema(
     cls: type[object],
     *,
     alias_generator: Callable[[str], str] | None = None,
-    extra: Literal["ignore", "forbid", "allow"] = "ignore",
+    extra: Literal["ignore", "forbid", "allow"] = IGNORE_EXTRA,
 ) -> dict[str, JSONValue]:
     """Produce a minimal JSON Schema description for a dataclass."""
 
-    if not dataclasses.is_dataclass(cls) or not isinstance(cls, type):
+    if not dataclasses.is_dataclass(cls):
         raise TypeError("schema() requires a dataclass type")
-    if extra not in {"ignore", "forbid", "allow"}:
+    if extra not in EXTRA_MODES:
         raise ValueError("extra must be one of 'ignore', 'forbid', or 'allow'")
 
     properties: dict[str, dict[str, JSONValue]] = {}
@@ -294,7 +381,7 @@ def schema(
         "title": cls.__name__,
         "type": "object",
         "properties": properties,
-        "additionalProperties": extra != "forbid",
+        "additionalProperties": extra != FORBID_EXTRA,
     }
     if required:
         schema_dict["required"] = required
