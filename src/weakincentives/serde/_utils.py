@@ -305,4 +305,17 @@ __all__ = [
     "_merge_annotated_meta",
     "_ordered_values",
     "_set_extras",
+    "ParseConfig",
+    "UNION_TYPE",
+    "AnyType",
+    "apply_constraints",
+    "merge_annotated_meta",
+    "set_extras",
 ]
+
+ParseConfig = _ParseConfig
+UNION_TYPE = _UNION_TYPE
+AnyType = _AnyType
+apply_constraints = _apply_constraints
+merge_annotated_meta = _merge_annotated_meta
+set_extras = _set_extras
