@@ -26,6 +26,8 @@ from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolI
 
 if TYPE_CHECKING:
     from ...prompt.overrides import PromptDescriptor
+else:  # pragma: no cover - runtime alias avoids import cycles during module init
+    PromptDescriptor = Any
 
 
 def _describe_handler(handler: EventHandler) -> str:

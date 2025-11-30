@@ -85,5 +85,6 @@ __all__ = [
     "upsert_by",
 ]
 
+
 def __dir__() -> list[str]:
     return sorted({*globals().keys(), *__all__})  # pragma: no cover - convenience shim

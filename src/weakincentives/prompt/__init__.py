@@ -40,9 +40,9 @@ from .overrides import (
     hash_json,
     hash_text,
 )
-from .rendering import RenderedPrompt
 from .prompt import Prompt
 from .protocols import PromptProtocol, ProviderAdapterProtocol, RenderedPromptProtocol
+from .rendering import RenderedPrompt
 from .section import Section
 from .structured_output import (
     OutputParseError,
@@ -72,9 +72,9 @@ __all__ = [
     "PromptRenderError",
     "PromptValidationError",
     "ProviderAdapterProtocol",
-    "RenderedPrompt",
     "RecapParams",
     "RecapSection",
+    "RenderedPrompt",
     "RenderedPromptProtocol",
     "Section",
     "SectionDescriptor",
