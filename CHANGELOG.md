@@ -12,6 +12,9 @@ Release highlights for weakincentives.
 - Snapshots persist session tags and parent/child relationships, surfacing tags
   in the debug UI and filtering out stray `.jsonl` bundles when listing
   snapshots.
+- Added `wink optimize` to load snapshot `PromptRendered` entries into a
+  lightweight override editor with save/reset endpoints mirroring the debug
+  server controls.
 
 ### Sessions & Subagents
 

@@ -23,7 +23,10 @@ import pytest
 
 from weakincentives import cli
 from weakincentives.cli import wink
+from weakincentives.prompt.overrides import SectionOverride
+from weakincentives.prompt.overrides.versioning import SectionDescriptor, hash_text
 from weakincentives.runtime.session.snapshots import Snapshot
+from weakincentives.runtime.events import PromptRendered
 
 
 @dataclass(slots=True, frozen=True)
@@ -38,6 +41,44 @@ def _write_snapshot(path: Path) -> None:
         tags={"suite": "wink", "session_id": path.stem},
     )
     path.write_text(snapshot.to_json() + "\n")
+
+
+def _write_optimize_snapshot(path: Path) -> None:
+    content_hash = hash_text("section")
+    descriptor = wink.optimize_app.PromptDescriptor(
+        ns="demo",
+        key="opt",
+        sections=[SectionDescriptor(("intro",), content_hash, 0)],
+        tools=[],
+    )
+    prompt = PromptRendered(
+        prompt_ns="demo",
+        prompt_key="opt",
+        prompt_name="Demo",
+        adapter="openai",
+        session_id=None,
+        render_inputs=(),
+        rendered_prompt="hello",
+        descriptor=descriptor,
+        created_at=datetime.now(UTC),
+    )
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={
+            PromptRendered: (prompt,),
+            wink.optimize_app.PromptOverride: (
+                wink.optimize_app.PromptOverride(
+                    ns="demo",
+                    prompt_key="opt",
+                    tag="latest",
+                    sections={"intro": SectionOverride(expected_hash=content_hash, body="")},
+                    tool_overrides={},
+                ),
+            ),
+        },
+        tags={"suite": "wink", "session_id": path.stem},
+    )
+    path.write_text(snapshot.to_json())
 
 
 def test_cli_namespace_lists_wink_module() -> None:
@@ -135,6 +176,98 @@ def test_main_runs_debug_command(
     }
 
 
+def test_main_runs_optimize_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_optimize_snapshot(snapshot_path)
+
+    calls: dict[str, Any] = {}
+
+    def fake_configure_logging(*, level: object, json_mode: object) -> None:
+        calls["configure"] = {"level": level, "json_mode": json_mode}
+
+    class FakeLogger:
+        def __init__(self) -> None:
+            self.logs: list[tuple[str, dict[str, object]]] = []
+
+        def info(
+            self, message: str, *, event: str, context: object | None = None
+        ) -> None:
+            self.logs.append((message, {"event": event, "context": context}))
+
+        def error(
+            self, message: str, *, event: str, context: object | None = None
+        ) -> None:
+            self.logs.append((message, {"event": event, "context": context}))
+
+    fake_logger = FakeLogger()
+
+    def fake_get_logger(name: str) -> FakeLogger:
+        calls["logger_name"] = name
+        return fake_logger
+
+    real_loader = wink.optimize_app.load_snapshot
+
+    def fake_load_snapshot(path: Path) -> object:
+        calls["loaded_path"] = path
+        return real_loader(path)
+
+    def fake_build_app(*args: object, **kwargs: object) -> str:
+        calls["app_args"] = {"snapshot": args[0], **kwargs}
+        return "app"
+
+    def fake_run_server(
+        app: object, *, host: str, port: int, open_browser: bool, logger: object
+    ) -> int:
+        calls["run_args"] = {
+            "app": app,
+            "host": host,
+            "port": port,
+            "open_browser": open_browser,
+            "logger": logger,
+        }
+        return 0
+
+    monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
+    monkeypatch.setattr(wink, "get_logger", fake_get_logger)
+    monkeypatch.setattr(wink.optimize_app, "load_snapshot", fake_load_snapshot)
+    monkeypatch.setattr(wink.optimize_app, "build_optimize_app", fake_build_app)
+    monkeypatch.setattr(
+        wink.optimize_app, "run_optimize_server", fake_run_server
+    )
+
+    exit_code = wink.main(
+        [
+            "--log-level",
+            "DEBUG",
+            "--no-json-logs",
+            "optimize",
+            str(snapshot_path),
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9001",
+            "--no-open-browser",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls["configure"] == {"level": "DEBUG", "json_mode": False}
+    assert calls["logger_name"] == "weakincentives.cli.wink"
+    assert calls["loaded_path"] == snapshot_path
+    snapshot_store = calls["app_args"]["snapshot"]
+    assert isinstance(snapshot_store, wink.optimize_app.OptimizedSnapshotStore)
+    assert calls["app_args"]["logger"] == fake_logger
+    assert calls["run_args"] == {
+        "app": "app",
+        "host": "0.0.0.0",
+        "port": 9001,
+        "open_browser": False,
+        "logger": fake_logger,
+    }
+
+
 def test_main_handles_invalid_snapshot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -162,6 +295,37 @@ def test_main_handles_invalid_snapshot(
     monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
 
     exit_code = wink.main(["debug", str(snapshot_path)])
+
+    assert exit_code == 2
+
+
+def test_optimize_handles_invalid_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot_path = tmp_path / "missing.jsonl"
+
+    def fake_configure_logging(*, level: object, json_mode: object) -> None:
+        return None
+
+    class FakeLogger:
+        def error(self, *_: object, **__: object) -> None:
+            return None
+
+        def exception(self, *_: object, **__: object) -> None:
+            return None
+
+    def fake_get_logger(name: str) -> FakeLogger:
+        return FakeLogger()
+
+    def fake_load_snapshot(path: Path) -> object:
+        msg = f"{path} missing"
+        raise wink.optimize_app.SnapshotLoadError(msg)
+
+    monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
+    monkeypatch.setattr(wink, "get_logger", fake_get_logger)
+    monkeypatch.setattr(wink.optimize_app, "load_snapshot", fake_load_snapshot)
+
+    exit_code = wink.main(["optimize", str(snapshot_path)])
 
     assert exit_code == 2
 

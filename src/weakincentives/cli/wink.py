@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ..runtime.logging import StructuredLogger, configure_logging, get_logger
-from . import debug_app
+from . import debug_app, optimize_app
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -37,6 +37,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "debug":
         return _run_debug(args, logger)
+    if args.command == "optimize":
+        return _run_optimize(args, logger)
 
     return 0
 
@@ -87,6 +89,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Open the default browser to the UI (disable with --no-open-browser).",
     )
 
+    optimize_parser = subcommands.add_parser(
+        "optimize",
+        help="Start a server for editing prompt overrides captured in a snapshot.",
+    )
+    _ = optimize_parser.add_argument(
+        "snapshot_path",
+        help="Path to a session snapshot JSONL file or a directory containing snapshots.",
+    )
+    _ = optimize_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host interface to bind the optimize server to (default: 127.0.0.1).",
+    )
+    _ = optimize_parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind the optimize server to (default: 8000).",
+    )
+    _ = optimize_parser.add_argument(
+        "--open-browser",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Open the default browser to the UI (disable with --no-open-browser).",
+    )
+
     return parser
 
 
@@ -124,6 +152,45 @@ def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
         logger.exception(
             "Debug server failed to start",
             event="wink.debug.server_error",
+            context={"error": repr(error)},
+        )
+        return 3
+
+
+def _run_optimize(args: argparse.Namespace, logger: StructuredLogger) -> int:
+    snapshot_path = Path(args.snapshot_path)
+
+    def _bootstrap_loader(path: Path) -> optimize_app.OptimizableSnapshot:
+        return optimize_app.load_snapshot(path)
+
+    try:
+        store = optimize_app.OptimizedSnapshotStore(
+            snapshot_path,
+            loader=_bootstrap_loader,
+            logger=logger,
+        )
+    except optimize_app.SnapshotLoadError as error:
+        logger.exception(
+            "Snapshot validation failed",
+            event="wink.optimize.snapshot_error",
+            context={"path": str(snapshot_path), "error": str(error)},
+        )
+        return 2
+
+    app = optimize_app.build_optimize_app(store, logger=logger)
+
+    try:
+        return optimize_app.run_optimize_server(
+            app,
+            host=args.host,
+            port=args.port,
+            open_browser=args.open_browser,
+            logger=logger,
+        )
+    except Exception as error:  # pragma: no cover - defensive guard
+        logger.exception(
+            "Optimize server failed to start",
+            event="wink.optimize.server_error",
             context={"error": repr(error)},
         )
         return 3

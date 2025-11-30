@@ -1,0 +1,168 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background: #0b1224;
+  border-bottom: 1px solid #1e293b;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+header p {
+  margin: 4px 0 0 0;
+  color: #94a3b8;
+}
+
+button {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button.primary {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #0b1224;
+  font-weight: 600;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  padding: 16px;
+}
+
+.sidebar {
+  background: #0b1224;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 12px;
+  height: calc(100vh - 120px);
+  overflow: auto;
+}
+
+.sidebar h2 {
+  margin: 4px 0 12px 0;
+  font-size: 16px;
+}
+
+#prompt-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+#prompt-list li {
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid #1e293b;
+  background: #0f172a;
+  cursor: pointer;
+}
+
+#prompt-list li.active {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px #6366f1;
+}
+
+.prompt-meta {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.detail {
+  min-height: calc(100vh - 120px);
+}
+
+.card {
+  background: #0b1224;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.hidden {
+  display: none;
+}
+
+.field-group {
+  margin-bottom: 16px;
+}
+
+.field-group label {
+  display: block;
+  color: #cbd5e1;
+  margin-bottom: 6px;
+}
+
+.field-group textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: monospace;
+}
+
+.field-group .inline-input {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.field-group input[type="text"] {
+  flex: 1;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.section-heading {
+  font-size: 14px;
+  margin: 12px 0 8px 0;
+  color: #cbd5e1;
+}
+
+.status {
+  margin-top: 12px;
+  color: #94a3b8;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 11px;
+  margin-left: 6px;
+}
