@@ -27,7 +27,7 @@ from uuid import uuid4
 
 import pytest
 
-from code_reviewer_example import initialize_code_reviewer_runtime
+from code_reviewer_example import _create_runtime_context
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
@@ -263,18 +263,13 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
 
 def test_code_reviewer_session_reset_clears_runtime_state(tmp_path: Path) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    (
-        _prompt,
-        session,
-        _bus,
-        _store,
-        _tag,
-    ) = initialize_code_reviewer_runtime(
+    context = _create_runtime_context(
         overrides_store=overrides_store,
         override_tag="reset",
     )
 
     seeded_value = ExampleResult(value=1)
+    session = context.session
     session.seed_slice(ExampleResult, (seeded_value,))
 
     assert session.select_all(ExampleResult) == (seeded_value,)

@@ -4,7 +4,11 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-_No changes yet._
+### Examples
+
+- Removed the `initialize_code_reviewer_runtime` helper from the code reviewer
+  example; tests now call `_create_runtime_context` directly when constructing
+  prompt and session state.
 
 ## v0.12.0 - 2025-11-30
 

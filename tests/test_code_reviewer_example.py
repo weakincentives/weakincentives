@@ -29,7 +29,6 @@ from code_reviewer_example import (
     ReviewResponse,
     ReviewTurnParams,
     build_task_prompt,
-    initialize_code_reviewer_runtime,
 )
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
@@ -138,16 +137,12 @@ def test_prompt_render_reducer_prints_full_prompt(
     tmp_path: Path,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    (
-        _prompt,
-        session,
-        bus,
-        _store,
-        _tag,
-    ) = initialize_code_reviewer_runtime(
+    context = reviewer_example._create_runtime_context(
         overrides_store=overrides_store,
         override_tag="prompt-log",
     )
+    session = context.session
+    bus = context.bus
 
     event = PromptRendered(
         prompt_ns="example",

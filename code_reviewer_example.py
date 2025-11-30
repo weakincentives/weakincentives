@@ -334,30 +334,6 @@ def _build_workspace_section(
     )
 
 
-def initialize_code_reviewer_runtime(
-    *,
-    overrides_store: LocalPromptOverridesStore | None = None,
-    override_tag: str | None = None,
-) -> tuple[
-    Prompt[ReviewResponse],
-    Session,
-    EventBus,
-    LocalPromptOverridesStore,
-    str,
-]:
-    context = _create_runtime_context(
-        overrides_store=overrides_store,
-        override_tag=override_tag,
-    )
-    return (
-        context.prompt,
-        context.session,
-        context.bus,
-        context.overrides_store,
-        context.override_tag,
-    )
-
-
 def _create_runtime_context(
     *,
     overrides_store: LocalPromptOverridesStore | None = None,

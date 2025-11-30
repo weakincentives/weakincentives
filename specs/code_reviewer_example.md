@@ -80,8 +80,8 @@ digest is expected to receive long-lived overrides.
 ## Overrides & Optimization
 
 Overrides live in `LocalPromptOverridesStore`, defaulting to
-`~/.weakincentives/prompts`. `initialize_code_reviewer_runtime` is a helper
-used by tests (and other code) to get a prompt/session/bus/store/tag tuple
+`~/.weakincentives/prompts`. Tests reuse `_create_runtime_context` (the same
+builder used by `CodeReviewApp`) to get a prompt/session/bus/store/tag bundle
 without booting the REPL. Overrides are scoped by namespace/key/tag, so you can
 preserve multiple prompt variants in parallel.
 
@@ -133,7 +133,7 @@ Interactive commands:
 - `tests/test_code_reviewer_example.py` covers prompt rendering logs, default
   workspace digest behavior, overrides precedence, the optimize command (via a
   stub adapter), and structured response formatting.
-- `tests/test_thread_safety.py` reuses `initialize_code_reviewer_runtime` during
+- `tests/test_thread_safety.py` reuses `_create_runtime_context` during
   concurrency checks.
 - `make test` / `make check` enforce the repository-wide guarantees
   (formatting, lint, typecheck, security scans, dependency audits, markdown
