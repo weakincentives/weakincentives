@@ -345,6 +345,21 @@ def test_replace_latest_keeps_only_newest_value(
     assert session.select_all(ExamplePayload) == (ExamplePayload(value=2),)
 
 
+def test_resolve_event_value_rejects_missing_value() -> None:
+    @dataclass(slots=True, frozen=True)
+    class ReducerEventStub:
+        value: ExamplePayload | None
+
+    event = ReducerEventStub(value=None)
+
+    with pytest.raises(TypeError):
+        append(
+            (),
+            cast(ReducerEvent, event),
+            context=cast(ReducerContextProtocol, object()),
+        )
+
+
 def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
