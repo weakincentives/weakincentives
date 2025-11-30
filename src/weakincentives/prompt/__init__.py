@@ -42,6 +42,7 @@ from .overrides import (
 )
 from .prompt import Prompt
 from .protocols import PromptProtocol, ProviderAdapterProtocol, RenderedPromptProtocol
+from .rendering import RenderedPrompt
 from .section import Section
 from .structured_output import (
     OutputParseError,
@@ -73,6 +74,7 @@ __all__ = [
     "ProviderAdapterProtocol",
     "RecapParams",
     "RecapSection",
+    "RenderedPrompt",
     "RenderedPromptProtocol",
     "Section",
     "SectionDescriptor",

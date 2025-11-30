@@ -51,6 +51,75 @@ Optional extras enable specific providers or tooling:
 - **Overrides** (`PromptOverride`, `LocalPromptOverridesStore`): Hash-based
   prompt overrides that let you refine prompt text safely in version control.
 
+## Public API
+
+- `weakincentives`: Curated entrypoints for building prompts, tools, and
+  sessions.
+  - Classes and functions: `Deadline`, `JSONValue`, `MarkdownSection`,
+    `Prompt`, `PromptResponse`, `StructuredLogger`, `SupportsDataclass`,
+    `Tool`, `ToolContext`, `ToolHandler`, `ToolResult`, `configure_logging`,
+    `get_logger`, `parse_structured_output`.
+  - Modules: `adapters`, `cli`, `deadlines`, `debug`, `prompt`, `runtime`,
+    `serde`, `tools`, `types`.
+- `weakincentives.adapters`: Provider integrations and throttling primitives.
+  - Constants: `LITELLM_ADAPTER_NAME`, `OPENAI_ADAPTER_NAME`.
+  - Types: `AdapterName`, `PromptEvaluationError`, `PromptResponse`,
+    `ProviderAdapter`, `SessionProtocol`, `ThrottleError`, `ThrottlePolicy`.
+  - Factory: `new_throttle_policy`.
+- `weakincentives.prompt`: Prompt authoring, rendering, and override helpers.
+  - Authoring: `MarkdownSection`, `Prompt`, `RenderedPrompt`, `Section`,
+    `SectionPath`, `Tool`, `ToolContext`, `ToolExample`, `ToolHandler`,
+    `ToolRenderableResult`, `ToolResult`, `SupportsDataclass`,
+    `SupportsToolResult`, `PromptProtocol`, `RenderedPromptProtocol`,
+    `ProviderAdapterProtocol`.
+  - Composition: `DelegationParams`, `DelegationPrompt`,
+    `DelegationSummarySection`, `ParentPromptParams`, `ParentPromptSection`,
+    `RecapParams`, `RecapSection`.
+  - Overrides: `LocalPromptOverridesStore`, `PromptDescriptor`, `PromptLike`,
+    `PromptOverride`, `PromptOverridesError`, `PromptOverridesStore`,
+    `SectionDescriptor`, `SectionOverride`, `ToolDescriptor`, `ToolOverride`,
+    `hash_json`, `hash_text`.
+  - Structured output and validation: `OutputParseError`,
+    `StructuredOutputConfig`, `parse_structured_output`, `PromptError`,
+    `PromptRenderError`, `PromptValidationError`.
+- `weakincentives.runtime`: Session and event primitives.
+  - Logging: `StructuredLogger`, `configure_logging`, `get_logger`.
+  - Events: `EventBus`, `HandlerFailure`, `InProcessEventBus`,
+    `PromptExecuted`, `PromptRendered`, `PublishResult`, `ToolInvoked`.
+  - Session ledger: `DataEvent`, `ReducerContext`, `ReducerContextProtocol`,
+    `ReducerEvent`, `ReducerEventWithValue`, `Session`, `SessionProtocol`,
+    `Snapshot`, `SnapshotProtocol`, `SnapshotRestoreError`,
+    `SnapshotSerializationError`, `TypedReducer`, `append`,
+    `build_reducer_context`, `iter_sessions_bottom_up`, `replace_latest`,
+    `replace_latest_by`, `select_all`, `select_latest`, `select_where`,
+    `upsert_by`.
+- `weakincentives.tools`: Built-in tool sections and dataclasses.
+  - Planning: `AddStep`, `ClearPlan`, `MarkStep`, `NewPlanStep`, `Plan`,
+    `PlanStatus`, `PlanStep`, `PlanningStrategy`, `PlanningToolsSection`,
+    `ReadPlan`, `SetupPlan`, `StepStatus`, `UpdateStep`.
+  - Sandboxes and VFS: `AstevalSection`, `DispatchSubagentsParams`,
+    `HostMount`, `SubagentIsolationLevel`, `SubagentResult`, `SubagentsSection`,
+    `VirtualFileSystem`, `WorkspaceDigest`, `WorkspaceDigestSection`,
+    `VfsFile`, `VfsPath`, `VfsToolsSection`, `build_dispatch_subagents_tool`,
+    `clear_workspace_digest`, `dispatch_subagents`, `latest_workspace_digest`,
+    `set_workspace_digest`.
+  - File operations: `DeleteEntry`, `EditFileParams`, `EvalFileRead`,
+    `EvalFileWrite`, `EvalParams`, `EvalResult`, `FileInfo`, `GlobMatch`,
+    `GlobParams`, `GrepMatch`, `GrepParams`, `ListDirectory`,
+    `ListDirectoryParams`, `ListDirectoryResult`, `ReadFile`, `ReadFileParams`,
+    `ReadFileResult`, `RemoveParams`, `ToolValidationError`, `WriteFile`,
+    `WriteFileParams`.
+  - Podman extras (lazy-loaded): `PodmanSandboxConfig`, `PodmanSandboxSection`,
+    `PodmanShellParams`, `PodmanShellResult`, `PodmanWorkspace`.
+- `weakincentives.serde`: Dataclass serialization helpers: `clone`, `dump`,
+  `parse`, `schema`.
+- `weakincentives.types`: JSON typing helpers: `ContractResult`, `JSONArray`,
+  `JSONArrayT`, `JSONObject`, `JSONObjectT`, `JSONValue`, `ParseableDataclassT`.
+- `weakincentives.dbc`: Design-by-contract utilities: `dbc_active`,
+  `dbc_enabled`, `disable_dbc`, `enable_dbc`, `ensure`, `invariant`, `pure`,
+  `require`, `skip_invariant`.
+- `weakincentives.cli`: CLI entrypoints, notably the `wink` module.
+
 ## Agent-facing operational notes
 
 - WINK does not run unattended background agents by itself. It provides

@@ -17,13 +17,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
-from ...prompt.overrides import PromptDescriptor
 from ..logging import StructuredLogger, get_logger
 from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
+
+if TYPE_CHECKING:
+    from ...prompt.overrides import PromptDescriptor
+else:  # pragma: no cover - runtime alias avoids import cycles during module init
+    PromptDescriptor = Any
 
 
 def _describe_handler(handler: EventHandler) -> str:
