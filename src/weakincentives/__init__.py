@@ -10,18 +10,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Namespace package exposing subsystem API modules."""
+"""Public surface for :mod:`weakincentives`."""
 
 from __future__ import annotations
 
-from . import adapters, api, cli, deadlines, debug, prompt, runtime, serde, tools, types
+from . import adapters, cli, deadlines, debug, prompt, runtime, serde, tools, types
+from .adapters import PromptResponse
+from .deadlines import Deadline
+from .prompt import (
+    MarkdownSection,
+    Prompt,
+    SupportsDataclass,
+    Tool,
+    ToolContext,
+    ToolHandler,
+    ToolResult,
+    parse_structured_output,
+)
+from .runtime import StructuredLogger, configure_logging, get_logger
+from .types import JSONValue
 
 __all__ = [
+    "Deadline",
+    "JSONValue",
+    "MarkdownSection",
+    "Prompt",
+    "PromptResponse",
+    "StructuredLogger",
+    "SupportsDataclass",
+    "Tool",
+    "ToolContext",
+    "ToolHandler",
+    "ToolResult",
     "adapters",
-    "api",
     "cli",
+    "configure_logging",
     "deadlines",
     "debug",
+    "get_logger",
+    "parse_structured_output",
     "prompt",
     "runtime",
     "serde",
