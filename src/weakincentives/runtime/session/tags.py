@@ -40,6 +40,6 @@ def normalize_tags(
         normalized["session_id"] = str(session_id)
 
     if parent_session_id is not None:
-        normalized.setdefault("parent_session_id", str(parent_session_id))
+        _ = normalized.setdefault("parent_session_id", str(parent_session_id))
 
     return MappingProxyType(normalized)

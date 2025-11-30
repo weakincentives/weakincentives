@@ -161,11 +161,13 @@ def test_snapshot_serializes_relationship_metadata() -> None:
 
 
 def test_snapshot_rejects_non_string_tags() -> None:
+    tags = cast(Mapping[str, str], {"scope": "session", "invalid": cast(str, 123)})
+
     with pytest.raises(SnapshotSerializationError):
         Snapshot(
             created_at=datetime(2024, 1, 1, tzinfo=UTC),
             slices={SnapshotItem: (SnapshotItem(1),)},
-            tags={"scope": "session", "invalid": 123},
+            tags=tags,
         )
 
 
