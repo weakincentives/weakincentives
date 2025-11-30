@@ -80,7 +80,7 @@ else:
             PodmanShellResult,
             PodmanWorkspace,
         )
-    except ImportError:
+    except ImportError:  # pragma: no cover - optional dependency
         PodmanSandboxConfig = cast(type[Any], None)
         PodmanSandboxSection = cast(type[Any], None)
         PodmanShellParams = cast(type[Any], None)

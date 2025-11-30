@@ -15,9 +15,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from ...runtime.logging import StructuredLogger, get_logger
+if TYPE_CHECKING:
+    from ...runtime.logging import StructuredLogger
 from ...types import JSONValue
 from .versioning import (
     HexDigest,
@@ -33,9 +34,20 @@ from .versioning import (
     ensure_hex_digest,
 )
 
-_LOGGER: StructuredLogger = get_logger(
-    __name__, context={"component": "prompt_overrides"}
-)
+_logger_instance: StructuredLogger | None = None
+
+
+def _logger() -> StructuredLogger:
+    from ...runtime.logging import get_logger
+
+    global _logger_instance
+    if _logger_instance is None:
+        _logger_instance = get_logger(
+            __name__, context={"component": "prompt_overrides"}
+        )
+    return _logger_instance
+
+
 FORMAT_VERSION = 1
 
 
@@ -79,7 +91,7 @@ def _log_mismatched_override_metadata(
     descriptor: PromptDescriptor,
     override: PromptOverride,
 ) -> None:
-    _LOGGER.debug(
+    _logger().debug(
         "Skipping override due to descriptor metadata mismatch.",
         event="prompt_override_mismatched_descriptor",
         context={
@@ -111,7 +123,7 @@ def _normalize_section_override(
             raise PromptOverridesError(
                 f"Unknown section path for override: {config.path_display}"
             )
-        _LOGGER.debug(
+        _logger().debug(
             "Skipping unknown override section path.",
             event="prompt_override_unknown_section",
             context={"path": config.path_display},
@@ -126,7 +138,7 @@ def _normalize_section_override(
             raise PromptOverridesError(
                 f"Hash mismatch for section {config.path_display}."
             )
-        _LOGGER.debug(
+        _logger().debug(
             "Skipping stale section override.",
             event="prompt_override_stale_section",
             context={
@@ -161,7 +173,7 @@ def _validate_tool_descriptor(
     if descriptor_tool is None:
         if strict:
             raise PromptOverridesError(f"Unknown tool override: {name}")
-        _LOGGER.debug(
+        _logger().debug(
             "Skipping unknown tool override.",
             event="prompt_override_unknown_tool",
             context={"tool": name},
@@ -184,7 +196,7 @@ def _validate_tool_expected_hash(
     if expected_digest != descriptor_tool.contract_hash:
         if strict:
             raise PromptOverridesError(f"Hash mismatch for tool override: {name}.")
-        _LOGGER.debug(
+        _logger().debug(
             "Skipping stale tool override.",
             event="prompt_override_stale_tool",
             context={

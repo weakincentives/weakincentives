@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -505,7 +506,11 @@ def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()
     file_path = docs / "intro.md"
-    file_path.write_text("hello", encoding="utf-8")
+    fd = os.open(file_path, os.O_WRONLY | os.O_CREAT)
+    try:
+        os.write(fd, b"hello")
+    finally:
+        os.close(fd)
 
     bus = InProcessEventBus()
     session = Session(bus=bus)

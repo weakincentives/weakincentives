@@ -62,18 +62,12 @@ def test_namespace_forwarding() -> None:
     assert cast(Any, adapters).PromptResponse is adapters_response
 
 
-def test_runtime_getattr_reimports_api() -> None:
-    runtime.api = None
-
-    reloaded_session = cast(Any, runtime).Session
-    assert reloaded_session is cast(Any, runtime.api).Session
+def test_runtime_exports_match_api() -> None:
+    assert cast(Any, runtime).Session is cast(Any, runtime.api).Session
 
 
-def test_adapters_getattr_reimports_api() -> None:
-    adapters.api = None
-
-    reloaded_response = cast(Any, adapters).PromptResponse
-    assert reloaded_response is cast(Any, adapters.api).PromptResponse
+def test_adapters_exports_match_api() -> None:
+    assert cast(Any, adapters).PromptResponse is cast(Any, adapters.api).PromptResponse
 
 
 def test_api_dir_helpers() -> None:

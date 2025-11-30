@@ -3219,4 +3219,4 @@ def test_tools_module_missing_attr_raises() -> None:
     import weakincentives.tools as tools
 
     with pytest.raises(AttributeError):
-        _ = tools.TOTALLY_UNKNOWN
+        _ = cast(Any, tools).TOTALLY_UNKNOWN

@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from . import api
 from .api import (
-    AdapterName,
     LITELLM_ADAPTER_NAME,
     OPENAI_ADAPTER_NAME,
+    AdapterName,
     PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
@@ -28,7 +28,7 @@ from .api import (
     new_throttle_policy,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022
     "AdapterName",
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",

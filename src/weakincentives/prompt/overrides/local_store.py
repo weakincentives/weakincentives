@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast, override
+from typing import TYPE_CHECKING, cast, override
 
-from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
 from ._fs import OverrideFilesystem
 from .validation import (
@@ -42,9 +41,23 @@ from .versioning import (
     SectionOverride,
 )
 
-_LOGGER: StructuredLogger = get_logger(
-    __name__, context={"component": "prompt_overrides"}
-)
+if TYPE_CHECKING:
+    from ...runtime.logging import StructuredLogger
+
+_logger_instance: StructuredLogger | None = None
+
+
+def _logger() -> StructuredLogger:
+    from ...runtime.logging import get_logger
+
+    global _logger_instance
+    if _logger_instance is None:
+        _logger_instance = get_logger(
+            __name__, context={"component": "prompt_overrides"}
+        )
+    return _logger_instance
+
+
 _DEFAULT_RELATIVE_PATH = Path(".weakincentives") / "prompts" / "overrides"
 
 
@@ -79,7 +92,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         )
         with self._filesystem.locked_override_path(file_path):
             if not file_path.exists():
-                _LOGGER.debug(
+                _logger().debug(
                     "Override file not found.",
                     event="prompt_override_missing",
                     context={
@@ -119,7 +132,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         )
 
         if not filtered_sections and not filtered_tools:
-            _LOGGER.debug(
+            _logger().debug(
                 "No applicable overrides remain after validation.",
                 event="prompt_override_empty",
                 context={
@@ -137,7 +150,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             sections=filtered_sections,
             tool_overrides=filtered_tools,
         )
-        _LOGGER.info(
+        _logger().info(
             "Resolved prompt override.",
             event="prompt_override_resolved",
             context={
@@ -196,7 +209,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             sections=validated_sections,
             tool_overrides=validated_tools,
         )
-        _LOGGER.info(
+        _logger().info(
             "Persisted prompt override.",
             event="prompt_override_persisted",
             context={
@@ -227,7 +240,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             try:
                 file_path.unlink()
             except FileNotFoundError:
-                _LOGGER.debug(
+                _logger().debug(
                     "No override file to delete.",
                     event="prompt_override_delete_missing",
                     context={
