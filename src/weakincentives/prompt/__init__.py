@@ -40,6 +40,7 @@ from .overrides import (
     hash_json,
     hash_text,
 )
+from .rendering import RenderedPrompt
 from .prompt import Prompt
 from .protocols import PromptProtocol, ProviderAdapterProtocol, RenderedPromptProtocol
 from .section import Section
@@ -71,6 +72,7 @@ __all__ = [
     "PromptRenderError",
     "PromptValidationError",
     "ProviderAdapterProtocol",
+    "RenderedPrompt",
     "RecapParams",
     "RecapSection",
     "RenderedPromptProtocol",
