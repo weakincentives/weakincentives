@@ -189,13 +189,8 @@ class Session(SessionProtocol):
         self._attach_to_bus(self._bus)
 
     @contextmanager
-    def _locked(self) -> Iterator[None]:
-        with self._lock:
-            yield
-
-    @contextmanager
     def locked(self) -> Iterator[None]:
-        with self._locked():
+        with self._lock:
             yield
 
     def clone(
@@ -209,7 +204,7 @@ class Session(SessionProtocol):
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
 
-        with self._locked():
+        with self.locked():
             reducer_snapshot = [
                 (data_type, tuple(registrations))
                 for data_type, registrations in self._reducers.items()
@@ -235,7 +230,7 @@ class Session(SessionProtocol):
                     slice_type=registration.slice_type,
                 )
 
-        with clone._locked():
+        with clone.locked():
             clone._state = state_snapshot
 
         return clone
@@ -333,14 +328,14 @@ class Session(SessionProtocol):
     def children(self) -> tuple[Session, ...]:
         """Return direct child sessions in registration order."""
 
-        with self._locked():
+        with self.locked():
             return tuple(self._children)
 
     @override
     def snapshot(self) -> SnapshotProtocol:
         """Capture an immutable snapshot of the current session state."""
 
-        with self._locked():
+        with self.locked():
             state_snapshot: dict[SessionSliceType, SessionSlice] = dict(self._state)
             parent_id = self._parent.session_id if self._parent is not None else None
             children_ids = tuple(child.session_id for child in self._children)
@@ -374,7 +369,7 @@ class Session(SessionProtocol):
             msg = f"Slice types not registered: {missing_names}"
             raise SnapshotRestoreError(msg)
 
-        with self._locked():
+        with self.locked():
             new_state: dict[SessionSliceType, SessionSlice] = dict(self._state)
             for slice_type in registered_slices:
                 new_state[slice_type] = snapshot.slices.get(slice_type, EMPTY_SLICE)
@@ -382,7 +377,7 @@ class Session(SessionProtocol):
             self._state = new_state
 
     def _registered_slice_types(self) -> set[SessionSliceType]:
-        with self._locked():
+        with self.locked():
             types: set[SessionSliceType] = set(self._state)
             for registrations in self._reducers.values():
                 for registration in registrations:
@@ -390,7 +385,7 @@ class Session(SessionProtocol):
             return types
 
     def _register_child(self, child: Session) -> None:
-        with self._locked():
+        with self.locked():
             for registered in self._children:
                 if registered is child:
                     return
@@ -465,7 +460,7 @@ class Session(SessionProtocol):
     ) -> None:
         from .reducer_context import build_reducer_context
 
-        with self._locked():
+        with self.locked():
             registrations = list(self._reducers.get(data_type, ()))
             if not registrations:
                 default_reducer: TypedReducer[Any]
@@ -486,7 +481,7 @@ class Session(SessionProtocol):
         for registration in registrations:
             slice_type = registration.slice_type
             while True:
-                with self._locked():
+                with self.locked():
                     previous = self._state.get(slice_type, EMPTY_SLICE)
                 try:
                     result = registration.reducer(previous, event, context=context)
@@ -505,14 +500,14 @@ class Session(SessionProtocol):
                     )
                     break
                 normalized = tuple(result)
-                with self._locked():
+                with self.locked():
                     current = self._state.get(slice_type, EMPTY_SLICE)
                     if current is previous or current == normalized:
                         self._state[slice_type] = normalized
                         break
 
     def _attach_to_bus(self, bus: EventBus) -> None:
-        with self._locked():
+        with self.locked():
             if self._subscriptions_attached and self._bus is bus:
                 return
             self._bus = bus
