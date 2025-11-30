@@ -119,7 +119,7 @@ a goal at any time.
   limiting or throttling paths.
 - **TOOLS.md**: Tool catalog and contracts—before adding or modifying tools.
 - **VFS_TOOLS.md**: Virtual file system tools—when editing VFS behavior.
-- **WINK_CLI.md**: `wink` CLI design—when changing CLI surfaces.
+- **WINK_DEBUG.md**: `wink` CLI design—when changing CLI surfaces.
 - **WORKSPACE_DIGEST.md**: Workspace digest mechanism—when updating digest
   calculations or usage.
 
