@@ -4,6 +4,10 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+_No changes yet._
+
+## v0.12.0 - 2025-11-30
+
 ### Wink Debugger & Snapshots
 
 - Snapshot viewer now renders markdown-rich values with a toggle between
@@ -12,19 +16,35 @@ Release highlights for weakincentives.
 - Snapshots persist session tags and parent/child relationships, surfacing tags
   in the debug UI and filtering out stray `.jsonl` bundles when listing
   snapshots.
+- Debug app defaults and pagination were tightened, shared snapshot slice
+  payloads are reused across the UI, and snapshot path handling is documented so
+  missing or renamed files stay discoverable.
 
 ### Sessions & Subagents
 
 - Isolated subagents now inherit their parent session so reducers, tags, and
   event context stay consistent across nested runs.
+- Session locking was simplified and invariant/`skip_invariant` typing tightened
+  to keep reducer mutations predictable and thread-safe.
 
 ### Prompts & Events
 
 - Prompt render/execution events include the prompt descriptor, clone methods
   return `Self` for stricter typing, and `OptimizationScope` is now a `StrEnum`
   (update any comparisons against the enum values).
+- Prompt rendering events tolerate payloads that omit the `value` field to keep
+  logging resilient to adapter differences.
 - Removed the prompt chapter abstraction; prompts now compose sections only and
   chapter-focused specs and tests have been removed.
+
+### Adapters & API Surface
+
+- Provider responses now flow through shared dataclasses, OpenAI response format
+  handling is simplified, and adapter `__all__` exports are sorted for
+  deterministic imports.
+- Public API exports were clarified, legacy import shims and the package-level
+  `__getattr__` fallback were removed, and schema/digest helpers were trimmed to
+  reduce surface area.
 
 ### Tools, VFS & Sandboxes
 
@@ -35,6 +55,13 @@ Release highlights for weakincentives.
 - Tool execution flow now relies on focused helpers for argument parsing,
   deadline checks, handler invocation, and result logging to reduce complexity
   while preserving structured events.
+- Podman tool configuration helpers were refactored and workspace digest keys
+  simplified to keep sandboxed runs and tests aligned.
+
+### Serde & Schema
+
+- Dataclass serde imports were consolidated into authoritative modules and
+  shared schema helpers/constants were cleaned up to avoid duplication.
 
 ### Quality & Testing
 
@@ -42,6 +69,11 @@ Release highlights for weakincentives.
   earlier.
 - Added unit coverage for tool execution success cases, validation failures,
   deadline expirations, and unexpected handler exceptions.
+
+### Documentation & Specs
+
+- AGENTS guidance now calls out the alpha/stability status explicitly, and
+  throttling specs were aligned with the current implementation.
 
 ## v0.11.0 - 2025-11-23
 
