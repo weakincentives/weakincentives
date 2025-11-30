@@ -29,7 +29,7 @@ from weakincentives import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.core import OptimizationScope
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.debug import dump_session
+from weakincentives.debug import dump_session as dump_session_tree
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
@@ -173,7 +173,7 @@ class CodeReviewApp:
             print("-" * 23 + "\n")
 
         print("Goodbye.")
-        dump_session(self.session, SNAPSHOT_DIR)
+        dump_session_tree(self.session, SNAPSHOT_DIR)
 
     def _evaluate_turn(self, user_prompt: str) -> str:
         response = self.adapter.evaluate(
