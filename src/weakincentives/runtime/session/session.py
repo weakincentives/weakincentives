@@ -20,7 +20,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
-from types import MappingProxyType
 from typing import Any, Concatenate, cast, override
 from uuid import UUID, uuid4
 
@@ -40,6 +39,7 @@ from .snapshots import (
     SnapshotState,
     normalize_snapshot_state,
 )
+from .tags import normalize_tags
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "session"})
 
@@ -116,28 +116,6 @@ def _created_at_is_utc(session: Session) -> bool:
     return session.created_at.tzinfo == UTC
 
 
-def _normalize_tags(
-    tags: Mapping[object, object] | None,
-    *,
-    session_id: UUID,
-    parent: Session | None,
-) -> Mapping[str, str]:
-    normalized: dict[str, str] = {}
-
-    if tags is not None:
-        for key, value in tags.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                msg = "Session tags must be string key/value pairs."
-                raise TypeError(msg)
-            normalized[key] = value
-
-    normalized["session_id"] = str(session_id)
-    if parent is not None:
-        _ = normalized.setdefault("parent_session_id", str(parent.session_id))
-
-    return MappingProxyType(normalized)
-
-
 @invariant(
     _session_id_is_well_formed,
     _created_at_has_tz,
@@ -179,7 +157,12 @@ class Session(SessionProtocol):
         self._lock = RLock()
         self._parent = parent
         self._children: list[Session] = []
-        self._tags = _normalize_tags(tags, session_id=self.session_id, parent=parent)
+        self._tags = normalize_tags(
+            tags,
+            error_cls=TypeError,
+            session_id=self.session_id,
+            parent_session_id=None if parent is None else parent.session_id,
+        )
         self._subscriptions_attached = False
         if parent is self:
             msg = "Session cannot be its own parent."

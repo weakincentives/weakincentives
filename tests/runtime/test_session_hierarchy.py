@@ -87,3 +87,12 @@ def test_session_snapshot_carries_tags() -> None:
 def test_session_rejects_non_string_tags() -> None:
     with pytest.raises(TypeError):
         Session(tags={"scope": 123})
+
+
+def test_session_injects_metadata_tags() -> None:
+    root = Session()
+    child = Session(parent=root)
+
+    assert root.tags["session_id"] == str(root.session_id)
+    assert child.tags["session_id"] == str(child.session_id)
+    assert child.tags["parent_session_id"] == str(root.session_id)

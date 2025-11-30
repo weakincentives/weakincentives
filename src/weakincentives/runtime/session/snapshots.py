@@ -28,6 +28,7 @@ from ...serde import dump, parse
 from ...types import JSONValue
 from ._slice_types import SessionSlice, SessionSliceType
 from .dataclasses import is_dataclass_instance
+from .tags import normalize_tags
 
 SNAPSHOT_SCHEMA_VERSION = "1"
 
@@ -41,21 +42,6 @@ class SnapshotSerializationError(RuntimeError):
 
 class SnapshotRestoreError(RuntimeError):
     """Raised when snapshot restoration fails due to incompatible payloads."""
-
-
-def _normalize_tags(
-    tags: Mapping[object, object] | None, *, error_cls: type[Exception]
-) -> Mapping[str, str]:
-    normalized: dict[str, str] = {}
-
-    if tags is not None:
-        for key, value in tags.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                msg = "Snapshot tags must be string key/value pairs"
-                raise error_cls(msg)
-            normalized[key] = value
-
-    return cast(Mapping[str, str], types.MappingProxyType(normalized))
 
 
 def normalize_snapshot_state(
@@ -181,14 +167,17 @@ def _validate_slices(
     return tuple(SnapshotSlicePayload.from_object(entry) for entry in slices_source)
 
 
-def _validate_tags(payload: Mapping[str, JSONValue]) -> Mapping[str, str]:
+def _validate_tags(
+    payload: Mapping[str, JSONValue], *, parent_id: str | None
+) -> Mapping[str, str]:
     tags_obj = payload.get("tags", {})
     if not isinstance(tags_obj, Mapping):
         raise SnapshotRestoreError("Snapshot tags must be an object")
 
-    return _normalize_tags(
+    return normalize_tags(
         cast(Mapping[object, object] | None, tags_obj),
         error_cls=SnapshotRestoreError,
+        parent_session_id=parent_id,
     )
 
 
@@ -199,7 +188,7 @@ def _construct_snapshot_payload(
     version, created_at, parent_id = _validate_payload_fields(payload)
     children_ids = _validate_children_ids(payload)
     slices = _validate_slices(payload)
-    tags = _validate_tags(payload)
+    tags = _validate_tags(payload, parent_id=parent_id)
 
     return cls(
         version=version,
@@ -327,9 +316,10 @@ class Snapshot:
         object.__setattr__(
             self,
             "tags",
-            _normalize_tags(
+            normalize_tags(
                 cast(Mapping[object, object], self.tags),
                 error_cls=SnapshotSerializationError,
+                parent_session_id=self.parent_id,
             ),
         )
 

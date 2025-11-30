@@ -160,6 +160,36 @@ def test_snapshot_serializes_relationship_metadata() -> None:
     assert restored.children_ids == (child_one, child_two)
 
 
+def test_snapshot_rejects_non_string_tags() -> None:
+    with pytest.raises(SnapshotSerializationError):
+        Snapshot(
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+            slices={SnapshotItem: (SnapshotItem(1),)},
+            tags={"scope": "session", "invalid": 123},
+        )
+
+
+def test_snapshot_from_json_rejects_non_string_tags() -> None:
+    payload = make_snapshot_payload()
+    payload["tags"] = {"scope": 123}
+
+    with pytest.raises(SnapshotRestoreError):
+        Snapshot.from_json(json.dumps(payload))
+
+
+def test_snapshot_round_trip_injects_parent_tag() -> None:
+    parent_id = uuid4()
+    snapshot = Snapshot(
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        parent_id=parent_id,
+        slices={SnapshotItem: (SnapshotItem(1),)},
+    )
+
+    restored = Snapshot.from_json(snapshot.to_json())
+
+    assert restored.tags["parent_session_id"] == str(parent_id)
+
+
 def test_snapshot_to_json_surfaces_serialization_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
