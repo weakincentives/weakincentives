@@ -29,6 +29,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from weakincentives.cli import debug_app
+from weakincentives.dbc import dbc_enabled
 from weakincentives.runtime.session.snapshots import Snapshot
 
 
@@ -54,7 +55,8 @@ def _write_snapshot(path: Path, values: list[str]) -> list[str]:
         )
         entries.append(snapshot.to_json())
         session_ids.append(session_id)
-    path.write_text("\n".join(entries))
+    with dbc_enabled(False):
+        path.write_text("\n".join(entries))
     return session_ids
 
 

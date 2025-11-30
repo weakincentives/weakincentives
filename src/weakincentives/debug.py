@@ -18,6 +18,7 @@ import logging
 from collections.abc import Iterable
 from pathlib import Path
 
+from .dbc import dbc_enabled
 from .runtime.session import Session, iter_sessions_bottom_up
 
 logger = logging.getLogger(__name__)
@@ -34,47 +35,49 @@ def dump_session(root_session: Session, target: str | Path) -> Path | None:
     input, the final snapshot file is named ``<root_session_id>.jsonl``.
     """
 
-    target_path = _resolve_target(Path(target), root_session)
-    snapshots = _collect_snapshots(root_session)
-    if not snapshots:
+    with dbc_enabled(False):
+        target_path = _resolve_target(Path(target), root_session)
+        snapshots = _collect_snapshots(root_session)
+        if not snapshots:
+            logger.info(
+                "Session snapshot dump skipped; no slices to persist.",
+                extra={
+                    "session_id": str(root_session.session_id),
+                    "snapshot_path": str(target_path),
+                },
+            )
+            return None
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = "\n".join(snapshots) + "\n"
+        _ = target_path.write_text(payload, encoding="utf-8")
         logger.info(
-            "Session snapshot dump skipped; no slices to persist.",
+            "Session snapshots persisted.",
             extra={
                 "session_id": str(root_session.session_id),
                 "snapshot_path": str(target_path),
+                "snapshot_count": len(snapshots),
             },
         )
-        return None
-
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = "\n".join(snapshots) + "\n"
-    _ = target_path.write_text(payload, encoding="utf-8")
-    logger.info(
-        "Session snapshots persisted.",
-        extra={
-            "session_id": str(root_session.session_id),
-            "snapshot_path": str(target_path),
-            "snapshot_count": len(snapshots),
-        },
-    )
-    return target_path
+        return target_path
 
 
 def _collect_snapshots(root_session: Session) -> list[str]:
     snapshots: list[str] = []
-    for session in _iter_sessions_top_down(root_session):
-        snapshot = session.snapshot()
-        if not snapshot.slices:
-            logger.info(
-                "Session snapshot skipped; no slices to persist.",
-                extra={
-                    "session_id": str(session.session_id),
-                    "root_session_id": str(root_session.session_id),
-                },
-            )
-            continue
-        snapshots.append(snapshot.to_json())
-    return snapshots
+    with dbc_enabled(False):
+        for session in _iter_sessions_top_down(root_session):
+            snapshot = session.snapshot()
+            if not snapshot.slices:
+                logger.info(
+                    "Session snapshot skipped; no slices to persist.",
+                    extra={
+                        "session_id": str(session.session_id),
+                        "root_session_id": str(root_session.session_id),
+                    },
+                )
+                continue
+            snapshots.append(snapshot.to_json())
+        return snapshots
 
 
 def _resolve_target(target: Path, root_session: Session) -> Path:
