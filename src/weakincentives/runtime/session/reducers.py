@@ -30,9 +30,11 @@ from ._types import (
 def _resolve_event_value(event: ReducerEvent) -> SupportsDataclass:
     if isinstance(event, ReducerEventWithValue):
         value = event.value
-        if value is not None:
-            return value
-    return cast(SupportsDataclass, event)
+        if value is None:
+            msg = "ReducerEventWithValue.value cannot be None"
+            raise TypeError(msg)
+        return value
+    return event
 
 
 @pure
