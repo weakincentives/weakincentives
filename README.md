@@ -161,7 +161,7 @@ Here, we create a main prompt that includes:
 - `user_turn_section`: A placeholder for the user's interactive request.
 
 ```python
-from weakincentives.api import MarkdownSection, Prompt
+from weakincentives import MarkdownSection, Prompt
 from weakincentives.tools.planning import PlanningToolsSection
 from weakincentives.tools.vfs import VfsToolsSection
 
