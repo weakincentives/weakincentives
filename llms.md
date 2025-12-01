@@ -55,69 +55,199 @@ Optional extras enable specific providers or tooling:
 
 - `weakincentives`: Curated entrypoints for building prompts, tools, and
   sessions.
-  - Classes and functions: `Deadline`, `JSONValue`, `MarkdownSection`,
-    `Prompt`, `PromptResponse`, `StructuredLogger`, `SupportsDataclass`,
-    `Tool`, `ToolContext`, `ToolHandler`, `ToolResult`, `configure_logging`,
-    `get_logger`, `parse_structured_output`.
+  - Classes and functions:
+    - `Deadline`: Immutable value object describing a wall-clock expiration.
+    - `JSONValue`: Type alias for JSON-compatible primitives, objects, and arrays.
+    - `MarkdownSection`: Render markdown content using `string.Template`.
+    - `Prompt`: Coordinate prompt sections and their parameter bindings.
+    - `PromptResponse`: Structured result emitted by an adapter evaluation.
+    - `StructuredLogger`: Logger adapter enforcing a minimal structured event schema.
+    - `SupportsDataclass`: Protocol satisfied by dataclass types and instances.
+    - `Tool`: Describe a callable tool exposed by prompt sections.
+    - `ToolContext`: Immutable container exposing prompt execution state to handlers.
+    - `ToolHandler`: Callable protocol implemented by tool handlers.
+    - `ToolResult`: Structured response emitted by a tool handler.
+    - `configure_logging`: Configure the root logger with sensible defaults.
+    - `get_logger`: Return a `StructuredLogger` scoped to a name.
+    - `parse_structured_output`: Parse a model response into the structured output type declared by the prompt.
   - Modules: `adapters`, `cli`, `deadlines`, `debug`, `prompt`, `runtime`,
     `serde`, `tools`, `types`.
 - `weakincentives.adapters`: Provider integrations and throttling primitives.
   - Constants: `LITELLM_ADAPTER_NAME`, `OPENAI_ADAPTER_NAME`.
-  - Types: `AdapterName`, `PromptEvaluationError`, `PromptResponse`,
-    `ProviderAdapter`, `SessionProtocol`, `ThrottleError`, `ThrottlePolicy`.
-  - Factory: `new_throttle_policy`.
+  - Types:
+    - `AdapterName`: Type alias for adapter names.
+    - `PromptEvaluationError`: Raised when evaluation against a provider fails.
+    - `PromptResponse`: Structured result emitted by an adapter evaluation.
+    - `ProviderAdapter`: Abstract base class describing the synchronous adapter contract.
+    - `SessionProtocol`: Protocol describing the session interface required by adapters.
+    - `ThrottleError`: Raised when a throttle policy denies a request.
+    - `ThrottlePolicy`: Protocol for rate limiting policies.
+  - Factory: `new_throttle_policy`: Factory for creating throttle policies.
 - `weakincentives.prompt`: Prompt authoring, rendering, and override helpers.
-  - Authoring: `MarkdownSection`, `Prompt`, `RenderedPrompt`, `Section`,
-    `SectionPath`, `Tool`, `ToolContext`, `ToolExample`, `ToolHandler`,
-    `ToolRenderableResult`, `ToolResult`, `SupportsDataclass`,
-    `SupportsToolResult`, `PromptProtocol`, `RenderedPromptProtocol`,
-    `ProviderAdapterProtocol`.
-  - Composition: `DelegationParams`, `DelegationPrompt`,
-    `DelegationSummarySection`, `ParentPromptParams`, `ParentPromptSection`,
-    `RecapParams`, `RecapSection`.
-  - Overrides: `LocalPromptOverridesStore`, `PromptDescriptor`, `PromptLike`,
-    `PromptOverride`, `PromptOverridesError`, `PromptOverridesStore`,
-    `SectionDescriptor`, `SectionOverride`, `ToolDescriptor`, `ToolOverride`,
-    `hash_json`, `hash_text`.
-  - Structured output and validation: `OutputParseError`,
-    `StructuredOutputConfig`, `parse_structured_output`, `PromptError`,
-    `PromptRenderError`, `PromptValidationError`.
+  - Authoring:
+    - `MarkdownSection`: Render markdown content using `string.Template`.
+    - `Prompt`: Coordinate prompt sections and their parameter bindings.
+    - `RenderedPrompt`: Result of rendering a prompt.
+    - `Section`: Base class for prompt sections.
+    - `SectionPath`: Path to a section.
+    - `Tool`: Describe a callable tool exposed by prompt sections.
+    - `ToolContext`: Immutable container exposing prompt execution state to handlers.
+    - `ToolExample`: Representative invocation for a tool documenting inputs and outputs.
+    - `ToolHandler`: Callable protocol implemented by tool handlers.
+    - `ToolRenderableResult`: Protocol for tool results that can be rendered.
+    - `ToolResult`: Structured response emitted by a tool handler.
+    - `SupportsDataclass`: Protocol satisfied by dataclass types and instances.
+    - `SupportsToolResult`: Protocol for tool results.
+    - `PromptProtocol`: Protocol for prompts.
+    - `RenderedPromptProtocol`: Protocol for rendered prompts.
+    - `ProviderAdapterProtocol`: Protocol for provider adapters.
+  - Composition:
+    - `DelegationParams`: Parameters for delegation prompts.
+    - `DelegationPrompt`: Prompt for delegating tasks to sub-agents.
+    - `DelegationSummarySection`: Section for summarizing delegation results.
+    - `ParentPromptParams`: Parameters for parent prompts.
+    - `ParentPromptSection`: Section for including parent prompt context.
+    - `RecapParams`: Parameters for recap sections.
+    - `RecapSection`: Section for recapping previous turns.
+  - Overrides:
+    - `LocalPromptOverridesStore`: Store for local prompt overrides.
+    - `PromptDescriptor`: Descriptor for a prompt.
+    - `PromptLike`: Protocol for objects that look like prompts.
+    - `PromptOverride`: Override for a prompt.
+    - `PromptOverridesError`: Raised when prompt overrides fail.
+    - `PromptOverridesStore`: Protocol for prompt override stores.
+    - `SectionDescriptor`: Descriptor for a section.
+    - `SectionOverride`: Override for a section.
+    - `ToolDescriptor`: Descriptor for a tool.
+    - `ToolOverride`: Override for a tool.
+    - `hash_json`: Hash a JSON value.
+    - `hash_text`: Hash a text value.
+  - Structured output and validation:
+    - `OutputParseError`: Raised when structured output parsing fails.
+    - `StructuredOutputConfig`: Configuration for structured output.
+    - `parse_structured_output`: Parse a model response into the structured output type declared by the prompt.
+    - `PromptError`: Base class for prompt errors.
+    - `PromptRenderError`: Raised when prompt rendering fails.
+    - `PromptValidationError`: Raised when prompt validation fails.
 - `weakincentives.runtime`: Session and event primitives.
-  - Logging: `StructuredLogger`, `configure_logging`, `get_logger`.
-  - Events: `EventBus`, `HandlerFailure`, `InProcessEventBus`,
-    `PromptExecuted`, `PromptRendered`, `PublishResult`, `ToolInvoked`.
-  - Session ledger: `DataEvent`, `ReducerContext`, `ReducerContextProtocol`,
-    `ReducerEvent`, `ReducerEventWithValue`, `Session`, `SessionProtocol`,
-    `Snapshot`, `SnapshotProtocol`, `SnapshotRestoreError`,
-    `SnapshotSerializationError`, `TypedReducer`, `append`,
-    `build_reducer_context`, `iter_sessions_bottom_up`, `replace_latest`,
-    `replace_latest_by`, `select_all`, `select_latest`, `select_where`,
-    `upsert_by`.
+  - Logging:
+    - `StructuredLogger`: Logger adapter enforcing a minimal structured event schema.
+    - `configure_logging`: Configure the root logger with sensible defaults.
+    - `get_logger`: Return a `StructuredLogger` scoped to a name.
+  - Events:
+    - `EventBus`: Interface for publishing events.
+    - `HandlerFailure`: Event emitted when a handler fails.
+    - `InProcessEventBus`: Simple in-process event bus.
+    - `PromptExecuted`: Event emitted when a prompt is executed.
+    - `PromptRendered`: Event emitted when a prompt is rendered.
+    - `PublishResult`: Result of publishing an event.
+    - `ToolInvoked`: Event emitted when a tool is invoked.
+  - Session ledger:
+    - `DataEvent`: Event carrying data.
+    - `ReducerContext`: Context for reducers.
+    - `ReducerContextProtocol`: Protocol for reducer context.
+    - `ReducerEvent`: Base class for reducer events.
+    - `ReducerEventWithValue`: Reducer event with a value.
+    - `Session`: Immutable event ledger with Redux-like reducers.
+    - `SessionProtocol`: Protocol for sessions.
+    - `Snapshot`: Session snapshot.
+    - `SnapshotProtocol`: Protocol for session snapshots.
+    - `SnapshotRestoreError`: Raised when snapshot restoration fails.
+    - `SnapshotSerializationError`: Raised when snapshot serialization fails.
+    - `TypedReducer`: Reducer for typed state.
+    - `append`: Append an event to a session.
+    - `build_reducer_context`: Build a reducer context.
+    - `iter_sessions_bottom_up`: Iterate over sessions bottom-up.
+    - `replace_latest`: Replace the latest value in a session.
+    - `replace_latest_by`: Replace the latest value in a session by key.
+    - `select_all`: Select all values from a session.
+    - `select_latest`: Select the latest value from a session.
+    - `select_where`: Select values from a session matching a predicate.
+    - `upsert_by`: Upsert a value in a session by key.
 - `weakincentives.tools`: Built-in tool sections and dataclasses.
-  - Planning: `AddStep`, `ClearPlan`, `MarkStep`, `NewPlanStep`, `Plan`,
-    `PlanStatus`, `PlanStep`, `PlanningStrategy`, `PlanningToolsSection`,
-    `ReadPlan`, `SetupPlan`, `StepStatus`, `UpdateStep`.
-  - Sandboxes and VFS: `AstevalSection`, `DispatchSubagentsParams`,
-    `HostMount`, `SubagentIsolationLevel`, `SubagentResult`, `SubagentsSection`,
-    `VirtualFileSystem`, `WorkspaceDigest`, `WorkspaceDigestSection`,
-    `VfsFile`, `VfsPath`, `VfsToolsSection`, `build_dispatch_subagents_tool`,
-    `clear_workspace_digest`, `dispatch_subagents`, `latest_workspace_digest`,
-    `set_workspace_digest`.
-  - File operations: `DeleteEntry`, `EditFileParams`, `EvalFileRead`,
-    `EvalFileWrite`, `EvalParams`, `EvalResult`, `FileInfo`, `GlobMatch`,
-    `GlobParams`, `GrepMatch`, `GrepParams`, `ListDirectory`,
-    `ListDirectoryParams`, `ListDirectoryResult`, `ReadFile`, `ReadFileParams`,
-    `ReadFileResult`, `RemoveParams`, `ToolValidationError`, `WriteFile`,
-    `WriteFileParams`.
-  - Podman extras (lazy-loaded): `PodmanSandboxConfig`, `PodmanSandboxSection`,
-    `PodmanShellParams`, `PodmanShellResult`, `PodmanWorkspace`.
-- `weakincentives.serde`: Dataclass serialization helpers: `clone`, `dump`,
-  `parse`, `schema`.
-- `weakincentives.types`: JSON typing helpers: `ContractResult`, `JSONArray`,
-  `JSONArrayT`, `JSONObject`, `JSONObjectT`, `JSONValue`, `ParseableDataclassT`.
-- `weakincentives.dbc`: Design-by-contract utilities: `dbc_active`,
-  `dbc_enabled`, `disable_dbc`, `enable_dbc`, `ensure`, `invariant`, `pure`,
-  `require`, `skip_invariant`.
+  - Planning:
+    - `AddStep`: Add a step to a plan.
+    - `ClearPlan`: Clear the plan.
+    - `MarkStep`: Mark a step in a plan.
+    - `NewPlanStep`: New step for a plan.
+    - `Plan`: A plan.
+    - `PlanStatus`: Status of a plan.
+    - `PlanStep`: A step in a plan.
+    - `PlanningStrategy`: Strategy for planning.
+    - `PlanningToolsSection`: Section for planning tools.
+    - `ReadPlan`: Read the plan.
+    - `SetupPlan`: Setup a plan.
+    - `StepStatus`: Status of a step.
+    - `UpdateStep`: Update a step in a plan.
+  - Sandboxes and VFS:
+    - `AstevalSection`: Section for asteval tools.
+    - `DispatchSubagentsParams`: Parameters for dispatching subagents.
+    - `HostMount`: Host mount configuration.
+    - `SubagentIsolationLevel`: Isolation level for subagents.
+    - `SubagentResult`: Result of a subagent.
+    - `SubagentsSection`: Section for subagents.
+    - `VirtualFileSystem`: Virtual file system.
+    - `WorkspaceDigest`: Digest of a workspace.
+    - `WorkspaceDigestSection`: Section for workspace digest.
+    - `VfsFile`: Virtual file system file.
+    - `VfsPath`: Virtual file system path.
+    - `VfsToolsSection`: Section for VFS tools.
+    - `build_dispatch_subagents_tool`: Build a tool for dispatching subagents.
+    - `clear_workspace_digest`: Clear the workspace digest.
+    - `dispatch_subagents`: Dispatch subagents.
+    - `latest_workspace_digest`: Get the latest workspace digest.
+    - `set_workspace_digest`: Set the workspace digest.
+  - File operations:
+    - `DeleteEntry`: Delete a file or directory.
+    - `EditFileParams`: Parameters for editing a file.
+    - `EvalFileRead`: Read a file for evaluation.
+    - `EvalFileWrite`: Write a file for evaluation.
+    - `EvalParams`: Parameters for evaluation.
+    - `EvalResult`: Result of evaluation.
+    - `FileInfo`: Information about a file.
+    - `GlobMatch`: Match for a glob pattern.
+    - `GlobParams`: Parameters for globbing.
+    - `GrepMatch`: Match for a grep pattern.
+    - `GrepParams`: Parameters for grepping.
+    - `ListDirectory`: List a directory.
+    - `ListDirectoryParams`: Parameters for listing a directory.
+    - `ListDirectoryResult`: Result of listing a directory.
+    - `ReadFile`: Read a file.
+    - `ReadFileParams`: Parameters for reading a file.
+    - `ReadFileResult`: Result of reading a file.
+    - `RemoveParams`: Parameters for removing a file.
+    - `ToolValidationError`: Raised when tool validation fails.
+    - `WriteFile`: Write a file.
+    - `WriteFileParams`: Parameters for writing a file.
+  - Podman extras (lazy-loaded):
+    - `PodmanSandboxConfig`: Configuration for Podman sandbox.
+    - `PodmanSandboxSection`: Section for Podman sandbox.
+    - `PodmanShellParams`: Parameters for Podman shell.
+    - `PodmanShellResult`: Result of Podman shell.
+    - `PodmanWorkspace`: Podman workspace.
+- `weakincentives.serde`: Dataclass serialization helpers.
+  - `clone`: Clone a dataclass.
+  - `dump`: Dump a dataclass to JSON-compatible types.
+  - `parse`: Parse JSON-compatible types into a dataclass.
+  - `schema`: Generate a JSON schema for a dataclass.
+- `weakincentives.types`: JSON typing helpers.
+  - `ContractResult`: Result of a contract check.
+  - `JSONArray`: Type alias for JSON arrays.
+  - `JSONArrayT`: Type variable for JSON arrays.
+  - `JSONObject`: Type alias for JSON objects.
+  - `JSONObjectT`: Type variable for JSON objects.
+  - `JSONValue`: Type alias for JSON-compatible primitives, objects, and arrays.
+  - `ParseableDataclassT`: Type variable for parseable dataclasses.
+- `weakincentives.dbc`: Design-by-contract utilities.
+  - `dbc_active`: Return `True` when DbC checks should run.
+  - `dbc_enabled`: Context manager to temporarily enable DbC.
+  - `disable_dbc`: Force DbC enforcement off.
+  - `enable_dbc`: Force DbC enforcement on.
+  - `ensure`: Validate postconditions once the callable returns or raises.
+  - `invariant`: Enforce invariants before and after public method calls.
+  - `pure`: Validate that the wrapped callable behaves like a pure function.
+  - `require`: Validate preconditions before invoking the wrapped callable.
+  - `skip_invariant`: Mark a method so invariants are not evaluated around it.
 - `weakincentives.cli`: CLI entrypoints, notably the `wink` module.
 
 ## Agent-facing operational notes
