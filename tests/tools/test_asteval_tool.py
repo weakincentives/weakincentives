@@ -774,6 +774,22 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     assert payload.value_repr == "'hello mount'"
 
 
+def test_list_directory_result_renders_readable() -> None:
+    result = ListDirectoryResult(
+        path=VfsPath(("workspace", "project")),
+        directories=("src", "tests"),
+        files=("README.md",),
+    )
+
+    rendered = result.render()
+
+    assert "workspace/project" in rendered
+    assert "Directories:" in rendered
+    assert "src" in rendered
+    assert "Files:" in rendered
+    assert "README.md" in rendered
+
+
 def test_write_text_rejects_empty_path() -> None:
     session, bus, _vfs_section, tool = _setup_sections()
 

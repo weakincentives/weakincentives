@@ -451,6 +451,15 @@ class ListDirectoryResult:
         }
     )
 
+    def render(self) -> str:
+        path_label = "/".join(self.path.segments) or "/"
+        lines = [f"Directory listing for {path_label}:"]
+        lines.append("Directories:" if self.directories else "Directories: <none>")
+        lines.extend(f"- {entry}" for entry in self.directories)
+        lines.append("Files:" if self.files else "Files: <none>")
+        lines.extend(f"- {entry}" for entry in self.files)
+        return "\n".join(lines)
+
 
 @dataclass(slots=True, frozen=True)
 class ReadFile:
