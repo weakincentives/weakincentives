@@ -35,11 +35,14 @@ from uuid import UUID
 from ..types import JSONValue
 from ._utils import (
     _UNION_TYPE,
+    TYPE_REF_KEY,
     _AnyType,
     _apply_constraints,
     _merge_annotated_meta,
     _ParseConfig,
+    _resolve_type_identifier,
     _set_extras,
+    _type_identifier,
 )
 
 get_args = typing_get_args
@@ -564,8 +567,53 @@ def _run_validation_hooks(instance: object) -> None:
         _ = post_validator()
 
 
+def _resolve_target_dataclass[T](
+    cls: type[T] | None,
+    mapping_data: Mapping[str, object],
+    *,
+    allow_dataclass_type: bool,
+    type_key: str,
+) -> tuple[type[T], Mapping[str, object]]:
+    target_cls = cls
+    referenced_cls: type[T] | None = None
+    payload = mapping_data
+
+    if allow_dataclass_type and type_key in mapping_data:
+        type_identifier = mapping_data[type_key]
+        if not isinstance(type_identifier, str):
+            raise TypeError(f"{type_key} must be a string type reference")
+        try:
+            resolved_cls = cast(type[T], _resolve_type_identifier(type_identifier))
+        except (TypeError, ValueError) as error:
+            raise TypeError(f"{type_key}: {error}") from error
+        if not dataclasses.is_dataclass(resolved_cls):
+            raise TypeError(f"{type_key}: resolved type is not a dataclass")
+        referenced_cls = resolved_cls
+        payload = cast(
+            Mapping[str, object],
+            {key: value for key, value in mapping_data.items() if key != type_key},
+        )
+
+    if target_cls is None:
+        if referenced_cls is None:
+            raise TypeError("parse() requires a dataclass type")
+        target_cls = referenced_cls
+
+    if not dataclasses.is_dataclass(target_cls) or not isinstance(target_cls, type):
+        raise TypeError("parse() requires a dataclass type")
+
+    if referenced_cls is not None and referenced_cls is not target_cls:
+        expected = _type_identifier(target_cls)
+        found = _type_identifier(referenced_cls)
+        raise TypeError(
+            f"{type_key} does not match target dataclass {expected}; found {found}"
+        )
+
+    return target_cls, payload
+
+
 def parse[T](
-    cls: type[T],
+    cls: type[T] | None,
     data: Mapping[str, object] | object,
     *,
     extra: Literal["ignore", "forbid", "allow"] = "ignore",
@@ -573,15 +621,23 @@ def parse[T](
     case_insensitive: bool = False,
     alias_generator: Callable[[str], str] | None = None,
     aliases: Mapping[str, str] | None = None,
+    allow_dataclass_type: bool = False,
+    type_key: str = TYPE_REF_KEY,
 ) -> T:
     """Parse a mapping into a dataclass instance."""
 
-    if not dataclasses.is_dataclass(cls) or not isinstance(cls, type):
-        raise TypeError("parse() requires a dataclass type")
     if not isinstance(data, Mapping):
         raise TypeError("parse() requires a mapping input")
     if extra not in {"ignore", "forbid", "allow"}:
         raise ValueError("extra must be one of 'ignore', 'forbid', or 'allow'")
+
+    mapping_data = cast(Mapping[str, object], data)
+    target_cls, mapping_data = _resolve_target_dataclass(
+        cls,
+        mapping_data,
+        allow_dataclass_type=allow_dataclass_type,
+        type_key=type_key,
+    )
 
     config = _ParseConfig(
         extra=extra,
@@ -591,10 +647,9 @@ def parse[T](
         aliases=aliases,
     )
 
-    mapping_data = cast(Mapping[str, object], data)
-    type_hints = get_type_hints(cls, include_extras=True)
+    type_hints = get_type_hints(target_cls, include_extras=True)
     kwargs, used_keys = _collect_field_kwargs(
-        cls,
+        target_cls,
         mapping_data,
         type_hints,
         config,
@@ -602,7 +657,7 @@ def parse[T](
         alias_generator=alias_generator,
     )
 
-    instance = cls(**kwargs)
+    instance = target_cls(**kwargs)
 
     _apply_extra_fields(instance, mapping_data, used_keys, extra)
     _run_validation_hooks(instance)

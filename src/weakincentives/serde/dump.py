@@ -26,7 +26,7 @@ from typing import Protocol, cast, no_type_check
 from uuid import UUID
 
 from ..types import JSONValue
-from ._utils import MISSING_SENTINEL, _set_extras
+from ._utils import MISSING_SENTINEL, TYPE_REF_KEY, _set_extras, _type_identifier
 
 
 class DataclassInstance(Protocol):
@@ -163,12 +163,14 @@ def _serialize_iterable(
     return serialized_items
 
 
-def dump(
+def dump(  # noqa: PLR0913
     obj: object,
     *,
     by_alias: bool = True,
     exclude_none: bool = False,
     computed: bool = False,
+    include_dataclass_type: bool = False,
+    type_key: str = TYPE_REF_KEY,
     alias_generator: Callable[[str], str] | None = None,
 ) -> dict[str, JSONValue]:
     """Serialize a dataclass instance to a JSON-compatible dictionary."""
@@ -177,6 +179,8 @@ def dump(
         raise TypeError("dump() requires a dataclass instance")
 
     result: dict[str, JSONValue] = {}
+    if include_dataclass_type:
+        result[type_key] = _type_identifier(type(obj))
     dataclass_obj = cast(DataclassInstance, obj)
     _serialize_fields(dataclass_obj, result, by_alias, exclude_none, alias_generator)
     if computed and hasattr(obj.__class__, "__computed__"):
