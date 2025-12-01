@@ -177,6 +177,18 @@ def test_snapshot_to_json_surfaces_serialization_errors(
         snapshot.to_json()
 
 
+def test_snapshot_serializes_type_references() -> None:
+    payload = make_snapshot_payload()
+    slices = cast(list[object], payload["slices"])
+    entry = cast(dict[str, object], slices[0])
+    items = cast(list[object], entry["items"])
+    first_item = cast(dict[str, object], items[0])
+
+    expected_type = f"{SnapshotItem.__module__}:{SnapshotItem.__qualname__}"
+
+    assert first_item["__type__"] == expected_type
+
+
 @pytest.mark.parametrize(
     "raw_payload",
     [

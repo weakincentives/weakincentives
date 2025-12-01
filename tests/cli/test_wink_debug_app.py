@@ -161,13 +161,21 @@ def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
     detail_response = client.get(f"/api/slices/{quote(slice_type)}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
-    assert detail["items"] == [{"value": "b"}]
+    first_item = detail["items"][0]
+    assert first_item["value"] == "b"
+    assert first_item["__type__"] == (
+        f"{_ExampleSlice.__module__}:{_ExampleSlice.__qualname__}"
+    )
 
     raw_response = client.get("/api/raw")
     assert raw_response.status_code == 200
     raw = raw_response.json()
     assert raw["version"] == "1"
-    assert raw["slices"][0]["items"][0]["value"] == "b"
+    raw_item = raw["slices"][0]["items"][0]
+    assert raw_item["value"] == "b"
+    assert raw_item["__type__"] == (
+        f"{_ExampleSlice.__module__}:{_ExampleSlice.__qualname__}"
+    )
 
 
 def test_slice_pagination_with_query_params(tmp_path: Path) -> None:

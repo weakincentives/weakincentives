@@ -800,6 +800,71 @@ def test_dump_computed_none_excluded() -> None:
     assert "maybe" not in payload
 
 
+@dataclass
+class TypeReferenceModel:
+    value: int
+
+
+def test_dump_and_parse_round_trip_with_type_reference() -> None:
+    payload = dump(TypeReferenceModel(1), include_dataclass_type=True)
+
+    expected_type = f"{TypeReferenceModel.__module__}:{TypeReferenceModel.__qualname__}"
+    assert payload["__type__"] == expected_type
+
+    parsed = parse(None, payload, allow_dataclass_type=True)
+    assert isinstance(parsed, TypeReferenceModel)
+    assert parsed.value == 1
+
+
+def test_parse_rejects_mismatched_type_reference() -> None:
+    @dataclass
+    class AnotherModel:
+        value: int
+
+    payload = dump(TypeReferenceModel(2), include_dataclass_type=True)
+
+    with pytest.raises(TypeError) as exc:
+        parse(AnotherModel, payload, allow_dataclass_type=True)
+
+    assert "does not match target dataclass" in str(exc.value)
+
+
+def test_parse_validates_type_reference_shape() -> None:
+    payload = {"__type__": 123, "value": 1}
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, payload, allow_dataclass_type=True)
+
+    assert "must be a string type reference" in str(exc.value)
+
+
+def test_parse_rejects_invalid_type_identifier() -> None:
+    payload = {"__type__": "invalid", "value": 1}
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, payload, allow_dataclass_type=True)
+
+    assert "Invalid type identifier" in str(exc.value)
+
+
+def test_parse_rejects_nondataclass_type_reference() -> None:
+    payload = {"__type__": "builtins:int", "value": 1}
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, payload, allow_dataclass_type=True)
+
+    assert "resolved type is not a dataclass" in str(exc.value)
+
+
+def test_parse_requires_reference_when_cls_missing() -> None:
+    payload = {"value": 1}
+
+    with pytest.raises(TypeError) as exc:
+        parse(None, payload, allow_dataclass_type=True)
+
+    assert "requires a dataclass type" in str(exc.value)
+
+
 def test_schema_reflects_types_constraints_and_aliases() -> None:
     schema_dict = schema(User, alias_generator=camel, extra="forbid")
     assert schema_dict["title"] == "User"

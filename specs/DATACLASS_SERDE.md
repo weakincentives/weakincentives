@@ -39,7 +39,7 @@ from weakincentives.serde import parse, dump, clone, schema
 
 ```python
 parse(
-    cls,
+    cls: type[T] | None,
     data,
     *,
     extra="ignore",
@@ -47,10 +47,12 @@ parse(
     case_insensitive=False,
     alias_generator=None,
     aliases=None,
+    allow_dataclass_type=False,
+    type_key="__type__",
 ) -> T
 ```
 
-- Accepts a dataclass type and a mapping payload. Missing required inputs raise `ValueError("Missing required field: 'field'")`.
+- Accepts a dataclass type (or resolves from the payload when `allow_dataclass_type=True`) and a mapping payload. Missing required inputs raise `ValueError("Missing required field: 'field'")`.
 - **Extras**: `extra` may be `"ignore"`, `"forbid"`, or `"allow"`. Allowed extras attach to the instance or fall back to
   `__extras__` when slots block dynamic attributes.
 - **Coercion**: When enabled, converts strings to numerics, UUID, paths, Enums, date/time objects, nested dataclasses,
@@ -61,6 +63,9 @@ parse(
   final value. Model-level hooks run after construction and extras assignment.
 - **Error reporting**: Path-aware messages use dotted/indexed keys such as `"address.street"` or `"line_items[0].price"`.
 - **Union semantics**: Branches are attempted in declaration order; the last failure surfaces when all branches fail.
+- **Type references**: When `allow_dataclass_type=True`, parse reads a type identifier from `type_key` (defaulting to
+  `"__type__"`) and resolves it in the form `"{module}:{qualname}"`. The resolved type must be a dataclass and match the
+  provided `cls` when present; mismatches raise `TypeError`.
 
 ### `dump`
 
@@ -71,6 +76,8 @@ dump(
     by_alias=True,
     exclude_none=False,
     computed=False,
+    include_dataclass_type=False,
+    type_key="__type__",
     alias_generator=None,
 ) -> dict[str, Any]
 ```
@@ -80,6 +87,9 @@ dump(
 - **Type handling**: Enums emit their values; `datetime`/`date`/`time` use ISO formatting; `UUID`/`Decimal`/`Path` stringify.
 - **Nullability**: `exclude_none=True` prunes `None` values throughout the payload.
 - **Computed fields**: When `computed=True`, properties listed in `__computed__` materialise under the same alias policy.
+- **Type references**: When `include_dataclass_type=True`, dump embeds the dataclass type identifier at `type_key` using the
+  `"{module}:{qualname}"` format so callers can round-trip instances without supplying an explicit target class to
+  `parse()`.
 - **Runtime contract**: Tool payloads depend on `dump(..., exclude_none=True)` for `Result.render()`, so regressions here
   surface as telemetry or provider mismatches.
 

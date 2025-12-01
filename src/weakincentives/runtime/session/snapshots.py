@@ -19,12 +19,16 @@ import types
 from collections.abc import Mapping
 from dataclasses import dataclass, field, is_dataclass
 from datetime import UTC, datetime
-from importlib import import_module
-from typing import Any, TypeGuard, cast, override
+from typing import TypeGuard, cast, override
 from uuid import UUID
 
 from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
+from ...serde._utils import (
+    TYPE_REF_KEY,
+    resolve_type_identifier,
+    type_identifier,
+)
 from ...types import JSONValue
 from ._slice_types import SessionSlice, SessionSliceType
 from .dataclasses import is_dataclass_instance
@@ -90,25 +94,14 @@ def normalize_snapshot_state(
 
 
 def _type_identifier(cls: SessionSliceType) -> str:
-    return f"{cls.__module__}:{cls.__qualname__}"
+    return type_identifier(cls)
 
 
 def _resolve_type(identifier: str) -> SessionSliceType:
-    module_name, _, qualname = identifier.partition(":")
-    if not module_name or not qualname:
-        msg = f"Invalid type identifier: {identifier!r}"
-        raise SnapshotRestoreError(msg)
-    module = import_module(module_name)
-    target: Any = module
-    for part in qualname.split("."):
-        target = getattr(target, part, None)
-        if target is None:
-            msg = f"Type {identifier!r} could not be resolved"
-            raise SnapshotRestoreError(msg)
-    if not isinstance(target, type):
-        msg = f"Resolved object for {identifier!r} is not a type"
-        raise SnapshotRestoreError(msg)
-    return cast(SessionSliceType, target)
+    try:
+        return cast(SessionSliceType, resolve_type_identifier(identifier))
+    except (TypeError, ValueError) as error:
+        raise SnapshotRestoreError(str(error)) from error
 
 
 def _ensure_timezone(dt: datetime) -> datetime:
@@ -356,7 +349,15 @@ class Snapshot:
             item_type = _infer_item_type(slice_type, values)
             try:
                 serialized_items = [
-                    cast(Mapping[str, JSONValue], dump(value)) for value in values
+                    cast(
+                        Mapping[str, JSONValue],
+                        dump(
+                            value,
+                            include_dataclass_type=True,
+                            type_key=TYPE_REF_KEY,
+                        ),
+                    )
+                    for value in values
                 ]
             except Exception as error:
                 msg = f"Failed to serialize slice {slice_type.__qualname__}"
@@ -421,7 +422,12 @@ class Snapshot:
             restored_items: list[SupportsDataclass] = []
             for item_mapping in entry.items:
                 try:
-                    restored_item = parse(item_type, item_mapping)
+                    restored_item = parse(
+                        item_type,
+                        item_mapping,
+                        allow_dataclass_type=True,
+                        type_key=TYPE_REF_KEY,
+                    )
                 except Exception as error:
                     raise SnapshotRestoreError(
                         f"Failed to restore slice {slice_type.__qualname__}"

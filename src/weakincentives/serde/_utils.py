@@ -18,6 +18,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sized
 from dataclasses import dataclass
 from decimal import Decimal
+from importlib import import_module
 from re import Pattern
 from typing import Any as _AnyType, Final, Literal, cast, get_args
 
@@ -25,6 +26,7 @@ from ..types import JSONValue
 
 MISSING_SENTINEL: Final[object] = object()
 _UNION_TYPE = type(int | str)
+TYPE_REF_KEY: Final[str] = "__type__"
 
 
 class _ExtrasDescriptor:
@@ -294,15 +296,48 @@ def _fail(path: str, message: str) -> None:
     raise ValueError(f"{path}: {message}")
 
 
-__all__ = [
+def _type_identifier(cls: type[object]) -> str:
+    return f"{cls.__module__}:{cls.__qualname__}"
+
+
+def _resolve_type_identifier(identifier: str) -> type[object]:
+    module_name, _, qualname = identifier.partition(":")
+    if not module_name or not qualname:
+        raise ValueError(f"Invalid type identifier: {identifier!r}")
+
+    module = import_module(module_name)
+    target: object = module
+    for part in qualname.split("."):
+        target = getattr(target, part, None)
+        if target is None:
+            raise ValueError(f"Type {identifier!r} could not be resolved")
+    if not isinstance(target, type):
+        raise TypeError(f"Resolved object for {identifier!r} is not a type")
+    return target
+
+
+def resolve_type_identifier(identifier: str) -> type[object]:
+    return _resolve_type_identifier(identifier)
+
+
+def type_identifier(cls: type[object]) -> str:
+    return _type_identifier(cls)
+
+
+__all__ = [  # noqa: RUF022
     "MISSING_SENTINEL",
-    "_SLOTTED_EXTRAS",
-    "_UNION_TYPE",
+    "TYPE_REF_KEY",
     "_AnyType",
     "_ExtrasDescriptor",
     "_ParseConfig",
+    "_SLOTTED_EXTRAS",
+    "_UNION_TYPE",
     "_apply_constraints",
     "_merge_annotated_meta",
     "_ordered_values",
+    "_resolve_type_identifier",
     "_set_extras",
+    "_type_identifier",
+    "resolve_type_identifier",
+    "type_identifier",
 ]
