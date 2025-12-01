@@ -132,10 +132,6 @@ class ProviderAdapter(ABC):
             self._clone_section(section, session=inner_session)
             for section in tool_sections
         )
-        safe_workspace_digest = digest_section.clone(
-            session=inner_session,
-            bus=inner_session.event_bus,
-        )
 
         optimization_prompt = Prompt[_OptimizationResponse](
             ns=f"{prompt.ns}.optimization",
@@ -167,7 +163,6 @@ class ProviderAdapter(ABC):
                 ),
                 *safe_tools,
                 safe_workspace,
-                safe_workspace_digest,
             ),
         )
 
