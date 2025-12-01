@@ -986,6 +986,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             cpu_period=_CPU_PERIOD,
             cpu_quota=_CPU_QUOTA,
             environment=env,
+            network_mode="none",
             mounts=[
                 {
                     "Target": _TMPFS_TARGET,

@@ -156,6 +156,51 @@ def test_evaluate_python_writes_file(tmp_path: Path) -> None:
             _wait_for_container_removal(container_name, connection_name)
 
 
+@pytest.mark.integration
+@pytest.mark.podman
+def test_podman_container_has_no_network(tmp_path: Path) -> None:
+    connection = PodmanSandboxSection.resolve_connection()
+    if connection is None:
+        pytest.skip("Podman integration requires a running podman machine.")
+    assert connection is not None
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    connection_name = connection.get("connection_name")
+    section = PodmanSandboxSection(
+        session=session, config=PodmanSandboxConfig(cache_dir=tmp_path)
+    )
+    container_name: str | None = None
+    try:
+        tool = find_tool(section, "shell_execute")
+        handler = tool.handler
+        assert handler is not None
+
+        script = (
+            "import socket, sys\n"
+            "addr = ('93.184.216.34', 80)\n"
+            "try:\n"
+            "    socket.create_connection(addr, 2)\n"
+            "except OSError:\n"
+            "    sys.exit(0)\n"
+            "sys.exit(1)\n"
+        )
+        params = PodmanShellParams(command=("python3", "-c", script))
+        result = handler(params, context=build_tool_context(bus, session))
+
+        assert result.success
+        assert result.value is not None
+        value = cast(PodmanShellResult, result.value)
+        assert value.exit_code == 0
+        handle = section._workspace_handle
+        assert handle is not None
+        container_name = handle.descriptor.container_name
+        assert _container_network_mode(container_name, connection_name) == "none"
+    finally:
+        section.close()
+        if container_name:
+            _wait_for_container_removal(container_name, connection_name)
+
+
 def _wait_for_container_removal(
     container_name: str, connection_name: str | None, timeout: float = 10.0
 ) -> None:
@@ -174,3 +219,21 @@ def _container_exists(container_name: str, connection_name: str | None) -> bool:
     cmd.extend(["container", "exists", container_name])
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     return result.returncode == 0
+
+
+def _container_network_mode(container_name: str, connection_name: str | None) -> str:
+    cmd = ["podman"]
+    if connection_name:
+        cmd.extend(["--connection", connection_name])
+    cmd.extend(
+        [
+            "container",
+            "inspect",
+            "--format",
+            "{{.HostConfig.NetworkMode}}",
+            container_name,
+        ]
+    )
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()

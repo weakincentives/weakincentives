@@ -10,6 +10,11 @@ Release highlights for weakincentives.
   example; tests now call `_create_runtime_context` directly when constructing
   prompt and session state.
 
+### Tools & Sandboxes
+
+- Podman sandbox containers now start with networking disabled (`network_mode=none`),
+  and an integration test verifies they cannot reach external hosts.
+
 ## v0.12.0 - 2025-11-30
 
 ### Wink Debugger & Snapshots
