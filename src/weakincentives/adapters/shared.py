@@ -45,7 +45,8 @@ from ..prompt.structured_output import (
     parse_dataclass_payload,
     parse_structured_output,
 )
-from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from ..prompt.tool import NativeTool, Tool, ToolContext, ToolHandler, ToolResult
+from ..prompt.tool_result import render_tool_payload
 from ..runtime.events import (
     EventBus,
     HandlerFailure,
@@ -57,6 +58,7 @@ from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.dataclasses import is_dataclass_instance
 from ..serde import parse, schema
 from ..tools.errors import DeadlineExceededError, ToolValidationError
+from ..tools.web_search import WebSearchTool
 from ..types import JSONValue
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
 from ._provider_protocols import (
@@ -281,6 +283,33 @@ def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
 
 def tool_to_spec(tool: Tool[SupportsDataclass, SupportsToolResult]) -> dict[str, Any]:
     """Return a provider-agnostic tool specification payload."""
+
+    if isinstance(tool, WebSearchTool):
+        payload: dict[str, Any] = {"type": tool.provider_type}
+        web_search_payload: dict[str, object] = {}
+
+        if tool.search_context_size is not None:
+            web_search_payload["search_context_size"] = tool.search_context_size
+        if tool.filters is not None:
+            allowed = tool.filters.allowed_domains or ()
+            if allowed:
+                web_search_payload["filters"] = {"allowed_domains": list(allowed)}
+        if tool.user_location is not None:
+            location = {
+                "city": tool.user_location.city,
+                "country": tool.user_location.country,
+                "region": tool.user_location.region,
+                "timezone": tool.user_location.timezone,
+                "type": tool.user_location.type,
+            }
+            location_payload = {k: v for k, v in location.items() if v is not None}
+            if location_payload:
+                web_search_payload["user_location"] = location_payload
+
+        if web_search_payload:
+            payload["web_search"] = web_search_payload
+
+        return payload
 
     parameters_schema = schema(tool.params_type, extra="forbid")
     _ = parameters_schema.pop("title", None)
@@ -1016,6 +1045,7 @@ __all__ = (
     "ConversationConfig",
     "ConversationRequest",
     "ConversationRunner",
+    "NativeToolCall",
     "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
@@ -1066,6 +1096,16 @@ ChoiceSelector = Callable[[object], ProviderChoice]
 """Callable that extracts the relevant choice from a provider response."""
 
 
+@dataclass(slots=True, frozen=True)
+class NativeToolCall:
+    """Provider-executed native tool invocation payload."""
+
+    name: str
+    arguments: Mapping[str, Any]
+    call_id: str | None = None
+    success: bool = True
+
+
 class ToolMessageSerializer(Protocol):
     def __call__(
         self,
@@ -1095,6 +1135,9 @@ class ConversationConfig:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
+    native_tool_extractor: (
+        Callable[[object, dict[str, Any] | None], Sequence[NativeToolCall]] | None
+    ) = None
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> ConversationConfig:
         """Fill in optional settings using rendered prompt metadata."""
@@ -1130,6 +1173,65 @@ class ToolExecutor:
             prompt=self.prompt_name,
         )
         self._tool_message_records = []
+
+    def record_native_calls(
+        self,
+        calls: Sequence[NativeToolCall],
+        provider_payload: dict[str, Any] | None,
+    ) -> None:
+        """Publish provider-managed native tool invocations as events."""
+
+        for call in calls:
+            tool = self.tool_registry.get(call.name)
+            if tool is None:
+                raise PromptEvaluationError(
+                    f"Unknown tool '{call.name}' requested by provider.",
+                    prompt_name=self.prompt_name,
+                    phase=PROMPT_EVALUATION_PHASE_TOOL,
+                    provider_payload=provider_payload,
+                )
+            if not isinstance(tool, NativeTool):
+                raise PromptEvaluationError(
+                    f"Tool '{call.name}' does not have a registered handler.",
+                    prompt_name=self.prompt_name,
+                    phase=PROMPT_EVALUATION_PHASE_TOOL,
+                    provider_payload=provider_payload,
+                )
+
+            try:
+                params = _parse_tool_params(tool=tool, arguments_mapping=call.arguments)
+            except ToolValidationError as error:
+                params = cast(
+                    SupportsDataclass,
+                    _rejected_params(
+                        arguments_mapping=call.arguments,
+                        error=error,
+                    ),
+                )
+                result = _handle_tool_validation_error(log=self._log, error=error)
+            else:
+                value = cast(SupportsToolResult, params)
+                result = ToolResult(
+                    message=render_tool_payload(value),
+                    value=value,
+                    success=call.success,
+                )
+
+            outcome = ToolExecutionOutcome(
+                tool=tool,
+                params=params,
+                result=result,
+                call_id=call.call_id,
+                log=self._log,
+            )
+            _ = _publish_tool_invocation(
+                adapter_name=self.adapter_name,
+                prompt_name=self.prompt_name,
+                session=self.session,
+                bus=self.bus,
+                outcome=outcome,
+                format_publish_failures=self.format_publish_failures,
+            )
 
     def execute(
         self,
@@ -1294,6 +1396,9 @@ class ConversationRunner[OutputT]:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
+    native_tool_extractor: (
+        Callable[[object, dict[str, Any] | None], Sequence[NativeToolCall]] | None
+    ) = None
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
@@ -1330,6 +1435,11 @@ class ConversationRunner[OutputT]:
 
             self._provider_payload = extract_payload(response)
             choice = self.select_choice(response)
+            native_tool_calls: Sequence[NativeToolCall] = ()
+            if self.native_tool_extractor is not None:
+                native_tool_calls = self.native_tool_extractor(
+                    response, self._provider_payload
+                )
             message = getattr(choice, "message", None)
             if message is None:
                 raise PromptEvaluationError(
@@ -1341,6 +1451,11 @@ class ConversationRunner[OutputT]:
 
             tool_calls_sequence = getattr(message, "tool_calls", None)
             tool_calls = list(tool_calls_sequence or [])
+
+            if native_tool_calls:
+                self._tool_executor.record_native_calls(
+                    native_tool_calls, self._provider_payload
+                )
 
             if not tool_calls:
                 return self._finalize_response(message)
@@ -1649,5 +1764,6 @@ def run_conversation[
         logger_override=normalized_config.logger_override,
         deadline=normalized_config.deadline,
         throttle_policy=normalized_config.throttle_policy,
+        native_tool_extractor=normalized_config.native_tool_extractor,
     )
     return runner.run()

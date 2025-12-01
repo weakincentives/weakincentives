@@ -53,6 +53,7 @@ from weakincentives.tools import (
     VfsPath,
     VfsToolsSection,
     WorkspaceDigestSection,
+    build_web_search_tool,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -228,6 +229,13 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
     """Builds the main prompt for the code review agent."""
 
     _ensure_test_repository_available()
+    web_search_tool = build_web_search_tool(
+        description=(
+            "Use the provider web search to retrieve fresh context for the review when"
+            " repository content is insufficient."
+        ),
+        search_context_size="medium",
+    )
     workspace_section = _build_workspace_section(session=session)
     sections = (
         _build_review_guidance_section(),
@@ -240,6 +248,7 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
         MarkdownSection[ReviewTurnParams](
             title="Review Request",
             template="${request}",
+            tools=(web_search_tool,),
             key="review-request",
         ),
     )
@@ -275,6 +284,8 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
               When available, the `shell_execute` command runs short Podman
               commands (no network access). Mounted files are read-only; use
               writes to stage new snapshots.
+            - The `web_search` tool calls the provider's native search to gather
+              recent information when repo context is insufficient.
             - `dispatch_subagents` lets you delegate parallel scans (e.g., README,
               docs, build scripts) so you can summarize broader surface area faster.
 

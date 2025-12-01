@@ -21,7 +21,7 @@ from typing import Any, Literal, TypeVar, cast
 
 import pytest
 
-from weakincentives.adapters import shared
+from weakincentives.adapters import openai as openai_adapter, shared
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -1886,3 +1886,84 @@ def test_openai_normalize_input_messages_allows_passthrough() -> None:
         prompt_name="prompt",
     )
     assert messages[-1]["content"] == "raw"
+
+
+def test_normalize_output_mapping_handles_mappings() -> None:
+    assert openai_adapter._normalize_output_mapping({"type": "web_search_call"}) == {
+        "type": "web_search_call"
+    }
+
+    class Dumpable:
+        def model_dump(self) -> Mapping[str, Any]:
+            return {"type": "web_search_call", "id": 1}
+
+    assert openai_adapter._normalize_output_mapping(Dumpable()) == {
+        "type": "web_search_call",
+        "id": 1,
+    }
+    assert openai_adapter._normalize_output_mapping(object()) is None
+
+
+def test_native_tool_calls_from_response_extracts_web_search_call() -> None:
+    output_item = {
+        "type": "web_search_call",
+        "id": "abc",
+        "status": "failed",
+        "action": {"type": "search", "query": "latest"},
+    }
+    response = types.SimpleNamespace(output=[output_item])
+
+    calls = openai_adapter._native_tool_calls_from_response(
+        response, None, prompt_name="test"
+    )
+
+    assert len(calls) == 1
+    assert calls[0].call_id == "abc"
+    assert calls[0].success is False
+
+    calls_from_payload = openai_adapter._native_tool_calls_from_response(
+        response, {"output": [output_item]}, prompt_name="test"
+    )
+    assert calls_from_payload
+
+
+def test_native_tool_calls_from_response_filters_invalid_payloads() -> None:
+    response = types.SimpleNamespace(output=123)
+
+    assert (
+        openai_adapter._native_tool_calls_from_response(
+            response, None, prompt_name="test"
+        )
+        == []
+    )
+
+    class Dumpable:
+        def model_dump(self) -> str:
+            return "not-a-mapping"
+
+    response.output = [Dumpable()]
+    assert (
+        openai_adapter._native_tool_calls_from_response(
+            response, None, prompt_name="test"
+        )
+        == []
+    )
+
+
+def test_responses_tool_spec_allows_web_search() -> None:
+    module = cast(Any, _reload_module())
+
+    spec = module._responses_tool_spec(
+        {"type": "web_search", "web_search": {"search_context_size": "low"}},
+        prompt_name="prompt",
+    )
+
+    assert spec == {"type": "web_search", "web_search": {"search_context_size": "low"}}
+
+
+def test_responses_tool_choice_allows_web_search() -> None:
+    module = cast(Any, _reload_module())
+
+    choice = module._responses_tool_choice({"type": "web_search"}, prompt_name="prompt")
+
+    assert choice == {"type": "web_search"}

@@ -28,6 +28,7 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.adapters.shared import (
     ConversationRunner,
+    NativeToolCall,
     ThrottlePolicy,
     ToolChoice,
     new_throttle_policy,
@@ -52,6 +53,7 @@ from weakincentives.runtime.events._types import EventHandler
 from weakincentives.runtime.session.protocols import SnapshotProtocol
 from weakincentives.runtime.session.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
+from weakincentives.tools.web_search import build_web_search_tool
 
 from ._test_stubs import DummyChoice, DummyMessage, DummyResponse, DummyToolCall
 
@@ -427,3 +429,44 @@ def test_conversation_runner_requires_message_payload() -> None:
 
     with pytest.raises(PromptEvaluationError):
         runner.run()
+
+
+def test_conversation_runner_records_native_tool_calls() -> None:
+    web_search_tool = build_web_search_tool()
+    rendered = RenderedPrompt(
+        text="system",
+        _tools=cast(
+            tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+            (web_search_tool,),
+        ),
+    )
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="done"))])]
+    provider = ProviderStub(responses)
+    bus = RecordingBus()
+
+    native_call = NativeToolCall(
+        name="web_search",
+        arguments={
+            "id": "search_1",
+            "status": "completed",
+            "type": "web_search_call",
+            "action": {"type": "search", "query": "fresh info"},
+        },
+        call_id="search_1",
+        success=True,
+    )
+
+    runner = build_runner(
+        rendered=rendered,
+        provider=provider,
+        bus=bus,
+        tool_choice="auto",
+    )
+    runner.native_tool_extractor = lambda response, payload: (native_call,)
+
+    runner.run()
+
+    tool_events: list[ToolInvoked] = [
+        event for event in bus.events if isinstance(event, ToolInvoked)
+    ]
+    assert any(event.name == "web_search" for event in tool_events)

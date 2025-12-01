@@ -29,9 +29,11 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
 )
 from weakincentives.adapters.shared import (
+    NativeToolCall,
     ResponseParser,
     ToolExecutor,
     parse_tool_arguments,
+    tool_to_spec,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, ToolContext
@@ -47,6 +49,11 @@ from weakincentives.runtime.events import (
 )
 from weakincentives.runtime.events._types import EventHandler
 from weakincentives.runtime.session.session import Session
+from weakincentives.tools.web_search import (
+    WebSearchFilters,
+    WebSearchLocation,
+    build_web_search_tool,
+)
 
 
 class RecordingBus(EventBus):
@@ -147,6 +154,221 @@ def test_response_parser_text_only() -> None:
 
     assert output is None
     assert text == "Hello"
+
+
+def test_tool_to_spec_for_web_search() -> None:
+    tool = build_web_search_tool(
+        provider_type="web_search_2025_08_26",
+        search_context_size="high",
+        filters=WebSearchFilters(allowed_domains=("example.com", "openai.com")),
+        user_location=WebSearchLocation(
+            city="San Francisco",
+            country="US",
+            region=None,
+            timezone="America/Los_Angeles",
+        ),
+    )
+
+    spec = tool_to_spec(cast(Tool[SupportsDataclass, SupportsToolResult], tool))
+
+    assert spec["type"] == "web_search_2025_08_26"
+    assert spec["web_search"]["search_context_size"] == "high"
+    assert spec["web_search"]["filters"] == {
+        "allowed_domains": ["example.com", "openai.com"],
+    }
+    assert spec["web_search"]["user_location"] == {
+        "city": "San Francisco",
+        "country": "US",
+        "timezone": "America/Los_Angeles",
+        "type": "approximate",
+    }
+
+
+def test_record_native_calls_publishes_events() -> None:
+    tool = build_web_search_tool()
+    rendered = RenderedPrompt(
+        text="system",
+        _tools=cast(
+            tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+            (tool,),
+        ),
+    )
+    bus = RecordingBus()
+    session = Session(bus=bus)
+    tool_registry = cast(
+        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]], {tool.name: tool}
+    )
+
+    executor = ToolExecutor(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[Any], object()),
+        prompt=Prompt(ns="test", key="tool"),
+        prompt_name="test",
+        rendered=rendered,
+        bus=bus,
+        session=session,
+        tool_registry=tool_registry,
+        serialize_tool_message_fn=serialize_tool_message,
+        format_publish_failures=lambda x: "",
+        parse_arguments=parse_tool_arguments,
+    )
+
+    call = NativeToolCall(
+        name="web_search",
+        arguments={
+            "id": "call-1",
+            "status": "completed",
+            "type": "web_search_call",
+            "action": {"type": "search", "query": "latest"},
+        },
+        call_id="call-1",
+        success=True,
+    )
+
+    executor.record_native_calls((call,), provider_payload={})
+
+    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
+    assert tool_events
+    assert tool_events[0].name == "web_search"
+
+
+def test_record_native_calls_validates_tool_registration() -> None:
+    rendered = RenderedPrompt(text="system")
+    bus = RecordingBus()
+    session = Session(bus=bus)
+
+    executor = ToolExecutor(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[Any], object()),
+        prompt=Prompt(ns="test", key="tool"),
+        prompt_name="test",
+        rendered=rendered,
+        bus=bus,
+        session=session,
+        tool_registry={},
+        serialize_tool_message_fn=serialize_tool_message,
+        format_publish_failures=lambda x: "",
+        parse_arguments=parse_tool_arguments,
+    )
+
+    native_call = NativeToolCall(
+        name="missing",
+        arguments={"id": "1", "status": "completed", "action": {}},
+        call_id=None,
+        success=True,
+    )
+
+    with pytest.raises(PromptEvaluationError):
+        executor.record_native_calls((native_call,), provider_payload=None)
+
+    non_native_tool = Tool[EchoParams, EchoPayload](
+        name="echo", description="Echo", handler=echo_handler
+    )
+    non_native_registry = cast(
+        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
+        {non_native_tool.name: non_native_tool},
+    )
+    non_native_executor = ToolExecutor(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[Any], object()),
+        prompt=Prompt(ns="test", key="tool"),
+        prompt_name="test",
+        rendered=rendered,
+        bus=bus,
+        session=session,
+        tool_registry=non_native_registry,
+        serialize_tool_message_fn=serialize_tool_message,
+        format_publish_failures=lambda x: "",
+        parse_arguments=parse_tool_arguments,
+    )
+
+    with pytest.raises(PromptEvaluationError):
+        non_native_executor.record_native_calls((native_call,), provider_payload=None)
+
+
+def test_record_native_calls_rejects_non_native_tool_type() -> None:
+    tool = Tool[EchoParams, EchoPayload](
+        name="echo", description="Echo", handler=echo_handler
+    )
+    rendered = RenderedPrompt(
+        text="system",
+        _tools=cast(
+            tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+            (tool,),
+        ),
+    )
+    bus = RecordingBus()
+    session = Session(bus=bus)
+    tool_registry = cast(
+        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
+        {tool.name: tool},
+    )
+
+    executor = ToolExecutor(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[Any], object()),
+        prompt=Prompt(ns="test", key="tool"),
+        prompt_name="test",
+        rendered=rendered,
+        bus=bus,
+        session=session,
+        tool_registry=tool_registry,
+        serialize_tool_message_fn=serialize_tool_message,
+        format_publish_failures=lambda x: "",
+        parse_arguments=parse_tool_arguments,
+    )
+
+    native_call = NativeToolCall(
+        name="echo",
+        arguments={"id": "1", "status": "completed", "action": {}},
+        call_id=None,
+        success=True,
+    )
+
+    with pytest.raises(PromptEvaluationError):
+        executor.record_native_calls((native_call,), provider_payload=None)
+
+
+def test_record_native_calls_handles_validation_errors() -> None:
+    tool = build_web_search_tool()
+    rendered = RenderedPrompt(
+        text="system",
+        _tools=cast(
+            tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+            (tool,),
+        ),
+    )
+    bus = RecordingBus()
+    session = Session(bus=bus)
+    tool_registry = cast(
+        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]], {tool.name: tool}
+    )
+
+    executor = ToolExecutor(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[Any], object()),
+        prompt=Prompt(ns="test", key="tool"),
+        prompt_name="test",
+        rendered=rendered,
+        bus=bus,
+        session=session,
+        tool_registry=tool_registry,
+        serialize_tool_message_fn=serialize_tool_message,
+        format_publish_failures=lambda x: "",
+        parse_arguments=parse_tool_arguments,
+    )
+
+    invalid_call = NativeToolCall(
+        name="web_search",
+        arguments={"id": "bad"},
+        call_id="bad",
+        success=False,
+    )
+
+    executor.record_native_calls((invalid_call,), provider_payload={})
+
+    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
+    assert tool_events
 
 
 @dataclass

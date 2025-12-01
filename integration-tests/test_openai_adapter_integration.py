@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import textwrap
 from dataclasses import dataclass
 from typing import cast
 
@@ -24,7 +25,9 @@ from tests.helpers.events import NullEventBus
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
+from weakincentives.tools import WebSearchCall, build_web_search_tool
 
 pytest.importorskip("openai")
 
@@ -98,6 +101,13 @@ class ReviewFinding:
 
     summary: str
     sentiment: str
+
+
+@dataclass(slots=True)
+class WebSearchQuery:
+    """Prompt parameters for exercising web search."""
+
+    query: str
 
 
 def _build_greeting_prompt() -> Prompt[object]:
@@ -186,6 +196,44 @@ def _build_structured_list_prompt() -> Prompt[list[ReviewFinding]]:
         name="structured_review_list",
         sections=[analysis_section],
     )
+
+
+def _build_web_search_prompt(
+    tool: Tool[WebSearchCall, WebSearchCall],
+) -> Prompt[object]:
+    search_section = MarkdownSection[WebSearchQuery](
+        title="Web Search",
+        template=textwrap.dedent(
+            """
+            Use the `web_search` tool to gather up-to-date information relevant to the
+            query. Call the tool before you respond.
+
+            Query: ${query}
+            """
+        ).strip(),
+        tools=(tool,),
+        key="web-search",
+    )
+
+    return Prompt(
+        ns=_PROMPT_NS,
+        key="integration-web-search",
+        name="web_search_flow",
+        sections=[search_section],
+    )
+
+
+class RecordingBus(InProcessEventBus):
+    """Event bus that records published tool events for assertions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tool_events: list[ToolInvoked] = []
+        self.subscribe(ToolInvoked, self._record)
+
+    def _record(self, event: object) -> None:
+        if isinstance(event, ToolInvoked):
+            self.tool_events.append(event)
 
 
 def test_openai_adapter_returns_text(adapter: OpenAIAdapter) -> None:
@@ -303,3 +351,32 @@ def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -
         assert isinstance(finding, ReviewFinding)
         assert finding.summary
         assert finding.sentiment
+
+
+def test_openai_adapter_runs_web_search(openai_model: str) -> None:
+    tool = build_web_search_tool(search_context_size="medium")
+    prompt = _build_web_search_prompt(tool)
+    question = WebSearchQuery(query="Which city will host the next Summer Olympics?")
+
+    adapter = OpenAIAdapter(
+        model=openai_model,
+        tool_choice={"type": "web_search"},
+    )
+
+    bus = RecordingBus()
+    session = Session(bus=bus)
+    response = adapter.evaluate(
+        prompt,
+        question,
+        parse_output=False,
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
+
+    assert response.prompt_name == "web_search_flow"
+    assert bus.tool_events, "Expected a web_search tool invocation to be recorded."
+    assert any(
+        isinstance(event.params, WebSearchCall) and event.name == "web_search"
+        for event in bus.tool_events
+    )
+    assert response.text is None or response.text.strip()

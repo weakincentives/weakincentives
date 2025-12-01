@@ -80,6 +80,17 @@ from .vfs import (
     WriteFile,
     WriteFileParams,
 )
+from .web_search import (
+    WebSearchAction,
+    WebSearchActionType,
+    WebSearchCall,
+    WebSearchCallStatus,
+    WebSearchFilters,
+    WebSearchLocation,
+    WebSearchTool,
+    WebSearchToolType,
+    build_web_search_tool,
+)
 
 PodmanSandboxConfig: Any
 PodmanSandboxSection: Any
@@ -136,11 +147,20 @@ __all__ = [
     "VfsPath",
     "VfsToolsSection",
     "VirtualFileSystem",
+    "WebSearchAction",
+    "WebSearchActionType",
+    "WebSearchCall",
+    "WebSearchCallStatus",
+    "WebSearchFilters",
+    "WebSearchLocation",
+    "WebSearchTool",
+    "WebSearchToolType",
     "WorkspaceDigest",
     "WorkspaceDigestSection",
     "WriteFile",
     "WriteFileParams",
     "build_dispatch_subagents_tool",
+    "build_web_search_tool",
     "clear_workspace_digest",
     "dispatch_subagents",
     "latest_workspace_digest",

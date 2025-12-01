@@ -49,7 +49,7 @@ from .structured_output import (
     StructuredOutputConfig,
     parse_structured_output,
 )
-from .tool import Tool, ToolContext, ToolExample, ToolHandler
+from .tool import NativeTool, Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
@@ -58,6 +58,7 @@ __all__ = [
     "DelegationSummarySection",
     "LocalPromptOverridesStore",
     "MarkdownSection",
+    "NativeTool",
     "OutputParseError",
     "ParentPromptParams",
     "ParentPromptSection",

@@ -28,6 +28,8 @@ from typing import (
     get_args,
     get_origin,
     get_type_hints,
+    no_type_check,
+    override,
 )
 
 from ..deadlines import Deadline
@@ -581,6 +583,11 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     ) -> type[Tool[SupportsDataclass, SupportsToolResult]]:
         params_candidate, result_candidate = _normalize_specialization(item)
         if not isinstance(params_candidate, type):
+            if isinstance(params_candidate, TypeVar):
+                return cast(
+                    "type[Tool[SupportsDataclass, SupportsToolResult]]",
+                    cls,
+                )
             raise TypeError("Tool ParamsT type argument must be a type.")
         params_type = cast(type[SupportsDataclass], params_candidate)
         result_annotation = cast(ResultT, result_candidate)
@@ -600,4 +607,34 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         )
 
 
-__all__ = ["Tool", "ToolContext", "ToolExample", "ToolHandler", "ToolResult"]
+@dataclass(slots=True)
+class NativeTool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult](
+    Tool[ParamsT, ResultT]
+):
+    """Marker tool executed by the provider rather than a local handler."""
+
+    handler: ToolHandler[ParamsT, ResultT] | None = None
+    accepts_overrides: bool = False
+
+    @no_type_check
+    @override
+    def __post_init__(
+        self,
+    ) -> None:  # pragma: no cover - exercised via Tool
+        Tool.__post_init__(self)
+        if self.handler is not None:
+            raise PromptValidationError(
+                "NativeTool must not set a handler; execution is provider-managed.",
+                dataclass_type=self.params_type,
+                placeholder=self.name,
+            )
+
+
+__all__ = [
+    "NativeTool",
+    "Tool",
+    "ToolContext",
+    "ToolExample",
+    "ToolHandler",
+    "ToolResult",
+]

@@ -93,6 +93,8 @@ a goal at any time.
 - **LITE_LLM_ADAPTER.md**: Lite LLM adapter rules—before touching lightweight
   adapter integrations.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
+- **NATIVE_TOOLS.md**: Native provider tool contract—when defining provider-owned tools
+  such as web search or code execution.
 - **NATIVE_OPENAI_STRUCTURED_OUTPUTS.md**: Native structured outputs for OpenAI
   models—when implementing or updating OpenAI structured outputs.
 - **OPENAI_RESPONSES_API.md**: OpenAI responses API behaviors—when modifying

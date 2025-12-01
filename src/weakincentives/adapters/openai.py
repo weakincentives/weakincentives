@@ -49,6 +49,7 @@ from .core import (
 from .shared import (
     OPENAI_ADAPTER_NAME,
     ConversationConfig,
+    NativeToolCall,
     ThrottleError,
     ThrottleKind,
     ToolChoice,
@@ -260,6 +261,63 @@ def _tool_calls_from_content(parts: Sequence[object]) -> list[ProviderToolCallDa
     return []
 
 
+def _normalize_output_mapping(output: object) -> Mapping[str, Any] | None:
+    if isinstance(output, Mapping):
+        return {
+            str(key): value for key, value in cast(Mapping[Any, Any], output).items()
+        }
+
+    model_dump = getattr(output, "model_dump", None)
+    if callable(model_dump):
+        try:
+            payload = model_dump()
+        except Exception:  # pragma: no cover - defensive
+            return None
+        if isinstance(payload, Mapping):
+            return {
+                str(key): value
+                for key, value in cast(Mapping[Any, Any], payload).items()
+            }
+    return None
+
+
+def _native_tool_calls_from_response(
+    response: object, provider_payload: Mapping[str, Any] | None, *, prompt_name: str
+) -> list[NativeToolCall]:
+    del prompt_name  # prompt name available in callers for error reporting
+    outputs_obj: object | None = None
+    if isinstance(provider_payload, Mapping):
+        outputs_obj = provider_payload.get("output")
+    if not isinstance(outputs_obj, Sequence):
+        outputs_obj = getattr(response, "output", None)
+    if not isinstance(outputs_obj, Sequence):
+        return []
+
+    native_calls: list[NativeToolCall] = []
+    for output in cast(Sequence[object], outputs_obj):
+        normalized_output = _normalize_output_mapping(output)
+        if normalized_output is None:
+            continue
+        output_type = normalized_output.get("type")
+        if output_type not in {"web_search_call"}:
+            continue
+        call_id = normalized_output.get("id") or normalized_output.get("call_id")
+        status = str(normalized_output.get("status", ""))
+        success = status.lower() != "failed"
+        native_calls.append(
+            NativeToolCall(
+                name="web_search",
+                arguments=normalized_output,
+                call_id=str(call_id) if call_id else None,
+                success=success,
+            )
+        )
+
+    if native_calls:
+        return native_calls
+    return []
+
+
 def _parsed_from_content(parts: Sequence[object]) -> object | None:
     for part in parts:
         parsed = getattr(part, "parsed", None)
@@ -328,7 +386,16 @@ def _responses_tool_spec(
 ) -> dict[str, Any]:
     """Normalize a provider-agnostic tool spec for the Responses API."""
 
-    if spec.get("type") != "function":
+    tool_type = spec.get("type")
+    if tool_type in {"web_search", "web_search_2025_08_26"}:
+        normalized: dict[str, Any] = {"type": tool_type}
+        web_search_payload = spec.get("web_search")
+        if isinstance(web_search_payload, Mapping):
+            web_search_mapping = cast(Mapping[str, Any], web_search_payload)
+            normalized["web_search"] = dict(web_search_mapping)
+        return normalized
+
+    if tool_type != "function":
         raise PromptEvaluationError(
             "OpenAI Responses only supports function tools.",
             prompt_name=prompt_name,
@@ -410,6 +477,8 @@ def _responses_tool_choice(
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
             provider_payload={"tool_choice": tool_choice},
         )
+    if tool_type in {"web_search", "web_search_2025_08_26"}:
+        return {"type": tool_type}
 
     raise PromptEvaluationError(
         "OpenAI tool choice is not supported by the Responses API.",
@@ -632,6 +701,9 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             parse_arguments=parse_tool_arguments,
             logger_override=self._conversation_logger(),
             deadline=deadline,
+            native_tool_extractor=self._build_native_tool_extractor(
+                context.prompt_name
+            ),
         )
 
         return run_conversation(
@@ -802,6 +874,19 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             )
 
         return _select_choice
+
+    @staticmethod
+    def _build_native_tool_extractor(
+        prompt_name: str,
+    ) -> Callable[[object, Mapping[str, Any] | None], list[NativeToolCall]]:
+        def _extract_native_tools(
+            response: object, provider_payload: Mapping[str, Any] | None
+        ) -> list[NativeToolCall]:
+            return _native_tool_calls_from_response(
+                response, provider_payload, prompt_name=prompt_name
+            )
+
+        return _extract_native_tools
 
     @staticmethod
     def _conversation_logger() -> StructuredLogger:

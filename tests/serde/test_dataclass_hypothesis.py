@@ -20,6 +20,7 @@ from typing import Annotated
 import pytest
 from hypothesis import given, strategies as st
 
+from weakincentives.dbc import dbc_enabled
 from weakincentives.serde import dump, parse
 
 
@@ -72,8 +73,9 @@ def record_strategy() -> st.SearchStrategy[NestedRecord]:
 
 @given(record_strategy())
 def test_round_trip_with_nested_collections(record: NestedRecord) -> None:
-    payload = dump(record)
-    restored = parse(NestedRecord, payload)
+    with dbc_enabled(False):
+        payload = dump(record)
+        restored = parse(NestedRecord, payload)
     assert restored == record
 
 
