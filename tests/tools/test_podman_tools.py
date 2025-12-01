@@ -1578,6 +1578,26 @@ def test_shell_execute_truncates_output(
     assert value.stderr.endswith("[truncated]")
 
 
+def test_podman_shell_result_renders_human_readable() -> None:
+    result = PodmanShellResult(
+        command=("echo", "hello"),
+        cwd="/workspace",
+        exit_code=0,
+        stdout="hello",
+        stderr="",
+        duration_ms=10,
+        timed_out=False,
+    )
+
+    rendered = result.render()
+
+    assert "echo hello" in rendered
+    assert "Exit code: 0" in rendered
+    assert "STDOUT:" in rendered
+    assert "hello" in rendered
+    assert "STDERR:" in rendered
+
+
 def test_evaluate_python_runs_script_passthrough(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,

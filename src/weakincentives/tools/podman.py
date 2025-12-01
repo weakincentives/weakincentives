@@ -206,6 +206,22 @@ class PodmanShellResult:
     duration_ms: int
     timed_out: bool
 
+    def render(self) -> str:
+        command_str = " ".join(self.command)
+        lines = [
+            "Shell command result:",
+            f"Command: {command_str}",
+            f"CWD: {self.cwd}",
+            f"Exit code: {self.exit_code}",
+            f"Timed out: {self.timed_out}",
+            f"Duration: {self.duration_ms} ms",
+            "STDOUT:",
+            self.stdout or "<empty>",
+            "STDERR:",
+            self.stderr or "<empty>",
+        ]
+        return "\n".join(lines)
+
 
 @dataclass(slots=True, frozen=True)
 class PodmanWorkspace:
