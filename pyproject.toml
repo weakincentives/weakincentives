@@ -141,7 +141,6 @@ combine-as-imports = true
 "src/weakincentives/prompt/structured_output.py" = ["PLR0913"]
 "src/weakincentives/prompt/tool.py" = ["PLR2004", "PLR6201"]
 "src/weakincentives/prompt/tool_result.py" = ["PLR0911"]
-"src/weakincentives/tools/vfs.py" = ["PLR0914"]
 "src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915"]
 "src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
 "src/weakincentives/tools/asteval.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
