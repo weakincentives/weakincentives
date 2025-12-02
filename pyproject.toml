@@ -129,7 +129,6 @@ combine-as-imports = true
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
-"src/weakincentives/prompt/registry.py" = ["PLR0911", "PLR0912"]
 "src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/adapters/openai.py" = ["PLR0913"]
 "src/weakincentives/adapters/shared.py" = ["PLR0913", "PLR1730", "PLR5501"]
