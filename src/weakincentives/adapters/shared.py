@@ -191,6 +191,17 @@ class AdapterRenderOptions:
     overrides_tag: str = "latest"
 
 
+@dataclass(slots=True, frozen=True)
+class ThrottleDetails:
+    """Provider throttle metadata tracked alongside PromptEvaluationError details."""
+
+    kind: ThrottleKind
+    retry_after: timedelta | None = None
+    attempts: int = 1
+    retry_safe: bool = True
+    provider_payload: dict[str, Any] | None = None
+
+
 class ThrottleError(PromptEvaluationError):
     """Raised when a provider throttles a request."""
 
@@ -200,22 +211,62 @@ class ThrottleError(PromptEvaluationError):
         *,
         prompt_name: str,
         phase: PromptEvaluationPhase,
-        kind: ThrottleKind,
-        retry_after: timedelta | None = None,
-        attempts: int = 1,
-        retry_safe: bool = True,
-        provider_payload: dict[str, Any] | None = None,
+        details: ThrottleDetails,
     ) -> None:
         super().__init__(
             message,
             prompt_name=prompt_name,
             phase=phase,
-            provider_payload=provider_payload,
+            provider_payload=details.provider_payload,
         )
-        self.kind: ThrottleKind = kind
-        self.retry_after: timedelta | None = retry_after
-        self.attempts: int = attempts
-        self.retry_safe: bool = retry_safe
+        self.details = details
+
+    @property
+    def kind(self) -> ThrottleKind:
+        return self.details.kind
+
+    @property
+    def retry_after(self) -> timedelta | None:
+        return self.details.retry_after
+
+    @property
+    def attempts(self) -> int:
+        return self.details.attempts
+
+    @property
+    def retry_safe(self) -> bool:
+        return self.details.retry_safe
+
+
+def throttle_details(
+    *,
+    kind: ThrottleKind,
+    retry_after: timedelta | None = None,
+    attempts: int = 1,
+    retry_safe: bool = True,
+    provider_payload: dict[str, Any] | None = None,
+) -> ThrottleDetails:
+    """Convenience wrapper for constructing throttle detail payloads."""
+
+    return ThrottleDetails(
+        kind=kind,
+        retry_after=retry_after,
+        attempts=attempts,
+        retry_safe=retry_safe,
+        provider_payload=provider_payload,
+    )
+
+
+def _details_from_error(
+    error: ThrottleError, *, attempts: int, retry_safe: bool
+) -> ThrottleDetails:
+    return throttle_details(
+        kind=error.kind,
+        retry_after=error.retry_after,
+        attempts=attempts,
+        retry_safe=retry_safe,
+        provider_payload=error.provider_payload,
+    )
 
 
 def _sleep_for(delay: timedelta) -> None:
@@ -235,8 +286,7 @@ def _jittered_backoff(
 
     jitter_seconds = random.uniform(0, base.total_seconds())  # nosec B311
     delay = timedelta(seconds=jitter_seconds)
-    if delay < policy.base_delay:
-        delay = policy.base_delay
+    delay = max(delay, policy.base_delay)
     if retry_after is not None and delay < retry_after:
         return retry_after
     return delay
@@ -264,13 +314,11 @@ def _raise_tool_deadline_error(
 def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
     """Summarize publish failures encountered while applying tool results."""
 
-    messages: list[str] = []
-    for failure in failures:
-        error = failure.error
-        message = str(error).strip()
-        if not message:
-            message = error.__class__.__name__
-        messages.append(message)
+    def _message_for(failure: HandlerFailure) -> str:
+        message = str(failure.error).strip()
+        return message or failure.error.__class__.__name__
+
+    messages = [_message_for(failure) for failure in failures]
 
     if not messages:
         return "Reducer errors prevented applying tool result."
@@ -449,16 +497,14 @@ def _parse_tool_call_arguments(
 
 def _build_tool_logger(
     *,
-    adapter_name: AdapterName,
-    prompt_name: str,
+    context: ToolExecutionContext,
     tool_name: str,
     tool_call: ProviderToolCall,
-    logger_override: StructuredLogger | None,
 ) -> tuple[str | None, StructuredLogger]:
     call_id = getattr(tool_call, "id", None)
-    bound_log = (logger_override or logger).bind(
-        adapter=adapter_name,
-        prompt=prompt_name,
+    bound_log = (context.logger_override or logger).bind(
+        adapter=context.adapter_name,
+        prompt=context.prompt_name,
         tool=tool_name,
         call_id=call_id,
     )
@@ -577,42 +623,29 @@ def _handle_unexpected_tool_error(
 @contextmanager
 def tool_execution(
     *,
-    adapter_name: AdapterName,
-    adapter: ProviderAdapter[Any],
-    prompt: Prompt[Any],
-    rendered_prompt: RenderedPrompt[Any] | None,
+    context: ToolExecutionContext,
     tool_call: ProviderToolCall,
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
-    bus: EventBus,
-    session: SessionProtocol,
-    prompt_name: str,
-    provider_payload: dict[str, Any] | None,
-    deadline: Deadline | None,
-    parse_arguments: ToolArgumentsParser,
-    logger_override: StructuredLogger | None = None,
 ) -> Iterator[ToolExecutionOutcome]:
     """Context manager that executes a tool call and standardizes logging."""
 
     tool, handler = _resolve_tool_and_handler(
         tool_call=tool_call,
-        tool_registry=tool_registry,
-        prompt_name=prompt_name,
-        provider_payload=provider_payload,
+        tool_registry=context.tool_registry,
+        prompt_name=context.prompt_name,
+        provider_payload=context.provider_payload,
     )
     tool_name = tool.name
     arguments_mapping = _parse_tool_call_arguments(
         tool_call=tool_call,
-        prompt_name=prompt_name,
-        provider_payload=provider_payload,
-        parse_arguments=parse_arguments,
+        prompt_name=context.prompt_name,
+        provider_payload=context.provider_payload,
+        parse_arguments=context.parse_arguments,
     )
 
     call_id, log = _build_tool_logger(
-        adapter_name=adapter_name,
-        prompt_name=prompt_name,
+        context=context,
         tool_name=tool_name,
         tool_call=tool_call,
-        logger_override=logger_override,
     )
 
     tool_params: SupportsDataclass | None = None
@@ -620,22 +653,22 @@ def tool_execution(
     try:
         tool_params = _parse_tool_params(tool=tool, arguments_mapping=arguments_mapping)
         _ensure_deadline_not_expired(
-            deadline=deadline,
-            prompt_name=prompt_name,
+            deadline=context.deadline,
+            prompt_name=context.prompt_name,
             tool_name=tool_name,
         )
-        context = ToolContext(
-            prompt=cast(PromptProtocol[Any], prompt),
-            rendered_prompt=rendered_prompt,
-            adapter=cast(ProviderAdapterProtocol[Any], adapter),
-            session=session,
-            event_bus=bus,
-            deadline=deadline,
+        tool_context = ToolContext(
+            prompt=cast(PromptProtocol[Any], context.prompt),
+            rendered_prompt=context.rendered_prompt,
+            adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
+            session=context.session,
+            event_bus=context.bus,
+            deadline=context.deadline,
         )
         tool_result = _invoke_tool_handler(
             handler=handler,
             tool_params=tool_params,
-            context=context,
+            context=tool_context,
         )
     except ToolValidationError as error:
         if tool_params is None:
@@ -649,15 +682,15 @@ def tool_execution(
     except DeadlineExceededError as error:
         raise _handle_tool_deadline_error(
             error=error,
-            prompt_name=prompt_name,
+            prompt_name=context.prompt_name,
             tool_name=tool_name,
-            deadline=deadline,
+            deadline=context.deadline,
         ) from error
     except Exception as error:  # propagate message via ToolResult
         tool_result = _handle_unexpected_tool_error(
             log=log,
             tool_name=tool_name,
-            provider_payload=provider_payload,
+            provider_payload=context.provider_payload,
             error=error,
         )
     else:
@@ -677,15 +710,11 @@ def tool_execution(
 
 def _publish_tool_invocation(
     *,
-    adapter_name: AdapterName,
-    prompt_name: str,
-    session: SessionProtocol,
-    bus: EventBus,
+    context: ToolExecutionContext,
     outcome: ToolExecutionOutcome,
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
 ) -> ToolInvoked:
-    snapshot = session.snapshot()
-    session_id = getattr(session, "session_id", None)
+    snapshot = context.session.snapshot()
+    session_id = getattr(context.session, "session_id", None)
     tool_value = outcome.result.value
     dataclass_value: SupportsDataclass | None = None
     if is_dataclass_instance(tool_value):
@@ -694,8 +723,8 @@ def _publish_tool_invocation(
     rendered_output = outcome.result.render()
 
     invocation = ToolInvoked(
-        prompt_name=prompt_name,
-        adapter=adapter_name,
+        prompt_name=context.prompt_name,
+        adapter=context.adapter_name,
         name=outcome.tool.name,
         params=outcome.params,
         result=cast(ToolResult[object], outcome.result),
@@ -706,9 +735,9 @@ def _publish_tool_invocation(
         call_id=outcome.call_id,
         event_id=uuid4(),
     )
-    publish_result = bus.publish(invocation)
+    publish_result = context.bus.publish(invocation)
     if not publish_result.ok:
-        session.rollback(snapshot)
+        context.session.rollback(snapshot)
         outcome.log.warning(
             "Session rollback triggered after publish failure.",
             event="session_rollback_due_to_publish_failure",
@@ -725,7 +754,9 @@ def _publish_tool_invocation(
                 "failed_handlers": failure_handlers,
             },
         )
-        outcome.result.message = format_publish_failures(publish_result.errors)
+        outcome.result.message = context.format_publish_failures(
+            publish_result.errors
+        )
     else:
         outcome.log.debug(
             "Tool event published.",
@@ -737,45 +768,18 @@ def _publish_tool_invocation(
 
 def execute_tool_call(
     *,
-    adapter_name: AdapterName,
-    adapter: ProviderAdapter[Any],
-    prompt: Prompt[Any],
-    rendered_prompt: RenderedPrompt[Any] | None,
+    context: ToolExecutionContext,
     tool_call: ProviderToolCall,
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
-    bus: EventBus,
-    session: SessionProtocol,
-    prompt_name: str,
-    provider_payload: dict[str, Any] | None,
-    deadline: Deadline | None,
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str],
-    parse_arguments: ToolArgumentsParser,
-    logger_override: StructuredLogger | None = None,
 ) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
     """Execute a provider tool call and publish the resulting event."""
 
     with tool_execution(
-        adapter_name=adapter_name,
-        adapter=adapter,
-        prompt=prompt,
-        rendered_prompt=rendered_prompt,
+        context=context,
         tool_call=tool_call,
-        tool_registry=tool_registry,
-        bus=bus,
-        session=session,
-        prompt_name=prompt_name,
-        provider_payload=provider_payload,
-        deadline=deadline,
-        parse_arguments=parse_arguments,
-        logger_override=logger_override,
     ) as outcome:
         invocation = _publish_tool_invocation(
-            adapter_name=adapter_name,
-            prompt_name=prompt_name,
-            session=session,
-            bus=bus,
+            context=context,
             outcome=outcome,
-            format_publish_failures=format_publish_failures,
         )
     return invocation, outcome.result
 
@@ -998,55 +1002,61 @@ def _parsed_payload_from_part(part: object) -> object | None:
 
 
 def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
-    str_mapping: dict[str, Any] = {}
-    for key, value in mapping.items():
-        if not isinstance(key, str):
-            return None
-        str_mapping[key] = value
-    return str_mapping
+    if any(not isinstance(key, str) for key in mapping):
+        return None
+    return {cast(str, key): value for key, value in mapping.items()}
 
 
-__all__ = (
-    "LITELLM_ADAPTER_NAME",
-    "OPENAI_ADAPTER_NAME",
-    "AdapterName",
-    "AdapterRenderContext",
-    "AdapterRenderOptions",
-    "ChoiceSelector",
-    "ConversationConfig",
-    "ConversationRequest",
-    "ConversationRunner",
-    "ProviderChoice",
-    "ProviderCompletionCallable",
-    "ProviderCompletionResponse",
-    "ProviderFunctionCall",
-    "ProviderMessage",
-    "ProviderToolCall",
-    "ThrottleError",
-    "ThrottleKind",
-    "ThrottlePolicy",
-    "ToolArgumentsParser",
-    "ToolChoice",
-    "ToolMessageSerializer",
-    "_content_part_text",
-    "_parsed_payload_from_part",
-    "build_json_schema_response_format",
-    "call_provider_with_normalization",
-    "deadline_provider_payload",
-    "execute_tool_call",
-    "extract_parsed_content",
-    "extract_payload",
-    "first_choice",
-    "format_publish_failures",
-    "message_text_content",
-    "new_throttle_policy",
-    "parse_schema_constrained_payload",
-    "parse_tool_arguments",
-    "prepare_adapter_conversation",
-    "run_conversation",
-    "serialize_tool_call",
-    "tool_execution",
-    "tool_to_spec",
+__all__ = tuple(
+    sorted(
+        (
+            "_content_part_text",
+            "_parsed_payload_from_part",
+            "AdapterName",
+            "AdapterRenderContext",
+            "AdapterRenderOptions",
+            "build_json_schema_response_format",
+            "call_provider_with_normalization",
+            "ChoiceSelector",
+            "ConversationConfig",
+            "ConversationInputs",
+            "ConversationRequest",
+            "ConversationRunner",
+            "deadline_provider_payload",
+            "execute_tool_call",
+            "extract_parsed_content",
+            "extract_payload",
+            "first_choice",
+            "format_publish_failures",
+            "LITELLM_ADAPTER_NAME",
+            "message_text_content",
+            "new_throttle_policy",
+            "OPENAI_ADAPTER_NAME",
+            "parse_schema_constrained_payload",
+            "parse_tool_arguments",
+            "prepare_adapter_conversation",
+            "ProviderChoice",
+            "ProviderCompletionCallable",
+            "ProviderCompletionResponse",
+            "ProviderFunctionCall",
+            "ProviderMessage",
+            "ProviderToolCall",
+            "run_conversation",
+            "serialize_tool_call",
+            "throttle_details",
+            "ThrottleDetails",
+            "ThrottleError",
+            "ThrottleKind",
+            "ThrottlePolicy",
+            "tool_execution",
+            "tool_to_spec",
+            "ToolArgumentsParser",
+            "ToolChoice",
+            "ToolExecutionContext",
+            "ToolMessageSerializer",
+        ),
+        key=str.casefold,
+    )
 )
 
 
@@ -1064,6 +1074,19 @@ ConversationRequest = Callable[
 
 ChoiceSelector = Callable[[object], ProviderChoice]
 """Callable that extracts the relevant choice from a provider response."""
+
+
+@dataclass(slots=True)
+class ConversationInputs[OutputT]:
+    """Inputs required to start a conversation with a provider."""
+
+    adapter_name: AdapterName
+    adapter: ProviderAdapter[OutputT]
+    prompt: Prompt[OutputT]
+    prompt_name: str
+    rendered: RenderedPrompt[OutputT]
+    render_inputs: tuple[SupportsDataclass, ...]
+    initial_messages: list[dict[str, Any]]
 
 
 class ToolMessageSerializer(Protocol):
@@ -1120,6 +1143,7 @@ class ToolExecutor:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     _log: StructuredLogger = field(init=False)
+    _context: ToolExecutionContext = field(init=False)
     _tool_message_records: list[
         tuple[ToolResult[SupportsToolResult], dict[str, Any]]
     ] = field(init=False)
@@ -1128,6 +1152,20 @@ class ToolExecutor:
         self._log = (self.logger_override or logger).bind(
             adapter=self.adapter_name,
             prompt=self.prompt_name,
+        )
+        self._context = ToolExecutionContext(
+            adapter_name=self.adapter_name,
+            adapter=self.adapter,
+            prompt=self.prompt,
+            rendered_prompt=self.rendered,
+            tool_registry=self.tool_registry,
+            bus=self.bus,
+            session=self.session,
+            prompt_name=self.prompt_name,
+            parse_arguments=self.parse_arguments,
+            format_publish_failures=self.format_publish_failures,
+            deadline=self.deadline,
+            logger_override=self.logger_override,
         )
         self._tool_message_records = []
 
@@ -1146,6 +1184,8 @@ class ToolExecutor:
             context={"count": len(tool_calls)},
         )
 
+        execution_context = self._context.with_provider_payload(provider_payload)
+
         for tool_call in tool_calls:
             tool_name = getattr(tool_call.function, "name", "tool")
             if self.deadline is not None and self.deadline.remaining() <= timedelta(0):
@@ -1155,27 +1195,12 @@ class ToolExecutor:
                     deadline=self.deadline,
                 )
             with tool_execution(
-                adapter_name=self.adapter_name,
-                adapter=self.adapter,
-                prompt=self.prompt,
-                rendered_prompt=self.rendered,
+                context=execution_context,
                 tool_call=tool_call,
-                tool_registry=self.tool_registry,
-                bus=self.bus,
-                session=self.session,
-                prompt_name=self.prompt_name,
-                provider_payload=provider_payload,
-                deadline=self.deadline,
-                parse_arguments=self.parse_arguments,
-                logger_override=self.logger_override,
             ) as outcome:
                 _ = _publish_tool_invocation(
-                    adapter_name=self.adapter_name,
-                    prompt_name=self.prompt_name,
-                    session=self.session,
-                    bus=self.bus,
+                    context=execution_context,
                     outcome=outcome,
-                    format_publish_failures=self.format_publish_failures,
                 )
 
             tool_message = {
@@ -1237,26 +1262,23 @@ class ResponseParser[OutputT]:
                         phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                         provider_payload=provider_payload,
                     ) from error
-            else:
-                if final_text or not self.require_structured_output_text:
-                    try:
-                        output = parse_structured_output(
-                            final_text or "", self.rendered
-                        )
-                    except OutputParseError as error:
-                        raise PromptEvaluationError(
-                            error.message,
-                            prompt_name=self.prompt_name,
-                            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-                            provider_payload=provider_payload,
-                        ) from error
-                else:
+            elif final_text or not self.require_structured_output_text:
+                try:
+                    output = parse_structured_output(final_text or "", self.rendered)
+                except OutputParseError as error:
                     raise PromptEvaluationError(
-                        "Provider response did not include structured output.",
+                        error.message,
                         prompt_name=self.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                         provider_payload=provider_payload,
-                    )
+                    ) from error
+            else:
+                raise PromptEvaluationError(
+                    "Provider response did not include structured output.",
+                    prompt_name=self.prompt_name,
+                    phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+                    provider_payload=provider_payload,
+                )
             if output is not None:
                 text_value = None
 
@@ -1366,7 +1388,7 @@ class ConversationRunner[OutputT]:
                     self.response_format,
                 )
             except ThrottleError as error:
-                error.attempts = max(error.attempts, attempts)
+                attempts = max(error.attempts, attempts)
                 if not error.retry_safe:
                     raise
 
@@ -1375,11 +1397,9 @@ class ConversationRunner[OutputT]:
                         "Throttle retry budget exhausted.",
                         prompt_name=self.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        kind=error.kind,
-                        retry_after=error.retry_after,
-                        attempts=error.attempts,
-                        retry_safe=False,
-                        provider_payload=error.provider_payload,
+                        details=_details_from_error(
+                            error, attempts=attempts, retry_safe=False
+                        ),
                     ) from error
 
                 delay = _jittered_backoff(
@@ -1393,11 +1413,9 @@ class ConversationRunner[OutputT]:
                         "Deadline expired before retrying after throttling.",
                         prompt_name=self.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        kind=error.kind,
-                        retry_after=error.retry_after,
-                        attempts=error.attempts,
-                        retry_safe=False,
-                        provider_payload=error.provider_payload,
+                        details=_details_from_error(
+                            error, attempts=attempts, retry_safe=False
+                        ),
                     ) from error
 
                 total_delay += delay
@@ -1406,11 +1424,9 @@ class ConversationRunner[OutputT]:
                         "Throttle retry window exceeded configured budget.",
                         prompt_name=self.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        kind=error.kind,
-                        retry_after=error.retry_after,
-                        attempts=error.attempts,
-                        retry_safe=False,
-                        provider_payload=error.provider_payload,
+                        details=_details_from_error(
+                            error, attempts=attempts, retry_safe=False
+                        ),
                     ) from error
 
                 self._log.warning(
@@ -1609,32 +1625,28 @@ def run_conversation[
     OutputT,
 ](
     *,
-    adapter_name: AdapterName,
-    adapter: ProviderAdapter[OutputT],
-    prompt: Prompt[OutputT],
-    prompt_name: str,
-    rendered: RenderedPrompt[OutputT],
-    render_inputs: tuple[SupportsDataclass, ...],
-    initial_messages: list[dict[str, Any]],
+    inputs: ConversationInputs[OutputT],
     config: ConversationConfig,
 ) -> PromptResponse[OutputT]:
     """Execute a conversational exchange with a provider and return the result."""
 
-    normalized_config = config.with_defaults(rendered)
-    rendered_with_deadline = rendered
+    normalized_config = config.with_defaults(inputs.rendered)
+    rendered_with_deadline = inputs.rendered
     if normalized_config.deadline is not None and (
-        rendered.deadline is not normalized_config.deadline
+        inputs.rendered.deadline is not normalized_config.deadline
     ):
-        rendered_with_deadline = replace(rendered, deadline=normalized_config.deadline)
+        rendered_with_deadline = replace(
+            inputs.rendered, deadline=normalized_config.deadline
+        )
 
     runner = ConversationRunner[OutputT](
-        adapter_name=adapter_name,
-        adapter=adapter,
-        prompt=prompt,
-        prompt_name=prompt_name,
+        adapter_name=inputs.adapter_name,
+        adapter=inputs.adapter,
+        prompt=inputs.prompt,
+        prompt_name=inputs.prompt_name,
         rendered=rendered_with_deadline,
-        render_inputs=render_inputs,
-        initial_messages=initial_messages,
+        render_inputs=inputs.render_inputs,
+        initial_messages=inputs.initial_messages,
         parse_output=normalized_config.parse_output,
         bus=normalized_config.bus,
         session=normalized_config.session,
@@ -1651,3 +1663,30 @@ def run_conversation[
         throttle_policy=normalized_config.throttle_policy,
     )
     return runner.run()
+
+
+@dataclass(slots=True)
+class ToolExecutionContext:
+    """Inputs and collaborators required to execute a provider tool call."""
+
+    adapter_name: AdapterName
+    adapter: ProviderAdapter[Any]
+    prompt: Prompt[Any]
+    rendered_prompt: RenderedPrompt[Any] | None
+    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]]
+    bus: EventBus
+    session: SessionProtocol
+    prompt_name: str
+    parse_arguments: ToolArgumentsParser
+    format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
+    deadline: Deadline | None
+    provider_payload: dict[str, Any] | None = None
+    logger_override: StructuredLogger | None = None
+
+    def with_provider_payload(
+        self, provider_payload: dict[str, Any] | None
+    ) -> ToolExecutionContext:
+        """Return a copy of the context with a new provider payload."""
+
+        return replace(self, provider_payload=provider_payload)
+

@@ -29,8 +29,10 @@ from weakincentives.adapters.core import (
     PromptEvaluationError,
 )
 from weakincentives.adapters.shared import (
+    ToolExecutionContext,
     ToolExecutionOutcome,
     _RejectedToolParams,
+    format_publish_failures,
     parse_tool_arguments,
     tool_execution,
 )
@@ -61,32 +63,31 @@ def _build_prompt(tool: Tool[ToolParams, ToolPayload]) -> Prompt[ToolPayload]:
                 tools=[tool],
             ),
         ),
-    )
+)
 
 
-def _base_kwargs(
+def _base_context(
     tool: Tool[ToolParams, ToolPayload],
-    tool_call: DummyToolCall,
     *,
     deadline: Deadline | None = None,
     session: SessionProtocol | None = None,
-) -> dict[str, Any]:
+) -> ToolExecutionContext:
     bus = InProcessEventBus()
     prompt = _build_prompt(tool)
-    return {
-        "adapter_name": "adapter",
-        "adapter": cast(Any, object()),
-        "prompt": prompt,
-        "rendered_prompt": None,
-        "tool_call": tool_call,
-        "tool_registry": {tool.name: tool},
-        "bus": bus,
-        "session": cast(SessionProtocol, session or Session(bus=bus)),
-        "prompt_name": prompt.name,
-        "provider_payload": {},
-        "deadline": deadline,
-        "parse_arguments": parse_tool_arguments,
-    }
+    return ToolExecutionContext(
+        adapter_name="adapter",
+        adapter=cast(Any, object()),
+        prompt=prompt,
+        rendered_prompt=None,
+        tool_registry={tool.name: tool},
+        bus=bus,
+        session=cast(SessionProtocol, session or Session(bus=bus)),
+        prompt_name=prompt.name,
+        parse_arguments=parse_tool_arguments,
+        format_publish_failures=format_publish_failures,
+        deadline=deadline,
+        provider_payload={},
+    )
 
 
 def _build_tool(
@@ -113,9 +114,10 @@ def test_tool_execution_success_path() -> None:
         return ToolResult(message="done", value=ToolPayload(answer=params.query))
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
-    kwargs = _base_kwargs(tool, _tool_call({"query": "policies"}))
+    tool_call = _tool_call({"query": "policies"})
+    context = _base_context(tool)
 
-    with tool_execution(**kwargs) as outcome:
+    with tool_execution(context=context, tool_call=tool_call) as outcome:
         assert isinstance(outcome, ToolExecutionOutcome)
         assert outcome.result.success is True
         assert outcome.result.value == ToolPayload(answer="policies")
@@ -128,9 +130,10 @@ def test_tool_execution_records_validation_failure() -> None:
         return ToolResult(message="ok", value=ToolPayload(answer="noop"))
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
-    kwargs = _base_kwargs(tool, _tool_call({"query": "policies", "extra": True}))
+    tool_call = _tool_call({"query": "policies", "extra": True})
+    context = _base_context(tool)
 
-    with tool_execution(**kwargs) as outcome:
+    with tool_execution(context=context, tool_call=tool_call) as outcome:
         assert isinstance(outcome.params, _RejectedToolParams)
         assert outcome.params.raw_arguments == {"query": "policies", "extra": True}
         assert outcome.result.success is False
@@ -149,11 +152,12 @@ def test_tool_execution_raises_on_expired_deadline(
     frozen_utcnow.set(anchor)
     expired_deadline = Deadline(anchor + timedelta(seconds=2))
     frozen_utcnow.advance(timedelta(seconds=5))
-    kwargs = _base_kwargs(
-        tool, _tool_call({"query": "policies"}), deadline=expired_deadline
-    )
+    context = _base_context(tool, deadline=expired_deadline)
+    tool_call = _tool_call({"query": "policies"})
 
-    with pytest.raises(PromptEvaluationError) as excinfo, tool_execution(**kwargs):
+    with pytest.raises(PromptEvaluationError) as excinfo, tool_execution(
+        context=context, tool_call=tool_call
+    ):
         pytest.fail("tool_execution should raise before yielding")
 
     error = excinfo.value
@@ -170,9 +174,12 @@ def test_tool_execution_wraps_handler_deadline_exceptions() -> None:
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=10))
-    kwargs = _base_kwargs(tool, _tool_call({"query": "policies"}), deadline=deadline)
+    context = _base_context(tool, deadline=deadline)
+    tool_call = _tool_call({"query": "policies"})
 
-    with pytest.raises(PromptEvaluationError) as excinfo, tool_execution(**kwargs):
+    with pytest.raises(PromptEvaluationError) as excinfo, tool_execution(
+        context=context, tool_call=tool_call
+    ):
         pytest.fail("tool_execution should raise before yielding")
 
     error = excinfo.value
@@ -188,9 +195,10 @@ def test_tool_execution_converts_unexpected_exceptions() -> None:
         raise RuntimeError("boom")
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
-    kwargs = _base_kwargs(tool, _tool_call({"query": "policies"}))
+    context = _base_context(tool)
+    tool_call = _tool_call({"query": "policies"})
 
-    with tool_execution(**kwargs) as outcome:
+    with tool_execution(context=context, tool_call=tool_call) as outcome:
         assert outcome.result.success is False
         assert outcome.result.message == "Tool 'search_notes' execution failed: boom"
         assert outcome.params == ToolParams(query="policies")

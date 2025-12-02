@@ -1736,13 +1736,15 @@ def test_litellm_adapter_delegates_to_shared_runner(
     result = _evaluate_with_bus(adapter, prompt, params)
 
     assert result is sentinel
-    assert captured["adapter_name"] == LITELLM_ADAPTER_NAME
-    assert captured["prompt_name"] == "shared-runner"
+    inputs = captured["inputs"]
+    assert isinstance(inputs, module.ConversationInputs)
+    assert inputs.adapter_name == LITELLM_ADAPTER_NAME
+    assert inputs.prompt_name == "shared-runner"
 
     expected_rendered = prompt.render(params, inject_output_instructions=False)
-    assert captured["rendered"] == expected_rendered
-    assert captured["render_inputs"] == (params,)
-    assert captured["initial_messages"] == [
+    assert inputs.rendered == expected_rendered
+    assert inputs.render_inputs == (params,)
+    assert inputs.initial_messages == [
         {"role": "system", "content": expected_rendered.text}
     ]
 

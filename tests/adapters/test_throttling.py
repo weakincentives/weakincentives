@@ -27,6 +27,7 @@ from weakincentives.adapters.shared import (
     _jittered_backoff,
     _sleep_for,
     new_throttle_policy,
+    throttle_details,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt.prompt import RenderedPrompt
@@ -61,8 +62,9 @@ def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
                 "throttled",
                 prompt_name="example",
                 phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                kind="rate_limit",
-                retry_after=timedelta(seconds=1),
+                details=throttle_details(
+                    kind="rate_limit", retry_after=timedelta(seconds=1)
+                ),
             )
         return response
 
@@ -101,8 +103,9 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
             "throttled",
             prompt_name="example",
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            kind="rate_limit",
-            retry_after=timedelta(milliseconds=50),
+            details=throttle_details(
+                kind="rate_limit", retry_after=timedelta(milliseconds=50)
+            ),
         )
 
     runner = build_runner(
@@ -163,8 +166,7 @@ def test_runner_raises_on_non_retryable_throttle() -> None:
             "throttled",
             prompt_name="example",
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            kind="rate_limit",
-            retry_safe=False,
+            details=throttle_details(kind="rate_limit", retry_safe=False),
         )
 
     runner = build_runner(
@@ -196,8 +198,9 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
             "throttled",
             prompt_name="example",
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            kind="rate_limit",
-            retry_after=timedelta(milliseconds=10),
+            details=throttle_details(
+                kind="rate_limit", retry_after=timedelta(milliseconds=10)
+            ),
         )
 
     runner = build_runner(
@@ -235,8 +238,9 @@ def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None
             "throttled",
             prompt_name="example",
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            kind="rate_limit",
-            retry_after=timedelta(seconds=1),
+            details=throttle_details(
+                kind="rate_limit", retry_after=timedelta(seconds=1)
+            ),
         )
 
     runner = build_runner(

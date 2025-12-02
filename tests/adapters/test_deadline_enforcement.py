@@ -76,6 +76,33 @@ def _build_rendered(prompt: Prompt[BodyResult]) -> RenderedPrompt[BodyResult]:
     return prompt.render(BodyParams(content="ready"))
 
 
+def _tool_context(
+    *,
+    prompt: Prompt[BodyResult],
+    rendered: RenderedPrompt[BodyResult],
+    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
+    bus: InProcessEventBus,
+    session: SessionProtocol,
+    prompt_name: str,
+    provider_payload: dict[str, Any] | None = None,
+    deadline: Deadline | None = None,
+) -> shared.ToolExecutionContext:
+    return shared.ToolExecutionContext(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[BodyResult], object()),
+        prompt=prompt,
+        rendered_prompt=rendered,
+        tool_registry=tool_registry,
+        bus=bus,
+        session=session,
+        prompt_name=prompt_name,
+        parse_arguments=shared.parse_tool_arguments,
+        format_publish_failures=shared.format_publish_failures,
+        deadline=deadline,
+        provider_payload=provider_payload,
+    )
+
+
 def test_deadline_provider_payload_handles_none() -> None:
     assert shared.deadline_provider_payload(None) is None
 
@@ -187,20 +214,16 @@ def test_execute_tool_call_raises_when_deadline_expired(
     frozen_utcnow.advance(timedelta(seconds=10))
     with pytest.raises(PromptEvaluationError) as excinfo:
         shared.execute_tool_call(
-            adapter_name=TEST_ADAPTER_NAME,
-            adapter=cast(ProviderAdapter[BodyResult], object()),
-            prompt=prompt,
-            rendered_prompt=rendered,
+            context=_tool_context(
+                prompt=prompt,
+                rendered=rendered,
+                tool_registry=tool_registry,
+                bus=bus,
+                session=session,
+                prompt_name="deadline",
+                deadline=deadline,
+            ),
             tool_call=cast(shared.ProviderToolCall, call),
-            tool_registry=tool_registry,
-            bus=bus,
-            session=session,
-            prompt_name="deadline",
-            provider_payload=None,
-            deadline=deadline,
-            format_publish_failures=shared.format_publish_failures,
-            parse_arguments=shared.parse_tool_arguments,
-            logger_override=None,
         )
     error = cast(PromptEvaluationError, excinfo.value)
     assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
@@ -232,20 +255,15 @@ def test_execute_tool_call_publishes_invocation() -> None:
     )
 
     invocation, result = shared.execute_tool_call(
-        adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[BodyResult], object()),
-        prompt=prompt,
-        rendered_prompt=rendered,
+        context=_tool_context(
+            prompt=prompt,
+            rendered=rendered,
+            tool_registry=tool_registry,
+            bus=bus,
+            session=session,
+            prompt_name="publish",
+        ),
         tool_call=cast(shared.ProviderToolCall, call),
-        tool_registry=tool_registry,
-        bus=bus,
-        session=session,
-        prompt_name="publish",
-        provider_payload=None,
-        deadline=None,
-        format_publish_failures=shared.format_publish_failures,
-        parse_arguments=shared.parse_tool_arguments,
-        logger_override=None,
     )
 
     assert result.success is True
@@ -295,7 +313,9 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         deadline=deadline,
     )
 
-    result = shared.run_conversation(
+    inputs = shared.ConversationInputs[
+        BodyResult
+    ](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
@@ -303,7 +323,8 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         rendered=rendered,
         render_inputs=(BodyParams(content="ready"),),
         initial_messages=[{"role": "system", "content": rendered.text}],
-        config=conversation_config,
     )
+
+    result = shared.run_conversation(inputs=inputs, config=conversation_config)
 
     assert isinstance(result, PromptResponse)

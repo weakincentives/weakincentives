@@ -132,7 +132,6 @@ combine-as-imports = true
 "src/weakincentives/prompt/registry.py" = ["PLR0911", "PLR0912"]
 "src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/adapters/openai.py" = ["PLR0913"]
-"src/weakincentives/adapters/shared.py" = ["PLR0913", "PLR1730", "PLR5501"]
 "src/weakincentives/dbc/__init__.py" = ["PLR0913"]
 "src/weakincentives/prompt/_enabled_predicate.py" = ["PLR6201"]
 "src/weakincentives/prompt/composition.py" = ["PLR6301"]
