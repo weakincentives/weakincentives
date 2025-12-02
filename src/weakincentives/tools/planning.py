@@ -383,7 +383,8 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
     def session(self) -> Session:
         return self._session
 
-    def _initialize_session(self, session: Session) -> None:
+    @staticmethod
+    def _initialize_session(session: Session) -> None:
         session.register_reducer(Plan, replace_latest)
         session.register_reducer(SetupPlan, _setup_plan_reducer, slice_type=Plan)
         session.register_reducer(AddStep, _add_step_reducer, slice_type=Plan)
