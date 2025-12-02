@@ -24,6 +24,7 @@ import pytest
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.runtime import select_latest
 from weakincentives.runtime.events import PromptExecuted
 from weakincentives.runtime.session import Session
 
@@ -189,20 +190,14 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
     )
 
 
-def _make_session_with_usage_tracking() -> tuple[Session, list[PromptExecuted]]:
-    session = Session()
-    events: list[PromptExecuted] = []
-
-    def record_event(event: object) -> None:
-        events.append(cast(PromptExecuted, event))
-
-    session.event_bus.subscribe(PromptExecuted, record_event)
-    return session, events
+def _make_session_with_usage_tracking() -> Session:
+    return Session()
 
 
-def _assert_prompt_usage(events: list[PromptExecuted]) -> None:
-    assert events, "Expected a PromptExecuted event."
-    usage = events[-1].usage
+def _assert_prompt_usage(session: Session) -> None:
+    event = select_latest(session, PromptExecuted)
+    assert event is not None, "Expected a PromptExecuted event."
+    usage = event.usage
     assert usage is not None, "Expected token usage to be recorded."
     assert usage.total_tokens is not None and usage.total_tokens > 0
 
@@ -211,7 +206,7 @@ def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
     prompt = _build_greeting_prompt()
     params = GreetingParams(audience="LiteLLM integration tests")
 
-    session, events = _make_session_with_usage_tracking()
+    session = _make_session_with_usage_tracking()
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
@@ -224,7 +219,7 @@ def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
     assert response.prompt_name == "greeting"
     assert response.text is not None
     assert response.text.strip()
-    _assert_prompt_usage(events)
+    _assert_prompt_usage(session)
 
 
 def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
@@ -232,7 +227,7 @@ def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
     prompt = _build_tool_prompt(tool)
     params = TransformRequest(text="LiteLLM integration")
 
-    session, events = _make_session_with_usage_tracking()
+    session = _make_session_with_usage_tracking()
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
@@ -243,14 +238,14 @@ def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
 
     assert response.text is not None
     assert "LITELLM INTEGRATION" in response.text.upper()
-    _assert_prompt_usage(events)
+    _assert_prompt_usage(session)
 
 
 def test_litellm_adapter_parses_structured_output(adapter: LiteLLMAdapter) -> None:
     prompt = _build_structured_prompt()
     params = ReviewParams(text="Integration tests should remain deterministic.")
 
-    session, events = _make_session_with_usage_tracking()
+    session = _make_session_with_usage_tracking()
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
@@ -264,4 +259,4 @@ def test_litellm_adapter_parses_structured_output(adapter: LiteLLMAdapter) -> No
     assert response.text is None
     assert response.output.summary
     assert response.output.sentiment
-    _assert_prompt_usage(events)
+    _assert_prompt_usage(session)
