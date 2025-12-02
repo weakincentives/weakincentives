@@ -125,7 +125,6 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 "tests/**" = ["PLR2004", "PLR0913", "PLR0914", "PLR0402", "PLR6301"]
-"src/weakincentives/prompt/overrides/_fs.py" = ["PLR6301"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]

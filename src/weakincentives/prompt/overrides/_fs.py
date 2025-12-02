@@ -86,7 +86,8 @@ class OverrideFilesystem:
         directory = self.overrides_dir().joinpath(*segments, prompt_component)
         return directory / f"{tag_component}.json"
 
-    def validate_identifier(self, value: str, label: str) -> str:
+    @staticmethod
+    def validate_identifier(value: str, label: str) -> str:
         stripped = value.strip()
         if not stripped:
             raise PromptOverridesError(
@@ -105,7 +106,8 @@ class OverrideFilesystem:
         with lock:
             yield
 
-    def atomic_write(self, file_path: Path, payload: Mapping[str, Any]) -> None:
+    @staticmethod
+    def atomic_write(file_path: Path, payload: Mapping[str, Any]) -> None:
         directory = file_path.parent
         directory.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -136,7 +138,8 @@ class OverrideFilesystem:
             for segment in segments
         )
 
-    def _git_toplevel(self) -> Path | None:
+    @staticmethod
+    def _git_toplevel() -> Path | None:
         try:
             # Bandit false positive: git invocation uses explicit arguments.
             result = subprocess.run(  # nosec B603 B607
@@ -152,7 +155,8 @@ class OverrideFilesystem:
             return None
         return Path(path).resolve()
 
-    def _walk_to_git_root(self) -> Path | None:
+    @staticmethod
+    def _walk_to_git_root() -> Path | None:
         current = Path.cwd().resolve()
         for candidate in (current, *current.parents):
             git_dir = candidate / ".git"
