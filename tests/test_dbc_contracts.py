@@ -33,6 +33,7 @@ from weakincentives.dbc import (
     skip_invariant,
 )
 from weakincentives.runtime.session.session import (
+    SESSION_ID_BYTE_LENGTH,
     Session,
     _created_at_has_tz,
     _created_at_is_utc,
@@ -355,5 +356,6 @@ def test_session_invariant_helpers_cover_basics() -> None:
     typed_session = cast(Session, session)
 
     assert _session_id_is_well_formed(typed_session)
+    assert len(typed_session.session_id.bytes) == SESSION_ID_BYTE_LENGTH
     assert _created_at_has_tz(typed_session)
     assert _created_at_is_utc(typed_session)
