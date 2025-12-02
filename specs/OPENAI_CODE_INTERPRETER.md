@@ -162,6 +162,82 @@ remaining compatible with the runtime's tool registry.
   finish-reason normalization path; adapters SHOULD raise assertion errors when
   required output is filtered to maintain DbC guarantees.
 
+## Usage examples
+
+### Python (Responses API)
+
+```python
+from openai import OpenAI
+from weakincentives.vfs import HostMount
+
+client = OpenAI()
+
+# Project a local CSV into the container using the shared VFS HostMount API
+mount = HostMount(host_path="/tmp/data.csv", mount_path="/data/input.csv")
+
+response = client.responses.create(
+    model="gpt-4.1",
+    tools=[
+        {
+            "type": "code_interpreter",
+            "container": {
+                "type": "auto",
+                "memory_limit": "4g",
+                # File IDs come from prior uploads; HostMount entries mirror host files
+                "file_ids": ["file_csv_upload"],
+                "host_mounts": [mount.to_openai()],
+            },
+        }
+    ],
+    tool_choice="required",
+    input="Load /data/input.csv, calculate the mean of the `value` column, and generate a histogram PNG.",
+)
+
+print(response.output_text)
+
+# Download generated files referenced in container_file_citation annotations
+for content in response.output or []:
+    for item in content.get("annotations", []) or []:
+        if item["type"] == "container_file_citation":
+            downloaded = client.container_files.content(
+                container_id=item["container_id"],
+                file_id=item["file_id"],
+            )
+            with open(item["filename"], "wb") as handle:
+                handle.write(downloaded)
+```
+
+### JavaScript/TypeScript (Responses API)
+
+```typescript
+import OpenAI from "openai";
+import { HostMount } from "weakincentives/vfs";
+
+const client = new OpenAI();
+
+// Mirror a local PDF into the container alongside prior uploads
+const pdfMount = new HostMount({ hostPath: "/tmp/report.pdf", mountPath: "/workspace/report.pdf" });
+
+const resp = await client.responses.create({
+  model: "gpt-4.1",
+  tools: [
+    {
+      type: "code_interpreter",
+      container: {
+        type: "auto",
+        memory_limit: "1g",
+        file_ids: ["file_pdf_upload"],
+        host_mounts: [pdfMount.toOpenAI()],
+      },
+    },
+  ],
+  tool_choice: "required",
+  input: "Extract the section titles from /workspace/report.pdf and return them as JSON.",
+});
+
+console.log(resp.output_text);
+```
+
 ## Testing and observability
 
 - Add unit coverage for `ProviderTool` registration, provider-name validation,
