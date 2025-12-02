@@ -114,7 +114,7 @@ def test_section_allows_custom_children_and_enabled() -> None:
 class PlainSection(Section):
     def render(self, params: object, depth: int, number: str) -> str:
         del params, depth, number
-        _ = self.key
+        _ = getattr(self, "key", None)
         return ""
 
     def clone(self, **kwargs: object) -> PlainSection:

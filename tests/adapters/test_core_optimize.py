@@ -86,7 +86,9 @@ class _RecordingOverridesStore(PromptOverridesStore):
         prompt_key: str,
         tag: str,
     ) -> None:
-        self.calls.append((cast(Prompt[Any], object()), tag, (ns, prompt_key), "delete"))
+        self.calls.append(
+            (cast(Prompt[Any], object()), tag, (ns, prompt_key), "delete")
+        )
 
     def set_section_override(
         self,
