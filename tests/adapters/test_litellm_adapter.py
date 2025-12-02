@@ -167,8 +167,12 @@ def test_create_litellm_completion_wraps_kwargs(
     captured_kwargs: list[dict[str, object]] = []
 
     class DummyLiteLLM(types.SimpleNamespace):
+        def __init__(self) -> None:
+            super().__init__()
+            self.captured_kwargs = captured_kwargs
+
         def completion(self, **kwargs: object) -> DummyResponse:
-            captured_kwargs.append(dict(kwargs))
+            self.captured_kwargs.append(dict(kwargs))
             message = DummyMessage(content="Hello", tool_calls=None)
             return DummyResponse([DummyChoice(message)])
 

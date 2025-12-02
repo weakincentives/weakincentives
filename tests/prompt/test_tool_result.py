@@ -46,7 +46,7 @@ class FailingRenderableData:
     value: str
 
     def render(self) -> str:
-        raise ValueError("boom")
+        raise ValueError(f"boom:{self.value}")
 
 
 def test_render_tool_payload_prefers_custom_render() -> None:

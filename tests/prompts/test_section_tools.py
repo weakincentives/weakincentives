@@ -62,6 +62,8 @@ class _BareSection(Section[SectionParams]):
         )
 
     def render(self, params: SectionParams, depth: int, number: str) -> str:
+        del params, depth, number
+        _ = self.key
         return ""
 
 

@@ -129,9 +129,12 @@ class BrokenSection(Section[BrokenParams]):
         super().__init__(title="Broken", key="broken")
 
     def render(self, params: BrokenParams, depth: int, number: str) -> str:
-        raise PromptRenderError("inner", placeholder="value")
+        del params, depth, number
+        raise PromptRenderError("inner", section_path=(self.key,), placeholder="value")
 
     def clone(self, **kwargs: object) -> BrokenSection:
+        del kwargs
+        _ = self.title
         return BrokenSection()
 
 
@@ -157,9 +160,12 @@ class InvalidParamsSection(Section[int]):  # type: ignore[arg-type]
         super().__init__(title="Invalid", key="invalid")
 
     def render(self, params: int, depth: int, number: str) -> str:
-        return "invalid"
+        del params, depth, number
+        return self.key
 
     def clone(self, **kwargs: object) -> InvalidParamsSection:
+        del kwargs
+        _ = self.title
         return InvalidParamsSection()
 
 
@@ -248,9 +254,12 @@ class BareSection(Section[PlaceholderParams]):
         super().__init__(title="Bare", key="bare")
 
     def render(self, params: PlaceholderParams, depth: int, number: str) -> str:
-        return "bare"
+        del params, depth, number
+        return self.key
 
     def clone(self, **kwargs: object) -> BareSection:
+        del kwargs
+        _ = self.title
         return BareSection()
 
 
@@ -303,6 +312,8 @@ class ContextAwareSection(Section[ContextParams]):
         super().__init__(title="Context", key="context")
 
     def render(self, params: ContextParams, depth: int, number: str) -> str:
+        _ = self.title
+        del params, depth, number
         raise PromptRenderError(
             "context",
             section_path=("Provided",),
@@ -311,6 +322,8 @@ class ContextAwareSection(Section[ContextParams]):
         )
 
     def clone(self, **kwargs: object) -> ContextAwareSection:
+        del kwargs
+        _ = self.key
         return ContextAwareSection()
 
 

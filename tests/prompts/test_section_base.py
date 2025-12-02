@@ -36,6 +36,8 @@ class GenericParams:
 
 class ExampleSection(Section[ExampleParams]):
     def render(self, params: ExampleParams, depth: int, number: str) -> str:
+        del number
+        _ = self.title
         return f"Rendered {params.value} at depth {depth}"
 
     def clone(self, **kwargs: object) -> ExampleSection:
@@ -111,6 +113,8 @@ def test_section_allows_custom_children_and_enabled() -> None:
 
 class PlainSection(Section):
     def render(self, params: object, depth: int, number: str) -> str:
+        del params, depth, number
+        _ = self.key
         return ""
 
     def clone(self, **kwargs: object) -> PlainSection:

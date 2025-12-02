@@ -155,7 +155,8 @@ class WeirdResponse:
             DummyResponseOutput(choice.message.to_content_parts()) for choice in choices
         ]
 
-    def model_dump(self) -> list[object]:
+    @staticmethod
+    def model_dump() -> list[object]:
         return ["unexpected"]
 
 

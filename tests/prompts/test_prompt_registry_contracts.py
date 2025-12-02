@@ -37,9 +37,12 @@ class OtherParams:
 
 class ExampleSection(Section[ExampleParams]):
     def render(self, params: ExampleParams, depth: int, number: str) -> str:
+        del number
+        _ = self.key
         return f"example:{params.value}:{depth}"
 
     def placeholder_names(self) -> set[str]:
+        _ = self.children
         return {"value"}
 
     def clone(self, **kwargs: object) -> ExampleSection:
@@ -55,9 +58,12 @@ class ExampleSection(Section[ExampleParams]):
 
 class OtherSection(Section[OtherParams]):
     def render(self, params: OtherParams, depth: int, number: str) -> str:
+        del number
+        _ = self.title
         return f"other:{params.level}:{depth}"
 
     def placeholder_names(self) -> set[str]:
+        _ = self.children
         return {"level"}
 
     def clone(self, **kwargs: object) -> OtherSection:
@@ -73,6 +79,8 @@ class OtherSection(Section[OtherParams]):
 
 class NoParamsSection(Section):
     def render(self, params: object, depth: int, number: str) -> str:
+        del params, depth, number
+        _ = self.key
         return "no-params"
 
     def clone(self, **kwargs: object) -> NoParamsSection:
