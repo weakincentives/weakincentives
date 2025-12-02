@@ -39,13 +39,13 @@ post-processing provider outputs using the existing `ToolContext` contract.
 - **`provider: Literal[...]`** – identifies the provider this tool definition is
   valid for (e.g., `"openai"`). Adapters MAY reject provider tools that do not
   match their provider name during registration.
-- **`handle_provider_output: Callable[[ResultT, ToolContext, type[ResultT]], ToolResult[ResultT]] | None`** – optional hook that processes provider tool
+- **`handle_provider_output: Callable[[ResultT, ToolContext], ToolResult[ResultT]] | None`** – optional hook that processes provider tool
   outputs (e.g., OpenAI tool-call content parts) into a normalized `ToolResult`.
-  Provider payloads are mapped into `ResultT` before invocation, and the
-  `ResultT` type object is passed alongside `ToolContext` so handlers can
-  construct typed payloads or delegate to the default handler. When absent,
-  adapters fall back to the default behavior of pushing raw provider payloads
-  through the registered handler.
+  Provider payloads are mapped into `ResultT` before invocation, and the typed
+  result instance is passed alongside `ToolContext` so handlers can construct
+  typed payloads or delegate to the default handler. When absent, adapters fall
+  back to the default behavior of pushing raw provider payloads through the
+  registered handler.
 
 `ProviderTool` retains the base invariants:
 
