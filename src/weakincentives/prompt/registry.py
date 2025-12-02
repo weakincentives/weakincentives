@@ -81,8 +81,8 @@ class RegistrySnapshot:
 
         return self._construct_section_params(params_type, node)
 
+    @staticmethod
     def _construct_section_params(
-        self,
         params_type: type[SupportsDataclass],
         node: SectionNode[SupportsDataclass],
     ) -> SupportsDataclass | None:
@@ -96,8 +96,8 @@ class RegistrySnapshot:
                 dataclass_type=params_type,
             ) from error
 
+    @staticmethod
     def _ensure_dataclass_params(
-        self,
         params: SupportsDataclass | None,
         node: SectionNode[SupportsDataclass],
         params_type: type[SupportsDataclass],
@@ -124,7 +124,8 @@ def _registry_paths_are_registered(
     """Ensure internal registries only reference known section nodes."""
 
     node_by_path = {
-        node.path: node for node in registry._section_nodes  # pyright: ignore[reportPrivateUsage]
+        node.path: node
+        for node in registry._section_nodes  # pyright: ignore[reportPrivateUsage]
     }
     validations = (
         _validate_default_paths(registry, node_by_path),
