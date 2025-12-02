@@ -164,18 +164,22 @@ remaining compatible with the runtime's tool registry.
 
 ## Usage examples
 
-### Python (Responses API)
+### Registering `OpenAICodeInterpreterTool`
 
 The VFS spec defines `HostMount` (see `specs/VFS_TOOLS.md` and
 `code_reviewer_example.py`) as the canonical way to project host files into
 tools. The OpenAI adapter expects the same structure when wiring
-`host_mounts` for the code interpreter.
+`host_mounts` for the code interpreter. The snippet below shows how to wire an
+`OpenAICodeInterpreterTool` with a pass-through provider-output handler that
+returns the provider-rendered text while preserving the structured payload.
 
 ```python
 from pathlib import Path
 
 from openai import OpenAI
-from weakincentives.tools import HostMount, VfsPath
+from weakincentives.prompt import ToolContext
+from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.tools import HostMount, OpenAICodeInterpreterTool, VfsPath
 
 client = OpenAI()
 
@@ -200,14 +204,31 @@ def _to_openai_mount(mount: HostMount) -> dict[str, object]:
         "follow_symlinks": mount.follow_symlinks,
     }
 
-container_config = {
-    "type": "auto",
-    "memory_limit": "4g",
-    # File IDs come from prior uploads
-    "file_ids": ["file_csv_upload"],
-    # Host projections use the same HostMount definition as the VFS tools
-    "host_mounts": [_to_openai_mount(host_mount)],
-}
+def identity_provider_output(result: dict[str, object], context: ToolContext) -> ToolResult[dict[str, object]]:
+    """Pass through provider output while preserving structure."""
+
+    return ToolResult(
+        message=str(result.get("output_text") or result.get("message") or ""),
+        value=result,
+        success=True,
+    )
+
+code_interpreter_tool = OpenAICodeInterpreterTool(
+    name="openai_python",
+    description="Executes model-authored Python in a sandboxed container.",
+    container={
+        "type": "auto",
+        "memory_limit": "4g",
+        # File IDs come from prior uploads
+        "file_ids": ["file_csv_upload"],
+        # Host projections use the same HostMount definition as the VFS tools
+        "host_mounts": [_to_openai_mount(host_mount)],
+    },
+    handle_provider_output=identity_provider_output,
+)
+
+# Register the tool in your prompt/tool registry before issuing the request.
+container_config = code_interpreter_tool.container
 
 response = client.responses.create(
     model="gpt-4.1",
