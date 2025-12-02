@@ -31,6 +31,7 @@ from weakincentives.adapters.shared import (
     ThrottlePolicy,
     ToolChoice,
     new_throttle_policy,
+    token_usage_from_payload,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, ToolContext
@@ -46,6 +47,7 @@ from weakincentives.runtime.events import (
     PromptExecuted,
     PromptRendered,
     PublishResult,
+    TokenUsage,
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
@@ -192,6 +194,38 @@ def test_conversation_runner_success() -> None:
     assert response.output is None
     assert isinstance(bus.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
+
+
+def test_conversation_runner_includes_usage_in_event() -> None:
+    rendered = RenderedPrompt(text="system")
+    responses = [
+        DummyResponse(
+            [DummyChoice(DummyMessage(content="Hello"))],
+            usage={"input_tokens": 12, "output_tokens": 5, "cached_tokens": 3},
+        )
+    ]
+    provider = ProviderStub(responses)
+    bus = RecordingBus()
+
+    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
+    _ = runner.run()
+
+    prompt_event = cast(PromptExecuted, bus.events[-1])
+    assert prompt_event.usage == TokenUsage(
+        input_tokens=12, output_tokens=5, cached_tokens=3
+    )
+
+
+def test_token_usage_from_payload_handles_missing_counts() -> None:
+    payload = {
+        "usage": {
+            "input_tokens": None,
+            "output_tokens": "unknown",
+            "cached_tokens": False,
+        }
+    }
+
+    assert token_usage_from_payload(payload) is None
 
 
 def test_conversation_runner_includes_prompt_descriptor_in_event() -> None:

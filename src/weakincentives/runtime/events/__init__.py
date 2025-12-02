@@ -42,6 +42,23 @@ def _describe_handler(handler: EventHandler) -> str:
 logger: StructuredLogger = get_logger(__name__, context={"component": "event_bus"})
 
 
+@dataclass(slots=True, frozen=True)
+class TokenUsage:
+    """Token accounting captured from provider responses."""
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_tokens: int | None = None
+
+    @property
+    def total_tokens(self) -> int | None:
+        """Return a best-effort total when counts are available."""
+
+        if self.input_tokens is None and self.output_tokens is None:
+            return None
+        return (self.input_tokens or 0) + (self.output_tokens or 0)
+
+
 class InProcessEventBus:
     """Process-local event bus that delivers events synchronously."""
 
@@ -91,6 +108,7 @@ class PromptExecuted:
     result: Any
     session_id: UUID | None
     created_at: datetime
+    usage: TokenUsage | None = None
     value: Any | None = None
     event_id: UUID = field(default_factory=uuid4)
 
@@ -118,5 +136,6 @@ __all__ = [
     "PromptExecuted",
     "PromptRendered",
     "PublishResult",
+    "TokenUsage",
     "ToolInvoked",
 ]

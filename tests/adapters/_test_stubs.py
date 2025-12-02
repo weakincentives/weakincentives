@@ -129,14 +129,20 @@ class DummyResponseOutput:
 
 
 class DummyResponse:
-    def __init__(self, choices: Sequence[DummyChoice]) -> None:
+    def __init__(
+        self, choices: Sequence[DummyChoice], *, usage: dict[str, object] | None = None
+    ) -> None:
         self.choices = list(choices)
+        self.usage = usage
         self.output = [
             DummyResponseOutput(choice.message.to_content_parts()) for choice in choices
         ]
 
     def model_dump(self) -> dict[str, Any]:
-        return {"output": [output.model_dump() for output in self.output]}
+        payload = {"output": [output.model_dump() for output in self.output]}
+        if self.usage is not None:
+            payload["usage"] = self.usage
+        return payload
 
 
 class MappingResponse(dict[str, object]):

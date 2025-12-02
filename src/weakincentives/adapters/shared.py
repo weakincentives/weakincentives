@@ -22,15 +22,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Literal,
-    NoReturn,
-    Protocol,
-    TypeVar,
-    cast,
-)
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
 from uuid import uuid4
 
 from ..deadlines import Deadline
@@ -51,6 +43,7 @@ from ..runtime.events import (
     HandlerFailure,
     PromptExecuted,
     PromptRendered,
+    TokenUsage,
     ToolInvoked,
 )
 from ..runtime.logging import StructuredLogger, get_logger
@@ -361,6 +354,43 @@ def extract_payload(response: object) -> dict[str, Any] | None:
         if mapping_payload is not None:
             return mapping_payload
     return None
+
+
+def _coerce_token_count(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        coerced = int(value)
+        return coerced if coerced >= 0 else None
+    return None
+
+
+def token_usage_from_payload(payload: Mapping[str, Any] | None) -> TokenUsage | None:
+    """Extract token usage metrics from a provider payload when present."""
+
+    if not isinstance(payload, Mapping):
+        return None
+    usage_value = payload.get("usage")
+    if not isinstance(usage_value, Mapping):
+        return None
+    usage_payload = cast(Mapping[str, object], usage_value)
+
+    input_tokens = _coerce_token_count(
+        usage_payload.get("input_tokens") or usage_payload.get("prompt_tokens")
+    )
+    output_tokens = _coerce_token_count(
+        usage_payload.get("output_tokens") or usage_payload.get("completion_tokens")
+    )
+    cached_tokens = _coerce_token_count(usage_payload.get("cached_tokens"))
+
+    if all(value is None for value in (input_tokens, output_tokens, cached_tokens)):
+        return None
+
+    return TokenUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_tokens=cached_tokens,
+    )
 
 
 def first_choice(response: object, *, prompt_name: str) -> object:
@@ -1005,9 +1035,7 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
     return {cast(str, key): value for key, value in mapping.items()}
 
 
-__all__ = (
-    "LITELLM_ADAPTER_NAME",
-    "OPENAI_ADAPTER_NAME",
+__all__ = (  # noqa: RUF022
     "AdapterName",
     "AdapterRenderContext",
     "AdapterRenderOptions",
@@ -1016,6 +1044,8 @@ __all__ = (
     "ConversationInputs",
     "ConversationRequest",
     "ConversationRunner",
+    "LITELLM_ADAPTER_NAME",
+    "OPENAI_ADAPTER_NAME",
     "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
@@ -1048,6 +1078,7 @@ __all__ = (
     "run_conversation",
     "serialize_tool_call",
     "throttle_details",
+    "token_usage_from_payload",
     "tool_execution",
     "tool_to_spec",
 )
@@ -1571,6 +1602,7 @@ class ConversationRunner[OutputT]:
             text=text_value,
             output=output,
         )
+        usage = token_usage_from_payload(self._provider_payload)
         prompt_value: SupportsDataclass | None = None
         if is_dataclass_instance(output):
             prompt_value = cast(SupportsDataclass, output)  # pyright: ignore[reportUnnecessaryCast]
@@ -1582,6 +1614,7 @@ class ConversationRunner[OutputT]:
                 result=cast(PromptResponse[object], response_payload),
                 session_id=getattr(self.session, "session_id", None),
                 created_at=datetime.now(UTC),
+                usage=usage,
                 value=prompt_value,
                 event_id=uuid4(),
             )

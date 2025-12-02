@@ -30,6 +30,7 @@ from weakincentives.runtime.events import (
     PromptExecuted,
     PromptRendered,
     PublishResult,
+    TokenUsage,
     ToolInvoked,
 )
 
@@ -268,3 +269,15 @@ def test_tool_invoked_event_fields() -> None:
     assert event.call_id == "abc123"
     assert isinstance(event.event_id, UUID)
     assert event.rendered_output == rendered_output
+
+
+def test_token_usage_total_tokens_none_when_unset() -> None:
+    usage = TokenUsage()
+
+    assert usage.total_tokens is None
+
+
+def test_token_usage_total_tokens_sums_counts() -> None:
+    usage = TokenUsage(input_tokens=5, output_tokens=7)
+
+    assert usage.total_tokens == 12
