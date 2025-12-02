@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
 from types import MappingProxyType
-from typing import Any, Concatenate, cast, override
+from typing import Any, Concatenate, Final, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
@@ -45,6 +45,9 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "session"}
 
 
 type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
+
+
+SESSION_ID_BYTE_LENGTH: Final[int] = 16
 
 
 def iter_sessions_bottom_up(root: Session) -> Iterator[Session]:
@@ -105,7 +108,7 @@ class _ReducerRegistration:
 
 
 def _session_id_is_well_formed(session: Session) -> bool:
-    return len(session.session_id.bytes) == 16
+    return len(session.session_id.bytes) == SESSION_ID_BYTE_LENGTH
 
 
 def _created_at_has_tz(session: Session) -> bool:
