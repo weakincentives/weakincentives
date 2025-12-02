@@ -60,45 +60,56 @@ class RegistrySnapshot:
         if params_type is None:
             return None
 
-        section_params: SupportsDataclass | None = param_lookup.get(params_type)
-
+        section_params = param_lookup.get(params_type)
         if section_params is None:
-            default_value = self.defaults_by_path.get(node.path)
-            if default_value is not None:
-                section_params = clone_dataclass(default_value)
-            else:
-                type_default = self.defaults_by_type.get(params_type)
-                if type_default is not None:
-                    section_params = clone_dataclass(type_default)
-                else:
-                    try:
-                        constructor = cast(
-                            Callable[[], SupportsDataclass | None], params_type
-                        )
-                        section_params = constructor()
-                    except TypeError as error:
-                        raise PromptRenderError(
-                            "Missing parameters for section.",
-                            section_path=node.path,
-                            dataclass_type=params_type,
-                        ) from error
+            section_params = self._default_or_construct_params(node, params_type)
 
-        result: SupportsDataclass | None = section_params
-        if result is None:
+        return self._ensure_dataclass_params(section_params, node, params_type)
+
+    def _default_or_construct_params(
+        self,
+        node: SectionNode[SupportsDataclass],
+        params_type: type[SupportsDataclass],
+    ) -> SupportsDataclass | None:
+        default_value = self.defaults_by_path.get(node.path)
+        if default_value is not None:
+            return clone_dataclass(default_value)
+
+        type_default = self.defaults_by_type.get(params_type)
+        if type_default is not None:
+            return clone_dataclass(type_default)
+
+        return self._construct_section_params(params_type, node)
+
+    @staticmethod
+    def _construct_section_params(
+        params_type: type[SupportsDataclass],
+        node: SectionNode[SupportsDataclass],
+    ) -> SupportsDataclass | None:
+        try:
+            constructor = cast(Callable[[], SupportsDataclass | None], params_type)
+            return constructor()
+        except TypeError as error:
+            raise PromptRenderError(
+                "Missing parameters for section.",
+                section_path=node.path,
+                dataclass_type=params_type,
+            ) from error
+
+    @staticmethod
+    def _ensure_dataclass_params(
+        params: SupportsDataclass | None,
+        node: SectionNode[SupportsDataclass],
+        params_type: type[SupportsDataclass],
+    ) -> SupportsDataclass:
+        if params is None or not is_dataclass(params):
             raise PromptRenderError(
                 "Section constructor must return a dataclass instance.",
                 section_path=node.path,
                 dataclass_type=params_type,
             )
 
-        if not is_dataclass(result):
-            raise PromptRenderError(
-                "Section constructor must return a dataclass instance.",
-                section_path=node.path,
-                dataclass_type=params_type,
-            )
-
-        return result
+        return params
 
     @property
     def param_types(self) -> set[type[SupportsDataclass]]:
@@ -112,13 +123,44 @@ def _registry_paths_are_registered(
 ) -> tuple[bool, str] | bool:
     """Ensure internal registries only reference known section nodes."""
 
-    section_nodes = registry._section_nodes  # pyright: ignore[reportPrivateUsage]
-    node_by_path = {node.path: node for node in section_nodes}
-    defaults_by_path = registry._defaults_by_path  # pyright: ignore[reportPrivateUsage]
-    placeholders = registry._placeholders  # pyright: ignore[reportPrivateUsage]
-    tool_name_registry = registry._tool_name_registry  # pyright: ignore[reportPrivateUsage]
-    defaults_by_type = registry._defaults_by_type  # pyright: ignore[reportPrivateUsage]
+    node_by_path = {
+        node.path: node
+        for node in registry._section_nodes  # pyright: ignore[reportPrivateUsage]
+    }
+    validations = (
+        _validate_default_paths(registry, node_by_path),
+        _validate_placeholders(registry, node_by_path),
+        _validate_tool_registry(registry, node_by_path),
+        _validate_defaults_by_type(registry),
+    )
 
+    for validation in validations:
+        if validation is not True:
+            return validation
+
+    return True
+
+
+def _params_registry_is_consistent(
+    registry: PromptRegistry,
+) -> tuple[bool, str] | bool:
+    """Ensure params registry entries point at known nodes with matching types."""
+
+    section_nodes = list(registry._section_nodes)  # pyright: ignore[reportPrivateUsage]
+    params_registry = registry._params_registry  # pyright: ignore[reportPrivateUsage]
+    for params_type, nodes in params_registry.items():
+        validation = _validate_param_nodes(section_nodes, params_type, nodes)
+        if validation is not True:
+            return validation
+
+    return True
+
+
+def _validate_default_paths(
+    registry: PromptRegistry,
+    node_by_path: Mapping[SectionPath, SectionNode[SupportsDataclass]],
+) -> tuple[bool, str] | bool:
+    defaults_by_path = registry._defaults_by_path  # pyright: ignore[reportPrivateUsage]
     unknown_default_paths = [
         path for path in defaults_by_path if path not in node_by_path
     ]
@@ -139,6 +181,14 @@ def _registry_paths_are_registered(
                 f"{path!r}: expected {params_type.__name__}, got {type(default).__name__}"
             )
 
+    return True
+
+
+def _validate_placeholders(
+    registry: PromptRegistry,
+    node_by_path: Mapping[SectionPath, SectionNode[SupportsDataclass]],
+) -> tuple[bool, str] | bool:
+    placeholders = registry._placeholders  # pyright: ignore[reportPrivateUsage]
     unknown_placeholder_paths = [
         path for path in placeholders if path not in node_by_path
     ]
@@ -148,12 +198,27 @@ def _registry_paths_are_registered(
             f"{sorted(unknown_placeholder_paths)!r}"
         )
 
+    return True
+
+
+def _validate_tool_registry(
+    registry: PromptRegistry,
+    node_by_path: Mapping[SectionPath, SectionNode[SupportsDataclass]],
+) -> tuple[bool, str] | bool:
+    tool_name_registry = registry._tool_name_registry  # pyright: ignore[reportPrivateUsage]
     unknown_tool_paths = [
         path for path in tool_name_registry.values() if path not in node_by_path
     ]
     if unknown_tool_paths:
         return False, f"tools reference unknown paths: {sorted(unknown_tool_paths)!r}"
 
+    return True
+
+
+def _validate_defaults_by_type(
+    registry: PromptRegistry,
+) -> tuple[bool, str] | bool:
+    defaults_by_type = registry._defaults_by_type  # pyright: ignore[reportPrivateUsage]
     for params_type, default in defaults_by_type.items():
         if type(default) is not params_type:
             return False, (
@@ -164,32 +229,29 @@ def _registry_paths_are_registered(
     return True
 
 
-def _params_registry_is_consistent(
-    registry: PromptRegistry,
+def _validate_param_nodes(
+    section_nodes: Sequence[SectionNode[SupportsDataclass]],
+    params_type: type[SupportsDataclass],
+    nodes: Sequence[SectionNode[SupportsDataclass]],
 ) -> tuple[bool, str] | bool:
-    """Ensure params registry entries point at known nodes with matching types."""
-
-    section_nodes = list(registry._section_nodes)  # pyright: ignore[reportPrivateUsage]
-    params_registry = registry._params_registry  # pyright: ignore[reportPrivateUsage]
-    for params_type, nodes in params_registry.items():
-        for node in nodes:
-            if node not in section_nodes:
-                return False, (
-                    "params registry references unknown node at path "
-                    f"{node.path!r} for {params_type.__name__}"
-                )
-            node_params_type = node.section.param_type
-            if node_params_type is None:
-                return False, (
-                    "params registry references section without params at path "
-                    f"{node.path!r}"
-                )
-            if node_params_type is not params_type:
-                return False, (
-                    "params registry type mismatch for path "
-                    f"{node.path!r}: expected {params_type.__name__}, "
-                    f"found {node_params_type.__name__}"
-                )
+    for node in nodes:
+        if node not in section_nodes:
+            return False, (
+                "params registry references unknown node at path "
+                f"{node.path!r} for {params_type.__name__}"
+            )
+        node_params_type = node.section.param_type
+        if node_params_type is None:
+            return False, (
+                "params registry references section without params at path "
+                f"{node.path!r}"
+            )
+        if node_params_type is not params_type:
+            return False, (
+                "params registry type mismatch for path "
+                f"{node.path!r}: expected {params_type.__name__}, "
+                f"found {node_params_type.__name__}"
+            )
 
     return True
 
