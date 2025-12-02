@@ -35,7 +35,22 @@ from ._types import SupportsDataclass, SupportsToolResult
 from .errors import PromptValidationError
 from .tool_result import ToolResult
 
-_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
+_NAME_MIN_LENGTH: Final = 1
+_NAME_MAX_LENGTH: Final = 64
+_DESCRIPTION_MIN_LENGTH: Final = 1
+_DESCRIPTION_MAX_LENGTH: Final = 200
+_EXPECTED_TYPE_ARGUMENTS: Final = 2
+_HANDLER_PARAMETER_COUNT: Final = 2
+_VARIADIC_TUPLE_LENGTH: Final = 2
+_SINGLE_GENERIC_ARG_COUNT: Final = 1
+_POSITIONAL_PARAMETER_KINDS: Final = {
+    inspect.Parameter.POSITIONAL_ONLY,
+    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+}
+
+_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
+    rf"^[a-z0-9_-]{{{_NAME_MIN_LENGTH},{_NAME_MAX_LENGTH}}}$"
+)
 
 
 if TYPE_CHECKING:
@@ -76,7 +91,7 @@ def _normalize_specialization(item: object) -> tuple[object, object]:
     if not isinstance(item, tuple):
         raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
     normalized = cast(SequenceABC[object], item)
-    if len(normalized) != 2:
+    if len(normalized) != _EXPECTED_TYPE_ARGUMENTS:
         raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
     return normalized[0], normalized[1]
 
@@ -145,7 +160,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
             origin = getattr(self, "__orig_class__", None)
             if origin is not None:  # pragma: no cover - interpreter-specific path
                 args = get_args(origin)
-                if len(args) == 2:
+                if len(args) == _EXPECTED_TYPE_ARGUMENTS:
                     params_arg, result_arg = args
                     if isinstance(params_arg, type):
                         params_type = params_arg
@@ -176,9 +191,11 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 dataclass_type=params_type,
                 placeholder=stripped_name,
             )
-        if len(name_clean) > 64 or not _NAME_PATTERN.fullmatch(name_clean):
+        if len(name_clean) > _NAME_MAX_LENGTH or not _NAME_PATTERN.fullmatch(
+            name_clean
+        ):
             raise PromptValidationError(
-                "Tool name must match the OpenAI function name constraints (pattern: ^[a-z0-9_-]{1,64}$).",
+                f"Tool name must match the OpenAI function name constraints (pattern: {_NAME_PATTERN.pattern}).",
                 dataclass_type=params_type,
                 placeholder=name_clean,
             )
@@ -187,7 +204,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
     def _validate_description(self, params_type: type[SupportsDataclass]) -> str:
         description_clean = self.description.strip()
-        if not description_clean or len(description_clean) > 200:
+        if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
             raise PromptValidationError(
                 "Tool description must be 1-200 ASCII characters.",
                 dataclass_type=params_type,
@@ -208,7 +225,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         description: str, params_type: type[SupportsDataclass]
     ) -> None:
         description_clean = description.strip()
-        if not description_clean or len(description_clean) > 200:
+        if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
             raise PromptValidationError(
                 "Tool example description must be 1-200 ASCII characters.",
                 dataclass_type=params_type,
@@ -374,7 +391,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         parameters: list[inspect.Parameter],
         params_type: type[SupportsDataclass],
     ) -> tuple[inspect.Parameter, inspect.Parameter]:
-        if len(parameters) != 2:
+        if len(parameters) != _HANDLER_PARAMETER_COUNT:
             raise PromptValidationError(
                 "Tool handler must accept exactly one positional argument and the keyword-only 'context' parameter.",
                 dataclass_type=params_type,
@@ -390,10 +407,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         parameter: inspect.Parameter,
         params_type: type[SupportsDataclass],
     ) -> None:
-        if parameter.kind not in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        ):
+        if parameter.kind not in _POSITIONAL_PARAMETER_KINDS:
             raise PromptValidationError(
                 "Tool handler parameter must be positional.",
                 dataclass_type=params_type,
@@ -444,9 +458,10 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 dataclass_type=params_type,
                 placeholder="handler",
             )
-        if get_origin(annotation) is Annotated:
-            annotation = get_args(annotation)[0]
-        if annotation is not params_type:
+        annotation_to_validate = annotation
+        if get_origin(annotation_to_validate) is Annotated:
+            annotation_to_validate = get_args(annotation_to_validate)[0]
+        if annotation_to_validate is not params_type:
             raise PromptValidationError(
                 "Tool handler parameter annotation must match ParamsT.",
                 dataclass_type=params_type,
@@ -464,9 +479,10 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 dataclass_type=params_type,
                 placeholder="handler",
             )
-        if get_origin(context_annotation) is Annotated:
-            context_annotation = get_args(context_annotation)[0]
-        if context_annotation is not ToolContext:
+        context_annotation_to_validate = context_annotation
+        if get_origin(context_annotation_to_validate) is Annotated:
+            context_annotation_to_validate = get_args(context_annotation_to_validate)[0]
+        if context_annotation_to_validate is not ToolContext:
             raise PromptValidationError(
                 "Tool handler 'context' annotation must be ToolContext.",
                 dataclass_type=params_type,
@@ -487,12 +503,13 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 dataclass_type=params_type,
                 placeholder="return",
             )
-        if get_origin(return_annotation) is Annotated:
-            return_annotation = get_args(return_annotation)[0]
+        return_annotation_to_validate = return_annotation
+        if get_origin(return_annotation_to_validate) is Annotated:
+            return_annotation_to_validate = get_args(return_annotation_to_validate)[0]
 
-        origin = get_origin(return_annotation)
+        origin = get_origin(return_annotation_to_validate)
         if origin is ToolResult:
-            result_args_raw = get_args(return_annotation)
+            result_args_raw = get_args(return_annotation_to_validate)
             if result_args_raw and self._matches_result_annotation(
                 result_args_raw[0],
                 result_annotation,
@@ -523,14 +540,14 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         args = get_args(annotation)
         element: object | None = None
         if origin is tuple:
-            if len(args) != 2 or args[1] is not Ellipsis:
+            if len(args) != _VARIADIC_TUPLE_LENGTH or args[1] is not Ellipsis:
                 raise PromptValidationError(
                     "Variadic Tuple[ResultT, ...] is required for Tool sequence results.",
                     dataclass_type=params_type,
                     placeholder="ResultT",
                 )
             element = args[0]
-        elif len(args) == 1:
+        elif len(args) == _SINGLE_GENERIC_ARG_COUNT:
             element = args[0]
 
         if not isinstance(element, type):
@@ -561,14 +578,14 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 candidate_args[0]
                 if candidate_origin is not tuple
                 else candidate_args[0]
-                if len(candidate_args) == 2
+                if len(candidate_args) == _VARIADIC_TUPLE_LENGTH
                 else None
             )
             expected_element = (
                 expected_args[0]
                 if expected_origin is not tuple
                 else expected_args[0]
-                if len(expected_args) == 2
+                if len(expected_args) == _VARIADIC_TUPLE_LENGTH
                 else None
             )
             return candidate_element is expected_element
