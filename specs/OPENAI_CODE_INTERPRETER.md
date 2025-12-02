@@ -166,31 +166,57 @@ remaining compatible with the runtime's tool registry.
 
 ### Python (Responses API)
 
+The VFS spec defines `HostMount` (see `specs/VFS_TOOLS.md` and
+`code_reviewer_example.py`) as the canonical way to project host files into
+tools. The OpenAI adapter expects the same structure when wiring
+`host_mounts` for the code interpreter.
+
 ```python
+from pathlib import Path
+
 from openai import OpenAI
-from weakincentives.vfs import HostMount
+from weakincentives.tools import HostMount, VfsPath
 
 client = OpenAI()
 
-# Project a local CSV into the container using the shared VFS HostMount API
-mount = HostMount(host_path="/tmp/data.csv", mount_path="/data/input.csv")
+# Reuse the VFS HostMount API (same shape used in the code reviewer example)
+host_mount = HostMount(
+    host_path="sunfish",  # Relative to the allowed host roots configured by the orchestrator
+    mount_path=VfsPath(("workspace", "sunfish")),
+    include_glob=("*.py", "*.md", "*.txt"),
+    exclude_glob=("**/__pycache__/**",),
+    max_bytes=600_000,
+)
+
+# HostMount uses VfsPath; serialize it into the provider payload
+def _to_openai_mount(mount: HostMount) -> dict[str, object]:
+    mount_path = "/" + "/".join(mount.mount_path.segments) if mount.mount_path else "/"
+    return {
+        "host_path": mount.host_path,
+        "mount_path": mount_path,
+        "include_glob": list(mount.include_glob),
+        "exclude_glob": list(mount.exclude_glob),
+        "max_bytes": mount.max_bytes,
+        "follow_symlinks": mount.follow_symlinks,
+    }
+
+container_config = {
+    "type": "auto",
+    "memory_limit": "4g",
+    # File IDs come from prior uploads
+    "file_ids": ["file_csv_upload"],
+    # Host projections use the same HostMount definition as the VFS tools
+    "host_mounts": [_to_openai_mount(host_mount)],
+}
 
 response = client.responses.create(
     model="gpt-4.1",
-    tools=[
-        {
-            "type": "code_interpreter",
-            "container": {
-                "type": "auto",
-                "memory_limit": "4g",
-                # File IDs come from prior uploads; HostMount entries mirror host files
-                "file_ids": ["file_csv_upload"],
-                "host_mounts": [mount.to_openai()],
-            },
-        }
-    ],
+    tools=[{"type": "code_interpreter", "container": container_config}],
     tool_choice="required",
-    input="Load /data/input.csv, calculate the mean of the `value` column, and generate a histogram PNG.",
+    input=(
+        "Load /workspace/sunfish/data/input.csv, calculate the mean of the `value` "
+        "column, and generate a histogram PNG."
+    ),
 )
 
 print(response.output_text)
@@ -203,39 +229,7 @@ for content in response.output or []:
                 container_id=item["container_id"],
                 file_id=item["file_id"],
             )
-            with open(item["filename"], "wb") as handle:
-                handle.write(downloaded)
-```
-
-### JavaScript/TypeScript (Responses API)
-
-```typescript
-import OpenAI from "openai";
-import { HostMount } from "weakincentives/vfs";
-
-const client = new OpenAI();
-
-// Mirror a local PDF into the container alongside prior uploads
-const pdfMount = new HostMount({ hostPath: "/tmp/report.pdf", mountPath: "/workspace/report.pdf" });
-
-const resp = await client.responses.create({
-  model: "gpt-4.1",
-  tools: [
-    {
-      type: "code_interpreter",
-      container: {
-        type: "auto",
-        memory_limit: "1g",
-        file_ids: ["file_pdf_upload"],
-        host_mounts: [pdfMount.toOpenAI()],
-      },
-    },
-  ],
-  tool_choice: "required",
-  input: "Extract the section titles from /workspace/report.pdf and return them as JSON.",
-});
-
-console.log(resp.output_text);
+            Path(item["filename"]).write_bytes(downloaded)
 ```
 
 ## Testing and observability
