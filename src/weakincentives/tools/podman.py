@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
 from ..prompt.markdown import MarkdownSection
+from ..prompt.section import SectionSettings
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session, replace_latest, select_latest
@@ -915,11 +916,13 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             title="Podman Workspace",
             key="podman.shell",
             template=template,
-            default_params=_PodmanSectionParams(
-                image=self._image, workspace_root=_DEFAULT_WORKDIR
+            settings=SectionSettings(
+                default_params=_PodmanSectionParams(
+                    image=self._image, workspace_root=_DEFAULT_WORKDIR
+                ),
+                tools=tools,
+                accepts_overrides=accepts_overrides,
             ),
-            tools=tools,
-            accepts_overrides=accepts_overrides,
         )
 
     @property

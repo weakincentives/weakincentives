@@ -29,6 +29,7 @@ from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast, override
 
 from ..prompt.markdown import MarkdownSection
+from ..prompt.section import SectionSettings
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import (
@@ -1068,9 +1069,11 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             title="Python Evaluation Tool",
             key="tools.asteval",
             template=_EVAL_TEMPLATE,
-            default_params=_AstevalSectionParams(),
-            tools=(tool,),
-            accepts_overrides=accepts_overrides,
+            settings=SectionSettings(
+                default_params=_AstevalSectionParams(),
+                tools=(tool,),
+                accepts_overrides=accepts_overrides,
+            ),
         )
 
     @property

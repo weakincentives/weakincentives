@@ -22,6 +22,7 @@ from typing import Final, Literal, cast, override
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
+from ..prompt.section import SectionSettings
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.session import (
     ReducerContextProtocol,
@@ -374,9 +375,11 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             title="Planning Tools",
             key="planning.tools",
             template=_template_for_strategy(strategy),
-            default_params=_PlanningSectionParams(),
-            tools=tools,
-            accepts_overrides=accepts_overrides,
+            settings=SectionSettings(
+                default_params=_PlanningSectionParams(),
+                tools=tools,
+                accepts_overrides=accepts_overrides,
+            ),
         )
 
     @property

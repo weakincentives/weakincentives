@@ -14,20 +14,29 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
-
-if TYPE_CHECKING:
-    from .tool import Tool
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, ClassVar, Self, cast
 
 from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass, SupportsToolResult
 
-SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
+if TYPE_CHECKING:
+    from .tool import Tool
+
+@dataclass(slots=True)
+class SectionSettings[SectionParamsT: SupportsDataclass]:
+    default_params: SectionParamsT | None = None
+    children: Sequence[Section[SupportsDataclass]] | None = None
+    enabled: EnabledPredicate | None = None
+    tools: Sequence[object] | None = None
+    accepts_overrides: bool = True
 
 
-class Section(GenericParamsSpecializer[SectionParamsT], ABC):
+class Section[SectionParamsT: SupportsDataclass](
+    GenericParamsSpecializer[SectionParamsT], ABC
+):
     """Abstract building block for prompt content."""
 
     _generic_owner_name: ClassVar[str | None] = "Section"
@@ -37,13 +46,10 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         *,
         title: str,
         key: str,
-        default_params: SectionParamsT | None = None,
-        children: Sequence[Section[SupportsDataclass]] | None = None,
-        enabled: EnabledPredicate | None = None,
-        tools: Sequence[object] | None = None,
-        accepts_overrides: bool = True,
+        settings: SectionSettings[SectionParamsT] | None = None,
     ) -> None:
         super().__init__()
+        normalized_settings = settings or SectionSettings()
         params_candidate = getattr(self.__class__, "_params_type", None)
         candidate_type = (
             params_candidate if isinstance(params_candidate, type) else None
@@ -56,23 +62,25 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         self.param_type: type[SectionParamsT] | None = self.params_type
         self.title = title
         self.key = self._normalize_key(key)
-        self.default_params = default_params
-        self.accepts_overrides = accepts_overrides
+        self.default_params = normalized_settings.default_params
+        self.accepts_overrides = normalized_settings.accepts_overrides
 
         if self.params_type is None and self.default_params is not None:
             raise TypeError("Section without parameters cannot define default_params.")
 
         normalized_children: list[Section[SupportsDataclass]] = []
-        raw_children: Sequence[object] = cast(Sequence[object], children or ())
+        raw_children: Sequence[object] = cast(
+            Sequence[object], normalized_settings.children or ()
+        )
         for child in raw_children:
             if not isinstance(child, Section):
                 raise TypeError("Section children must be Section instances.")
             normalized_children.append(cast(Section[SupportsDataclass], child))
         self.children = tuple(normalized_children)
         self._enabled: Callable[[SupportsDataclass | None], bool] | None = (
-            normalize_enabled_predicate(enabled, params_type)
+            normalize_enabled_predicate(normalized_settings.enabled, params_type)
         )
-        self._tools = self._normalize_tools(tools)
+        self._tools = self._normalize_tools(normalized_settings.tools)
 
     def is_enabled(self, params: SupportsDataclass | None) -> bool:
         """Return True when the section should render for the given params."""
@@ -88,7 +96,10 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
     def placeholder_names(self) -> set[str]:
         """Return placeholder identifiers used by the section template."""
 
-        return set()
+        placeholders: set[str] = set()
+        for child in self.children:
+            placeholders.update(child.placeholder_names())
+        return placeholders
 
     @abstractmethod
     def clone(self: Self, **kwargs: object) -> Self:
@@ -99,7 +110,8 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
         return self._tools
 
-    def original_body_template(self) -> str | None:
+    @staticmethod
+    def original_body_template() -> str | None:
         """Return the template text that participates in hashing, when available."""
 
         return None
@@ -125,4 +137,4 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         return tuple(normalized)
 
 
-__all__ = ["Section"]
+__all__ = ["Section", "SectionSettings"]

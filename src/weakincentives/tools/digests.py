@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import cast, override
 
 from ..prompt._types import SupportsDataclass
-from ..prompt.section import Section
+from ..prompt.section import Section, SectionSettings
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
@@ -106,7 +106,11 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
     ) -> None:
         self._session = session
         self._placeholder = placeholder.strip()
-        super().__init__(title=title, key=key, accepts_overrides=True)
+        super().__init__(
+            title=title,
+            key=key,
+            settings=SectionSettings(accepts_overrides=True),
+        )
         self.params_type = None
         self.param_type = None
 

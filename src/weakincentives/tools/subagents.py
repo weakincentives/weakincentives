@@ -27,6 +27,7 @@ from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.prompt import RenderedPrompt
 from ..prompt.protocols import PromptResponseProtocol
+from ..prompt.section import SectionSettings
 from ..prompt.tool import Tool, ToolContext, ToolExample
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
@@ -377,9 +378,11 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
             title="Delegation",
             key="subagents",
             template=_DELEGATION_BODY,
-            default_params=_SubagentsSectionParams(),
-            tools=(tool,),
-            accepts_overrides=accepts_overrides,
+            settings=SectionSettings(
+                default_params=_SubagentsSectionParams(),
+                tools=(tool,),
+                accepts_overrides=accepts_overrides,
+            ),
         )
 
     @override

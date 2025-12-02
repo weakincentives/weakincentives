@@ -19,6 +19,7 @@ from typing import Any, Final, Literal, Self, cast, override
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
 from .markdown import MarkdownSection
+from .section import SectionSettings
 
 __all__ = ["ResponseFormatParams", "ResponseFormatSection"]
 
@@ -55,9 +56,11 @@ class ResponseFormatSection(MarkdownSection[ResponseFormatParams]):
             title="Response Format",
             key="response-format",
             template=_RESPONSE_FORMAT_BODY,
-            default_params=params,
-            enabled=enabled,
-            accepts_overrides=accepts_overrides,
+            settings=SectionSettings(
+                default_params=params,
+                enabled=enabled,
+                accepts_overrides=accepts_overrides,
+            ),
         )
 
     @override

@@ -25,6 +25,7 @@ from typing import Final, Literal, cast, override
 
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.markdown import MarkdownSection
+from ..prompt.section import SectionSettings
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.session import (
     ReducerContextProtocol,
@@ -642,9 +643,11 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             title="Virtual Filesystem Tools",
             key="vfs.tools",
             template=_render_section_template(mount_previews),
-            default_params=_VfsSectionParams(),
-            tools=tools,
-            accepts_overrides=accepts_overrides,
+            settings=SectionSettings(
+                default_params=_VfsSectionParams(),
+                tools=tools,
+                accepts_overrides=accepts_overrides,
+            ),
         )
 
     @property

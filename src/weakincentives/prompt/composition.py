@@ -26,7 +26,7 @@ from .markdown import MarkdownSection
 from .prompt import Prompt, RenderedPrompt
 from .protocols import PromptProtocol
 from .response_format import ResponseFormatParams, ResponseFormatSection
-from .section import Section
+from .section import Section, SectionSettings
 
 ParentOutputT = TypeVar("ParentOutputT")
 DelegationOutputT = TypeVar("DelegationOutputT")
@@ -92,8 +92,10 @@ class ParentPromptSection(Section[ParentPromptParams]):
         super().__init__(
             title="Parent Prompt (Verbatim)",
             key="parent-prompt",
-            tools=tools,
-            default_params=default_params,
+            settings=SectionSettings(
+                tools=tools,
+                default_params=default_params,
+            ),
         )
 
     @override

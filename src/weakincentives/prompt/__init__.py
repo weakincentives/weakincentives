@@ -43,7 +43,7 @@ from .overrides import (
 from .prompt import Prompt
 from .protocols import PromptProtocol, ProviderAdapterProtocol, RenderedPromptProtocol
 from .rendering import RenderedPrompt
-from .section import Section
+from .section import Section, SectionSettings
 from .structured_output import (
     OutputParseError,
     StructuredOutputConfig,
@@ -80,6 +80,7 @@ __all__ = [
     "SectionDescriptor",
     "SectionOverride",
     "SectionPath",
+    "SectionSettings",
     "StructuredOutputConfig",
     "SupportsDataclass",
     "SupportsToolResult",

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import textwrap
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
 from typing import Any, Literal, Self, TypeVar, cast, override
@@ -22,7 +22,7 @@ from typing import Any, Literal, Self, TypeVar, cast, override
 from ..serde import clone as clone_dataclass, dump
 from ._types import SupportsDataclass, SupportsToolResult
 from .errors import PromptRenderError
-from .section import Section
+from .section import Section, SectionSettings
 from .tool import Tool
 from .tool_result import render_tool_payload
 
@@ -42,21 +42,13 @@ class MarkdownSection(Section[MarkdownParamsT]):
         title: str,
         template: str,
         key: str,
-        default_params: MarkdownParamsT | None = None,
-        children: Sequence[Section[SupportsDataclass]] | None = None,
-        enabled: Callable[[SupportsDataclass], bool] | None = None,
-        tools: Sequence[object] | None = None,
-        accepts_overrides: bool = True,
+        settings: SectionSettings[MarkdownParamsT] | None = None,
     ) -> None:
         self.template = template
         super().__init__(
             title=title,
             key=key,
-            default_params=default_params,
-            children=children,
-            enabled=enabled,
-            tools=tools,
-            accepts_overrides=accepts_overrides,
+            settings=settings,
         )
 
     @override
@@ -148,11 +140,13 @@ class MarkdownSection(Section[MarkdownParamsT]):
             title=self.title,
             template=self.template,
             key=self.key,
-            default_params=cloned_default,
-            children=cloned_children,
-            enabled=self._enabled,
-            tools=self.tools(),
-            accepts_overrides=self.accepts_overrides,
+            settings=SectionSettings(
+                default_params=cloned_default,
+                children=cloned_children,
+                enabled=self._enabled,
+                tools=self.tools(),
+                accepts_overrides=self.accepts_overrides,
+            ),
         )
         return cast(Self, clone)
 
