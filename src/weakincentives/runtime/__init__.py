@@ -22,6 +22,7 @@ from .events import (
     PromptExecuted,
     PromptRendered,
     PublishResult,
+    TokenUsage,
     ToolInvoked,
 )
 from .logging import StructuredLogger, configure_logging, get_logger
@@ -68,6 +69,7 @@ __all__ = [
     "SnapshotRestoreError",
     "SnapshotSerializationError",
     "StructuredLogger",
+    "TokenUsage",
     "ToolInvoked",
     "TypedReducer",
     "append",

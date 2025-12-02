@@ -36,6 +36,7 @@ from weakincentives.prompt.overrides import (
 )
 from weakincentives.runtime import (
     EventBus,
+    PromptExecuted,
     PromptRendered,
     Session,
     ToolInvoked,
@@ -472,9 +473,34 @@ def _log_tool_invocation(event: object) -> None:
     print("\n[tool] " + "\n".join(lines))
 
 
+def _log_prompt_executed(event: object) -> None:
+    prompt_event = cast(PromptExecuted, event)
+    usage = prompt_event.usage
+
+    print("\n[prompt] Execution complete")
+    if usage is None:
+        print("  token usage: (not reported)\n")
+        return
+
+    parts: list[str] = []
+    if usage.input_tokens is not None:
+        parts.append(f"input={usage.input_tokens}")
+    if usage.output_tokens is not None:
+        parts.append(f"output={usage.output_tokens}")
+    if usage.cached_tokens is not None:
+        parts.append(f"cached={usage.cached_tokens}")
+
+    total = usage.total_tokens
+    if total is not None:
+        parts.append(f"total={total}")
+
+    print(f"  token usage: {', '.join(parts)}\n")
+
+
 def _attach_logging_subscribers(bus: EventBus) -> None:
     bus.subscribe(PromptRendered, _print_rendered_prompt)
     bus.subscribe(ToolInvoked, _log_tool_invocation)
+    bus.subscribe(PromptExecuted, _log_prompt_executed)
 
 
 def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
