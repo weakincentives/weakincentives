@@ -320,9 +320,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             deadline=deadline,
         )
 
-        inputs = ConversationInputs[
-            OutputT
-        ](
+        inputs = ConversationInputs[OutputT](
             adapter_name=LITELLM_ADAPTER_NAME,
             adapter=cast("ProviderAdapter[OutputT]", self),
             prompt=prompt,

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -40,6 +41,8 @@ from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
+    SupportsDataclass,
+    SupportsToolResult,
     Tool,
     ToolContext,
     ToolHandler,
@@ -63,7 +66,7 @@ def _build_prompt(tool: Tool[ToolParams, ToolPayload]) -> Prompt[ToolPayload]:
                 tools=[tool],
             ),
         ),
-)
+    )
 
 
 def _base_context(
@@ -79,10 +82,13 @@ def _base_context(
         adapter=cast(Any, object()),
         prompt=prompt,
         rendered_prompt=None,
-        tool_registry={tool.name: tool},
+        tool_registry=cast(
+            Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
+            {tool.name: cast(Tool[SupportsDataclass, SupportsToolResult], tool)},
+        ),
         bus=bus,
         session=cast(SessionProtocol, session or Session(bus=bus)),
-        prompt_name=prompt.name,
+        prompt_name=cast(str, prompt.name),
         parse_arguments=parse_tool_arguments,
         format_publish_failures=format_publish_failures,
         deadline=deadline,
@@ -155,8 +161,9 @@ def test_tool_execution_raises_on_expired_deadline(
     context = _base_context(tool, deadline=expired_deadline)
     tool_call = _tool_call({"query": "policies"})
 
-    with pytest.raises(PromptEvaluationError) as excinfo, tool_execution(
-        context=context, tool_call=tool_call
+    with (
+        pytest.raises(PromptEvaluationError) as excinfo,
+        tool_execution(context=context, tool_call=tool_call),
     ):
         pytest.fail("tool_execution should raise before yielding")
 
@@ -177,8 +184,9 @@ def test_tool_execution_wraps_handler_deadline_exceptions() -> None:
     context = _base_context(tool, deadline=deadline)
     tool_call = _tool_call({"query": "policies"})
 
-    with pytest.raises(PromptEvaluationError) as excinfo, tool_execution(
-        context=context, tool_call=tool_call
+    with (
+        pytest.raises(PromptEvaluationError) as excinfo,
+        tool_execution(context=context, tool_call=tool_call),
     ):
         pytest.fail("tool_execution should raise before yielding")
 

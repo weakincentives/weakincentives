@@ -130,9 +130,7 @@ def test_run_conversation_requires_message_payload() -> None:
         parse_output=False,
     )
 
-    inputs = shared.ConversationInputs[
-        object
-    ](
+    inputs = shared.ConversationInputs[object](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=adapter,
         prompt=prompt,

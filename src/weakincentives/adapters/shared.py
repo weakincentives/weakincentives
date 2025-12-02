@@ -754,9 +754,7 @@ def _publish_tool_invocation(
                 "failed_handlers": failure_handlers,
             },
         )
-        outcome.result.message = context.format_publish_failures(
-            publish_result.errors
-        )
+        outcome.result.message = context.format_publish_failures(publish_result.errors)
     else:
         outcome.log.debug(
             "Tool event published.",
@@ -1007,56 +1005,51 @@ def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
     return {cast(str, key): value for key, value in mapping.items()}
 
 
-__all__ = tuple(
-    sorted(
-        (
-            "_content_part_text",
-            "_parsed_payload_from_part",
-            "AdapterName",
-            "AdapterRenderContext",
-            "AdapterRenderOptions",
-            "build_json_schema_response_format",
-            "call_provider_with_normalization",
-            "ChoiceSelector",
-            "ConversationConfig",
-            "ConversationInputs",
-            "ConversationRequest",
-            "ConversationRunner",
-            "deadline_provider_payload",
-            "execute_tool_call",
-            "extract_parsed_content",
-            "extract_payload",
-            "first_choice",
-            "format_publish_failures",
-            "LITELLM_ADAPTER_NAME",
-            "message_text_content",
-            "new_throttle_policy",
-            "OPENAI_ADAPTER_NAME",
-            "parse_schema_constrained_payload",
-            "parse_tool_arguments",
-            "prepare_adapter_conversation",
-            "ProviderChoice",
-            "ProviderCompletionCallable",
-            "ProviderCompletionResponse",
-            "ProviderFunctionCall",
-            "ProviderMessage",
-            "ProviderToolCall",
-            "run_conversation",
-            "serialize_tool_call",
-            "throttle_details",
-            "ThrottleDetails",
-            "ThrottleError",
-            "ThrottleKind",
-            "ThrottlePolicy",
-            "tool_execution",
-            "tool_to_spec",
-            "ToolArgumentsParser",
-            "ToolChoice",
-            "ToolExecutionContext",
-            "ToolMessageSerializer",
-        ),
-        key=str.casefold,
-    )
+__all__ = (
+    "LITELLM_ADAPTER_NAME",
+    "OPENAI_ADAPTER_NAME",
+    "AdapterName",
+    "AdapterRenderContext",
+    "AdapterRenderOptions",
+    "ChoiceSelector",
+    "ConversationConfig",
+    "ConversationInputs",
+    "ConversationRequest",
+    "ConversationRunner",
+    "ProviderChoice",
+    "ProviderCompletionCallable",
+    "ProviderCompletionResponse",
+    "ProviderFunctionCall",
+    "ProviderMessage",
+    "ProviderToolCall",
+    "ThrottleDetails",
+    "ThrottleError",
+    "ThrottleKind",
+    "ThrottlePolicy",
+    "ToolArgumentsParser",
+    "ToolChoice",
+    "ToolExecutionContext",
+    "ToolMessageSerializer",
+    "_content_part_text",
+    "_parsed_payload_from_part",
+    "build_json_schema_response_format",
+    "call_provider_with_normalization",
+    "deadline_provider_payload",
+    "execute_tool_call",
+    "extract_parsed_content",
+    "extract_payload",
+    "first_choice",
+    "format_publish_failures",
+    "message_text_content",
+    "new_throttle_policy",
+    "parse_schema_constrained_payload",
+    "parse_tool_arguments",
+    "prepare_adapter_conversation",
+    "run_conversation",
+    "serialize_tool_call",
+    "throttle_details",
+    "tool_execution",
+    "tool_to_spec",
 )
 
 
@@ -1689,4 +1682,3 @@ class ToolExecutionContext:
         """Return a copy of the context with a new provider payload."""
 
         return replace(self, provider_payload=provider_payload)
-

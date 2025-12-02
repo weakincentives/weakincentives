@@ -313,9 +313,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         deadline=deadline,
     )
 
-    inputs = shared.ConversationInputs[
-        BodyResult
-    ](
+    inputs = shared.ConversationInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,

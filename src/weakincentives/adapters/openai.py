@@ -638,9 +638,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             deadline=deadline,
         )
 
-        inputs = ConversationInputs[
-            OutputT
-        ](
+        inputs = ConversationInputs[OutputT](
             adapter_name=OPENAI_ADAPTER_NAME,
             adapter=cast("ProviderAdapter[OutputT]", self),
             prompt=prompt,
