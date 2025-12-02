@@ -1330,58 +1330,111 @@ def _load_mount(
     include_patterns = _normalize_globs(mount.include_glob, "include_glob")
     exclude_patterns = _normalize_globs(mount.exclude_glob, "exclude_glob")
     mount_prefix = _normalize_optional_path(mount.mount_path)
-    preview_entries = _list_mount_entries(resolved_host)
     preview = HostMountPreview(
         host_path=host_path,
         resolved_host=resolved_host,
         mount_path=mount_prefix,
-        entries=preview_entries,
+        entries=_list_mount_entries(resolved_host),
         is_directory=resolved_host.is_dir(),
     )
 
+    context = _MountContext(
+        resolved_host=resolved_host,
+        mount_prefix=mount_prefix,
+        include_patterns=include_patterns,
+        exclude_patterns=exclude_patterns,
+        timestamp=_now(),
+        max_bytes=mount.max_bytes,
+    )
     files: list[VfsFile] = []
     consumed_bytes = 0
-    timestamp = _now()
     for path in _iter_mount_files(resolved_host, mount.follow_symlinks):
-        relative = (
-            Path(path.name)
-            if resolved_host.is_file()
-            else path.relative_to(resolved_host)
+        file, consumed_bytes = _read_mount_entry(
+            path=path, context=context, consumed_bytes=consumed_bytes
         )
-        relative_posix = relative.as_posix()
-        if include_patterns and not any(
-            fnmatch.fnmatchcase(relative_posix, pattern) for pattern in include_patterns
-        ):
-            continue
-        if any(
-            fnmatch.fnmatchcase(relative_posix, pattern) for pattern in exclude_patterns
-        ):
-            continue
-
-        try:
-            content = path.read_text(encoding=_DEFAULT_ENCODING)
-        except UnicodeDecodeError as error:  # pragma: no cover - defensive guard
-            raise ToolValidationError("Mounted file must be valid UTF-8.") from error
-        except OSError as error:
-            raise ToolValidationError(f"Failed to read mounted file {path}.") from error
-        size = len(content.encode(_DEFAULT_ENCODING))
-        if mount.max_bytes is not None and consumed_bytes + size > mount.max_bytes:
-            raise ToolValidationError("Host mount exceeded the configured byte budget.")
-        consumed_bytes += size
-
-        segments = mount_prefix.segments + relative.parts
-        normalized_path = _normalize_path(VfsPath(segments))
-        file = VfsFile(
-            path=normalized_path,
-            content=content,
-            encoding=_DEFAULT_ENCODING,
-            size_bytes=size,
-            version=1,
-            created_at=timestamp,
-            updated_at=timestamp,
-        )
-        files.append(file)
+        if file is not None:
+            files.append(file)
     return tuple(files), preview
+
+
+@dataclass(slots=True, frozen=True)
+class _MountContext:
+    resolved_host: Path = field(
+        metadata={"description": "Absolute host path resolved against allowed roots."}
+    )
+    mount_prefix: VfsPath = field(
+        metadata={
+            "description": "Normalized VFS path where the host mount will appear."
+        }
+    )
+    include_patterns: tuple[str, ...] = field(
+        metadata={
+            "description": "Glob patterns that must match mounted files when provided."
+        }
+    )
+    exclude_patterns: tuple[str, ...] = field(
+        metadata={
+            "description": "Glob patterns that exclude files from the mounted set."
+        }
+    )
+    timestamp: datetime = field(
+        metadata={
+            "description": "Timestamp applied to mounted files for created/updated metadata."
+        }
+    )
+    max_bytes: int | None = field(
+        metadata={
+            "description": "Optional byte budget limiting total mounted file size."
+        }
+    )
+
+
+def _read_mount_entry(
+    *,
+    path: Path,
+    context: _MountContext,
+    consumed_bytes: int,
+) -> tuple[VfsFile | None, int]:
+    relative = (
+        Path(path.name)
+        if context.resolved_host.is_file()
+        else path.relative_to(context.resolved_host)
+    )
+    relative_posix = relative.as_posix()
+    if context.include_patterns and not any(
+        fnmatch.fnmatchcase(relative_posix, pattern)
+        for pattern in context.include_patterns
+    ):
+        return None, consumed_bytes
+    if any(
+        fnmatch.fnmatchcase(relative_posix, pattern)
+        for pattern in context.exclude_patterns
+    ):
+        return None, consumed_bytes
+
+    try:
+        content = path.read_text(encoding=_DEFAULT_ENCODING)
+    except UnicodeDecodeError as error:  # pragma: no cover - defensive guard
+        raise ToolValidationError("Mounted file must be valid UTF-8.") from error
+    except OSError as error:
+        raise ToolValidationError(f"Failed to read mounted file {path}.") from error
+    size = len(content.encode(_DEFAULT_ENCODING))
+    if context.max_bytes is not None and consumed_bytes + size > context.max_bytes:
+        raise ToolValidationError("Host mount exceeded the configured byte budget.")
+    consumed_bytes += size
+
+    segments = context.mount_prefix.segments + relative.parts
+    normalized_path = _normalize_path(VfsPath(segments))
+    file = VfsFile(
+        path=normalized_path,
+        content=content,
+        encoding=_DEFAULT_ENCODING,
+        size_bytes=size,
+        version=1,
+        created_at=context.timestamp,
+        updated_at=context.timestamp,
+    )
+    return file, consumed_bytes
 
 
 def _list_mount_entries(root: Path) -> tuple[str, ...]:
