@@ -733,6 +733,7 @@ def test_close_handles_missing_container(
 
     class _BrokenContainers:
         def get(self, container_id: str) -> _FakeContainer:
+            self.last_requested = container_id
             raise RuntimeError("missing container")
 
     class _BrokenClient:
@@ -741,7 +742,7 @@ def test_close_handles_missing_container(
             self.images = _FakeImageCollection()
 
         def close(self) -> None:
-            return None
+            self.closed = True
 
     section._client_factory = lambda: _BrokenClient()
 
@@ -1371,6 +1372,7 @@ def test_client_factory_creates_client(monkeypatch: pytest.MonkeyPatch) -> None:
 
         def close(self) -> None:
             created["closed"] = True
+            self.was_closed = True
 
     fake_module = SimpleNamespace(PodmanClient=_StubClient)
     monkeypatch.setitem(sys.modules, "podman", fake_module)
@@ -1430,7 +1432,7 @@ def test_client_factory_uses_connection_options(
             created["kwargs"] = kwargs
 
         def close(self) -> None:
-            return None
+            self.closed = True
 
     fake_module = SimpleNamespace(PodmanClient=_DummyClient)
     monkeypatch.setitem(sys.modules, "podman", fake_module)
@@ -3236,7 +3238,7 @@ def test_write_via_container_handles_cli_failures(
 
 
 def test_tools_module_missing_attr_raises() -> None:
-    import weakincentives.tools as tools
+    from weakincentives import tools
 
     with pytest.raises(AttributeError):
         _ = tools.TOTALLY_UNKNOWN

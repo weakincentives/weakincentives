@@ -114,11 +114,12 @@ class RecordingBus(EventBus):
         self.fail_rendered = fail_rendered
         self.fail_tool = fail_tool
         self.fail_prompt = fail_prompt
+        self.subscriptions: list[tuple[type[object], EventHandler]] = []
 
     def subscribe(
         self, event_type: type[object], handler: EventHandler
     ) -> None:  # pragma: no cover - unused
-        del event_type, handler
+        self.subscriptions.append((event_type, handler))
 
     def publish(self, event: object) -> PublishResult:
         self.events.append(event)

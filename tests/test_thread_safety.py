@@ -57,6 +57,7 @@ class _DummySection:
         return self.template
 
     def tools(self) -> tuple[object, ...]:
+        _ = self.accepts_overrides
         return ()
 
 

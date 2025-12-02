@@ -664,7 +664,8 @@ def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None
         def __init__(self, config: FakeConfig) -> None:
             config_calls["server_config"] = config
 
-        def run(self) -> None:
+        @staticmethod
+        def run() -> None:
             config_calls["run_called"] = True
 
     monkeypatch.setattr(debug_app.uvicorn, "Config", FakeConfig)

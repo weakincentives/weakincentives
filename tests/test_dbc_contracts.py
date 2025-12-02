@@ -279,6 +279,7 @@ def test_invariant_skips_static_and_class_methods() -> None:
 
         def ping(self) -> str:
             tracker.append("ping")
+            _ = self.constant
             return "pong"
 
     example = Example()

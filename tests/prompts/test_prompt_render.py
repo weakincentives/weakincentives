@@ -246,7 +246,8 @@ def test_prompt_render_wraps_template_errors_with_context() -> None:
 
     class ExplodingSection(MarkdownSection[ErrorParams]):
         def render(self, params: ErrorParams, depth: int, number: str) -> str:
-            raise ValueError("boom")
+            del params, depth, number
+            raise ValueError(f"boom:{self.title}")
 
     section = ExplodingSection(
         title="Explode",

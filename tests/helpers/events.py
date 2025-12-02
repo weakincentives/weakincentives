@@ -20,10 +20,13 @@ from weakincentives.runtime.events import EventHandler, PublishResult
 class NullEventBus:
     """Event bus implementation that discards all events."""
 
-    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
+    @staticmethod
+    def subscribe(event_type: type[object], handler: EventHandler) -> None:
         """No-op subscription hook."""
+        del event_type, handler
 
-    def publish(self, event: object) -> PublishResult:
+    @staticmethod
+    def publish(event: object) -> PublishResult:
         """Drop the provided event instance."""
 
         return PublishResult(

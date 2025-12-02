@@ -68,7 +68,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         descriptor: PromptLike,
         tag: str = "latest",
     ) -> PromptOverride | None:
-        del descriptor, tag
+        self.calls.append((cast(Prompt[Any], descriptor), tag, (), "resolve"))
         return None
 
     def upsert(
@@ -76,7 +76,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         descriptor: PromptLike,
         override: PromptOverride,
     ) -> PromptOverride:
-        del descriptor
+        self.calls.append((cast(Prompt[Any], descriptor), "", (), "upsert"))
         return override
 
     def delete(
@@ -86,7 +86,9 @@ class _RecordingOverridesStore(PromptOverridesStore):
         prompt_key: str,
         tag: str,
     ) -> None:
-        del ns, prompt_key, tag
+        self.calls.append(
+            (cast(Prompt[Any], object()), tag, (ns, prompt_key), "delete")
+        )
 
     def set_section_override(
         self,
@@ -105,7 +107,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         *,
         tag: str = "latest",
     ) -> PromptOverride:
-        del prompt, tag
+        self.calls.append((cast(Prompt[Any], prompt), tag, (), "seed"))
         return cast(PromptOverride, object())
 
 

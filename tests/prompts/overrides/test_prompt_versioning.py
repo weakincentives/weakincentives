@@ -37,7 +37,7 @@ class _GreetingParams:
 
 class _StaticSection(Section[_GreetingParams]):
     def render(self, params: _GreetingParams, depth: int, number: str) -> str:
-        return f"Depth {depth}: {params.subject} ({number})"
+        return f"{self.title}: Depth {depth}: {params.subject} ({number})"
 
     def clone(self, **kwargs: object) -> _StaticSection:
         return _StaticSection(title=self.title, key=self.key)

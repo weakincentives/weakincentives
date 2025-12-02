@@ -146,10 +146,12 @@ def test_main_handles_invalid_snapshot(
         return None
 
     class FakeLogger:
-        def error(self, *_: object, **__: object) -> None:
+        @staticmethod
+        def error(*_: object, **__: object) -> None:
             return None
 
-        def exception(self, *_: object, **__: object) -> None:
+        @staticmethod
+        def exception(*_: object, **__: object) -> None:
             return None
 
     def fake_get_logger(name: str) -> FakeLogger:
@@ -170,7 +172,8 @@ def test_main_handles_invalid_snapshot(
 
 def test_main_returns_parser_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeParser:
-        def parse_args(self, argv: list[str] | None = None) -> object:
+        @staticmethod
+        def parse_args(argv: list[str] | None = None) -> object:
             raise SystemExit(5)
 
     monkeypatch.setattr(wink, "_build_parser", lambda: FakeParser())
@@ -189,7 +192,8 @@ def test_main_returns_zero_for_unknown_command(
         json_logs = True
 
     class FakeParser:
-        def parse_args(self, argv: list[str] | None = None) -> FakeArgs:
+        @staticmethod
+        def parse_args(argv: list[str] | None = None) -> FakeArgs:
             return FakeArgs()
 
     calls: dict[str, object] = {}
