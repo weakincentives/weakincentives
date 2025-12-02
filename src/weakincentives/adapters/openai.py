@@ -49,6 +49,7 @@ from .core import (
 from .shared import (
     OPENAI_ADAPTER_NAME,
     ConversationConfig,
+    ConversationInputs,
     ThrottleError,
     ThrottleKind,
     ToolChoice,
@@ -57,6 +58,7 @@ from .shared import (
     format_publish_failures,
     parse_tool_arguments,
     run_conversation,
+    throttle_details,
 )
 
 OutputT = TypeVar("OutputT")
@@ -556,9 +558,11 @@ def _normalize_openai_throttle(
         message,
         prompt_name=prompt_name,
         phase=PROMPT_EVALUATION_PHASE_REQUEST,
-        kind=kind,
-        retry_after=retry_after,
-        provider_payload=_error_payload(error),
+        details=throttle_details(
+            kind=kind,
+            retry_after=retry_after,
+            provider_payload=_error_payload(error),
+        ),
     )
 
 
@@ -634,7 +638,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             deadline=deadline,
         )
 
-        return run_conversation(
+        inputs = ConversationInputs[OutputT](
             adapter_name=OPENAI_ADAPTER_NAME,
             adapter=cast("ProviderAdapter[OutputT]", self),
             prompt=prompt,
@@ -642,8 +646,9 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             rendered=context.rendered,
             render_inputs=context.render_inputs,
             initial_messages=[{"role": "system", "content": context.rendered.text}],
-            config=conversation_config,
         )
+
+        return run_conversation(inputs=inputs, config=conversation_config)
 
     def _setup_evaluation(
         self,

@@ -42,6 +42,7 @@ from .shared import (
     LITELLM_ADAPTER_NAME,
     AdapterRenderOptions,
     ConversationConfig,
+    ConversationInputs,
     ThrottleError,
     ThrottleKind,
     ToolChoice,
@@ -51,6 +52,7 @@ from .shared import (
     parse_tool_arguments,
     prepare_adapter_conversation,
     run_conversation,
+    throttle_details,
 )
 
 OutputT = TypeVar("OutputT")
@@ -187,9 +189,11 @@ def _normalize_litellm_throttle(
         message,
         prompt_name=prompt_name,
         phase=PROMPT_EVALUATION_PHASE_REQUEST,
-        kind=kind,
-        retry_after=_retry_after_from_error(error),
-        provider_payload=_error_payload(error),
+        details=throttle_details(
+            kind=kind,
+            retry_after=_retry_after_from_error(error),
+            provider_payload=_error_payload(error),
+        ),
     )
 
 
@@ -316,7 +320,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             deadline=deadline,
         )
 
-        return run_conversation(
+        inputs = ConversationInputs[OutputT](
             adapter_name=LITELLM_ADAPTER_NAME,
             adapter=cast("ProviderAdapter[OutputT]", self),
             prompt=prompt,
@@ -324,8 +328,9 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             rendered=rendered,
             render_inputs=render_inputs,
             initial_messages=[{"role": "system", "content": rendered.text}],
-            config=conversation_config,
         )
+
+        return run_conversation(inputs=inputs, config=conversation_config)
 
 
 __all__ = [

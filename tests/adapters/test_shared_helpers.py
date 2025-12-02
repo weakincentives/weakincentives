@@ -130,14 +130,15 @@ def test_run_conversation_requires_message_payload() -> None:
         parse_output=False,
     )
 
+    inputs = shared.ConversationInputs[object](
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=adapter,
+        prompt=prompt,
+        prompt_name="example",
+        rendered=rendered,
+        render_inputs=(),
+        initial_messages=[{"role": "system", "content": rendered.text}],
+    )
+
     with pytest.raises(PromptEvaluationError):
-        shared.run_conversation(
-            adapter_name=TEST_ADAPTER_NAME,
-            adapter=adapter,
-            prompt=prompt,
-            prompt_name="example",
-            rendered=rendered,
-            render_inputs=(),
-            initial_messages=[{"role": "system", "content": rendered.text}],
-            config=conversation_config,
-        )
+        shared.run_conversation(inputs=inputs, config=conversation_config)
