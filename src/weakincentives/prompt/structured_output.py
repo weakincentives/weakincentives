@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Final, Literal, cast
 
 from ..serde.parse import parse as parse_dataclass
-from ..types import JSONValue, ParseableDataclassT
+from ..types import JSONValue
 from ._structured_output_config import StructuredOutputConfig
 from ._types import SupportsDataclass
 from .protocols import RenderedPromptProtocol
@@ -64,6 +64,67 @@ class PayloadParsingConfig:
     array_item_error: str
 
 
+@dataclass(frozen=True, slots=True)
+class DataclassPayloadParser[PayloadT: SupportsDataclass]:
+    """Parse JSON payloads into dataclasses using a parsing configuration."""
+
+    dataclass_type: type[PayloadT]
+    config: PayloadParsingConfig
+
+    @property
+    def extra_mode(self) -> Literal["ignore", "forbid"]:
+        return "ignore" if self.config.allow_extra_keys else "forbid"
+
+    def parse(self, payload: JSONValue) -> PayloadT | list[PayloadT]:
+        if self.config.container not in {"object", "array"}:
+            raise TypeError("Unknown output container declared.")
+
+        if self.config.container == "object":
+            return self._parse_object_payload(payload)
+
+        return self._parse_array_payload(payload)
+
+    def _parse_object_payload(self, payload: JSONValue) -> PayloadT:
+        if not isinstance(payload, Mapping):
+            raise TypeError(self.config.object_error)
+
+        mapping_payload = cast(Mapping[str, JSONValue], payload)
+        return parse_dataclass(
+            self.dataclass_type,
+            mapping_payload,
+            extra=self.extra_mode,
+        )
+
+    def _parse_array_payload(self, payload: JSONValue) -> list[PayloadT]:
+        sequence_payload = self._normalize_array_payload(payload)
+        parsed_items: list[PayloadT] = []
+        for index, item in enumerate(sequence_payload):
+            if not isinstance(item, Mapping):
+                raise TypeError(self.config.array_item_error.format(index=index))
+            mapping_item = cast(Mapping[str, JSONValue], item)
+            parsed_item = parse_dataclass(
+                self.dataclass_type,
+                mapping_item,
+                extra=self.extra_mode,
+            )
+            parsed_items.append(parsed_item)
+        return parsed_items
+
+    def _normalize_array_payload(self, payload: JSONValue) -> Sequence[JSONValue]:
+        if isinstance(payload, Mapping):
+            mapping_payload = cast(Mapping[str, JSONValue], payload)
+            if ARRAY_WRAPPER_KEY not in mapping_payload:
+                raise TypeError(self.config.array_error)
+            payload = mapping_payload[ARRAY_WRAPPER_KEY]
+
+        if not isinstance(payload, Sequence) or isinstance(
+            payload, (str, bytes, bytearray)
+        ):
+            raise TypeError(self.config.array_error)
+
+        return cast(Sequence[JSONValue], payload)
+
+
 def parse_structured_output[PayloadT](
     output_text: str, rendered: RenderedPromptProtocol[PayloadT]
 ) -> PayloadT:
@@ -82,11 +143,13 @@ def parse_structured_output[PayloadT](
         array_error="Expected top-level JSON array.",
         array_item_error="Array item at index {index} is not an object.",
     )
+    parser = DataclassPayloadParser(
+        dataclass_type=dataclass_type, config=parsing_config
+    )
     try:
         parsed = parse_dataclass_payload(
-            dataclass_type,
             payload,
-            parsing_config,
+            parser,
         )
     except (TypeError, ValueError) as error:
         raise OutputParseError(str(error), dataclass_type=dataclass_type) from error
@@ -131,43 +194,8 @@ def _extract_json_payload(
     )
 
 
-def parse_dataclass_payload(
-    dataclass_type: type[ParseableDataclassT],
+def parse_dataclass_payload[PayloadT: SupportsDataclass](
     payload: JSONValue,
-    config: PayloadParsingConfig,
-) -> ParseableDataclassT | list[ParseableDataclassT]:
-    if config.container not in {"object", "array"}:
-        raise TypeError("Unknown output container declared.")
-
-    extra_mode: Literal["ignore", "forbid"] = (
-        "ignore" if config.allow_extra_keys else "forbid"
-    )
-
-    if config.container == "object":
-        if not isinstance(payload, Mapping):
-            raise TypeError(config.object_error)
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
-        return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
-
-    if isinstance(payload, Mapping):
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
-        if ARRAY_WRAPPER_KEY not in mapping_payload:
-            raise TypeError(config.array_error)
-        payload = mapping_payload[ARRAY_WRAPPER_KEY]
-    if not isinstance(payload, Sequence) or isinstance(
-        payload, (str, bytes, bytearray)
-    ):
-        raise TypeError(config.array_error)
-    sequence_payload = cast(Sequence[JSONValue], payload)
-    parsed_items: list[ParseableDataclassT] = []
-    for index, item in enumerate(sequence_payload):
-        if not isinstance(item, Mapping):
-            raise TypeError(config.array_item_error.format(index=index))
-        mapping_item = cast(Mapping[str, JSONValue], item)
-        parsed_item = parse_dataclass(
-            dataclass_type,
-            mapping_item,
-            extra=extra_mode,
-        )
-        parsed_items.append(parsed_item)
-    return parsed_items
+    parser: DataclassPayloadParser[PayloadT],
+) -> PayloadT | list[PayloadT]:
+    return parser.parse(payload)
