@@ -39,9 +39,10 @@ post-processing provider outputs using the existing `ToolContext` contract.
 - **`provider: Literal[...]`** – identifies the provider this tool definition is
   valid for (e.g., `"openai"`). Adapters MAY reject provider tools that do not
   match their provider name during registration.
-- **`handle_provider_output: Callable[[ProviderToolCallData, ToolContext, type[ResultT]], ToolResult[ResultT]] | None`** – optional hook that processes provider tool
+- **`handle_provider_output: Callable[[ResultT, ToolContext, type[ResultT]], ToolResult[ResultT]] | None`** – optional hook that processes provider tool
   outputs (e.g., OpenAI tool-call content parts) into a normalized `ToolResult`.
-  The `ResultT` type object is passed alongside `ToolContext` so handlers can
+  Provider payloads are mapped into `ResultT` before invocation, and the
+  `ResultT` type object is passed alongside `ToolContext` so handlers can
   construct typed payloads or delegate to the default handler. When absent,
   adapters fall back to the default behavior of pushing raw provider payloads
   through the registered handler.
@@ -116,12 +117,12 @@ remaining compatible with the runtime's tool registry.
 
 1. **Tool call detection**: Parse `response.output[0].content` entries of type
    `"output_text"` and `"input_text"` with `tool_calls` to detect
-   `code_interpreter` invocations. Normalize into `ProviderToolCallData` for
-   dispatch.
+   `code_interpreter` invocations. Normalize provider output into the declared
+   `ResultT` prior to handler dispatch.
 1. **Handler invocation**: If `handle_provider_output` exists on
-   `OpenAICodeInterpreterTool`, invoke it with the parsed `ProviderToolCallData`
-   and the active `ToolContext`. Otherwise, decode the tool-call payload (if
-   any) and dispatch the default handler.
+   `OpenAICodeInterpreterTool`, invoke it with the typed `ResultT` payload and
+   the active `ToolContext`. Otherwise, decode the tool-call payload (if any)
+   and dispatch the default handler.
 1. **Result assembly**: Map provider outputs into `ToolResult`:
    - `message`: human-readable python output.
    - `value`: optional structured payload containing stdout, stderr, exit code,
@@ -138,7 +139,10 @@ remaining compatible with the runtime's tool registry.
   SHOULD allow callers to provision a new container.
 - Any file included in the model input is automatically uploaded to the active
   container. Additional uploads happen through the `container_files` endpoints;
-  adapters SHOULD provide helper utilities for attaching `file_id` references.
+  adapters SHOULD provide helper utilities for attaching `file_id` references
+  and SHOULD expose host paths using the shared `HostMount` VFS API when a
+  runtime needs to project local files into the provider's container
+  configuration.
 - Model-generated files appear as `container_file_citation` annotations with
   `container_id`, `file_id`, and `filename`. The runtime SHOULD propagate these
   identifiers in `ToolResult.value` when available.
