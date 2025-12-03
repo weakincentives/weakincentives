@@ -25,10 +25,9 @@ from pytest import CaptureFixture
 
 import code_reviewer_example as reviewer_example
 from code_reviewer_example import (
-    CodeReviewApp,
     ReviewResponse,
     ReviewTurnParams,
-    build_task_prompt,
+    build_review_prompt,
 )
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
@@ -49,6 +48,29 @@ from weakincentives.tools.digests import (
     latest_workspace_digest,
     set_workspace_digest,
 )
+
+
+@pytest.fixture
+def overrides_store(tmp_path: Path) -> LocalPromptOverridesStore:
+    return LocalPromptOverridesStore(root_path=tmp_path)
+
+
+def _apply_digest_override(
+    prompt: Prompt[SupportsDataclass],
+    overrides_store: LocalPromptOverridesStore,
+    *,
+    tag: str = "seed",
+    body: str,
+) -> None:
+    digest_node = next(
+        node for node in prompt.sections if node.section.key == "workspace-digest"
+    )
+    overrides_store.set_section_override(
+        prompt,
+        tag=tag,
+        path=digest_node.path,
+        body=body,
+    )
 
 
 class _RepositoryOptimizationAdapter:
@@ -132,15 +154,12 @@ class _RepositoryOptimizationAdapter:
 
 def test_prompt_render_reducer_prints_full_prompt(
     capsys: CaptureFixture[str],
-    tmp_path: Path,
+    overrides_store: LocalPromptOverridesStore,
 ) -> None:
-    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    context = reviewer_example._create_runtime_context(
+    _, session, bus, _, _ = reviewer_example.prepare_runtime(
         overrides_store=overrides_store,
         override_tag="prompt-log",
     )
-    session = context.session
-    bus = context.bus
 
     event = PromptRendered(
         prompt_ns="example",
@@ -169,7 +188,7 @@ def test_prompt_render_reducer_prints_full_prompt(
 def test_workspace_digest_section_empty_by_default() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    prompt = build_task_prompt(session=session)
+    prompt = build_review_prompt(session=session)
 
     rendered = prompt.render(ReviewTurnParams(request="demo request"))
 
@@ -180,22 +199,13 @@ def test_workspace_digest_section_empty_by_default() -> None:
 
 
 def test_workspace_digest_override_applied_when_no_session_digest(
-    tmp_path: Path,
+    overrides_store: LocalPromptOverridesStore,
 ) -> None:
-    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    prompt = build_task_prompt(session=session)
+    prompt = build_review_prompt(session=session)
 
-    digest_node = next(
-        node for node in prompt.sections if node.section.key == "workspace-digest"
-    )
-    overrides_store.set_section_override(
-        prompt,
-        tag="seed",
-        path=digest_node.path,
-        body="- Override digest",
-    )
+    _apply_digest_override(prompt, overrides_store, body="- Override digest")
 
     rendered = prompt.render(
         ReviewTurnParams(request="demo request"),
@@ -206,21 +216,11 @@ def test_workspace_digest_override_applied_when_no_session_digest(
 
 
 def test_workspace_digest_prefers_session_snapshot_over_override(
-    tmp_path: Path,
+    overrides_store: LocalPromptOverridesStore,
 ) -> None:
-    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     session = Session()
-    prompt = build_task_prompt(session=session)
-    digest_node = next(
-        node for node in prompt.sections if node.section.key == "workspace-digest"
-    )
-
-    overrides_store.set_section_override(
-        prompt,
-        tag="seed",
-        path=digest_node.path,
-        body="- Override digest",
-    )
+    prompt = build_review_prompt(session=session)
+    _apply_digest_override(prompt, overrides_store, body="- Override digest")
     set_workspace_digest(session, "workspace-digest", "- Session digest")
 
     rendered = prompt.render(
@@ -231,26 +231,30 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     assert "Session digest" in rendered.text
 
 
-def test_optimize_command_persists_override(tmp_path: Path) -> None:
+def test_refresh_workspace_digest_persists_override(tmp_path: Path) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    app = CodeReviewApp(
-        cast(ProviderAdapter[ReviewResponse], adapter),
+    prompt, session, _, store, tag = reviewer_example.prepare_runtime(
         overrides_store=overrides_store,
     )
 
-    assert app.override_tag == "latest"
+    digest = reviewer_example.refresh_workspace_digest(
+        prompt,
+        cast(ProviderAdapter[ReviewResponse], adapter),
+        session=session,
+        overrides_store=store,
+        override_tag=tag,
+    )
 
-    app._handle_optimize_command()
-
-    descriptor = PromptDescriptor.from_prompt(app.prompt)
-    override = overrides_store.resolve(descriptor=descriptor, tag=app.override_tag)
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    override = overrides_store.resolve(descriptor=descriptor, tag=tag)
     assert override is not None
     placeholder_body = override.sections["workspace-digest",].body
     assert "Workspace digest unavailable" in placeholder_body
-    session_digest = latest_workspace_digest(app.session, "workspace-digest")
+    session_digest = latest_workspace_digest(session, "workspace-digest")
     assert session_digest is not None
     assert session_digest.body == "- Repo instructions from stub"
+    assert digest == "- Repo instructions from stub"
 
 
 @pytest.fixture(autouse=True)
