@@ -27,7 +27,6 @@ from uuid import uuid4
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass, SupportsToolResult
-from ..prompt.overrides import PromptOverridesStore
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
@@ -180,8 +179,6 @@ class AdapterRenderOptions:
     disable_output_instructions: bool
     enable_json_schema: bool
     deadline: Deadline | None
-    overrides_store: PromptOverridesStore | None
-    overrides_tag: str = "latest"
 
 
 @dataclass(slots=True, frozen=True)
@@ -944,13 +941,12 @@ def prepare_adapter_conversation[
 ](
     *,
     prompt: Prompt[OutputT],
-    params: Sequence[SupportsDataclass],
     options: AdapterRenderOptions,
 ) -> AdapterRenderContext[OutputT]:
     """Render a prompt and compute adapter inputs shared across providers."""
 
-    prompt_name = prompt.name or prompt.__class__.__name__
-    render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
+    prompt_name = prompt.name or prompt.template.__class__.__name__
+    render_inputs: tuple[SupportsDataclass, ...] = prompt.params
 
     if options.deadline is not None and options.deadline.remaining() <= timedelta(0):
         raise PromptEvaluationError(
@@ -960,16 +956,11 @@ def prepare_adapter_conversation[
             provider_payload=deadline_provider_payload(options.deadline),
         )
 
-    render_overrides_store = options.overrides_store
-    render_tag = options.overrides_tag
     render_inject_output_instructions: bool | None = None
     if options.disable_output_instructions:
         render_inject_output_instructions = False
 
     rendered = prompt.render(
-        *render_inputs,
-        overrides_store=render_overrides_store,
-        tag=render_tag,
         inject_output_instructions=render_inject_output_instructions,
     )
     if options.deadline is not None:

@@ -62,15 +62,13 @@ class _RepositoryOptimizationAdapter:
     def evaluate(
         self,
         prompt: Prompt[SupportsDataclass],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: InProcessEventBus | None = None,
         session: Session | None = None,
         deadline: object | None = None,
-        overrides_store: LocalPromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponse[Any]:
-        del params, parse_output, bus, session, deadline, overrides_store, overrides_tag
+        del parse_output, bus, session, deadline
         self.calls.append(prompt.key)
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,

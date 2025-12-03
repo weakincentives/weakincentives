@@ -24,8 +24,12 @@ from weakincentives.adapters.core import (
     SessionProtocol,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import Prompt, SupportsDataclass, SupportsToolResult
-from weakincentives.prompt.overrides import PromptOverridesStore
+from weakincentives.prompt import (
+    Prompt,
+    PromptTemplate,
+    SupportsDataclass,
+    SupportsToolResult,
+)
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
@@ -45,19 +49,17 @@ class _DummyAdapter(ProviderAdapter[Any]):
     def evaluate(
         self,
         prompt: Prompt[Any],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: InProcessEventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponse[Any]:
         raise NotImplementedError
 
 
 def build_tool_context(bus: InProcessEventBus, session: SessionProtocol) -> ToolContext:
-    prompt = Prompt(ns="tests", key="tool-context-helper")
+    prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
     adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
     return ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),

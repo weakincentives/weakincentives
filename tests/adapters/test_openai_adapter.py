@@ -75,7 +75,7 @@ from tests.helpers.events import NullEventBus
 from weakincentives.adapters import PromptEvaluationError
 from weakincentives.prompt import (
     MarkdownSection,
-    Prompt,
+    PromptTemplate,
     SupportsDataclass,
     Tool,
     ToolContext,
@@ -139,20 +139,25 @@ def _text_config_from_json_schema(
 OutputT = TypeVar("OutputT")
 
 
+def _evaluate(
+    adapter: ProviderAdapter[OutputT],
+    prompt: PromptTemplate[OutputT],
+    *params: SupportsDataclass,
+    **kwargs: object,
+) -> PromptResponse[OutputT]:
+    bound_prompt = prompt.bind(*params)
+    return adapter.evaluate(bound_prompt, **kwargs)
+
+
 def _evaluate_with_bus(
     adapter: ProviderAdapter[OutputT],
-    prompt: Prompt[OutputT],
+    prompt: PromptTemplate[OutputT],
     *params: SupportsDataclass,
     bus: EventBus | None = None,
 ) -> PromptResponse[OutputT]:
     target_bus = bus or NullEventBus()
     session: SessionProtocol = cast(SessionProtocol, Session(bus=target_bus))
-    return adapter.evaluate(
-        prompt,
-        *params,
-        bus=target_bus,
-        session=session,
-    )
+    return _evaluate(adapter, prompt, *params, bus=target_bus, session=session)
 
 
 def test_create_openai_client_requires_optional_dependency(
@@ -200,7 +205,7 @@ def test_openai_adapter_constructs_client_when_not_provided(
 ) -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-greeting",
         name="greeting",
@@ -242,7 +247,7 @@ def test_openai_adapter_constructs_client_when_not_provided(
 def test_openai_adapter_supports_custom_client_factory() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-greeting",
         name="greeting",
@@ -306,7 +311,7 @@ def test_openai_adapter_rejects_client_factory_with_explicit_client() -> None:
 def test_openai_adapter_returns_plain_text_response() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-plain",
         name="greeting",
@@ -360,7 +365,7 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-structured-success",
         name="search",
@@ -438,7 +443,7 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
         handler=simple_handler,
     )
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-session-rollback",
         name="search",
@@ -501,7 +506,8 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
     )
 
     with pytest.raises(ExceptionGroup) as exc_info:
-        adapter.evaluate(
+        _evaluate(
+            adapter,
             prompt,
             ToolParams(query="policies"),
             bus=bus,
@@ -552,7 +558,7 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-tool-validation",
         name="search-validation",
@@ -590,7 +596,8 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
 
     bus.subscribe(ToolInvoked, record_tool_event)
 
-    result = adapter.evaluate(
+    result = _evaluate(
+        adapter,
         prompt,
         ToolParams(query="invalid"),
         bus=bus,
@@ -643,7 +650,7 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-tool-type-error",
         name="search-type-error",
@@ -681,7 +688,8 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
 
     bus.subscribe(ToolInvoked, record_tool_event)
 
-    result = adapter.evaluate(
+    result = _evaluate(
+        adapter,
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -712,7 +720,7 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
 def test_openai_adapter_includes_text_config_for_array_outputs() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[list[StructuredAnswer]](
+    prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="openai-structured-schema-array",
         name="structured_list",
@@ -765,7 +773,7 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
         handler=simple_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-tools-relaxed",
         name="search",
@@ -826,7 +834,7 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
         handler=simple_handler,
     )
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-structured-events",
         name="search",
@@ -897,7 +905,7 @@ def test_openai_adapter_raises_when_tool_handler_missing() -> None:
         handler=None,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-tools-missing-handler",
         name="search",
@@ -950,7 +958,7 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-optional-tool",
         name="optional",
@@ -1000,7 +1008,7 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
 def test_openai_adapter_reads_output_json_content_blocks() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-structured-json-block",
         name="structured",
@@ -1040,7 +1048,7 @@ def test_openai_adapter_reads_output_json_content_blocks() -> None:
 def test_openai_adapter_raises_when_structured_output_missing_json() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-structured-missing-json",
         name="search",
@@ -1073,7 +1081,7 @@ def test_openai_adapter_raises_when_structured_output_missing_json() -> None:
 def test_openai_adapter_raises_on_invalid_parsed_payload() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-structured-parsed-error",
         name="structured",
@@ -1154,7 +1162,7 @@ def test_openai_extract_parsed_content_handles_attribute_blocks() -> None:
 def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[list[StructuredAnswer]](
+    prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="openai-structured-schema-array-wrapped",
         name="structured_list",
@@ -1186,7 +1194,7 @@ def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None
 def test_openai_parse_schema_constrained_payload_handles_object_container() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-structured-schema",
         name="structured",
@@ -1214,7 +1222,7 @@ def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt(
 ):
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-plain",
         name="plain",
@@ -1246,7 +1254,7 @@ def test_openai_parse_schema_constrained_payload_requires_structured_prompt() ->
 def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[list[StructuredAnswer]](
+    prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="openai-structured-schema-array-non-seq",
         name="structured_list",
@@ -1284,7 +1292,7 @@ def test_openai_parse_schema_constrained_payload_rejects_unknown_container() -> 
 def test_openai_adapter_raises_for_unknown_tool() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-unknown-tool",
         name="search",
@@ -1328,7 +1336,7 @@ def test_openai_adapter_handles_invalid_tool_params() -> None:
         handler=simple_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-invalid-tool-params",
         name="search",
@@ -1393,7 +1401,7 @@ def test_openai_adapter_records_handler_failures() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-handler-failure",
         name="search",
@@ -1437,7 +1445,8 @@ def test_openai_adapter_records_handler_failures() -> None:
 
     bus.subscribe(ToolInvoked, record)
 
-    result = adapter.evaluate(
+    result = _evaluate(
+        adapter,
         prompt,
         ToolParams(query="policies"),
         bus=bus,
@@ -1465,7 +1474,7 @@ def test_openai_adapter_records_handler_failures() -> None:
 def test_openai_adapter_records_provider_payload_from_mapping() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-provider-payload",
         name="greeting",
@@ -1496,7 +1505,7 @@ def test_openai_adapter_records_provider_payload_from_mapping() -> None:
 def test_openai_adapter_ignores_non_mapping_model_dump() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-weird-dump",
         name="greeting",
@@ -1527,7 +1536,7 @@ def test_openai_adapter_ignores_non_mapping_model_dump() -> None:
 def test_openai_adapter_handles_response_without_model_dump() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-simple-response",
         name="greeting",
@@ -1568,7 +1577,7 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
         handler=simple_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-bad-tool-arguments",
         name="search",
@@ -1609,7 +1618,7 @@ def test_openai_adapter_delegates_to_shared_runner(
 ) -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-shared-runner",
         name="shared-runner",

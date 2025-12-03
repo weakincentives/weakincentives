@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, Prompt
+from weakincentives.prompt import MarkdownSection, PromptTemplate
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
@@ -29,12 +29,12 @@ from weakincentives.tools.digests import (
 )
 
 
-def _build_prompt() -> Prompt[str]:
+def _build_prompt() -> PromptTemplate[str]:
     sections = (
         MarkdownSection(title="One", template="first", key="one"),
         MarkdownSection(title="Two", template="second", key="two"),
     )
-    return Prompt(ns="test", key="prompt", sections=sections)
+    return PromptTemplate(ns="test", key="prompt", sections=sections)
 
 
 def test_prompt_find_section_by_key_and_candidates() -> None:
@@ -66,7 +66,7 @@ def test_set_section_override_requires_registered_path(tmp_path: Path) -> None:
 def test_workspace_digest_section_in_descriptor() -> None:
     section = WorkspaceDigestSection(session=Session())
     descriptor = PromptDescriptor.from_prompt(
-        Prompt(ns="digest", key="prompt", sections=(section,))
+        PromptTemplate(ns="digest", key="prompt", sections=(section,))
     )
 
     assert section.original_body_template() == section._placeholder

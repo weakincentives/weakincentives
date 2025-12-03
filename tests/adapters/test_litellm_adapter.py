@@ -77,7 +77,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
 from tests.helpers.events import NullEventBus
 from weakincentives.prompt import (
     MarkdownSection,
-    Prompt,
+    PromptTemplate,
     SupportsDataclass,
     Tool,
     ToolContext,
@@ -118,9 +118,19 @@ def _reload_module() -> types.ModuleType:
 OutputT = TypeVar("OutputT")
 
 
+def _evaluate(
+    adapter: ProviderAdapter[OutputT],
+    prompt: PromptTemplate[OutputT],
+    *params: SupportsDataclass,
+    **kwargs: object,
+) -> PromptResponse[OutputT]:
+    bound_prompt = prompt.bind(*params)
+    return adapter.evaluate(bound_prompt, **kwargs)
+
+
 def _evaluate_with_bus(
     adapter: ProviderAdapter[OutputT],
-    prompt: Prompt[OutputT],
+    prompt: PromptTemplate[OutputT],
     *params: SupportsDataclass,
     bus: EventBus | None = None,
     session: SessionProtocol | None = None,
@@ -131,12 +141,7 @@ def _evaluate_with_bus(
         if session is not None
         else cast(SessionProtocol, Session(bus=target_bus))
     )
-    return adapter.evaluate(
-        prompt,
-        *params,
-        bus=target_bus,
-        session=target_session,
-    )
+    return _evaluate(adapter, prompt, *params, bus=target_bus, session=target_session)
 
 
 def test_create_litellm_completion_requires_optional_dependency(
@@ -223,7 +228,7 @@ def test_litellm_adapter_constructs_completion_when_not_provided(
 ) -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-greeting",
         name="greeting",
@@ -266,7 +271,7 @@ def test_litellm_adapter_constructs_completion_when_not_provided(
 def test_litellm_adapter_supports_custom_completion_factory() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-greeting",
         name="greeting",
@@ -332,7 +337,7 @@ def test_litellm_adapter_rejects_completion_factory_with_explicit_completion() -
 def test_litellm_adapter_returns_plain_text_response() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-plain",
         name="greeting",
@@ -388,7 +393,7 @@ def test_litellm_adapter_executes_tools_and_parses_output() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-structured-success",
         name="search",
@@ -456,7 +461,7 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
         handler=simple_handler,
     )
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-session-rollback",
         name="search",
@@ -561,7 +566,7 @@ def test_litellm_format_publish_failures_handles_defaults() -> None:
 def test_litellm_adapter_uses_parsed_payload_when_available() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-structured-parsed",
         name="structured",
@@ -596,7 +601,7 @@ def test_litellm_adapter_uses_parsed_payload_when_available() -> None:
 def test_litellm_adapter_includes_response_format_for_array_outputs() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[list[StructuredAnswer]](
+    prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="litellm-structured-schema-array",
         name="structured_list",
@@ -648,7 +653,7 @@ def test_litellm_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
         handler=simple_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-tools-relaxed",
         name="search",
@@ -718,7 +723,7 @@ def test_litellm_adapter_handles_tool_call_without_arguments() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-tool-no-args",
         name="search",
@@ -767,7 +772,7 @@ def test_litellm_adapter_surfaces_tool_validation_errors() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-tool-validation",
         name="search-validation",
@@ -857,7 +862,7 @@ def test_litellm_adapter_surfaces_tool_type_errors() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-tool-type-error",
         name="search-type-error",
@@ -927,7 +932,7 @@ def test_litellm_adapter_surfaces_tool_type_errors() -> None:
 def test_litellm_adapter_reads_output_json_content_blocks() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-structured-json-block",
         name="structured",
@@ -974,7 +979,7 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
         handler=simple_handler,
     )
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-structured-events",
         name="search",
@@ -1047,7 +1052,7 @@ def test_litellm_adapter_raises_when_tool_handler_missing() -> None:
         handler=None,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-handler-missing",
         name="search",
@@ -1086,7 +1091,7 @@ def test_litellm_adapter_raises_when_tool_handler_missing() -> None:
 def test_litellm_adapter_raises_when_tool_not_registered() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-missing-tool",
         name="search",
@@ -1131,7 +1136,7 @@ def test_litellm_adapter_handles_invalid_tool_params() -> None:
         handler=simple_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-invalid-tool-params",
         name="search",
@@ -1196,7 +1201,7 @@ def test_litellm_adapter_records_handler_failures() -> None:
         handler=tool_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-handler-failure",
         name="search",
@@ -1266,7 +1271,7 @@ def test_litellm_adapter_records_handler_failures() -> None:
 def test_litellm_adapter_records_provider_payload_from_mapping() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-provider-payload",
         name="greeting",
@@ -1298,7 +1303,7 @@ def test_litellm_adapter_records_provider_payload_from_mapping() -> None:
 def test_litellm_adapter_ignores_non_mapping_model_dump() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-weird-dump",
         name="greeting",
@@ -1330,7 +1335,7 @@ def test_litellm_adapter_ignores_non_mapping_model_dump() -> None:
 def test_litellm_adapter_handles_response_without_model_dump() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-simple-response",
         name="greeting",
@@ -1372,7 +1377,7 @@ def test_litellm_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None
         handler=simple_handler,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-bad-tool-arguments",
         name="search",
@@ -1417,7 +1422,7 @@ def test_litellm_adapter_propagates_parse_errors_for_structured_output() -> None
         handler=simple_handler,
     )
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-structured-error",
         name="search",
@@ -1458,7 +1463,7 @@ def test_litellm_adapter_propagates_parse_errors_for_structured_output() -> None
 def test_litellm_adapter_raises_when_structured_output_missing() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-structured-missing",
         name="structured",
@@ -1492,7 +1497,7 @@ def test_litellm_adapter_raises_when_structured_output_missing() -> None:
 def test_litellm_adapter_raises_on_invalid_parsed_payload() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-structured-parsed-error",
         name="structured",
@@ -1573,7 +1578,7 @@ def test_litellm_extract_parsed_content_handles_attribute_blocks() -> None:
 def test_litellm_parse_schema_constrained_payload_unwraps_wrapped_array() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[list[StructuredAnswer]](
+    prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="litellm-structured-schema-array-wrapped",
         name="structured_list",
@@ -1605,7 +1610,7 @@ def test_litellm_parse_schema_constrained_payload_unwraps_wrapped_array() -> Non
 def test_litellm_parse_schema_constrained_payload_handles_object_container() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-structured-schema",
         name="structured",
@@ -1633,7 +1638,7 @@ def test_litellm_build_json_schema_response_format_returns_none_for_plain_prompt
 ):
     module = cast(Any, _reload_module())
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns=PROMPT_NS,
         key="litellm-plain",
         name="plain",
@@ -1665,7 +1670,7 @@ def test_litellm_parse_schema_constrained_payload_requires_structured_prompt() -
 def test_litellm_parse_schema_constrained_payload_rejects_non_sequence_arrays() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[list[StructuredAnswer]](
+    prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="litellm-structured-schema-array-non-seq",
         name="structured_list",
@@ -1705,7 +1710,7 @@ def test_litellm_adapter_delegates_to_shared_runner(
 ) -> None:
     module = cast(Any, _reload_module())
 
-    prompt = Prompt[StructuredAnswer](
+    prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="litellm-shared-runner",
         name="shared-runner",

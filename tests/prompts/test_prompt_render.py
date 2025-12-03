@@ -24,6 +24,7 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptRenderError,
+    PromptTemplate,
     PromptValidationError,
     SupportsDataclass,
 )
@@ -48,7 +49,7 @@ class OutroParams:
     footer: str
 
 
-def build_prompt() -> Prompt:
+def build_prompt() -> PromptTemplate:
     intro = MarkdownSection[IntroParams](
         title="Intro",
         template="Intro: ${title}",
@@ -65,7 +66,7 @@ def build_prompt() -> Prompt:
         key="outro",
         default_params=OutroParams(footer="bye"),
     )
-    return Prompt(
+    return PromptTemplate(
         ns="tests/prompts",
         key="render-basic",
         sections=[intro, details, outro],
@@ -97,7 +98,7 @@ def test_prompt_renders_section_without_params() -> None:
     static_section = MarkdownSection(
         title="Static", key="static", template="Static content."
     )
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests.prompts",
         key="paramless-section",
         sections=(static_section,),
@@ -112,10 +113,10 @@ def test_prompt_rejects_placeholders_for_paramless_section() -> None:
     section = MarkdownSection(title="Bad", key="bad", template="${value}")
 
     with pytest.raises(PromptValidationError):
-        Prompt(ns="tests.prompts", key="bad-section", sections=(section,))
+        PromptTemplate(ns="tests.prompts", key="bad-section", sections=(section,))
 
 
-def build_nested_prompt() -> Prompt:
+def build_nested_prompt() -> PromptTemplate:
     leaf = MarkdownSection[LeafParams](
         title="Leaf",
         template="Leaf: ${note}",
@@ -139,7 +140,7 @@ def build_nested_prompt() -> Prompt:
         template="Summary: ${summary}",
         key="summary",
     )
-    return Prompt(
+    return PromptTemplate(
         ns="tests/prompts",
         key="render-nested",
         sections=[parent, summary],
@@ -254,7 +255,7 @@ def test_prompt_render_wraps_template_errors_with_context() -> None:
         template="unused",
         key="explode",
     )
-    prompt = Prompt(ns="tests/prompts", key="render-error", sections=[section])
+    prompt = PromptTemplate(ns="tests/prompts", key="render-error", sections=[section])
 
     with pytest.raises(PromptRenderError) as exc:
         prompt.render(ErrorParams(value="x"))
@@ -278,7 +279,7 @@ def test_prompt_render_propagates_enabled_errors() -> None:
         key="guard",
         enabled=cast(Callable[[SupportsDataclass], bool], raising_enabled),
     )
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/prompts",
         key="render-enabled-error",
         sections=[section],
@@ -298,6 +299,29 @@ def test_rendered_prompt_str_returns_text() -> None:
     assert str(rendered) == "Rendered output"
 
 
+def test_prompt_bind_mutates_and_replaces_params() -> None:
+    prompt = PromptTemplate(
+        ns="tests/prompts",
+        key="bind-mutation",
+        sections=[
+            MarkdownSection[IntroParams](title="Intro", template="", key="intro")
+        ],
+    )
+    bound = Prompt(prompt)
+
+    assert bound.bind() is bound  # no-op, identity
+    assert bound.params == ()
+
+    first = IntroParams(title="v1")
+    second = IntroParams(title="v2")
+
+    assert bound.bind(first) is bound
+    assert bound.params == (first,)
+
+    assert bound.bind(second) is bound
+    assert bound.params == (second,)
+
+
 def test_format_specialization_argument_variants() -> None:
     assert _format_specialization_argument(None) == "?"
     assert _format_specialization_argument(int) == "int"
@@ -305,7 +329,7 @@ def test_format_specialization_argument_variants() -> None:
 
 
 def test_prompt_build_response_format_requires_output_container() -> None:
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/prompts",
         key="response-format",
         sections=[],

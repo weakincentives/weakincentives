@@ -34,7 +34,7 @@ from weakincentives.adapters.shared import (
     parse_tool_arguments,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import Prompt, ToolContext
+from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
@@ -105,7 +105,7 @@ def test_tool_executor_success() -> None:
     executor = ToolExecutor(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[Any], object()),
-        prompt=Prompt(ns="test", key="tool"),
+        prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         prompt_name="test",
         rendered=rendered,
         bus=bus,
@@ -231,7 +231,7 @@ def test_tool_executor_raises_when_deadline_expired(
     executor = ToolExecutor(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[Any], object()),
-        prompt=Prompt(ns="test", key="tool"),
+        prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         prompt_name="test",
         rendered=rendered,
         bus=bus,

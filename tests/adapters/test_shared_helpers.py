@@ -27,9 +27,7 @@ from weakincentives.adapters.core import (
     SessionProtocol,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import Prompt
-from weakincentives.prompt._types import SupportsDataclass
-from weakincentives.prompt.overrides import PromptOverridesStore
+from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.events import EventBus
 from weakincentives.runtime.session import Session
@@ -104,18 +102,16 @@ def test_run_conversation_requires_message_payload() -> None:
         def evaluate(
             self,
             prompt: Prompt[object],
-            *params: SupportsDataclass,
+            *,
             parse_output: bool = True,
             bus: EventBus,
             session: SessionProtocol,
             deadline: Deadline | None = None,
-            overrides_store: PromptOverridesStore | None = None,
-            overrides_tag: str = "latest",
         ) -> PromptResponse[object]:
             raise NotImplementedError
 
     adapter = DummyAdapter()
-    prompt = Prompt(ns="tests", key="example")
+    prompt = Prompt(PromptTemplate(ns="tests", key="example"))
     session = Session(bus=bus)
 
     conversation_config = shared.ConversationConfig(

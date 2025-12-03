@@ -24,9 +24,14 @@ from typing import Any, Literal, cast
 from tests.helpers.adapters import RECORDING_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import DelegationParams, MarkdownSection, Prompt, RecapParams
+from weakincentives.prompt import (
+    DelegationParams,
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    RecapParams,
+)
 from weakincentives.prompt._types import SupportsDataclass
-from weakincentives.prompt.overrides import PromptOverridesStore
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.structured_output import StructuredOutputConfig
@@ -89,15 +94,14 @@ class RecordingAdapter(ProviderAdapter[Any]):
     def evaluate(
         self,
         prompt: Prompt[Any],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: InProcessEventBus,
         session: Session | None = None,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponse[Any]:
         del parse_output
+        params = prompt.params
         delegation = cast(DelegationParams, params[0])
         recap = (
             cast(RecapParams, params[1]) if len(params) > 1 else RecapParams(bullets=())
@@ -169,18 +173,20 @@ class RecordingAdapter(ProviderAdapter[Any]):
 
 def _build_parent_prompt(
     *, deadline: Deadline | None = None
-) -> tuple[Prompt[ParentOutput], RenderedPrompt[ParentOutput]]:
+) -> tuple[PromptTemplate[ParentOutput], RenderedPrompt[ParentOutput]]:
     section = MarkdownSection[ParentSectionParams](
         title="Parent",
         key="parent",
         template="${instructions}",
     )
-    prompt = Prompt[ParentOutput](
+    prompt = PromptTemplate[ParentOutput](
         ns="tests.subagents",
         key="parent",
         sections=(section,),
     )
-    rendered = prompt.render(ParentSectionParams(instructions="Document the repo."))
+    rendered = prompt.bind(
+        ParentSectionParams(instructions="Document the repo.")
+    ).render()
     if deadline is not None:
         rendered = replace(rendered, deadline=deadline)
     return prompt, rendered

@@ -13,8 +13,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
-from weakincentives.prompt import MarkdownSection, Prompt, Section, Tool
+from weakincentives.prompt import (
+    MarkdownSection,
+    PromptTemplate,
+    Section,
+    Tool,
+)
 from weakincentives.prompt.overrides import (
     PromptDescriptor,
     PromptOverride,
@@ -43,8 +49,8 @@ class _StaticSection(Section[_GreetingParams]):
         return _StaticSection(title=self.title, key=self.key)
 
 
-def _build_prompt() -> Prompt:
-    return Prompt(
+def _build_prompt() -> PromptTemplate:
+    return PromptTemplate(
         ns="tests/versioning",
         key="versioned-greeting",
         name="greeting",
@@ -70,14 +76,14 @@ class _LookupItem:
 
 def _build_tool_prompt(
     *, accepts_overrides: bool = True
-) -> tuple[Prompt, Tool[_GreetingParams, _LookupResult]]:
+) -> tuple[PromptTemplate, Tool[_GreetingParams, _LookupResult]]:
     tool = Tool[_GreetingParams, _LookupResult](
         name="greeter",
         description="Greet the provided subject in a friendly way.",
         handler=None,
         accepts_overrides=accepts_overrides,
     )
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/versioning",
         key="versioned-greeting-tools",
         name="greeting-tools",
@@ -95,14 +101,14 @@ def _build_tool_prompt(
 
 def _build_sequence_tool_prompt(
     *, accepts_overrides: bool = True
-) -> tuple[Prompt, Tool[_GreetingParams, tuple[_LookupItem, ...]]]:
+) -> tuple[PromptTemplate, Tool[_GreetingParams, tuple[_LookupItem, ...]]]:
     tool = Tool[_GreetingParams, tuple[_LookupItem, ...]](
         name="greeter_sequence",
         description="Greet and capture multiple responses.",
         handler=None,
         accepts_overrides=accepts_overrides,
     )
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/versioning",
         key="versioned-greeting-tools-seq",
         name="greeting-tools-seq",
@@ -140,7 +146,7 @@ def test_prompt_descriptor_excludes_response_format_section() -> None:
     class Summary:
         topic: str
 
-    prompt = Prompt[Summary](
+    prompt = PromptTemplate[Summary](
         ns="tests/versioning",
         key="versioned-summary",
         sections=[
@@ -163,7 +169,7 @@ def test_prompt_descriptor_excludes_response_format_section() -> None:
 
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
     section = _StaticSection(title="Static", key="static")
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/versioning",
         key="versioned-static",
         sections=[section],
@@ -273,7 +279,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
 
     def seed(
         self,
-        prompt: Prompt,
+        prompt: PromptTemplate[Any],
         *,
         tag: str = "latest",
     ) -> PromptOverride:

@@ -23,7 +23,7 @@ from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
 from .errors import PromptRenderError
 from .markdown import MarkdownSection
-from .prompt import Prompt, RenderedPrompt
+from .prompt import Prompt, PromptTemplate, RenderedPrompt
 from .protocols import PromptProtocol
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
@@ -181,7 +181,9 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
 
     def __init__(
         self,
-        parent_prompt: PromptProtocol[ParentOutputT] | Prompt[ParentOutputT],
+        parent_prompt: PromptProtocol[ParentOutputT]
+        | PromptTemplate[ParentOutputT]
+        | Prompt[ParentOutputT],
         rendered_parent: RenderedPrompt[ParentOutputT],
         *,
         include_response_format: bool = False,
@@ -206,8 +208,10 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
         sections.append(self._recap_section)
 
         delegation_output_type = self._resolve_delegation_output_type()
-        prompt_cls: type[Prompt[DelegationOutputT]] = Prompt[delegation_output_type]
-        self._prompt = prompt_cls(
+        prompt_cls: type[PromptTemplate[DelegationOutputT]] = PromptTemplate[
+            delegation_output_type
+        ]
+        self._prompt_template = prompt_cls(
             ns=f"{parent_prompt.ns}.delegation",
             key=f"{parent_prompt.key}-wrapper",
             sections=tuple(sections),
@@ -244,9 +248,9 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
 
     @property
     def prompt(self) -> Prompt[DelegationOutputT]:
-        """Expose the composed prompt for direct access when required."""
+        """Expose the composed prompt template for direct access when required."""
 
-        return self._prompt
+        return Prompt(self._prompt_template)
 
     def render(
         self,
@@ -262,7 +266,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
         recap_params = recap or default_recap
         params.append(recap_params)
 
-        rendered = self._prompt.render(*tuple(params))
+        rendered = Prompt(self._prompt_template).bind(*tuple(params)).render()
         parent_deadline = self._rendered_parent.deadline
         if parent_deadline is not None and rendered.deadline is not parent_deadline:
             rendered = replace(rendered, deadline=parent_deadline)

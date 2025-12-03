@@ -17,7 +17,7 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, Prompt, Section
+from weakincentives.prompt import MarkdownSection, PromptTemplate, Section
 from weakincentives.prompt.errors import PromptValidationError
 from weakincentives.prompt.tool import Tool
 
@@ -75,7 +75,7 @@ def _build_secondary_tool() -> Tool[SecondaryToolParams, SecondaryToolPayload]:
 
 
 def _build_prompt() -> tuple[
-    Prompt,
+    PromptTemplate,
     Tool[PrimaryToolParams, PrimaryToolPayload],
     Tool[SecondaryToolParams, SecondaryToolPayload],
 ]:
@@ -106,7 +106,7 @@ def _build_prompt() -> tuple[
     )
 
     return (
-        Prompt(
+        PromptTemplate(
             ns="tests/prompts",
             key="tools-basic",
             sections=[guidance, secondary],
@@ -154,7 +154,7 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
     )
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(
+        PromptTemplate(
             ns="tests/prompts",
             key="tools-duplicate",
             sections=[first_section, second_section],
@@ -188,7 +188,7 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
         default_params=SecondaryToggleParams(),
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/prompts",
         key="tools-duplicate-params",
         sections=[first_section, second_section],
@@ -217,7 +217,7 @@ def test_prompt_tools_requires_tool_instances() -> None:
     invalid_section = _InvalidToolSection(title="Invalid", key="invalid")
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(
+        PromptTemplate(
             ns="tests/prompts",
             key="tools-invalid-instance",
             sections=[invalid_section],
@@ -241,7 +241,7 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
     )
 
     with pytest.raises(PromptValidationError) as error_info:
-        Prompt(
+        PromptTemplate(
             ns="tests/prompts",
             key="tools-bad-params-type",
             sections=[section],

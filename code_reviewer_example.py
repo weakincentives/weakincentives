@@ -25,11 +25,16 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-from weakincentives import MarkdownSection, Prompt, SupportsDataclass
 from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.core import OptimizationScope
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.debug import dump_session as dump_session_tree
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    SupportsDataclass,
+)
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
@@ -177,13 +182,11 @@ class CodeReviewApp:
         dump_session_tree(self.session, SNAPSHOT_DIR)
 
     def _evaluate_turn(self, user_prompt: str) -> str:
+        bound_prompt = self.prompt.bind(ReviewTurnParams(request=user_prompt))
         response = self.adapter.evaluate(
-            self.prompt,
-            ReviewTurnParams(request=user_prompt),
+            bound_prompt,
             bus=self.bus,
             session=self.session,
-            overrides_store=self.overrides_store,
-            overrides_tag=self.override_tag,
         )
         return _render_response_payload(response)
 
@@ -225,8 +228,8 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
-def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
-    """Builds the main prompt for the code review agent."""
+def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
+    """Builds the main prompt template for the code review agent."""
 
     _ensure_test_repository_available()
     workspace_section = _build_workspace_section(session=session)
@@ -244,7 +247,7 @@ def build_task_prompt(*, session: Session) -> Prompt[ReviewResponse]:
             key="review-request",
         ),
     )
-    return Prompt[ReviewResponse](
+    return PromptTemplate[ReviewResponse](
         ns="examples/code-review",
         key="code-review-session",
         name="sunfish_code_review_agent",
@@ -345,13 +348,14 @@ def _create_runtime_context(
     bus = session.event_bus
     resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
     prompt = build_task_prompt(session=session)
+    prompt_wrapper = Prompt(prompt, overrides_store=store, overrides_tag=resolved_tag)
     try:
         store.seed(prompt, tag=resolved_tag)
     except PromptOverridesError as exc:  # pragma: no cover - startup validation
         raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
 
     return RuntimeContext(
-        prompt=prompt,
+        prompt=prompt_wrapper,
         session=session,
         bus=bus,
         overrides_store=store,

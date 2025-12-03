@@ -27,7 +27,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
 
-PromptOutputT = TypeVar("PromptOutputT", covariant=True)
+PromptOutputT = TypeVar("PromptOutputT")
+TemplateOutputT = TypeVar("TemplateOutputT", covariant=True)
 RenderedOutputT = TypeVar("RenderedOutputT", covariant=True)
 AdapterOutputT = TypeVar("AdapterOutputT")
 
@@ -71,12 +72,20 @@ class RenderedPromptProtocol(Protocol[RenderedOutputT]):
     ) -> StructuredOutputConfig[SupportsDataclass] | None: ...
 
 
-class PromptProtocol(Protocol[PromptOutputT]):
-    """Interface describing the subset of Prompt state exposed to tools."""
+class PromptTemplateProtocol(Protocol[TemplateOutputT]):
+    """Interface describing the subset of prompt template state exposed to tools."""
 
     ns: str
     key: str
     name: str | None
+
+    @property
+    def sections(self) -> tuple[Any, ...]: ...
+
+    @property
+    def structured_output(
+        self,
+    ) -> StructuredOutputConfig[SupportsDataclass] | None: ...
 
     def render(
         self,
@@ -84,7 +93,35 @@ class PromptProtocol(Protocol[PromptOutputT]):
         overrides_store: PromptOverridesStore | None = None,
         tag: str = "latest",
         inject_output_instructions: bool | None = None,
-    ) -> RenderedPromptProtocol[PromptOutputT]: ...
+    ) -> RenderedPromptProtocol[TemplateOutputT]: ...
+
+
+class PromptProtocol(Protocol[PromptOutputT]):
+    """Interface describing the bound prompt wrapper used at runtime."""
+
+    template: PromptTemplateProtocol[PromptOutputT]
+    overrides_store: PromptOverridesStore | None
+    overrides_tag: str
+    inject_output_instructions: bool | None
+
+    ns: str
+    key: str
+    name: str | None
+
+    @property
+    def sections(self) -> tuple[Any, ...]: ...
+
+    @property
+    def params(self) -> tuple[SupportsDataclass, ...]: ...
+
+    @property
+    def structured_output(
+        self,
+    ) -> StructuredOutputConfig[SupportsDataclass] | None: ...
+
+    def bind(self, *params: SupportsDataclass) -> PromptProtocol[PromptOutputT]: ...
+
+    def render(self) -> RenderedPromptProtocol[PromptOutputT]: ...
 
 
 class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
@@ -93,19 +130,18 @@ class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
     def evaluate(
         self,
         prompt: PromptProtocol[AdapterOutputT],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponseProtocol[AdapterOutputT]: ...
 
 
 __all__ = [
     "PromptProtocol",
     "PromptResponseProtocol",
+    "PromptTemplateProtocol",
     "ProviderAdapterProtocol",
     "RenderedPromptProtocol",
 ]

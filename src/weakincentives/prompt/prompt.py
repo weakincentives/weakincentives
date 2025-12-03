@@ -18,7 +18,9 @@ from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
+    Generic,
     Literal,
+    TypeVar,
     cast,
     get_args,
     get_origin,
@@ -36,6 +38,8 @@ from .structured_output import StructuredOutputConfig
 if TYPE_CHECKING:
     from .overrides import PromptLike, ToolOverride
 
+OutputT = TypeVar("OutputT", covariant=True)
+
 
 def _format_specialization_argument(argument: object | None) -> str:
     if argument is None:
@@ -45,13 +49,13 @@ def _format_specialization_argument(argument: object | None) -> str:
     return repr(argument)
 
 
-class Prompt[OutputT]:
+class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     """Coordinate prompt sections and their parameter bindings."""
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
 
-    def __class_getitem__(cls, item: object) -> type[Prompt[Any]]:
+    def __class_getitem__(cls, item: object) -> type[PromptTemplate[Any]]:
         origin = get_origin(item)
         candidate = item
         container: Literal["object", "array"] | None = "object"
@@ -167,6 +171,28 @@ class Prompt[OutputT]:
             descriptor=descriptor,
         )
 
+    def bind(
+        self,
+        *params: SupportsDataclass,
+        overrides_store: PromptOverridesStore | None = None,
+        tag: str = "latest",
+        inject_output_instructions: bool | None = None,
+    ) -> Prompt[OutputT]:
+        """Return a bound prompt wrapper with the provided parameters."""
+
+        effective_instructions = (
+            inject_output_instructions
+            if inject_output_instructions is not None
+            else self.inject_output_instructions
+        )
+        return Prompt(
+            self,
+            overrides_store=overrides_store,
+            overrides_tag=tag,
+            inject_output_instructions=effective_instructions,
+            params=params,
+        )
+
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
         return self._registry_snapshot.sections
@@ -255,4 +281,90 @@ class Prompt[OutputT]:
         )
 
 
-__all__ = ["Prompt", "RenderedPrompt", "SectionNode"]
+class Prompt(Generic[OutputT]):  # noqa: UP046
+    """Wrap a prompt template with overrides and bound parameters."""
+
+    def __init__(
+        self,
+        template: PromptTemplate[OutputT],
+        *,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
+        inject_output_instructions: bool | None = None,
+        params: Sequence[SupportsDataclass] | None = None,
+    ) -> None:
+        super().__init__()
+        self.template = template
+        self.ns: str = template.ns
+        self.key: str = template.key
+        self.name: str | None = template.name
+        self.overrides_store = overrides_store
+        self.overrides_tag = overrides_tag
+        self.inject_output_instructions = inject_output_instructions
+        self._params: tuple[SupportsDataclass, ...] = tuple(params or ())
+
+    @property
+    def params(self) -> tuple[SupportsDataclass, ...]:
+        """Return the parameters bound to this prompt instance."""
+
+        return self._params
+
+    @property
+    def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
+        return self.template.sections
+
+    @property
+    def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
+        return self.template.structured_output
+
+    def bind(self, *params: SupportsDataclass) -> Prompt[OutputT]:
+        """Mutate this prompt's bound parameters; return self for chaining.
+
+        New dataclass instances replace any existing binding of the same
+        dataclass type; otherwise they are appended.
+        """
+
+        if not params:
+            return self
+
+        current = list(self._params)
+        for candidate in params:
+            replaced = False
+            for idx, existing in enumerate(current):
+                if type(existing) is type(candidate):
+                    current[idx] = candidate
+                    replaced = True
+                    break
+            if not replaced:
+                current.append(candidate)
+
+        self._params = tuple(current)
+        return self
+
+    def render(
+        self, *, inject_output_instructions: bool | None = None
+    ) -> RenderedPrompt[OutputT]:
+        """Render the underlying template with stored overrides and params."""
+
+        instructions_flag = (
+            inject_output_instructions
+            if inject_output_instructions is not None
+            else self.inject_output_instructions
+        )
+        tag = self.overrides_tag if self.overrides_tag else "latest"
+        return self.template.render(
+            *self._params,
+            overrides_store=self.overrides_store,
+            tag=tag,
+            inject_output_instructions=instructions_flag,
+        )
+
+    def find_section(
+        self,
+        selector: type[Section[SupportsDataclass]]
+        | tuple[type[Section[SupportsDataclass]], ...],
+    ) -> Section[SupportsDataclass]:
+        return self.template.find_section(selector)
+
+
+__all__ = ["Prompt", "PromptTemplate", "RenderedPrompt", "SectionNode"]
