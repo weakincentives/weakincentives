@@ -31,6 +31,7 @@ from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
+    DataclassPayloadParser,
     OutputParseError,
     PayloadParsingConfig,
     parse_dataclass_payload,
@@ -870,7 +871,8 @@ def parse_schema_constrained_payload(
         array_error="Expected provider payload to be a JSON array.",
         array_item_error="Array item at index {index} is not an object.",
     )
-    return parse_dataclass_payload(dataclass_type, payload, config)
+    parser = DataclassPayloadParser(dataclass_type=dataclass_type, config=config)
+    return parse_dataclass_payload(payload, parser)
 
 
 def message_text_content(content: object) -> str:
