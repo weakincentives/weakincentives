@@ -33,7 +33,7 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import MarkdownSection, Prompt
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
@@ -63,17 +63,13 @@ class EchoResult:
     content: str
 
 
-def _build_prompt() -> Prompt[BodyResult]:
+def _build_prompt() -> PromptTemplate[BodyResult]:
     section = MarkdownSection[BodyParams](
         title="Body",
         key="body",
         template="${content}",
     )
-    return Prompt[BodyResult](ns="tests", key="deadline", sections=(section,))
-
-
-def _build_rendered(prompt: Prompt[BodyResult]) -> RenderedPrompt[BodyResult]:
-    return prompt.render(BodyParams(content="ready"))
+    return PromptTemplate[BodyResult](ns="tests", key="deadline", sections=(section,))
 
 
 def _tool_context(
@@ -121,8 +117,8 @@ def test_raise_tool_deadline_error() -> None:
 
 
 def test_conversation_runner_raise_deadline_error() -> None:
-    prompt = _build_prompt()
-    rendered = _build_rendered(prompt)
+    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
@@ -132,7 +128,7 @@ def test_conversation_runner_raise_deadline_error() -> None:
         prompt=prompt,
         prompt_name="deadline",
         rendered=rendered,
-        render_inputs=(BodyParams(content="ready"),),
+        render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
         parse_output=False,
         bus=bus,
@@ -152,8 +148,8 @@ def test_conversation_runner_raise_deadline_error() -> None:
 def test_conversation_runner_detects_expired_deadline(
     frozen_utcnow: FrozenUtcNow,
 ) -> None:
-    prompt = _build_prompt()
-    rendered = _build_rendered(prompt)
+    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
@@ -165,7 +161,7 @@ def test_conversation_runner_detects_expired_deadline(
         prompt=prompt,
         prompt_name="deadline",
         rendered=rendered,
-        render_inputs=(BodyParams(content="ready"),),
+        render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
         parse_output=False,
         bus=bus,
@@ -188,8 +184,8 @@ def test_conversation_runner_detects_expired_deadline(
 def test_execute_tool_call_raises_when_deadline_expired(
     frozen_utcnow: FrozenUtcNow,
 ) -> None:
-    prompt = _build_prompt()
-    rendered = _build_rendered(prompt)
+    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
 
@@ -230,8 +226,8 @@ def test_execute_tool_call_raises_when_deadline_expired(
 
 
 def test_execute_tool_call_publishes_invocation() -> None:
-    prompt = _build_prompt()
-    rendered = _build_rendered(prompt)
+    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
 
@@ -274,8 +270,8 @@ def test_execute_tool_call_publishes_invocation() -> None:
 
 
 def test_run_conversation_replaces_rendered_deadline() -> None:
-    prompt = _build_prompt()
-    rendered = _build_rendered(prompt)
+    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    rendered = prompt.render()
     bus = InProcessEventBus()
     session = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
@@ -319,7 +315,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         prompt=prompt,
         prompt_name="deadline",
         rendered=rendered,
-        render_inputs=(BodyParams(content="ready"),),
+        render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
 

@@ -26,7 +26,7 @@ from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.prompt import RenderedPrompt
-from ..prompt.protocols import PromptResponseProtocol
+from ..prompt.protocols import PromptProtocol, PromptResponseProtocol
 from ..prompt.tool import Tool, ToolContext, ToolExample
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
@@ -282,10 +282,12 @@ def build_dispatch_subagents_tool(
             delegation, child_session, child_bus = payload
             recap = RecapParams(bullets=delegation.recap_lines)
             try:
+                bound_prompt = cast(
+                    PromptProtocol[Any],
+                    delegation_prompt.prompt.bind(delegation, recap),
+                )
                 response = adapter.evaluate(
-                    delegation_prompt.prompt,
-                    delegation,
-                    recap,
+                    bound_prompt,
                     parse_output=parse_output,
                     bus=child_bus,
                     session=child_session,

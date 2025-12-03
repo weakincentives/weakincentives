@@ -20,7 +20,7 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, Prompt, Tool
+from weakincentives.prompt import MarkdownSection, PromptTemplate, Tool
 from weakincentives.prompt.overrides import (
     HexDigest,
     LocalPromptOverridesStore,
@@ -55,8 +55,8 @@ class _ToolResult:
     result: str
 
 
-def _build_prompt() -> Prompt:
-    return Prompt(
+def _build_prompt() -> PromptTemplate:
+    return PromptTemplate(
         ns="tests/versioning",
         key="versioned-greeting",
         sections=[
@@ -69,13 +69,13 @@ def _build_prompt() -> Prompt:
     )
 
 
-def _build_prompt_with_tool() -> Prompt:
+def _build_prompt_with_tool() -> PromptTemplate:
     tool = Tool[_ToolParams, _ToolResult](
         name="search",
         description="Search stored notes.",
         handler=None,
     )
-    return Prompt(
+    return PromptTemplate(
         ns="tests/versioning",
         key="versioned-greeting-tools",
         sections=[
@@ -837,7 +837,7 @@ def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
         handler=None,
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/versioning",
         key="plain-metadata",
         sections=[

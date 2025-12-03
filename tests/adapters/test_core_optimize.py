@@ -25,8 +25,7 @@ from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
 )
-from weakincentives.prompt import MarkdownSection, Prompt
-from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.overrides import (
     PromptLike,
     PromptOverride,
@@ -61,14 +60,14 @@ class _ToolEventParams:
 
 class _RecordingOverridesStore(PromptOverridesStore):
     def __init__(self) -> None:
-        self.calls: list[tuple[Prompt[Any], str, tuple[str, ...], str]] = []
+        self.calls: list[tuple[PromptTemplate[Any], str, tuple[str, ...], str]] = []
 
     def resolve(
         self,
         descriptor: PromptLike,
         tag: str = "latest",
     ) -> PromptOverride | None:
-        self.calls.append((cast(Prompt[Any], descriptor), tag, (), "resolve"))
+        self.calls.append((cast(PromptTemplate[Any], descriptor), tag, (), "resolve"))
         return None
 
     def upsert(
@@ -76,7 +75,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         descriptor: PromptLike,
         override: PromptOverride,
     ) -> PromptOverride:
-        self.calls.append((cast(Prompt[Any], descriptor), "", (), "upsert"))
+        self.calls.append((cast(PromptTemplate[Any], descriptor), "", (), "upsert"))
         return override
 
     def delete(
@@ -87,12 +86,12 @@ class _RecordingOverridesStore(PromptOverridesStore):
         tag: str,
     ) -> None:
         self.calls.append(
-            (cast(Prompt[Any], object()), tag, (ns, prompt_key), "delete")
+            (cast(PromptTemplate[Any], object()), tag, (ns, prompt_key), "delete")
         )
 
     def set_section_override(
         self,
-        prompt: Prompt[Any],
+        prompt: PromptTemplate[Any],
         *,
         tag: str,
         path: tuple[str, ...],
@@ -107,7 +106,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         *,
         tag: str = "latest",
     ) -> PromptOverride:
-        self.calls.append((cast(Prompt[Any], prompt), tag, (), "seed"))
+        self.calls.append((cast(PromptTemplate[Any], prompt), tag, (), "seed"))
         return cast(PromptOverride, object())
 
 
@@ -123,15 +122,13 @@ class _RecordingAdapter(ProviderAdapter):
     def evaluate(
         self,
         prompt: Prompt[Any],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: Any = None,
         session: Session | None = None,
         deadline: Any = None,
-        overrides_store: Any = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponse[Any]:
-        del params, parse_output, deadline, overrides_store, overrides_tag
+        del parse_output, deadline
         prompt_name = prompt.name or prompt.key
         self.rendered_prompts.append(prompt)
         self.sessions.append(session)
@@ -170,16 +167,18 @@ class _RecordingAdapter(ProviderAdapter):
         )
 
 
-def _build_prompt() -> Prompt[_PromptOutput]:
+def _build_prompt() -> PromptTemplate[_PromptOutput]:
     session = Session()
     workspace = VfsToolsSection(session=session)
     digest = WorkspaceDigestSection(session=session)
-    return Prompt[_PromptOutput](ns="tests", key="opt", sections=(workspace, digest))
+    return PromptTemplate[_PromptOutput](
+        ns="tests", key="opt", sections=(workspace, digest)
+    )
 
 
 def test_optimize_persists_digest_from_output() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     session = Session()
 
     result = adapter.optimize(prompt, session=session)
@@ -201,7 +200,7 @@ def test_session_clear_slice_removes_entire_digest_slice() -> None:
 
 def test_optimize_handles_string_output() -> None:
     adapter = _RecordingAdapter(mode="string")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     session = Session()
 
     result = adapter.optimize(prompt, session=session)
@@ -211,7 +210,7 @@ def test_optimize_handles_string_output() -> None:
 
 def test_optimize_falls_back_to_text() -> None:
     adapter = _RecordingAdapter(mode="text")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     session = Session()
 
     result = adapter.optimize(prompt, session=session)
@@ -221,7 +220,7 @@ def test_optimize_falls_back_to_text() -> None:
 
 def test_optimize_requires_digest_content() -> None:
     adapter = _RecordingAdapter(mode="none")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     session = Session()
 
     with pytest.raises(PromptEvaluationError):
@@ -231,7 +230,7 @@ def test_optimize_requires_digest_content() -> None:
 def test_optimize_updates_global_overrides() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     overrides_store = _RecordingOverridesStore()
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     session = Session()
 
     result = adapter.optimize(
@@ -254,7 +253,7 @@ def test_optimize_updates_global_overrides() -> None:
 def test_optimize_global_scope_clears_existing_session_digest() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     overrides_store = _RecordingOverridesStore()
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     session = Session()
     _ = set_workspace_digest(session, "workspace-digest", "stale")
 
@@ -271,7 +270,7 @@ def test_optimize_global_scope_clears_existing_session_digest() -> None:
 
 def test_optimize_requires_overrides_inputs_for_global_scope() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
 
     with pytest.raises(PromptEvaluationError):
         adapter.optimize(
@@ -284,7 +283,7 @@ def test_optimize_requires_overrides_inputs_for_global_scope() -> None:
 
 def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     session = Session()
     _ = set_workspace_digest(session, "workspace-digest", "existing")
 
@@ -304,26 +303,26 @@ def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
 
 def test_optimize_requires_workspace_section() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    digest_only_prompt = Prompt[_PromptOutput](
+    digest_only_prompt = PromptTemplate[_PromptOutput](
         ns="tests",
         key="opt",
         sections=(WorkspaceDigestSection(session=Session()),),
     )
 
     with pytest.raises(PromptEvaluationError):
-        adapter.optimize(digest_only_prompt, session=Session())
+        adapter.optimize(Prompt(digest_only_prompt), session=Session())
 
 
 def test_optimize_requires_digest_section() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    workspace_only_prompt = Prompt[_PromptOutput](
+    workspace_only_prompt = PromptTemplate[_PromptOutput](
         ns="tests",
         key="opt",
         sections=(VfsToolsSection(session=Session()),),
     )
 
     with pytest.raises(PromptEvaluationError):
-        adapter.optimize(workspace_only_prompt, session=Session())
+        adapter.optimize(Prompt(workspace_only_prompt), session=Session())
 
 
 def test_optimize_validates_digest_section_type() -> None:
@@ -339,17 +338,17 @@ def test_optimize_validates_digest_section_type() -> None:
         key="workspace-digest",
         default_params=_Params(),
     )
-    prompt = Prompt[_PromptOutput](
+    prompt = PromptTemplate[_PromptOutput](
         ns="tests", key="opt", sections=(workspace, fake_digest)
     )
 
     with pytest.raises(PromptEvaluationError):
-        adapter.optimize(prompt, session=Session())
+        adapter.optimize(Prompt(prompt), session=Session())
 
 
 def test_find_section_path_raises_for_missing_section() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
 
     with pytest.raises(PromptEvaluationError):
         adapter._find_section_path(prompt, "missing")
@@ -357,7 +356,7 @@ def test_find_section_path_raises_for_missing_section() -> None:
 
 def test_optimize_uses_isolated_session() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     outer_session = Session()
 
     _ = adapter.optimize(prompt, session=outer_session)
@@ -371,7 +370,7 @@ def test_optimize_uses_isolated_session() -> None:
 
 def test_optimize_accepts_provided_session() -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    prompt = _build_prompt()
+    prompt = Prompt(_build_prompt())
     outer_session = Session()
     provided_session = Session()
 

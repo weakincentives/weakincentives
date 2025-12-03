@@ -34,9 +34,9 @@ from weakincentives.adapters.shared import (
     token_usage_from_payload,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import Prompt, ToolContext
+from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
 from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
-from weakincentives.prompt.overrides import PromptDescriptor, PromptOverridesStore
+from weakincentives.prompt.overrides import PromptDescriptor
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
@@ -62,13 +62,11 @@ class DummyAdapter(ProviderAdapter[object]):
     def evaluate(
         self,
         prompt: Prompt[object],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol | None = None,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponse[object]:
         raise NotImplementedError
 
@@ -158,7 +156,8 @@ def build_runner(
     render_inputs: tuple[SupportsDataclass, ...] | None = None,
     throttle_policy: ThrottlePolicy | None = None,
 ) -> ConversationRunner[object]:
-    prompt = Prompt(ns="tests", key="example")
+    template = PromptTemplate(ns="tests", key="example")
+    prompt = Prompt(template, params=render_inputs or ())
     session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
     return ConversationRunner[object](
         adapter_name=DUMMY_ADAPTER_NAME,
@@ -166,7 +165,7 @@ def build_runner(
         prompt=prompt,
         prompt_name="example",
         rendered=rendered,
-        render_inputs=render_inputs if render_inputs is not None else (),
+        render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
         parse_output=parse_output,
         bus=bus,

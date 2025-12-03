@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from weakincentives import prompt
-from weakincentives.prompt import MarkdownSection, Prompt
+from weakincentives.prompt import MarkdownSection, PromptTemplate
 
 
 @dataclass
@@ -39,7 +39,7 @@ class ContentParams:
     summary: str
 
 
-def build_compose_prompt() -> Prompt:
+def build_compose_prompt() -> PromptTemplate:
     tone_section = MarkdownSection[ToneParams](
         title="Tone",
         template="""
@@ -71,7 +71,7 @@ def build_compose_prompt() -> Prompt:
         ),
     ]
 
-    return Prompt(ns="tests/prompts", key="compose-email", sections=sections)
+    return PromptTemplate(ns="tests/prompts", key="compose-email", sections=sections)
 
 
 def test_prompt_integration_renders_expected_markdown() -> None:
@@ -106,8 +106,8 @@ def test_prompt_integration_handles_disabled_sections() -> None:
 
 
 def test_prompt_module_public_exports() -> None:
-    for symbol in ("Prompt", "Section", "MarkdownSection"):
+    for symbol in ("Prompt", "PromptTemplate", "Section", "MarkdownSection"):
         assert hasattr(prompt, symbol), f"prompt module missing export: {symbol}"
         assert getattr(prompt, symbol) is getattr(prompt, symbol)
-    for symbol in ("Prompt", "Section", "MarkdownSection"):
+    for symbol in ("Prompt", "PromptTemplate", "Section", "MarkdownSection"):
         assert symbol in prompt.__all__

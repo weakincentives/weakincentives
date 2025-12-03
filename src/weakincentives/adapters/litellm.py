@@ -18,10 +18,9 @@ from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
+from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..deadlines import Deadline
-from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
@@ -56,9 +55,6 @@ from .shared import (
 )
 
 OutputT = TypeVar("OutputT")
-
-if TYPE_CHECKING:
-    from ..prompt.overrides import PromptOverridesStore
 
 _ERROR_MESSAGE: Final[str] = (
     "LiteLLM support requires the optional 'litellm' dependency. "
@@ -236,13 +232,11 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
     def evaluate(
         self,
         prompt: Prompt[OutputT],
-        *params: SupportsDataclass,
-        parse_output: bool = True,
+        *,
         bus: EventBus,
         session: SessionProtocol,
+        parse_output: bool = True,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponse[OutputT]:
         has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
@@ -256,13 +250,10 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             disable_output_instructions=should_disable_instructions,
             enable_json_schema=True,
             deadline=deadline,
-            overrides_store=overrides_store,
-            overrides_tag=overrides_tag,
         )
 
         render_context = prepare_adapter_conversation(
             prompt=prompt,
-            params=params,
             options=render_options,
         )
 

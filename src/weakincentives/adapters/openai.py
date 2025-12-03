@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
+from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
@@ -62,9 +62,6 @@ from .shared import (
 )
 
 OutputT = TypeVar("OutputT")
-
-if TYPE_CHECKING:
-    from ..prompt.overrides import PromptOverridesStore
 
 _ERROR_MESSAGE: Final[str] = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -605,21 +602,16 @@ class OpenAIAdapter(ProviderAdapter[Any]):
     def evaluate(
         self,
         prompt: Prompt[OutputT],
-        *params: SupportsDataclass,
-        parse_output: bool = True,
+        *,
         bus: EventBus,
         session: SessionProtocol,
+        parse_output: bool = True,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponse[OutputT]:
         context = self._setup_evaluation(
             prompt,
-            params,
             parse_output=parse_output,
             deadline=deadline,
-            overrides_store=overrides_store,
-            overrides_tag=overrides_tag,
         )
 
         conversation_config = ConversationConfig(
@@ -653,23 +645,17 @@ class OpenAIAdapter(ProviderAdapter[Any]):
     def _setup_evaluation(
         self,
         prompt: Prompt[OutputT],
-        params: tuple[SupportsDataclass, ...],
         *,
         parse_output: bool,
         deadline: Deadline | None,
-        overrides_store: PromptOverridesStore | None,
-        overrides_tag: str,
     ) -> _EvaluationContext[OutputT]:
-        prompt_name = prompt.name or prompt.__class__.__name__
-        render_inputs: tuple[SupportsDataclass, ...] = tuple(params)
+        prompt_name = prompt.name or prompt.template.__class__.__name__
+        render_inputs = prompt.params
         self._ensure_deadline_not_expired(deadline, prompt_name)
         rendered = self._render_prompt(
             prompt,
-            render_inputs,
             parse_output=parse_output,
             deadline=deadline,
-            overrides_store=overrides_store,
-            overrides_tag=overrides_tag,
         )
         response_format = self._build_response_format(
             rendered,
@@ -698,34 +684,27 @@ class OpenAIAdapter(ProviderAdapter[Any]):
     def _render_prompt(
         self,
         prompt: Prompt[OutputT],
-        render_inputs: tuple[SupportsDataclass, ...],
         *,
         parse_output: bool,
         deadline: Deadline | None,
-        overrides_store: PromptOverridesStore | None,
-        overrides_tag: str,
     ) -> RenderedPrompt[OutputT]:
         has_structured_output = prompt.structured_output is not None
+        inject_instructions = (
+            prompt.inject_output_instructions
+            if prompt.inject_output_instructions is not None
+            else prompt.template.inject_output_instructions
+        )
         should_disable_instructions = (
             parse_output
             and has_structured_output
             and self._use_native_response_format
-            and getattr(prompt, "inject_output_instructions", False)
+            and inject_instructions
         )
 
         if should_disable_instructions:
-            rendered = prompt.render(
-                *render_inputs,
-                overrides_store=overrides_store,
-                tag=overrides_tag,
-                inject_output_instructions=False,
-            )
+            rendered = prompt.render(inject_output_instructions=False)
         else:
-            rendered = prompt.render(
-                *render_inputs,
-                overrides_store=overrides_store,
-                tag=overrides_tag,
-            )
+            rendered = prompt.render(inject_output_instructions=inject_instructions)
         if deadline is not None:
             rendered = replace(rendered, deadline=deadline)
         return rendered

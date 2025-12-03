@@ -52,11 +52,14 @@ from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
+    PromptResponse,
+    ProviderAdapter,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
+    PromptTemplate,
     Tool,
     ToolContext,
     ToolHandler,
@@ -119,8 +122,8 @@ def adapter_harness(request: pytest.FixtureRequest) -> AdapterHarness:
 
 def _build_prompt(
     harness: AdapterHarness, tool: Tool[ToolParams, ToolPayload]
-) -> Prompt[Any]:
-    return Prompt(
+) -> PromptTemplate[Any]:
+    return PromptTemplate(
         ns=f"tests/adapters/{harness.name}",
         key=f"{harness.name}-shared-tool-execution",
         name="search",
@@ -145,6 +148,16 @@ def _build_responses(
     )
     second = DummyResponse([DummyChoice(final_message)])
     return [first, second]
+
+
+def _evaluate_prompt(
+    adapter: ProviderAdapter[Any],
+    prompt_template: PromptTemplate[Any],
+    *params: SupportsDataclass,
+    **kwargs: object,
+) -> PromptResponse[Any]:
+    bound_prompt = Prompt(prompt_template).bind(*params)
+    return adapter.evaluate(bound_prompt, **kwargs)
 
 
 def _record_tool_events(bus: InProcessEventBus) -> list[ToolInvoked]:
@@ -191,7 +204,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -207,9 +220,10 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+
     adapter.evaluate(
-        prompt,
-        ToolParams(query="policies"),
+        bound_prompt,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -242,7 +256,7 @@ def test_adapter_tool_context_receives_deadline(
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -258,9 +272,10 @@ def test_adapter_tool_context_receives_deadline(
     session = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+
     adapter.evaluate(
-        prompt,
-        ToolParams(query="policies"),
+        bound_prompt,
         bus=bus,
         session=cast(SessionProtocol, session),
         deadline=deadline,
@@ -282,7 +297,7 @@ def test_adapter_tool_deadline_exceeded(
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -298,10 +313,11 @@ def test_adapter_tool_deadline_exceeded(
     session = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(
-            prompt,
-            ToolParams(query="policies"),
+            bound_prompt,
             bus=bus,
             session=cast(SessionProtocol, session),
             deadline=deadline,
@@ -327,7 +343,7 @@ def test_adapter_deadline_preflight_rejection(
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -346,10 +362,11 @@ def test_adapter_deadline_preflight_rejection(
     deadline = Deadline(anchor + timedelta(seconds=5))
     frozen_utcnow.advance(timedelta(seconds=10))
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(
-            prompt,
-            ToolParams(query="policies"),
+            bound_prompt,
             bus=bus,
             session=cast(SessionProtocol, session),
             deadline=deadline,
@@ -376,7 +393,7 @@ def test_adapter_tool_execution_validation_error(
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -394,9 +411,10 @@ def test_adapter_tool_execution_validation_error(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="invalid"))
+
     adapter.evaluate(
-        prompt,
-        ToolParams(query="invalid"),
+        bound_prompt,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -434,7 +452,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -452,9 +470,10 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+
     adapter.evaluate(
-        prompt,
-        ToolParams(query="policies"),
+        bound_prompt,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -493,7 +512,7 @@ def test_adapter_tool_execution_rejects_type_errors(
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -511,9 +530,10 @@ def test_adapter_tool_execution_rejects_type_errors(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+
     adapter.evaluate(
-        prompt,
-        ToolParams(query="policies"),
+        bound_prompt,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -548,7 +568,7 @@ def test_adapter_tool_execution_unexpected_exception(
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -564,9 +584,10 @@ def test_adapter_tool_execution_unexpected_exception(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+
     adapter.evaluate(
-        prompt,
-        ToolParams(query="policies"),
+        bound_prompt,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -604,7 +625,7 @@ def test_adapter_tool_execution_rolls_back_session(
         description="Search stored notes.",
         handler=tool_handler,
     )
-    prompt = _build_prompt(adapter_harness, tool)
+    prompt_template = _build_prompt(adapter_harness, tool)
     tool_call = DummyToolCall(
         call_id="call_1",
         name="search_notes",
@@ -642,9 +663,10 @@ def test_adapter_tool_execution_rolls_back_session(
 
     events = _record_tool_events(bus)
 
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+
     adapter.evaluate(
-        prompt,
-        ToolParams(query="policies"),
+        bound_prompt,
         bus=bus,
         session=session,
     )

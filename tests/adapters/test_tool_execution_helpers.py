@@ -40,7 +40,7 @@ from weakincentives.adapters.shared import (
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
-    Prompt,
+    PromptTemplate,
     SupportsDataclass,
     SupportsToolResult,
     Tool,
@@ -53,8 +53,8 @@ from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.tools import DeadlineExceededError
 
 
-def _build_prompt(tool: Tool[ToolParams, ToolPayload]) -> Prompt[ToolPayload]:
-    return Prompt(
+def _build_prompt(tool: Tool[ToolParams, ToolPayload]) -> PromptTemplate[ToolPayload]:
+    return PromptTemplate(
         ns="tests/adapters/tool-execution-helpers",
         key="tool-execution-helpers",
         name="test",
@@ -76,7 +76,8 @@ def _base_context(
     session: SessionProtocol | None = None,
 ) -> ToolExecutionContext:
     bus = InProcessEventBus()
-    prompt = _build_prompt(tool)
+    prompt_template = _build_prompt(tool)
+    prompt = prompt_template.bind()
     return ToolExecutionContext(
         adapter_name="adapter",
         adapter=cast(Any, object()),

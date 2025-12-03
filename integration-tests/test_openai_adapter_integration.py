@@ -22,7 +22,14 @@ import pytest
 
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    Tool,
+    ToolContext,
+    ToolResult,
+)
 from weakincentives.runtime import select_latest
 from weakincentives.runtime.events import PromptExecuted
 from weakincentives.runtime.session import Session
@@ -101,7 +108,7 @@ class ReviewFinding:
     sentiment: str
 
 
-def _build_greeting_prompt() -> Prompt[object]:
+def _build_greeting_prompt() -> PromptTemplate[object]:
     greeting_section = MarkdownSection[GreetingParams](
         title="Greeting",
         template=(
@@ -109,7 +116,7 @@ def _build_greeting_prompt() -> Prompt[object]:
         ),
         key="greeting",
     )
-    return Prompt(
+    return PromptTemplate(
         ns=_PROMPT_NS,
         key="integration-greeting",
         name="greeting",
@@ -135,7 +142,7 @@ def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
 
 def _build_tool_prompt(
     tool: Tool[TransformRequest, TransformResult],
-) -> Prompt[object]:
+) -> PromptTemplate[object]:
     instruction_section = MarkdownSection[TransformRequest](
         title="Instruction",
         template=(
@@ -146,7 +153,7 @@ def _build_tool_prompt(
         tools=(tool,),
         key="instruction",
     )
-    return Prompt(
+    return PromptTemplate(
         ns=_PROMPT_NS,
         key="integration-uppercase",
         name="uppercase_workflow",
@@ -154,7 +161,7 @@ def _build_tool_prompt(
     )
 
 
-def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
+def _build_structured_prompt() -> PromptTemplate[ReviewAnalysis]:
     analysis_section = MarkdownSection[ReviewParams](
         title="Analysis Task",
         template=(
@@ -164,7 +171,7 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
         ),
         key="analysis-task",
     )
-    return Prompt[ReviewAnalysis](
+    return PromptTemplate[ReviewAnalysis](
         ns=_PROMPT_NS,
         key="integration-structured",
         name="structured_review",
@@ -172,7 +179,7 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
     )
 
 
-def _build_structured_list_prompt() -> Prompt[list[ReviewFinding]]:
+def _build_structured_list_prompt() -> PromptTemplate[list[ReviewFinding]]:
     analysis_section = MarkdownSection[ReviewParams](
         title="Analysis Task",
         template=(
@@ -181,7 +188,7 @@ def _build_structured_list_prompt() -> Prompt[list[ReviewFinding]]:
         ),
         key="analysis-task",
     )
-    return Prompt[list[ReviewFinding]](
+    return PromptTemplate[list[ReviewFinding]](
         ns=_PROMPT_NS,
         key="integration-structured-list",
         name="structured_review_list",
@@ -202,14 +209,13 @@ def _assert_prompt_usage(session: Session) -> None:
 
 
 def test_openai_adapter_returns_text(adapter: OpenAIAdapter) -> None:
-    prompt = _build_greeting_prompt()
+    prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="integration tests")
+    prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
     bus = session.event_bus
-    response = adapter.evaluate(
-        prompt, params, parse_output=False, bus=bus, session=session
-    )
+    response = adapter.evaluate(prompt, parse_output=False, bus=bus, session=session)
 
     assert response.prompt_name == "greeting"
     assert response.text is not None
@@ -219,18 +225,18 @@ def test_openai_adapter_returns_text(adapter: OpenAIAdapter) -> None:
 
 def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
     tool = _build_uppercase_tool()
-    prompt = _build_tool_prompt(tool)
+    prompt_template = _build_tool_prompt(tool)
     params = TransformRequest(text="integration tests")
     adapter = OpenAIAdapter(
         model=openai_model,
         tool_choice={"type": "function", "function": {"name": tool.name}},
     )
 
+    prompt = Prompt(prompt_template).bind(params)
+
     session = _make_session_with_usage_tracking()
     bus = session.event_bus
-    response = adapter.evaluate(
-        prompt, params, parse_output=False, bus=bus, session=session
-    )
+    response = adapter.evaluate(prompt, parse_output=False, bus=bus, session=session)
 
     assert response.prompt_name == "uppercase_workflow"
     assert response.text is not None and response.text.strip()
@@ -239,7 +245,7 @@ def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
 
 
 def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None:
-    prompt = _build_structured_prompt()
+    prompt_template = _build_structured_prompt()
     sample = ReviewParams(
         text=(
             "The new release shipped important bug fixes and improved the onboarding flow."
@@ -247,9 +253,11 @@ def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None
         ),
     )
 
+    prompt = Prompt(prompt_template).bind(sample)
+
     session = _make_session_with_usage_tracking()
     bus = session.event_bus
-    response = adapter.evaluate(prompt, sample, bus=bus, session=session)
+    response = adapter.evaluate(prompt, bus=bus, session=session)
 
     assert response.prompt_name == "structured_review"
     assert response.output is not None
@@ -263,13 +271,14 @@ def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None
 def test_openai_adapter_parses_structured_output_without_native_schema(
     openai_model: str,
 ) -> None:
-    prompt = _build_structured_prompt()
+    prompt_template = _build_structured_prompt()
     sample = ReviewParams(
         text=(
             "Customers praise the simplified dashboards and clearer metrics, "
             "though a few still flag onboarding friction when importing legacy data."
         ),
     )
+    prompt = Prompt(prompt_template).bind(sample)
 
     custom_adapter = OpenAIAdapter(
         model=openai_model,
@@ -280,7 +289,6 @@ def test_openai_adapter_parses_structured_output_without_native_schema(
     bus = session.event_bus
     response = custom_adapter.evaluate(
         prompt,
-        sample,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -295,7 +303,7 @@ def test_openai_adapter_parses_structured_output_without_native_schema(
 
 
 def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -> None:
-    prompt = _build_structured_list_prompt()
+    prompt_template = _build_structured_list_prompt()
     sample = ReviewParams(
         text=(
             "Feedback mentions strong improvements to documentation and onboarding flow, "
@@ -303,11 +311,12 @@ def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -
         ),
     )
 
+    prompt = Prompt(prompt_template).bind(sample)
+
     session = _make_session_with_usage_tracking()
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        sample,
         bus=bus,
         session=cast(SessionProtocol, session),
     )

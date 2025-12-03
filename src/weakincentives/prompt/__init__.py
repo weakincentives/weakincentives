@@ -40,8 +40,13 @@ from .overrides import (
     hash_json,
     hash_text,
 )
-from .prompt import Prompt
-from .protocols import PromptProtocol, ProviderAdapterProtocol, RenderedPromptProtocol
+from .prompt import Prompt, PromptTemplate
+from .protocols import (
+    PromptProtocol,
+    PromptTemplateProtocol,
+    ProviderAdapterProtocol,
+    RenderedPromptProtocol,
+)
 from .rendering import RenderedPrompt
 from .section import Section
 from .structured_output import (
@@ -70,6 +75,8 @@ __all__ = [
     "PromptOverridesStore",
     "PromptProtocol",
     "PromptRenderError",
+    "PromptTemplate",
+    "PromptTemplateProtocol",
     "PromptValidationError",
     "ProviderAdapterProtocol",
     "RecapParams",

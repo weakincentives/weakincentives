@@ -20,7 +20,7 @@ import pytest
 
 from weakincentives.prompt import (
     MarkdownSection,
-    Prompt,
+    PromptTemplate,
     PromptValidationError,
     SupportsDataclass,
 )
@@ -65,7 +65,7 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         children=[child, sibling],
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/prompts",
         key="prompt-init",
         name="demo",
@@ -93,7 +93,7 @@ def test_prompt_requires_non_empty_key() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Prompt(ns="tests/prompts", key="   ", sections=[section])
+        PromptTemplate(ns="tests/prompts", key="   ", sections=[section])
 
 
 def test_prompt_requires_non_empty_namespace() -> None:
@@ -102,7 +102,7 @@ def test_prompt_requires_non_empty_namespace() -> None:
     )
 
     with pytest.raises(PromptValidationError):
-        Prompt(ns="   ", key="prompt-ns", sections=[section])
+        PromptTemplate(ns="   ", key="prompt-ns", sections=[section])
 
 
 def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
@@ -119,7 +119,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
         default_params=DuplicateParams(value="beta"),
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/prompts",
         key="duplicate-defaults",
         sections=[first, second],
@@ -144,7 +144,7 @@ def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
         key="second",
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/prompts",
         key="duplicate-shared",
         sections=[first, second],
@@ -171,7 +171,7 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
         key="second",
     )
 
-    prompt = Prompt(
+    prompt = PromptTemplate(
         ns="tests/prompts",
         key="duplicate-type-default",
         sections=[first, second],
@@ -195,7 +195,9 @@ def test_prompt_validates_text_section_placeholders() -> None:
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(ns="tests/prompts", key="invalid-placeholder", sections=[section])
+        PromptTemplate(
+            ns="tests/prompts", key="invalid-placeholder", sections=[section]
+        )
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.placeholder == "oops"

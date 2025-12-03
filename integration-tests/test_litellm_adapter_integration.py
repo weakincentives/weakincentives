@@ -23,7 +23,14 @@ import pytest
 
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.litellm import LiteLLMAdapter
-from weakincentives.prompt import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    Tool,
+    ToolContext,
+    ToolResult,
+)
 from weakincentives.runtime import select_latest
 from weakincentives.runtime.events import PromptExecuted
 from weakincentives.runtime.session import Session
@@ -119,7 +126,7 @@ class ReviewAnalysis:
     sentiment: str
 
 
-def _build_greeting_prompt() -> Prompt[object]:
+def _build_greeting_prompt() -> PromptTemplate[object]:
     greeting_section = MarkdownSection[GreetingParams](
         title="Greeting",
         template=(
@@ -127,7 +134,7 @@ def _build_greeting_prompt() -> Prompt[object]:
         ),
         key="greeting",
     )
-    return Prompt(
+    return PromptTemplate(
         ns=_PROMPT_NS,
         key="litellm-integration-greeting",
         name="greeting",
@@ -153,7 +160,7 @@ def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
 
 def _build_tool_prompt(
     tool: Tool[TransformRequest, TransformResult],
-) -> Prompt[object]:
+) -> PromptTemplate[object]:
     instruction_section = MarkdownSection[TransformRequest](
         title="Instruction",
         template=(
@@ -164,7 +171,7 @@ def _build_tool_prompt(
         tools=(tool,),
         key="instruction",
     )
-    return Prompt(
+    return PromptTemplate(
         ns=_PROMPT_NS,
         key="litellm-integration-uppercase",
         name="uppercase_workflow",
@@ -172,7 +179,7 @@ def _build_tool_prompt(
     )
 
 
-def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
+def _build_structured_prompt() -> PromptTemplate[ReviewAnalysis]:
     analysis_section = MarkdownSection[ReviewParams](
         title="Analysis Task",
         template=(
@@ -182,7 +189,7 @@ def _build_structured_prompt() -> Prompt[ReviewAnalysis]:
         ),
         key="analysis-task",
     )
-    return Prompt[ReviewAnalysis](
+    return PromptTemplate[ReviewAnalysis](
         ns=_PROMPT_NS,
         key="litellm-integration-structured",
         name="structured_review",
@@ -203,14 +210,14 @@ def _assert_prompt_usage(session: Session) -> None:
 
 
 def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
-    prompt = _build_greeting_prompt()
+    prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="LiteLLM integration tests")
+    prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        params,
         parse_output=False,
         bus=bus,
         session=cast(SessionProtocol, session),
@@ -224,14 +231,14 @@ def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
 
 def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
     tool = _build_uppercase_tool()
-    prompt = _build_tool_prompt(tool)
+    prompt_template = _build_tool_prompt(tool)
     params = TransformRequest(text="LiteLLM integration")
+    prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        params,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -242,14 +249,14 @@ def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
 
 
 def test_litellm_adapter_parses_structured_output(adapter: LiteLLMAdapter) -> None:
-    prompt = _build_structured_prompt()
+    prompt_template = _build_structured_prompt()
     params = ReviewParams(text="Integration tests should remain deterministic.")
+    prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        params,
         bus=bus,
         session=cast(SessionProtocol, session),
     )

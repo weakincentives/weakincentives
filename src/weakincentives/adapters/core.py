@@ -21,10 +21,9 @@ from enum import StrEnum
 from typing import Any, Literal, TypeVar, cast
 
 from ..deadlines import Deadline
-from ..prompt import MarkdownSection
+from ..prompt import MarkdownSection, Prompt, PromptTemplate
 from ..prompt._types import SupportsDataclass
 from ..prompt.overrides import PromptLike, PromptOverridesStore
-from ..prompt.prompt import Prompt
 from ..prompt.section import Section
 from ..runtime.events._types import EventBus
 from ..runtime.session import Session
@@ -86,19 +85,17 @@ class ProviderAdapter(ABC):
     def evaluate(
         self,
         prompt: Prompt[OutputT],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response."""
 
         ...
 
-    def optimize(
+    def optimize(  # noqa: PLR0914 - keeping local clarity for optimization flow
         self,
         prompt: Prompt[OutputT],
         *,
@@ -133,7 +130,10 @@ class ProviderAdapter(ABC):
             for section in tool_sections
         )
 
-        optimization_prompt = Prompt[_OptimizationResponse](
+        effective_store = overrides_store or prompt.overrides_store
+        effective_tag = overrides_tag or prompt.overrides_tag
+
+        optimization_prompt_template = PromptTemplate[_OptimizationResponse](
             ns=f"{prompt.ns}.optimization",
             key=f"{prompt.key}-workspace-digest",
             name=(f"{prompt.name}_workspace_digest" if prompt.name else None),
@@ -166,13 +166,17 @@ class ProviderAdapter(ABC):
             ),
         )
 
+        optimization_prompt = Prompt(
+            optimization_prompt_template,
+            overrides_store=effective_store,
+            overrides_tag=effective_tag,
+        )
+
         response = self.evaluate(
             optimization_prompt,
             parse_output=True,
             bus=inner_session.event_bus,
             session=inner_session,
-            overrides_store=overrides_store,
-            overrides_tag=overrides_tag or "latest",
         )
 
         digest = self._extract_digest(response=response, prompt_name=prompt_name)
@@ -181,7 +185,9 @@ class ProviderAdapter(ABC):
             _ = set_workspace_digest(outer_session, digest_section.key, digest)
 
         if store_scope is OptimizationScope.GLOBAL:
-            if overrides_store is None or overrides_tag is None:
+            global_store = effective_store
+            global_tag = effective_tag
+            if global_store is None:
                 message = "Global scope requires overrides_store and overrides_tag."
                 raise PromptEvaluationError(
                     message,
@@ -189,9 +195,9 @@ class ProviderAdapter(ABC):
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 )
             section_path = self._find_section_path(prompt, digest_section.key)
-            _ = overrides_store.set_section_override(
+            _ = global_store.set_section_override(
                 cast(PromptLike, prompt),
-                tag=overrides_tag,
+                tag=global_tag,
                 path=section_path,
                 body=digest,
             )
@@ -205,7 +211,7 @@ class ProviderAdapter(ABC):
         )
 
     def _resolve_workspace_section(
-        self, prompt: Prompt[object], prompt_name: str
+        self, prompt: Prompt[OutputT], prompt_name: str
     ) -> Section[SupportsDataclass]:
         try:
             return prompt.find_section((PodmanSandboxSection, VfsToolsSection))
@@ -217,7 +223,7 @@ class ProviderAdapter(ABC):
             ) from error
 
     def _resolve_tool_sections(
-        self, prompt: Prompt[object]
+        self, prompt: Prompt[OutputT]
     ) -> tuple[Section[SupportsDataclass], ...]:
         sections: list[Section[SupportsDataclass]] = []
         for section_type in (AstevalSection,):
@@ -233,7 +239,7 @@ class ProviderAdapter(ABC):
         return section.clone(session=session, bus=session.event_bus)
 
     def _require_workspace_digest_section(
-        self, prompt: Prompt[object], *, prompt_name: str
+        self, prompt: Prompt[OutputT], *, prompt_name: str
     ) -> WorkspaceDigestSection:
         try:
             section = prompt.find_section(WorkspaceDigestSection)
@@ -246,7 +252,7 @@ class ProviderAdapter(ABC):
         return cast(WorkspaceDigestSection, section)
 
     def _find_section_path(
-        self, prompt: Prompt[object], section_key: str
+        self, prompt: Prompt[OutputT], section_key: str
     ) -> tuple[str, ...]:
         for node in prompt.sections:
             if node.section.key == section_key:
