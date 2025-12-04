@@ -748,6 +748,7 @@ def _publish_tool_invocation(
         dataclass_value = cast(SupportsDataclass, tool_value)  # pyright: ignore[reportUnnecessaryCast]
 
     rendered_output = outcome.result.render()
+    usage = token_usage_from_payload(context.provider_payload)
 
     invocation = ToolInvoked(
         prompt_name=context.prompt_name,
@@ -757,6 +758,7 @@ def _publish_tool_invocation(
         result=cast(ToolResult[object], outcome.result),
         session_id=session_id,
         created_at=datetime.now(UTC),
+        usage=usage,
         value=dataclass_value,
         rendered_output=rendered_output,
         call_id=outcome.call_id,

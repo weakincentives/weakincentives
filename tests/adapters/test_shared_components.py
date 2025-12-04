@@ -30,7 +30,10 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.adapters.shared import (
     ResponseParser,
+    ToolExecutionContext,
+    ToolExecutionOutcome,
     ToolExecutor,
+    _publish_tool_invocation,
     parse_tool_arguments,
 )
 from weakincentives.deadlines import Deadline
@@ -46,6 +49,7 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
+from weakincentives.runtime.logging import get_logger
 from weakincentives.runtime.session.session import Session
 
 
@@ -131,6 +135,59 @@ def test_tool_executor_success() -> None:
     assert next_choice == "auto"
     assert len(tool_events) == 1
     assert len(executor.tool_message_records) == 1
+
+
+def test_publish_tool_invocation_attaches_usage() -> None:
+    tool = Tool[EchoParams, EchoPayload](
+        name="echo",
+        description="Echo",
+        handler=echo_handler,
+    )
+    params = EchoParams(value="hello")
+    result = ToolResult(message="echoed", value=EchoPayload(value="hello"))
+    log = get_logger(__name__)
+
+    bus = RecordingBus()
+    session = Session(bus=bus)
+    context = ToolExecutionContext(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[Any], object()),
+        prompt=Prompt(PromptTemplate(ns="test", key="tool")),
+        rendered_prompt=None,
+        tool_registry={tool.name: tool},
+        bus=bus,
+        session=session,
+        prompt_name="test",
+        parse_arguments=parse_tool_arguments,
+        format_publish_failures=lambda errors: "",
+        deadline=None,
+    ).with_provider_payload(
+        {
+            "usage": {
+                "input_tokens": 5,
+                "output_tokens": 7,
+                "cached_tokens": 2,
+            }
+        }
+    )
+
+    outcome = ToolExecutionOutcome(
+        tool=tool,
+        params=params,
+        result=cast(ToolResult[SupportsToolResult], result),
+        call_id="call-usage",
+        log=log,
+    )
+
+    invocation = _publish_tool_invocation(context=context, outcome=outcome)
+
+    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
+
+    assert invocation.usage is not None
+    assert invocation.usage.input_tokens == 5
+    assert invocation.usage.output_tokens == 7
+    assert invocation.usage.cached_tokens == 2
+    assert tool_events == [invocation]
 
 
 def test_response_parser_text_only() -> None:

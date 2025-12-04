@@ -17,12 +17,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 
 EventHandler = Callable[[object], None]
+
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard for type checking
+    from . import TokenUsage
 
 
 class EventBus(Protocol):
@@ -92,6 +96,7 @@ class ToolInvoked:
     result: Any
     session_id: UUID | None
     created_at: datetime
+    usage: TokenUsage | None = None
     value: Any | None = None
     rendered_output: str = ""
     call_id: str | None = None
