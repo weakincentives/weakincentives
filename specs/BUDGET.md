@@ -31,16 +31,20 @@ allocation.
 
 - `Budget` lives in `weakincentives.budget` as an immutable dataclass holding:
   - `deadline: Deadline | None` – optional wall-clock cutoff.
-  - `token_usage: TokenUsage` – tracks consumed and remaining tokens.
+  - `token_limit: TokenLimit` – maximum tokens permitted across prompt,
+    provider response, and tool output phases. The provider API maintains the
+    cumulative token counter; callers compare that to `token_limit` to detect
+    overages.
 - Construction validates both components and rejects impossible states
   (negative remaining tokens, expired deadlines, or missing token ceilings).
 - Provide helpers:
   - `remaining_time(now: datetime | None = None) -> timedelta | None` mirroring
     `Deadline.remaining()` semantics.
-  - `remaining_tokens() -> int` exposing the maximum tokens still available
-    across prompt, provider response, and tool output phases.
-  - `consume_tokens(count: int) -> Budget` returning a new instance with updated
-    usage; raising `BudgetExceededError` when consumption would cross the cap.
+  - `remaining_tokens(usage: int) -> int` returning the remaining allowance
+    after subtracting the current cumulative usage reported by the provider or
+    tool handler.
+  - `assert_within_limit(usage: int) -> None` raising `BudgetExceededError` when
+    the reported cumulative usage meets or exceeds the limit.
 
 ## API Changes
 
@@ -61,13 +65,14 @@ allocation.
   expired deadlines or depleted tokens raise `PromptEvaluationError` with
   `phase="preflight"` before any provider call.
 - **Provider requests** – Before each provider invocation, orchestrators check
-  `budget.remaining_time()` and `budget.remaining_tokens()` against the
-  projected costs. When either is exhausted, raise `BudgetExceededError` without
-  issuing the request.
-- **Token accounting** – Provider adapters increment `token_usage` using the
-  reported prompt/response token counts. Tool handlers report estimated token
-  costs (or measured counts when available) through `ToolContext`, allowing the
-  orchestrator to update the budget via `consume_tokens`.
+  `budget.remaining_time()` and `budget.remaining_tokens(current_usage)` against
+  the projected costs using the provider's cumulative usage counter. When
+  either is exhausted, raise `BudgetExceededError` without issuing the request.
+- **Token accounting** – Provider adapters rely on the provider API's
+  cumulative token counter. Tool handlers report estimated token costs (or
+  measured counts when available) through `ToolContext`, allowing the
+  orchestrator to compare the updated cumulative usage against `token_limit`
+  using `assert_within_limit`.
 - **Subagents** – Delegation helpers forward the active `Budget` into child
   prompts. Subagents MUST share the same object so consumption and expiration in
   the child reduce the remaining budget for the parent. When a child exceeds the
@@ -85,8 +90,8 @@ allocation.
 
 ## Testing Strategy
 
-- Unit tests validate `Budget` construction, token consumption, and deadline
-  rejection paths.
+- Unit tests validate `Budget` construction, token limit enforcement, and
+  deadline rejection paths.
 - Adapter tests simulate evaluations with tight budgets to ensure requests are
   blocked before exceeding token or time limits.
 - Subagent integration tests assert that child invocations reduce the shared
