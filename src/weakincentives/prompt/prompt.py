@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
 from typing import (
     TYPE_CHECKING,
@@ -24,12 +24,14 @@ from typing import (
     cast,
     get_args,
     get_origin,
+    override,
 )
 
 from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
 from .errors import PromptValidationError, SectionPath
-from .registry import PromptRegistry, RegistrySnapshot, SectionNode
+from .overrides import PromptDescriptor
+from .registry import PromptRegistry, SectionNode
 from .rendering import PromptRenderer, RenderedPrompt
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
@@ -37,6 +39,7 @@ from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:
     from .overrides import PromptLike, ToolOverride
+    from .registry import RegistrySnapshot
 
 OutputT = TypeVar("OutputT", covariant=True)
 
@@ -51,6 +54,27 @@ def _format_specialization_argument(argument: object | None) -> str:
 
 class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     """Coordinate prompt sections and their parameter bindings."""
+
+    ns: str
+    key: str
+    name: str | None
+    inject_output_instructions: bool
+    _descriptor: PromptDescriptor
+    _renderer: PromptRenderer[OutputT]
+    _snapshot: RegistrySnapshot
+    _structured_output: StructuredOutputConfig[SupportsDataclass] | None
+
+    __slots__ = (
+        "_descriptor",
+        "_frozen",
+        "_renderer",
+        "_snapshot",
+        "_structured_output",
+        "inject_output_instructions",
+        "key",
+        "name",
+        "ns",
+    )
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -88,6 +112,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         allow_extra_keys: bool = False,
     ) -> None:
         super().__init__()
+        self._frozen = False
         stripped_ns = ns.strip()
         if not stripped_ns:
             raise PromptValidationError("Prompt namespace must be a non-empty string.")
@@ -97,45 +122,47 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         self.ns = stripped_ns
         self.key = stripped_key
         self.name = name
-        base_sections = tuple(sections or ())
-        self._base_sections: tuple[Section[SupportsDataclass], ...] = base_sections
-        self._sections: tuple[Section[SupportsDataclass], ...] = base_sections
-        self._registry = PromptRegistry()
-        self.placeholders: dict[SectionPath, set[str]] = {}
-        self._allow_extra_keys_requested = allow_extra_keys
-
-        self._structured_output: StructuredOutputConfig[SupportsDataclass] | None
-        self._structured_output = self._resolve_output_spec(allow_extra_keys)
-
         self.inject_output_instructions = inject_output_instructions
 
-        self._registry.register_sections(self._sections)
+        registry = PromptRegistry()
+        registry.register_sections(tuple(sections or ()))
 
-        self._response_section: ResponseFormatSection | None = None
-        if self._structured_output is not None:
+        structured_output = self._resolve_output_spec(allow_extra_keys)
+        self._structured_output = structured_output
+        response_section: ResponseFormatSection | None = None
+        if structured_output is not None:
             response_params = self._build_response_format_params()
             response_section = ResponseFormatSection(
                 params=response_params,
                 enabled=lambda _params, prompt=self: prompt.inject_output_instructions,
             )
-            self._response_section = response_section
-            section_for_registry = cast(Section[SupportsDataclass], response_section)
-            self._sections += (section_for_registry,)
-            self._registry.register_section(
-                section_for_registry, path=(response_section.key,), depth=0
+            registry.register_section(
+                cast(Section[SupportsDataclass], response_section),
+                path=(response_section.key,),
+                depth=0,
             )
 
-        snapshot = self._registry.snapshot()
-        self._registry_snapshot: RegistrySnapshot = snapshot
-        self.placeholders = {
-            path: set(names) for path, names in snapshot.placeholders.items()
-        }
-
-        self._renderer: PromptRenderer[OutputT] = PromptRenderer(
+        snapshot = registry.snapshot()
+        self._snapshot = snapshot
+        self._renderer = PromptRenderer(
             registry=snapshot,
-            structured_output=self._structured_output,
-            response_section=self._response_section,
+            structured_output=structured_output,
+            response_section=response_section,
         )
+        self._descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
+        self._frozen = True
+
+    @override
+    def __setattr__(self, name: str, value: object) -> None:
+        """Prevent mutation after initialization."""
+
+        if name == "_frozen":
+            object.__setattr__(self, name, value)
+            return
+        if getattr(self, "_frozen", False):
+            msg = "PromptTemplate instances are immutable."
+            raise AttributeError(msg)
+        object.__setattr__(self, name, value)
 
     def render(
         self,
@@ -148,9 +175,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
 
         overrides: dict[SectionPath, str] | None = None
         tool_overrides: dict[str, ToolOverride] | None = None
-        from .overrides import PromptDescriptor
-
-        descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
+        descriptor = self.descriptor
 
         if overrides_store is not None:
             override = overrides_store.resolve(descriptor=descriptor, tag=tag)
@@ -195,11 +220,19 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
 
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
-        return self._registry_snapshot.sections
+        return self._snapshot.sections
 
     @property
     def param_types(self) -> set[type[SupportsDataclass]]:
-        return self._registry_snapshot.param_types
+        return self._snapshot.param_types
+
+    @property
+    def descriptor(self) -> PromptDescriptor:
+        return self._descriptor
+
+    @property
+    def placeholders(self) -> Mapping[SectionPath, frozenset[str]]:
+        return self._snapshot.placeholders
 
     @property
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
@@ -221,7 +254,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         else:
             candidates = (selector,)
 
-        for node in self._registry_snapshot.sections:
+        for node in self._snapshot.sections:
             if any(isinstance(node.section, candidate) for candidate in candidates):
                 return node.section
 
@@ -312,6 +345,10 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
         return self.template.sections
+
+    @property
+    def descriptor(self) -> PromptDescriptor:
+        return self.template.descriptor
 
     @property
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
