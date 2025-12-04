@@ -104,7 +104,7 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
     ) -> ToolResult[ResultT_co]: ...
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     """Describe a callable tool exposed by prompt sections."""
 
@@ -131,17 +131,21 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
             params_type,
         )
 
-        self.params_type = cast(type[ParamsT], params_type)
-        self.result_type = result_type
-        self.result_container = result_container
-        self._result_annotation = raw_result_annotation
+        object.__setattr__(self, "params_type", cast(type[ParamsT], params_type))
+        object.__setattr__(self, "result_type", result_type)
+        object.__setattr__(self, "result_container", result_container)
+        object.__setattr__(self, "_result_annotation", raw_result_annotation)
 
-        self.name = self._validate_name(params_type)
-        self.description = self._validate_description(params_type)
-        self.examples = self._validate_examples(
+        validated_name = self._validate_name(params_type)
+        validated_description = self._validate_description(params_type)
+        validated_examples = self._validate_examples(
             params_type,
             result_type,
         )
+
+        object.__setattr__(self, "name", validated_name)
+        object.__setattr__(self, "description", validated_description)
+        object.__setattr__(self, "examples", validated_examples)
 
         self._validate_handler_if_present(
             params_type,
@@ -604,8 +608,12 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
         class _SpecializedTool(cls):
             def __post_init__(self) -> None:
-                self.params_type = cast(type[ParamsT], params_type)
-                self._result_annotation = result_annotation
+                object.__setattr__(
+                    self,
+                    "params_type",
+                    cast(type[ParamsT], params_type),
+                )
+                object.__setattr__(self, "_result_annotation", result_annotation)
                 super().__post_init__()
 
         _SpecializedTool.__name__ = cls.__name__

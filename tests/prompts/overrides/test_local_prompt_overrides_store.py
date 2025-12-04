@@ -850,7 +850,8 @@ def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
         ],
     )
     descriptor = PromptDescriptor.from_prompt(prompt)
-    tool.params_type = str
+    tool = replace(tool)
+    object.__setattr__(tool, "params_type", str)
 
     overrides = seed_tools(prompt, descriptor)
 
