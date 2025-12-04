@@ -179,7 +179,9 @@ class ProviderAdapter(ABC):
         )
         if accepts_overrides and effective_store is not None:
             try:
-                effective_store.seed(optimization_prompt, tag=normalized_tag)
+                _ = effective_store.seed(
+                    cast(PromptLike, optimization_prompt), tag=normalized_tag
+                )
             except PromptOverridesError as exc:
                 raise PromptEvaluationError(
                     "Failed to seed overrides for optimization prompt.",
@@ -201,7 +203,7 @@ class ProviderAdapter(ABC):
 
         if store_scope is OptimizationScope.GLOBAL:
             global_store = effective_store
-            global_tag = effective_tag
+            global_tag = normalized_tag
             if global_store is None:
                 message = "Global scope requires overrides_store and overrides_tag."
                 raise PromptEvaluationError(

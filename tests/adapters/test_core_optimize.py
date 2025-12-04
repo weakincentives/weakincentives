@@ -29,6 +29,7 @@ from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.overrides import (
     PromptLike,
     PromptOverride,
+    PromptOverridesError,
     PromptOverridesStore,
 )
 from weakincentives.prompt.tool_result import ToolResult
@@ -108,6 +109,17 @@ class _RecordingOverridesStore(PromptOverridesStore):
     ) -> PromptOverride:
         self.calls.append((cast(PromptTemplate[Any], prompt), tag, (), "seed"))
         return cast(PromptOverride, object())
+
+
+class _FailingSeedOverridesStore(_RecordingOverridesStore):
+    def seed(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+    ) -> PromptOverride:
+        self.calls.append((cast(PromptTemplate[Any], prompt), tag, (), "seed"))
+        raise PromptOverridesError("seed failed")
 
 
 class _RecordingAdapter(ProviderAdapter):
@@ -317,6 +329,19 @@ def test_optimize_seeds_internal_prompt_overrides() -> None:
     )
 
     assert any(call[3] == "seed" for call in overrides_store.calls)
+
+
+def test_optimize_raises_when_internal_prompt_seeding_fails() -> None:
+    adapter = _RecordingAdapter(mode="dataclass")
+    overrides_store = _FailingSeedOverridesStore()
+    prompt = Prompt(_build_prompt())
+
+    with pytest.raises(PromptEvaluationError):
+        adapter.optimize(
+            prompt,
+            session=Session(),
+            overrides_store=overrides_store,
+        )
 
 
 def test_optimize_skips_overrides_when_disabled() -> None:
