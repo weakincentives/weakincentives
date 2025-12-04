@@ -50,75 +50,76 @@ def _write_snapshot(path: Path, *, created_at: datetime) -> None:
 def test_directory_argument_loads_latest_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    older = tmp_path / "old.jsonl"
-    newer = tmp_path / "new.jsonl"
-    now = datetime.now(UTC)
-    _write_snapshot(older, created_at=now - timedelta(days=1))
-    _write_snapshot(newer, created_at=now)
-    now_ts = time.time()
-    os.utime(older, (now_ts, now_ts))
-    os.utime(newer, (now_ts + 1, now_ts + 1))
+    with dbc_enabled(False):
+        older = tmp_path / "old.jsonl"
+        newer = tmp_path / "new.jsonl"
+        now = datetime.now(UTC)
+        _write_snapshot(older, created_at=now - timedelta(days=1))
+        _write_snapshot(newer, created_at=now)
+        now_ts = time.time()
+        os.utime(older, (now_ts, now_ts))
+        os.utime(newer, (now_ts + 1, now_ts + 1))
 
-    calls: dict[str, Any] = {}
+        calls: dict[str, Any] = {}
 
-    def fake_configure_logging(*, level: object, json_mode: object) -> None:
-        calls["configure"] = {"level": level, "json_mode": json_mode}
+        def fake_configure_logging(*, level: object, json_mode: object) -> None:
+            calls["configure"] = {"level": level, "json_mode": json_mode}
 
-    class FakeLogger:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, dict[str, object]]] = []
+        class FakeLogger:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object]]] = []
 
-        def info(
-            self, message: str, *, event: str, context: object | None = None
-        ) -> None:
-            self.calls.append((message, {"event": event, "context": context}))
+            def info(
+                self, message: str, *, event: str, context: object | None = None
+            ) -> None:
+                self.calls.append((message, {"event": event, "context": context}))
 
-        def error(
-            self, message: str, *, event: str, context: object | None = None
-        ) -> None:
-            self.calls.append((message, {"event": event, "context": context}))
+            def error(
+                self, message: str, *, event: str, context: object | None = None
+            ) -> None:
+                self.calls.append((message, {"event": event, "context": context}))
 
-    fake_logger = FakeLogger()
+        fake_logger = FakeLogger()
 
-    def fake_get_logger(name: str) -> FakeLogger:
-        calls["logger_name"] = name
-        return fake_logger
+        def fake_get_logger(name: str) -> FakeLogger:
+            calls["logger_name"] = name
+            return fake_logger
 
-    real_loader = wink.debug_app.load_snapshot
+        real_loader = wink.debug_app.load_snapshot
 
-    def fake_load_snapshot(path: Path) -> object:
-        calls.setdefault("loaded_paths", []).append(path)
-        return real_loader(path)
+        def fake_load_snapshot(path: Path) -> object:
+            calls.setdefault("loaded_paths", []).append(path)
+            return real_loader(path)
 
-    def fake_build_app(*args: object, **kwargs: object) -> str:
-        calls["app_args"] = {"snapshot": args[0], **kwargs}
-        return "app"
+        def fake_build_app(*args: object, **kwargs: object) -> str:
+            calls["app_args"] = {"snapshot": args[0], **kwargs}
+            return "app"
 
-    def fake_run_server(
-        app: object, *, host: str, port: int, open_browser: bool, logger: object
-    ) -> int:
-        calls["run_args"] = {
-            "app": app,
-            "host": host,
-            "port": port,
-            "open_browser": open_browser,
-            "logger": logger,
-        }
-        return 0
+        def fake_run_server(
+            app: object, *, host: str, port: int, open_browser: bool, logger: object
+        ) -> int:
+            calls["run_args"] = {
+                "app": app,
+                "host": host,
+                "port": port,
+                "open_browser": open_browser,
+                "logger": logger,
+            }
+            return 0
 
-    monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
-    monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-    monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
-    monkeypatch.setattr(wink.debug_app, "build_debug_app", fake_build_app)
-    monkeypatch.setattr(wink.debug_app, "run_debug_server", fake_run_server)
+        monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
+        monkeypatch.setattr(wink, "get_logger", fake_get_logger)
+        monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
+        monkeypatch.setattr(wink.debug_app, "build_debug_app", fake_build_app)
+        monkeypatch.setattr(wink.debug_app, "run_debug_server", fake_run_server)
 
-    exit_code = wink.main(
-        [
-            "debug",
-            str(tmp_path),
-            "--no-open-browser",
-        ]
-    )
+        exit_code = wink.main(
+            [
+                "debug",
+                str(tmp_path),
+                "--no-open-browser",
+            ]
+        )
 
     assert exit_code == 0
     assert calls["loaded_paths"][0] == newer.resolve()
