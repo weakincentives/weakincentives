@@ -206,6 +206,8 @@ def _assert_prompt_usage(session: Session) -> None:
     assert event is not None, "Expected a PromptExecuted event."
     usage = event.usage
     assert usage is not None, "Expected token usage to be recorded."
+    assert usage.input_tokens is not None and usage.input_tokens > 0
+    assert usage.output_tokens is not None and usage.output_tokens > 0
     assert usage.total_tokens is not None and usage.total_tokens > 0
 
 
