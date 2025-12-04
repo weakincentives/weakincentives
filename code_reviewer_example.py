@@ -239,7 +239,9 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
         WorkspaceDigestSection(session=session),
         _build_subagents_section(),
         PlanningToolsSection(
-            session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT
+            session=session,
+            strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+            accepts_overrides=True,
         ),
         workspace_section,
         MarkdownSection[ReviewTurnParams](
@@ -295,7 +297,7 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
 
 
 def _build_subagents_section() -> SubagentsSection:
-    return SubagentsSection()
+    return SubagentsSection(accepts_overrides=True)
 
 
 def _sunfish_mounts() -> tuple[HostMount, ...]:
@@ -325,6 +327,7 @@ def _build_workspace_section(
             session=session,
             mounts=mounts,
             allowed_host_roots=allowed_roots,
+            accepts_overrides=True,
         )
 
     return PodmanSandboxSection(
@@ -335,6 +338,7 @@ def _build_workspace_section(
             base_url=connection.get("base_url"),
             identity=connection.get("identity"),
             connection_name=connection.get("connection_name"),
+            accepts_overrides=True,
         ),
     )
 
