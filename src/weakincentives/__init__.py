@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from .adapters import PromptResponse
+from .dataclasses import FrozenDataclass
 from .deadlines import Deadline
 from .prompt import (
     MarkdownSection,
@@ -31,6 +32,7 @@ from .types import JSONValue
 
 __all__ = [
     "Deadline",
+    "FrozenDataclass",
     "JSONValue",
     "MarkdownSection",
     "Prompt",
