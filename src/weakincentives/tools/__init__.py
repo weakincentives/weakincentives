@@ -57,6 +57,7 @@ from .subagents import (
     build_dispatch_subagents_tool,
     dispatch_subagents,
 )
+from .todo import TodoList, TodoReadParams, TodoToolsSection
 from .vfs import (
     DeleteEntry,
     EditFileParams,
@@ -130,6 +131,9 @@ __all__ = [
     "SubagentIsolationLevel",
     "SubagentResult",
     "SubagentsSection",
+    "TodoList",
+    "TodoReadParams",
+    "TodoToolsSection",
     "ToolValidationError",
     "UpdateStep",
     "VfsFile",

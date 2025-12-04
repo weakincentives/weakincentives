@@ -50,12 +50,11 @@ from weakincentives.runtime import (
 from weakincentives.serde import dump
 from weakincentives.tools import (
     HostMount,
-    Plan,
-    PlanningStrategy,
-    PlanningToolsSection,
     PodmanSandboxConfig,
     PodmanSandboxSection,
     SubagentsSection,
+    TodoList,
+    TodoToolsSection,
     VfsPath,
     VfsToolsSection,
     WorkspaceDigestSection,
@@ -174,8 +173,8 @@ class CodeReviewApp:
             answer = self._evaluate_turn(user_prompt)
             print("\n--- Agent Response ---")
             print(answer)
-            print("\n--- Plan Snapshot ---")
-            print(_render_plan_snapshot(self.session))
+            print("\n--- Todo Snapshot ---")
+            print(_render_todo_snapshot(self.session))
             print("-" * 23 + "\n")
 
         print("Goodbye.")
@@ -237,9 +236,7 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
         _build_review_guidance_section(),
         WorkspaceDigestSection(session=session),
         _build_subagents_section(),
-        PlanningToolsSection(
-            session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT
-        ),
+        TodoToolsSection(session=session),
         workspace_section,
         MarkdownSection[ReviewTurnParams](
             title="Review Request",
@@ -273,8 +270,8 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
             Access the repository under the `sunfish/` directory.
 
             Use the available tools to stay grounded:
-            - Planning tools help you capture multi-step investigations; keep the
-              plan updated as you explore.
+            - Todo tools keep a running checklist for the session; read the latest
+              list before writing updates.
             - Filesystem tools list directories, read files, and stage edits.
               When available, the `shell_execute` command runs short Podman
               commands (no network access). Mounted files are read-only; use
@@ -380,7 +377,7 @@ def _build_intro(override_tag: str) -> str:
         f"""
         Launching example code reviewer agent.
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
-        - Tools: Planning and a filesystem workspace (with a Podman shell if available).
+        - Tools: A session-scoped todo list plus filesystem workspace tools (with a Podman shell if available).
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
         - Commands: 'optimize' refreshes the workspace digest, 'exit' quits.
 
@@ -389,18 +386,13 @@ def _build_intro(override_tag: str) -> str:
     ).strip()
 
 
-def _render_plan_snapshot(session: Session) -> str:
-    plan = select_latest(session, Plan)
-    if plan is None:
-        return "No active plan."
+def _render_todo_snapshot(session: Session) -> str:
+    todo_list = select_latest(session, TodoList)
+    if todo_list is None or not todo_list.items:
+        return "No todo items recorded."
 
-    lines = [f"Objective: {plan.objective} (status: {plan.status})"]
-    for step in plan.steps:
-        notes = "; ".join(step.notes) if step.notes else ""
-        suffix = f" — notes: {notes}" if notes else ""
-        if step.details:
-            suffix = f" — details: {step.details}{suffix}"
-        lines.append(f"- {step.step_id} [{step.status}] {step.title}{suffix}")
+    lines = ["Current todo list:"]
+    lines.extend(f"- {item}" for item in todo_list.items)
     return "\n".join(lines)
 
 

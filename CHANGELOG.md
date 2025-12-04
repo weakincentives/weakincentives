@@ -9,11 +9,15 @@ Release highlights for weakincentives.
 - Removed the `initialize_code_reviewer_runtime` helper from the code reviewer
   example; tests now call `_create_runtime_context` directly when constructing
   prompt and session state.
+- The code reviewer example now surfaces todo snapshots via `TodoToolsSection`
+  instead of the planning suite.
 
 ### Tools & Sandboxes
 
 - Podman sandbox containers now start with networking disabled (`network_mode=none`),
   and an integration test verifies they cannot reach external hosts.
+- Added a session-scoped todo list tool suite (`TodoToolsSection`) with
+  `todo_read`/`todo_write` operations backed by the append reducer.
 
 ## v0.12.0 - 2025-11-30
 

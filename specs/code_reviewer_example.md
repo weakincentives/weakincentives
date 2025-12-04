@@ -10,13 +10,13 @@ optimization hooks in one place.
 - **Why it exists:** Serves as the canonical, end-to-end walkthrough for a
   review agent that exercises prompt composition, overrides, workspace tooling,
   and adapter optimization in one script. It prioritizes transparency so
-  operators can see every prompt render, tool call, and plan snapshot.
+  operators can see every prompt render, tool call, and todo snapshot.
 - **Scope:** Focused on the bundled `sunfish` repository fixture and the
   runtime stack required to review it. The design keeps mounts read-only and
   caps workspace payloads to 600 KB to avoid bloating prompts.
 - **Guiding principles:** Prefer declarative prompt assembly, keep overrides
-  ergonomic (tagged by namespace/key), reuse shared planning/workspace tools,
-  and expose observability hooks so REPL users stay in the loop.
+  ergonomic (tagged by namespace/key), reuse shared todo/workspace tools, and
+  expose observability hooks so REPL users stay in the loop.
 
 ## Runtime Architecture
 
@@ -35,13 +35,13 @@ On startup:
 1. `_resolve_override_tag` selects the overrides tag using the order:
    explicit `override_tag` arg → `CODE_REVIEW_PROMPT_TAG` env var → `"latest"`.
 1. `CodeReviewApp.run()` prints an intro banner, accepts review prompts until
-   EOF/`exit`/`quit`, and emits plan snapshots after every agent response.
+   EOF/`exit`/`quit`, and emits todo snapshots after every agent response.
 
 Each REPL turn invokes `ProviderAdapter.evaluate` with
 `ReviewTurnParams(request=...)` and our session/bus/override state. Responses
 are converted into human-readable text by `_render_response_payload`, which
-mirrors the `ReviewResponse` dataclass (`summary`, `issues`, `next_steps`). Plan
-data is pulled from the session via `select_latest(session, Plan)`.
+mirrors the `ReviewResponse` dataclass (`summary`, `issues`, `next_steps`). Todo
+data is pulled from the session via `select_latest(session, TodoList)`.
 
 ## Prompt Composition
 
@@ -58,9 +58,10 @@ to keep behavior predictable (previewed in the REPL before each turn):
    - Populated interactively via the `optimize` command.
 1. **Subagents** (`SubagentsSection`):
    - Enables `dispatch_subagents` so the agent can parallelize exploration.
-1. **Planning Tools** (`PlanningToolsSection`):
-   - Uses `PlanningStrategy.PLAN_ACT_REFLECT`, allowing multi-step plans whose
-     snapshots we print after every turn.
+1. **Todo Tools** (`TodoToolsSection`):
+   - Renders brief guidance to read the current list before writing updates.
+   - Persists todo snapshots to the session so we can print the latest list
+     after every turn.
 1. **Workspace Tools**:
    - `_build_workspace_section` prefers `PodmanSandboxSection` when
      `PodmanSandboxSection.resolve_connection()` succeeds; otherwise it falls
@@ -94,10 +95,10 @@ The REPL recognizes a single special command:
 
 The shared adapter logic (see `ProviderAdapter.optimize`) builds its own
 optimization prompt using two short markdown sections
-(`Optimization Goal`, `Expectations`), the planning tools, and whichever
-workspace section matches the review prompt (Podman or VFS). The digest body is
-persisted via `set_workspace_digest` and, when callers request global scope,
-via `PromptOverridesStore.set_section_override`.
+(`Optimization Goal`, `Expectations`), the todo tools, and whichever workspace
+section matches the review prompt (Podman or VFS). The digest body is persisted
+via `set_workspace_digest` and, when callers request global scope, via
+`PromptOverridesStore.set_section_override`.
 
 ## Logging & Observability
 
@@ -106,9 +107,8 @@ via `PromptOverridesStore.set_section_override`.
   obvious in logs.
 - `_log_tool_invocation` renders tool params/results/payloads via the serde
   helpers while truncating long strings (`_LOG_STRING_LIMIT = 256`).
-- `_render_plan_snapshot` summarizes the latest plan objective, per-step status,
-  notes, and details. We call it after every agent response so operators can
-  track progress.
+- `_render_todo_snapshot` prints the current todo list after every agent
+  response so operators can track follow-ups at a glance.
 
 ## Running the Example
 

@@ -44,11 +44,16 @@ metadata so the provider returns parsed structured results. Fallbacks preserve
 text-based parsing when native support is unavailable. See
 [Native OpenAI Structured Outputs](specs/NATIVE_OPENAI_STRUCTURED_OUTPUTS.md).
 
+## Todo Tools
+
+The `TodoToolsSection` exposes `todo_read`/`todo_write` against an append-only
+session slice holding ordered text lists. See the [Todo Tool specification](specs/TODO_TOOL.md).
+
 ## Planning Tool Suite
 
-The `PlanningToolsSection` registers a todo-list tool suite that keeps a single
-session-scoped plan, replacing the current snapshot on each update. Reducers and
-data models are documented in the [Planning Tool specification](specs/PLANNING_TOOL.md).
+`PlanningToolsSection` manages structured execution plans (objective, steps,
+statuses) and the reducers that keep them consistent. Details live in the
+[Planning Tool specification](specs/PLANNING_TOOL.md).
 
 ## Planning Strategies
 
