@@ -39,7 +39,7 @@
    other event type. Each session and event carries a UUID identifier plus a
    timezone-aware creation timestamp for downstream correlation.
 1. **Default behavior that works** – Without custom reducers, the Session appends new
-   dataclass values (deduping by equality) and keeps results immutable.
+   dataclass values and keeps results immutable.
 1. **Flexible slices** – Reducers may manage a slice whose element type differs from
    the incoming dataclass value so Sessions can maintain derived aggregates.
 
@@ -90,7 +90,7 @@ structures.
 - **Lifecycle hooks**: Constructing a session immediately wires the event listeners;
   no additional setup steps are required to start collecting data.
 - **Immutable slices**: Every dispatch path returns a fresh tuple. Default reducers
-  dedupe by equality, but callers can opt into upsert/replace semantics when
+  append every event value; callers can opt into upsert/replace semantics when
   registering reducers.
 - **Dispatch ordering**: Events flow through reducers synchronously on the publisher
   thread. When multiple reducers share a data type they are invoked in the order
@@ -225,7 +225,7 @@ from weakincentives.runtime.session import iter_sessions_bottom_up
 Provide three reducers (each accepts the keyword-only `context` argument and may
 ignore it when unused):
 
-1. `append` – Default behavior, dedupes by equality.
+1. `append` – Default behavior, appends every event value.
 1. `upsert_by(key_fn)` – Replaces items that share the same derived key.
 1. `replace_latest` – Stores only the most recent value.
 

@@ -44,6 +44,23 @@ def test_todo_write_appends_normalized_snapshot() -> None:
     assert latest == TodoList(items=("trace podman logs", "triage lint failures"))
 
 
+def test_todo_write_replaces_latest_snapshot_even_when_reverting() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = TodoToolsSection(session=session)
+    write_tool = find_tool(section, "todo_write")
+
+    original = TodoList(items=("triage",))
+    replacement = TodoList(items=("fix",))
+
+    invoke_tool(bus, write_tool, original, session=session)
+    invoke_tool(bus, write_tool, replacement, session=session)
+    invoke_tool(bus, write_tool, original, session=session)
+
+    assert session.select_all(TodoList) == (original, replacement, original)
+    assert select_latest(session, TodoList) == original
+
+
 def test_todo_read_returns_latest_snapshot() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)

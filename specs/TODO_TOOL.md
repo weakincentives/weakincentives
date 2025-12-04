@@ -28,7 +28,8 @@ class TodoList:
 
 - State is **session-local** and cleared when the session ends.
 - The session keeps **every `TodoList` snapshot**. Writes append to the slice
-  (via the `append` reducer) instead of replacing the latest value.
+  (via the `append` reducer) instead of replacing the latest value, even when the
+  payload matches an earlier snapshot.
 - Reading uses the most recent snapshot (`select_latest(session, TodoList)`) but
   the full slice history remains available to the orchestrator if needed.
 

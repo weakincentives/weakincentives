@@ -128,7 +128,9 @@ def make_prompt_rendered(
     )
 
 
-def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> None:
+def test_tool_invoked_appends_payload_per_event(
+    session_factory: SessionFactory,
+) -> None:
     session, bus = session_factory()
 
     event = make_tool_event(1)
@@ -137,7 +139,10 @@ def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> N
 
     assert first_result.ok
     assert second_result.ok
-    assert session.select_all(ExamplePayload) == (ExamplePayload(value=1),)
+    assert session.select_all(ExamplePayload) == (
+        ExamplePayload(value=1),
+        ExamplePayload(value=1),
+    )
     assert isinstance(event.event_id, UUID)
 
 
@@ -428,7 +433,7 @@ def test_select_where_logs_violate_purity_contract(
         select_where(session, ExampleOutput, predicate)
 
 
-def test_reducer_failure_leaves_previous_slice_unchanged(
+def test_reducer_failure_preserves_successful_reducer_results(
     session_factory: SessionFactory,
 ) -> None:
     session, bus = session_factory()
@@ -451,11 +456,15 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
     assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
     assert first_result.handled_count == 1
 
-    # Second publish should leave slice unchanged due to faulty reducer
+    # Second publish should record the append reducer result even though a later
+    # reducer fails.
     second_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     assert second_result.handled_count == 1
-    assert session.select_all(ExampleOutput) == (ExampleOutput(text="first"),)
+    assert session.select_all(ExampleOutput) == (
+        ExampleOutput(text="first"),
+        ExampleOutput(text="first"),
+    )
 
 
 def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> None:

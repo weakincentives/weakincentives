@@ -42,12 +42,10 @@ def append[T: SupportsDataclass](
     *,
     context: ReducerContextProtocol,
 ) -> tuple[T, ...]:
-    """Append the event value if it is not already present."""
+    """Append the event value."""
 
     del context
     value = cast(T, _resolve_event_value(event))
-    if value in slice_values:
-        return slice_values
     return (*slice_values, value)
 
 

@@ -18,6 +18,8 @@ Release highlights for weakincentives.
   and an integration test verifies they cannot reach external hosts.
 - Added a session-scoped todo list tool suite (`TodoToolsSection`) with
   `todo_read`/`todo_write` operations backed by the append reducer.
+- The session append reducer now always records every payload, allowing todo
+  writes (and other append-driven slices) to revert to earlier snapshots.
 
 ## v0.12.0 - 2025-11-30
 
