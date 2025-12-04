@@ -35,16 +35,24 @@ allocation.
     provider response, and tool output phases. The provider API maintains the
     cumulative token counter; callers compare that to `token_limit` to detect
     overages.
+- `TokenLimit` maps directly to `TokenUsage` with separate ceilings for the two
+  pricing dimensions providers report:
+  - `input: int | None` – optional ceiling for prompt or tool input tokens.
+  - `output: int | None` – optional ceiling for model or tool output tokens.
+  - Either field may be `None` to denote that dimension is unbounded while the
+    other remains enforced.
 - Construction validates both components and rejects impossible states
-  (negative remaining tokens, expired deadlines, or missing token ceilings).
+  (negative remaining tokens in the bounded dimensions, expired deadlines, or
+  missing token ceilings when both limits are `None`).
 - Provide helpers:
   - `remaining_time(now: datetime | None = None) -> timedelta | None` mirroring
     `Deadline.remaining()` semantics.
-  - `remaining_tokens(usage: int) -> int` returning the remaining allowance
-    after subtracting the current cumulative usage reported by the provider or
-    tool handler.
-  - `assert_within_limit(usage: int) -> None` raising `BudgetExceededError` when
-    the reported cumulative usage meets or exceeds the limit.
+  - `remaining_tokens(usage: TokenUsage) -> TokenUsage` returning per-dimension
+    remaining allowance after subtracting the current cumulative usage reported
+    by the provider or tool handler; unbounded dimensions remain `None`.
+  - `assert_within_limit(usage: TokenUsage) -> None` raising
+    `BudgetExceededError` when any bounded dimension in the reported cumulative
+    usage meets or exceeds the matching limit.
 
 ## API Changes
 
@@ -66,13 +74,15 @@ allocation.
   `phase="preflight"` before any provider call.
 - **Provider requests** – Before each provider invocation, orchestrators check
   `budget.remaining_time()` and `budget.remaining_tokens(current_usage)` against
-  the projected costs using the provider's cumulative usage counter. When
-  either is exhausted, raise `BudgetExceededError` without issuing the request.
-- **Token accounting** – Provider adapters rely on the provider API's
-  cumulative token counter. Tool handlers report estimated token costs (or
-  measured counts when available) through `ToolContext`, allowing the
-  orchestrator to compare the updated cumulative usage against `token_limit`
-  using `assert_within_limit`.
+  the projected costs using the provider's cumulative usage counter. When either
+  bounded dimension is exhausted, raise `BudgetExceededError` without issuing
+  the request.
+- **Token accounting** – Provider adapters rely on the provider API's cumulative
+  token counter, which supplies a `TokenUsage` with separate `input` and
+  `output` totals. Tool handlers report estimated token costs (or measured counts
+  when available) through `ToolContext`, allowing the orchestrator to compare
+  the updated cumulative usage against `token_limit` using `assert_within_limit`
+  while ignoring unbounded dimensions.
 - **Subagents** – Delegation helpers forward the active `Budget` into child
   prompts. Subagents MUST share the same object so consumption and expiration in
   the child reduce the remaining budget for the parent. When a child exceeds the
