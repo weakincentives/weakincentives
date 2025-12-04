@@ -22,7 +22,14 @@ from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 from ..logging import StructuredLogger, get_logger
-from ._types import EventBus, EventHandler, HandlerFailure, PublishResult, ToolInvoked
+from ._types import (
+    EventBus,
+    EventHandler,
+    HandlerFailure,
+    PublishResult,
+    TokenUsage,
+    ToolInvoked,
+)
 
 if TYPE_CHECKING:
     from ...prompt.overrides import PromptDescriptor
@@ -40,23 +47,6 @@ def _describe_handler(handler: EventHandler) -> str:
 
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "event_bus"})
-
-
-@dataclass(slots=True, frozen=True)
-class TokenUsage:
-    """Token accounting captured from provider responses."""
-
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cached_tokens: int | None = None
-
-    @property
-    def total_tokens(self) -> int | None:
-        """Return a best-effort total when counts are available."""
-
-        if self.input_tokens is None and self.output_tokens is None:
-            return None
-        return (self.input_tokens or 0) + (self.output_tokens or 0)
 
 
 class InProcessEventBus:

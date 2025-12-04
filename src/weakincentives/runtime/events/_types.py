@@ -17,16 +17,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Protocol, cast, override
+from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 
 EventHandler = Callable[[object], None]
-
-
-if TYPE_CHECKING:  # pragma: no cover - import cycle guard for type checking
-    from . import TokenUsage
 
 
 class EventBus(Protocol):
@@ -86,6 +82,23 @@ class PublishResult:
 
 
 @dataclass(slots=True, frozen=True)
+class TokenUsage:
+    """Token accounting captured from provider responses."""
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_tokens: int | None = None
+
+    @property
+    def total_tokens(self) -> int | None:
+        """Return a best-effort total when counts are available."""
+
+        if self.input_tokens is None and self.output_tokens is None:
+            return None
+        return (self.input_tokens or 0) + (self.output_tokens or 0)
+
+
+@dataclass(slots=True, frozen=True)
 class ToolInvoked:
     """Event emitted after an adapter executes a tool handler."""
 
@@ -108,5 +121,6 @@ __all__ = [
     "EventHandler",
     "HandlerFailure",
     "PublishResult",
+    "TokenUsage",
     "ToolInvoked",
 ]

@@ -149,12 +149,17 @@ def test_publish_tool_invocation_attaches_usage() -> None:
 
     bus = RecordingBus()
     session = Session(bus=bus)
+    typed_tool = cast(Tool[SupportsDataclass, SupportsToolResult], tool)
+    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]] = {
+        tool.name: typed_tool
+    }
+
     context = ToolExecutionContext(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[Any], object()),
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         rendered_prompt=None,
-        tool_registry={tool.name: tool},
+        tool_registry=tool_registry,
         bus=bus,
         session=session,
         prompt_name="test",
@@ -172,8 +177,8 @@ def test_publish_tool_invocation_attaches_usage() -> None:
     )
 
     outcome = ToolExecutionOutcome(
-        tool=tool,
-        params=params,
+        tool=typed_tool,
+        params=cast(SupportsDataclass, params),
         result=cast(ToolResult[SupportsToolResult], result),
         call_id="call-usage",
         log=log,
