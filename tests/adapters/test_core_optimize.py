@@ -242,7 +242,11 @@ def test_optimize_updates_global_overrides() -> None:
     )
 
     assert overrides_store.calls
-    recorded_prompt, tag, path, body = overrides_store.calls[0]
+    recorded_prompt, tag, path, body = next(
+        call
+        for call in overrides_store.calls
+        if call[3] not in {"seed", "resolve", "upsert", "delete"}
+    )
     assert recorded_prompt is prompt
     assert tag == "tag"
     assert path[-1] == "workspace-digest"
@@ -299,6 +303,35 @@ def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
     latest = latest_workspace_digest(session, "workspace-digest")
     assert latest is not None
     assert getattr(latest, "body", None) == "existing"
+
+
+def test_optimize_seeds_internal_prompt_overrides() -> None:
+    adapter = _RecordingAdapter(mode="dataclass")
+    overrides_store = _RecordingOverridesStore()
+    prompt = Prompt(_build_prompt())
+
+    _ = adapter.optimize(
+        prompt,
+        session=Session(),
+        overrides_store=overrides_store,
+    )
+
+    assert any(call[3] == "seed" for call in overrides_store.calls)
+
+
+def test_optimize_skips_overrides_when_disabled() -> None:
+    adapter = _RecordingAdapter(mode="dataclass")
+    overrides_store = _RecordingOverridesStore()
+    prompt = Prompt(_build_prompt())
+
+    _ = adapter.optimize(
+        prompt,
+        session=Session(),
+        overrides_store=overrides_store,
+        accepts_overrides=False,
+    )
+
+    assert not overrides_store.calls
 
 
 def test_optimize_requires_workspace_section() -> None:

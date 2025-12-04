@@ -23,7 +23,7 @@ from typing import Any, Literal, TypeVar, cast
 from ..deadlines import Deadline
 from ..prompt import MarkdownSection, Prompt, PromptTemplate
 from ..prompt._types import SupportsDataclass
-from ..prompt.overrides import PromptLike, PromptOverridesStore
+from ..prompt.overrides import PromptLike, PromptOverridesError, PromptOverridesStore
 from ..prompt.section import Section
 from ..runtime.events._types import EventBus
 from ..runtime.session import Session
@@ -102,6 +102,7 @@ class ProviderAdapter(ABC):
         store_scope: OptimizationScope = OptimizationScope.SESSION,
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str | None = None,
+        accepts_overrides: bool = True,
         session: SessionProtocol,
         optimization_session: Session | None = None,
     ) -> OptimizationResult:
@@ -132,6 +133,9 @@ class ProviderAdapter(ABC):
 
         effective_store = overrides_store or prompt.overrides_store
         effective_tag = overrides_tag or prompt.overrides_tag
+        if not accepts_overrides:
+            effective_store = None
+            effective_tag = None
 
         optimization_prompt_template = PromptTemplate[_OptimizationResponse](
             ns=f"{prompt.ns}.optimization",
@@ -160,17 +164,28 @@ class ProviderAdapter(ABC):
                 PlanningToolsSection(
                     session=inner_session,
                     strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
+                    accepts_overrides=accepts_overrides,
                 ),
                 *safe_tools,
                 safe_workspace,
             ),
         )
 
+        normalized_tag = effective_tag or "latest"
         optimization_prompt = Prompt(
             optimization_prompt_template,
             overrides_store=effective_store,
-            overrides_tag=effective_tag,
+            overrides_tag=normalized_tag,
         )
+        if accepts_overrides and effective_store is not None:
+            try:
+                effective_store.seed(optimization_prompt, tag=normalized_tag)
+            except PromptOverridesError as exc:
+                raise PromptEvaluationError(
+                    "Failed to seed overrides for optimization prompt.",
+                    prompt_name=prompt_name,
+                    phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                ) from exc
 
         response = self.evaluate(
             optimization_prompt,

@@ -83,9 +83,11 @@ class _RepositoryOptimizationAdapter:
         store_scope: OptimizationScope = OptimizationScope.SESSION,
         overrides_store: LocalPromptOverridesStore | None = None,
         overrides_tag: str | None = None,
+        accepts_overrides: bool = True,
         session: Session | None = None,
         optimization_session: Session | None = None,
     ) -> OptimizationResult:
+        del accepts_overrides
         assert session is not None
         assert optimization_session is not None
         self.optimization_sessions.append(optimization_session)
