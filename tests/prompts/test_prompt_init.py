@@ -20,6 +20,7 @@ import pytest
 
 from weakincentives.prompt import (
     MarkdownSection,
+    PromptDescriptor,
     PromptTemplate,
     PromptValidationError,
     SupportsDataclass,
@@ -156,6 +157,16 @@ def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
     assert "Second: shared" in rendered.text
 
 
+def test_prompt_exposes_placeholders_from_registry_snapshot() -> None:
+    section = MarkdownSection[RootParams](
+        title="Root", template="Root: ${title}", key="root"
+    )
+
+    prompt = PromptTemplate(ns="tests/prompts", key="placeholder", sections=[section])
+
+    assert prompt.placeholders == {("root",): frozenset({"title"})}
+
+
 def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_default() -> (
     None
 ):
@@ -222,3 +233,42 @@ def test_text_section_rejects_non_section_children() -> None:
         )
 
     assert "Section instances" in str(exc.value)
+
+
+def test_prompt_template_is_immutable() -> None:
+    section = MarkdownSection[RootParams](
+        title="Root", template="Root: ${title}", key="root"
+    )
+
+    prompt = PromptTemplate(ns="tests/prompts", key="immutable", sections=[section])
+
+    with pytest.raises(AttributeError):
+        prompt.ns = "changed"
+    with pytest.raises(AttributeError):
+        prompt.placeholders = {}
+    with pytest.raises(AttributeError):
+        prompt.inject_output_instructions = False
+
+
+def test_prompt_descriptor_cached_during_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    section = MarkdownSection[RootParams](
+        title="Root", template="Root: ${title}", key="root"
+    )
+
+    prompt = PromptTemplate(ns="tests/prompts", key="descriptor", sections=[section])
+
+    def _fail(
+        cls: type[PromptDescriptor], prompt_like: PromptTemplate[SupportsDataclass]
+    ) -> PromptDescriptor:
+        raise AssertionError("from_prompt should not be invoked after initialization")
+
+    monkeypatch.setattr(PromptDescriptor, "from_prompt", classmethod(_fail))
+
+    rendered = prompt.render(RootParams(title="hello"))
+    bound_prompt = prompt.bind(RootParams(title="hello"))
+
+    assert prompt.descriptor.ns == "tests/prompts"
+    assert bound_prompt.descriptor is prompt.descriptor
+    assert "Root: hello" in rendered.text

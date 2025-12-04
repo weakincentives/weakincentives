@@ -160,6 +160,15 @@ class PromptDescriptor:
         return cls(prompt.ns, prompt.key, sections, tools)
 
 
+def descriptor_for_prompt(prompt: PromptLike) -> PromptDescriptor:
+    """Return a cached prompt descriptor when available."""
+
+    descriptor = getattr(prompt, "descriptor", None)
+    if isinstance(descriptor, PromptDescriptor):
+        return descriptor
+    return PromptDescriptor.from_prompt(prompt)
+
+
 @dataclass(slots=True)
 class SectionOverride:
     """Override payload for a prompt section validated by hash."""

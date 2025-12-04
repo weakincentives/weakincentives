@@ -40,6 +40,7 @@ from .versioning import (
     PromptOverridesError,
     PromptOverridesStore,
     SectionOverride,
+    descriptor_for_prompt,
 )
 
 _LOGGER: StructuredLogger = get_logger(
@@ -246,7 +247,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         path: tuple[str, ...],
         body: str,
     ) -> PromptOverride:
-        descriptor = PromptDescriptor.from_prompt(prompt)
+        descriptor = descriptor_for_prompt(prompt)
         normalized_tag = self._filesystem.validate_identifier(tag, "tag")
         existing_override = self.resolve(descriptor=descriptor, tag=normalized_tag)
         sections = dict(existing_override.sections) if existing_override else {}
@@ -271,7 +272,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         *,
         tag: str = "latest",
     ) -> PromptOverride:
-        descriptor = PromptDescriptor.from_prompt(prompt)
+        descriptor = descriptor_for_prompt(prompt)
         normalized_tag = self._filesystem.validate_identifier(tag, "tag")
         file_path = self._filesystem.override_file_path(
             ns=descriptor.ns,

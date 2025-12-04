@@ -27,6 +27,7 @@ from weakincentives.prompt.overrides import (
     PromptDescriptor,
     PromptOverride,
     PromptOverridesError,
+    SectionDescriptor,
     SectionOverride,
     ToolOverride,
 )
@@ -790,10 +791,19 @@ def test_seed_sections_missing_section_raises(tmp_path: Path) -> None:
     prompt = _build_prompt()
     descriptor = PromptDescriptor.from_prompt(prompt)
 
-    prompt._registry_snapshot = replace(prompt._registry_snapshot, sections=())
+    missing_section_descriptor = replace(
+        descriptor,
+        sections=[
+            SectionDescriptor(
+                path=("missing",),
+                content_hash=descriptor.sections[0].content_hash,
+                number="1",
+            )
+        ],
+    )
 
     with pytest.raises(PromptOverridesError):
-        seed_sections(prompt, descriptor)
+        seed_sections(prompt, missing_section_descriptor)
 
 
 def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
