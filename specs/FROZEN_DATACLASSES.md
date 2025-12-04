@@ -66,15 +66,26 @@ inside `__post_init__` is prohibited; failures should raise exceptions instead o
 
 ## Copy helpers
 
-The decorator injects a `with_updates(**changes)` instance method as a thin wrapper around `dataclasses.replace`:
+The decorator injects ergonomic copy-on-write helpers:
+
+- `update(**changes)`: Thin wrapper over `dataclasses.replace` that re-runs `__post_init__` to keep invariants enforced.
+- `merge(mapping_or_obj)`: Accepts a `Mapping[str, Any]` or object with matching attributes, merges those fields into a
+  copy, and re-runs `__post_init__`.
+- `map(transform: Callable[[dict[str, Any]], Mapping[str, Any]])`: Provides the current field mapping to the callable,
+  expects a mapping of replacements, and applies them atomically via `update`.
 
 ```python
-updated = invoice.with_updates(tax_rate=0.24)
+updated = invoice.update(tax_rate=0.24)
+from_mapping = invoice.merge({"tax_rate": 0.24})
+remapped = invoice.map(lambda fields: {"tax_cents": fields["total_cents"] * 0.24})
 ```
 
-- Re-applies `__post_init__` after replacement to ensure invariants still hold.
-- Does **not** invoke `__pre_init__`; callers should recompute dependent fields explicitly or factor that logic into a
-  shared helper callable.
+Notes:
+
+- These helpers do **not** invoke `__pre_init__`; callers should recompute dependent fields explicitly or factor that
+  logic into a shared helper callable.
+- `map` is intended for small, pure transforms; complex recalculation belongs in a dedicated helper function that calls
+  `update` or `merge`.
 
 ## Recommended usage patterns
 
@@ -110,5 +121,5 @@ class User:
             raise ValueError("name is required")
 
 user = User(name=" Ada Lovelace ")
-updated = user.with_updates(tags=("pioneer",))
+updated = user.update(tags=("pioneer",))
 ```
