@@ -31,10 +31,11 @@ allocation.
 
 - `Budget` lives in `weakincentives.budget` as an immutable dataclass holding:
   - `deadline: Deadline | None` – optional wall-clock cutoff.
-  - `token_limit: TokenLimit` – maximum tokens permitted across prompt,
-    provider response, and tool output phases. The provider API maintains the
-    cumulative token counter; callers compare that to `token_limit` to detect
-    overages.
+  - `token_limit: TokenLimit | None` – optional ceiling for tokens permitted
+    across prompt, provider response, and tool output phases. When `None`, only
+    the deadline is enforced. The provider API maintains the cumulative token
+    counter; callers compare that to `token_limit` to detect overages when it is
+    present.
 - `TokenLimit` maps directly to `TokenUsage` with separate ceilings for the two
   pricing dimensions providers report:
   - `input: int | None` – optional ceiling for prompt or tool input tokens.
@@ -42,17 +43,19 @@ allocation.
   - Either field may be `None` to denote that dimension is unbounded while the
     other remains enforced.
 - Construction validates both components and rejects impossible states
-  (negative remaining tokens in the bounded dimensions, expired deadlines, or
-  missing token ceilings when both limits are `None`).
+  (negative remaining tokens in the bounded dimensions or expired deadlines);
+  `token_limit` itself may be `None` to represent a pure deadline budget.
 - Provide helpers:
   - `remaining_time(now: datetime | None = None) -> timedelta | None` mirroring
     `Deadline.remaining()` semantics.
-  - `remaining_tokens(usage: TokenUsage) -> TokenUsage` returning per-dimension
-    remaining allowance after subtracting the current cumulative usage reported
-    by the provider or tool handler; unbounded dimensions remain `None`.
+  - `remaining_tokens(usage: TokenUsage) -> TokenUsage | None` returning
+    per-dimension remaining allowance after subtracting the current cumulative
+    usage reported by the provider or tool handler; unbounded dimensions remain
+    `None`. Returns `None` when `token_limit` is `None`.
   - `assert_within_limit(usage: TokenUsage) -> None` raising
     `BudgetExceededError` when any bounded dimension in the reported cumulative
-    usage meets or exceeds the matching limit.
+    usage meets or exceeds the matching limit; it is a no-op when
+    `token_limit` is `None`.
 
 ## API Changes
 
