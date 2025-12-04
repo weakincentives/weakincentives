@@ -44,6 +44,7 @@ from weakincentives.runtime import (
     PromptExecuted,
     PromptRendered,
     Session,
+    TokenUsage,
     ToolInvoked,
     select_latest,
 )
@@ -471,6 +472,7 @@ def _log_tool_invocation(event: object) -> None:
         f"  params: {params_repr}",
         f"  result: {result_message}",
     ]
+    lines.append(f"  {_format_usage_for_log(tool_event.usage)}")
     if payload_repr is not None:
         lines.append(f"  payload: {payload_repr}")
 
@@ -479,12 +481,13 @@ def _log_tool_invocation(event: object) -> None:
 
 def _log_prompt_executed(event: object) -> None:
     prompt_event = cast(PromptExecuted, event)
-    usage = prompt_event.usage
-
     print("\n[prompt] Execution complete")
+    print(f"  {_format_usage_for_log(prompt_event.usage)}\n")
+
+
+def _format_usage_for_log(usage: TokenUsage | None) -> str:
     if usage is None:
-        print("  token usage: (not reported)\n")
-        return
+        return "token usage: (not reported)"
 
     parts: list[str] = []
     if usage.input_tokens is not None:
@@ -498,7 +501,9 @@ def _log_prompt_executed(event: object) -> None:
     if total is not None:
         parts.append(f"total={total}")
 
-    print(f"  token usage: {', '.join(parts)}\n")
+    if not parts:
+        return "token usage: (not reported)"
+    return f"token usage: {', '.join(parts)}"
 
 
 def _attach_logging_subscribers(bus: EventBus) -> None:
