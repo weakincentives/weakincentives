@@ -335,7 +335,7 @@ def test_prompt_render_respects_section_acceptance() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    prompt.sections[0].section.accepts_overrides = False
+    prompt.sections[0].section.accepts_overrides = False  # type: ignore[union-attr]
 
     rendered = prompt.render(
         _GreetingParams(subject="Operators"),
@@ -437,7 +437,7 @@ def test_prompt_render_with_tool_overrides_respects_acceptance() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    prompt.sections[0].section.tools()[0].accepts_overrides = False
+    prompt.sections[0].section.tools()[0].accepts_overrides = False  # type: ignore[union-attr]
 
     rendered = prompt.render(
         _GreetingParams(subject="Operators"),

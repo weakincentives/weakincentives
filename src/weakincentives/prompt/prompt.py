@@ -12,8 +12,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import MISSING, is_dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import MISSING, field, is_dataclass
 from functools import cached_property
 from typing import (
     TYPE_CHECKING,
@@ -119,13 +119,19 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
 
     ns: str
     key: str
-    name: str | None
-    inject_output_instructions: bool
-    sections: tuple[SectionNode[SupportsDataclass], ...]
-    allow_extra_keys: bool
-    _renderer: PromptRenderer[OutputT]
-    _snapshot: RegistrySnapshot
-    _structured_output: StructuredOutputConfig[SupportsDataclass] | None
+    name: str | None = None
+    inject_output_instructions: bool = True
+    # Field accepts Section sequence as input and stores SectionNode tuple
+    sections: (
+        Sequence[Section[SupportsDataclass]]
+        | tuple[SectionNode[SupportsDataclass], ...]
+    ) = ()
+    allow_extra_keys: bool = False
+    _renderer: PromptRenderer[OutputT] | None = field(init=False, default=None)
+    _snapshot: RegistrySnapshot | None = field(init=False, default=None)
+    _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
+        init=False, default=None
+    )
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -158,44 +164,15 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         *,
         ns: str | object = MISSING,
         key: str | object = MISSING,
-        name: str | None | object = MISSING,
+        name: str | object | None = MISSING,
         sections: Sequence[Section[SupportsDataclass]]
         | tuple[SectionNode[SupportsDataclass], ...]
-        | None
-        | object = MISSING,
+        | object
+        | None = MISSING,
         inject_output_instructions: bool | object = MISSING,
         allow_extra_keys: bool | object = MISSING,
-        _renderer: PromptRenderer[Any] | object = MISSING,
-        _snapshot: RegistrySnapshot | object = MISSING,
-        _structured_output: StructuredOutputConfig[SupportsDataclass]
-        | None
-        | object = MISSING,
     ) -> dict[str, Any]:
         """Normalize inputs and derive internal state before construction."""
-        # Handle direct field assignment (for update/merge operations)
-        if _renderer is not MISSING and _snapshot is not MISSING:
-            return {
-                "ns": ns if ns is not MISSING else "",
-                "key": key if key is not MISSING else "",
-                "name": name if name is not MISSING else None,
-                "inject_output_instructions": (
-                    inject_output_instructions
-                    if inject_output_instructions is not MISSING
-                    else True
-                ),
-                "sections": (
-                    tuple(sections) if sections is not MISSING and sections else ()
-                ),
-                "allow_extra_keys": (
-                    allow_extra_keys if allow_extra_keys is not MISSING else False
-                ),
-                "_renderer": _renderer,
-                "_snapshot": _snapshot,
-                "_structured_output": (
-                    _structured_output if _structured_output is not MISSING else None
-                ),
-            }
-
         # Validate required inputs
         if ns is MISSING:
             raise TypeError("PromptTemplate() missing required argument: 'ns'")
@@ -238,7 +215,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             # Create a closure that captures inject_val for the enabled callback
             def make_enabled_callback(
                 default_inject: bool,
-            ) -> Any:
+            ) -> Callable[[SupportsDataclass], bool]:
                 return lambda _params: default_inject
 
             response_section = ResponseFormatSection(
@@ -293,8 +270,11 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
                 }
                 tool_overrides = dict(override.tool_overrides)
 
-        param_lookup = self._renderer.build_param_lookup(params)
-        return self._renderer.render(
+        renderer = self._renderer
+        if renderer is None:  # pragma: no cover
+            raise RuntimeError("PromptTemplate._renderer not initialized")
+        param_lookup = renderer.build_param_lookup(params)
+        return renderer.render(
             param_lookup,
             overrides,
             tool_overrides,
@@ -327,7 +307,10 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     @property
     def param_types(self) -> set[type[SupportsDataclass]]:
         """Return the set of parameter types used by this prompt's sections."""
-        return self._snapshot.param_types
+        snapshot = self._snapshot
+        if snapshot is None:  # pragma: no cover
+            raise RuntimeError("PromptTemplate._snapshot not initialized")
+        return snapshot.param_types
 
     @cached_property
     def descriptor(self) -> PromptDescriptor:
@@ -337,7 +320,10 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     @property
     def placeholders(self) -> Mapping[SectionPath, frozenset[str]]:
         """Return the placeholders for each section path."""
-        return self._snapshot.placeholders
+        snapshot = self._snapshot
+        if snapshot is None:  # pragma: no cover
+            raise RuntimeError("PromptTemplate._snapshot not initialized")
+        return snapshot.placeholders
 
     @property
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
@@ -358,7 +344,10 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         else:
             candidates = (selector,)
 
-        for node in self._snapshot.sections:
+        snapshot = self._snapshot
+        if snapshot is None:  # pragma: no cover
+            raise RuntimeError("PromptTemplate._snapshot not initialized")
+        for node in snapshot.sections:
             if any(isinstance(node.section, candidate) for candidate in candidates):
                 return node.section
 
@@ -409,7 +398,8 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
 
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
-        return self.template.sections
+        # sections is always SectionNode tuple after construction
+        return cast(tuple[SectionNode[SupportsDataclass], ...], self.template.sections)
 
     @property
     def descriptor(self) -> PromptDescriptor:

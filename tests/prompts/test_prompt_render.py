@@ -339,6 +339,24 @@ def test_prompt_build_response_format_requires_output_container() -> None:
         prompt._build_response_format_params()
 
 
+@dataclass
+class _StructuredOutput:
+    value: str
+
+
+def test_prompt_build_response_format_returns_params_when_configured() -> None:
+    prompt = PromptTemplate[_StructuredOutput](
+        ns="tests/prompts",
+        key="structured-response",
+        sections=[],
+    )
+
+    params = prompt._build_response_format_params()
+
+    assert params.container == "object"
+    assert params.article == "an"
+
+
 def test_markdown_section_missing_placeholder_raises_prompt_error() -> None:
     section = MarkdownSection[IntroParams](
         title="Intro",

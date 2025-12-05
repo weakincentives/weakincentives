@@ -45,7 +45,7 @@ from .overrides import (
     hash_json,
     hash_text,
 )
-from .prompt import Prompt, PromptTemplate
+from .prompt import Prompt, PromptTemplate, SectionNode
 from .protocols import (
     PromptProtocol,
     PromptTemplateProtocol,
@@ -90,6 +90,7 @@ __all__ = [
     "RenderedPromptProtocol",
     "Section",
     "SectionDescriptor",
+    "SectionNode",
     "SectionOverride",
     "SectionPath",
     "StructuredOutputConfig",

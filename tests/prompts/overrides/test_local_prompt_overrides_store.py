@@ -812,7 +812,7 @@ def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
 
     for node in prompt.sections:
-        section = cast(Any, node.section)
+        section = cast(Any, node.section)  # type: ignore[union-attr]
         section.original_body_template = lambda: None
 
     with pytest.raises(PromptOverridesError):
@@ -825,7 +825,7 @@ def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
 
     for node in prompt.sections:
-        section = cast(Any, node.section)
+        section = cast(Any, node.section)  # type: ignore[union-attr]
         section._tools = ()
 
     with pytest.raises(PromptOverridesError):
