@@ -15,12 +15,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, is_dataclass
 from typing import Any, cast
 
 from ..serde import dump
 from ._types import SupportsDataclass
+
+_LOGGER = logging.getLogger(__name__)
 
 _SEQUENCE_EXCLUSIONS = (str, bytes, bytearray)
 
@@ -79,6 +82,15 @@ def _render_dataclass(value: SupportsDataclass) -> str:
                 rendered = str(rendered)
         if rendered is not None:
             return rendered
+    else:
+        _LOGGER.warning(
+            "Tool result dataclass %s is missing a render() implementation; falling back to serialization.",
+            type(value).__name__,
+            extra={
+                "event": "tool_result.render.missing",
+                "dataclass": type(value).__name__,
+            },
+        )
 
     try:
         payload = dump(value, exclude_none=True)
