@@ -14,12 +14,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
 import textwrap
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
@@ -41,14 +40,10 @@ from weakincentives.prompt.overrides import (
 )
 from weakincentives.runtime import (
     EventBus,
-    PromptExecuted,
-    PromptRendered,
     Session,
-    TokenUsage,
-    ToolInvoked,
+    attach_standard_logging,
     select_latest,
 )
-from weakincentives.serde import dump
 from weakincentives.tools import (
     HostMount,
     Plan,
@@ -376,7 +371,7 @@ def _build_logged_session(
         session_tags.update(tags)
 
     session = Session(parent=parent, tags=cast(Mapping[object, object], session_tags))
-    _attach_logging_subscribers(session.event_bus)
+    attach_standard_logging(session.event_bus, truncate_limit=_LOG_STRING_LIMIT)
     return session
 
 
@@ -447,104 +442,6 @@ def _configure_logging() -> None:
         handlers=[logging.StreamHandler(sys.stdout)],
         force=True,
     )
-
-
-def _print_rendered_prompt(event: object) -> None:
-    prompt_event = cast(PromptRendered, event)
-    prompt_label = prompt_event.prompt_name or (
-        f"{prompt_event.prompt_ns}:{prompt_event.prompt_key}"
-    )
-    print(f"\n[prompt] Rendered prompt ({prompt_label})")
-    print(prompt_event.rendered_prompt)
-    print()
-
-
-def _log_tool_invocation(event: object) -> None:
-    tool_event = cast(ToolInvoked, event)
-    params_repr = _format_for_log(dump(tool_event.params, exclude_none=True))
-    result_message = _truncate_for_log(tool_event.result.message or "")
-    payload_repr: str | None = None
-    payload = tool_event.result.value
-    if payload is not None:
-        try:
-            payload_repr = _format_for_log(dump(payload, exclude_none=True))
-        except TypeError:
-            payload_repr = _format_for_log({"value": payload})
-
-    lines = [
-        f"{tool_event.name} ({tool_event.prompt_name})",
-        f"  params: {params_repr}",
-        f"  result: {result_message}",
-    ]
-    lines.append(f"  {_format_usage_for_log(tool_event.usage)}")
-    if payload_repr is not None:
-        lines.append(f"  payload: {payload_repr}")
-
-    print("\n[tool] " + "\n".join(lines))
-
-
-def _log_prompt_executed(event: object) -> None:
-    prompt_event = cast(PromptExecuted, event)
-    print("\n[prompt] Execution complete")
-    print(f"  {_format_usage_for_log(prompt_event.usage)}\n")
-
-
-def _format_usage_for_log(usage: TokenUsage | None) -> str:
-    if usage is None:
-        return "token usage: (not reported)"
-
-    parts: list[str] = []
-    if usage.input_tokens is not None:
-        parts.append(f"input={usage.input_tokens}")
-    if usage.output_tokens is not None:
-        parts.append(f"output={usage.output_tokens}")
-    if usage.cached_tokens is not None:
-        parts.append(f"cached={usage.cached_tokens}")
-
-    total = usage.total_tokens
-    if total is not None:
-        parts.append(f"total={total}")
-
-    if not parts:
-        return "token usage: (not reported)"
-    return f"token usage: {', '.join(parts)}"
-
-
-def _attach_logging_subscribers(bus: EventBus) -> None:
-    bus.subscribe(PromptRendered, _print_rendered_prompt)
-    bus.subscribe(ToolInvoked, _log_tool_invocation)
-    bus.subscribe(PromptExecuted, _log_prompt_executed)
-
-
-def _truncate_for_log(text: str, *, limit: int = _LOG_STRING_LIMIT) -> str:
-    if len(text) <= limit:
-        return text
-    return f"{text[: limit - 1]}…"
-
-
-def _format_for_log(payload: object, *, limit: int = _LOG_STRING_LIMIT) -> str:
-    serializable = _coerce_for_log(payload)
-    try:
-        rendered = json.dumps(serializable, ensure_ascii=False)
-    except TypeError:
-        rendered = repr(serializable)
-    return _truncate_for_log(rendered, limit=limit)
-
-
-def _coerce_for_log(payload: object) -> object:
-    if payload is None or isinstance(payload, (str, int, float, bool)):
-        return payload
-    if isinstance(payload, Mapping):
-        return {str(key): _coerce_for_log(value) for key, value in payload.items()}
-    if isinstance(payload, Sequence) and not isinstance(
-        payload, (str, bytes, bytearray)
-    ):
-        return [_coerce_for_log(item) for item in payload]
-    if hasattr(payload, "__dataclass_fields__"):
-        return dump(payload, exclude_none=True)
-    if isinstance(payload, set):
-        return sorted(_coerce_for_log(item) for item in payload)
-    return str(payload)
 
 
 if __name__ == "__main__":

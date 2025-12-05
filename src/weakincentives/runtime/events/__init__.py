@@ -30,6 +30,7 @@ from ._types import (
     TokenUsage,
     ToolInvoked,
 )
+from .subscribers import StandardLoggingSubscribers, attach_standard_logging
 
 if TYPE_CHECKING:
     from ...prompt.overrides import PromptDescriptor
@@ -126,6 +127,8 @@ __all__ = [
     "PromptExecuted",
     "PromptRendered",
     "PublishResult",
+    "StandardLoggingSubscribers",
     "TokenUsage",
     "ToolInvoked",
+    "attach_standard_logging",
 ]
