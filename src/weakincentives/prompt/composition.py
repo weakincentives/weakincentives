@@ -15,10 +15,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import field, replace
 from types import MappingProxyType
 from typing import Any, ClassVar, Generic, Self, TypeVar, cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
 from ._visibility import SectionVisibility
@@ -33,7 +34,7 @@ ParentOutputT = TypeVar("ParentOutputT")
 DelegationOutputT = TypeVar("DelegationOutputT")
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class DelegationParams:
     """Delegation summary fields surfaced to the delegated agent."""
 
@@ -43,14 +44,14 @@ class DelegationParams:
     recap_lines: tuple[str, ...] = field(default_factory=tuple)
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ParentPromptParams:
     """Container for the verbatim parent prompt body."""
 
     body: str
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class RecapParams:
     """Bullet-style recap directives rendered after the parent prompt."""
 

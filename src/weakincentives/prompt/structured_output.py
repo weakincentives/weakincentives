@@ -15,9 +15,9 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Final, Literal, cast
 
+from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
 from ..serde.parse import parse as parse_dataclass
 from ..types import JSONValue, ParseableDataclassT
@@ -54,7 +54,7 @@ class OutputParseError(WinkError):
         self.dataclass_type = dataclass_type
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class PayloadParsingConfig:
     """Configuration for parsing structured payloads into dataclasses."""
 

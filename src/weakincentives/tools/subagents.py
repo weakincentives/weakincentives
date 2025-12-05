@@ -17,10 +17,11 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field, is_dataclass
+from dataclasses import field, is_dataclass
 from enum import Enum, auto
 from typing import Any, Final, cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..prompt import SupportsDataclass
 from ..prompt._visibility import SectionVisibility
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
@@ -51,9 +52,7 @@ def _default_max_workers() -> int:
 _DEFAULT_MAX_WORKERS: Final[int] = _default_max_workers()
 
 
-@dataclass(
-    slots=True,
-)
+@FrozenDataclass()
 class DispatchSubagentsParams:
     """Parameters describing the delegations to execute."""
 
@@ -68,9 +67,7 @@ class DispatchSubagentsParams:
     )
 
 
-@dataclass(
-    slots=True,
-)
+@FrozenDataclass()
 class SubagentResult:
     """Outcome captured for an individual delegation."""
 
@@ -339,7 +336,7 @@ def build_dispatch_subagents_tool(
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _SubagentsSectionParams:
     """Placeholder params container for the subagents section."""
 

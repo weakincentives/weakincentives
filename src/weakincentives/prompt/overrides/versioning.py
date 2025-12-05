@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import field
 from hashlib import sha256
 from typing import Literal, Protocol, TypeVar, cast, overload
 
+from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
 from ...serde.schema import schema
 from ...types import JSONValue
@@ -110,7 +111,7 @@ def ensure_hex_digest(value: object, *, field_name: str) -> HexDigest:
     raise PromptOverridesError(msg)
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class SectionDescriptor:
     """Hash metadata for a single section within a prompt."""
 
@@ -119,7 +120,7 @@ class SectionDescriptor:
     number: str
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ToolDescriptor:
     """Stable metadata describing a tool exposed by a prompt."""
 
@@ -128,7 +129,7 @@ class ToolDescriptor:
     contract_hash: HexDigest
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class PromptDescriptor:
     """Stable metadata describing a prompt and its hash-aware sections."""
 
@@ -171,7 +172,7 @@ def descriptor_for_prompt(prompt: PromptLike) -> PromptDescriptor:
     return PromptDescriptor.from_prompt(prompt)
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class SectionOverride:
     """Override payload for a prompt section validated by hash."""
 
@@ -179,7 +180,7 @@ class SectionOverride:
     body: str
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ToolOverride:
     """Description overrides validated against a tool contract hash."""
 
@@ -191,7 +192,7 @@ class ToolOverride:
     )
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class PromptOverride:
     """Runtime replacements for prompt sections validated by an overrides store."""
 

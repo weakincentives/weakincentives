@@ -18,11 +18,12 @@ import fnmatch
 import os
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal, cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
@@ -63,7 +64,7 @@ _VFS_SECTION_TEMPLATE: Final[str] = (
 )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class VfsPath:
     """Relative POSIX-style path representation."""
 
@@ -77,7 +78,7 @@ class VfsPath:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class VfsFile:
     """Snapshot of a single file stored in the virtual filesystem."""
 
@@ -114,7 +115,7 @@ class VfsFile:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class VirtualFileSystem:
     """Immutable snapshot of the virtual filesystem state."""
 
@@ -129,7 +130,7 @@ class VirtualFileSystem:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class FileInfo:
     """Metadata describing a directory entry."""
 
@@ -184,7 +185,7 @@ class FileInfo:
         )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReadFileResult:
     """Payload returned from :func:`read_file`."""
 
@@ -230,7 +231,7 @@ class ReadFileResult:
         return f"{header}\n\n{body}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class GlobMatch:
     """Match returned by the :func:`glob` tool."""
 
@@ -263,7 +264,7 @@ class GlobMatch:
         )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class GrepMatch:
     """Regex match returned by :func:`grep`."""
 
@@ -286,7 +287,7 @@ class GrepMatch:
         return f"{path_label}:{self.line_number}: {self.line}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ListDirectoryParams:
     path: str | None = field(
         default=None,
@@ -298,7 +299,7 @@ class ListDirectoryParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReadFileParams:
     file_path: str = field(
         metadata={
@@ -323,7 +324,7 @@ class ReadFileParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class WriteFileParams:
     file_path: str = field(
         metadata={
@@ -339,7 +340,7 @@ class WriteFileParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class EditFileParams:
     file_path: str = field(
         metadata={
@@ -368,7 +369,7 @@ class EditFileParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class GlobParams:
     pattern: str = field(
         metadata={
@@ -385,7 +386,7 @@ class GlobParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class GrepParams:
     pattern: str = field(
         metadata={
@@ -410,7 +411,7 @@ class GrepParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class RemoveParams:
     path: str = field(
         metadata={
@@ -419,7 +420,7 @@ class RemoveParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ListDirectory:
     path: VfsPath | None = field(
         default=None,
@@ -431,7 +432,7 @@ class ListDirectory:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ListDirectoryResult:
     path: VfsPath = field(
         metadata={"description": "Directory that was listed after normalization."}
@@ -461,7 +462,7 @@ class ListDirectoryResult:
         return "\n".join(lines)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReadFile:
     path: VfsPath = field(
         metadata={
@@ -472,7 +473,7 @@ class ReadFile:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class WriteFile:
     path: VfsPath = field(
         metadata={"description": "Destination file path being written inside the VFS."}
@@ -511,7 +512,7 @@ class WriteFile:
         return f"{header}\n\n{body}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class DeleteEntry:
     path: VfsPath = field(
         metadata={
@@ -524,7 +525,7 @@ class DeleteEntry:
         return f"Removed entries under {path_label}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class HostMount:
     host_path: str = field(
         metadata={
@@ -575,7 +576,7 @@ class HostMount:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class HostMountPreview:
     host_path: str = field(
         metadata={
@@ -612,7 +613,7 @@ class HostMountPreview:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _VfsSectionParams:
     pass
 
@@ -1357,7 +1358,7 @@ def _load_mount(
     return tuple(files), preview
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _MountContext:
     resolved_host: Path = field(
         metadata={"description": "Absolute host path resolved against allowed roots."}

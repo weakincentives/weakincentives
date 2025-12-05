@@ -13,9 +13,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any, Final, Literal, Self, cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
 from .markdown import MarkdownSection
@@ -23,7 +23,7 @@ from .markdown import MarkdownSection
 __all__ = ["ResponseFormatParams", "ResponseFormatSection"]
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ResponseFormatParams:
     """Parameter payload for the auto-generated response format section."""
 

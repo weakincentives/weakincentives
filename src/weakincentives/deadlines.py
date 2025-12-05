@@ -14,8 +14,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+
+from .dataclasses import FrozenDataclass
 
 __all__ = ["Deadline"]
 
@@ -26,7 +27,7 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class Deadline:
     """Immutable value object describing a wall-clock expiration."""
 

@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import MISSING, Field, dataclass, fields
+from dataclasses import MISSING, Field, dataclass, field, fields
 from typing import (
     Any,
     Protocol,
@@ -60,7 +60,7 @@ class DataclassOptions(TypedDict, total=False):
     slots: bool
 
 
-@dataclass_transform()
+@dataclass_transform(field_specifiers=(field,))
 def FrozenDataclass(
     **dataclass_kwargs: Unpack[DataclassOptions],
 ) -> Callable[[type[T]], type[T]]:

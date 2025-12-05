@@ -15,10 +15,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import fields, is_dataclass, replace
 from types import MappingProxyType
 from typing import Any, cast
 
+from ..dataclasses import FrozenDataclass
 from ..dbc import invariant
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
@@ -26,7 +27,7 @@ from .section import Section
 from .tool import Tool
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class SectionNode[ParamsT: SupportsDataclass]:
     """Flattened view of a section within a prompt."""
 
@@ -36,7 +37,7 @@ class SectionNode[ParamsT: SupportsDataclass]:
     number: str
 
 
-@dataclass(frozen=True)
+@FrozenDataclass()
 class RegistrySnapshot:
     """Immutable view over registered prompt sections."""
 

@@ -15,10 +15,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import field
 from enum import Enum
 from typing import Final, Literal, cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt._visibility import SectionVisibility
 from ..prompt.errors import PromptRenderError
@@ -39,7 +40,7 @@ PlanStatus = Literal["active", "completed", "abandoned"]
 StepStatus = Literal["pending", "in_progress", "blocked", "done"]
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PlanStep:
     """Single actionable step tracked within a plan."""
 
@@ -91,7 +92,7 @@ class PlanStep:
         return " | ".join(parts)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class Plan:
     """Immutable snapshot of the active plan."""
 
@@ -127,7 +128,7 @@ class Plan:
         return "\n".join(lines)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class NewPlanStep:
     """User-supplied proposal for a new plan step."""
 
@@ -150,7 +151,7 @@ class NewPlanStep:
         return f"{self.title}{detail}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class SetupPlan:
     """Initialise or replace the session plan."""
 
@@ -178,7 +179,7 @@ class SetupPlan:
         return "\n".join(lines)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class AddStep:
     """Append new steps to the current plan."""
 
@@ -199,7 +200,7 @@ class AddStep:
         return "\n".join(lines)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class UpdateStep:
     """Modify a step's title or details while keeping its identifier stable."""
 
@@ -240,7 +241,7 @@ class UpdateStep:
         return f"UpdateStep {self.step_id}: {payload}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class MarkStep:
     """Update the status of a step and optionally record a note."""
 
@@ -273,7 +274,7 @@ class MarkStep:
         return f"MarkStep {self.step_id}: status={self.status}{note}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ClearPlan:
     """Mark the current plan as abandoned while retaining its objective."""
 
@@ -281,7 +282,7 @@ class ClearPlan:
         return "Plan cleared; objective retained."
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReadPlan:
     """Request the most recent plan snapshot from the session store."""
 
@@ -289,7 +290,7 @@ class ReadPlan:
         return "Read latest plan snapshot."
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _PlanningSectionParams:
     """Placeholder params container for the planning tools section."""
 
