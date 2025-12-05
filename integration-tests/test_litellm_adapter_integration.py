@@ -21,6 +21,7 @@ from typing import cast
 
 import pytest
 
+from weakincentives.adapters import LiteLLMClientConfig, LiteLLMModelConfig
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.litellm import LiteLLMAdapter, create_litellm_completion
 from weakincentives.prompt import (
@@ -61,8 +62,11 @@ def litellm_model() -> str:
 
 @pytest.fixture(scope="module")
 def completion_kwargs() -> dict[str, object]:
-    """Build the completion kwargs passed to LiteLLM."""
+    """Build the completion kwargs passed to LiteLLM.
 
+    Used when extra environment-based configuration is needed beyond what
+    LiteLLMClientConfig supports.
+    """
     api_key = os.environ["LITELLM_API_KEY"]
     kwargs: dict[str, object] = {"api_key": api_key}
 
@@ -81,6 +85,18 @@ def completion_kwargs() -> dict[str, object]:
 
 
 @pytest.fixture(scope="module")
+def completion_config() -> LiteLLMClientConfig:
+    """Build a typed LiteLLMClientConfig from environment variables."""
+    api_key = os.environ["LITELLM_API_KEY"]
+    base_url = os.environ.get("LITELLM_BASE_URL")
+
+    return LiteLLMClientConfig(
+        api_key=api_key,
+        api_base=base_url,
+    )
+
+
+@pytest.fixture(scope="module")
 def adapter(litellm_model: str, completion_kwargs: dict[str, object]) -> LiteLLMAdapter:
     """Create a LiteLLM adapter instance for basic evaluations."""
 
@@ -88,6 +104,17 @@ def adapter(litellm_model: str, completion_kwargs: dict[str, object]) -> LiteLLM
     return LiteLLMAdapter(
         model=litellm_model,
         completion=completion,
+    )
+
+
+@pytest.fixture(scope="module")
+def adapter_with_typed_config(
+    litellm_model: str, completion_config: LiteLLMClientConfig
+) -> LiteLLMAdapter:
+    """Create a LiteLLM adapter using typed configuration objects."""
+    return LiteLLMAdapter(
+        model=litellm_model,
+        completion_config=completion_config,
     )
 
 
@@ -267,4 +294,61 @@ def test_litellm_adapter_parses_structured_output(adapter: LiteLLMAdapter) -> No
     assert response.text is None
     assert response.output.summary
     assert response.output.sentiment
+    _assert_prompt_usage(session)
+
+
+def test_litellm_adapter_with_typed_client_config(
+    adapter_with_typed_config: LiteLLMAdapter,
+) -> None:
+    """Verify adapter instantiated with LiteLLMClientConfig works correctly."""
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="typed config integration tests")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    bus = session.event_bus
+    response = adapter_with_typed_config.evaluate(
+        prompt,
+        parse_output=False,
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
+
+    assert response.prompt_name == "greeting"
+    assert response.text is not None
+    assert response.text.strip()
+    _assert_prompt_usage(session)
+
+
+def test_litellm_adapter_with_model_config(
+    litellm_model: str, completion_config: LiteLLMClientConfig
+) -> None:
+    """Verify adapter with LiteLLMModelConfig applies model parameters."""
+    model_config = LiteLLMModelConfig(
+        temperature=0.3,
+        max_tokens=150,
+    )
+
+    adapter = LiteLLMAdapter(
+        model=litellm_model,
+        completion_config=completion_config,
+        model_config=model_config,
+    )
+
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="model config tests")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    bus = session.event_bus
+    response = adapter.evaluate(
+        prompt,
+        parse_output=False,
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
+
+    assert response.prompt_name == "greeting"
+    assert response.text is not None
+    assert response.text.strip()
     _assert_prompt_usage(session)
