@@ -27,7 +27,7 @@ type JSONValue = _JSONPrimitive | JSONObject | JSONArray
 type ContractResult = bool | tuple[bool, *tuple[object, ...]] | None
 
 if TYPE_CHECKING:  # pragma: no cover - import guard for typing
-    from ..prompt._types import SupportsDataclass
+    from .dataclass import SupportsDataclass
 
 ParseableDataclassT = TypeVar("ParseableDataclassT", bound="SupportsDataclass")
 JSONObjectT = TypeVar("JSONObjectT", bound=JSONObject)

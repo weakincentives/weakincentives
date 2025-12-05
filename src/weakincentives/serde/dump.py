@@ -22,15 +22,12 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Protocol, cast, no_type_check
+from typing import cast, no_type_check
 from uuid import UUID
 
 from ..types import JSONValue
+from ..types.dataclass import SupportsDataclass
 from ._utils import MISSING_SENTINEL, TYPE_REF_KEY, _set_extras, _type_identifier
-
-
-class DataclassInstance(Protocol):
-    __dataclass_fields__: Mapping[str, dataclasses.Field[object]]
 
 
 def _serialize(
@@ -181,7 +178,7 @@ def dump(  # noqa: PLR0913
     result: dict[str, JSONValue] = {}
     if include_dataclass_type:
         result[type_key] = _type_identifier(type(obj))
-    dataclass_obj = cast(DataclassInstance, obj)
+    dataclass_obj = cast(SupportsDataclass, obj)
     _serialize_fields(dataclass_obj, result, by_alias, exclude_none, alias_generator)
     if computed and hasattr(obj.__class__, "__computed__"):
         _serialize_computed_fields(
@@ -193,7 +190,7 @@ def dump(  # noqa: PLR0913
 
 @no_type_check
 def _serialize_fields(
-    obj: DataclassInstance,
+    obj: SupportsDataclass,
     result: dict[str, JSONValue],
     by_alias: bool,
     exclude_none: bool,
@@ -213,7 +210,7 @@ def _serialize_fields(
 
 
 def _serialize_computed_fields(
-    obj: DataclassInstance,
+    obj: SupportsDataclass,
     result: dict[str, JSONValue],
     by_alias: bool,
     exclude_none: bool,
