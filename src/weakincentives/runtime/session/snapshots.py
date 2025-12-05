@@ -302,28 +302,16 @@ class Snapshot:
     )
 
     def __post_init__(self) -> None:
-        normalized_parent = (
-            None if self.parent_id is None else UUID(str(self.parent_id))
-        )
-        normalized_children = tuple(UUID(str(child)) for child in self.children_ids)
-        normalized: dict[SessionSliceType, SessionSlice] = {
-            slice_type: tuple(values) for slice_type, values in self.slices.items()
-        }
         object.__setattr__(self, "created_at", _ensure_timezone(self.created_at))
         object.__setattr__(
             self,
             "slices",
-            cast(SnapshotState, types.MappingProxyType(normalized)),
+            cast(SnapshotState, types.MappingProxyType(dict(self.slices))),
         )
-        object.__setattr__(self, "parent_id", normalized_parent)
-        object.__setattr__(self, "children_ids", normalized_children)
         object.__setattr__(
             self,
             "tags",
-            _normalize_tags(
-                cast(Mapping[object, object], self.tags),
-                error_cls=SnapshotSerializationError,
-            ),
+            cast(Mapping[str, str], types.MappingProxyType(dict(self.tags))),
         )
 
     @override
