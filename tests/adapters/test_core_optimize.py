@@ -25,16 +25,18 @@ from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
 )
+from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.overrides import (
+    PromptDescriptor,
     PromptLike,
     PromptOverride,
     PromptOverridesError,
     PromptOverridesStore,
 )
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.runtime.events import ToolInvoked
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.events import EventBus, ToolInvoked
+from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.tools.digests import (
     WorkspaceDigest,
     WorkspaceDigestSection,
@@ -65,7 +67,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
 
     def resolve(
         self,
-        descriptor: PromptLike,
+        descriptor: PromptDescriptor,
         tag: str = "latest",
     ) -> PromptOverride | None:
         self.calls.append((cast(PromptTemplate[Any], descriptor), tag, (), "resolve"))
@@ -94,7 +96,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         self,
         prompt: PromptTemplate[Any],
         *,
-        tag: str,
+        tag: str = "latest",
         path: tuple[str, ...],
         body: str,
     ) -> PromptOverride:
@@ -126,7 +128,7 @@ class _RecordingAdapter(ProviderAdapter):
     def __init__(self, *, mode: str, emit_tool_event: bool = False) -> None:
         self.mode = mode
         self.rendered_prompts: list[Prompt[Any]] = []
-        self.sessions: list[Session | None] = []
+        self.sessions: list[SessionProtocol] = []
         self.buses: list[Any] = []
         self._emit_tool_event = emit_tool_event
 
@@ -136,9 +138,9 @@ class _RecordingAdapter(ProviderAdapter):
         prompt: Prompt[Any],
         *,
         parse_output: bool = True,
-        bus: Any = None,
-        session: Session | None = None,
-        deadline: Any = None,
+        bus: EventBus,
+        session: SessionProtocol,
+        deadline: Deadline | None = None,
     ) -> PromptResponse[Any]:
         del parse_output, deadline
         prompt_name = prompt.name or prompt.key

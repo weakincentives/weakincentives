@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import MISSING, FrozenInstanceError, field
+from dataclasses import _MISSING_TYPE, MISSING, FrozenInstanceError, field
 from typing import ClassVar, Protocol, Self, cast
 
 import pytest
@@ -51,17 +51,20 @@ def test_pre_init_shapes_inputs_and_runs_post_init() -> None:
             *,
             total_cents: int,
             tax_rate: float,
-            tax_cents: int | object = MISSING,
-            grand_total_cents: int | object = MISSING,
+            tax_cents: int | _MISSING_TYPE | None = MISSING,
+            grand_total_cents: int | _MISSING_TYPE | None = MISSING,
         ) -> dict[str, int | float]:
             computed_tax = (
                 int(tax_cents)
-                if tax_cents is not MISSING and tax_cents is not None
+                if not isinstance(tax_cents, _MISSING_TYPE) and tax_cents is not None
                 else int(total_cents * tax_rate)
             )
             computed_total = (
                 int(grand_total_cents)
-                if grand_total_cents is not MISSING and grand_total_cents is not None
+                if (
+                    not isinstance(grand_total_cents, _MISSING_TYPE)
+                    and grand_total_cents is not None
+                )
                 else total_cents + computed_tax
             )
             return {
@@ -206,11 +209,11 @@ def test_pre_init_validates_inputs_and_defaults() -> None:
         def __pre_init__(
             cls,
             *,
-            required: int | object = MISSING,
-            derived: int | object = MISSING,
+            required: int | _MISSING_TYPE | None = MISSING,
+            derived: int | _MISSING_TYPE | None = MISSING,
         ) -> dict[str, int]:
-            base = int(required) if required is not MISSING else 0
-            derived_value = base if derived is MISSING else int(derived)
+            base = int(required) if not isinstance(required, _MISSING_TYPE) else 0
+            derived_value = base if isinstance(derived, _MISSING_TYPE) else int(derived)
             return {"required": base, "derived": derived_value}
 
     partial = Partial(required=3)  # type: ignore[call-arg]
