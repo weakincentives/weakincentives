@@ -33,6 +33,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
 
+from ..errors import WinkError
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.snapshots import (
     Snapshot,
@@ -61,7 +62,7 @@ _markdown = MarkdownIt("commonmark", {"linkify": True})
 # pyright: reportUnusedFunction=false
 
 
-class SnapshotLoadError(RuntimeError):
+class SnapshotLoadError(WinkError, RuntimeError):
     """Raised when a snapshot cannot be loaded or validated."""
 
 

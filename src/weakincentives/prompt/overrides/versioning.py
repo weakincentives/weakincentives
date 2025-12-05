@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Literal, Protocol, TypeVar, cast, overload
 
+from ...errors import WinkError
 from ...serde.schema import schema
 from ...types import JSONValue
 from .._types import SupportsDataclass, SupportsDataclassOrNone
@@ -245,7 +246,7 @@ class PromptOverridesStore(Protocol):
     ) -> PromptOverride: ...
 
 
-class PromptOverridesError(Exception):
+class PromptOverridesError(WinkError):
     """Raised when prompt overrides fail validation or persistence."""
 
 

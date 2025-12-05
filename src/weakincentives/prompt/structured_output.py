@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, cast
 
+from ..errors import WinkError
 from ..serde.parse import parse as parse_dataclass
 from ..types import JSONValue, ParseableDataclassT
 from ._structured_output_config import StructuredOutputConfig
@@ -39,7 +40,7 @@ _JSON_FENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 
 
-class OutputParseError(Exception):
+class OutputParseError(WinkError):
     """Raised when structured output parsing fails."""
 
     def __init__(

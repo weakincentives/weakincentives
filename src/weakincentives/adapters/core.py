@@ -21,6 +21,7 @@ from enum import StrEnum
 from typing import Any, Literal, TypeVar, cast
 
 from ..deadlines import Deadline
+from ..errors import WinkError
 from ..prompt import MarkdownSection, Prompt, PromptTemplate
 from ..prompt._types import SupportsDataclass
 from ..prompt.overrides import PromptLike, PromptOverridesError, PromptOverridesStore
@@ -302,7 +303,7 @@ class ProviderAdapter(ABC):
         return digest.strip()
 
 
-class PromptEvaluationError(RuntimeError):
+class PromptEvaluationError(WinkError, RuntimeError):
     """Raised when evaluation against a provider fails."""
 
     def __init__(

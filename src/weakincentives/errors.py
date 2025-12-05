@@ -10,19 +10,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared error types for built-in tools."""
+"""Base exception hierarchy for :mod:`weakincentives`."""
 
 from __future__ import annotations
 
-from ..errors import WinkError
+
+class WinkError(Exception):
+    """Base class for all weakincentives exceptions.
+
+    This class serves as the root of the exception hierarchy, allowing callers
+    to catch all library-specific exceptions with a single handler::
+
+        try:
+            # weakincentives operations
+        except WinkError:
+            # handle any library error
+    """
 
 
-class ToolValidationError(WinkError, ValueError):
-    """Raised when tool parameters fail validation checks."""
-
-
-class DeadlineExceededError(WinkError, RuntimeError):
-    """Raised when tool execution cannot finish before the deadline."""
-
-
-__all__ = ["DeadlineExceededError", "ToolValidationError"]
+__all__ = ["WinkError"]
