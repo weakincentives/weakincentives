@@ -20,7 +20,7 @@ from types import MappingProxyType
 from typing import Any, cast
 
 from ..dbc import invariant
-from ._types import SupportsDataclass, SupportsToolResult
+from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .section import Section
 from .tool import Tool
@@ -413,7 +413,7 @@ class PromptRegistry:
                     section_path=path,
                     dataclass_type=params_type,
                 )
-            typed_tool = cast(Tool[SupportsDataclass, SupportsToolResult], tool)
+            typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
             self._register_section_tools(
                 typed_tool,
                 path,
@@ -442,7 +442,7 @@ class PromptRegistry:
         return ".".join(str(value) for value in self._numbering_stack)
 
     def _register_section_tools[
-        ParamsT: SupportsDataclass,
+        ParamsT: SupportsDataclassOrNone,
         ResultT: SupportsToolResult,
     ](
         self,
@@ -450,7 +450,7 @@ class PromptRegistry:
         path: SectionPath,
     ) -> None:
         params_type = tool.params_type
-        if not is_dataclass(params_type):
+        if params_type is not type(None) and not is_dataclass(params_type):
             raise PromptValidationError(
                 "Tool parameters must be dataclass types.",
                 section_path=path,

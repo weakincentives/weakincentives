@@ -20,7 +20,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, override
 
 from ..deadlines import Deadline
-from ._types import SupportsDataclass, SupportsToolResult
+from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .registry import RegistrySnapshot, SectionNode
 from .response_format import ResponseFormatSection
@@ -45,7 +45,7 @@ class RenderedPrompt[OutputT_co]:
     structured_output: StructuredOutputConfig[SupportsDataclass] | None = None
     deadline: Deadline | None = None
     descriptor: PromptDescriptor | None = None
-    _tools: tuple[Tool[SupportsDataclass, SupportsToolResult], ...] = field(
+    _tools: tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...] = field(
         default_factory=tuple
     )
     _tool_param_descriptions: Mapping[str, Mapping[str, str]] = field(
@@ -57,7 +57,7 @@ class RenderedPrompt[OutputT_co]:
         return self.text
 
     @property
-    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
+    def tools(self) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
         """Tools contributed by enabled sections in traversal order."""
 
         return self._tools
@@ -162,7 +162,7 @@ class PromptRenderer[OutputT]:
         descriptor: PromptDescriptor | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
-        collected_tools: list[Tool[SupportsDataclass, SupportsToolResult]] = []
+        collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
         override_lookup = dict(overrides or {})
         tool_override_lookup = dict(tool_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}

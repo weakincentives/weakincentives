@@ -14,11 +14,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import pytest
 
-from weakincentives.prompt import SupportsDataclass, SupportsToolResult
+from weakincentives.prompt import SupportsDataclassOrNone, SupportsToolResult
 from weakincentives.prompt.overrides.validation import (
     FORMAT_VERSION,
     load_sections,
@@ -39,9 +39,12 @@ from weakincentives.prompt.overrides.versioning import (
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
+    _tool_contract_hash,
 )
 from weakincentives.prompt.tool import Tool
 from weakincentives.types import JSONValue
+
+_NONE_TYPE = type(None)
 
 
 @dataclass(slots=True)
@@ -58,12 +61,12 @@ class _Result:
 class _Section:
     template: str
     accepts_overrides: bool = True
-    _tools: tuple[Tool[SupportsDataclass, SupportsToolResult], ...] = ()
+    _tools: tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...] = ()
 
     def original_body_template(self) -> str | None:
         return self.template
 
-    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
+    def tools(self) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
         return self._tools
 
 
@@ -95,7 +98,7 @@ def _build_prompt_with_tool() -> tuple[
     )
     section = _Section(
         template="Body template",
-        _tools=(cast(Tool[SupportsDataclass, SupportsToolResult], tool),),
+        _tools=(cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool),),
     )
     node = _SectionNode(path=("intro",), number="1", section=section)
     prompt = _Prompt(ns="demo", key="example", _section_nodes=(node,))
@@ -328,3 +331,19 @@ def test_seed_sections_and_tools_generate_overrides() -> None:
 
     assert sections["intro",].body == "Body template"
     assert tools[tool.name].param_descriptions == {"value": "Value"}
+
+
+@dataclass(slots=True)
+class _NoneToolContract:
+    name: str = "none_tool"
+    description: str = "None params/result tool"
+    params_type: type[SupportsDataclassOrNone] | type[None] = _NONE_TYPE
+    result_type: type[SupportsDataclassOrNone] = _NONE_TYPE
+    result_container: Literal["object", "array"] = "object"
+    accepts_overrides: bool = True
+
+
+def test_tool_contract_hash_handles_none_types() -> None:
+    digest = _tool_contract_hash(_NoneToolContract())
+
+    assert len(str(digest)) == 64

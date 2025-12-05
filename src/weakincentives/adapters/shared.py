@@ -26,7 +26,11 @@ from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cas
 from uuid import uuid4
 
 from ..deadlines import Deadline
-from ..prompt._types import SupportsDataclass, SupportsToolResult
+from ..prompt._types import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
@@ -118,6 +122,11 @@ ThrottleKind = Literal["rate_limit", "quota_exhausted", "timeout", "unknown"]
 
 _DEFAULT_MAX_ATTEMPTS = 5
 _DEFAULT_BASE_DELAY = timedelta(milliseconds=500)
+_EMPTY_TOOL_PARAMETERS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": False,
+}
 _DEFAULT_MAX_DELAY = timedelta(seconds=8)
 _DEFAULT_MAX_TOTAL_DELAY = timedelta(seconds=30)
 
@@ -317,11 +326,16 @@ def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
     return f"Reducer errors prevented applying tool result: {joined}"
 
 
-def tool_to_spec(tool: Tool[SupportsDataclass, SupportsToolResult]) -> dict[str, Any]:
+def tool_to_spec(
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+) -> dict[str, Any]:
     """Return a provider-agnostic tool specification payload."""
 
-    parameters_schema = schema(tool.params_type, extra="forbid")
-    _ = parameters_schema.pop("title", None)
+    if tool.params_type is type(None):
+        parameters_schema = dict(_EMPTY_TOOL_PARAMETERS_SCHEMA)
+    else:
+        parameters_schema = schema(tool.params_type, extra="forbid")
+        _ = parameters_schema.pop("title", None)
     return {
         "type": "function",
         "function": {
@@ -469,8 +483,8 @@ def parse_tool_arguments(
 class ToolExecutionOutcome:
     """Result of executing a tool handler."""
 
-    tool: Tool[SupportsDataclass, SupportsToolResult]
-    params: SupportsDataclass
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult]
+    params: SupportsDataclass | None
     result: ToolResult[SupportsToolResult]
     call_id: str | None
     log: StructuredLogger
@@ -479,12 +493,12 @@ class ToolExecutionOutcome:
 def _resolve_tool_and_handler(
     *,
     tool_call: ProviderToolCall,
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
+    tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
     prompt_name: str,
     provider_payload: dict[str, Any] | None,
 ) -> tuple[
-    Tool[SupportsDataclass, SupportsToolResult],
-    ToolHandler[SupportsDataclass, SupportsToolResult],
+    Tool[SupportsDataclassOrNone, SupportsToolResult],
+    ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
 ]:
     function = tool_call.function
     tool_name = function.name
@@ -540,9 +554,13 @@ def _build_tool_logger(
 
 def _parse_tool_params(
     *,
-    tool: Tool[SupportsDataclass, SupportsToolResult],
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
     arguments_mapping: Mapping[str, Any],
-) -> SupportsDataclass:
+) -> SupportsDataclass | None:
+    if tool.params_type is type(None):
+        if arguments_mapping:
+            raise ToolValidationError("Tool does not accept any arguments.")
+        return None
     try:
         return parse(tool.params_type, arguments_mapping, extra="forbid")
     except (TypeError, ValueError) as error:
@@ -576,8 +594,8 @@ def _ensure_deadline_not_expired(
 
 def _invoke_tool_handler(
     *,
-    handler: ToolHandler[SupportsDataclass, SupportsToolResult],
-    tool_params: SupportsDataclass,
+    handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
+    tool_params: SupportsDataclass | None,
     context: ToolContext,
 ) -> ToolResult[SupportsToolResult]:
     return handler(tool_params, context=context)
@@ -1153,7 +1171,7 @@ class ToolExecutor:
     rendered: RenderedPrompt[Any]
     bus: EventBus
     session: SessionProtocol
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]]
+    tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
     serialize_tool_message_fn: ToolMessageSerializer
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
     parse_arguments: ToolArgumentsParser
@@ -1692,7 +1710,7 @@ class ToolExecutionContext:
     adapter: ProviderAdapter[Any]
     prompt: Prompt[Any]
     rendered_prompt: RenderedPrompt[Any] | None
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]]
+    tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
     bus: EventBus
     session: SessionProtocol
     prompt_name: str

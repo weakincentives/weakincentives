@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
-from ._types import SupportsDataclass, SupportsToolResult
+from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -94,7 +94,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
     def clone(self: Self, **kwargs: object) -> Self:
         """Return a deep copy of the section and its children."""
 
-    def tools(self) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
+    def tools(self) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
         """Return the tools exposed by this section."""
 
         return self._tools
@@ -111,17 +111,19 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
     @staticmethod
     def _normalize_tools(
         tools: Sequence[object] | None,
-    ) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
+    ) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
         if not tools:
             return ()
 
         from .tool import Tool
 
-        normalized: list[Tool[SupportsDataclass, SupportsToolResult]] = []
+        normalized: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
         for tool in tools:
             if not isinstance(tool, Tool):
                 raise TypeError("Section tools must be Tool instances.")
-            normalized.append(cast(Tool[SupportsDataclass, SupportsToolResult], tool))
+            normalized.append(
+                cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
+            )
         return tuple(normalized)
 
 

@@ -35,12 +35,14 @@ class ToolRenderableResult(SupportsDataclass, Protocol):
     def render(self) -> str: ...
 
 
-SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass]
+SupportsDataclassOrNone = SupportsDataclass | None
+SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass] | None
 
 
 __all__ = [
     "DataclassFieldMapping",
     "SupportsDataclass",
+    "SupportsDataclassOrNone",
     "SupportsToolResult",
     "ToolRenderableResult",
 ]

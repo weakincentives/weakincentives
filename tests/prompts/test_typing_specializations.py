@@ -62,7 +62,7 @@ def test_tool_requires_dataclass_parameters(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "Expected `SupportsDataclass`, found `str`" in result.stdout
+    assert "Expected `SupportsDataclass | None`, found `str`" in result.stdout
 
 
 def test_tool_requires_dataclass_results(tmp_path: Path) -> None:
@@ -85,7 +85,7 @@ def test_tool_requires_dataclass_results(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert (
-        "Expected `SupportsDataclass | Sequence[SupportsDataclass]`, found `str`"
+        "Expected `SupportsDataclass | Sequence[SupportsDataclass] | None`, found `str`"
         in result.stdout
     )
 
