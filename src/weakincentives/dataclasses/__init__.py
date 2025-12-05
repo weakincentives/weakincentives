@@ -246,9 +246,11 @@ def _build_map_helper(cls: type[Any]) -> Callable[..., _SupportsUpdate]:
         self: _SupportsUpdate,
         transform: Callable[[dict[str, object]], Mapping[str, object]],
     ) -> _SupportsUpdate:
+        # Only expose init fields to transform (non-init fields are derived)
         current = {
-            field.name: getattr(self, field.name)
-            for field in fields(self)  # type: ignore[arg-type]
+            f.name: getattr(self, f.name)
+            for f in fields(self)  # type: ignore[arg-type]
+            if f.init
         }
         updates = transform(current)
         _ensure_mapping(cls, updates)
@@ -287,16 +289,34 @@ def _apply_changes(
 ) -> _SupportsUpdate:
     cls = type(instance)
     field_defs = fields(instance)  # type: ignore[arg-type]
-    values = {field.name: getattr(instance, field.name) for field in field_defs}
+    init_fields = [f for f in field_defs if f.init]
+    non_init_fields = [f for f in field_defs if not f.init]
+    init_field_names = {f.name for f in init_fields}
+    all_field_names = {f.name for f in field_defs}
 
-    unknown = set(changes) - values.keys()
+    # Validate changes against known fields
+    unknown = set(changes) - all_field_names
     if unknown:
         joined = ", ".join(sorted(unknown))
         raise TypeError(f"{cls.__name__}() got unexpected field(s): {joined}")
 
-    values.update(changes)
+    # Disallow direct changes to non-init (derived) fields
+    non_init_changes = set(changes) - init_field_names
+    if non_init_changes:
+        joined = ", ".join(sorted(non_init_changes))
+        raise TypeError(f"{cls.__name__}() cannot update derived field(s): {joined}")
+
+    # Collect current init-field values and apply changes
+    init_values = {f.name: getattr(instance, f.name) for f in init_fields}
+    init_values.update(changes)
+
+    # If class has non-init fields, call constructor so __pre_init__ recomputes them
+    if non_init_fields:
+        return cls(**init_values)
+
+    # Fast path: class has no derived fields, bypass __pre_init__
     new_instance = cls.__new__(cls)
-    for name, value in values.items():
+    for name, value in init_values.items():
         object.__setattr__(new_instance, name, value)
 
     post_init = getattr(new_instance, "__post_init__", None)
