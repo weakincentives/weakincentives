@@ -139,8 +139,15 @@ class OpenAIModelConfig(LLMConfig):
 
     @override
     def to_request_params(self) -> dict[str, Any]:
-        """Convert non-None fields to request parameters."""
+        """Convert non-None fields to request parameters.
+
+        The Responses API uses ``max_output_tokens`` instead of ``max_tokens``,
+        so this override renames the key accordingly.
+        """
         params = LLMConfig.to_request_params(self)
+        # Responses API uses max_output_tokens instead of max_tokens
+        if "max_tokens" in params:
+            params["max_output_tokens"] = params.pop("max_tokens")
         if self.logprobs is not None:
             params["logprobs"] = self.logprobs
         if self.top_logprobs is not None:

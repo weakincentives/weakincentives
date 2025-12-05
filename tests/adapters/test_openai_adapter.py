@@ -291,8 +291,9 @@ def test_openai_adapter_uses_model_config() -> None:
 
     assert result.text == "Hello with temp!"
     # Verify model_config params were included in request
+    # Responses API uses max_output_tokens instead of max_tokens
     assert client.responses.requests[0]["temperature"] == 0.5
-    assert client.responses.requests[0]["max_tokens"] == 100
+    assert client.responses.requests[0]["max_output_tokens"] == 100
 
 
 def test_openai_adapter_returns_plain_text_response() -> None:

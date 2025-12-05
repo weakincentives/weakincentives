@@ -177,7 +177,8 @@ class OpenAIModelConfig(LLMConfig):
 ```
 
 `OpenAIClientConfig` controls client instantiation (API key, base URL, timeouts). `OpenAIModelConfig` extends
-`LLMConfig` with OpenAI-specific parameters like `logprobs` and `parallel_tool_calls`.
+`LLMConfig` with OpenAI-specific parameters like `logprobs` and `parallel_tool_calls`. Note that `max_tokens` is
+automatically renamed to `max_output_tokens` in request payloads to match the Responses API convention.
 
 **LiteLLM Configuration**
 
