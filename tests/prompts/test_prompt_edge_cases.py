@@ -23,6 +23,7 @@ from weakincentives.prompt import (
     PromptTemplate,
     PromptValidationError,
     Section,
+    SectionVisibility,
 )
 
 
@@ -128,8 +129,15 @@ class BrokenSection(Section[BrokenParams]):
     def __init__(self) -> None:
         super().__init__(title="Broken", key="broken")
 
-    def render(self, params: BrokenParams, depth: int, number: str) -> str:
-        del params, depth, number
+    def render(
+        self,
+        params: BrokenParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del params, depth, number, visibility
         raise PromptRenderError("inner", section_path=(self.key,), placeholder="value")
 
     def clone(self, **kwargs: object) -> BrokenSection:
@@ -159,8 +167,15 @@ class InvalidParamsSection(Section[int]):  # type: ignore[arg-type]
     def __init__(self) -> None:
         super().__init__(title="Invalid", key="invalid")
 
-    def render(self, params: int, depth: int, number: str) -> str:
-        del params, depth, number
+    def render(
+        self,
+        params: int,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del params, depth, number, visibility
         return self.key
 
     def clone(self, **kwargs: object) -> InvalidParamsSection:
@@ -253,8 +268,15 @@ class BareSection(Section[PlaceholderParams]):
     def __init__(self) -> None:
         super().__init__(title="Bare", key="bare")
 
-    def render(self, params: PlaceholderParams, depth: int, number: str) -> str:
-        del params, depth, number
+    def render(
+        self,
+        params: PlaceholderParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del params, depth, number, visibility
         return self.key
 
     def clone(self, **kwargs: object) -> BareSection:
@@ -311,9 +333,16 @@ class ContextAwareSection(Section[ContextParams]):
     def __init__(self) -> None:
         super().__init__(title="Context", key="context")
 
-    def render(self, params: ContextParams, depth: int, number: str) -> str:
+    def render(
+        self,
+        params: ContextParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
         _ = self.title
-        del params, depth, number
+        del params, depth, number, visibility
         raise PromptRenderError(
             "context",
             section_path=("Provided",),

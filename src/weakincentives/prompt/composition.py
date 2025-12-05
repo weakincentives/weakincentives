@@ -21,6 +21,7 @@ from typing import Any, ClassVar, Generic, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass
 from ._types import SupportsDataclass
+from ._visibility import SectionVisibility
 from .errors import PromptRenderError
 from .markdown import MarkdownSection
 from .prompt import Prompt, PromptTemplate, RenderedPrompt
@@ -94,7 +95,15 @@ class ParentPromptSection(Section[ParentPromptParams]):
         )
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
+    def render(
+        self,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del visibility
         if not isinstance(params, ParentPromptParams):
             raise PromptRenderError(
                 "Parent prompt section requires parameters.",
@@ -134,7 +143,15 @@ class RecapSection(Section[RecapParams]):
         super().__init__(title="Recap", key="recap")
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
+    def render(
+        self,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del visibility
         if not isinstance(params, RecapParams):
             raise PromptRenderError(
                 "Recap section requires parameters.",

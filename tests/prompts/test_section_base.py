@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompt import Section
+from weakincentives.prompt import Section, SectionVisibility
 from weakincentives.prompt._generic_params_specializer import GenericParamsSpecializer
 from weakincentives.prompt._normalization import (
     COMPONENT_KEY_PATTERN,
@@ -35,8 +35,15 @@ class GenericParams:
 
 
 class ExampleSection(Section[ExampleParams]):
-    def render(self, params: ExampleParams, depth: int, number: str) -> str:
-        del number
+    def render(
+        self,
+        params: ExampleParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del number, visibility
         _ = self.title
         return f"Rendered {params.value} at depth {depth}"
 
@@ -112,8 +119,15 @@ def test_section_allows_custom_children_and_enabled() -> None:
 
 
 class PlainSection(Section):
-    def render(self, params: object, depth: int, number: str) -> str:
-        del params, depth, number
+    def render(
+        self,
+        params: object,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del params, depth, number, visibility
         _ = getattr(self, "key", None)
         return ""
 

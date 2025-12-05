@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import pytest
 
 from weakincentives.prompt.markdown import MarkdownSection
-from weakincentives.prompt.section import Section
+from weakincentives.prompt.section import Section, SectionVisibility
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 
 
@@ -61,8 +61,15 @@ class _BareSection(Section[SectionParams]):
             accepts_overrides=self.accepts_overrides,
         )
 
-    def render(self, params: SectionParams, depth: int, number: str) -> str:
-        del params, depth, number
+    def render(
+        self,
+        params: SectionParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del params, depth, number, visibility
         _ = self.key
         return ""
 

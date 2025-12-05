@@ -20,6 +20,7 @@ from enum import Enum
 from typing import Final, Literal, cast, override
 
 from ..prompt import SupportsDataclass, SupportsToolResult
+from ..prompt._visibility import SectionVisibility
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
@@ -405,7 +406,15 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         )
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
+    def render(
+        self,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del visibility
         if not isinstance(params, _PlanningSectionParams):
             raise PromptRenderError(
                 "Planning tools section requires parameters.",

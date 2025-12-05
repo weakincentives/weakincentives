@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, PromptRenderError
+from weakincentives.prompt import MarkdownSection, PromptRenderError, SectionVisibility
 
 
 @dataclass
@@ -85,3 +85,195 @@ def test_text_section_rejects_non_dataclass_params() -> None:
     error = error_info.value
     assert isinstance(error, PromptRenderError)
     assert error.dataclass_type is SimpleNamespace
+
+
+def test_text_section_with_summary_renders_summary_when_visibility_is_summary() -> None:
+    @dataclass
+    class ContentParams:
+        topic: str
+
+    section = MarkdownSection[ContentParams](
+        title="Content",
+        template="Full content about ${topic}. This is a detailed explanation.",
+        key="content",
+        summary="Brief: ${topic}",
+    )
+
+    output = section.render(
+        ContentParams(topic="testing"), depth=0, number="1", visibility=SectionVisibility.SUMMARY
+    )
+
+    assert output == "## 1. Content\n\nBrief: testing"
+
+
+def test_text_section_with_summary_renders_full_by_default() -> None:
+    @dataclass
+    class ContentParams:
+        topic: str
+
+    section = MarkdownSection[ContentParams](
+        title="Content",
+        template="Full content about ${topic}.",
+        key="content",
+        summary="Brief: ${topic}",
+    )
+
+    output = section.render(ContentParams(topic="testing"), depth=0, number="1")
+
+    assert output == "## 1. Content\n\nFull content about testing."
+
+
+def test_text_section_without_summary_falls_back_to_full() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="NoSummary",
+        template="Full content: ${value}",
+        key="no-summary",
+    )
+
+    # Even with SUMMARY visibility, falls back to full when no summary is set
+    output = section.render(
+        ContentParams(value="test"), depth=0, number="1", visibility=SectionVisibility.SUMMARY
+    )
+
+    assert output == "## 1. NoSummary\n\nFull content: test"
+
+
+def test_text_section_visibility_override_takes_precedence() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="Override",
+        template="Full: ${value}",
+        key="override",
+        summary="Summary: ${value}",
+        visibility=SectionVisibility.FULL,  # Default visibility is FULL
+    )
+
+    # Override to SUMMARY at render time
+    output = section.render(
+        ContentParams(value="test"), depth=0, number="1", visibility=SectionVisibility.SUMMARY
+    )
+
+    assert output == "## 1. Override\n\nSummary: test"
+
+
+def test_text_section_default_visibility_is_full() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="Default",
+        template="Full: ${value}",
+        key="default",
+        summary="Summary: ${value}",
+    )
+
+    assert section.visibility == SectionVisibility.FULL
+
+
+def test_text_section_configurable_default_visibility() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="Configured",
+        template="Full: ${value}",
+        key="configured",
+        summary="Summary: ${value}",
+        visibility=SectionVisibility.SUMMARY,
+    )
+
+    assert section.visibility == SectionVisibility.SUMMARY
+    output = section.render(ContentParams(value="test"), depth=0, number="1")
+
+    assert output == "## 1. Configured\n\nSummary: test"
+
+
+def test_text_section_effective_visibility_returns_override() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="Test",
+        template="Full: ${value}",
+        key="test",
+        summary="Summary: ${value}",
+        visibility=SectionVisibility.FULL,
+    )
+
+    assert section.effective_visibility() == SectionVisibility.FULL
+    assert section.effective_visibility(SectionVisibility.SUMMARY) == SectionVisibility.SUMMARY
+
+
+def test_text_section_effective_visibility_fallback_to_full_without_summary() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="NoSummary",
+        template="Full: ${value}",
+        key="no-summary",
+    )
+
+    assert section.summary is None
+    assert section.effective_visibility() == SectionVisibility.FULL
+    # Falls back to FULL when requesting SUMMARY but no summary is set
+    assert section.effective_visibility(SectionVisibility.SUMMARY) == SectionVisibility.FULL
+
+
+def test_text_section_original_summary_template_returns_summary() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="Test",
+        template="Full: ${value}",
+        key="test",
+        summary="Summary: ${value}",
+    )
+
+    assert section.original_summary_template() == "Summary: ${value}"
+
+
+def test_text_section_original_summary_template_returns_none_when_not_set() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="Test",
+        template="Full: ${value}",
+        key="test",
+    )
+
+    assert section.original_summary_template() is None
+
+
+def test_text_section_clone_preserves_summary_and_visibility() -> None:
+    @dataclass
+    class ContentParams:
+        value: str
+
+    section = MarkdownSection[ContentParams](
+        title="Original",
+        template="Full: ${value}",
+        key="original",
+        summary="Summary: ${value}",
+        visibility=SectionVisibility.SUMMARY,
+    )
+
+    cloned = section.clone()
+
+    assert cloned.summary == section.summary
+    assert cloned.visibility == section.visibility

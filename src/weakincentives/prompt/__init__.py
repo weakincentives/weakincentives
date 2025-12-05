@@ -53,7 +53,7 @@ from .protocols import (
     RenderedPromptProtocol,
 )
 from .rendering import RenderedPrompt
-from .section import Section
+from .section import Section, SectionVisibility
 from .structured_output import (
     OutputParseError,
     StructuredOutputConfig,
@@ -90,6 +90,7 @@ __all__ = [
     "RenderedPromptProtocol",
     "Section",
     "SectionDescriptor",
+    "SectionVisibility",
     "SectionOverride",
     "SectionPath",
     "StructuredOutputConfig",

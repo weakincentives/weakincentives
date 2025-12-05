@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, override
 
 from ..deadlines import Deadline
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
+from ._visibility import SectionVisibility
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .registry import RegistrySnapshot, SectionNode
 from .response_format import ResponseFormatSection
@@ -160,11 +161,13 @@ class PromptRenderer[OutputT]:
         *,
         inject_output_instructions: bool | None = None,
         descriptor: PromptDescriptor | None = None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
         override_lookup = dict(overrides or {})
         tool_override_lookup = dict(tool_overrides or {})
+        visibility_override_lookup = dict(visibility_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
 
         for node, section_params in self._iter_enabled_sections(
@@ -176,7 +179,10 @@ class PromptRenderer[OutputT]:
                 if getattr(node.section, "accepts_overrides", True)
                 else None
             )
-            rendered = self._render_section(node, section_params, override_body)
+            visibility_override = visibility_override_lookup.get(node.path)
+            rendered = self._render_section(
+                node, section_params, override_body, visibility_override
+            )
 
             section_tools = node.section.tools()
             if section_tools:
@@ -257,6 +263,7 @@ class PromptRenderer[OutputT]:
         node: SectionNode[SupportsDataclass],
         section_params: SupportsDataclass | None,
         override_body: str | None,
+        visibility_override: SectionVisibility | None = None,
     ) -> str:
         params_type = node.section.param_type
         try:
@@ -270,7 +277,9 @@ class PromptRenderer[OutputT]:
                     override_body, section_params, node.depth, node.number
                 )
             else:
-                rendered = node.section.render(section_params, node.depth, node.number)
+                rendered = node.section.render(
+                    section_params, node.depth, node.number, visibility=visibility_override
+                )
         except PromptRenderError as error:
             if error.section_path and error.dataclass_type:
                 raise

@@ -19,6 +19,7 @@ from weakincentives.prompt import (
     MarkdownSection,
     PromptTemplate,
     Section,
+    SectionVisibility,
     Tool,
 )
 from weakincentives.prompt.overrides import (
@@ -42,7 +43,15 @@ class _GreetingParams:
 
 
 class _StaticSection(Section[_GreetingParams]):
-    def render(self, params: _GreetingParams, depth: int, number: str) -> str:
+    def render(
+        self,
+        params: _GreetingParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del visibility
         return f"{self.title}: Depth {depth}: {params.subject} ({number})"
 
     def clone(self, **kwargs: object) -> _StaticSection:
