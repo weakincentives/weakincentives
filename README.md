@@ -1,278 +1,173 @@
 # Weak Incentives (Is All You Need)
 
-Weak Incentives (WINK) is a Python library for building "background agents" (automated
-AI systems). It provides lean, typed, and composable building blocks that keep
-determinism, testability, and safe execution front and center without relying on
-heavy dependencies or hosted services.
+WINK is a Python library for building background agents—automated AI systems that
+run unattended. It provides typed, composable primitives designed for determinism,
+testability, and safe execution without heavy dependencies or hosted services.
 
-The core philosophy treats agent development as a structured engineering
-discipline rather than ad-hoc scripting. WINK favors typed prompts,
-dataclass-backed outputs, observable sessions, sandboxed tools, provider-agnostic
-adapters, and configurable overrides so deterministic, testable behavior comes
-first.
+## What makes WINK different?
 
-## What's novel?
+Most agent frameworks offer loose toolkits. WINK provides an opinionated chassis
+that treats agent development as structured engineering:
 
-While other agent frameworks provide a toolbox of loose components, WINK
-offers an opinionated chassis that emphasizes determinism, type
-contracts, and observable workflows:
+- **Redux-style state management.** Every state change flows through pure reducers
+  processing published events. Tool calls, prompt evaluations, and internal
+  decisions become a replayable ledger—not scattered mutations in free-form dicts.
+  See [Session State](specs/SESSIONS.md) and [Events](specs/EVENTS.md).
 
-- **Redux-like state management with reducers.** Every state change is a
-  traceable consequence of a published event processed by a pure reducer,
-  delivering replayability and visibility far beyond free-form dictionaries or
-  mutable object properties. A Redux-like session ledger and in-process event
-  bus keep every tool call and prompt render replayable. Built-in planning,
-  virtual filesystem, and Python-evaluation sections ship with reducers that
-  enforce domain rules while emitting structured telemetry. See [Session
-  State](https://github.com/weakincentives/weakincentives/blob/main/specs/SESSIONS.md),
-  [Prompt Event Emission](https://github.com/weakincentives/weakincentives/blob/main/specs/EVENTS.md),
-  [Planning Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/PLANNING_TOOL.md),
-  [Virtual Filesystem Tools](https://github.com/weakincentives/weakincentives/blob/main/specs/VFS_TOOLS.md),
-  and [Asteval Integration](https://github.com/weakincentives/weakincentives/blob/main/specs/ASTEVAL.md).
-- **Composable prompt blueprints with typed contracts.** Prompts are built from
-  reusable sections backed by dataclasses, so composition and parameter binding
-  feel like standard software engineering instead of string concatenation.
-  Dataclass-backed sections compose into reusable blueprints that render
-  validated Markdown and expose tool contracts automatically. Specs:
-  [Prompt Overview](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS.md),
-  [Prompt Composition](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPTS_COMPOSITION.md),
-  and [Structured Output](https://github.com/weakincentives/weakincentives/blob/main/specs/STRUCTURED_OUTPUT.md).
-- **Integrated, hash-based prompt overrides.** `PromptDescriptor` content hashes
-  and tool contracts ensure overrides only apply to the intended section
-  version. `LocalPromptOverridesStore` keeps the JSON artifacts in version
-  control so
-  teams can collaborate without risking stale edits. Prompt definitions ship
-  with hash-based descriptors and on-disk overrides that stay in sync through
-  schema validation and Git-root discovery, laying the groundwork for iterative
-  optimization. Review
-  [Prompt Overrides](https://github.com/weakincentives/weakincentives/blob/main/specs/PROMPT_OVERRIDES.md)
-  for the full contract.
-- **First-class in-memory virtual filesystem.** The sandboxed VFS ships as a
-  core tool, giving agents a secure workspace whose state is tracked like any
-  other session slice and avoiding accidental host access. Everything runs
-  locally without hosted dependencies, and prompt renders stay diff-friendly so
-  version control captures intent instead of churn. The code-review example
-  ties it together with override-aware prompts, session telemetry, and
-  replayable tooling.
-- **Provider-agnostic adapters.** Adapters connect the framework to providers
-  like OpenAI or LiteLLM by handling API calls, tool negotiation, and response
-  parsing while keeping the agent logic model-agnostic. Shared conversation
-  loops negotiate tool calls, apply JSON-schema response formats, and normalize
-  structured payloads so the runtime stays model-agnostic. See
-  [Adapter Specification](https://github.com/weakincentives/weakincentives/blob/main/specs/ADAPTERS.md)
-  and provider-specific docs such as the
-  [LiteLLM Adapter](https://github.com/weakincentives/weakincentives/blob/main/specs/LITE_LLM_ADAPTER.md).
-- **Lean dependency surface.** Avoiding heavyweight stacks such as Pydantic
-  keeps the core lightweight. Custom serde modules provide the needed
-  functionality without saddling users with sprawling dependency trees.
+- **Typed prompt composition.** Prompts assemble from dataclass-backed sections
+  that compose like regular code. No string concatenation, no template soup—just
+  validated Markdown with automatic tool contract generation.
+  See [Prompts](specs/PROMPTS.md) and [Composition](specs/PROMPTS_COMPOSITION.md).
 
-In short, WINK favors software-engineering discipline—determinism,
-type safety, testability, and clear state management—over maximizing the number
-of exposed knobs.
+- **Hash-based prompt overrides.** Prompt descriptors carry content hashes so
+  overrides apply only to the intended version. Teams iterate on prompts via
+  version-controlled JSON without risking stale edits.
+  See [Prompt Overrides](specs/PROMPT_OVERRIDES.md).
+
+- **Sandboxed virtual filesystem.** Agents get an in-memory VFS tracked as session
+  state. Mount host directories read-only when needed; the sandbox prevents
+  accidental writes to the host. See [VFS Tools](specs/VFS_TOOLS.md).
+
+- **Provider-agnostic adapters.** Swap between OpenAI, LiteLLM, or other providers
+  without touching agent logic. Adapters handle tool negotiation, structured
+  output schemas, and response normalization.
+  See [Adapters](specs/ADAPTERS.md) and [LiteLLM](specs/LITE_LLM_ADAPTER.md).
+
+- **Minimal dependencies.** No Pydantic, no heavyweight stacks. Custom serde
+  modules provide validation without sprawling dependency trees.
 
 ## Requirements
 
-- Python 3.12+ (the repository pins 3.12 in `.python-version` for development)
+- Python 3.12+
 - [`uv`](https://github.com/astral-sh/uv) CLI
 
 ## Install
 
 ```bash
 uv add weakincentives
-# optional tool extras
-uv add "weakincentives[asteval]"
-# optional provider adapters
-uv add "weakincentives[openai]"
-uv add "weakincentives[litellm]"
-# optional CLI extras (FastAPI debug UI)
-uv add "weakincentives[wink]"
-# cloning the repo? use: uv sync --extra asteval --extra openai --extra litellm --extra wink
+# optional extras
+uv add "weakincentives[asteval]"      # safe Python evaluation
+uv add "weakincentives[openai]"       # OpenAI adapter
+uv add "weakincentives[litellm]"      # LiteLLM adapter
+uv add "weakincentives[wink]"         # debug UI
 ```
 
-### Debugging snapshots with `wink`
+### Debug UI
 
-The `wink` CLI ships a debug subcommand that serves a FastAPI-based UI for
-exploring session snapshots. It accepts a JSONL file (one snapshot JSON object
-per non-empty line) or a directory containing snapshot files. Install the extra
-and start the server:
+The `wink debug` command serves a FastAPI UI for exploring session snapshots:
 
 ```bash
-uv run --extra wink wink debug snapshots/5de6bba7-d699-4229-9747-d68664d8f91e.jsonl \
-  --host 127.0.0.1 --port 8000
+uv run --extra wink wink debug snapshots/session.jsonl --port 8000
 ```
 
-The UI is tuned for quick inspection of captured runs:
+Features: slice browser with JSON viewer, session selector for multi-entry files,
+live reload, raw download. Exit codes: `2` for invalid input, `3` for server
+failures.
 
-- Snapshot metadata (path, created timestamp, schema version) is pinned to the
-  header so you always know what file is being viewed.
-- A slice sidebar lists every slice type with item counts; selecting one streams
-  the items into a JSON viewer with copy-to-clipboard and collapse controls.
-- A session selector lets you hop between snapshots captured in the same JSONL
-  file (each line is treated as a distinct entry) without restarting the
-  server.
-- A snapshot selector surfaces any `*.jsonl` or `*.json` files under the provided
-  directory root (non-recursive); multi-line/pretty-printed JSON is not
-  supported, so use single-line payloads.
-- A reload action re-reads the snapshot from disk so you can iterate on
-  reproducible runs without restarting the server, and a raw download button
-  fetches the full JSON for archival or diffing.
+![Snapshot Explorer](snapshot_explorer.png)
 
-Validation happens before the server binds to a port. The command exits with
-`2` for missing files, unreadable/invalid JSONL lines, schema mismatches, or
-snapshots that omit a `session_id`, and `3` for server startup failures.
+## Tutorial: Code Review Agent
 
-![Snapshot Explorer UI (1902x1572)](snapshot_explorer.png)
+Build a code review assistant that browses files, answers questions, and creates
+review plans—all in a structured, observable, sandboxed way.
 
-## Tutorial: An Interactive Code Review Assistant
+Full source: [`code_reviewer_example.py`](code_reviewer_example.py) •
+Architecture: [`specs/code_reviewer_example.md`](specs/code_reviewer_example.md)
 
-Let's build a simple, interactive code review assistant. This agent will be able to browse a codebase, answer questions about it, and create plans for more complex reviews. We'll see how WINK helps build this in a structured, observable, and safe way.
+### 1. Define structured output
 
-The full source for this example is in
-[`code_reviewer_example.py`](https://github.com/weakincentives/weakincentives/blob/main/code_reviewer_example.py),
-and a high-level walkthrough of the architecture lives in
-[`specs/code_reviewer_example.md`](https://github.com/weakincentives/weakincentives/blob/main/specs/code_reviewer_example.md).
-
-### 1. Define the Agent's Task with Typed Dataclasses
-
-Instead of dealing with messy string outputs from the LLM, we'll define our expected output using a Python `dataclass`. The library ensures the model's response is parsed into this structure.
+Dataclasses enforce the shape of agent responses:
 
 ```python
 from dataclasses import dataclass
 
 @dataclass(slots=True, frozen=True)
 class ReviewResponse:
-    """The structured response we expect from our agent."""
     summary: str
     issues: list[str]
     next_steps: list[str]
 ```
 
-This `ReviewResponse` class is our contract with the agent. We're telling it exactly what we need: a summary, a list of issues, and next steps.
+### 2. Compose the prompt
 
-### 2. Compose a "Blueprint" for the Agent's Brain
-
-In WINK, prompts are not just f-strings; they are composable, versioned objects. We build a `Prompt` from `Section`s, which are like building blocks for the agent's reasoning process.
-
-Here, we create a main prompt that includes:
-
-- `guidance_section`: General instructions for the agent.
-- `planning_section`: Gives the agent the ability to create and manage plans.
-- `workspace_section`: Provides tools for interacting with a virtual filesystem.
-- `user_turn_section`: A placeholder for the user's interactive request.
+Prompts assemble from typed sections—guidance, planning tools, filesystem tools,
+and user input:
 
 ```python
 from weakincentives import MarkdownSection, Prompt
 from weakincentives.tools.planning import PlanningToolsSection
 from weakincentives.tools.vfs import VfsToolsSection
 
-# Sections are reusable components for building prompts.
-guidance_section = MarkdownSection(...)
-planning_section = PlanningToolsSection(session=session)
-workspace_section = VfsToolsSection(session=session, mounts=...)
-user_turn_section = MarkdownSection[ReviewTurnParams](...) # Takes user input
-
-# The Prompt object is the blueprint for the agent.
 review_prompt = Prompt[ReviewResponse](
     ns="examples/code-review",
     key="code-review-session",
-    name="sunfish_code_review_agent",
+    name="code_review_agent",
     sections=(
-        guidance_section,
-        planning_section,
-        workspace_section,
-        user_turn_section,
+        MarkdownSection(...),                          # guidance
+        PlanningToolsSection(session=session),         # planning tools
+        VfsToolsSection(session=session, mounts=...),  # sandboxed files
+        MarkdownSection[ReviewTurnParams](...),        # user input
     ),
 )
 ```
 
-This "prompt as code" approach makes our agent's logic modular, reusable, and easier to test.
+### 3. Mount files safely
 
-### 3. Provide a Safe Workspace with a Virtual Filesystem
-
-To let the agent review code, we need to give it access to the files. But we don't want it to have unrestricted access to the host machine. The `VfsToolsSection` provides a sandboxed in-memory filesystem. We can `mount` a real directory into this virtual workspace.
+Give agents file access without host risk:
 
 ```python
-from weakincentives.tools.vfs import HostMount, VfsPath, VfsToolsSection
+from weakincentives.tools.vfs import HostMount, VfsPath
 
-# Mount the 'sunfish' test repository into the agent's virtual workspace.
-# The agent will see it at the path 'sunfish/'.
-mounts = (
-    HostMount(
-        host_path="sunfish",
-        mount_path=VfsPath(("sunfish",)),
-    ),
-)
-
+mounts = (HostMount(host_path="repo", mount_path=VfsPath(("repo",))),)
 vfs_section = VfsToolsSection(
     session=session,
     mounts=mounts,
-    allowed_host_roots=(TEST_REPOSITORIES_ROOT,), # Limit host access
+    allowed_host_roots=(SAFE_ROOT,),
 )
 ```
 
-Now the agent can use tools like `vfs_list_files` and `vfs_read_file` to explore the code inside its sandbox, without any risk to the host system.
+Agents use `vfs_list_files` and `vfs_read_file` inside the sandbox.
 
-### 4. Run the Agent and Get a Structured Result
-
-With the prompt defined, we need a `Session` to track state and an `Adapter` to communicate with an LLM provider (like OpenAI).
-
-The `Session` is a central state store. All events, like tool calls and prompt evaluations, are recorded in the session. This makes the agent's execution fully observable and replayable.
+### 4. Run and get typed results
 
 ```python
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.adapters.openai import OpenAIAdapter
 
-# The event bus allows us to listen to events from the session.
 bus = InProcessEventBus()
-# The session tracks all state changes.
 session = Session(bus=bus)
-
-# The adapter connects to the LLM provider.
 adapter = OpenAIAdapter(model="gpt-5.1")
 
-# This is the main evaluation loop.
 response = adapter.evaluate(
     review_prompt,
-    ReviewTurnParams(request="Are there any obvious bugs in sunfish.py?"),
+    ReviewTurnParams(request="Find bugs in main.py"),
     bus=bus,
     session=session,
 )
 
-# The output is a typed dataclass object, not a raw string.
-review: ReviewResponse = response.output
-print(review.summary)
+review: ReviewResponse = response.output  # typed, validated
 ```
 
-If the model's output doesn't match our `ReviewResponse` dataclass, the adapter will raise an error, preventing corrupted data from flowing through the system.
+### 5. Inspect agent state
 
-### 5. Observe the Agent's Thought Process
-
-Because every action is tracked in the `Session`, we can inspect the agent's state at any time. For example, we can retrieve the final plan the agent came up with.
+Every action is recorded. Query the session for plans, tool calls, or any slice:
 
 ```python
 from weakincentives.runtime.session import select_latest
 from weakincentives.tools.planning import Plan
 
-# Select the latest plan from the session state.
-latest_plan = select_latest(session, Plan)
-
-if latest_plan:
-    print(f"Plan objective: {latest_plan.objective}")
-    for step in latest_plan.steps:
-        print(f"- [{step.status}] {step.title}")
+plan = select_latest(session, Plan)
+if plan:
+    for step in plan.steps:
+        print(f"[{step.status}] {step.title}")
 ```
 
-This observability is crucial for debugging and understanding the agent's behavior. You can see exactly what tools it ran, what files it read, and what conclusions it drew at each step.
+### 6. Iterate prompts without code changes
 
-### 6. Evolve Prompts without Changing Code
-
-What if you want to tweak the agent's instructions? Instead of editing the Python code, you can use **Prompt Overrides**. WINK can load modified prompt sections from external JSON files.
-
-This allows you to iterate on prompts, A/B test different instructions, and tune the agent's behavior without redeploying your application.
+Override prompt sections via version-controlled JSON:
 
 ```python
-# When rendering, specify a tag to look for overrides.
 rendered = review_prompt.render(
     ...,
     overrides_store=LocalPromptOverridesStore(),
@@ -280,26 +175,17 @@ rendered = review_prompt.render(
 )
 ```
 
-The `LocalPromptOverridesStore` will look for a JSON file in `.weakincentives/prompts/overrides/` that matches the prompt's namespace, key, and the "assertive-feedback" tag. This makes prompt engineering a data-driven process, separate from application logic.
+Overrides live in `.weakincentives/prompts/overrides/` and match by namespace,
+key, and tag.
 
-### You've built a reviewer!
+### Result
 
-That's it. You now have a deterministic, observable, and safe code review assistant that:
-
-1. Returns structured, typed data.
-1. Interacts with files in a sandboxed environment.
-1. Creates and follows plans to solve complex tasks.
-1. Whose every action is recorded and can be inspected.
-1. Can be easily tweaked and improved via external configuration.
-
-This approach turns agent development from a scripting exercise into a structured engineering discipline.
+A code review agent with structured output, sandboxed file access, observable
+state, and tunable prompts—built as regular software, not ad-hoc scripts.
 
 ## Logging
 
-WINK ships a structured logging adapter so hosts can add contextual
-metadata to every record without manual dictionary plumbing. Call
-`configure_logging()` during startup to install the default handler and then
-bind logger instances wherever you need telemetry:
+WINK provides structured logging with contextual metadata:
 
 ```python
 from weakincentives.runtime.logging import configure_logging, get_logger
@@ -309,76 +195,35 @@ logger = get_logger("demo").bind(component="cli")
 logger.info("boot", event="demo.start", context={"attempt": 1})
 ```
 
-The helper respects any existing root handlers—omit `force=True` if your
-application already configures logging and you only want WINK to
-honor the selected level. When you do want to take over the pipeline, call
-`configure_logging(..., force=True)` and then customize the root handler list
-with additional sinks (for example, forwarding records to Cloud Logging or a
-structured log shipper). Each emitted record contains an `event` field plus a
-`context` mapping, so downstream processors can make routing decisions without
-parsing raw message strings.
+Use `force=True` to replace existing handlers. Each record includes `event` and
+`context` fields for downstream routing.
 
-## Development Setup
+## Development
 
-1. Install Python 3.12 (for example with `pyenv install 3.12.0`).
+```bash
+uv sync && ./install-hooks.sh
+```
 
-1. Install `uv`, then bootstrap the environment and hooks:
-
-   ```bash
-   uv sync
-   ./install-hooks.sh
-   ```
-
-1. Run checks with `uv run` so everything shares the managed virtualenv:
-
-   - `make format` / `make format-check`
-   - `make lint` / `make lint-fix`
-   - `make typecheck` (Ty + Pyright, warnings fail the build)
-   - `make test` (pytest via `build/run_pytest.py`, 100% coverage enforced)
-   - `make mutation-test` (mutmut driven from `mutation.toml` for mutation coverage)
-   - `make check` (aggregates the quiet checks above plus Bandit, Deptry, pip-audit,
-     and markdown linting)
-
-`make mutation-check` mirrors the `mutation-test` target while enforcing the
-configured minimum score; CI uses a dedicated mutation step to block regressions,
-and the default `make check` target intentionally leaves mutation scoring out of the
-fast path.
+Key targets:
+- `make format` / `make lint` / `make typecheck`
+- `make test` (100% coverage enforced)
+- `make mutation-test` (mutmut, 80% score gate)
+- `make check` (all of the above plus Bandit, Deptry, pip-audit)
 
 ### Integration tests
 
-Provider integrations require live credentials, so the suite stays opt-in. Export the
-necessary OpenAI configuration and then run the dedicated `make` target, which disables
-coverage enforcement automatically:
-
 ```bash
-export OPENAI_API_KEY="sk-your-key"
-# Optionally override the default model (`gpt-5.1`).
-export OPENAI_TEST_MODEL="gpt-5.1"
-
-make integration-tests
+export OPENAI_API_KEY="sk-..."
+make integration-tests  # skipped without credentials
 ```
-
-`make integration-tests` forwards `--no-cov` to pytest so you can exercise the adapter
-scenarios without tripping the 100% coverage gate configured for the unit test suite. The
-tests remain skipped when `OPENAI_API_KEY` is not present.
-
-### Mutation testing
-
-Mutation coverage complements the strict line-coverage floor. Mutants focus on the
-session reducer and serde hotspots (see `paths_to_mutate` in `mutation.toml`) and
-exclude generated assets and snapshots that would inflate the workload without
-improving signal. Run `make mutation-test` to execute mutmut locally; `make mutation-check`
-enforces an 80% score gate that CI uses alongside the coverage gate. The reported percentage reflects
-the share of mutants that were killed or timed out relative to all generated mutants;
-survivors and suspicious mutants reduce the score, and a run with no mutants scores 0%.
 
 ## Documentation
 
-- `AGENTS.md` — operational handbook and contributor workflow.
-- `specs/` — design docs for prompts, planning tools, and adapters.
-- `ROADMAP.md` — upcoming feature sketches.
-- `docs/api/` — API reference material.
+- `AGENTS.md` — contributor workflow
+- `specs/` — design documents
+- `ROADMAP.md` — upcoming features
+- `docs/api/` — API reference
 
 ## License
 
-Apache 2.0 • Status: Alpha (APIs may change between releases)
+Apache 2.0 • Status: Alpha (APIs may change)
