@@ -28,6 +28,7 @@ from importlib import import_module
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
@@ -131,7 +132,7 @@ def _str_set_factory() -> set[str]:
     return set()
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class EvalFileRead:
     """File that should be read from the virtual filesystem before execution."""
 
@@ -148,7 +149,7 @@ class EvalFileRead:
         return f"read {_format_vfs_path(self.path)}"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class EvalFileWrite:
     """File that should be written back to the virtual filesystem."""
 
@@ -178,7 +179,7 @@ class EvalFileWrite:
         return f"{self.mode} {_format_vfs_path(self.path)} ({size} chars)"
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class EvalParams:
     """Parameter payload passed to the Python evaluation tool."""
 
@@ -214,7 +215,7 @@ class EvalParams:
     )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class EvalResult:
     """Structured result produced by the Python evaluation tool."""
 
@@ -274,7 +275,7 @@ class EvalResult:
         return "\n".join(lines)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _AstevalSectionParams:
     """Placeholder params container for the asteval section."""
 

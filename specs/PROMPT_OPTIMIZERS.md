@@ -335,32 +335,33 @@ The optimizer's `optimize()` method follows the same workflow as the current
    workspace section (`PodmanSandboxSection` or `VfsToolsSection`). Raise
    `PromptEvaluationError` if either is missing.
 
-2. **Create isolated session** – Use `_create_optimization_session()` to obtain
+1. **Create isolated session** – Use `_create_optimization_session()` to obtain
    a session that will not mutate the caller's state during tool execution.
 
-3. **Clone session-aware sections** – Call `section.clone(session=...,
-   bus=...)` on workspace and tool sections to bind them to the optimization
+1. **Clone session-aware sections** – Call `section.clone(session=..., bus=...)` on workspace and tool sections to bind them to the optimization
    session.
 
-4. **Compose optimization prompt** – Build a `PromptTemplate` containing:
+1. **Compose optimization prompt** – Build a `PromptTemplate` containing:
+
    - `MarkdownSection` for "Optimization Goal"
    - `MarkdownSection` for "Expectations"
    - `PlanningToolsSection` with `GOAL_DECOMPOSE_ROUTE_SYNTHESISE` strategy
    - Cloned tool sections (`AstevalSection`, etc.)
    - Cloned workspace section
 
-5. **Evaluate** – Call `context.adapter.evaluate()` with the optimization
+1. **Evaluate** – Call `context.adapter.evaluate()` with the optimization
    prompt and isolated session.
 
-6. **Extract digest** – Parse the response output or text to obtain the digest
+1. **Extract digest** – Parse the response output or text to obtain the digest
    string.
 
-7. **Persist result** – Based on `store_scope`:
+1. **Persist result** – Based on `store_scope`:
+
    - `SESSION`: Call `set_workspace_digest()` on the caller's session.
    - `GLOBAL`: Call `overrides_store.set_section_override()` and clear the
      session entry via `clear_workspace_digest()`.
 
-8. **Return result** – Package the response, digest, scope, and section key
+1. **Return result** – Package the response, digest, scope, and section key
    into `WorkspaceDigestResult`.
 
 ## Adapter Refactoring
@@ -407,23 +408,23 @@ The refactoring requires the following changes:
    protocol, `OptimizationContext`, `BasePromptOptimizer`, and
    `WorkspaceDigestOptimizer`.
 
-2. **Delete `ProviderAdapter.optimize()`** – Remove the method and all helper
+1. **Delete `ProviderAdapter.optimize()`** – Remove the method and all helper
    methods (`_resolve_workspace_section`, `_resolve_tool_sections`,
    `_clone_section`, `_require_workspace_digest_section`, `_find_section_path`,
    `_extract_digest`) from `adapters/core.py`.
 
-3. **Move result types** – Relocate `OptimizationScope` and `OptimizationResult`
+1. **Move result types** – Relocate `OptimizationScope` and `OptimizationResult`
    from `adapters/core.py` to the optimizers module. Delete
    `_OptimizationResponse` (internal to optimizer).
 
-4. **Update callers** – Modify `code_reviewer_example.py` and any other code
+1. **Update callers** – Modify `code_reviewer_example.py` and any other code
    that calls `adapter.optimize()` to instantiate and use
    `WorkspaceDigestOptimizer` directly.
 
-5. **Update ADAPTERS.md** – Remove the "Optimization API" and "Optimization
+1. **Update ADAPTERS.md** – Remove the "Optimization API" and "Optimization
    Workflow" sections; add a cross-reference to this spec.
 
-6. **Update WORKSPACE_DIGEST.md** – Replace references to
+1. **Update WORKSPACE_DIGEST.md** – Replace references to
    `ProviderAdapter.optimize()` with `WorkspaceDigestOptimizer`.
 
 ## Future Optimizer Examples

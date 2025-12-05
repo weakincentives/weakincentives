@@ -16,16 +16,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, cast
 
+from ...dataclasses import FrozenDataclass
 from .local_store import LocalPromptOverridesStore
 from .versioning import HexDigest, PromptOverridesError
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class OverrideFileMetadata:
     """Summary information about a prompt override file."""
 

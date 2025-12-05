@@ -33,6 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
+from ..dataclasses import FrozenDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
@@ -148,7 +149,7 @@ class _ExecRunner(Protocol):
     ) -> subprocess.CompletedProcess[str]: ...
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _ExecConfig:
     command: Sequence[str]
     stdin: str | None = None
@@ -158,13 +159,13 @@ class _ExecConfig:
     capture_output: bool = True
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _PodmanSectionParams:
     image: str = _DEFAULT_IMAGE
     workspace_root: str = _DEFAULT_WORKDIR
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PodmanSandboxConfig:
     """Configuration for :class:`PodmanSandboxSection`."""
 
@@ -182,7 +183,7 @@ class PodmanSandboxConfig:
     accepts_overrides: bool = False
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PodmanShellParams:
     """Parameter payload accepted by the ``shell_execute`` tool."""
 
@@ -194,7 +195,7 @@ class PodmanShellParams:
     capture_output: bool = True
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PodmanShellResult:
     """Structured command summary returned by the ``shell_execute`` tool."""
 
@@ -223,7 +224,7 @@ class PodmanShellResult:
         return "\n".join(lines)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PodmanWorkspace:
     """Active Podman container backing the session."""
 
@@ -243,14 +244,14 @@ class _WorkspaceHandle:
     overlay_path: Path
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _PodmanConnectionInfo:
     base_url: str | None
     identity: str | None
     connection_name: str | None
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _ResolvedHostMount:
     source_label: str
     resolved_host: Path

@@ -14,13 +14,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import field
 from datetime import datetime
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
+from ...dataclasses import FrozenDataclass
 from ..logging import StructuredLogger, get_logger
 from ._types import (
     EventBus,
@@ -101,7 +102,7 @@ class InProcessEventBus:
         )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PromptExecuted:
     """Event emitted after an adapter finishes evaluating a prompt."""
 
@@ -115,7 +116,7 @@ class PromptExecuted:
     event_id: UUID = field(default_factory=uuid4)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PromptRendered:
     """Event emitted immediately before dispatching a rendered prompt."""
 

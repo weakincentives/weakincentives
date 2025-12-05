@@ -15,9 +15,9 @@
 from __future__ import annotations
 
 import textwrap
-from dataclasses import dataclass
 from typing import cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..prompt._types import SupportsDataclass
 from ..prompt._visibility import SectionVisibility
 from ..prompt.section import Section
@@ -26,7 +26,7 @@ from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class WorkspaceDigest(SupportsDataclass):
     """Digest entry persisted within a :class:`Session` slice."""
 

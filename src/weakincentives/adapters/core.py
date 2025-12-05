@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import textwrap
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal, TypeVar, cast
 
@@ -69,7 +68,7 @@ class OptimizationResult:
     section_key: str
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class _OptimizationResponse:
     """Structured response emitted by the workspace digest optimization prompt."""
 

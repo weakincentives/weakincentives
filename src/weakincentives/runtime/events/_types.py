@@ -21,6 +21,7 @@ from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
+from ...dataclasses import FrozenDataclass
 
 EventHandler = Callable[[object], None]
 
@@ -44,7 +45,7 @@ class EventBus(Protocol):
         ...
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class HandlerFailure:
     """Container describing a handler error captured during publish."""
 
@@ -88,7 +89,7 @@ class PublishResult:
         )
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class TokenUsage:
     """Token accounting captured from provider responses."""
 
@@ -105,7 +106,7 @@ class TokenUsage:
         return (self.input_tokens or 0) + (self.output_tokens or 0)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ToolInvoked:
     """Event emitted after an adapter executes a tool handler."""
 

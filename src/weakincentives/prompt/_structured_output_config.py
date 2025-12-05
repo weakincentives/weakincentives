@@ -12,9 +12,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal, TypeVar
 
+from ..dataclasses import FrozenDataclass
 from ._types import SupportsDataclass
 
 __all__ = ["StructuredOutputConfig"]
@@ -22,7 +22,7 @@ __all__ = ["StructuredOutputConfig"]
 DataclassT = TypeVar("DataclassT", bound=SupportsDataclass)
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class StructuredOutputConfig[DataclassT]:
     """Resolved structured output declaration for a prompt."""
 

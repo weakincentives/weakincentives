@@ -132,7 +132,7 @@ _DEFAULT_MAX_DELAY = timedelta(seconds=8)
 _DEFAULT_MAX_TOTAL_DELAY = timedelta(seconds=30)
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ThrottlePolicy:
     """Configuration for throttle retry handling."""
 
@@ -181,7 +181,7 @@ class AdapterRenderContext[OutputT]:
     response_format: Mapping[str, Any] | None
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class AdapterRenderOptions:
     """Configuration for rendering prompts ahead of provider evaluation."""
 
@@ -191,7 +191,7 @@ class AdapterRenderOptions:
     deadline: Deadline | None
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ThrottleDetails:
     """Provider throttle metadata tracked alongside PromptEvaluationError details."""
 

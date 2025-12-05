@@ -15,10 +15,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, MutableMapping
-from dataclasses import dataclass, field, is_dataclass, replace
+from dataclasses import field, is_dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, override
 
+from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._visibility import SectionVisibility
@@ -39,7 +40,7 @@ _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyTy
 OutputT_co = TypeVar("OutputT_co", covariant=True)
 
 
-@dataclass(frozen=True, slots=True)
+@FrozenDataclass()
 class RenderedPrompt[OutputT_co]:
     """Rendered prompt text paired with structured output metadata."""
 

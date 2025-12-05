@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping, Sized
-from dataclasses import dataclass
 from decimal import Decimal
 from importlib import import_module
 from re import Pattern
 from typing import Any as _AnyType, Final, Literal, cast, get_args
 
+from ..dataclasses import FrozenDataclass
 from ..types import JSONValue
 
 MISSING_SENTINEL: Final[object] = object()
@@ -79,7 +79,7 @@ def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
         descriptor.__set__(instance, extras_dict)
 
 
-@dataclass(frozen=True)
+@FrozenDataclass()
 class _ParseConfig:
     extra: Literal["ignore", "forbid", "allow"]
     coerce: bool

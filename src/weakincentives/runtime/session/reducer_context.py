@@ -14,14 +14,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from ...dataclasses import FrozenDataclass
 from ..events import EventBus
 from ._types import ReducerContextProtocol
 from .protocols import SessionProtocol
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ReducerContext(ReducerContextProtocol):
     """Immutable bundle of runtime services shared with reducers."""
 

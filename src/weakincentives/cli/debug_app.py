@@ -19,7 +19,6 @@ import re
 import threading
 import webbrowser
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
@@ -33,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
 
+from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.snapshots import (
@@ -101,14 +101,14 @@ def _render_markdown_values(value: JSONValue) -> JSONValue:
     return value
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class SliceSummary:
     slice_type: str
     item_type: str
     count: int
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class SnapshotMeta:
     version: str
     created_at: str
@@ -120,7 +120,7 @@ class SnapshotMeta:
     validation_error: str | None = None
 
 
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class LoadedSnapshot:
     meta: SnapshotMeta
     slices: Mapping[str, SnapshotSlicePayload]
