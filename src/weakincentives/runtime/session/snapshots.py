@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from typing import TypeGuard, cast, override
 from uuid import UUID
 
+from ...errors import WinkError
 from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
 from ...serde._utils import (
@@ -39,11 +40,11 @@ SNAPSHOT_SCHEMA_VERSION = "1"
 type SnapshotState = Mapping[SessionSliceType, SessionSlice]
 
 
-class SnapshotSerializationError(RuntimeError):
+class SnapshotSerializationError(WinkError, RuntimeError):
     """Raised when snapshot capture fails due to unsupported payloads."""
 
 
-class SnapshotRestoreError(RuntimeError):
+class SnapshotRestoreError(WinkError, RuntimeError):
     """Raised when snapshot restoration fails due to incompatible payloads."""
 
 

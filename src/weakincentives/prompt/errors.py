@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from ..errors import WinkError
+
 SectionPath = tuple[str, ...]
 
 
@@ -23,7 +25,7 @@ def _normalize_section_path(section_path: Sequence[str] | None) -> SectionPath:
     return tuple(section_path)
 
 
-class PromptError(Exception):
+class PromptError(WinkError):
     """Base class for prompt-related failures providing structured context."""
 
     def __init__(

@@ -17,6 +17,7 @@ from __future__ import annotations
 from .adapters import PromptResponse
 from .dataclasses import FrozenDataclass
 from .deadlines import Deadline
+from .errors import WinkError
 from .prompt import (
     MarkdownSection,
     Prompt,
@@ -43,6 +44,7 @@ __all__ = [
     "ToolContext",
     "ToolHandler",
     "ToolResult",
+    "WinkError",
     "configure_logging",
     "get_logger",
     "parse_structured_output",
