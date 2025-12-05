@@ -14,10 +14,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
-
-from typing import cast
 
 from weakincentives.prompt import (
     MarkdownSection,
@@ -112,7 +111,10 @@ def test_text_section_with_summary_renders_summary_when_visibility_is_summary() 
     )
 
     output = section.render(
-        ContentParams(topic="testing"), depth=0, number="1", visibility=SectionVisibility.SUMMARY
+        ContentParams(topic="testing"),
+        depth=0,
+        number="1",
+        visibility=SectionVisibility.SUMMARY,
     )
 
     assert output == "## 1. Content\n\nBrief: testing"
@@ -148,7 +150,10 @@ def test_text_section_without_summary_falls_back_to_full() -> None:
 
     # Even with SUMMARY visibility, falls back to full when no summary is set
     output = section.render(
-        ContentParams(value="test"), depth=0, number="1", visibility=SectionVisibility.SUMMARY
+        ContentParams(value="test"),
+        depth=0,
+        number="1",
+        visibility=SectionVisibility.SUMMARY,
     )
 
     assert output == "## 1. NoSummary\n\nFull content: test"
@@ -169,7 +174,10 @@ def test_text_section_visibility_override_takes_precedence() -> None:
 
     # Override to SUMMARY at render time
     output = section.render(
-        ContentParams(value="test"), depth=0, number="1", visibility=SectionVisibility.SUMMARY
+        ContentParams(value="test"),
+        depth=0,
+        number="1",
+        visibility=SectionVisibility.SUMMARY,
     )
 
     assert output == "## 1. Override\n\nSummary: test"
@@ -223,7 +231,10 @@ def test_text_section_effective_visibility_returns_override() -> None:
     )
 
     assert section.effective_visibility() == SectionVisibility.FULL
-    assert section.effective_visibility(SectionVisibility.SUMMARY) == SectionVisibility.SUMMARY
+    assert (
+        section.effective_visibility(SectionVisibility.SUMMARY)
+        == SectionVisibility.SUMMARY
+    )
 
 
 def test_text_section_effective_visibility_fallback_to_full_without_summary() -> None:
@@ -240,7 +251,10 @@ def test_text_section_effective_visibility_fallback_to_full_without_summary() ->
     assert section.summary is None
     assert section.effective_visibility() == SectionVisibility.FULL
     # Falls back to FULL when requesting SUMMARY but no summary is set
-    assert section.effective_visibility(SectionVisibility.SUMMARY) == SectionVisibility.FULL
+    assert (
+        section.effective_visibility(SectionVisibility.SUMMARY)
+        == SectionVisibility.FULL
+    )
 
 
 def test_text_section_original_summary_template_returns_summary() -> None:
@@ -304,7 +318,9 @@ class _ToolResult:
     answer: str
 
 
-def _dummy_handler(params: _ToolParams, *, context: ToolContext) -> ToolResult[_ToolResult]:
+def _dummy_handler(
+    params: _ToolParams, *, context: ToolContext
+) -> ToolResult[_ToolResult]:
     del context
     return ToolResult(message="ok", value=_ToolResult(answer=params.query))
 
@@ -376,9 +392,7 @@ def test_summary_visibility_skips_child_sections() -> None:
     )
 
     registry = PromptRegistry()
-    registry.register_sections(
-        (cast(Section[SupportsDataclass], parent),)
-    )
+    registry.register_sections((cast(Section[SupportsDataclass], parent),))
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
         registry=snapshot,
@@ -386,10 +400,12 @@ def test_summary_visibility_skips_child_sections() -> None:
         response_section=None,
     )
 
-    params_lookup = renderer.build_param_lookup((
-        _SectionParams(title="Parent Title"),
-        ChildParams(detail="Child Detail"),
-    ))
+    params_lookup = renderer.build_param_lookup(
+        (
+            _SectionParams(title="Parent Title"),
+            ChildParams(detail="Child Detail"),
+        )
+    )
 
     # Without visibility override, both parent and child are rendered
     rendered_full = renderer.render(params_lookup)
@@ -433,9 +449,7 @@ def test_summary_visibility_skips_child_tools() -> None:
     )
 
     registry = PromptRegistry()
-    registry.register_sections(
-        (cast(Section[SupportsDataclass], parent),)
-    )
+    registry.register_sections((cast(Section[SupportsDataclass], parent),))
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
         registry=snapshot,
@@ -443,10 +457,12 @@ def test_summary_visibility_skips_child_tools() -> None:
         response_section=None,
     )
 
-    params_lookup = renderer.build_param_lookup((
-        _SectionParams(title="Parent"),
-        ChildParams(query="test"),
-    ))
+    params_lookup = renderer.build_param_lookup(
+        (
+            _SectionParams(title="Parent"),
+            ChildParams(query="test"),
+        )
+    )
 
     # Without visibility override, child tool is included
     rendered_full = renderer.render(params_lookup)
@@ -503,3 +519,66 @@ def test_summary_visibility_default_excludes_tools() -> None:
     )
     assert len(rendered_full.tools) == 1
     assert "Full: Test" in rendered_full.text
+
+
+def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
+    """Sibling sections after a SUMMARY section are rendered normally."""
+
+    @dataclass
+    class ChildParams:
+        detail: str
+
+    @dataclass
+    class SiblingParams:
+        info: str
+
+    parent_with_child = MarkdownSection[_SectionParams](
+        title="Parent",
+        template="Parent full: ${title}",
+        key="parent",
+        summary="Parent summary: ${title}",
+        children=[
+            MarkdownSection[ChildParams](
+                title="Child",
+                template="Child content: ${detail}",
+                key="child",
+            )
+        ],
+    )
+
+    sibling = MarkdownSection[SiblingParams](
+        title="Sibling",
+        template="Sibling content: ${info}",
+        key="sibling",
+    )
+
+    registry = PromptRegistry()
+    registry.register_sections(
+        (
+            cast(Section[SupportsDataclass], parent_with_child),
+            cast(Section[SupportsDataclass], sibling),
+        )
+    )
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+        response_section=None,
+    )
+
+    params_lookup = renderer.build_param_lookup(
+        (
+            _SectionParams(title="Parent Title"),
+            ChildParams(detail="Child Detail"),
+            SiblingParams(info="Sibling Info"),
+        )
+    )
+
+    # With SUMMARY visibility on parent, child is skipped but sibling is rendered
+    rendered = renderer.render(
+        params_lookup,
+        visibility_overrides={("parent",): SectionVisibility.SUMMARY},
+    )
+    assert "Parent summary: Parent Title" in rendered.text
+    assert "Child content" not in rendered.text  # Child is skipped
+    assert "Sibling content: Sibling Info" in rendered.text  # Sibling is rendered

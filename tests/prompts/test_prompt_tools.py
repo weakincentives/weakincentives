@@ -17,7 +17,12 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, PromptTemplate, Section, SectionVisibility
+from weakincentives.prompt import (
+    MarkdownSection,
+    PromptTemplate,
+    Section,
+    SectionVisibility,
+)
 from weakincentives.prompt.errors import PromptValidationError
 from weakincentives.prompt.tool import Tool
 

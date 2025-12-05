@@ -25,6 +25,7 @@ from ._visibility import SectionVisibility
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .registry import RegistrySnapshot, SectionNode
 from .response_format import ResponseFormatSection
+from .section import Section
 from .structured_output import StructuredOutputConfig
 from .tool import Tool
 
@@ -153,7 +154,7 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(
+    def render(  # noqa: PLR0913
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
@@ -187,7 +188,9 @@ class PromptRenderer[OutputT]:
                 else None
             )
             visibility_override = visibility_override_lookup.get(node.path)
-            effective_visibility = node.section.effective_visibility(visibility_override)
+            effective_visibility = node.section.effective_visibility(
+                visibility_override
+            )
 
             # When rendering with SUMMARY visibility, skip children
             if effective_visibility == SectionVisibility.SUMMARY:
@@ -198,28 +201,13 @@ class PromptRenderer[OutputT]:
             )
 
             # Don't collect tools when rendering with SUMMARY visibility
-            section_tools = node.section.tools()
-            if section_tools and effective_visibility != SectionVisibility.SUMMARY:
-                for tool in section_tools:
-                    override = (
-                        tool_override_lookup.get(tool.name)
-                        if tool.accepts_overrides
-                        else None
-                    )
-                    patched_tool = tool
-                    if override is not None:
-                        if (
-                            override.description is not None
-                            and override.description != tool.description
-                        ):
-                            patched_tool = replace(
-                                tool, description=override.description
-                            )
-                        if override.param_descriptions:
-                            field_description_patches[tool.name] = dict(
-                                override.param_descriptions
-                            )
-                    collected_tools.append(patched_tool)
+            if effective_visibility != SectionVisibility.SUMMARY:
+                self._collect_section_tools(
+                    node.section,
+                    tool_override_lookup,
+                    collected_tools,
+                    field_description_patches,
+                )
 
             if rendered:
                 rendered_sections.append(rendered)
@@ -235,6 +223,34 @@ class PromptRenderer[OutputT]:
                 field_description_patches
             ),
         )
+
+    def _collect_section_tools(
+        self,
+        section: Section[SupportsDataclass],
+        tool_override_lookup: dict[str, ToolOverride],
+        collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        field_description_patches: dict[str, dict[str, str]],
+    ) -> None:
+        section_tools = section.tools()
+        if not section_tools:
+            return
+
+        for tool in section_tools:
+            override = (
+                tool_override_lookup.get(tool.name) if tool.accepts_overrides else None
+            )
+            patched_tool = tool
+            if override is not None:
+                if (
+                    override.description is not None
+                    and override.description != tool.description
+                ):
+                    patched_tool = replace(tool, description=override.description)
+                if override.param_descriptions:
+                    field_description_patches[tool.name] = dict(
+                        override.param_descriptions
+                    )
+            collected_tools.append(patched_tool)
 
     def _iter_enabled_sections(
         self,
@@ -292,7 +308,10 @@ class PromptRenderer[OutputT]:
                 )
             else:
                 rendered = node.section.render(
-                    section_params, node.depth, node.number, visibility=visibility_override
+                    section_params,
+                    node.depth,
+                    node.number,
+                    visibility=visibility_override,
                 )
         except PromptRenderError as error:
             if error.section_path and error.dataclass_type:
