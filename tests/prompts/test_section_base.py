@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompt import Section
+from weakincentives.prompt import Section, SectionVisibility
 from weakincentives.prompt._generic_params_specializer import GenericParamsSpecializer
 from weakincentives.prompt._normalization import (
     COMPONENT_KEY_PATTERN,
@@ -35,8 +35,15 @@ class GenericParams:
 
 
 class ExampleSection(Section[ExampleParams]):
-    def render(self, params: ExampleParams, depth: int, number: str) -> str:
-        del number
+    def render(
+        self,
+        params: ExampleParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del number, visibility
         _ = self.title
         return f"Rendered {params.value} at depth {depth}"
 
@@ -93,6 +100,83 @@ def test_section_original_body_template_default_is_none() -> None:
     assert section.original_body_template() is None
 
 
+def test_section_default_summary_is_none() -> None:
+    section = ExampleSection(title="No Summary", key="no-summary")
+
+    assert section.summary is None
+
+
+def test_section_default_visibility_is_full() -> None:
+    section = ExampleSection(title="Default Visibility", key="default-visibility")
+
+    assert section.visibility == SectionVisibility.FULL
+
+
+def test_section_allows_custom_summary_and_visibility() -> None:
+    section = PlainSection(
+        title="Custom",
+        key="custom",
+        summary="Brief description",
+        visibility=SectionVisibility.SUMMARY,
+    )
+
+    assert section.summary == "Brief description"
+    assert section.visibility == SectionVisibility.SUMMARY
+
+
+def test_section_effective_visibility_returns_default_when_no_override() -> None:
+    section = PlainSection(
+        title="Default",
+        key="default",
+        summary="Summary text",
+        visibility=SectionVisibility.FULL,
+    )
+
+    assert section.effective_visibility() == SectionVisibility.FULL
+
+
+def test_section_effective_visibility_returns_override_when_provided() -> None:
+    section = PlainSection(
+        title="Override",
+        key="override",
+        summary="Summary text",
+        visibility=SectionVisibility.FULL,
+    )
+
+    assert (
+        section.effective_visibility(SectionVisibility.SUMMARY)
+        == SectionVisibility.SUMMARY
+    )
+
+
+def test_section_effective_visibility_fallback_to_full_without_summary() -> None:
+    section = PlainSection(title="No Summary", key="no-summary")
+
+    # Default is FULL when no summary
+    assert section.effective_visibility() == SectionVisibility.FULL
+    # Falls back to FULL when requesting SUMMARY but no summary is set
+    assert (
+        section.effective_visibility(SectionVisibility.SUMMARY)
+        == SectionVisibility.FULL
+    )
+
+
+def test_section_original_summary_template_returns_summary() -> None:
+    section = PlainSection(
+        title="With Summary",
+        key="with-summary",
+        summary="This is the summary template",
+    )
+
+    assert section.original_summary_template() == "This is the summary template"
+
+
+def test_section_original_summary_template_returns_none_when_not_set() -> None:
+    section = PlainSection(title="No Summary", key="no-summary")
+
+    assert section.original_summary_template() is None
+
+
 def test_section_allows_custom_children_and_enabled() -> None:
     child = ExampleSection(title="Child", key="child")
 
@@ -112,8 +196,15 @@ def test_section_allows_custom_children_and_enabled() -> None:
 
 
 class PlainSection(Section):
-    def render(self, params: object, depth: int, number: str) -> str:
-        del params, depth, number
+    def render(
+        self,
+        params: object,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del params, depth, number, visibility
         _ = getattr(self, "key", None)
         return ""
 

@@ -23,6 +23,7 @@ from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
+from ._visibility import SectionVisibility
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -42,6 +43,8 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         enabled: EnabledPredicate | None = None,
         tools: Sequence[object] | None = None,
         accepts_overrides: bool = True,
+        summary: str | None = None,
+        visibility: SectionVisibility = SectionVisibility.FULL,
     ) -> None:
         super().__init__()
         params_candidate = getattr(self.__class__, "_params_type", None)
@@ -58,6 +61,8 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         self.key = self._normalize_key(key)
         self.default_params = default_params
         self.accepts_overrides = accepts_overrides
+        self.summary = summary
+        self.visibility = visibility
 
         if self.params_type is None and self.default_params is not None:
             raise TypeError("Section without parameters cannot define default_params.")
@@ -82,8 +87,25 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         return bool(self._enabled(params))
 
     @abstractmethod
-    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
-        """Produce markdown output for the section at the supplied depth."""
+    def render(
+        self,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        """Produce markdown output for the section at the supplied depth.
+
+        Args:
+            params: The parameters to use when rendering the section template.
+            depth: The nesting depth of this section (affects heading level).
+            number: The section number prefix (e.g., "1.2.").
+            visibility: Optional override for the section's default visibility.
+                When provided, this takes precedence over the section's
+                configured visibility. This allows callers to dynamically
+                control whether to render the full content or just a summary.
+        """
 
     def placeholder_names(self) -> set[str]:
         """Return placeholder identifiers used by the section template."""
@@ -103,6 +125,31 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         """Return the template text that participates in hashing, when available."""
 
         return None
+
+    def original_summary_template(self) -> str | None:
+        """Return the summary template text, when available."""
+
+        return self.summary
+
+    def effective_visibility(
+        self, override: SectionVisibility | None = None
+    ) -> SectionVisibility:
+        """Return the visibility to use for rendering.
+
+        Args:
+            override: Optional visibility override. When provided, this takes
+                precedence over the section's configured visibility.
+
+        Returns:
+            The effective visibility to use. If an override is provided, it is
+            returned. Otherwise, the section's configured visibility is used.
+            If no summary is available and SUMMARY visibility is requested,
+            FULL visibility is used as a fallback.
+        """
+        visibility = override if override is not None else self.visibility
+        if visibility == SectionVisibility.SUMMARY and self.summary is None:
+            return SectionVisibility.FULL
+        return visibility
 
     @staticmethod
     def _normalize_key(key: str) -> str:
@@ -127,4 +174,4 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         return tuple(normalized)
 
 
-__all__ = ["Section"]
+__all__ = ["Section", "SectionVisibility"]

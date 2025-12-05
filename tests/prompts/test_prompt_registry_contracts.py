@@ -19,7 +19,7 @@ from typing import cast
 import pytest
 
 from weakincentives.dbc import dbc_enabled
-from weakincentives.prompt import Section
+from weakincentives.prompt import Section, SectionVisibility
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.registry import PromptRegistry, SectionNode
 from weakincentives.serde import clone as clone_dataclass
@@ -36,8 +36,15 @@ class OtherParams:
 
 
 class ExampleSection(Section[ExampleParams]):
-    def render(self, params: ExampleParams, depth: int, number: str) -> str:
-        del number
+    def render(
+        self,
+        params: ExampleParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del number, visibility
         _ = self.key
         return f"example:{params.value}:{depth}"
 
@@ -57,8 +64,15 @@ class ExampleSection(Section[ExampleParams]):
 
 
 class OtherSection(Section[OtherParams]):
-    def render(self, params: OtherParams, depth: int, number: str) -> str:
-        del number
+    def render(
+        self,
+        params: OtherParams,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del number, visibility
         _ = self.title
         return f"other:{params.level}:{depth}"
 
@@ -78,8 +92,15 @@ class OtherSection(Section[OtherParams]):
 
 
 class NoParamsSection(Section):
-    def render(self, params: object, depth: int, number: str) -> str:
-        del params, depth, number
+    def render(
+        self,
+        params: object,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del params, depth, number, visibility
         _ = self.key
         return "no-params"
 

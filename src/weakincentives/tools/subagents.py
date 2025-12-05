@@ -22,6 +22,7 @@ from enum import Enum, auto
 from typing import Any, Final, cast, override
 
 from ..prompt import SupportsDataclass
+from ..prompt._visibility import SectionVisibility
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
@@ -382,13 +383,20 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
         )
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
+    def render(
+        self,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
         if not isinstance(params, _SubagentsSectionParams):
             raise PromptRenderError(
                 "Subagents section requires parameters.",
                 dataclass_type=_SubagentsSectionParams,
             )
-        return super().render(params, depth, number)
+        return super().render(params, depth, number, visibility=visibility)
 
     @override
     def clone(self, **kwargs: object) -> SubagentsSection:

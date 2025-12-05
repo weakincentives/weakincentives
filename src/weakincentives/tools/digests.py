@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import cast, override
 
 from ..prompt._types import SupportsDataclass
+from ..prompt._visibility import SectionVisibility
 from ..prompt.section import Section
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session
@@ -115,8 +116,15 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         return self._placeholder
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
-        del params
+    def render(
+        self,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        del params, visibility
         body = self._resolve_body()
         return self._render_block(body, depth, number)
 

@@ -26,6 +26,7 @@ from weakincentives.prompt import (
     PromptRenderError,
     PromptTemplate,
     PromptValidationError,
+    SectionVisibility,
     SupportsDataclass,
 )
 from weakincentives.prompt.prompt import (
@@ -246,8 +247,15 @@ def test_prompt_render_wraps_template_errors_with_context() -> None:
         value: str
 
     class ExplodingSection(MarkdownSection[ErrorParams]):
-        def render(self, params: ErrorParams, depth: int, number: str) -> str:
-            del params, depth, number
+        def render(
+            self,
+            params: ErrorParams,
+            depth: int,
+            number: str,
+            *,
+            visibility: SectionVisibility | None = None,
+        ) -> str:
+            del params, depth, number, visibility
             raise ValueError(f"boom:{self.title}")
 
     section = ExplodingSection(

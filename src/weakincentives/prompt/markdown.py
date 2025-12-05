@@ -26,7 +26,7 @@ from ._types import (
     SupportsToolResult,
 )
 from .errors import PromptRenderError
-from .section import Section
+from .section import Section, SectionVisibility
 from .tool import Tool
 from .tool_result import render_tool_payload
 
@@ -51,6 +51,8 @@ class MarkdownSection(Section[MarkdownParamsT]):
         enabled: Callable[[SupportsDataclass], bool] | None = None,
         tools: Sequence[object] | None = None,
         accepts_overrides: bool = True,
+        summary: str | None = None,
+        visibility: SectionVisibility = SectionVisibility.FULL,
     ) -> None:
         self.template = template
         super().__init__(
@@ -61,10 +63,22 @@ class MarkdownSection(Section[MarkdownParamsT]):
             enabled=enabled,
             tools=tools,
             accepts_overrides=accepts_overrides,
+            summary=summary,
+            visibility=visibility,
         )
 
     @override
-    def render(self, params: SupportsDataclass | None, depth: int, number: str) -> str:
+    def render(
+        self,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        *,
+        visibility: SectionVisibility | None = None,
+    ) -> str:
+        effective = self.effective_visibility(visibility)
+        if effective == SectionVisibility.SUMMARY and self.summary is not None:
+            return self.render_with_template(self.summary, params, depth, number)
         return self.render_with_template(self.template, params, depth, number)
 
     def render_with_template(
@@ -157,6 +171,8 @@ class MarkdownSection(Section[MarkdownParamsT]):
             enabled=self._enabled,
             tools=self.tools(),
             accepts_overrides=self.accepts_overrides,
+            summary=self.summary,
+            visibility=self.visibility,
         )
         return cast(Self, clone)
 
