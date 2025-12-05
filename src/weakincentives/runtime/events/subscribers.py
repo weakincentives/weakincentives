@@ -10,16 +10,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Standard event subscribers for console logging and observability."""
+"""Standard event subscribers for structured logging and observability."""
 
 from __future__ import annotations
 
-import json
-from collections.abc import Callable, Mapping, Sequence
+import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final, TextIO, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from ...serde import dump
+from ...types import JSONValue
+from ..logging import StructuredLogger, get_logger
 from ._types import EventBus, EventHandler, TokenUsage
 
 if TYPE_CHECKING:
@@ -27,6 +29,7 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_TRUNCATE_LIMIT: Final[int] = 256
+_MODULE_LOGGER_NAME: Final[str] = "weakincentives.runtime.events.subscribers"
 
 
 def _truncate(text: str, *, limit: int) -> str:
@@ -36,7 +39,7 @@ def _truncate(text: str, *, limit: int) -> str:
     return f"{text[: limit - 1]}…"
 
 
-def _coerce_for_json(payload: object) -> object:
+def _coerce_for_json(payload: object) -> JSONValue:
     """Recursively coerce a payload to JSON-serializable types."""
     if payload is None or isinstance(payload, (str, int, float, bool)):
         return payload
@@ -47,50 +50,36 @@ def _coerce_for_json(payload: object) -> object:
     ):
         return [_coerce_for_json(item) for item in payload]
     if hasattr(payload, "__dataclass_fields__"):
-        return dump(payload, exclude_none=True)  # pragma: no cover - defensive
+        return cast(JSONValue, dump(payload, exclude_none=True))
     if isinstance(payload, set):
-        return sorted(_coerce_for_json(item) for item in payload)
+        return [_coerce_for_json(item) for item in sorted(payload)]
     return str(payload)
 
 
-def _format_payload(payload: object, *, limit: int) -> str:
-    """Serialize and truncate a payload for log output."""
-    serializable = _coerce_for_json(payload)
-    try:
-        rendered = json.dumps(serializable, ensure_ascii=False)
-    except TypeError:  # pragma: no cover - defensive fallback
-        rendered = repr(serializable)
-    return _truncate(rendered, limit=limit)
-
-
-def _format_token_usage(usage: TokenUsage | None) -> str:
-    """Format token usage counts for log output."""
+def _build_token_usage_context(usage: TokenUsage | None) -> dict[str, JSONValue]:
+    """Build a context dict for token usage."""
     if usage is None:
-        return "token usage: (not reported)"
+        return {}
 
-    parts: list[str] = []
+    result: dict[str, JSONValue] = {}
     if usage.input_tokens is not None:
-        parts.append(f"input={usage.input_tokens}")
+        result["input_tokens"] = usage.input_tokens
     if usage.output_tokens is not None:
-        parts.append(f"output={usage.output_tokens}")
+        result["output_tokens"] = usage.output_tokens
     if usage.cached_tokens is not None:
-        parts.append(f"cached={usage.cached_tokens}")
-
+        result["cached_tokens"] = usage.cached_tokens
     total = usage.total_tokens
     if total is not None:
-        parts.append(f"total={total}")
-
-    if not parts:
-        return "token usage: (not reported)"
-    return f"token usage: {', '.join(parts)}"
+        result["total_tokens"] = total
+    return result
 
 
 @dataclass(slots=True)
 class StandardLoggingSubscribers:
-    """Attach standard console logging for prompt and tool events.
+    """Attach standard structured logging for prompt and tool events.
 
-    This helper provides ready-to-use event handlers that print prompt renders,
-    tool invocations, and execution summaries to a stream (stdout by default).
+    This helper provides ready-to-use event handlers that log prompt renders,
+    tool invocations, and execution summaries using structured logging.
 
     Example usage::
 
@@ -115,28 +104,38 @@ class StandardLoggingSubscribers:
     truncate_limit: int = field(default=_DEFAULT_TRUNCATE_LIMIT)
     """Maximum length for serialized payloads before truncation."""
 
-    stream: TextIO | None = field(default=None)
-    """Output stream for log messages. Defaults to stdout when None."""
+    logger: StructuredLogger | logging.Logger | None = field(default=None)
+    """Logger instance to use. Defaults to module-level StructuredLogger when None."""
 
     show_rendered_prompt: bool = field(default=True)
-    """Whether to print the full rendered prompt text."""
+    """Whether to log prompt renders."""
 
     show_tool_invocations: bool = field(default=True)
-    """Whether to print tool invocation details."""
+    """Whether to log tool invocation details."""
 
     show_execution_summary: bool = field(default=True)
-    """Whether to print execution completion summaries."""
+    """Whether to log execution completion summaries."""
 
     _handlers: dict[type[object], EventHandler] = field(
         default_factory=dict, init=False, repr=False
     )
+    _resolved_logger: StructuredLogger = field(init=False, repr=False)
 
-    def _output(self, text: str) -> None:
-        """Write text to the configured output stream."""
-        import sys
-
-        stream = self.stream or sys.stdout
-        print(text, file=stream)
+    def __post_init__(self) -> None:
+        """Resolve the logger instance after initialization."""
+        if self.logger is None:
+            self._resolved_logger = get_logger(
+                _MODULE_LOGGER_NAME,
+                context={"component": "event_subscribers"},
+            )
+        elif isinstance(self.logger, StructuredLogger):
+            self._resolved_logger = self.logger
+        else:
+            self._resolved_logger = get_logger(
+                _MODULE_LOGGER_NAME,
+                logger_override=self.logger,
+                context={"component": "event_subscribers"},
+            )
 
     def _handle_prompt_rendered(self, event: object) -> None:
         """Handle PromptRendered events."""
@@ -146,54 +145,82 @@ class StandardLoggingSubscribers:
         prompt_label = prompt_event.prompt_name or (
             f"{prompt_event.prompt_ns}:{prompt_event.prompt_key}"
         )
-        self._output(f"\n[prompt] Rendered prompt ({prompt_label})")
-        self._output(prompt_event.rendered_prompt)
-        self._output("")
+        self._resolved_logger.info(
+            "Prompt rendered.",
+            event="prompt_rendered",
+            context={
+                "prompt_name": prompt_label,
+                "prompt_ns": prompt_event.prompt_ns,
+                "prompt_key": prompt_event.prompt_key,
+                "adapter": prompt_event.adapter,
+                "rendered_prompt": prompt_event.rendered_prompt,
+            },
+        )
 
     def _handle_tool_invoked(self, event: object) -> None:
         """Handle ToolInvoked events."""
         from . import ToolInvoked
 
         tool_event = cast(ToolInvoked, event)
-        params_repr = _format_payload(
-            dump(tool_event.params, exclude_none=True),
-            limit=self.truncate_limit,
-        )
+
+        # Coerce params for JSON serialization
+        params_data = _coerce_for_json(dump(tool_event.params, exclude_none=True))
+
+        # Build result context
         result_message = _truncate(
             tool_event.result.message or "", limit=self.truncate_limit
         )
-        payload_repr: str | None = None
+
+        context: dict[str, JSONValue] = {
+            "tool_name": tool_event.name,
+            "prompt_name": tool_event.prompt_name,
+            "params": params_data,
+            "result_message": result_message,
+            "result_success": tool_event.result.success,
+        }
+
+        # Add token usage if available
+        usage_context = _build_token_usage_context(tool_event.usage)
+        if usage_context:
+            context["token_usage"] = usage_context
+
+        # Add payload if present
         payload = tool_event.result.value
         if payload is not None:
-            try:
-                payload_repr = _format_payload(
-                    dump(payload, exclude_none=True),
-                    limit=self.truncate_limit,
-                )
-            except TypeError:
-                payload_repr = _format_payload(
-                    {"value": payload},
-                    limit=self.truncate_limit,
-                )
+            # Use dump for dataclasses, coerce directly for other types
+            if hasattr(payload, "__dataclass_fields__"):
+                payload_data = _coerce_for_json(dump(payload, exclude_none=True))
+            else:
+                payload_data = _coerce_for_json(payload)
+            context["result_payload"] = payload_data
 
-        lines = [
-            f"{tool_event.name} ({tool_event.prompt_name})",
-            f"  params: {params_repr}",
-            f"  result: {result_message}",
-        ]
-        lines.append(f"  {_format_token_usage(tool_event.usage)}")
-        if payload_repr is not None:
-            lines.append(f"  payload: {payload_repr}")
-
-        self._output("\n[tool] " + "\n".join(lines))
+        self._resolved_logger.info(
+            f"Tool invoked: {tool_event.name}",
+            event="tool_invoked",
+            context=context,
+        )
 
     def _handle_prompt_executed(self, event: object) -> None:
         """Handle PromptExecuted events."""
         from . import PromptExecuted
 
         prompt_event = cast(PromptExecuted, event)
-        self._output("\n[prompt] Execution complete")
-        self._output(f"  {_format_token_usage(prompt_event.usage)}\n")
+
+        context: dict[str, JSONValue] = {
+            "prompt_name": prompt_event.prompt_name,
+            "adapter": prompt_event.adapter,
+        }
+
+        # Add token usage if available
+        usage_context = _build_token_usage_context(prompt_event.usage)
+        if usage_context:
+            context["token_usage"] = usage_context
+
+        self._resolved_logger.info(
+            "Prompt execution complete.",
+            event="prompt_executed",
+            context=context,
+        )
 
     def attach(self, bus: EventBus) -> None:
         """Subscribe logging handlers to the event bus.
@@ -275,7 +302,7 @@ def attach_standard_logging(
     bus: EventBus,
     *,
     truncate_limit: int = _DEFAULT_TRUNCATE_LIMIT,
-    stream: TextIO | None = None,
+    logger: StructuredLogger | logging.Logger | None = None,
     show_rendered_prompt: bool = True,
     show_tool_invocations: bool = True,
     show_execution_summary: bool = True,
@@ -295,17 +322,17 @@ def attach_standard_logging(
     Args:
         bus: The event bus to subscribe handlers to.
         truncate_limit: Maximum length for serialized payloads.
-        stream: Output stream for log messages (defaults to stdout).
-        show_rendered_prompt: Whether to print rendered prompts.
-        show_tool_invocations: Whether to print tool invocations.
-        show_execution_summary: Whether to print execution summaries.
+        logger: Logger instance to use (defaults to module-level StructuredLogger).
+        show_rendered_prompt: Whether to log rendered prompts.
+        show_tool_invocations: Whether to log tool invocations.
+        show_execution_summary: Whether to log execution summaries.
 
     Returns:
         The StandardLoggingSubscribers instance for later detachment if needed.
     """
     subscribers = StandardLoggingSubscribers(
         truncate_limit=truncate_limit,
-        stream=stream,
+        logger=logger,
         show_rendered_prompt=show_rendered_prompt,
         show_tool_invocations=show_tool_invocations,
         show_execution_summary=show_execution_summary,

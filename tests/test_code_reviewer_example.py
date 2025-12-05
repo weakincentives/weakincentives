@@ -21,7 +21,6 @@ from typing import Any, cast
 from uuid import uuid4
 
 import pytest
-from pytest import CaptureFixture
 
 import code_reviewer_example as reviewer_example
 from code_reviewer_example import (
@@ -132,8 +131,8 @@ class _RepositoryOptimizationAdapter:
         )
 
 
-def test_prompt_render_reducer_prints_full_prompt(
-    capsys: CaptureFixture[str],
+def test_prompt_render_reducer_logs_full_prompt(
+    caplog: pytest.LogCaptureFixture,
     tmp_path: Path,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
@@ -156,12 +155,21 @@ def test_prompt_render_reducer_prints_full_prompt(
         event_id=uuid4(),
     )
 
-    publish_result = bus.publish(event)
+    with caplog.at_level(logging.INFO):
+        publish_result = bus.publish(event)
     assert publish_result.handled_count >= 1
 
-    captured = capsys.readouterr()
-    assert "Rendered prompt" in captured.out
-    assert "<prompt body>" in captured.out
+    # Find the log record with our event
+    log_record = None
+    for record in caplog.records:
+        if getattr(record, "event", None) == "prompt_rendered":
+            log_record = record
+            break
+
+    assert log_record is not None, "Expected a 'prompt_rendered' log event"
+    context_data = getattr(log_record, "context", {})
+    assert context_data.get("rendered_prompt") == "<prompt body>"
+    assert context_data.get("prompt_name") == "sunfish_code_review_agent"
 
     stored_events = session.select_all(PromptRendered)
     assert stored_events
