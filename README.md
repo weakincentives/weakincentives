@@ -205,6 +205,7 @@ uv sync && ./install-hooks.sh
 ```
 
 Key targets:
+
 - `make format` / `make lint` / `make typecheck`
 - `make test` (100% coverage enforced)
 - `make mutation-test` (mutmut, 80% score gate)
