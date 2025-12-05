@@ -114,6 +114,7 @@ Optional extras enable specific providers or tooling:
   - Factory: `new_throttle_policy`: Factory for creating throttle policies.
 - `weakincentives.prompt`: Prompt authoring, rendering, and override helpers.
   - Authoring:
+    - `PromptTemplate`: Immutable prompt blueprint with sections (import from here).
     - `MarkdownSection`: Render markdown content using `string.Template`.
     - `Prompt`: Coordinate prompt sections and their parameter bindings.
     - `RenderedPrompt`: Result of rendering a prompt.
@@ -303,14 +304,14 @@ Optional extras enable specific providers or tooling:
 
 ## Quickstart: Minimal Agent Harness
 
-The simplest agent harness requires four components: a prompt, an adapter, a
-session, and an event bus.
+The simplest agent harness requires: a prompt template, an adapter, and a session.
 
 ```python
 from dataclasses import dataclass
-from weakincentives import MarkdownSection, Prompt, PromptTemplate
+from weakincentives import MarkdownSection, Prompt
+from weakincentives.prompt import PromptTemplate  # Note: PromptTemplate from .prompt
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import InProcessEventBus, Session
+from weakincentives.runtime import Session
 
 # 1. Define the structured output the model should return
 @dataclass(slots=True, frozen=True)
@@ -332,14 +333,13 @@ template = PromptTemplate[TaskResponse](
     ],
 )
 
-# 3. Create the runtime components
-bus = InProcessEventBus()
-session = Session(bus=bus)
+# 3. Create session and adapter (Session creates its own EventBus internally)
+session = Session()
 adapter = OpenAIAdapter(model="gpt-4o-mini")
 
 # 4. Wrap template in Prompt and evaluate
 prompt = Prompt(template)
-response = adapter.evaluate(prompt, bus=bus, session=session)
+response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
 
 # 5. Access the typed result
 result: TaskResponse = response.output
@@ -353,17 +353,12 @@ and session state access:
 
 ```python
 from dataclasses import dataclass
-from weakincentives import (
-    MarkdownSection,
-    Prompt,
-    PromptTemplate,
-    Tool,
-    ToolContext,
-    ToolResult,
-)
+from datetime import timedelta
+from weakincentives import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
+from weakincentives.prompt import PromptTemplate
 from weakincentives.adapters import PromptEvaluationError
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import InProcessEventBus, Session, configure_logging
+from weakincentives.runtime import Session, configure_logging
 
 # 1. Define structured I/O types (frozen dataclasses recommended)
 @dataclass(slots=True, frozen=True)
@@ -384,11 +379,8 @@ class ApplyPatchResult:
 # 2. Implement tool handler with ToolContext access
 def apply_patch(params: ApplyPatchArgs, *, context: ToolContext) -> ToolResult[ApplyPatchResult]:
     """Tool handlers receive params + context, return ToolResult."""
-    # Access session state if needed
-    session = context.session
-
-    # Check deadline if time-bounded
-    if context.deadline and context.deadline.is_expired():
+    # Check deadline if time-bounded (use remaining() method)
+    if context.deadline and context.deadline.remaining() <= timedelta(0):
         return ToolResult(
             message="Deadline exceeded",
             value=ApplyPatchResult(applied=False, message="timeout"),
@@ -433,13 +425,12 @@ template = PromptTemplate[Plan](
 
 # 5. Set up runtime and evaluate
 configure_logging()
-bus = InProcessEventBus()
-session = Session(bus=bus)
+session = Session()
 adapter = OpenAIAdapter(model="gpt-4o-mini")
 
 try:
     prompt = Prompt(template)
-    response = adapter.evaluate(prompt, bus=bus, session=session)
+    response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
     plan: Plan = response.output
     print(f"Plan: {plan.summary}")
 except PromptEvaluationError as exc:
@@ -466,7 +457,7 @@ For agents that run multiple turns (e.g., planning then executing):
 from weakincentives.runtime import select_latest, append
 
 # Run planning phase
-plan_response = adapter.evaluate(plan_prompt, bus=bus, session=session)
+plan_response = adapter.evaluate(plan_prompt, bus=session.event_bus, session=session)
 plan = plan_response.output
 
 # Store plan in session for later access
@@ -475,7 +466,7 @@ session = append(session, plan)
 # Run execution phase with plan context
 for step in plan.steps:
     exec_prompt = Prompt(exec_template).bind(StepParams(step=step))
-    exec_response = adapter.evaluate(exec_prompt, bus=bus, session=session)
+    exec_response = adapter.evaluate(exec_prompt, bus=session.event_bus, session=session)
     # Session accumulates all events across turns
 
 # Later, retrieve stored state
@@ -490,7 +481,8 @@ stored_plan = select_latest(session, Plan)
 parameter bindings and overrides:
 
 ```python
-from weakincentives import MarkdownSection, Prompt, PromptTemplate
+from weakincentives import MarkdownSection, Prompt
+from weakincentives.prompt import PromptTemplate
 
 # Immutable template
 template = PromptTemplate[OutputType](
@@ -537,10 +529,11 @@ prompt = Prompt(template).bind(TaskParams(objective="Fix the bug", context="..."
 
 ### Tool.wrap Helper
 
-For simpler tools, use `Tool.wrap` to convert a plain function:
+Use `Tool.wrap` to create a Tool from a handler function. The function name
+becomes the tool name, and the docstring becomes the description:
 
 ```python
-from weakincentives import Tool
+from weakincentives import Tool, ToolContext, ToolResult
 
 @dataclass
 class SearchParams:
@@ -550,22 +543,19 @@ class SearchParams:
 class SearchResult:
     matches: list[str]
 
-# Define a simple function (no ToolContext needed)
-def search(params: SearchParams) -> SearchResult:
-    return SearchResult(matches=["result1", "result2"])
+def search(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
+    """Search for content in the workspace."""
+    return ToolResult(
+        message="Search complete",
+        value=SearchResult(matches=["result1", "result2"]),
+        success=True,
+    )
 
-# Wrap it as a Tool
-search_tool = Tool.wrap(
-    name="search",
-    description="Search for content",
-    handler=search,
-)
+# Wrap uses __name__ as tool name and docstring as description
+search_tool = Tool.wrap(search)
+# Equivalent to:
+# Tool[SearchParams, SearchResult](name="search", description="Search for content in the workspace.", handler=search)
 ```
-
-The wrapper automatically:
-- Wraps the return value in `ToolResult`
-- Makes `context` parameter optional
-- Handles exceptions as failed results
 
 ### ToolContext
 
@@ -614,7 +604,7 @@ ToolResult(
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter
 
-# Basic usage
+# Basic usage (uses native JSON schema mode by default)
 adapter = OpenAIAdapter(model="gpt-4o-mini")
 
 # With custom client
@@ -628,10 +618,10 @@ adapter = OpenAIAdapter(
     client_factory=lambda: OpenAI(api_key="..."),
 )
 
-# Enable native structured output (OpenAI JSON schema mode)
+# Disable native structured output if needed
 adapter = OpenAIAdapter(
     model="gpt-4o",
-    use_native_response_format=True,
+    use_native_response_format=False,
 )
 ```
 
@@ -671,7 +661,7 @@ response.usage       # TokenUsage(input_tokens, output_tokens, ...)
 from weakincentives.adapters import PromptEvaluationError
 
 try:
-    response = adapter.evaluate(prompt, bus=bus, session=session)
+    response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
 except PromptEvaluationError as exc:
     exc.phase          # "request", "response", or "tool"
     exc.prompt_name    # Which prompt failed
@@ -687,7 +677,7 @@ from weakincentives.adapters import new_throttle_policy, ThrottleError
 policy = new_throttle_policy(requests_per_minute=60)
 
 try:
-    response = adapter.evaluate(prompt, bus=bus, session=session, throttle=policy)
+    response = adapter.evaluate(prompt, bus=session.event_bus, session=session, throttle=policy)
 except ThrottleError:
     # Wait and retry
     pass
@@ -757,8 +747,9 @@ Exposes tools: `setup_plan`, `read_plan`, `add_step`, `update_step`, `mark_step`
 from weakincentives.tools import SubagentsSection, SubagentIsolationLevel
 
 subagents_section = SubagentsSection(
-    isolation=SubagentIsolationLevel.FORK,  # Isolated session copy
+    isolation_level=SubagentIsolationLevel.FORK,  # Isolated session copy
 )
+# Note: SubagentsSection doesn't require a session parameter
 ```
 
 Exposes: `dispatch_subagents` for parallel subtask execution
@@ -776,9 +767,12 @@ Renders a summary of the current workspace state for context.
 ### Combining Sections
 
 ```python
+from weakincentives.prompt import PromptTemplate
+
 template = PromptTemplate[Response](
     ns="myapp",
     key="full-agent",
+    name="full-agent",
     sections=[
         MarkdownSection(title="Goal", template="...", key="goal"),
         planning_section,
@@ -840,27 +834,28 @@ Subscribe to events for logging, metrics, or custom behavior:
 
 ```python
 from weakincentives.runtime import (
-    InProcessEventBus,
+    Session,
     PromptRendered,
     PromptExecuted,
     ToolInvoked,
 )
 
-bus = InProcessEventBus()
+# Session creates its own EventBus internally
+session = Session()
 
 # Subscribe to prompt renders
 def on_render(event: object) -> None:
     if isinstance(event, PromptRendered):
-        print(f"Rendered: {event.rendered_prompt.text[:100]}...")
+        print(f"Rendered: {event.rendered_prompt[:100]}...")
 
-bus.subscribe(PromptRendered, on_render)
+session.event_bus.subscribe(PromptRendered, on_render)
 
 # Subscribe to tool invocations
 def on_tool(event: object) -> None:
     if isinstance(event, ToolInvoked):
         print(f"Tool '{event.name}' called, success={event.result.success}")
 
-bus.subscribe(ToolInvoked, on_tool)
+session.event_bus.subscribe(ToolInvoked, on_tool)
 
 # Subscribe to prompt completions (includes token usage)
 def on_complete(event: object) -> None:
@@ -869,10 +864,10 @@ def on_complete(event: object) -> None:
         if usage:
             print(f"Tokens: {usage.input_tokens} in, {usage.output_tokens} out")
 
-bus.subscribe(PromptExecuted, on_complete)
+session.event_bus.subscribe(PromptExecuted, on_complete)
 
 # Events are dispatched synchronously during adapter.evaluate()
-response = adapter.evaluate(prompt, bus=bus, session=session)
+response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
 ```
 
 ## Session Snapshots for Debugging
@@ -900,8 +895,20 @@ existed at a point in time—without needing live provider access.
 ## Deadlines (`weakincentives.Deadline`)
 
 `Deadline` instances communicate time budgets across prompts, tools, and
-provider calls. Pass them into prompts or adapters to ensure long-running tasks
-fail fast and emit consistent timeout metadata.
+provider calls. Pass them into adapters to ensure long-running tasks fail fast:
+
+```python
+from datetime import datetime, timedelta, UTC
+from weakincentives import Deadline
+
+# Create a deadline 5 minutes from now
+deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
+
+# Check remaining time in tool handlers
+if deadline.remaining() <= timedelta(0):
+    # Handle timeout
+    pass
+```
 
 ## Data Types (`weakincentives.types`)
 
@@ -1009,21 +1016,21 @@ A complete, production-ready agent harness with all recommended patterns:
 ```python
 """Complete agent harness example with full observability."""
 from dataclasses import dataclass
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 from weakincentives import (
     Deadline,
     MarkdownSection,
     Prompt,
-    PromptTemplate,
     Tool,
     ToolContext,
     ToolResult,
 )
+from weakincentives.prompt import PromptTemplate
 from weakincentives.adapters import PromptEvaluationError
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.runtime import (
-    InProcessEventBus,
     PromptExecuted,
     Session,
     ToolInvoked,
@@ -1050,7 +1057,6 @@ from weakincentives.tools import (
 class AgentConfig:
     """Configuration for the agent."""
     workspace_path: str
-    max_tokens: int = 4096
     timeout_seconds: float = 300.0
 
 
@@ -1092,16 +1098,14 @@ def execute_command(
     params: ExecuteCommandParams, *, context: ToolContext
 ) -> ToolResult[ExecuteCommandResult]:
     """Execute a shell command in the workspace."""
-    # Check deadline
-    if context.deadline and context.deadline.is_expired():
+    # Check deadline using remaining() method
+    if context.deadline and context.deadline.remaining() <= timedelta(0):
         return ToolResult(
             message="Deadline exceeded before command execution",
             value=ExecuteCommandResult(stdout="", stderr="timeout", exit_code=-1),
             success=False,
         )
 
-    # Implementation would run the command here
-    # For safety, validate command against allowlist
     import subprocess
     try:
         result = subprocess.run(
@@ -1142,31 +1146,6 @@ execute_tool = Tool[ExecuteCommandParams, ExecuteCommandResult](
 
 def build_agent_template(session: Session, config: AgentConfig) -> PromptTemplate[TaskResponse]:
     """Build the agent's prompt template with all sections."""
-
-    # Planning tools for multi-step tasks
-    planning = PlanningToolsSection(
-        session=session,
-        strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-    )
-
-    # Sandboxed file access
-    vfs = VfsToolsSection(
-        session=session,
-        mounts=(
-            HostMount(
-                host_path=config.workspace_path,
-                mount_path=VfsPath(("workspace",)),
-                include_glob=("*.py", "*.md", "*.json", "*.yaml", "*.toml"),
-                exclude_glob=("*.pyc", "__pycache__/**", ".git/**", "node_modules/**"),
-                max_bytes=500_000,
-            ),
-        ),
-        allowed_host_roots=(Path(config.workspace_path).resolve(),),
-    )
-
-    # Workspace summary
-    digest = WorkspaceDigestSection(session=session)
-
     return PromptTemplate[TaskResponse](
         ns="myapp/agents",
         key="task-agent",
@@ -1183,9 +1162,24 @@ def build_agent_template(session: Session, config: AgentConfig) -> PromptTemplat
                 key="task",
                 default_params=TaskParams(objective=""),
             ),
-            planning,
-            vfs,
-            digest,
+            PlanningToolsSection(
+                session=session,
+                strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+            ),
+            VfsToolsSection(
+                session=session,
+                mounts=(
+                    HostMount(
+                        host_path=config.workspace_path,
+                        mount_path=VfsPath(("workspace",)),
+                        include_glob=("*.py", "*.md", "*.json", "*.yaml", "*.toml"),
+                        exclude_glob=("*.pyc", "__pycache__/**", ".git/**"),
+                        max_bytes=500_000,
+                    ),
+                ),
+                allowed_host_roots=(Path(config.workspace_path).resolve(),),
+            ),
+            WorkspaceDigestSection(session=session),
             MarkdownSection(
                 title="Commands",
                 template="Use execute_command for shell operations when needed.",
@@ -1207,9 +1201,8 @@ class AgentHarness:
         self.config = config
         self.logger = get_logger("agent")
 
-        # Runtime components
-        self.bus = InProcessEventBus()
-        self.session = Session(bus=self.bus)
+        # Session creates its own EventBus internally
+        self.session = Session()
         self.adapter = OpenAIAdapter(model="gpt-4o")
 
         # Build template
@@ -1241,15 +1234,17 @@ class AgentHarness:
                         output_tokens=usage.output_tokens,
                     )
 
-        self.bus.subscribe(ToolInvoked, on_tool_invoked)
-        self.bus.subscribe(PromptExecuted, on_prompt_executed)
+        self.session.event_bus.subscribe(ToolInvoked, on_tool_invoked)
+        self.session.event_bus.subscribe(PromptExecuted, on_prompt_executed)
 
     def run(self, objective: str, context: str = "") -> TaskResponse:
         """Execute the agent with the given objective."""
         configure_logging()
 
         # Create deadline
-        deadline = Deadline.from_seconds(self.config.timeout_seconds)
+        deadline = Deadline(
+            expires_at=datetime.now(UTC) + timedelta(seconds=self.config.timeout_seconds)
+        )
 
         # Bind parameters
         prompt = Prompt(self.template).bind(
@@ -1259,7 +1254,7 @@ class AgentHarness:
         try:
             response = self.adapter.evaluate(
                 prompt,
-                bus=self.bus,
+                bus=self.session.event_bus,
                 session=self.session,
                 deadline=deadline,
             )
