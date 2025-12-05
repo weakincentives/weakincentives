@@ -253,9 +253,7 @@ def _extract_updates(
             updates[name] = getattr(source, name)
 
     if not updates:
-        raise TypeError(
-            f"{cls.__name__}.merge() source has no matching fields"
-        )
+        raise TypeError(f"{cls.__name__}.merge() source has no matching fields")
 
     return updates
 

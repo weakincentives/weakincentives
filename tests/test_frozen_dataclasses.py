@@ -241,15 +241,15 @@ def test_merge_with_partial_object_attributes() -> None:
         b: int
         c: int
 
-    multi = cast(HasFrozenOps, Multi(1, 2, 3))
+    multi = Multi(1, 2, 3)
 
     class PartialSource:
         a = 10
 
-    merged = multi.merge(PartialSource())
-    assert merged.a == 10
-    assert merged.b == 2
-    assert merged.c == 3
+    merged = cast(HasFrozenOps, multi).merge(PartialSource())
+    assert merged.a == 10  # type: ignore[attr-defined]
+    assert merged.b == 2  # type: ignore[attr-defined]
+    assert merged.c == 3  # type: ignore[attr-defined]
 
 
 def test_frozen_dataclass_without_pre_init() -> None:
@@ -325,4 +325,4 @@ def test_dataclass_options_passthrough() -> None:
     assert not hasattr(m, "__slots__")
 
     # Order should work
-    assert Mutable(1) < Mutable(2)
+    assert Mutable(1) < Mutable(2)  # type: ignore[operator]
