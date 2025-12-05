@@ -22,7 +22,7 @@ from typing import cast
 import pytest
 
 from weakincentives.adapters.core import SessionProtocol
-from weakincentives.adapters.litellm import LiteLLMAdapter
+from weakincentives.adapters.litellm import LiteLLMAdapter, create_litellm_completion
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -84,9 +84,10 @@ def completion_kwargs() -> dict[str, object]:
 def adapter(litellm_model: str, completion_kwargs: dict[str, object]) -> LiteLLMAdapter:
     """Create a LiteLLM adapter instance for basic evaluations."""
 
+    completion = create_litellm_completion(**completion_kwargs)
     return LiteLLMAdapter(
         model=litellm_model,
-        completion_kwargs=completion_kwargs,
+        completion=completion,
     )
 
 

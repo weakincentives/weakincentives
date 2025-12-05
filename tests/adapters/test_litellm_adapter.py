@@ -23,6 +23,8 @@ import pytest
 
 from weakincentives.adapters import (
     LITELLM_ADAPTER_NAME,
+    LiteLLMClientConfig,
+    LiteLLMModelConfig,
     PromptEvaluationError,
     PromptResponse,
     shared,
@@ -256,7 +258,7 @@ def test_litellm_adapter_constructs_completion_when_not_provided(
 
     adapter = module.LiteLLMAdapter(
         model="gpt-test",
-        completion_kwargs={"api_key": "secret-key"},
+        completion_config=LiteLLMClientConfig(api_key="secret-key"),
     )
 
     result = _evaluate_with_bus(
@@ -269,12 +271,24 @@ def test_litellm_adapter_constructs_completion_when_not_provided(
     assert captured_kwargs == [{"api_key": "secret-key"}]
 
 
-def test_litellm_adapter_supports_custom_completion_factory() -> None:
+def test_litellm_adapter_rejects_completion_config_with_explicit_completion() -> None:
+    module = cast(Any, _reload_module())
+    completion = RecordingCompletion([])
+
+    with pytest.raises(ValueError):
+        module.LiteLLMAdapter(
+            model="gpt-test",
+            completion=completion,
+            completion_config=LiteLLMClientConfig(api_key="secret"),
+        )
+
+
+def test_litellm_adapter_uses_model_config() -> None:
     module = cast(Any, _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
-        key="litellm-greeting",
+        key="litellm-config",
         name="greeting",
         sections=[
             MarkdownSection[GreetingParams](
@@ -286,53 +300,26 @@ def test_litellm_adapter_supports_custom_completion_factory() -> None:
     )
 
     response = DummyResponse(
-        [DummyChoice(DummyMessage(content="Hello again!", tool_calls=None))]
+        [DummyChoice(DummyMessage(content="Hello with temp!", tool_calls=None))]
     )
-    captured_kwargs: list[dict[str, object]] = []
-
-    def fake_factory(**kwargs: object) -> RecordingCompletion:
-        captured_kwargs.append(dict(kwargs))
-        return RecordingCompletion([response])
+    completion = RecordingCompletion([response])
 
     adapter = module.LiteLLMAdapter(
         model="gpt-test",
-        completion_factory=fake_factory,
-        completion_kwargs={"api_key": "secret-key"},
+        completion=completion,
+        model_config=LiteLLMModelConfig(temperature=0.5, max_tokens=100),
     )
 
     result = _evaluate_with_bus(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
-        bus=NullEventBus(),
     )
 
-    assert result.text == "Hello again!"
-    assert captured_kwargs == [{"api_key": "secret-key"}]
-
-
-def test_litellm_adapter_rejects_completion_kwargs_with_explicit_completion() -> None:
-    module = cast(Any, _reload_module())
-    completion = RecordingCompletion([])
-
-    with pytest.raises(ValueError):
-        module.LiteLLMAdapter(
-            model="gpt-test",
-            completion=completion,
-            completion_kwargs={"api_key": "secret"},
-        )
-
-
-def test_litellm_adapter_rejects_completion_factory_with_explicit_completion() -> None:
-    module = cast(Any, _reload_module())
-    completion = RecordingCompletion([])
-
-    with pytest.raises(ValueError):
-        module.LiteLLMAdapter(
-            model="gpt-test",
-            completion=completion,
-            completion_factory=lambda **_: completion,
-        )
+    assert result.text == "Hello with temp!"
+    # Verify model_config params were included in request
+    assert completion.requests[0]["temperature"] == 0.5
+    assert completion.requests[0]["max_tokens"] == 100
 
 
 def test_litellm_adapter_returns_plain_text_response() -> None:

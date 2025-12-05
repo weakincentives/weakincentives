@@ -57,6 +57,8 @@ Adapter responsibilities:
   layer to guarantee consistent typing and DbC coverage.
 - `shared.py` – Implements `run_conversation` / `ConversationRunner`, tool serialization (`tool_to_spec`), and response
   parsing. This is the live execution path for every adapter.
+- `config.py` – Typed configuration dataclasses for adapter instantiation and model parameters (`LLMConfig`,
+  `OpenAIClientConfig`, `OpenAIModelConfig`, `LiteLLMClientConfig`, `LiteLLMModelConfig`).
 - `_provider_protocols.py` – Structural typing for provider choices, responses, and completion callables so adapters can
   remain import-light when extras are missing.
 - `_tool_messages.py` – Utilities for formatting tool transcripts that flow back into provider conversations.
@@ -68,9 +70,9 @@ Adapter responsibilities:
 - **LiteLLMAdapter** (`src/weakincentives/adapters/litellm.py`)
 
   - **Configuration surfaces:** Optional dependency (`uv sync --extra litellm`); requires `model` and accepts
-    `tool_choice`; callers provide either a `completion` callable or a `completion_factory` plus `completion_kwargs`
-    to wrap `litellm.completion`. Structured output requests always enable
-    `require_structured_output_text=True` so the runner expects text even when forwarding schemas.
+    `tool_choice`; callers provide either a `completion` callable or a `LiteLLMClientConfig` for client instantiation.
+    Model parameters (temperature, max_tokens, etc.) are configured via `LiteLLMModelConfig`. Structured output requests
+    always enable `require_structured_output_text=True` so the runner expects text even when forwarding schemas.
   - **Known caveats/limitations:** Behavior depends on downstream providers LiteLLM proxies. Errors bubble up as
     LiteLLM exceptions wrapped in `PromptEvaluationError`. Because the API lacks native parsed payloads, structured
     outputs rely on textual content and prompt-level parsing.
@@ -78,7 +80,8 @@ Adapter responsibilities:
 - **OpenAIAdapter** (`src/weakincentives/adapters/openai.py`)
 
   - **Configuration surfaces:** Optional dependency (`uv sync --extra openai`); requires `model` and accepts
-    `tool_choice`; callers can pass a concrete client or a `client_factory` with `client_kwargs`. The
+    `tool_choice`; callers can pass a concrete client or an `OpenAIClientConfig` for client instantiation. Model
+    parameters (temperature, max_tokens, logprobs, etc.) are configured via `OpenAIModelConfig`. The
     `use_native_response_format` toggle disables inline output instructions when structured parsing is requested and
     forwards JSON schemas under `response_format`.
   - **Known caveats/limitations:** Requires OpenAI's Responses API. Deadlines are enforced before each request and tool
@@ -127,6 +130,127 @@ class PromptResponse(Generic[OutputT]):
 `PromptEvaluationError` carries a human-readable message, the prompt name, a `phase` literal (`"request"`, `"response"`,
 or `"tool"`), and the provider payload (when available). Adapters use this exception for every failure mode so tests and
 callers can safely assert on phase-specific error handling.
+
+### Typed Configuration
+
+Adapters use frozen dataclass configurations for type-safe instantiation and model parameter control. All config
+classes are defined in `config.py` and exported from the adapters package.
+
+**Base Configuration**
+
+```python
+@FrozenDataclass()
+class LLMConfig:
+    """Base configuration for LLM model parameters."""
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_p: float | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    stop: tuple[str, ...] | None = None
+    seed: int | None = None
+```
+
+`LLMConfig` provides common model parameters shared across providers. Only non-None fields are included in request
+payloads, allowing selective override of provider defaults.
+
+**OpenAI Configuration**
+
+```python
+@FrozenDataclass()
+class OpenAIClientConfig:
+    """Configuration for OpenAI client instantiation."""
+    api_key: str | None = None
+    base_url: str | None = None
+    organization: str | None = None
+    timeout: float | None = None
+    max_retries: int | None = None
+
+@FrozenDataclass()
+class OpenAIModelConfig(LLMConfig):
+    """OpenAI-specific model parameters."""
+    logprobs: bool | None = None
+    top_logprobs: int | None = None
+    parallel_tool_calls: bool | None = None
+    store: bool | None = None
+    user: str | None = None
+```
+
+`OpenAIClientConfig` controls client instantiation (API key, base URL, timeouts). `OpenAIModelConfig` extends
+`LLMConfig` with OpenAI-specific parameters like `logprobs` and `parallel_tool_calls`.
+
+**LiteLLM Configuration**
+
+```python
+@FrozenDataclass()
+class LiteLLMClientConfig:
+    """Configuration for LiteLLM client instantiation."""
+    api_key: str | None = None
+    api_base: str | None = None
+    timeout: float | None = None
+    num_retries: int | None = None
+
+@FrozenDataclass()
+class LiteLLMModelConfig(LLMConfig):
+    """LiteLLM-specific model parameters."""
+    n: int | None = None
+    user: str | None = None
+```
+
+`LiteLLMClientConfig` controls completion callable instantiation. `LiteLLMModelConfig` extends `LLMConfig` with
+LiteLLM-specific parameters.
+
+**Usage Examples**
+
+```python
+from weakincentives.adapters.openai import OpenAIAdapter, OpenAIClientConfig, OpenAIModelConfig
+
+# Configure client and model parameters
+client_config = OpenAIClientConfig(
+    api_key="sk-...",
+    timeout=30.0,
+)
+model_config = OpenAIModelConfig(
+    temperature=0.7,
+    max_tokens=1024,
+    seed=42,
+)
+
+adapter = OpenAIAdapter(
+    model="gpt-4o",
+    client_config=client_config,
+    model_config=model_config,
+)
+
+# Or with pre-configured client
+from openai import OpenAI
+client = OpenAI(api_key="sk-...")
+adapter = OpenAIAdapter(
+    model="gpt-4o",
+    client=client,
+    model_config=model_config,  # Model params still apply
+)
+```
+
+```python
+from weakincentives.adapters.litellm import LiteLLMAdapter, LiteLLMClientConfig, LiteLLMModelConfig
+
+# Configure completion and model parameters
+completion_config = LiteLLMClientConfig(
+    api_key="...",
+    timeout=60.0,
+)
+model_config = LiteLLMModelConfig(
+    temperature=0.5,
+    max_tokens=2048,
+)
+
+adapter = LiteLLMAdapter(
+    model="claude-3-sonnet-20240229",
+    completion_config=completion_config,
+    model_config=model_config,
+)
+```
 
 ### Optimization API
 
@@ -267,8 +391,10 @@ that produced the digest.
 ### `LiteLLMAdapter`
 
 - Optional dependency enabled via `uv sync --extra litellm`.
-- Accepts either a concrete `completion` callable or a factory + kwargs that wrap `litellm.completion`.
-- Forwards `model`, rendered system instructions, tools, tool choice, and JSON schema response format to LiteLLM.
+- Accepts either a concrete `completion` callable or a `LiteLLMClientConfig` for typed client instantiation.
+- Model parameters (temperature, max_tokens, etc.) are configured via `LiteLLMModelConfig`.
+- Forwards `model`, rendered system instructions, tools, tool choice, model parameters, and JSON schema response format
+  to LiteLLM.
 - Because LiteLLM proxies downstream providers, `require_structured_output_text=True` ensures we still see a readable
   assistant message even if the provider does not populate a structured payload.
 - Tool choice defaults to `"auto"` but callers can provide any supported `ToolChoice` literal/mapping.
@@ -278,9 +404,11 @@ that produced the digest.
 ### `OpenAIAdapter`
 
 - Optional dependency enabled via `uv sync --extra openai`.
-- Accepts either a concrete OpenAI client (`openai.OpenAI`) or a factory + kwargs. The helper raises a descriptive
-  `RuntimeError` if the package is missing.
-- Calls `client.chat.completions.create(model=..., messages=..., tools=..., tool_choice=..., response_format=...)`.
+- Accepts either a concrete OpenAI client (`openai.OpenAI`) or an `OpenAIClientConfig` for typed client instantiation.
+  The helper raises a descriptive `RuntimeError` if the package is missing.
+- Model parameters (temperature, max_tokens, logprobs, etc.) are configured via `OpenAIModelConfig`.
+- Calls `client.responses.create(model=..., input=..., tools=..., tool_choice=..., ...)` with model config parameters
+  merged into the request payload.
 - When `use_native_response_format=True` the adapter disables prompt-level output instructions any time structured
   output parsing is requested. This prevents duplicate requirements because OpenAI now enforces the JSON schema.
 - `response_format` is only passed when structured output is requested **and** native response formats are enabled.
@@ -292,13 +420,17 @@ that produced the digest.
 
 1. **Decide on an `AdapterName`** – Extend `_names.py` if you need a new identifier and export it from
    `src/weakincentives/adapters/__init__.py`.
+1. **Define typed configuration** – Create `ClientConfig` and `ModelConfig` frozen dataclasses in `config.py` for
+   type-safe instantiation. Extend `LLMConfig` for model parameters to inherit common fields. Export configs from the
+   adapter module and the adapters package.
 1. **Instantiate the provider client** – Follow the LiteLLM/OpenAI examples by accepting either a concrete client or a
-   factory so tests can inject fakes.
+   typed config dataclass so tests can inject fakes.
 1. **Render the prompt** – Always call `prompt.render` exactly once, respecting the `override_store`, `tag`, and optional
    instruction toggles when structured output parsing needs provider help.
 1. **Delegate to `run_conversation`** – Supply provider-specific `call_provider` and `select_choice` functions plus any
-   adapter-specific defaults (`tool_choice`, `response_format`, `require_structured_output_text`). The helper handles
-   logging, deadlines, events, tool execution, and structured output.
+   adapter-specific defaults (`tool_choice`, `response_format`, `require_structured_output_text`). Merge model config
+   parameters into the request payload via `config.to_request_params()`. The helper handles logging, deadlines, events,
+   tool execution, and structured output.
 1. **Wrap SDK failures** – Catch provider-specific exceptions and re-raise `PromptEvaluationError` with
    `phase="request"` so callers can respond consistently.
 1. **Expose extras** – If the adapter requires optional dependencies, raise a helpful `RuntimeError` mirroring the

@@ -21,7 +21,7 @@ from typing import Any, Literal, TypeVar, cast
 
 import pytest
 
-from weakincentives.adapters import shared
+from weakincentives.adapters import OpenAIClientConfig, OpenAIModelConfig, shared
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -232,7 +232,7 @@ def test_openai_adapter_constructs_client_when_not_provided(
 
     adapter = module.OpenAIAdapter(
         model="gpt-test",
-        client_kwargs={"api_key": "secret-key"},
+        client_config=OpenAIClientConfig(api_key="secret-key"),
     )
 
     result = _evaluate_with_bus(
@@ -245,12 +245,24 @@ def test_openai_adapter_constructs_client_when_not_provided(
     assert captured_kwargs == [{"api_key": "secret-key"}]
 
 
-def test_openai_adapter_supports_custom_client_factory() -> None:
+def test_openai_adapter_rejects_client_config_with_explicit_client() -> None:
+    module = cast(Any, _reload_module())
+    client = DummyOpenAIClient([])
+
+    with pytest.raises(ValueError):
+        module.OpenAIAdapter(
+            model="gpt-test",
+            client=client,
+            client_config=OpenAIClientConfig(api_key="secret"),
+        )
+
+
+def test_openai_adapter_uses_model_config() -> None:
     module = cast(Any, _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
-        key="openai-greeting",
+        key="openai-config",
         name="greeting",
         sections=[
             MarkdownSection[GreetingParams](
@@ -261,18 +273,14 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
         ],
     )
 
-    message = DummyMessage(content="Hello again!", tool_calls=None)
+    message = DummyMessage(content="Hello with temp!", tool_calls=None)
     response = DummyResponse([DummyChoice(message)])
-    captured_kwargs: list[dict[str, object]] = []
-
-    def fake_factory(**kwargs: object) -> DummyOpenAIClient:
-        captured_kwargs.append(dict(kwargs))
-        return DummyOpenAIClient([response])
+    client = DummyOpenAIClient([response])
 
     adapter = module.OpenAIAdapter(
         model="gpt-test",
-        client_factory=fake_factory,
-        client_kwargs={"api_key": "secret-key"},
+        client=client,
+        model_config=OpenAIModelConfig(temperature=0.5, max_tokens=100),
     )
 
     result = _evaluate_with_bus(
@@ -281,32 +289,10 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
         GreetingParams(user="Sam"),
     )
 
-    assert result.text == "Hello again!"
-    assert captured_kwargs == [{"api_key": "secret-key"}]
-
-
-def test_openai_adapter_rejects_client_kwargs_with_explicit_client() -> None:
-    module = cast(Any, _reload_module())
-    client = DummyOpenAIClient([])
-
-    with pytest.raises(ValueError):
-        module.OpenAIAdapter(
-            model="gpt-test",
-            client=client,
-            client_kwargs={"api_key": "secret"},
-        )
-
-
-def test_openai_adapter_rejects_client_factory_with_explicit_client() -> None:
-    module = cast(Any, _reload_module())
-    client = DummyOpenAIClient([])
-
-    with pytest.raises(ValueError):
-        module.OpenAIAdapter(
-            model="gpt-test",
-            client=client,
-            client_factory=lambda **_: client,
-        )
+    assert result.text == "Hello with temp!"
+    # Verify model_config params were included in request
+    assert client.responses.requests[0]["temperature"] == 0.5
+    assert client.responses.requests[0]["max_tokens"] == 100
 
 
 def test_openai_adapter_returns_plain_text_response() -> None:

@@ -15,6 +15,13 @@
 from __future__ import annotations
 
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
+from .config import (
+    LiteLLMClientConfig,
+    LiteLLMModelConfig,
+    LLMConfig,
+    OpenAIClientConfig,
+    OpenAIModelConfig,
+)
 from .core import (
     PromptEvaluationError,
     PromptResponse,
@@ -27,6 +34,11 @@ __all__ = [
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
     "AdapterName",
+    "LLMConfig",
+    "LiteLLMClientConfig",
+    "LiteLLMModelConfig",
+    "OpenAIClientConfig",
+    "OpenAIModelConfig",
     "PromptEvaluationError",
     "PromptResponse",
     "ProviderAdapter",
