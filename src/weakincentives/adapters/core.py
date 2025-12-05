@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal, TypeVar, cast
 
+from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import WinkError
 from ..prompt import MarkdownSection, Prompt, PromptTemplate
@@ -42,7 +43,7 @@ from ..tools.vfs import VfsToolsSection
 OutputT = TypeVar("OutputT")
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class PromptResponse[OutputT]:
     """Structured result emitted by an adapter evaluation."""
 
@@ -58,7 +59,7 @@ class OptimizationScope(StrEnum):
     GLOBAL = "global"
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class OptimizationResult:
     """Capture the outcome of an optimization run."""
 
