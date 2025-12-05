@@ -41,9 +41,6 @@ class DelegationParams:
     may_delegate_further: str
     recap_lines: tuple[str, ...] = field(default_factory=tuple)
 
-    def __post_init__(self) -> None:
-        self.recap_lines = tuple(self.recap_lines)
-
 
 @dataclass(slots=True)
 class ParentPromptParams:

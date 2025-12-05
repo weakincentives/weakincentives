@@ -66,9 +66,6 @@ class DispatchSubagentsParams:
         },
     )
 
-    def __post_init__(self) -> None:
-        self.delegations = tuple(self.delegations)
-
 
 @dataclass(
     slots=True,
