@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
 from uuid import uuid4
 
+from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass, SupportsToolResult
 from ..prompt.prompt import Prompt, RenderedPrompt
@@ -91,7 +92,7 @@ _EXPORTED_PROVIDER_PROTOCOLS = (
 OutputT = TypeVar("OutputT")
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class _RejectedToolParams:
     """Dataclass used when provider arguments fail validation."""
 
@@ -161,7 +162,7 @@ def new_throttle_policy(
     )
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class AdapterRenderContext[OutputT]:
     """Rendering inputs and derived metadata for adapter evaluations."""
 
@@ -465,7 +466,7 @@ def parse_tool_arguments(
     return arguments
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ToolExecutionOutcome:
     """Result of executing a tool handler."""
 
