@@ -26,9 +26,13 @@ from typing import cast
 from uuid import UUID
 
 from weakincentives.adapters import PromptResponse, ProviderAdapter
-from weakincentives.adapters.core import OptimizationScope
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.debug import dump_session as dump_session_tree
+from weakincentives.optimizers import (
+    OptimizationContext,
+    PersistenceScope,
+    WorkspaceDigestOptimizer,
+)
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -231,12 +235,18 @@ class CodeReviewApp:
         """Runs the optimization prompt and persists workspace digest content."""
 
         optimization_session = self._create_optimization_session()
-        result = self.adapter.optimize(
-            self.prompt,
-            store_scope=OptimizationScope.SESSION,
-            session=self.session,
+        context = OptimizationContext(
+            adapter=self.adapter,
+            event_bus=self.bus,
+            overrides_store=self.overrides_store,
+            overrides_tag=self.override_tag,
             optimization_session=optimization_session,
         )
+        optimizer = WorkspaceDigestOptimizer(
+            context,
+            store_scope=PersistenceScope.SESSION,
+        )
+        result = optimizer.optimize(self.prompt, session=self.session)
         digest = result.digest.strip()
         print("\nWorkspace digest persisted for future review turns:\n")
         print(digest)

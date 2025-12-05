@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -32,11 +33,7 @@ from code_reviewer_example import (
 )
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
-from weakincentives.adapters.core import (
-    OptimizationResult,
-    OptimizationScope,
-    ProviderAdapter,
-)
+from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
@@ -49,6 +46,13 @@ from weakincentives.tools.digests import (
     latest_workspace_digest,
     set_workspace_digest,
 )
+
+
+@dataclass(slots=True, frozen=True)
+class _StubDigestOutput:
+    """Stub output for optimization prompt."""
+
+    digest: str
 
 
 class _RepositoryOptimizationAdapter:
@@ -68,67 +72,35 @@ class _RepositoryOptimizationAdapter:
         session: Session | None = None,
         deadline: object | None = None,
     ) -> PromptResponse[Any]:
-        del parse_output, bus, session, deadline
+        del parse_output, deadline
         self.calls.append(prompt.key)
+
+        if "workspace-digest" in prompt.key:
+            assert session is not None
+            self.optimization_sessions.append(session)
+            if bus is not None:
+                optimization_event = PromptRendered(
+                    prompt_ns=prompt.ns,
+                    prompt_key=prompt.key,
+                    prompt_name=prompt.name,
+                    adapter=UNIT_TEST_ADAPTER_NAME,
+                    session_id=session.session_id,
+                    render_inputs=(),
+                    rendered_prompt="<optimize prompt>",
+                    created_at=datetime.now(UTC),
+                    event_id=uuid4(),
+                )
+                bus.publish(optimization_event)
+            return PromptResponse(
+                prompt_name=prompt.name or prompt.key,
+                text=self.instructions,
+                output=_StubDigestOutput(digest=self.instructions),
+            )
+
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,
             text="",
             output=None,
-        )
-
-    def optimize(
-        self,
-        prompt: Prompt[SupportsDataclass],
-        *,
-        store_scope: OptimizationScope = OptimizationScope.SESSION,
-        overrides_store: LocalPromptOverridesStore | None = None,
-        overrides_tag: str | None = None,
-        accepts_overrides: bool = True,
-        session: Session | None = None,
-        optimization_session: Session | None = None,
-    ) -> OptimizationResult:
-        del accepts_overrides
-        assert session is not None
-        assert optimization_session is not None
-        self.optimization_sessions.append(optimization_session)
-        assert optimization_session is not session
-        optimization_event = PromptRendered(
-            prompt_ns=prompt.ns,
-            prompt_key=prompt.key,
-            prompt_name=prompt.name,
-            adapter=UNIT_TEST_ADAPTER_NAME,
-            session_id=optimization_session.session_id,
-            render_inputs=(),
-            rendered_prompt="<optimize prompt>",
-            created_at=datetime.now(UTC),
-            event_id=uuid4(),
-        )
-        publish_result = optimization_session.event_bus.publish(optimization_event)
-        assert publish_result.handled_count >= 1
-        self.calls.append(f"optimize:{prompt.key}")
-        set_workspace_digest(session, "workspace-digest", self.instructions)
-        if overrides_store is not None and overrides_tag is not None:
-            digest_node = next(
-                node
-                for node in prompt.sections
-                if node.section.key == "workspace-digest"
-            )
-            overrides_store.set_section_override(
-                prompt,
-                tag=overrides_tag,
-                path=digest_node.path,
-                body=self.instructions,
-            )
-        response = PromptResponse(
-            prompt_name=prompt.name or prompt.key,
-            text=self.instructions,
-            output=None,
-        )
-        return OptimizationResult(
-            response=response,
-            digest=self.instructions,
-            scope=store_scope,
-            section_key="workspace-digest",
         )
 
 
