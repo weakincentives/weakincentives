@@ -169,23 +169,37 @@ class PromptRenderer[OutputT]:
         tool_override_lookup = dict(tool_overrides or {})
         visibility_override_lookup = dict(visibility_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
+        summary_skip_depth: int | None = None
 
         for node, section_params in self._iter_enabled_sections(
             dict(param_lookup),
             inject_output_instructions=inject_output_instructions,
         ):
+            # Skip children of sections rendered with SUMMARY visibility
+            if summary_skip_depth is not None:
+                if node.depth > summary_skip_depth:
+                    continue
+                summary_skip_depth = None
+
             override_body = (
                 override_lookup.get(node.path)
                 if getattr(node.section, "accepts_overrides", True)
                 else None
             )
             visibility_override = visibility_override_lookup.get(node.path)
+            effective_visibility = node.section.effective_visibility(visibility_override)
+
+            # When rendering with SUMMARY visibility, skip children
+            if effective_visibility == SectionVisibility.SUMMARY:
+                summary_skip_depth = node.depth
+
             rendered = self._render_section(
                 node, section_params, override_body, visibility_override
             )
 
+            # Don't collect tools when rendering with SUMMARY visibility
             section_tools = node.section.tools()
-            if section_tools:
+            if section_tools and effective_visibility != SectionVisibility.SUMMARY:
                 for tool in section_tools:
                     override = (
                         tool_override_lookup.get(tool.name)

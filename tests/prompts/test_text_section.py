@@ -17,7 +17,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from weakincentives.prompt import MarkdownSection, PromptRenderError, SectionVisibility
+from typing import cast
+
+from weakincentives.prompt import (
+    MarkdownSection,
+    PromptRenderError,
+    Section,
+    SectionVisibility,
+    SupportsDataclass,
+    Tool,
+)
+from weakincentives.prompt.registry import PromptRegistry
+from weakincentives.prompt.rendering import PromptRenderer
+from weakincentives.prompt.tool import ToolContext, ToolResult
 
 
 @dataclass
@@ -277,3 +289,217 @@ def test_text_section_clone_preserves_summary_and_visibility() -> None:
 
     assert cloned.summary == section.summary
     assert cloned.visibility == section.visibility
+
+
+# --- Tests for SUMMARY visibility behavior in rendering ---
+
+
+@dataclass
+class _ToolParams:
+    query: str
+
+
+@dataclass
+class _ToolResult:
+    answer: str
+
+
+def _dummy_handler(params: _ToolParams, *, context: ToolContext) -> ToolResult[_ToolResult]:
+    del context
+    return ToolResult(message="ok", value=_ToolResult(answer=params.query))
+
+
+@dataclass
+class _SectionParams:
+    title: str
+
+
+def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
+    section = MarkdownSection[_SectionParams](
+        title="Tools Section",
+        template="Full content: ${title}",
+        key="tools-section",
+        summary="Summary: ${title}",
+        tools=[
+            Tool[_ToolParams, _ToolResult](
+                name="search_tool",
+                description="Search for something.",
+                handler=_dummy_handler,
+            )
+        ],
+    )
+
+    registry = PromptRegistry()
+    registry.register_section(
+        cast(Section[SupportsDataclass], section), path=(section.key,), depth=0
+    )
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+        response_section=None,
+    )
+
+    params_lookup = renderer.build_param_lookup((_SectionParams(title="Test"),))
+
+    # Without visibility override, tools are included
+    rendered_full = renderer.render(params_lookup)
+    assert len(rendered_full.tools) == 1
+    assert rendered_full.tools[0].name == "search_tool"
+
+    # With SUMMARY visibility, tools are excluded
+    rendered_summary = renderer.render(
+        params_lookup,
+        visibility_overrides={(section.key,): SectionVisibility.SUMMARY},
+    )
+    assert len(rendered_summary.tools) == 0
+    assert "Summary: Test" in rendered_summary.text
+
+
+def test_summary_visibility_skips_child_sections() -> None:
+    @dataclass
+    class ChildParams:
+        detail: str
+
+    parent = MarkdownSection[_SectionParams](
+        title="Parent",
+        template="Parent full: ${title}",
+        key="parent",
+        summary="Parent summary: ${title}",
+        children=[
+            MarkdownSection[ChildParams](
+                title="Child",
+                template="Child content: ${detail}",
+                key="child",
+            )
+        ],
+    )
+
+    registry = PromptRegistry()
+    registry.register_sections(
+        (cast(Section[SupportsDataclass], parent),)
+    )
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+        response_section=None,
+    )
+
+    params_lookup = renderer.build_param_lookup((
+        _SectionParams(title="Parent Title"),
+        ChildParams(detail="Child Detail"),
+    ))
+
+    # Without visibility override, both parent and child are rendered
+    rendered_full = renderer.render(params_lookup)
+    assert "Parent full: Parent Title" in rendered_full.text
+    assert "Child content: Child Detail" in rendered_full.text
+
+    # With SUMMARY visibility on parent, child is skipped
+    rendered_summary = renderer.render(
+        params_lookup,
+        visibility_overrides={("parent",): SectionVisibility.SUMMARY},
+    )
+    assert "Parent summary: Parent Title" in rendered_summary.text
+    assert "Child content" not in rendered_summary.text
+    assert "Child Detail" not in rendered_summary.text
+
+
+def test_summary_visibility_skips_child_tools() -> None:
+    @dataclass
+    class ChildParams:
+        query: str
+
+    child_with_tool = MarkdownSection[ChildParams](
+        title="Child With Tool",
+        template="Child: ${query}",
+        key="child-tool",
+        tools=[
+            Tool[_ToolParams, _ToolResult](
+                name="child_tool",
+                description="Child tool description.",
+                handler=_dummy_handler,
+            )
+        ],
+    )
+
+    parent = MarkdownSection[_SectionParams](
+        title="Parent",
+        template="Parent: ${title}",
+        key="parent",
+        summary="Summary: ${title}",
+        children=[child_with_tool],
+    )
+
+    registry = PromptRegistry()
+    registry.register_sections(
+        (cast(Section[SupportsDataclass], parent),)
+    )
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+        response_section=None,
+    )
+
+    params_lookup = renderer.build_param_lookup((
+        _SectionParams(title="Parent"),
+        ChildParams(query="test"),
+    ))
+
+    # Without visibility override, child tool is included
+    rendered_full = renderer.render(params_lookup)
+    assert len(rendered_full.tools) == 1
+    assert rendered_full.tools[0].name == "child_tool"
+
+    # With SUMMARY visibility on parent, child (and its tools) are skipped
+    rendered_summary = renderer.render(
+        params_lookup,
+        visibility_overrides={("parent",): SectionVisibility.SUMMARY},
+    )
+    assert len(rendered_summary.tools) == 0
+
+
+def test_summary_visibility_default_excludes_tools() -> None:
+    """Section configured with SUMMARY visibility by default excludes tools."""
+    section = MarkdownSection[_SectionParams](
+        title="Default Summary",
+        template="Full: ${title}",
+        key="default-summary",
+        summary="Summary: ${title}",
+        visibility=SectionVisibility.SUMMARY,  # Default to SUMMARY
+        tools=[
+            Tool[_ToolParams, _ToolResult](
+                name="excluded_tool",
+                description="This tool should be excluded.",
+                handler=_dummy_handler,
+            )
+        ],
+    )
+
+    registry = PromptRegistry()
+    registry.register_section(
+        cast(Section[SupportsDataclass], section), path=(section.key,), depth=0
+    )
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+        response_section=None,
+    )
+
+    params_lookup = renderer.build_param_lookup((_SectionParams(title="Test"),))
+
+    # Tools excluded because section default visibility is SUMMARY
+    rendered = renderer.render(params_lookup)
+    assert len(rendered.tools) == 0
+    assert "Summary: Test" in rendered.text
+
+    # Override to FULL includes tools
+    rendered_full = renderer.render(
+        params_lookup,
+        visibility_overrides={(section.key,): SectionVisibility.FULL},
+    )
+    assert len(rendered_full.tools) == 1
+    assert "Full: Test" in rendered_full.text
