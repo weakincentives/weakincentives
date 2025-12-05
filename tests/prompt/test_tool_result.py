@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 
 import pytest
@@ -122,3 +123,20 @@ def test_render_tool_payload_handles_unserializable_mapping_values(
     payload = render_tool_payload({"data": PlainData(value="fallback")})
     decoded = json.loads(payload)
     assert decoded["data"].startswith("PlainData(")
+
+
+def test_render_tool_payload_warns_when_render_missing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        payload = render_tool_payload(PlainData(value="data"))
+
+    decoded = json.loads(payload)
+    assert decoded == {"value": "data"}
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelname == "WARNING"
+    assert "render() implementation" in record.getMessage()
+    assert getattr(record, "event", None) == "tool_result.render.missing"
+    assert getattr(record, "dataclass", None) == "PlainData"
