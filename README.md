@@ -11,14 +11,15 @@ separately registered tool lists. WINK inverts this: **the prompt *is* the
 agent**. You define an agent as a single hierarchical document where each
 section bundles its own instructions and tools together.
 
-### Prompt-as-architecture
+### One flexible reasoning loop
 
-A WINK agent is a tree of typed `Section` objects. Each section can:
+A WINK `Prompt` isn't just a template—it's the entire brain of your agent. One
+modular object combines instructions, tool registration, and progressive
+disclosure into a single reasoning loop that adapts to context.
 
-- Render Markdown instructions with validated placeholders
-- Contribute tools that the LLM can invoke
-- Nest child sections for progressive disclosure
-- Enable or disable itself (and its tools) based on runtime context
+Most frameworks scatter agent behavior across prompt templates, tool registries,
+and routing logic. WINK collapses all of this into a tree of typed `Section`
+objects:
 
 ```
 Prompt[ReviewResponse]
@@ -30,10 +31,15 @@ Prompt[ReviewResponse]
 └── MarkdownSection (user request)
 ```
 
-When you render this prompt, disabled sections vanish—and so do their tools.
-The LLM sees exactly the capabilities you expose at that moment, scoped to the
-context that explains how to use them. No stale tool registries, no orphaned
-instructions.
+Each section can render instructions, contribute tools the LLM can invoke, nest
+child sections, and enable or disable itself based on runtime state. When a
+section disables, its entire subtree—tools included—vanishes from the prompt.
+
+The result: **the prompt fully determines what the agent can think and do**.
+There's no separate tool registry to synchronize, no routing layer to maintain,
+no configuration that can drift from documentation. You define the agent's
+capabilities once, in one place, and the reasoning loop emerges from the
+structure itself.
 
 ### Why this matters
 
