@@ -17,13 +17,13 @@ from __future__ import annotations
 import ast
 import sys
 from importlib import import_module
-from types import ModuleType
+from types import CodeType, ModuleType
 from typing import cast
 
 import pytest
 
 
-def _compile_stub_segments(source: str) -> tuple[object, object | None]:
+def _compile_stub_segments(source: str) -> tuple[CodeType, CodeType | None]:
     parsed = ast.parse(source, filename="<asteval-stub>", mode="exec")
     statements = list(parsed.body)
     expr_code = None

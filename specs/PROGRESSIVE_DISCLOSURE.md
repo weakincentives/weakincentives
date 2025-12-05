@@ -164,15 +164,15 @@ The `open_sections` handler validates inputs and raises `VisibilityExpansionRequ
 halt evaluation:
 
 1. **Parse section keys**: Convert dot-notation strings to `SectionPath` tuples.
-2. **Validate targets**: For each requested key, verify that:
+1. **Validate targets**: For each requested key, verify that:
    - The section exists in the prompt's registry.
    - The section is currently rendered with `SUMMARY` visibility (accounting for any
      existing visibility overrides).
    - Reject keys pointing to non-existent sections or sections already at `FULL` visibility
      with `ToolValidationError`.
-3. **Build override mapping**: Construct `requested_overrides` with each validated path
+1. **Build override mapping**: Construct `requested_overrides` with each validated path
    mapped to `SectionVisibility.FULL`.
-4. **Raise exception**: Raise `VisibilityExpansionRequired` with the override mapping,
+1. **Raise exception**: Raise `VisibilityExpansionRequired` with the override mapping,
    reason, and original section keys.
 
 ### Exception Propagation
@@ -181,8 +181,8 @@ The `VisibilityExpansionRequired` exception propagates through the adapter's too
 layer without being caught or converted to a `ToolResult`. This ensures:
 
 1. **Immediate halt**: No subsequent tool calls execute in the same turn.
-2. **Clean stack unwinding**: The exception bubbles up to the caller's evaluation loop.
-3. **Explicit handling required**: Callers must catch `VisibilityExpansionRequired` or let
+1. **Clean stack unwinding**: The exception bubbles up to the caller's evaluation loop.
+1. **Explicit handling required**: Callers must catch `VisibilityExpansionRequired` or let
    it propagate as an error—there is no silent fallback.
 
 Adapters MUST NOT wrap this exception in `PromptEvaluationError` or convert it to a failed
@@ -225,11 +225,11 @@ while True:
 ### Handling Steps
 
 1. **Catch the exception**: Handle `VisibilityExpansionRequired` explicitly.
-2. **Extract overrides**: Access `e.requested_overrides` directly—it's already in the
+1. **Extract overrides**: Access `e.requested_overrides` directly—it's already in the
    correct format for `prompt.render()`.
-3. **Merge with existing overrides**: Combine with any caller-maintained overrides, giving
+1. **Merge with existing overrides**: Combine with any caller-maintained overrides, giving
    precedence to the exception's requests.
-4. **Re-render and retry**: Call `prompt.render()` with updated overrides and re-evaluate.
+1. **Re-render and retry**: Call `prompt.render()` with updated overrides and re-evaluate.
 
 ### Policies
 
@@ -288,8 +288,8 @@ rendered = prompt.render(
 ### Override Precedence
 
 1. **Default visibility**: The section's declared `visibility` attribute.
-2. **Caller-supplied overrides**: Visibility overrides passed to `render()`.
-3. **Tool-requested overrides**: Overrides requested via `open_sections` on retry.
+1. **Caller-supplied overrides**: Visibility overrides passed to `render()`.
+1. **Tool-requested overrides**: Overrides requested via `open_sections` on retry.
 
 Tool-requested overrides take precedence because they represent the model's explicit
 information needs discovered during evaluation.

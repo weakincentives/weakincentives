@@ -322,7 +322,8 @@ def test_response_parser_structured_output_failure() -> None:
     with pytest.raises(PromptEvaluationError) as excinfo:
         parser.parse(message, None)
 
-    error = cast(PromptEvaluationError, excinfo.value)
+    assert isinstance(excinfo.value, PromptEvaluationError)
+    error = excinfo.value
     assert error.phase == PROMPT_EVALUATION_PHASE_RESPONSE
 
 

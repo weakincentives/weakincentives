@@ -109,7 +109,8 @@ def test_raise_tool_deadline_error() -> None:
         shared._raise_tool_deadline_error(
             prompt_name="test", tool_name="tool", deadline=deadline
         )
-    error = cast(PromptEvaluationError, excinfo.value)
+    assert isinstance(excinfo.value, PromptEvaluationError)
+    error = excinfo.value
     assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
     assert error.provider_payload == {
         "deadline_expires_at": deadline.expires_at.isoformat()
@@ -222,7 +223,8 @@ def test_execute_tool_call_raises_when_deadline_expired(
             ),
             tool_call=cast(shared.ProviderToolCall, call),
         )
-    error = cast(PromptEvaluationError, excinfo.value)
+    assert isinstance(excinfo.value, PromptEvaluationError)
+    error = excinfo.value
     assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
@@ -233,7 +235,12 @@ def test_execute_tool_call_publishes_invocation() -> None:
     session: SessionProtocol = Session(bus=bus)
 
     events: list[ToolInvoked] = []
-    bus.subscribe(ToolInvoked, events.append)
+
+    def record_event(event: object) -> None:
+        assert isinstance(event, ToolInvoked)
+        events.append(event)
+
+    bus.subscribe(ToolInvoked, record_event)
 
     def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
         del context
@@ -281,8 +288,9 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
     def call_provider(
         messages: list[dict[str, Any]],
         tool_specs: list[dict[str, Any]],
-        tool_choice: shared.ToolChoice | None,
-        response_format: dict[str, Any] | None,
+        tool_choice: shared.ToolChoice,
+        response_format: Mapping[str, Any] | None,
+        /,
     ) -> object:
         del messages, tool_specs, tool_choice, response_format
         return SimpleNamespace(
@@ -293,7 +301,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
             ]
         )
 
-    def select_choice(response: SimpleNamespace) -> shared.ProviderChoice:
+    def select_choice(response: SimpleNamespace, /) -> shared.ProviderChoice:
         return cast(shared.ProviderChoice, response.choices[0])
 
     conversation_config = shared.ConversationConfig(
