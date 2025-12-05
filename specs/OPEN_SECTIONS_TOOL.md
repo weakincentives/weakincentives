@@ -5,8 +5,8 @@
 The `open_sections` tool enables progressive disclosure of prompt content. When a prompt
 contains sections rendered with `SUMMARY` visibility, the framework automatically registers
 this builtin tool so the model can request expanded views of summarized content. Calling the
-tool halts prompt evaluation and signals the caller to retry with the requested visibility
-overrides applied.
+tool raises a `VisibilityExpansionRequired` exception that halts prompt evaluation and
+carries the requested visibility overrides for the caller to apply on retry.
 
 ## Rationale
 
@@ -24,7 +24,7 @@ This approach:
 
 - **Reduces prompt size** by default while keeping all content accessible.
 - **Preserves model autonomy** by letting the LLM decide when detail is needed.
-- **Maintains determinism** because the tool produces a structured signal rather than
+- **Maintains determinism** because the exception carries structured data rather than
   mutating state; the caller controls the retry.
 
 ## Scope
@@ -50,12 +50,14 @@ This approach:
 
 - **Opt-in activation**: The tool appears only when the prompt has summarized sections;
   prompts with all-`FULL` visibility do not expose it.
-- **Explicit signaling**: The tool does not mutate prompt state. Instead it returns a
-  structured result that instructs the caller to retry with specified overrides.
+- **Exception-based signaling**: The tool raises `VisibilityExpansionRequired` rather than
+  returning a result. This provides explicit control flow that cannot be ignored and
+  naturally halts evaluation without requiring adapter-level detection.
 - **Predictable halt**: Invoking `open_sections` always terminates the current evaluation
-  turn. The model cannot continue reasoning after calling it within the same turn.
-- **Composable with overrides**: Visibility overrides requested by the tool merge with any
-  caller-supplied overrides, with tool requests taking precedence.
+  turn via exception. The model cannot continue reasoning after calling it within the same
+  turn.
+- **Composable with overrides**: Visibility overrides carried by the exception merge with
+  any caller-supplied overrides, with tool requests taking precedence.
 
 ## Automatic Registration
 
@@ -120,30 +122,46 @@ class OpenSectionsParams:
 - **`reason`**: A short explanation (≤256 characters) describing why the model needs the
   expanded content. This aids debugging, logging, and potential caller-side heuristics.
 
-### Result
+### Exception
+
+The tool raises `VisibilityExpansionRequired` to signal that evaluation should halt and
+retry with expanded sections. This exception is part of the `weakincentives.prompt.errors`
+module and inherits from `PromptError`:
 
 ```python
-@dataclass(slots=True, frozen=True)
-class OpenSectionsResult:
-    """Result payload for the open_sections tool."""
+@dataclass(slots=True)
+class VisibilityExpansionRequired(PromptError):
+    """Raised when the model requests expansion of summarized sections.
 
-    requested_overrides: dict[tuple[str, ...], str]
-    """Mapping of section paths to requested visibility ('full')."""
+    Callers should catch this exception, extract the visibility overrides,
+    and retry prompt evaluation with the requested sections expanded.
+    """
 
-    def render(self) -> str:
-        keys = ", ".join("/".join(p) for p in self.requested_overrides)
-        return f"Sections requested for expansion: {keys}. Retry prompt with visibility overrides."
+    requested_overrides: Mapping[tuple[str, ...], SectionVisibility]
+    """Mapping of section paths to requested visibility (always FULL)."""
+
+    reason: str
+    """The model's stated reason for needing the expanded content."""
+
+    section_keys: tuple[str, ...]
+    """Original section key strings as provided by the model."""
+
+    def __str__(self) -> str:
+        keys = ", ".join(".".join(p) for p in self.requested_overrides)
+        return f"Visibility expansion required for sections: {keys}. Reason: {self.reason}"
 ```
 
-- **`requested_overrides`**: A mapping from `SectionPath` tuples to the string `"full"`,
-  representing the visibility overrides the caller should apply when retrying.
-- The `render()` method produces a human-readable summary for the model's context,
-  confirming which sections were requested.
+- **`requested_overrides`**: A mapping from `SectionPath` tuples to `SectionVisibility.FULL`,
+  ready to be passed directly to `prompt.render(..., visibility_overrides=...)`.
+- **`reason`**: The model's explanation for why expansion is needed, preserved for logging
+  and debugging.
+- **`section_keys`**: The original dot-notation keys as provided by the model, useful for
+  telemetry and error messages.
 
 ## Handler Behavior
 
-The `open_sections` handler validates inputs and produces a result that signals the caller
-to halt and retry:
+The `open_sections` handler validates inputs and raises `VisibilityExpansionRequired` to
+halt evaluation:
 
 1. **Parse section keys**: Convert dot-notation strings to `SectionPath` tuples.
 2. **Validate targets**: For each requested key, verify that:
@@ -154,37 +172,74 @@ to halt and retry:
      with `ToolValidationError`.
 3. **Build override mapping**: Construct `requested_overrides` with each validated path
    mapped to `SectionVisibility.FULL`.
-4. **Return halt signal**: Return a `ToolResult` with:
-   - `success=True`
-   - `value=OpenSectionsResult(requested_overrides=...)`
-   - `message` summarizing the requested expansions.
+4. **Raise exception**: Raise `VisibilityExpansionRequired` with the override mapping,
+   reason, and original section keys.
 
-### Halt Semantics
+### Exception Propagation
 
-The `open_sections` tool is a **terminal tool**: its invocation ends the current prompt
-evaluation turn. Adapters must recognize this tool and:
+The `VisibilityExpansionRequired` exception propagates through the adapter's tool dispatch
+layer without being caught or converted to a `ToolResult`. This ensures:
 
-1. Not execute any subsequent tool calls in the same turn.
-2. Return control to the caller with the `OpenSectionsResult` payload.
-3. Signal that a retry with visibility overrides is required.
+1. **Immediate halt**: No subsequent tool calls execute in the same turn.
+2. **Clean stack unwinding**: The exception bubbles up to the caller's evaluation loop.
+3. **Explicit handling required**: Callers must catch `VisibilityExpansionRequired` or let
+   it propagate as an error—there is no silent fallback.
 
-This behavior is analogous to a `yield` or early return—the model's remaining planned
-actions are discarded in favor of the caller rerunning with expanded context.
+Adapters MUST NOT wrap this exception in `PromptEvaluationError` or convert it to a failed
+tool result. The exception is a deliberate control flow mechanism, not an error condition.
+
+```python
+# Adapter tool dispatch (pseudocode)
+try:
+    result = tool.handler(params, context=context)
+except VisibilityExpansionRequired:
+    raise  # Let it propagate to the caller
+except Exception as e:
+    # Other exceptions become failed tool results
+    result = ToolResult(success=False, message=str(e), value=None)
+```
 
 ## Caller Responsibilities
 
-When the caller receives an `OpenSectionsResult` from the adapter, it should:
+Callers must wrap adapter evaluation in a try/except block to handle
+`VisibilityExpansionRequired`:
 
-1. **Extract overrides**: Read `requested_overrides` and convert to
-   `Mapping[SectionPath, SectionVisibility]`.
-2. **Merge with existing overrides**: Combine the tool's requests with any overrides the
-   caller was already applying, giving precedence to the tool's requests.
-3. **Re-render the prompt**: Call `prompt.render(..., visibility_overrides=merged)`.
-4. **Retry evaluation**: Submit the re-rendered prompt to the adapter, continuing the
-   conversation with the expanded content now visible.
+```python
+from weakincentives.prompt.errors import VisibilityExpansionRequired
 
-Callers may implement policies around retry limits, caching of expanded prompts, or
-incremental expansion (opening one section at a time vs. batching requests).
+visibility_overrides: dict[tuple[str, ...], SectionVisibility] = {}
+
+while True:
+    try:
+        rendered = prompt.render(*params, visibility_overrides=visibility_overrides)
+        response = adapter.evaluate(rendered, session=session, bus=bus)
+        break  # Success
+    except VisibilityExpansionRequired as e:
+        # Merge requested overrides with existing ones
+        visibility_overrides.update(e.requested_overrides)
+        # Log the expansion request
+        logger.info(f"Expanding sections: {e.section_keys}, reason: {e.reason}")
+        # Continue loop to retry with expanded visibility
+```
+
+### Handling Steps
+
+1. **Catch the exception**: Handle `VisibilityExpansionRequired` explicitly.
+2. **Extract overrides**: Access `e.requested_overrides` directly—it's already in the
+   correct format for `prompt.render()`.
+3. **Merge with existing overrides**: Combine with any caller-maintained overrides, giving
+   precedence to the exception's requests.
+4. **Re-render and retry**: Call `prompt.render()` with updated overrides and re-evaluate.
+
+### Policies
+
+Callers may implement policies around:
+
+- **Retry limits**: Cap the number of expansion cycles to prevent infinite loops.
+- **Expansion budgets**: Limit total tokens or sections that can be expanded.
+- **Caching**: Reuse rendered prompts when the same overrides apply.
+- **Incremental vs. batch**: Choose whether to expand all requested sections at once or
+  one at a time.
 
 ## Summary Suffix Convention
 
@@ -282,11 +337,15 @@ constraints.
 
 ```python
 from dataclasses import dataclass
+from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import (
     MarkdownSection,
     PromptTemplate,
     SectionVisibility,
 )
+from weakincentives.prompt.errors import VisibilityExpansionRequired
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 @dataclass
 class TaskParams:
@@ -324,11 +383,6 @@ prompt = PromptTemplate(
 )
 
 # Initial render with summarized context
-rendered = prompt.render(
-    TaskParams(objective="Refactor the authentication module"),
-    ContextParams(project_name="WeakIncentives"),
-)
-
 # The model sees:
 # ## 1 Task
 # Complete the following: Refactor the authentication module
@@ -338,16 +392,30 @@ rendered = prompt.render(
 # ---
 # [This section is summarized. To view full content, call `open_sections` with key "context".]
 
-# Model calls: open_sections(section_keys=("context",), reason="Need architecture details for refactoring")
+# Evaluation loop with exception handling
+bus = InProcessEventBus()
+session = Session(bus=bus)
+adapter = OpenAIAdapter(model="gpt-4o")
 
-# Caller receives OpenSectionsResult and retries:
-rendered = prompt.render(
+params = (
     TaskParams(objective="Refactor the authentication module"),
     ContextParams(project_name="WeakIncentives"),
-    visibility_overrides={("context",): SectionVisibility.FULL},
 )
+visibility_overrides: dict[tuple[str, ...], SectionVisibility] = {}
 
-# The model now sees full context and can proceed with the task.
+while True:
+    try:
+        rendered = prompt.render(*params, visibility_overrides=visibility_overrides)
+        response = adapter.evaluate(rendered, session=session, bus=bus)
+        # Success - model completed the task
+        break
+    except VisibilityExpansionRequired as e:
+        # Model called: open_sections(section_keys=("context",), reason="Need architecture details")
+        print(f"Expanding: {e.section_keys}, reason: {e.reason}")
+        visibility_overrides.update(e.requested_overrides)
+        # Loop continues with expanded visibility
+
+# After expansion, the model sees full context and can proceed with the task.
 ```
 
 ## Telemetry
@@ -368,27 +436,34 @@ Callers may use this telemetry to:
 
 ## Limitations and Caveats
 
-- **Single-turn halt**: The tool always terminates the current turn. Models cannot
-  speculatively request expansions while continuing other work.
+- **Single-turn halt**: The tool always terminates the current turn via exception. Models
+  cannot speculatively request expansions while continuing other work.
 - **No partial expansion**: Sections open fully or remain summarized. There is no mechanism
   to request "more detail" incrementally within a section.
-- **Caller cooperation required**: The tool produces a signal; it cannot force the caller
-  to retry. Callers that ignore `OpenSectionsResult` will leave the model without requested
-  context.
+- **Explicit handling required**: The exception propagates unless caught. Callers must
+  implement a retry loop or let the exception surface as an error—there is no silent
+  fallback behavior.
 - **Token budget awareness**: The tool does not estimate token impact. Callers should
   implement safeguards if expanding sections risks exceeding context limits.
 - **No cross-prompt expansion**: The tool operates within a single prompt's section tree.
   It cannot request content from other prompts or external sources.
+- **Session state preserved**: The exception does not roll back session state from the
+  interrupted evaluation. Callers may need to snapshot session state before evaluation if
+  rollback semantics are desired.
 
 ## Testing Checklist
 
 - Tool registration tests verifying automatic injection when `SUMMARY` sections exist.
 - Tool exclusion tests confirming the tool is absent when all sections are `FULL`.
 - Handler validation tests for invalid section keys and already-expanded sections.
+- Exception tests verifying `VisibilityExpansionRequired` carries correct override mappings.
+- Exception propagation tests confirming adapters do not catch or wrap the exception.
 - Suffix rendering tests checking default and custom suffix templates.
-- Integration tests demonstrating the full flow: initial render → tool call → retry with
-  overrides → expanded content visible.
-- Telemetry tests asserting `ToolInvoked` events capture expansion metadata.
+- Integration tests demonstrating the full flow: initial render → tool call → exception →
+  retry with overrides → expanded content visible.
+- Retry loop tests validating typical caller patterns with exception handling.
+- Telemetry tests asserting `ToolInvoked` events capture expansion metadata before the
+  exception is raised.
 
 ## Documentation Tasks
 
