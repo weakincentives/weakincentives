@@ -115,6 +115,7 @@ def my_handler(params: ParamsType, *, context: ToolContext) -> ToolResult[Result
 - Mutation testing protects hotspots in `runtime/session/` and `serde/`
 
 Run focused tests during development:
+
 ```bash
 uv run pytest tests/path/to/test.py -v
 ```

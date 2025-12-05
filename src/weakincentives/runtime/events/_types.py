@@ -32,6 +32,13 @@ class EventBus(Protocol):
         """Register a handler for the given event type."""
         ...
 
+    def unsubscribe(self, event_type: type[object], handler: EventHandler) -> bool:
+        """Remove a handler for the given event type.
+
+        Returns ``True`` if the handler was found and removed, ``False`` otherwise.
+        """
+        ...
+
     def publish(self, event: object) -> PublishResult:
         """Publish an event instance to subscribers."""
         ...

@@ -21,13 +21,13 @@ An agent harness in WINK wires together five core components:
 
 1. **PromptTemplate** (`weakincentives.prompt.PromptTemplate`): Immutable blueprint defining sections, tools, and structured output schema. Import from `weakincentives.prompt`.
 
-2. **Prompt** (`weakincentives.Prompt`): Wraps a template with parameter bindings and optional overrides. Call `.bind()` to attach runtime params before evaluation.
+1. **Prompt** (`weakincentives.Prompt`): Wraps a template with parameter bindings and optional overrides. Call `.bind()` to attach runtime params before evaluation.
 
-3. **Session** (`weakincentives.runtime.Session`): Redux-like event ledger that records all prompt renders, tool invocations, and custom state. Creates its own `EventBus` internally (access via `session.event_bus`).
+1. **Session** (`weakincentives.runtime.Session`): Redux-like event ledger that records all prompt renders, tool invocations, and custom state. Creates its own `EventBus` internally (access via `session.event_bus`).
 
-4. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to LLM providers. Call `adapter.evaluate(prompt, bus=session.event_bus, session=session)` to execute.
+1. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to LLM providers. Call `adapter.evaluate(prompt, bus=session.event_bus, session=session)` to execute.
 
-5. **Tool handlers**: Functions with signature `(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]` that implement side effects when the model requests tool calls.
+1. **Tool handlers**: Functions with signature `(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]` that implement side effects when the model requests tool calls.
 
 **Data flow**: PromptTemplate → Prompt (with bound params) → `adapter.evaluate()` → LLM response → Tool calls dispatched → ToolResult returned → Session updated → Events published
 
@@ -408,6 +408,7 @@ search_tool = Tool.wrap(search)  # name="search", description="Search for conten
 ### ToolContext fields
 
 Available in tool handlers via `context`:
+
 - `context.session` - Current Session
 - `context.deadline` - Optional Deadline (check with `deadline.remaining()`)
 - `context.event_bus` - EventBus for publishing
@@ -484,6 +485,7 @@ vfs = VfsToolsSection(
     allowed_host_roots=(Path("."),),
 )
 ```
+
 Tools: `read_file`, `write_file`, `list_directory`, `glob`, `grep`
 
 ### PlanningToolsSection - Multi-step planning
@@ -492,6 +494,7 @@ Tools: `read_file`, `write_file`, `list_directory`, `glob`, `grep`
 from weakincentives.tools import PlanningToolsSection, PlanningStrategy
 planning = PlanningToolsSection(session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT)
 ```
+
 Tools: `setup_plan`, `read_plan`, `add_step`, `update_step`, `mark_step`
 
 ### SubagentsSection - Parallel delegation
@@ -500,6 +503,7 @@ Tools: `setup_plan`, `read_plan`, `add_step`, `update_step`, `mark_step`
 from weakincentives.tools import SubagentsSection, SubagentIsolationLevel
 subagents = SubagentsSection(isolation_level=SubagentIsolationLevel.FORK)
 ```
+
 Tools: `dispatch_subagents`
 
 ### WorkspaceDigestSection

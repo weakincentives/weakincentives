@@ -52,13 +52,16 @@ process:
 ## Event Bus Abstraction
 
 - Adapters MUST emit prompt lifecycle events through an in-process message bus exposed by `weakincentives.runtime.events`.
-- The bus presents a minimal synchronous API: `subscribe(event_type, handler)` for registration and `publish(event)` for
-  dispatch. Implementations MAY batch or queue under the hood but MUST deliver callbacks on the publishing thread by
-  default.
+- The bus presents a minimal synchronous API: `subscribe(event_type, handler)` for registration,
+  `unsubscribe(event_type, handler)` for removal, and `publish(event)` for dispatch. Implementations MAY batch or queue
+  under the hood but MUST deliver callbacks on the publishing thread by default.
 - Subscriptions are type-scoped. Handlers receive concrete event dataclasses, not envelopes or loosely typed dictionaries.
 - The module ships with an in-process implementation: `InProcessEventBus` stores handlers in a per-type registry and
   iterates over a snapshot on publish. It guarantees in-order delivery and isolates subscriber exceptions by logging
   and continuing.
+- Unsubscription removes a handler from the per-type registry. `unsubscribe(event_type, handler)` returns `True` if the
+  handler was found and removed, `False` otherwise. Unsubscription is thread-safe and can race with publishes without
+  errors; handlers already captured in a publish snapshot will still be invoked for that publish call.
 - Tests use `tests.helpers.events.NullEventBus` to satisfy the interface while discarding telemetry.
 - Callers MUST provide an `EventBus` instance for each adapter evaluation. There is no module-level default; provide
   `InProcessEventBus()` or a custom implementation scoped to the current request.

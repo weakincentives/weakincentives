@@ -4,6 +4,13 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Events & Telemetry
+
+- Added `unsubscribe(event_type, handler)` method to the `EventBus` protocol and
+  `InProcessEventBus` implementation, allowing handlers to be removed after
+  registration. The method returns `True` if the handler was found and removed,
+  `False` otherwise.
+
 ### Examples
 
 - Removed the `initialize_code_reviewer_runtime` helper from the code reviewer
