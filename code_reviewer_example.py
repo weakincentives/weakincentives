@@ -33,8 +33,11 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptTemplate,
+    SectionVisibility,
     SupportsDataclass,
+    VisibilityExpansionRequired,
 )
+from weakincentives.prompt.errors import SectionPath
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
@@ -121,6 +124,16 @@ class ReviewResponse:
     next_steps: list[str]
 
 
+@dataclass(slots=True, frozen=True)
+class ReferenceParams:
+    """Parameters for the reference documentation section."""
+
+    project_name: str = field(
+        default="sunfish",
+        metadata={"description": "Name of the project being reviewed."},
+    )
+
+
 @dataclass(slots=True)
 class RuntimeContext:
     """Holds the prompt, session, and override handles for the REPL."""
@@ -130,6 +143,9 @@ class RuntimeContext:
     bus: EventBus
     overrides_store: LocalPromptOverridesStore
     override_tag: str
+    visibility_overrides: dict[SectionPath, SectionVisibility] = field(
+        default_factory=dict
+    )
 
 
 class CodeReviewApp:
@@ -152,6 +168,7 @@ class CodeReviewApp:
         self.bus = self.context.bus
         self.overrides_store = self.context.overrides_store
         self.override_tag = self.context.override_tag
+        self.visibility_overrides = self.context.visibility_overrides
 
     def run(self) -> None:
         """Start the interactive review session."""
@@ -183,13 +200,32 @@ class CodeReviewApp:
         dump_session_tree(self.session, SNAPSHOT_DIR)
 
     def _evaluate_turn(self, user_prompt: str) -> str:
+        """Evaluate a user prompt with progressive disclosure support.
+
+        When the model requests expanded sections via `open_sections`, this method
+        catches the VisibilityExpansionRequired exception, updates visibility
+        overrides, and retries evaluation with the expanded content.
+        """
         bound_prompt = self.prompt.bind(ReviewTurnParams(request=user_prompt))
-        response = self.adapter.evaluate(
-            bound_prompt,
-            bus=self.bus,
-            session=self.session,
-        )
-        return _render_response_payload(response)
+
+        while True:
+            try:
+                response = self.adapter.evaluate(
+                    bound_prompt,
+                    bus=self.bus,
+                    session=self.session,
+                    visibility_overrides=self.visibility_overrides,
+                )
+                return _render_response_payload(response)
+            except VisibilityExpansionRequired as e:
+                # Model requested section expansion - update overrides and retry
+                _LOGGER.info(
+                    "Expanding sections: %s, reason: %s",
+                    ", ".join(e.section_keys),
+                    e.reason,
+                )
+                self.visibility_overrides.update(e.requested_overrides)
+                # Continue loop to retry with expanded visibility
 
     def _handle_optimize_command(self) -> None:
         """Runs the optimization prompt and persists workspace digest content."""
@@ -230,13 +266,18 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
 
 
 def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
-    """Builds the main prompt template for the code review agent."""
+    """Builds the main prompt template for the code review agent.
+
+    This prompt demonstrates progressive disclosure: the Reference Documentation
+    section starts summarized and can be expanded on demand via `open_sections`.
+    """
 
     _ensure_test_repository_available()
     workspace_section = _build_workspace_section(session=session)
     sections = (
         _build_review_guidance_section(),
         WorkspaceDigestSection(session=session),
+        _build_reference_section(),  # Progressive disclosure section
         _build_subagents_section(),
         PlanningToolsSection(
             session=session,
@@ -298,6 +339,43 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
 
 def _build_subagents_section() -> SubagentsSection:
     return SubagentsSection(accepts_overrides=True)
+
+
+def _build_reference_section() -> MarkdownSection[ReferenceParams]:
+    """Build a reference documentation section with progressive disclosure.
+
+    This section starts summarized. The model can call `open_sections` to
+    expand it when detailed documentation is needed.
+    """
+    return MarkdownSection[ReferenceParams](
+        title="Reference Documentation",
+        template=textwrap.dedent(
+            """
+            Detailed documentation for the ${project_name} project:
+
+            ## Architecture Overview
+            - The project follows a modular architecture with clear separation of concerns.
+            - Core components are organized into discrete packages.
+            - Dependencies flow inward toward the domain layer.
+
+            ## Code Conventions
+            - Follow PEP 8 style guidelines.
+            - Use type annotations for all public functions.
+            - Document public APIs with docstrings.
+            - Prefer composition over inheritance.
+
+            ## Review Checklist
+            - Verify that new code includes appropriate tests.
+            - Check for security vulnerabilities in user input handling.
+            - Ensure error handling follows project conventions.
+            - Validate that changes are backward compatible.
+            """
+        ).strip(),
+        summary="Documentation for ${project_name} is available. Request expansion if needed.",
+        default_params=ReferenceParams(),
+        key="reference-docs",
+        visibility=SectionVisibility.SUMMARY,
+    )
 
 
 def _sunfish_mounts() -> tuple[HostMount, ...]:

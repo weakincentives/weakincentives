@@ -24,6 +24,8 @@ from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
+from ..prompt._visibility import SectionVisibility
+from ..prompt.errors import SectionPath
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
 from ..runtime.events import EventBus
@@ -607,11 +609,13 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         session: SessionProtocol,
         parse_output: bool = True,
         deadline: Deadline | None = None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> PromptResponse[OutputT]:
         context = self._setup_evaluation(
             prompt,
             parse_output=parse_output,
             deadline=deadline,
+            visibility_overrides=visibility_overrides,
         )
 
         conversation_config = ConversationConfig(
@@ -648,6 +652,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         *,
         parse_output: bool,
         deadline: Deadline | None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> _EvaluationContext[OutputT]:
         prompt_name = prompt.name or prompt.template.__class__.__name__
         render_inputs = prompt.params
@@ -656,6 +661,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             prompt,
             parse_output=parse_output,
             deadline=deadline,
+            visibility_overrides=visibility_overrides,
         )
         response_format = self._build_response_format(
             rendered,
@@ -687,6 +693,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         *,
         parse_output: bool,
         deadline: Deadline | None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
         has_structured_output = prompt.structured_output is not None
         inject_instructions = (
@@ -702,9 +709,15 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         )
 
         if should_disable_instructions:
-            rendered = prompt.render(inject_output_instructions=False)
+            rendered = prompt.render(
+                inject_output_instructions=False,
+                visibility_overrides=visibility_overrides,
+            )
         else:
-            rendered = prompt.render(inject_output_instructions=inject_instructions)
+            rendered = prompt.render(
+                inject_output_instructions=inject_instructions,
+                visibility_overrides=visibility_overrides,
+            )
         if deadline is not None:
             rendered = replace(rendered, deadline=deadline)
         return rendered

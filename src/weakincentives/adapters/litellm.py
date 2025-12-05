@@ -21,6 +21,8 @@ from importlib import import_module
 from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..deadlines import Deadline
+from ..prompt._visibility import SectionVisibility
+from ..prompt.errors import SectionPath
 from ..prompt.prompt import Prompt
 from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
@@ -237,6 +239,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         session: SessionProtocol,
         parse_output: bool = True,
         deadline: Deadline | None = None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> PromptResponse[OutputT]:
         has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
@@ -250,6 +253,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             disable_output_instructions=should_disable_instructions,
             enable_json_schema=True,
             deadline=deadline,
+            visibility_overrides=visibility_overrides,
         )
 
         render_context = prepare_adapter_conversation(

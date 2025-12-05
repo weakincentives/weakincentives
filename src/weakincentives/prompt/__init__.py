@@ -29,7 +29,13 @@ from .composition import (
     RecapParams,
     RecapSection,
 )
-from .errors import PromptError, PromptRenderError, PromptValidationError, SectionPath
+from .errors import (
+    PromptError,
+    PromptRenderError,
+    PromptValidationError,
+    SectionPath,
+    VisibilityExpansionRequired,
+)
 from .markdown import MarkdownSection
 from .overrides import (
     LocalPromptOverridesStore,
@@ -45,6 +51,7 @@ from .overrides import (
     hash_json,
     hash_text,
 )
+from .progressive_disclosure import OpenSectionsParams
 from .prompt import Prompt, PromptTemplate, SectionNode
 from .protocols import (
     PromptProtocol,
@@ -68,6 +75,7 @@ __all__ = [
     "DelegationSummarySection",
     "LocalPromptOverridesStore",
     "MarkdownSection",
+    "OpenSectionsParams",
     "OutputParseError",
     "ParentPromptParams",
     "ParentPromptSection",
@@ -106,6 +114,7 @@ __all__ = [
     "ToolOverride",
     "ToolRenderableResult",
     "ToolResult",
+    "VisibilityExpansionRequired",
     "hash_json",
     "hash_text",
     "parse_structured_output",
