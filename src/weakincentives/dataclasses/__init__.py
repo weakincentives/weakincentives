@@ -249,12 +249,12 @@ def _extract_updates(
 
     updates: dict[str, object] = {}
     for name in field_names:
-        try:
+        if hasattr(source, name):
             updates[name] = getattr(source, name)
-        except AttributeError as error:
-            raise TypeError(
-                f"{cls.__name__}.merge() source missing attribute: {name}"
-            ) from error
+
+    if not updates:
+        raise TypeError(f"{cls.__name__}.merge() source has no matching fields")
+
     return updates
 
 

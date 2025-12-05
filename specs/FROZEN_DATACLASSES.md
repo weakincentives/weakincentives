@@ -68,16 +68,26 @@ inside `__post_init__` is prohibited; failures should raise exceptions instead o
 
 The decorator injects ergonomic copy-on-write helpers:
 
-- `update(**changes)`: Thin wrapper over `dataclasses.replace` that re-runs `__post_init__` to keep invariants enforced.
+- `update(**changes)`: Constructs a new instance with the specified changes, re-running `__post_init__` to keep
+  invariants enforced. Raises `TypeError` if given unknown field names.
 - `merge(mapping_or_obj)`: Accepts a `Mapping[str, Any]` or object with matching attributes, merges those fields into a
-  copy, and re-runs `__post_init__`.
+  copy, and re-runs `__post_init__`. When passed a mapping, only present keys are merged. When passed an object, only
+  existing attributes that match field names are merged. Raises `TypeError` if a mapping contains unknown keys or if an
+  object has no matching attributes.
 - `map(transform: Callable[[dict[str, Any]], Mapping[str, Any]])`: Provides the current field mapping to the callable,
-  expects a mapping of replacements, and applies them atomically via `update`.
+  expects a mapping of replacements, and applies them atomically via `update`. Raises `TypeError` if the transform
+  returns non-mapping values or unknown fields.
 
 ```python
 updated = invoice.update(tax_rate=0.24)
 from_mapping = invoice.merge({"tax_rate": 0.24})
 remapped = invoice.map(lambda fields: {"tax_cents": fields["total_cents"] * 0.24})
+
+# Partial object merging - only `rate` is transferred
+class RateOverride:
+    rate = 0.3
+
+adjusted = invoice.merge(RateOverride())
 ```
 
 Notes:
@@ -86,6 +96,7 @@ Notes:
   logic into a shared helper callable.
 - `map` is intended for small, pure transforms; complex recalculation belongs in a dedicated helper function that calls
   `update` or `merge`.
+- All helpers raise `TypeError` for invalid inputs to match dataclass constructor behaviour.
 
 ## Recommended usage patterns
 
