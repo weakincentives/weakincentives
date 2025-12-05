@@ -6,18 +6,61 @@ testability, and safe execution without heavy dependencies or hosted services.
 
 ## What makes WINK different?
 
-Most agent frameworks offer loose toolkits. WINK provides an opinionated chassis
-that treats agent development as structured engineering:
+Most agent frameworks treat prompts as an afterthought—templates glued to
+separately registered tool lists. WINK inverts this: **the prompt *is* the
+agent**. You define an agent as a single hierarchical document where each
+section bundles its own instructions and tools together.
+
+### Prompt-as-architecture
+
+A WINK agent is a tree of typed `Section` objects. Each section can:
+
+- Render Markdown instructions with validated placeholders
+- Contribute tools that the LLM can invoke
+- Nest child sections for progressive disclosure
+- Enable or disable itself (and its tools) based on runtime context
+
+```
+Prompt[ReviewResponse]
+├── MarkdownSection (guidance)
+├── PlanningToolsSection       ← contributes plan_*, reflect tools
+│   └── (nested planning docs)
+├── VfsToolsSection            ← contributes vfs_list_files, vfs_read_file, …
+│   └── (nested filesystem docs)
+└── MarkdownSection (user request)
+```
+
+When you render this prompt, disabled sections vanish—and so do their tools.
+The LLM sees exactly the capabilities you expose at that moment, scoped to the
+context that explains how to use them. No stale tool registries, no orphaned
+instructions.
+
+### Why this matters
+
+1. **Co-location.** Instructions and tools live together. The section that
+   explains filesystem navigation is the same section that provides the
+   `vfs_read_file` tool. Documentation can't drift from implementation.
+
+1. **Progressive disclosure.** Nest child sections to reveal advanced
+   capabilities only when relevant. The LLM sees numbered, hierarchical headings
+   that mirror your code structure.
+
+1. **Dynamic scoping.** Each section has an `enabled` predicate. Disable a
+   section and its entire subtree—tools included—disappears from the prompt.
+   Swap in a `PodmanSandboxSection` instead of `VfsToolsSection` when a shell
+   is available; the prompt adapts automatically.
+
+1. **Typed all the way down.** Sections are parameterized with dataclasses.
+   Placeholders are validated at construction time. Tools declare typed params
+   and results. The framework catches mismatches before the request reaches
+   an LLM.
+
+### Other key features
 
 - **Redux-style state management.** Every state change flows through pure reducers
   processing published events. Tool calls, prompt evaluations, and internal
   decisions become a replayable ledger—not scattered mutations in free-form dicts.
   See [Session State](specs/SESSIONS.md) and [Events](specs/EVENTS.md).
-
-- **Typed prompt composition.** Prompts assemble from dataclass-backed sections
-  that compose like regular code. No string concatenation, no template soup—just
-  validated Markdown with automatic tool contract generation.
-  See [Prompts](specs/PROMPTS.md) and [Composition](specs/PROMPTS_COMPOSITION.md).
 
 - **Hash-based prompt overrides.** Prompt descriptors carry content hashes so
   overrides apply only to the intended version. Teams iterate on prompts via
