@@ -1,4 +1,4 @@
-# Open Sections Tool Specification
+# Progressive Disclosure Specification
 
 ## Overview
 
@@ -237,57 +237,30 @@ Callers may implement policies around:
 
 - **Retry limits**: Cap the number of expansion cycles to prevent infinite loops.
 - **Expansion budgets**: Limit total tokens or sections that can be expanded.
-- **Caching**: Reuse rendered prompts when the same overrides apply.
-- **Incremental vs. batch**: Choose whether to expand all requested sections at once or
-  one at a time.
 
-## Summary Suffix Convention
+## Summary Rendering
 
-To inform the model that summarized sections can be expanded, each section rendered with
-`SUMMARY` visibility appends a standardized instruction block to its summary text. This
-suffix is injected automatically during rendering and follows this template:
+When a section is rendered with `SUMMARY` visibility, the framework automatically appends
+an instruction block to inform the model how to request expansion. This suffix is injected
+during rendering without requiring any configuration from section authors.
+
+### Rendered Format
 
 ```
 ---
 [This section is summarized. To view full content, call `open_sections` with key "${section_key}".]
 ```
 
-### Suffix Construction Rules
-
-1. **Separator**: A horizontal rule (`---`) visually separates the summary content from the
-   instruction.
-2. **Section key**: The dot-notation key path for the section (e.g., `context.examples`).
-3. **Instruction text**: A brief, model-directed instruction explaining how to request
-   expansion.
-4. **Placement**: The suffix is appended after the summary template content but before any
-   child content (children of summarized sections are not rendered, so this is effectively
-   the final content).
-
-### Customization
-
-Section authors may customize the suffix by providing a `summary_suffix` parameter:
-
-```python
-section = MarkdownSection[Params](
-    title="Reference Documentation",
-    template="...",
-    summary="Overview of available APIs and their purposes.",
-    summary_suffix=(
-        "Call `open_sections` with key '${section_key}' to see detailed API signatures "
-        "and usage examples."
-    ),
-    key="reference",
-    visibility=SectionVisibility.SUMMARY,
-)
-```
-
-The `${section_key}` placeholder is substituted with the section's dot-notation path during
-rendering. If `summary_suffix` is not provided, the default template is used.
+- **Separator**: A horizontal rule (`---`) visually separates summary content from the
+  instruction.
+- **Section key**: The dot-notation key path for the section (e.g., `context.examples`).
+- **Placement**: Appended after the summary template content. Since children of summarized
+  sections are not rendered, this is the final content for the section.
 
 ### Nested Sections
 
-When a parent section is summarized, its children are not rendered. The parent's summary
-suffix should indicate that expanding it reveals child content:
+When a parent section is summarized and has children, the suffix enumerates the child
+sections that would become visible upon expansion:
 
 ```
 ---
@@ -295,8 +268,7 @@ suffix should indicate that expanding it reveals child content:
 including subsections: examples, constraints, history.]
 ```
 
-The framework automatically appends child section keys to the suffix when the parent has
-`SUMMARY` visibility and children exist.
+The framework automatically detects and lists child section keys.
 
 ## Integration with Visibility Overrides
 
@@ -322,16 +294,8 @@ rendered = prompt.render(
 Tool-requested overrides take precedence because they represent the model's explicit
 information needs discovered during evaluation.
 
-### Incremental Expansion
-
-Callers may implement incremental expansion strategies:
-
-- **Eager**: Open all requested sections immediately.
-- **Conservative**: Open one section at a time, re-evaluating after each expansion.
-- **Batched**: Accumulate requests across turns before expanding.
-
-The tool imposes no policy; callers choose based on latency, cost, and context window
-constraints.
+All requested sections are expanded immediately on retry (eager expansion). The framework
+does not support partial or incremental expansion strategies.
 
 ## Example Flow
 
@@ -458,7 +422,8 @@ Callers may use this telemetry to:
 - Handler validation tests for invalid section keys and already-expanded sections.
 - Exception tests verifying `VisibilityExpansionRequired` carries correct override mappings.
 - Exception propagation tests confirming adapters do not catch or wrap the exception.
-- Suffix rendering tests checking default and custom suffix templates.
+- Suffix rendering tests checking the automatic instruction block is appended correctly.
+- Nested section tests verifying child keys are listed in the suffix.
 - Integration tests demonstrating the full flow: initial render → tool call → exception →
   retry with overrides → expanded content visible.
 - Retry loop tests validating typical caller patterns with exception handling.
