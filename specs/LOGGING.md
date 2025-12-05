@@ -55,8 +55,8 @@ in sync with code changes.
 
 | Module | Logger Variable | Level | Message / Event | Context Fields |
 | --- | --- | --- | --- | --- |
-| `src/weakincentives/events.py` | `logger` | `exception` (ERROR) | "Error delivering event %s to handler %r" | `event_type` (`type(event).__name__`), `handler` |
-| `src/weakincentives/session/session.py` | `logger` | `exception` (ERROR) | "Reducer %r failed for data type %s" | `reducer`, `data_type` |
+| `src/weakincentives/runtime/events/__init__.py` | `logger` | `exception` (ERROR) | "Error delivering event %s to handler %r" | `event_type` (`type(event).__name__`), `handler` |
+| `src/weakincentives/runtime/session/session.py` | `logger` | `exception` (ERROR) | "Reducer %r failed for data type %s" | `reducer`, `data_type` |
 | `src/weakincentives/adapters/shared.py` | `logger` (or override) | `exception` (ERROR) | "Tool '%s' raised an unexpected exception." | `tool_name` |
 | `src/weakincentives/prompt/overrides/local_store.py` | `_LOGGER` | `debug` | Missing override file, empty override payload, persistence success, delete-miss, unknown section/tool, stale hashes | `ns`, `prompt_key`, `tag`, `section_path`, `expected_hash`, `found_hash`, `tool_name` |
 | `src/weakincentives/tools/asteval.py` | `_logger` | `debug` | event="asteval.run" | `event`, `mode`, `stdout_len`, `stderr_len`, `write_count`, `code_preview` |

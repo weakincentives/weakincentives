@@ -117,12 +117,12 @@ schema(cls, *, alias_generator=None, extra="ignore") -> dict[str, Any]
 | Principle | Implementation Touchpoints |
 | --- | --- |
 | Dependency-free contracts | `src/weakincentives/serde/__init__.py` re-exports helpers; parsing and dumping rely solely on stdlib types and helper functions within `src/weakincentives/serde/` modules. |
-| Metadata-first validation | Constraint extraction and merge logic live in `src/weakincentives/serde/metadata.py`; enforcement flows through `parse` in `src/weakincentives/serde/parse.py`. |
-| Deterministic coercion | Coercers and collection handlers reside in `src/weakincentives/serde/coercion.py` and `src/weakincentives/serde/collections.py`. |
-| Alias-aware IO | Alias plumbing is handled in `src/weakincentives/serde/aliases.py` and is shared by both `parse` and `dump`. |
-| Path-aware errors | Error tracking utilities sit in `src/weakincentives/serde/errors.py`, surfacing dotted/indexed paths. |
+| Metadata-first validation | Constraint extraction and merge logic live in `src/weakincentives/serde/parse.py`; enforcement flows through `parse` in the same module. |
+| Deterministic coercion | Coercers and collection handlers reside in `src/weakincentives/serde/parse.py` alongside the main parsing logic. |
+| Alias-aware IO | Alias plumbing is handled in `src/weakincentives/serde/parse.py` and `src/weakincentives/serde/dump.py`. |
+| Path-aware errors | Error tracking utilities are integrated in `src/weakincentives/serde/parse.py`, surfacing dotted/indexed paths. |
 | Schema parity with runtime | `src/weakincentives/serde/schema.py` mirrors parse-time constraints into JSON Schema output. |
-| Extras preservation | Extras attachment and cloning behaviours are implemented in `parse` and `clone` under `src/weakincentives/serde/parse.py` and `src/weakincentives/serde/clone.py`. |
+| Extras preservation | Extras attachment and cloning behaviours are implemented in `src/weakincentives/serde/parse.py` and `src/weakincentives/serde/dump.py` (which contains `clone`). |
 | Contract verification | Tests in `tests/serde/test_dataclass_serde.py` and `tests/plugins/dataclass_serde.py` enforce the documented behaviours. |
 
 ## Edge Cases and Caveats
