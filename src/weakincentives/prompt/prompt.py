@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import is_dataclass
+from dataclasses import MISSING, is_dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -24,9 +24,9 @@ from typing import (
     cast,
     get_args,
     get_origin,
-    override,
 )
 
+from ..dataclasses import FrozenDataclass
 from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
 from .errors import PromptValidationError, SectionPath
@@ -52,29 +52,80 @@ def _format_specialization_argument(argument: object | None) -> str:
     return repr(argument)
 
 
+def _resolve_output_spec(
+    cls: type[PromptTemplate[Any]], allow_extra_keys: bool
+) -> StructuredOutputConfig[SupportsDataclass] | None:
+    """Resolve structured output from class-level type specialization."""
+    candidate = getattr(cls, "_output_dataclass_candidate", None)
+    container = cast(
+        Literal["object", "array"] | None,
+        getattr(cls, "_output_container_spec", None),
+    )
+
+    if candidate is None or container is None:
+        return None
+
+    if not isinstance(candidate, type):
+        candidate_type = cast(type[Any], type(candidate))
+        raise PromptValidationError(
+            "Prompt output type must be a dataclass.",
+            dataclass_type=candidate_type,
+        )
+
+    if not is_dataclass(candidate):
+        bad_dataclass = cast(type[Any], candidate)
+        raise PromptValidationError(
+            "Prompt output type must be a dataclass.",
+            dataclass_type=bad_dataclass,
+        )
+
+    dataclass_type = cast(type[SupportsDataclass], candidate)
+    return StructuredOutputConfig(
+        dataclass_type=dataclass_type,
+        container=container,
+        allow_extra_keys=allow_extra_keys,
+    )
+
+
+def _build_response_format_params(
+    spec: StructuredOutputConfig[SupportsDataclass],
+) -> ResponseFormatParams:
+    """Build response format parameters from structured output config."""
+    container = spec.container
+
+    article: Literal["a", "an"] = (
+        "an" if container.startswith(("a", "e", "i", "o", "u")) else "a"
+    )
+    extra_clause = "." if spec.allow_extra_keys else ". Do not add extra keys."
+    return ResponseFormatParams(
+        article=article,
+        container=container,
+        extra_clause=extra_clause,
+    )
+
+
+@FrozenDataclass(slots=False)
 class PromptTemplate(Generic[OutputT]):  # noqa: UP046
-    """Coordinate prompt sections and their parameter bindings."""
+    """Coordinate prompt sections and their parameter bindings.
+
+    PromptTemplate is an immutable dataclass that coordinates prompt sections
+    and their parameter bindings. All construction logic runs through
+    ``__pre_init__`` to derive internal state before the instance is frozen.
+
+    Copy helpers ``update()``, ``merge()``, and ``map()`` are available for
+    producing modified copies when needed.
+    """
 
     ns: str
     key: str
     name: str | None
     inject_output_instructions: bool
+    sections: tuple[SectionNode[SupportsDataclass], ...]
+    allow_extra_keys: bool
     _descriptor: PromptDescriptor
     _renderer: PromptRenderer[OutputT]
     _snapshot: RegistrySnapshot
     _structured_output: StructuredOutputConfig[SupportsDataclass] | None
-
-    __slots__ = (
-        "_descriptor",
-        "_frozen",
-        "_renderer",
-        "_snapshot",
-        "_structured_output",
-        "inject_output_instructions",
-        "key",
-        "name",
-        "ns",
-    )
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -101,40 +152,100 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         }
         return type(name, (cls,), namespace)
 
-    def __init__(
-        self,
+    @classmethod
+    def __pre_init__(
+        cls,
         *,
-        ns: str,
-        key: str,
-        name: str | None = None,
-        sections: Sequence[Section[SupportsDataclass]] | None = None,
-        inject_output_instructions: bool = True,
-        allow_extra_keys: bool = False,
-    ) -> None:
-        super().__init__()
-        self._frozen = False
-        stripped_ns = ns.strip()
+        ns: str | object = MISSING,
+        key: str | object = MISSING,
+        name: str | None | object = MISSING,
+        sections: Sequence[Section[SupportsDataclass]]
+        | tuple[SectionNode[SupportsDataclass], ...]
+        | None
+        | object = MISSING,
+        inject_output_instructions: bool | object = MISSING,
+        allow_extra_keys: bool | object = MISSING,
+        _descriptor: PromptDescriptor | object = MISSING,
+        _renderer: PromptRenderer[Any] | object = MISSING,
+        _snapshot: RegistrySnapshot | object = MISSING,
+        _structured_output: StructuredOutputConfig[SupportsDataclass]
+        | None
+        | object = MISSING,
+    ) -> dict[str, Any]:
+        """Normalize inputs and derive internal state before construction."""
+        # Handle direct field assignment (for update/merge operations)
+        if _descriptor is not MISSING and _renderer is not MISSING:
+            return {
+                "ns": ns if ns is not MISSING else "",
+                "key": key if key is not MISSING else "",
+                "name": name if name is not MISSING else None,
+                "inject_output_instructions": (
+                    inject_output_instructions
+                    if inject_output_instructions is not MISSING
+                    else True
+                ),
+                "sections": (
+                    tuple(sections) if sections is not MISSING and sections else ()
+                ),
+                "allow_extra_keys": (
+                    allow_extra_keys if allow_extra_keys is not MISSING else False
+                ),
+                "_descriptor": _descriptor,
+                "_renderer": _renderer,
+                "_snapshot": _snapshot if _snapshot is not MISSING else None,
+                "_structured_output": (
+                    _structured_output if _structured_output is not MISSING else None
+                ),
+            }
+
+        # Validate required inputs
+        if ns is MISSING:
+            raise TypeError("PromptTemplate() missing required argument: 'ns'")
+        if key is MISSING:
+            raise TypeError("PromptTemplate() missing required argument: 'key'")
+
+        ns_str = cast(str, ns)
+        key_str = cast(str, key)
+        name_val = cast(str | None, name) if name is not MISSING else None
+        sections_input = (
+            cast(Sequence[Section[SupportsDataclass]] | None, sections)
+            if sections is not MISSING
+            else None
+        )
+        inject_val = (
+            cast(bool, inject_output_instructions)
+            if inject_output_instructions is not MISSING
+            else True
+        )
+        allow_extra = (
+            cast(bool, allow_extra_keys) if allow_extra_keys is not MISSING else False
+        )
+
+        stripped_ns = ns_str.strip()
         if not stripped_ns:
             raise PromptValidationError("Prompt namespace must be a non-empty string.")
-        stripped_key = key.strip()
+        stripped_key = key_str.strip()
         if not stripped_key:
             raise PromptValidationError("Prompt key must be a non-empty string.")
-        self.ns = stripped_ns
-        self.key = stripped_key
-        self.name = name
-        self.inject_output_instructions = inject_output_instructions
 
+        sections_tuple = tuple(sections_input or ())
         registry = PromptRegistry()
-        registry.register_sections(tuple(sections or ()))
+        registry.register_sections(sections_tuple)
 
-        structured_output = self._resolve_output_spec(allow_extra_keys)
-        self._structured_output = structured_output
+        structured_output = _resolve_output_spec(cls, allow_extra)
         response_section: ResponseFormatSection | None = None
         if structured_output is not None:
-            response_params = self._build_response_format_params()
+            response_params = _build_response_format_params(structured_output)
+
+            # Create a closure that captures inject_val for the enabled callback
+            def make_enabled_callback(
+                default_inject: bool,
+            ) -> Any:
+                return lambda _params: default_inject
+
             response_section = ResponseFormatSection(
                 params=response_params,
-                enabled=lambda _params, prompt=self: prompt.inject_output_instructions,
+                enabled=make_enabled_callback(inject_val),
             )
             registry.register_section(
                 cast(Section[SupportsDataclass], response_section),
@@ -143,26 +254,37 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             )
 
         snapshot = registry.snapshot()
-        self._snapshot = snapshot
-        self._renderer = PromptRenderer(
+        renderer: PromptRenderer[Any] = PromptRenderer(
             registry=snapshot,
             structured_output=structured_output,
             response_section=response_section,
         )
-        self._descriptor = PromptDescriptor.from_prompt(cast("PromptLike", self))
-        self._frozen = True
 
-    @override
-    def __setattr__(self, name: str, value: object) -> None:
-        """Prevent mutation after initialization."""
+        # Build a temporary object for descriptor creation
+        temp_ns = stripped_ns
+        temp_key = stripped_key
+        temp_name = name_val
 
-        if name == "_frozen":
-            object.__setattr__(self, name, value)
-            return
-        if getattr(self, "_frozen", False):
-            msg = "PromptTemplate instances are immutable."
-            raise AttributeError(msg)
-        object.__setattr__(self, name, value)
+        class _TempPromptLike:
+            ns = temp_ns
+            key = temp_key
+            name = temp_name
+            sections = snapshot.sections
+
+        descriptor = PromptDescriptor.from_prompt(cast("PromptLike", _TempPromptLike()))
+
+        return {
+            "ns": stripped_ns,
+            "key": stripped_key,
+            "name": name_val,
+            "inject_output_instructions": inject_val,
+            "sections": snapshot.sections,
+            "allow_extra_keys": allow_extra,
+            "_descriptor": descriptor,
+            "_renderer": renderer,
+            "_snapshot": snapshot,
+            "_structured_output": structured_output,
+        }
 
     def render(
         self,
@@ -219,25 +341,23 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         )
 
     @property
-    def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
-        return self._snapshot.sections
-
-    @property
     def param_types(self) -> set[type[SupportsDataclass]]:
+        """Return the set of parameter types used by this prompt's sections."""
         return self._snapshot.param_types
 
     @property
     def descriptor(self) -> PromptDescriptor:
+        """Return the prompt descriptor for this template."""
         return self._descriptor
 
     @property
     def placeholders(self) -> Mapping[SectionPath, frozenset[str]]:
+        """Return the placeholders for each section path."""
         return self._snapshot.placeholders
 
     @property
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
         """Resolved structured output declaration, when present."""
-
         return self._structured_output
 
     def find_section(
@@ -262,56 +382,17 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             f"Section matching {candidates!r} not found in prompt {self.ns}:{self.key}."
         )
 
-    def _resolve_output_spec(
-        self, allow_extra_keys: bool
-    ) -> StructuredOutputConfig[SupportsDataclass] | None:
-        candidate = getattr(type(self), "_output_dataclass_candidate", None)
-        container = cast(
-            Literal["object", "array"] | None,
-            getattr(type(self), "_output_container_spec", None),
-        )
-
-        if candidate is None or container is None:
-            return None
-
-        if not isinstance(candidate, type):
-            candidate_type = cast(type[Any], type(candidate))
-            raise PromptValidationError(
-                "Prompt output type must be a dataclass.",
-                dataclass_type=candidate_type,
-            )
-
-        if not is_dataclass(candidate):
-            bad_dataclass = cast(type[Any], candidate)
-            raise PromptValidationError(
-                "Prompt output type must be a dataclass.",
-                dataclass_type=bad_dataclass,
-            )
-
-        dataclass_type = cast(type[SupportsDataclass], candidate)
-        return StructuredOutputConfig(
-            dataclass_type=dataclass_type,
-            container=container,
-            allow_extra_keys=allow_extra_keys,
-        )
-
     def _build_response_format_params(self) -> ResponseFormatParams:
+        """Build response format parameters from structured output config.
+
+        Raises RuntimeError if no structured output is configured.
+        """
         spec = self._structured_output
         if spec is None:
             raise RuntimeError(
                 "Output container missing during response format construction."
             )
-        container = spec.container
-
-        article: Literal["a", "an"] = (
-            "an" if container.startswith(("a", "e", "i", "o", "u")) else "a"
-        )
-        extra_clause = "." if spec.allow_extra_keys else ". Do not add extra keys."
-        return ResponseFormatParams(
-            article=article,
-            container=container,
-            extra_clause=extra_clause,
-        )
+        return _build_response_format_params(spec)
 
 
 class Prompt(Generic[OutputT]):  # noqa: UP046

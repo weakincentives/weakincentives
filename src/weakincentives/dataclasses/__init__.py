@@ -121,24 +121,28 @@ def _build_pre_init_wrapper(
 ) -> Callable[..., None]:
     field_defs = [field for field in fields(cls) if field.init]
     field_names = [field.name for field in field_defs]
+    # Get the underlying function from the classmethod to allow calling with
+    # the actual subclass type, not the class where __pre_init__ was defined.
+    pre_init_func = pre_init.__func__
 
     def wrapper(self: object, *args: object, **kwargs: object) -> None:
+        actual_cls = type(self)
         if len(args) > len(field_defs):
             raise TypeError(
-                f"{cls.__name__}() takes {len(field_defs)} positional arguments but {len(args)} were given"
+                f"{actual_cls.__name__}() takes {len(field_defs)} positional arguments but {len(args)} were given"
             )
 
         provided = dict(kwargs)
-        bound = _bind_fields(cls, field_defs, field_names, args, provided)
+        bound = _bind_fields(actual_cls, field_defs, field_names, args, provided)
         if provided:
             unexpected = ", ".join(sorted(provided))
             raise TypeError(
-                f"{cls.__name__}() got unexpected keyword arguments: {unexpected}"
+                f"{actual_cls.__name__}() got unexpected keyword arguments: {unexpected}"
             )
 
-        normalized = pre_init(**bound)
-        _ensure_mapping(cls, normalized)
-        _validate_normalized_fields(cls, field_names, normalized)
+        normalized = pre_init_func(actual_cls, **bound)
+        _ensure_mapping(actual_cls, normalized)
+        _validate_normalized_fields(actual_cls, field_names, normalized)
 
         original_init(self, **normalized)
 
