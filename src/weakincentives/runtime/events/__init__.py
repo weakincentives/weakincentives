@@ -91,7 +91,13 @@ class InProcessEventBus:
 
 @dataclass(slots=True, frozen=True)
 class PromptExecuted:
-    """Event emitted after an adapter finishes evaluating a prompt."""
+    """Event emitted after an adapter finishes evaluating a prompt.
+
+    Note: ``result`` and ``value`` use ``Any`` to support heterogeneous
+    prompt output types during serialization/deserialization.
+    At runtime, ``result`` is ``PromptResponse[OutputT]`` and
+    ``value`` is ``SupportsDataclass | None``.
+    """
 
     prompt_name: str
     adapter: AdapterName
@@ -105,7 +111,12 @@ class PromptExecuted:
 
 @dataclass(slots=True, frozen=True)
 class PromptRendered:
-    """Event emitted immediately before dispatching a rendered prompt."""
+    """Event emitted immediately before dispatching a rendered prompt.
+
+    Note: ``render_inputs`` uses ``Any`` to support heterogeneous
+    dataclass inputs during serialization/deserialization.
+    At runtime, elements are ``SupportsDataclass`` instances.
+    """
 
     prompt_ns: str
     prompt_key: str

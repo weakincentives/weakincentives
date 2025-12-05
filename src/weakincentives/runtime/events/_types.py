@@ -100,7 +100,14 @@ class TokenUsage:
 
 @dataclass(slots=True, frozen=True)
 class ToolInvoked:
-    """Event emitted after an adapter executes a tool handler."""
+    """Event emitted after an adapter executes a tool handler.
+
+    Note: ``params``, ``result``, and ``value`` use ``Any`` to support
+    heterogeneous tool types during serialization/deserialization.
+    At runtime, ``params`` is ``SupportsDataclass | None``,
+    ``result`` is ``ToolResult[SupportsToolResult]``, and
+    ``value`` is ``SupportsDataclass | None``.
+    """
 
     prompt_name: str
     adapter: AdapterName

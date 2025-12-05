@@ -122,12 +122,63 @@ and edit files directly from the workspace. `shell_execute` runs short commands
 operations are available. Do not assume files outside `/workspace` exist."""
 
 
+class _ContainerProtocol(Protocol):
+    """Subset of container operations used by the section."""
+
+    id: str
+
+    def start(self) -> None: ...
+
+    def exec_run(
+        self,
+        cmd: list[str],
+        *,
+        stdout: bool = ...,
+        stderr: bool = ...,
+        demux: bool = ...,
+    ) -> tuple[int, object]: ...
+
+    def stop(self, timeout: int = ...) -> None: ...
+
+    def remove(self, force: bool = ...) -> None: ...
+
+
+class _ContainersManager(Protocol):
+    """Subset of containers manager operations used by the section."""
+
+    def create(
+        self,
+        *,
+        image: str,
+        command: list[str],
+        name: str,
+        workdir: str,
+        user: str,
+        mem_limit: str,
+        memswap_limit: str,
+        cpu_period: int,
+        cpu_quota: int,
+        environment: dict[str, str],
+        network_mode: str,
+        mounts: list[dict[str, object]],
+        remove: bool,
+    ) -> _ContainerProtocol: ...
+
+    def get(self, container_id: str) -> _ContainerProtocol: ...
+
+
+class _ImagesManager(Protocol):
+    """Subset of images manager operations used by the section."""
+
+    def pull(self, image: str) -> object: ...
+
+
 @runtime_checkable
 class _PodmanClient(Protocol):
     """Subset of :class:`podman.PodmanClient` used by the section."""
 
-    containers: Any
-    images: Any
+    containers: _ContainersManager
+    images: _ImagesManager
 
     def close(self) -> None: ...
 

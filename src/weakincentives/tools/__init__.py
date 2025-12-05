@@ -17,7 +17,16 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .podman import (
+        PodmanSandboxConfig as PodmanSandboxConfigType,
+        PodmanSandboxSection as PodmanSandboxSectionType,
+        PodmanShellParams as PodmanShellParamsType,
+        PodmanShellResult as PodmanShellResultType,
+        PodmanWorkspace as PodmanWorkspaceType,
+    )
 
 from .asteval import (
     AstevalSection,
@@ -81,11 +90,12 @@ from .vfs import (
     WriteFileParams,
 )
 
-PodmanSandboxConfig: Any
-PodmanSandboxSection: Any
-PodmanShellParams: Any
-PodmanShellResult: Any
-PodmanWorkspace: Any
+# Runtime placeholders for lazy-loaded podman types; actual types via TYPE_CHECKING
+PodmanSandboxConfig: type[PodmanSandboxConfigType]
+PodmanSandboxSection: type[PodmanSandboxSectionType]
+PodmanShellParams: type[PodmanShellParamsType]
+PodmanShellResult: type[PodmanShellResultType]
+PodmanWorkspace: type[PodmanWorkspaceType]
 
 __all__ = [
     "AddStep",
