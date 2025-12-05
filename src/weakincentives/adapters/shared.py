@@ -96,7 +96,7 @@ _EXPORTED_PROVIDER_PROTOCOLS = (
 OutputT = TypeVar("OutputT")
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class _RejectedToolParams:
     """Dataclass used when provider arguments fail validation."""
 
@@ -171,7 +171,7 @@ def new_throttle_policy(
     )
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class AdapterRenderContext[OutputT]:
     """Rendering inputs and derived metadata for adapter evaluations."""
 
@@ -480,7 +480,7 @@ def parse_tool_arguments(
     return arguments
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ToolExecutionOutcome:
     """Result of executing a tool handler."""
 
