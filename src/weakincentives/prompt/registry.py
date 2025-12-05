@@ -118,6 +118,12 @@ class RegistrySnapshot:
 
         return set(self.params_registry.keys())
 
+    @property
+    def section_paths(self) -> frozenset[SectionPath]:
+        """Return the set of all registered section paths."""
+
+        return frozenset(node.path for node in self.sections)
+
 
 def _registry_paths_are_registered(
     registry: PromptRegistry,

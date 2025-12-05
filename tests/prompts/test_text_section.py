@@ -363,12 +363,14 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
     assert len(rendered_full.tools) == 1
     assert rendered_full.tools[0].name == "search_tool"
 
-    # With SUMMARY visibility, tools are excluded
+    # With SUMMARY visibility, the section's own tools are excluded,
+    # but the open_sections tool is injected for progressive disclosure
     rendered_summary = renderer.render(
         params_lookup,
         visibility_overrides={(section.key,): SectionVisibility.SUMMARY},
     )
-    assert len(rendered_summary.tools) == 0
+    assert len(rendered_summary.tools) == 1
+    assert rendered_summary.tools[0].name == "open_sections"
     assert "Summary: Test" in rendered_summary.text
 
 
@@ -469,12 +471,14 @@ def test_summary_visibility_skips_child_tools() -> None:
     assert len(rendered_full.tools) == 1
     assert rendered_full.tools[0].name == "child_tool"
 
-    # With SUMMARY visibility on parent, child (and its tools) are skipped
+    # With SUMMARY visibility on parent, child (and its tools) are skipped.
+    # The open_sections tool is injected for progressive disclosure.
     rendered_summary = renderer.render(
         params_lookup,
         visibility_overrides={("parent",): SectionVisibility.SUMMARY},
     )
-    assert len(rendered_summary.tools) == 0
+    assert len(rendered_summary.tools) == 1
+    assert rendered_summary.tools[0].name == "open_sections"
 
 
 def test_summary_visibility_default_excludes_tools() -> None:
@@ -507,9 +511,11 @@ def test_summary_visibility_default_excludes_tools() -> None:
 
     params_lookup = renderer.build_param_lookup((_SectionParams(title="Test"),))
 
-    # Tools excluded because section default visibility is SUMMARY
+    # Section's own tools are excluded because default visibility is SUMMARY,
+    # but open_sections tool is injected for progressive disclosure
     rendered = renderer.render(params_lookup)
-    assert len(rendered.tools) == 0
+    assert len(rendered.tools) == 1
+    assert rendered.tools[0].name == "open_sections"
     assert "Summary: Test" in rendered.text
 
     # Override to FULL includes tools

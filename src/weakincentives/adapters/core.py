@@ -16,14 +16,16 @@ from __future__ import annotations
 
 import textwrap
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Literal, TypeVar, cast
 
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import WinkError
-from ..prompt import MarkdownSection, Prompt, PromptTemplate
+from ..prompt import MarkdownSection, Prompt, PromptTemplate, SectionVisibility
 from ..prompt._types import SupportsDataclass
+from ..prompt.errors import SectionPath
 from ..prompt.overrides import PromptLike, PromptOverridesError, PromptOverridesStore
 from ..prompt.section import Section
 from ..runtime.events._types import EventBus
@@ -91,6 +93,7 @@ class ProviderAdapter(ABC):
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response."""
 

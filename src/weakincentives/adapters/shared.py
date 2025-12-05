@@ -32,6 +32,8 @@ from ..prompt._types import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
+from ..prompt._visibility import SectionVisibility
+from ..prompt.errors import SectionPath, VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
@@ -189,6 +191,7 @@ class AdapterRenderOptions:
     disable_output_instructions: bool
     enable_json_schema: bool
     deadline: Deadline | None
+    visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None
 
 
 @FrozenDataclass()
@@ -723,6 +726,9 @@ def tool_execution(
                 _rejected_params(arguments_mapping=arguments_mapping, error=error),
             )
         tool_result = _handle_tool_validation_error(log=log, error=error)
+    except VisibilityExpansionRequired:
+        # Progressive disclosure: let this propagate to the caller
+        raise
     except PromptEvaluationError:
         raise
     except DeadlineExceededError as error:
@@ -983,6 +989,7 @@ def prepare_adapter_conversation[
 
     rendered = prompt.render(
         inject_output_instructions=render_inject_output_instructions,
+        visibility_overrides=options.visibility_overrides,
     )
     if options.deadline is not None:
         rendered = replace(rendered, deadline=options.deadline)

@@ -12,9 +12,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, override
 
 from ..errors import WinkError
+
+if TYPE_CHECKING:
+    from ._visibility import SectionVisibility
 
 SectionPath = tuple[str, ...]
 
@@ -51,9 +55,40 @@ class PromptRenderError(PromptError):
     """Raised when rendering a prompt fails."""
 
 
+class VisibilityExpansionRequired(PromptError):
+    """Raised when the model requests expansion of summarized sections.
+
+    Callers should catch this exception, extract the visibility overrides,
+    and retry prompt evaluation with the requested sections expanded.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        requested_overrides: Mapping[SectionPath, SectionVisibility],
+        reason: str,
+        section_keys: tuple[str, ...],
+    ) -> None:
+        super().__init__(message)
+        self.requested_overrides: Mapping[SectionPath, SectionVisibility] = (
+            requested_overrides
+        )
+        self.reason = reason
+        self.section_keys = section_keys
+
+    @override
+    def __str__(self) -> str:
+        keys = ", ".join(".".join(p) for p in self.requested_overrides)
+        return (
+            f"Visibility expansion required for sections: {keys}. Reason: {self.reason}"
+        )
+
+
 __all__ = [
     "PromptError",
     "PromptRenderError",
     "PromptValidationError",
     "SectionPath",
+    "VisibilityExpansionRequired",
 ]

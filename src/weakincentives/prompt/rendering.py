@@ -24,6 +24,11 @@ from ..deadlines import Deadline
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._visibility import SectionVisibility
 from .errors import PromptRenderError, PromptValidationError, SectionPath
+from .progressive_disclosure import (
+    build_summary_suffix,
+    compute_current_visibility,
+    create_open_sections_handler,
+)
 from .registry import RegistrySnapshot, SectionNode
 from .response_format import ResponseFormatSection
 from .section import Section
@@ -155,7 +160,7 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: PLR0913
+    def render(  # noqa: PLR0913, PLR0914
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
@@ -172,6 +177,7 @@ class PromptRenderer[OutputT]:
         visibility_override_lookup = dict(visibility_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
         summary_skip_depth: int | None = None
+        has_summarized = False
 
         for node, section_params in self._iter_enabled_sections(
             dict(param_lookup),
@@ -196,10 +202,22 @@ class PromptRenderer[OutputT]:
             # When rendering with SUMMARY visibility, skip children
             if effective_visibility == SectionVisibility.SUMMARY:
                 summary_skip_depth = node.depth
+                has_summarized = True
 
             rendered = self._render_section(
                 node, section_params, override_body, visibility_override
             )
+
+            # Append summary suffix for sections rendered with SUMMARY visibility
+            if (
+                effective_visibility == SectionVisibility.SUMMARY
+                and node.section.summary is not None
+                and rendered
+            ):
+                section_key = ".".join(node.path)
+                child_keys = self._collect_child_keys(node)
+                suffix = build_summary_suffix(section_key, child_keys)
+                rendered += suffix
 
             # Don't collect tools when rendering with SUMMARY visibility
             if effective_visibility != SectionVisibility.SUMMARY:
@@ -213,6 +231,22 @@ class PromptRenderer[OutputT]:
             if rendered:
                 rendered_sections.append(rendered)
 
+        # Inject open_sections tool when there are summarized sections
+        if has_summarized:
+            current_visibility = compute_current_visibility(
+                self._registry, visibility_overrides
+            )
+            open_sections_tool = create_open_sections_handler(
+                registry=self._registry,
+                current_visibility=current_visibility,
+            )
+            collected_tools.append(
+                cast(
+                    Tool[SupportsDataclassOrNone, SupportsToolResult],
+                    open_sections_tool,
+                )
+            )
+
         text = "\n\n".join(rendered_sections)
 
         return RenderedPrompt[OutputT](
@@ -224,6 +258,31 @@ class PromptRenderer[OutputT]:
                 field_description_patches
             ),
         )
+
+    def _collect_child_keys(
+        self, parent_node: SectionNode[SupportsDataclass]
+    ) -> tuple[str, ...]:
+        """Collect the keys of direct child sections for a parent node."""
+        child_keys: list[str] = []
+        parent_depth = parent_node.depth
+        parent_path = parent_node.path
+        in_parent = False
+
+        for node in self._registry.sections:
+            if node is parent_node:
+                in_parent = True
+                continue
+
+            if in_parent:
+                # Direct children have depth == parent_depth + 1
+                # and their path starts with parent's path
+                if node.depth == parent_depth + 1 and node.path[:-1] == parent_path:
+                    child_keys.append(node.section.key)
+                elif node.depth <= parent_depth:
+                    # We've moved past the parent's children
+                    break
+
+        return tuple(child_keys)
 
     def _collect_section_tools(
         self,

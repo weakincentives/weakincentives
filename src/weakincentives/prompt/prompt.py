@@ -30,6 +30,7 @@ from typing import (
 from ..dataclasses import FrozenDataclass
 from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
+from ._visibility import SectionVisibility
 from .errors import PromptValidationError, SectionPath
 from .overrides import PromptDescriptor
 from .registry import PromptRegistry, SectionNode
@@ -253,6 +254,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         overrides_store: PromptOverridesStore | None = None,
         tag: str = "latest",
         inject_output_instructions: bool | None = None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt and apply overrides when an overrides store is supplied."""
 
@@ -280,6 +282,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             tool_overrides,
             inject_output_instructions=inject_output_instructions,
             descriptor=descriptor,
+            visibility_overrides=visibility_overrides,
         )
 
     def bind(
@@ -434,7 +437,10 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         return self
 
     def render(
-        self, *, inject_output_instructions: bool | None = None
+        self,
+        *,
+        inject_output_instructions: bool | None = None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
         """Render the underlying template with stored overrides and params."""
 
@@ -449,6 +455,7 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
             overrides_store=self.overrides_store,
             tag=tag,
             inject_output_instructions=instructions_flag,
+            visibility_overrides=visibility_overrides,
         )
 
     def find_section(

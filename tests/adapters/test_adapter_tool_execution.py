@@ -66,6 +66,8 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt._visibility import SectionVisibility
+from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import (
     ReducerEvent,
@@ -687,3 +689,54 @@ def test_adapter_tool_execution_rolls_back_session(
     assert message_text == invocation.result.message
     assert rendered_text is not None
     assert json.loads(rendered_text) == {"answer": "policies"}
+
+
+def test_adapter_tool_visibility_expansion_propagates(
+    adapter_harness: AdapterHarness,
+) -> None:
+    """VisibilityExpansionRequired is propagated to caller (not wrapped as failed tool)."""
+
+    def handler(_: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del context
+        raise VisibilityExpansionRequired(
+            "Section expansion requested",
+            requested_overrides={("docs",): SectionVisibility.FULL},
+            reason="Need documentation details",
+            section_keys=("docs",),
+        )
+
+    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+    prompt_template = _build_prompt(adapter_harness, tool)
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "docs"}),
+    )
+    responses = _build_responses(
+        tool_call=tool_call,
+        final_message=DummyMessage(content="Done", tool_calls=None),
+    )
+    adapter, _ = adapter_harness.build(responses)
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="docs"))
+
+    with pytest.raises(VisibilityExpansionRequired) as exc_info:
+        adapter.evaluate(
+            bound_prompt,
+            bus=bus,
+            session=cast(SessionProtocol, session),
+        )
+
+    exc = cast(VisibilityExpansionRequired, exc_info.value)
+    assert exc.section_keys == ("docs",)
+    assert exc.reason == "Need documentation details"
+    assert ("docs",) in exc.requested_overrides
