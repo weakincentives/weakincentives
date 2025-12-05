@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, is_dataclass
+from functools import cached_property
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -122,7 +123,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     inject_output_instructions: bool
     sections: tuple[SectionNode[SupportsDataclass], ...]
     allow_extra_keys: bool
-    _descriptor: PromptDescriptor
     _renderer: PromptRenderer[OutputT]
     _snapshot: RegistrySnapshot
     _structured_output: StructuredOutputConfig[SupportsDataclass] | None
@@ -165,7 +165,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         | object = MISSING,
         inject_output_instructions: bool | object = MISSING,
         allow_extra_keys: bool | object = MISSING,
-        _descriptor: PromptDescriptor | object = MISSING,
         _renderer: PromptRenderer[Any] | object = MISSING,
         _snapshot: RegistrySnapshot | object = MISSING,
         _structured_output: StructuredOutputConfig[SupportsDataclass]
@@ -174,7 +173,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     ) -> dict[str, Any]:
         """Normalize inputs and derive internal state before construction."""
         # Handle direct field assignment (for update/merge operations)
-        if _descriptor is not MISSING and _renderer is not MISSING:
+        if _renderer is not MISSING and _snapshot is not MISSING:
             return {
                 "ns": ns if ns is not MISSING else "",
                 "key": key if key is not MISSING else "",
@@ -190,9 +189,8 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
                 "allow_extra_keys": (
                     allow_extra_keys if allow_extra_keys is not MISSING else False
                 ),
-                "_descriptor": _descriptor,
                 "_renderer": _renderer,
-                "_snapshot": _snapshot if _snapshot is not MISSING else None,
+                "_snapshot": _snapshot,
                 "_structured_output": (
                     _structured_output if _structured_output is not MISSING else None
                 ),
@@ -260,19 +258,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             response_section=response_section,
         )
 
-        # Build a temporary object for descriptor creation
-        temp_ns = stripped_ns
-        temp_key = stripped_key
-        temp_name = name_val
-
-        class _TempPromptLike:
-            ns = temp_ns
-            key = temp_key
-            name = temp_name
-            sections = snapshot.sections
-
-        descriptor = PromptDescriptor.from_prompt(cast("PromptLike", _TempPromptLike()))
-
         return {
             "ns": stripped_ns,
             "key": stripped_key,
@@ -280,7 +265,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             "inject_output_instructions": inject_val,
             "sections": snapshot.sections,
             "allow_extra_keys": allow_extra,
-            "_descriptor": descriptor,
             "_renderer": renderer,
             "_snapshot": snapshot,
             "_structured_output": structured_output,
@@ -345,10 +329,10 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         """Return the set of parameter types used by this prompt's sections."""
         return self._snapshot.param_types
 
-    @property
+    @cached_property
     def descriptor(self) -> PromptDescriptor:
-        """Return the prompt descriptor for this template."""
-        return self._descriptor
+        """Return the prompt descriptor for this template, computed lazily."""
+        return PromptDescriptor.from_prompt(cast("PromptLike", self))
 
     @property
     def placeholders(self) -> Mapping[SectionPath, frozenset[str]]:

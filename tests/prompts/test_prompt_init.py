@@ -250,7 +250,7 @@ def test_prompt_template_is_immutable() -> None:
         prompt.inject_output_instructions = False
 
 
-def test_prompt_descriptor_cached_during_initialization(
+def test_prompt_descriptor_cached_on_first_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     section = MarkdownSection[RootParams](
@@ -259,16 +259,21 @@ def test_prompt_descriptor_cached_during_initialization(
 
     prompt = PromptTemplate(ns="tests/prompts", key="descriptor", sections=[section])
 
+    # First access triggers lazy creation and caches the descriptor
+    first_descriptor = prompt.descriptor
+    assert first_descriptor.ns == "tests/prompts"
+
     def _fail(
         cls: type[PromptDescriptor], prompt_like: PromptTemplate[SupportsDataclass]
     ) -> PromptDescriptor:
-        raise AssertionError("from_prompt should not be invoked after initialization")
+        raise AssertionError("from_prompt should not be invoked after first access")
 
     monkeypatch.setattr(PromptDescriptor, "from_prompt", classmethod(_fail))
 
+    # Subsequent accesses should use the cached descriptor
     rendered = prompt.render(RootParams(title="hello"))
     bound_prompt = prompt.bind(RootParams(title="hello"))
 
-    assert prompt.descriptor.ns == "tests/prompts"
+    assert prompt.descriptor is first_descriptor
     assert bound_prompt.descriptor is prompt.descriptor
     assert "Root: hello" in rendered.text
