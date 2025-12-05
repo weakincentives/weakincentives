@@ -33,12 +33,18 @@ from weakincentives.adapters.shared import (
     ToolExecutionContext,
     ToolExecutionOutcome,
     ToolExecutor,
+    _parse_tool_params,
     _publish_tool_invocation,
     parse_tool_arguments,
+    tool_to_spec,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
-from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
+from weakincentives.prompt._types import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
@@ -51,6 +57,7 @@ from weakincentives.runtime.events import (
 from weakincentives.runtime.events._types import EventHandler
 from weakincentives.runtime.logging import get_logger
 from weakincentives.runtime.session.session import Session
+from weakincentives.tools.errors import ToolValidationError
 
 
 class RecordingBus(EventBus):
@@ -87,6 +94,60 @@ def serialize_tool_message(
     return {"message": result.message, "payload": payload}
 
 
+def test_tool_to_spec_accepts_none_params() -> None:
+    def handler(params: None, *, context: ToolContext) -> ToolResult[EchoPayload]:
+        return ToolResult(message="ok", value=EchoPayload(value="hi"))
+
+    tool = Tool[None, EchoPayload](
+        name="no_params",
+        description="No arguments required.",
+        handler=handler,
+    )
+
+    spec = tool_to_spec(cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool))
+
+    assert spec["function"]["parameters"] == {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+
+
+def test_parse_tool_params_rejects_arguments_for_none_params() -> None:
+    def no_param_handler(
+        params: None, *, context: ToolContext
+    ) -> ToolResult[EchoPayload]:
+        del context
+        return ToolResult(message="ok", value=EchoPayload(value="hi"))
+
+    tool = Tool[None, EchoPayload](
+        name="no_params",
+        description="No arguments required.",
+        handler=no_param_handler,
+    )
+
+    with pytest.raises(ToolValidationError, match="does not accept any arguments"):
+        _parse_tool_params(
+            tool=cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool),
+            arguments_mapping={"unexpected": "value"},
+        )
+
+
+def test_parse_tool_params_returns_none_for_empty_arguments() -> None:
+    tool = Tool[None, EchoPayload](
+        name="no_params",
+        description="No arguments required.",
+        handler=None,
+    )
+
+    parsed = _parse_tool_params(
+        tool=cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool),
+        arguments_mapping={},
+    )
+
+    assert parsed is None
+
+
 def test_tool_executor_success() -> None:
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
@@ -96,14 +157,15 @@ def test_tool_executor_success() -> None:
     rendered = RenderedPrompt(
         text="system",
         _tools=cast(
-            tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
             (tool,),
         ),
     )
     bus = RecordingBus()
     session = Session(bus=bus)
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]], {tool.name: tool}
+        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        {tool.name: tool},
     )
 
     executor = ToolExecutor(
@@ -149,8 +211,8 @@ def test_publish_tool_invocation_attaches_usage() -> None:
 
     bus = RecordingBus()
     session = Session(bus=bus)
-    typed_tool = cast(Tool[SupportsDataclass, SupportsToolResult], tool)
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]] = {
+    typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
+    tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]] = {
         tool.name: typed_tool
     }
 
@@ -275,14 +337,15 @@ def test_tool_executor_raises_when_deadline_expired(
     rendered = RenderedPrompt(
         text="system",
         _tools=cast(
-            tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
             (tool,),
         ),
     )
     bus = RecordingBus()
     session = Session(bus=bus)
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]], {tool.name: tool}
+        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        {tool.name: tool},
     )
 
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)

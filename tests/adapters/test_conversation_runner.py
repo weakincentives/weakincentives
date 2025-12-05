@@ -35,7 +35,11 @@ from weakincentives.adapters.shared import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
-from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
+from weakincentives.prompt._types import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 from weakincentives.prompt.overrides import PromptDescriptor
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
@@ -325,7 +329,7 @@ def tool_rendered_prompt(tool: Tool[EchoParams, EchoPayload]) -> RenderedPrompt[
     return RenderedPrompt(
         text="system",
         _tools=cast(
-            tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
             (tool,),
         ),
     )

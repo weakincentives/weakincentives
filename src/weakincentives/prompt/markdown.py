@@ -20,7 +20,11 @@ from string import Template
 from typing import Any, Literal, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass, dump
-from ._types import SupportsDataclass, SupportsToolResult
+from ._types import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 from .errors import PromptRenderError
 from .section import Section
 from .tool import Tool
@@ -158,7 +162,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
 
 
 def _render_tool_examples_block(
-    tools: Sequence[Tool[SupportsDataclass, SupportsToolResult]],
+    tools: Sequence[Tool[SupportsDataclassOrNone, SupportsToolResult]],
 ) -> str:
     rendered: list[str] = []
     for tool in tools:
@@ -181,7 +185,9 @@ def _render_tool_examples_block(
     return "\n".join(["Tools:", *rendered])
 
 
-def _render_examples_for_tool(tool: Tool[SupportsDataclass, SupportsToolResult]) -> str:
+def _render_examples_for_tool(
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+) -> str:
     lines: list[str] = [f"- {tool.name} examples:"]
     for example in tool.examples:
         rendered_output = _render_example_output(
@@ -203,22 +209,25 @@ def _render_examples_for_tool(tool: Tool[SupportsDataclass, SupportsToolResult])
     return "\n".join(lines)
 
 
-def _render_example_value(value: SupportsDataclass) -> str:
+def _render_example_value(value: SupportsDataclass | None) -> str:
+    if value is None:
+        return "null"
+
     serialized_value = dump(value, exclude_none=True)
 
     return json.dumps(serialized_value, ensure_ascii=False)
 
 
 def _render_example_output(
-    value: SupportsDataclass | Sequence[SupportsDataclass],
+    value: SupportsToolResult | None,
     *,
     container: Literal["object", "array"],
 ) -> str:
     if container == "array":
-        sequence_value = cast(Sequence[SupportsDataclass], value)
+        sequence_value = cast(Sequence[object], value or [])
         return render_tool_payload(list(sequence_value))
 
-    return render_tool_payload(cast(SupportsDataclass, value))
+    return render_tool_payload(value)
 
 
 def _render_fenced_block(

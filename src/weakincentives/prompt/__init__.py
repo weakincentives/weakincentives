@@ -14,7 +14,12 @@
 
 from __future__ import annotations
 
-from ._types import SupportsDataclass, SupportsToolResult, ToolRenderableResult
+from ._types import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+    ToolRenderableResult,
+)
 from .composition import (
     DelegationParams,
     DelegationPrompt,
@@ -89,6 +94,7 @@ __all__ = [
     "SectionPath",
     "StructuredOutputConfig",
     "SupportsDataclass",
+    "SupportsDataclassOrNone",
     "SupportsToolResult",
     "Tool",
     "ToolContext",

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import inspect
 import re
+import types
 from collections.abc import Callable, Sequence as SequenceABC
 from dataclasses import dataclass, field, is_dataclass
 from typing import (
@@ -31,7 +32,7 @@ from typing import (
 )
 
 from ..deadlines import Deadline
-from ._types import SupportsDataclass, SupportsToolResult
+from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptValidationError
 from .tool_result import ToolResult
 
@@ -43,6 +44,7 @@ _EXPECTED_TYPE_ARGUMENTS: Final = 2
 _HANDLER_PARAMETER_COUNT: Final = 2
 _VARIADIC_TUPLE_LENGTH: Final = 2
 _SINGLE_GENERIC_ARG_COUNT: Final = 1
+_NONE_TYPE: Final = type(None)
 _POSITIONAL_PARAMETER_KINDS: Final = {
     inspect.Parameter.POSITIONAL_ONLY,
     inspect.Parameter.POSITIONAL_OR_KEYWORD,
@@ -62,12 +64,16 @@ if TYPE_CHECKING:
         RenderedPromptProtocol,
     )
 
-ParamsT_contra = TypeVar("ParamsT_contra", bound=SupportsDataclass, contravariant=True)
+ParamsT_contra = TypeVar(
+    "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
+)
 ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
+type ParamsType = type[SupportsDataclass] | type[None]
+type ResultType = type[SupportsDataclass] | type[None]
 
 
 @dataclass(slots=True, frozen=True)
-class ToolExample[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
+class ToolExample[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     """Representative invocation for a tool documenting inputs and outputs."""
 
     description: str
@@ -93,7 +99,23 @@ def _normalize_specialization(item: object) -> tuple[object, object]:
     normalized = cast(SequenceABC[object], item)
     if len(normalized) != _EXPECTED_TYPE_ARGUMENTS:
         raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
-    return normalized[0], normalized[1]
+    return _coerce_none_type(normalized[0]), _coerce_none_type(normalized[1])
+
+
+def _coerce_none_type(candidate: object) -> object:
+    if candidate is None:
+        return _NONE_TYPE
+
+    origin = get_origin(candidate)
+    if origin is types.UnionType:
+        args = get_args(candidate)
+        if args and all(isinstance(arg, type) for arg in args):
+            non_none = [arg for arg in args if arg is not _NONE_TYPE]
+            if non_none:
+                return non_none[0]
+            return _NONE_TYPE
+
+    return candidate
 
 
 class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
@@ -105,7 +127,7 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
 
 
 @dataclass(slots=True)
-class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
+class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     """Describe a callable tool exposed by prompt sections."""
 
     name: str
@@ -115,7 +137,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         default_factory=tuple,
     )
     params_type: type[ParamsT] = field(init=False, repr=False)
-    result_type: type[SupportsDataclass] = field(init=False, repr=False)
+    result_type: type[SupportsDataclass] | type[None] = field(init=False, repr=False)
     result_container: Literal["object", "array"] = field(
         init=False,
         repr=False,
@@ -150,10 +172,10 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
     def _resolve_type_arguments(
         self,
-    ) -> tuple[type[SupportsDataclass], ResultT]:
+    ) -> tuple[ParamsType, ResultT]:
         params_attr = getattr(self, "params_type", None)
-        params_type: type[SupportsDataclass] | None = (
-            params_attr if isinstance(params_attr, type) else None
+        params_type: ParamsType | None = (
+            cast(ParamsType, params_attr) if isinstance(params_attr, type) else None
         )
         raw_result_annotation = getattr(self, "_result_annotation", None)
         if params_type is None or raw_result_annotation is None:
@@ -163,8 +185,10 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 if len(args) == _EXPECTED_TYPE_ARGUMENTS:
                     params_arg, result_arg = args
                     if isinstance(params_arg, type):
-                        params_type = params_arg
-                        raw_result_annotation = cast(ResultT, result_arg)
+                        params_type = cast(ParamsType, _coerce_none_type(params_arg))
+                        raw_result_annotation = cast(
+                            ResultT, _coerce_none_type(result_arg)
+                        )
         if params_type is None or raw_result_annotation is None:
             raise PromptValidationError(
                 "Tool must be instantiated with concrete type arguments.",
@@ -173,7 +197,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
         return params_type, cast(ResultT, raw_result_annotation)
 
-    def _validate_name(self, params_type: type[SupportsDataclass]) -> str:
+    def _validate_name(self, params_type: ParamsType) -> str:
         raw_name = self.name
         stripped_name = raw_name.strip()
         if raw_name != stripped_name:
@@ -202,7 +226,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
         return name_clean
 
-    def _validate_description(self, params_type: type[SupportsDataclass]) -> str:
+    def _validate_description(self, params_type: ParamsType) -> str:
         description_clean = self.description.strip()
         if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
             raise PromptValidationError(
@@ -222,7 +246,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
     @staticmethod
     def _validate_example_description(
-        description: str, params_type: type[SupportsDataclass]
+        description: str, params_type: ParamsType
     ) -> None:
         description_clean = description.strip()
         if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
@@ -247,8 +271,16 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     def _validate_example_input(
         self,
         example_input: object,
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
     ) -> None:
+        if params_type is _NONE_TYPE:
+            if example_input is not None:
+                raise PromptValidationError(
+                    "Tool example input must be None when ParamsT is None.",
+                    dataclass_type=params_type,
+                    placeholder="examples",
+                )
+            return
         if not self._is_dataclass_instance(example_input):
             raise PromptValidationError(
                 "Tool example input must be a ParamsT dataclass instance.",
@@ -265,9 +297,17 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     def _validate_example_output(
         self,
         example_output: object,
-        params_type: type[SupportsDataclass],
-        result_type: type[SupportsDataclass],
+        params_type: ParamsType,
+        result_type: ResultType,
     ) -> None:
+        if result_type is _NONE_TYPE:
+            if example_output is not None:
+                raise PromptValidationError(
+                    "Tool example output must be None when ResultT is None.",
+                    dataclass_type=params_type,
+                    placeholder="examples",
+                )
+            return
         if self.result_container == "array":
             if not isinstance(example_output, SequenceABC) or isinstance(
                 example_output, (str, bytes, bytearray)
@@ -303,8 +343,8 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
     def _validate_examples(
         self,
-        params_type: type[SupportsDataclass],
-        result_type: type[SupportsDataclass],
+        params_type: ParamsType,
+        result_type: ResultType,
     ) -> tuple[ToolExample[ParamsT, ResultT], ...]:
         examples_value = cast(tuple[object, ...], self.examples)
         if not examples_value:
@@ -333,7 +373,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
 
     def _validate_handler_if_present(
         self,
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
         raw_result_annotation: object,
     ) -> None:
         handler = self.handler
@@ -348,7 +388,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     def _validate_handler(
         self,
         handler: object,
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
         result_annotation: object,
     ) -> None:
         if not callable(handler):
@@ -389,7 +429,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     @staticmethod
     def _validate_parameter_count(
         parameters: list[inspect.Parameter],
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
     ) -> tuple[inspect.Parameter, inspect.Parameter]:
         if len(parameters) != _HANDLER_PARAMETER_COUNT:
             raise PromptValidationError(
@@ -405,7 +445,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     @staticmethod
     def _validate_parameter_kind(
         parameter: inspect.Parameter,
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
     ) -> None:
         if parameter.kind not in _POSITIONAL_PARAMETER_KINDS:
             raise PromptValidationError(
@@ -417,7 +457,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     @staticmethod
     def _validate_context_parameter(
         context_parameter: inspect.Parameter,
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
     ) -> None:
         if context_parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
             raise PromptValidationError(
@@ -450,7 +490,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     @staticmethod
     def _validate_parameter_annotation(
         annotation: object,
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
     ) -> None:
         if annotation is inspect.Parameter.empty:
             raise PromptValidationError(
@@ -461,6 +501,17 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         annotation_to_validate = annotation
         if get_origin(annotation_to_validate) is Annotated:
             annotation_to_validate = get_args(annotation_to_validate)[0]
+        literal_origin = get_origin(annotation_to_validate)
+        if literal_origin is Literal:
+            literal_args = get_args(annotation_to_validate)
+            annotation_to_validate = (
+                literal_args[0] if literal_args else annotation_to_validate
+            )
+        if params_type is _NONE_TYPE and annotation_to_validate in {
+            None,
+            _NONE_TYPE,
+        }:
+            return
         if annotation_to_validate is not params_type:
             raise PromptValidationError(
                 "Tool handler parameter annotation must match ParamsT.",
@@ -471,7 +522,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     @staticmethod
     def _validate_context_annotation(
         context_annotation: object,
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
     ) -> None:
         if context_annotation is inspect.Parameter.empty:
             raise PromptValidationError(
@@ -494,7 +545,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         hints: dict[str, object],
         signature: inspect.Signature,
         result_annotation: object,
-        params_type: type[SupportsDataclass],
+        params_type: ParamsType,
     ) -> None:
         return_annotation = hints.get("return", signature.return_annotation)
         if return_annotation is inspect.Signature.empty:
@@ -524,10 +575,12 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     @staticmethod
     def _normalize_result_annotation(
         annotation: ResultT,
-        params_type: type[SupportsDataclass],
-    ) -> tuple[type[SupportsDataclass], Literal["object", "array"]]:
+        params_type: ParamsType,
+    ) -> tuple[ResultType, Literal["object", "array"]]:
+        if annotation is None:
+            return _NONE_TYPE, "object"
         if isinstance(annotation, type):
-            return cast(type[SupportsDataclass], annotation), "object"
+            return cast(ResultType, annotation), "object"
 
         origin = get_origin(annotation)
         if origin not in {list, tuple, SequenceABC}:
@@ -557,10 +610,12 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
                 placeholder="ResultT",
             )
 
-        return cast(type[SupportsDataclass], element), "array"
+        return cast(ResultType, element), "array"
 
     @staticmethod
     def _matches_result_annotation(candidate: object, expected: object) -> bool:
+        candidate = _coerce_none_type(candidate)
+        expected = _coerce_none_type(expected)
         if candidate is expected:
             return True
 
@@ -595,11 +650,11 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
     @classmethod
     def __class_getitem__(
         cls, item: object
-    ) -> type[Tool[SupportsDataclass, SupportsToolResult]]:
+    ) -> type[Tool[SupportsDataclassOrNone, SupportsToolResult]]:
         params_candidate, result_candidate = _normalize_specialization(item)
         if not isinstance(params_candidate, type):
             raise TypeError("Tool ParamsT type argument must be a type.")
-        params_type = cast(type[SupportsDataclass], params_candidate)
+        params_type = cast(ParamsType, params_candidate)
         result_annotation = cast(ResultT, result_candidate)
 
         class _SpecializedTool(cls):
@@ -612,7 +667,7 @@ class Tool[ParamsT: SupportsDataclass, ResultT: SupportsToolResult]:
         _SpecializedTool.__qualname__ = cls.__qualname__
         _SpecializedTool.__module__ = cls.__module__
         return cast(
-            "type[Tool[SupportsDataclass, SupportsToolResult]]",
+            "type[Tool[SupportsDataclassOrNone, SupportsToolResult]]",
             _SpecializedTool,
         )
 

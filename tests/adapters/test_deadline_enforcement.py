@@ -34,7 +34,7 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.prompt._types import SupportsDataclass, SupportsToolResult
+from weakincentives.prompt._types import SupportsDataclassOrNone, SupportsToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
@@ -76,7 +76,7 @@ def _tool_context(
     *,
     prompt: Prompt[BodyResult],
     rendered: RenderedPrompt[BodyResult],
-    tool_registry: Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
+    tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
     bus: InProcessEventBus,
     session: SessionProtocol,
     prompt_name: str,
@@ -199,7 +199,8 @@ def test_execute_tool_call_raises_when_deadline_expired(
         handler=handler,
     )
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]], {tool.name: tool}
+        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        {tool.name: tool},
     )
     call = SimpleNamespace(
         id="call", function=SimpleNamespace(name="echo", arguments='{"content": "hi"}')
@@ -244,7 +245,8 @@ def test_execute_tool_call_publishes_invocation() -> None:
         handler=handler,
     )
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclass, SupportsToolResult]], {tool.name: tool}
+        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        {tool.name: tool},
     )
     call = SimpleNamespace(
         id="call", function=SimpleNamespace(name="echo", arguments='{"content": "hi"}')

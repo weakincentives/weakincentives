@@ -16,10 +16,11 @@ import json
 import re
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Literal, Protocol, TypeVar, overload
+from typing import Literal, Protocol, TypeVar, cast, overload
 
 from ...serde.schema import schema
-from .._types import SupportsDataclass
+from ...types import JSONValue
+from .._types import SupportsDataclass, SupportsDataclassOrNone
 
 
 def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:
@@ -37,8 +38,8 @@ def _param_description_mapping_factory() -> dict[str, str]:
 class ToolContractProtocol(Protocol):
     name: str
     description: str
-    params_type: type[SupportsDataclass]
-    result_type: type[SupportsDataclass]
+    params_type: type[SupportsDataclass] | type[None]
+    result_type: type[SupportsDataclassOrNone]
     result_container: Literal["object", "array"]
     accepts_overrides: bool
 
@@ -266,17 +267,11 @@ __all__ = [
 
 def _tool_contract_hash(tool: ToolContractProtocol) -> HexDigest:
     description_hash = hash_text(tool.description)
-    params_schema_hash = hash_json(schema(tool.params_type, extra="forbid"))
-    if getattr(tool, "result_container", "object") == "array":
-        item_schema = schema(tool.result_type, extra="ignore")
-        result_schema = {
-            "title": f"{tool.result_type.__name__}List",
-            "type": "array",
-            "items": item_schema,
-        }
-    else:
-        result_schema = schema(tool.result_type, extra="ignore")
-    result_schema_hash = hash_json(result_schema)
+    params_schema_hash = hash_json(_params_schema(tool.params_type))
+    container = cast(
+        Literal["object", "array"], getattr(tool, "result_container", "object")
+    )
+    result_schema_hash = hash_json(_result_schema(tool.result_type, container))
     return hash_text(
         "::".join((description_hash, params_schema_hash, result_schema_hash))
     )
@@ -291,3 +286,32 @@ def hash_json(value: object) -> HexDigest:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     )
     return hash_text(canonical)
+
+
+def _params_schema(
+    params_type: type[SupportsDataclass] | type[None],
+) -> dict[str, JSONValue]:
+    if params_type is type(None):
+        return {
+            "title": "NoneType",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        }
+    return schema(params_type, extra="forbid")
+
+
+def _result_schema(
+    result_type: type[SupportsDataclassOrNone],
+    container: Literal["object", "array"],
+) -> dict[str, JSONValue]:
+    if result_type is type(None):
+        return {"title": "NoneType", "type": "null"}
+    if container == "array":
+        item_schema = schema(result_type, extra="ignore")
+        return {
+            "title": f"{result_type.__name__}List",
+            "type": "array",
+            "items": item_schema,
+        }
+    return schema(result_type, extra="ignore")

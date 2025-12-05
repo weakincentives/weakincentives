@@ -41,7 +41,7 @@ from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
     PromptTemplate,
-    SupportsDataclass,
+    SupportsDataclassOrNone,
     SupportsToolResult,
     Tool,
     ToolContext,
@@ -84,8 +84,8 @@ def _base_context(
         prompt=prompt,
         rendered_prompt=None,
         tool_registry=cast(
-            Mapping[str, Tool[SupportsDataclass, SupportsToolResult]],
-            {tool.name: cast(Tool[SupportsDataclass, SupportsToolResult], tool)},
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)},
         ),
         bus=bus,
         session=cast(SessionProtocol, session or Session(bus=bus)),
