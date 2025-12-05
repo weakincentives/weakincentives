@@ -62,6 +62,18 @@ class InProcessEventBus:
             handlers = self._handlers.setdefault(event_type, [])
             handlers.append(handler)
 
+    def unsubscribe(self, event_type: type[object], handler: EventHandler) -> bool:
+        with self._lock:
+            handlers = self._handlers.get(event_type)
+            if handlers is None:
+                return False
+            try:
+                handlers.remove(handler)
+            except ValueError:
+                return False
+            else:
+                return True
+
     def publish(self, event: object) -> PublishResult:
         with self._lock:
             handlers = tuple(self._handlers.get(type(event), ()))

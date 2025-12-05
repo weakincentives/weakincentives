@@ -281,3 +281,103 @@ def test_token_usage_total_tokens_sums_counts() -> None:
     usage = TokenUsage(input_tokens=5, output_tokens=7)
 
     assert usage.total_tokens == 12
+
+
+def test_unsubscribe_removes_handler_and_returns_true() -> None:
+    bus = InProcessEventBus()
+    delivered: list[PromptExecuted] = []
+
+    def handler(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
+        delivered.append(event)
+
+    bus.subscribe(PromptExecuted, handler)
+    event = PromptExecuted(
+        prompt_name="demo",
+        adapter=TEST_ADAPTER_NAME,
+        result=make_prompt_response("demo"),
+        session_id=uuid4(),
+        created_at=datetime.now(UTC),
+        value=None,
+    )
+
+    bus.publish(event)
+    assert len(delivered) == 1
+
+    result = bus.unsubscribe(PromptExecuted, handler)
+    assert result is True
+
+    bus.publish(event)
+    assert len(delivered) == 1
+
+
+def test_unsubscribe_returns_false_for_nonexistent_handler() -> None:
+    bus = InProcessEventBus()
+
+    def handler_a(_: object) -> None:
+        pass
+
+    def handler_b(_: object) -> None:
+        pass
+
+    bus.subscribe(PromptExecuted, handler_a)
+
+    result = bus.unsubscribe(PromptExecuted, handler_b)
+    assert result is False
+
+
+def test_unsubscribe_returns_false_for_nonexistent_event_type() -> None:
+    bus = InProcessEventBus()
+
+    def handler(_: object) -> None:
+        pass
+
+    result = bus.unsubscribe(PromptExecuted, handler)
+    assert result is False
+
+
+def test_unsubscribe_does_not_affect_other_handlers() -> None:
+    bus = InProcessEventBus()
+    delivered_a: list[PromptExecuted] = []
+    delivered_b: list[PromptExecuted] = []
+
+    def handler_a(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
+        delivered_a.append(event)
+
+    def handler_b(event: object) -> None:
+        assert isinstance(event, PromptExecuted)
+        delivered_b.append(event)
+
+    bus.subscribe(PromptExecuted, handler_a)
+    bus.subscribe(PromptExecuted, handler_b)
+
+    event = PromptExecuted(
+        prompt_name="demo",
+        adapter=TEST_ADAPTER_NAME,
+        result=make_prompt_response("demo"),
+        session_id=uuid4(),
+        created_at=datetime.now(UTC),
+        value=None,
+    )
+
+    bus.publish(event)
+    assert len(delivered_a) == 1
+    assert len(delivered_b) == 1
+
+    bus.unsubscribe(PromptExecuted, handler_a)
+
+    bus.publish(event)
+    assert len(delivered_a) == 1
+    assert len(delivered_b) == 2
+
+
+def test_null_event_bus_unsubscribe_returns_false() -> None:
+    bus = NullEventBus()
+
+    def handler(_: object) -> None:
+        pass
+
+    bus.subscribe(PromptExecuted, handler)
+    result = bus.unsubscribe(PromptExecuted, handler)
+    assert result is False

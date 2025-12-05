@@ -26,6 +26,15 @@ class NullEventBus:
         del event_type, handler
 
     @staticmethod
+    def unsubscribe(event_type: type[object], handler: EventHandler) -> bool:
+        """No-op unsubscription hook.
+
+        Always returns ``False`` since no handlers are stored.
+        """
+        del event_type, handler
+        return False
+
+    @staticmethod
     def publish(event: object) -> PublishResult:
         """Drop the provided event instance."""
 
