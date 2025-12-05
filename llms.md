@@ -17,32 +17,19 @@ agent or orchestration system.
 
 ## Architecture Overview
 
-An agent harness in WINK consists of these core components wired together:
+An agent harness in WINK wires together five core components:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Agent Harness                            │
-│  ┌──────────────────┐    ┌──────────────────┐                   │
-│  │  PromptTemplate  │───▶│      Prompt      │                   │
-│  │  (immutable)     │    │  (with bindings) │                   │
-│  └──────────────────┘    └────────┬─────────┘                   │
-│                                   │                             │
-│                                   ▼                             │
-│  ┌──────────────────┐    ┌──────────────────┐                   │
-│  │    EventBus      │◀───│ ProviderAdapter  │                   │
-│  │ (observability)  │    │ (OpenAI/LiteLLM) │                   │
-│  └────────┬─────────┘    └────────┬─────────┘                   │
-│           │                       │                             │
-│           ▼                       ▼                             │
-│  ┌──────────────────┐    ┌──────────────────┐                   │
-│  │     Session      │◀───│   ToolHandlers   │                   │
-│  │ (Redux-like state│    │ (side effects)   │                   │
-│  │   + event log)   │    └──────────────────┘                   │
-│  └──────────────────┘                                           │
-└─────────────────────────────────────────────────────────────────┘
-```
+1. **PromptTemplate** (`weakincentives.prompt.PromptTemplate`): Immutable blueprint defining sections, tools, and structured output schema. Import from `weakincentives.prompt`.
 
-**Data flow**: PromptTemplate → Prompt (with bound params) → ProviderAdapter.evaluate() → LLM response → Tool calls dispatched → ToolResult returned → Session updated → Events published
+2. **Prompt** (`weakincentives.Prompt`): Wraps a template with parameter bindings and optional overrides. Call `.bind()` to attach runtime params before evaluation.
+
+3. **Session** (`weakincentives.runtime.Session`): Redux-like event ledger that records all prompt renders, tool invocations, and custom state. Creates its own `EventBus` internally (access via `session.event_bus`).
+
+4. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to LLM providers. Call `adapter.evaluate(prompt, bus=session.event_bus, session=session)` to execute.
+
+5. **Tool handlers**: Functions with signature `(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]` that implement side effects when the model requests tool calls.
+
+**Data flow**: PromptTemplate → Prompt (with bound params) → `adapter.evaluate()` → LLM response → Tool calls dispatched → ToolResult returned → Session updated → Events published
 
 ## Installation
 
@@ -302,385 +289,170 @@ Optional extras enable specific providers or tooling:
   `session_id`, timestamps, and provider metadata so you can join prompt and
   tool flows deterministically.
 
-## Quickstart: Minimal Agent Harness
+## Quickstart Snippets
 
-The simplest agent harness requires: a prompt template, an adapter, and a session.
+### Minimal harness setup
 
 ```python
-from dataclasses import dataclass
 from weakincentives import MarkdownSection, Prompt
-from weakincentives.prompt import PromptTemplate  # Note: PromptTemplate from .prompt
+from weakincentives.prompt import PromptTemplate
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.runtime import Session
 
-# 1. Define the structured output the model should return
 @dataclass(slots=True, frozen=True)
 class TaskResponse:
     summary: str
     next_steps: list[str]
 
-# 2. Build the prompt template with sections
 template = PromptTemplate[TaskResponse](
-    ns="myapp/tasks",
-    key="task-agent",
-    name="task-agent",
-    sections=[
-        MarkdownSection(
-            title="Instructions",
-            template="Analyze the following task and provide a summary with next steps.",
-            key="instructions",
-        ),
-    ],
+    ns="myapp/tasks", key="task-agent", name="task-agent",
+    sections=[MarkdownSection(title="Instructions", template="...", key="instructions")],
 )
 
-# 3. Create session and adapter (Session creates its own EventBus internally)
 session = Session()
 adapter = OpenAIAdapter(model="gpt-4o-mini")
-
-# 4. Wrap template in Prompt and evaluate
-prompt = Prompt(template)
-response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
-
-# 5. Access the typed result
+response = adapter.evaluate(Prompt(template), bus=session.event_bus, session=session)
 result: TaskResponse = response.output
-print(f"Summary: {result.summary}")
 ```
 
-## Complete Agent with Tools
-
-This example shows a coding agent with tool handlers, proper error handling,
-and session state access:
+### Defining a tool handler
 
 ```python
-from dataclasses import dataclass
-from datetime import timedelta
-from weakincentives import MarkdownSection, Prompt, Tool, ToolContext, ToolResult
-from weakincentives.prompt import PromptTemplate
-from weakincentives.adapters import PromptEvaluationError
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import Session, configure_logging
-
-# 1. Define structured I/O types (frozen dataclasses recommended)
-@dataclass(slots=True, frozen=True)
-class Plan:
-    summary: str
-    steps: list[str]
+from weakincentives import Tool, ToolContext, ToolResult
 
 @dataclass(slots=True, frozen=True)
-class ApplyPatchArgs:
+class PatchArgs:
     path: str
     diff: str
 
 @dataclass(slots=True, frozen=True)
-class ApplyPatchResult:
+class PatchResult:
     applied: bool
-    message: str
 
-# 2. Implement tool handler with ToolContext access
-def apply_patch(params: ApplyPatchArgs, *, context: ToolContext) -> ToolResult[ApplyPatchResult]:
-    """Tool handlers receive params + context, return ToolResult."""
-    # Check deadline if time-bounded (use remaining() method)
-    if context.deadline and context.deadline.remaining() <= timedelta(0):
-        return ToolResult(
-            message="Deadline exceeded",
-            value=ApplyPatchResult(applied=False, message="timeout"),
-            success=False,
-        )
+def apply_patch(params: PatchArgs, *, context: ToolContext) -> ToolResult[PatchResult]:
+    # context.session, context.deadline, context.event_bus available
+    return ToolResult(message="Applied", value=PatchResult(applied=True), success=True)
 
-    # Perform the action (your implementation here)
-    # ...apply the patch to the filesystem...
-
-    return ToolResult(
-        message="Patch applied successfully",
-        value=ApplyPatchResult(applied=True, message="ok"),
-        success=True,
-    )
-
-# 3. Create Tool with typed parameters
-apply_patch_tool = Tool[ApplyPatchArgs, ApplyPatchResult](
-    name="apply_patch",
-    description="Apply a unified diff to the workspace.",
-    handler=apply_patch,
+patch_tool = Tool[PatchArgs, PatchResult](
+    name="apply_patch", description="Apply a unified diff.", handler=apply_patch
 )
-
-# 4. Compose prompt with sections and tools
-template = PromptTemplate[Plan](
-    ns="agent",
-    key="coding-agent",
-    name="coding-agent",
-    sections=[
-        MarkdownSection(
-            title="Goal",
-            template="Add a health-check endpoint to the FastAPI app",
-            key="goal",
-        ),
-        MarkdownSection(
-            title="Instructions",
-            template="Propose a plan, then call apply_patch with a diff that satisfies the goal.",
-            key="instructions",
-            tools=(apply_patch_tool,),  # Tools attach to sections
-        ),
-    ],
-)
-
-# 5. Set up runtime and evaluate
-configure_logging()
-session = Session()
-adapter = OpenAIAdapter(model="gpt-4o-mini")
-
-try:
-    prompt = Prompt(template)
-    response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
-    plan: Plan = response.output
-    print(f"Plan: {plan.summary}")
-except PromptEvaluationError as exc:
-    # Access error details for debugging
-    print(f"Phase: {exc.phase}")  # "request", "response", or "tool"
-    print(f"Prompt: {exc.prompt_name}")
-    raise
 ```
 
-### What happens at runtime?
-
-- The prompt renders Markdown plus a JSON-schema tool contract for
-  `apply_patch`.
-- `ProviderAdapter.evaluate` negotiates tool calls with the provider, emitting
-  `PromptExecuted` and `ToolInvoked` events into the session ledger.
-- The session keeps every event immutable so you can snapshot, replay, or
-  inspect them later.
-
-## Multi-Turn Agent Loop
-
-For agents that run multiple turns (e.g., planning then executing):
+### Attaching tools to sections
 
 ```python
-from weakincentives.runtime import select_latest, append
+section = MarkdownSection(
+    title="Instructions", template="Use apply_patch to edit files.",
+    key="instructions", tools=(patch_tool,),
+)
+```
 
-# Run planning phase
-plan_response = adapter.evaluate(plan_prompt, bus=session.event_bus, session=session)
-plan = plan_response.output
+### Multi-turn with session state
 
-# Store plan in session for later access
-session = append(session, plan)
+```python
+from weakincentives.runtime import append, select_latest
 
-# Run execution phase with plan context
-for step in plan.steps:
-    exec_prompt = Prompt(exec_template).bind(StepParams(step=step))
-    exec_response = adapter.evaluate(exec_prompt, bus=session.event_bus, session=session)
-    # Session accumulates all events across turns
+response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
+session = append(session, response.output)  # Store result
+later = select_latest(session, TaskResponse)  # Retrieve later
+```
 
-# Later, retrieve stored state
-stored_plan = select_latest(session, Plan)
+### Error handling
+
+```python
+from weakincentives.adapters import PromptEvaluationError
+
+try:
+    response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
+except PromptEvaluationError as exc:
+    print(exc.phase, exc.prompt_name)  # "request"/"response"/"tool"
 ```
 
 ## Prompt Authoring (`weakincentives.prompt`)
 
 ### PromptTemplate and Prompt
 
-`PromptTemplate` is immutable and defines the structure. `Prompt` wraps it with
-parameter bindings and overrides:
-
 ```python
-from weakincentives import MarkdownSection, Prompt
 from weakincentives.prompt import PromptTemplate
 
-# Immutable template
 template = PromptTemplate[OutputType](
-    ns="myapp/agents",           # Namespace for organization
-    key="my-agent",              # Unique identifier
-    name="my-agent",             # Human-readable name
-    sections=[...],              # Ordered sections
-    inject_output_instructions=True,  # Auto-add JSON format instructions
+    ns="myapp/agents", key="my-agent", name="my-agent",
+    sections=[...], inject_output_instructions=True,
 )
-
-# Wrap with bindings
-prompt = Prompt(template)
-bound = prompt.bind(MyParams(value="..."))  # Returns self for chaining
+prompt = Prompt(template).bind(MyParams(value="..."))  # Bind returns self
 ```
 
-### MarkdownSection with Parameters
+### MarkdownSection with parameters
 
-Use `string.Template` syntax (`${param}`) for dynamic content:
+Use `${param}` syntax for dynamic content:
 
 ```python
-@dataclass(slots=True, frozen=True)
-class TaskParams:
-    objective: str
-    context: str = ""
-
 section = MarkdownSection[TaskParams](
-    title="Task",
-    template="Objective: ${objective}\n\nContext: ${context}",
-    key="task",
-    default_params=TaskParams(objective="", context=""),  # Fallback values
+    title="Task", template="Objective: ${objective}", key="task",
+    default_params=TaskParams(objective=""),
 )
-
-# Bind params when evaluating
-prompt = Prompt(template).bind(TaskParams(objective="Fix the bug", context="..."))
 ```
 
-### Tool Definition
+### Tool.wrap helper
 
-- **`Tool`**: Declarative tool description parameterized as `Tool[Params, Result]` where `Params` **must** be a dataclass type and `Result` is a dataclass (or sequence of dataclasses). Key fields:
-  - `name`: Identifier exposed to the model.
-  - `description`: Natural-language guidance (1-200 ASCII characters).
-  - `handler`: Callable accepting `(params: Params, *, context: ToolContext)`
-    and returning `ToolResult[Result]`.
-
-### Tool.wrap Helper
-
-Use `Tool.wrap` to create a Tool from a handler function. The function name
-becomes the tool name, and the docstring becomes the description:
+Creates a Tool using the function's `__name__` and docstring:
 
 ```python
-from weakincentives import Tool, ToolContext, ToolResult
-
-@dataclass
-class SearchParams:
-    query: str
-
-@dataclass
-class SearchResult:
-    matches: list[str]
-
 def search(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
-    """Search for content in the workspace."""
-    return ToolResult(
-        message="Search complete",
-        value=SearchResult(matches=["result1", "result2"]),
-        success=True,
-    )
+    """Search for content."""  # Becomes tool description
+    return ToolResult(message="Done", value=SearchResult(...), success=True)
 
-# Wrap uses __name__ as tool name and docstring as description
-search_tool = Tool.wrap(search)
-# Equivalent to:
-# Tool[SearchParams, SearchResult](name="search", description="Search for content in the workspace.", handler=search)
+search_tool = Tool.wrap(search)  # name="search", description="Search for content."
 ```
 
-### ToolContext
+### ToolContext fields
 
-Passed to tool handlers. Provides access to runtime state:
+Available in tool handlers via `context`:
+- `context.session` - Current Session
+- `context.deadline` - Optional Deadline (check with `deadline.remaining()`)
+- `context.event_bus` - EventBus for publishing
+- `context.prompt` / `context.rendered_prompt` / `context.adapter`
+
+### ToolResult fields
 
 ```python
-def my_handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
-    context.prompt          # The Prompt being evaluated
-    context.rendered_prompt # RenderedPrompt (if available)
-    context.adapter         # The ProviderAdapter
-    context.session         # Current Session
-    context.event_bus       # EventBus for publishing
-    context.deadline        # Optional Deadline for timeouts
+ToolResult(message="...", value=MyResult(...), success=True, exclude_value_from_context=False)
 ```
 
-### ToolResult
+### Additional components
 
-Structured handler response:
-
-```python
-ToolResult(
-    message="Human-readable feedback",  # Shown to model
-    value=MyResult(...),                 # Typed payload
-    success=True,                        # Success flag
-    exclude_value_from_context=False,    # If True, value not sent to model
-)
-```
-
-### Additional Prompt Components
-
-- **`StructuredOutputConfig` / `parse_structured_output`**: Attach a
-  dataclass-driven schema to a prompt or parse the final model message into a
-  concrete instance. `OutputParseError` surfaces validation issues.
-- **`Section`**: Lower-level composition primitive for advanced prompt layouts.
-- **Delegation helpers**: `DelegationPrompt`, `DelegationSummarySection`,
-  `ParentPromptSection`, and related params let you compose supervising agents
-  that delegate subtasks while maintaining typed contracts.
-- **Overrides**: Use `PromptDescriptor`/`SectionDescriptor` and
-  `LocalPromptOverridesStore` to persist hash-scoped overrides alongside your
-  repo. Overrides are validated against the descriptor hashes to prevent drift.
+- **`parse_structured_output`**: Parse model response into typed dataclass
+- **Delegation**: `DelegationPrompt`, `DelegationSummarySection`, `ParentPromptSection`
+- **Overrides**: `LocalPromptOverridesStore` for hash-scoped prompt refinements
 
 ## Adapter Layer (`weakincentives.adapters`)
 
-### OpenAI Adapter
+### OpenAI and LiteLLM adapters
 
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter
-
-# Basic usage (uses native JSON schema mode by default)
-adapter = OpenAIAdapter(model="gpt-4o-mini")
-
-# With custom client
-from openai import OpenAI
-client = OpenAI(api_key="sk-...")
-adapter = OpenAIAdapter(model="gpt-4o", client=client)
-
-# With client factory (lazy initialization)
-adapter = OpenAIAdapter(
-    model="gpt-4o",
-    client_factory=lambda: OpenAI(api_key="..."),
-)
-
-# Disable native structured output if needed
-adapter = OpenAIAdapter(
-    model="gpt-4o",
-    use_native_response_format=False,
-)
-```
-
-### LiteLLM Adapter
-
-```python
 from weakincentives.adapters.litellm import LiteLLMAdapter
 
-# Works with any LiteLLM-supported model
-adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")
-adapter = LiteLLMAdapter(model="gpt-3.5-turbo")
-
-# With custom completion function
-import litellm
-adapter = LiteLLMAdapter(
-    model="gpt-4",
-    completion=litellm.completion,
-)
+adapter = OpenAIAdapter(model="gpt-4o-mini")  # Native JSON schema by default
+adapter = OpenAIAdapter(model="gpt-4o", client=custom_client)  # Custom client
+adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")  # Any LiteLLM model
 ```
 
-### PromptResponse
-
-Returned by `adapter.evaluate()`:
+### PromptResponse fields
 
 ```python
-response = adapter.evaluate(prompt, bus=bus, session=session)
-
-response.output      # Parsed structured output (your dataclass)
-response.text        # Raw model response text
-response.prompt_name # Name of the prompt
-response.usage       # TokenUsage(input_tokens, output_tokens, ...)
+response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
+response.output       # Parsed dataclass
+response.text         # Raw text
+response.usage        # TokenUsage(input_tokens, output_tokens, ...)
 ```
 
-### Error Handling
+### Rate limiting
 
 ```python
-from weakincentives.adapters import PromptEvaluationError
-
-try:
-    response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
-except PromptEvaluationError as exc:
-    exc.phase          # "request", "response", or "tool"
-    exc.prompt_name    # Which prompt failed
-    exc.provider_payload  # Raw provider request/response
-    exc.__cause__      # Original exception
-```
-
-### Rate Limiting
-
-```python
-from weakincentives.adapters import new_throttle_policy, ThrottleError
-
+from weakincentives.adapters import new_throttle_policy
 policy = new_throttle_policy(requests_per_minute=60)
-
-try:
-    response = adapter.evaluate(prompt, bus=session.event_bus, session=session, throttle=policy)
-except ThrottleError:
-    # Wait and retry
-    pass
+response = adapter.evaluate(..., throttle=policy)
 ```
 
 ## Runtime & Events (`weakincentives.runtime`)
@@ -701,601 +473,136 @@ except ThrottleError:
 
 ## Built-in Tool Sections (`weakincentives.tools`)
 
-WINK provides ready-to-use sections that expose common agent capabilities:
-
-### VfsToolsSection - Sandboxed File Operations
+### VfsToolsSection - Sandboxed file operations
 
 ```python
-from pathlib import Path
 from weakincentives.tools import VfsToolsSection, HostMount, VfsPath
-
-# Create a sandboxed workspace with file tools
-vfs_section = VfsToolsSection(
+vfs = VfsToolsSection(
     session=session,
-    mounts=(
-        HostMount(
-            host_path="./my-repo",
-            mount_path=VfsPath(("workspace",)),
-            include_glob=("*.py", "*.md", "*.json"),
-            exclude_glob=("*.pyc", "__pycache__/**", ".git/**"),
-            max_bytes=600_000,  # Limit total bytes loaded
-        ),
-    ),
-    allowed_host_roots=(Path("."),),  # Restrict file access
+    mounts=(HostMount(host_path="./repo", mount_path=VfsPath(("workspace",)),
+                      include_glob=("*.py",), exclude_glob=("*.pyc",), max_bytes=600_000),),
+    allowed_host_roots=(Path("."),),
 )
 ```
+Tools: `read_file`, `write_file`, `list_directory`, `glob`, `grep`
 
-Exposes tools: `read_file`, `write_file`, `list_directory`, `glob`, `grep`
-
-### PlanningToolsSection - Multi-Step Planning
+### PlanningToolsSection - Multi-step planning
 
 ```python
 from weakincentives.tools import PlanningToolsSection, PlanningStrategy
-
-planning_section = PlanningToolsSection(
-    session=session,
-    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-    # Or: PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE
-)
+planning = PlanningToolsSection(session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT)
 ```
+Tools: `setup_plan`, `read_plan`, `add_step`, `update_step`, `mark_step`
 
-Exposes tools: `setup_plan`, `read_plan`, `add_step`, `update_step`, `mark_step`
-
-### SubagentsSection - Parallel Delegation
+### SubagentsSection - Parallel delegation
 
 ```python
 from weakincentives.tools import SubagentsSection, SubagentIsolationLevel
-
-subagents_section = SubagentsSection(
-    isolation_level=SubagentIsolationLevel.FORK,  # Isolated session copy
-)
-# Note: SubagentsSection doesn't require a session parameter
+subagents = SubagentsSection(isolation_level=SubagentIsolationLevel.FORK)
 ```
+Tools: `dispatch_subagents`
 
-Exposes: `dispatch_subagents` for parallel subtask execution
-
-### WorkspaceDigestSection - Workspace Summary
+### WorkspaceDigestSection
 
 ```python
-from weakincentives.tools import WorkspaceDigestSection
-
-digest_section = WorkspaceDigestSection(session=session)
+digest = WorkspaceDigestSection(session=session)  # Renders workspace summary
 ```
 
-Renders a summary of the current workspace state for context.
+## Session State Management
 
-### Combining Sections
+### Selectors
 
 ```python
-from weakincentives.prompt import PromptTemplate
+from weakincentives.runtime import append, select_latest, select_all, select_where, replace_latest
 
-template = PromptTemplate[Response](
-    ns="myapp",
-    key="full-agent",
-    name="full-agent",
-    sections=[
-        MarkdownSection(title="Goal", template="...", key="goal"),
-        planning_section,
-        vfs_section,
-        digest_section,
-        subagents_section,
-    ],
-)
+session = append(session, my_data)
+latest = select_latest(session, MyType)
+all_items = select_all(session, MyType)
+filtered = select_where(session, MyType, lambda x: x.status == "done")
+session = replace_latest(session, MyType, updated)
 ```
 
-## Session State Management (Redux-like)
-
-Sessions maintain immutable state with selectors for querying:
+### In tool handlers
 
 ```python
-from weakincentives.runtime import (
-    Session,
-    append,           # Add a value to session
-    select_latest,    # Get most recent instance of type
-    select_all,       # Get all instances of type
-    select_where,     # Get instances matching predicate
-    replace_latest,   # Replace most recent instance
-    upsert_by,        # Update or insert by key function
-)
-
-# Append data to session
-session = append(session, Plan(summary="...", steps=[...]))
-session = append(session, PlanStep(title="Step 1", status="pending"))
-
-# Query session state
-latest_plan = select_latest(session, Plan)
-all_steps = select_all(session, PlanStep)
-completed = select_where(session, PlanStep, lambda s: s.status == "completed")
-
-# Update existing data
-session = replace_latest(session, Plan, updated_plan)
-session = upsert_by(session, step, lambda s: s.id)  # Upsert by id field
+def handler(params, *, context: ToolContext) -> ToolResult:
+    plan = select_latest(context.session, Plan)
+    # Tool handlers can't mutate session; adapters record ToolInvoked events
 ```
 
-### Accessing Session in Tool Handlers
+## Event Subscription
 
 ```python
-def my_tool_handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
-    session = context.session
+from weakincentives.runtime import PromptRendered, PromptExecuted, ToolInvoked
 
-    # Read current plan
-    plan = select_latest(session, Plan)
-    if not plan:
-        return ToolResult(message="No plan found", value=None, success=False)
-
-    # Tool handlers can't mutate session directly, but adapters
-    # automatically record ToolInvoked events
-    return ToolResult(message="Done", value=MyResult(...), success=True)
-```
-
-## Event Subscription and Observability
-
-Subscribe to events for logging, metrics, or custom behavior:
-
-```python
-from weakincentives.runtime import (
-    Session,
-    PromptRendered,
-    PromptExecuted,
-    ToolInvoked,
-)
-
-# Session creates its own EventBus internally
 session = Session()
-
-# Subscribe to prompt renders
-def on_render(event: object) -> None:
-    if isinstance(event, PromptRendered):
-        print(f"Rendered: {event.rendered_prompt[:100]}...")
-
-session.event_bus.subscribe(PromptRendered, on_render)
-
-# Subscribe to tool invocations
-def on_tool(event: object) -> None:
-    if isinstance(event, ToolInvoked):
-        print(f"Tool '{event.name}' called, success={event.result.success}")
-
-session.event_bus.subscribe(ToolInvoked, on_tool)
-
-# Subscribe to prompt completions (includes token usage)
-def on_complete(event: object) -> None:
-    if isinstance(event, PromptExecuted):
-        usage = event.usage
-        if usage:
-            print(f"Tokens: {usage.input_tokens} in, {usage.output_tokens} out")
-
-session.event_bus.subscribe(PromptExecuted, on_complete)
-
-# Events are dispatched synchronously during adapter.evaluate()
-response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
+session.event_bus.subscribe(ToolInvoked, lambda e: print(e.name))
+session.event_bus.subscribe(PromptExecuted, lambda e: print(e.usage))
 ```
 
-## Session Snapshots for Debugging
+## Session Snapshots
 
-Use `Session.snapshot()` to capture an immutable JSON bundle of the session's
-state for offline debugging, replay, or handoff to another agent. Snapshots can
-be stored, shared, or restored with `Snapshot.from_json(...)` and
-`Session.rollback(...)` when you need to rehydrate session slices.
+Use `Session.snapshot()` to capture session state for debugging or replay.
+Restore with `Snapshot.from_json(...)` and `Session.rollback(...)`.
 
-Snapshot payloads follow a stable, schema-versioned layout:
-
-- **Envelope**: `version` (currently `"1"`), `created_at` (ISO timestamp), and
-  optional `parent_id` plus `children_ids` when sessions are nested.
-- **Slices**: Each entry captures one session slice. Fields include
-  `slice_type` (module-qualified dataclass for the slice key), `item_type`
-  (dataclass type stored within the slice), and `items` (a list of serialized
-  dataclass mappings produced by `weakincentives.serde.dump`).
-- **Deterministic ordering**: Slices and items are sorted during serialization
-  so diffs stay stable in version control.
-
-You can export snapshots as files, feed them into analysis tools, or inspect the
-raw JSON to understand what prompts, tool invocations, and reducer-managed data
-existed at a point in time—without needing live provider access.
-
-## Deadlines (`weakincentives.Deadline`)
-
-`Deadline` instances communicate time budgets across prompts, tools, and
-provider calls. Pass them into adapters to ensure long-running tasks fail fast:
+## Deadlines
 
 ```python
 from datetime import datetime, timedelta, UTC
 from weakincentives import Deadline
 
-# Create a deadline 5 minutes from now
 deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
-
-# Check remaining time in tool handlers
-if deadline.remaining() <= timedelta(0):
-    # Handle timeout
-    pass
+# In handlers: if deadline.remaining() <= timedelta(0): ...
 ```
 
-## Data Types (`weakincentives.types`)
+## Serialization (`weakincentives.serde`)
 
-`JSONValue` represents JSON-compatible payloads frequently used in tool results
-and structured outputs.
+```python
+from weakincentives.serde import dump, parse, schema, clone
+data = dump(my_dataclass)           # To JSON-compatible dict
+obj = parse(MyDataclass, data)      # From dict
+json_schema = schema(MyDataclass)   # JSON schema
+copy = clone(my_dataclass)          # Deep clone
+```
 
-## Prompt Overrides in CI/CD
+## Additional Patterns
 
-Ship prompts and overrides together:
+### Hierarchical sections
 
-1. Render a `PromptDescriptor` for your prompt and commit it.
-1. Store edits in a `LocalPromptOverridesStore` scoped to your repo root.
-1. Gate deployments by validating override hashes so prompts only change when
-   descriptors do.
+```python
+root = MarkdownSection(title="Root", template="...", key="root", children=[
+    MarkdownSection(title="Child", template="...", key="child"),
+])
+```
 
-## CLI (`wink` extra)
+### Tool examples
 
-Install the `wink` extra to experiment locally:
+```python
+tool = Tool[P, R](name="search", description="...", handler=h, examples=(
+    ToolExample(description="Find X", input=P(...), output=R(...)),
+))
+```
+
+### Design-by-contract
+
+```python
+from weakincentives.dbc import require, ensure
+@require(lambda p: p.query, "Query required")
+def handler(params, *, context): ...
+```
+
+## CLI
 
 ```bash
 pip install "weakincentives[wink]"
 wink --help
 ```
 
-The CLI demonstrates prompt rendering, override validation, and adapter wiring
-without writing additional code.
-
-## Common Patterns
-
-### Hierarchical Sections
-
-Sections can contain children for organized prompts:
-
-```python
-root = MarkdownSection(
-    title="Agent Instructions",
-    template="You are a helpful assistant.",
-    key="root",
-    children=[
-        MarkdownSection(title="Guidelines", template="Be concise.", key="guidelines"),
-        MarkdownSection(title="Constraints", template="No harmful content.", key="constraints"),
-    ],
-)
-# Renders as nested markdown:
-# ## 1. Agent Instructions
-# You are a helpful assistant.
-# ### 1.1. Guidelines
-# Be concise.
-# ### 1.2. Constraints
-# No harmful content.
-```
-
-### Tool Examples for Better Model Understanding
-
-```python
-from weakincentives import Tool, ToolExample
-
-search_tool = Tool[SearchParams, SearchResult](
-    name="search",
-    description="Search the codebase",
-    handler=search_handler,
-    examples=(
-        ToolExample(
-            description="Find all Python files with 'async'",
-            input=SearchParams(query="async def", file_pattern="*.py"),
-            output=SearchResult(matches=["src/api.py:10", "src/worker.py:25"]),
-        ),
-    ),
-)
-```
-
-### Dataclass Serialization
-
-```python
-from weakincentives.serde import dump, parse, schema, clone
-
-# Serialize dataclass to JSON-compatible dict
-data = dump(my_dataclass)
-
-# Parse dict back to dataclass
-instance = parse(MyDataclass, data)
-
-# Generate JSON schema for dataclass
-json_schema = schema(MyDataclass)
-
-# Deep clone a dataclass
-copy = clone(my_dataclass)
-```
-
-### Design-by-Contract Validation
-
-```python
-from weakincentives.dbc import require, ensure, invariant
-
-@require(lambda params: params.query, "Query must not be empty")
-@ensure(lambda result: result.success or result.message, "Failed results must have message")
-def my_tool_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
-    ...
-```
-
-## Full Production Harness Example
-
-A complete, production-ready agent harness with all recommended patterns:
-
-```python
-"""Complete agent harness example with full observability."""
-from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
-from pathlib import Path
-
-from weakincentives import (
-    Deadline,
-    MarkdownSection,
-    Prompt,
-    Tool,
-    ToolContext,
-    ToolResult,
-)
-from weakincentives.prompt import PromptTemplate
-from weakincentives.adapters import PromptEvaluationError
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import (
-    PromptExecuted,
-    Session,
-    ToolInvoked,
-    append,
-    configure_logging,
-    get_logger,
-    select_latest,
-)
-from weakincentives.tools import (
-    HostMount,
-    PlanningStrategy,
-    PlanningToolsSection,
-    VfsPath,
-    VfsToolsSection,
-    WorkspaceDigestSection,
-)
-
-
-# ============================================================
-# 1. STRUCTURED TYPES
-# ============================================================
-
-@dataclass(slots=True, frozen=True)
-class AgentConfig:
-    """Configuration for the agent."""
-    workspace_path: str
-    timeout_seconds: float = 300.0
-
-
-@dataclass(slots=True, frozen=True)
-class TaskParams:
-    """Parameters for the task section."""
-    objective: str
-    context: str = ""
-
-
-@dataclass(slots=True, frozen=True)
-class TaskResponse:
-    """Structured response from the agent."""
-    summary: str
-    files_modified: list[str]
-    next_steps: list[str]
-
-
-@dataclass(slots=True, frozen=True)
-class ExecuteCommandParams:
-    """Parameters for command execution tool."""
-    command: str
-    working_dir: str = "."
-
-
-@dataclass(slots=True, frozen=True)
-class ExecuteCommandResult:
-    """Result of command execution."""
-    stdout: str
-    stderr: str
-    exit_code: int
-
-
-# ============================================================
-# 2. TOOL HANDLERS
-# ============================================================
-
-def execute_command(
-    params: ExecuteCommandParams, *, context: ToolContext
-) -> ToolResult[ExecuteCommandResult]:
-    """Execute a shell command in the workspace."""
-    # Check deadline using remaining() method
-    if context.deadline and context.deadline.remaining() <= timedelta(0):
-        return ToolResult(
-            message="Deadline exceeded before command execution",
-            value=ExecuteCommandResult(stdout="", stderr="timeout", exit_code=-1),
-            success=False,
-        )
-
-    import subprocess
-    try:
-        result = subprocess.run(
-            params.command,
-            shell=True,
-            cwd=params.working_dir,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return ToolResult(
-            message=f"Command completed with exit code {result.returncode}",
-            value=ExecuteCommandResult(
-                stdout=result.stdout,
-                stderr=result.stderr,
-                exit_code=result.returncode,
-            ),
-            success=result.returncode == 0,
-        )
-    except subprocess.TimeoutExpired:
-        return ToolResult(
-            message="Command timed out",
-            value=ExecuteCommandResult(stdout="", stderr="timeout", exit_code=-1),
-            success=False,
-        )
-
-
-execute_tool = Tool[ExecuteCommandParams, ExecuteCommandResult](
-    name="execute_command",
-    description="Execute a shell command in the workspace",
-    handler=execute_command,
-)
-
-
-# ============================================================
-# 3. BUILD PROMPT TEMPLATE
-# ============================================================
-
-def build_agent_template(session: Session, config: AgentConfig) -> PromptTemplate[TaskResponse]:
-    """Build the agent's prompt template with all sections."""
-    return PromptTemplate[TaskResponse](
-        ns="myapp/agents",
-        key="task-agent",
-        name="task-agent",
-        sections=[
-            MarkdownSection(
-                title="Role",
-                template="You are a skilled software engineer assistant.",
-                key="role",
-            ),
-            MarkdownSection[TaskParams](
-                title="Task",
-                template="Objective: ${objective}\n\nAdditional context: ${context}",
-                key="task",
-                default_params=TaskParams(objective=""),
-            ),
-            PlanningToolsSection(
-                session=session,
-                strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-            ),
-            VfsToolsSection(
-                session=session,
-                mounts=(
-                    HostMount(
-                        host_path=config.workspace_path,
-                        mount_path=VfsPath(("workspace",)),
-                        include_glob=("*.py", "*.md", "*.json", "*.yaml", "*.toml"),
-                        exclude_glob=("*.pyc", "__pycache__/**", ".git/**"),
-                        max_bytes=500_000,
-                    ),
-                ),
-                allowed_host_roots=(Path(config.workspace_path).resolve(),),
-            ),
-            WorkspaceDigestSection(session=session),
-            MarkdownSection(
-                title="Commands",
-                template="Use execute_command for shell operations when needed.",
-                key="commands",
-                tools=(execute_tool,),
-            ),
-        ],
-    )
-
-
-# ============================================================
-# 4. AGENT HARNESS
-# ============================================================
-
-class AgentHarness:
-    """Production agent harness with full observability."""
-
-    def __init__(self, config: AgentConfig):
-        self.config = config
-        self.logger = get_logger("agent")
-
-        # Session creates its own EventBus internally
-        self.session = Session()
-        self.adapter = OpenAIAdapter(model="gpt-4o")
-
-        # Build template
-        self.template = build_agent_template(self.session, config)
-
-        # Set up observability
-        self._setup_event_handlers()
-
-    def _setup_event_handlers(self) -> None:
-        """Subscribe to events for logging and metrics."""
-
-        def on_tool_invoked(event: object) -> None:
-            if isinstance(event, ToolInvoked):
-                self.logger.info(
-                    "Tool invoked",
-                    event="tool.invoked",
-                    tool=event.name,
-                    success=event.result.success,
-                )
-
-        def on_prompt_executed(event: object) -> None:
-            if isinstance(event, PromptExecuted):
-                usage = event.usage
-                if usage:
-                    self.logger.info(
-                        "Prompt executed",
-                        event="prompt.executed",
-                        input_tokens=usage.input_tokens,
-                        output_tokens=usage.output_tokens,
-                    )
-
-        self.session.event_bus.subscribe(ToolInvoked, on_tool_invoked)
-        self.session.event_bus.subscribe(PromptExecuted, on_prompt_executed)
-
-    def run(self, objective: str, context: str = "") -> TaskResponse:
-        """Execute the agent with the given objective."""
-        configure_logging()
-
-        # Create deadline
-        deadline = Deadline(
-            expires_at=datetime.now(UTC) + timedelta(seconds=self.config.timeout_seconds)
-        )
-
-        # Bind parameters
-        prompt = Prompt(self.template).bind(
-            TaskParams(objective=objective, context=context)
-        )
-
-        try:
-            response = self.adapter.evaluate(
-                prompt,
-                bus=self.session.event_bus,
-                session=self.session,
-                deadline=deadline,
-            )
-
-            # Store result in session for later retrieval
-            if response.output:
-                self.session = append(self.session, response.output)
-
-            return response.output
-
-        except PromptEvaluationError as exc:
-            self.logger.error(
-                "Agent evaluation failed",
-                event="agent.error",
-                phase=exc.phase,
-                prompt=exc.prompt_name,
-            )
-            raise
-
-    def get_last_result(self) -> TaskResponse | None:
-        """Retrieve the last task result from session."""
-        return select_latest(self.session, TaskResponse)
-
-
-# ============================================================
-# 5. USAGE
-# ============================================================
-
-if __name__ == "__main__":
-    config = AgentConfig(workspace_path="./my-project")
-    harness = AgentHarness(config)
-
-    result = harness.run(
-        objective="Add input validation to the user registration endpoint",
-        context="The endpoint is in src/api/users.py",
-    )
-
-    print(f"Summary: {result.summary}")
-    print(f"Modified: {result.files_modified}")
-    print(f"Next steps: {result.next_steps}")
-```
+## Example
+
+See `code_reviewer_example.py` in the repository for a complete production
+harness demonstrating all patterns: structured types, tool handlers, built-in
+sections (VFS, Planning, Subagents), event subscription, and prompt overrides.
 
 ## Versioning & Stability
 
