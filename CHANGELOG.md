@@ -4,18 +4,41 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Error Handling
+
+- Introduced `WinkError` as the root exception class for all library exceptions,
+  allowing callers to catch all weakincentives errors with a single handler.
+  Existing exceptions now inherit from `WinkError` while maintaining backward
+  compatibility with their original base types (`ValueError`, `RuntimeError`).
+
+### Prompts & Templates
+
+- Added generic `PromptTemplate[OutputT]` and `Prompt[OutputT]` abstractions that
+  derive structured-output schema (object vs array, allow-extra-keys) and
+  optionally inject response-format instructions into rendered prompts.
+
+### Tools
+
+- Added `Tool.wrap` static helper that constructs `Tool` instances from handler
+  annotations and docstrings, simplifying tool definition for common cases.
+- Tools now support `None` for parameter and result types, including schema
+  generation and prompt rendering for handlers that accept no input or return
+  no structured output.
+
 ### Events & Telemetry
 
+- Added `TokenUsage` tracking to `PromptExecuted` and `ToolInvoked` events,
+  exposing prompt and completion token counts from provider responses.
 - Added `unsubscribe(event_type, handler)` method to the `EventBus` protocol and
   `InProcessEventBus` implementation, allowing handlers to be removed after
   registration. The method returns `True` if the handler was found and removed,
   `False` otherwise.
 
-### Examples
+### Dataclasses
 
-- Removed the `initialize_code_reviewer_runtime` helper from the code reviewer
-  example; tests now call `_create_runtime_context` directly when constructing
-  prompt and session state.
+- Added `FrozenDataclass` decorator that provides pre-init normalization hooks,
+  `copy()` and `asdict()` helpers, and mapping utilities for immutable dataclass
+  patterns. Exported from the package root.
 
 ### Tools & Sandboxes
 
