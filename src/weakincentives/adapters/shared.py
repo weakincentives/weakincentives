@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
 from uuid import uuid4
 
+from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass, SupportsToolResult
 from ..prompt.prompt import Prompt, RenderedPrompt
@@ -1093,7 +1094,7 @@ ChoiceSelector = Callable[[object], ProviderChoice]
 """Callable that extracts the relevant choice from a provider response."""
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ConversationInputs[OutputT]:
     """Inputs required to start a conversation with a provider."""
 
@@ -1115,7 +1116,7 @@ class ToolMessageSerializer(Protocol):
     ) -> object: ...
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class ConversationConfig:
     """Configuration and collaborators required to run a conversation."""
 
