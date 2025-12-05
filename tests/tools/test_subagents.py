@@ -99,8 +99,9 @@ class RecordingAdapter(ProviderAdapter[Any]):
         bus: InProcessEventBus,
         session: Session | None = None,
         deadline: Deadline | None = None,
+        budget_tracker: object = None,
     ) -> PromptResponse[Any]:
-        del parse_output
+        del parse_output, budget_tracker
         params = prompt.params
         delegation = cast(DelegationParams, params[0])
         recap = (

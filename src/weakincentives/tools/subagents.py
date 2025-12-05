@@ -226,10 +226,8 @@ def build_dispatch_subagents_tool(
                 success=False,
             )
 
-        parent_prompt = context.prompt
-        parent_output_type = rendered_parent.output_type
-        if not isinstance(parent_output_type, type) or not is_dataclass(
-            parent_output_type
+        if not isinstance(rendered_parent.output_type, type) or not is_dataclass(
+            rendered_parent.output_type
         ):
             return ToolResult(
                 message="Parent prompt must declare a dataclass output type for delegation.",
@@ -238,10 +236,12 @@ def build_dispatch_subagents_tool(
             )
 
         delegation_prompt_cls: type[DelegationPrompt[Any, Any]] = (
-            DelegationPrompt.__class_getitem__((parent_output_type, parent_output_type))
+            DelegationPrompt.__class_getitem__(
+                (rendered_parent.output_type, rendered_parent.output_type)
+            )
         )
         delegation_prompt = delegation_prompt_cls(
-            parent_prompt,
+            context.prompt,
             cast(RenderedPrompt[Any], rendered_parent),
             include_response_format=rendered_parent.container is not None,
         )
@@ -270,6 +270,8 @@ def build_dispatch_subagents_tool(
         adapter = context.adapter
         parse_output = rendered_parent.container is not None
         parent_deadline = rendered_parent.deadline
+        # Budget tracker is always shared with children regardless of isolation
+        parent_budget_tracker = context.budget_tracker
 
         def _run_child(
             payload: tuple[DelegationParams, SessionProtocol, EventBus],
@@ -287,6 +289,7 @@ def build_dispatch_subagents_tool(
                     bus=child_bus,
                     session=child_session,
                     deadline=parent_deadline,
+                    budget_tracker=parent_budget_tracker,
                 )
             except Exception as error:  # pragma: no cover - defensive
                 return SubagentResult(

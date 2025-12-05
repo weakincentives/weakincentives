@@ -21,6 +21,7 @@ import pytest
 
 from tests.helpers.adapters import DUMMY_ADAPTER_NAME
 from weakincentives.adapters.core import (
+    PROMPT_EVALUATION_PHASE_BUDGET,
     PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
@@ -33,6 +34,7 @@ from weakincentives.adapters.shared import (
     new_throttle_policy,
     token_usage_from_payload,
 )
+from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
 from weakincentives.prompt._types import (
@@ -159,6 +161,7 @@ def build_runner(
     session: SessionProtocol | None = None,
     render_inputs: tuple[SupportsDataclass, ...] | None = None,
     throttle_policy: ThrottlePolicy | None = None,
+    budget_tracker: BudgetTracker | None = None,
 ) -> ConversationRunner[object]:
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template, params=render_inputs or ())
@@ -181,6 +184,7 @@ def build_runner(
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=serialize_tool_message,
         throttle_policy=throttle_policy or new_throttle_policy(),
+        budget_tracker=budget_tracker,
     )
 
 
@@ -465,3 +469,52 @@ def test_conversation_runner_requires_message_payload() -> None:
 
     with pytest.raises(PromptEvaluationError):
         runner.run()
+
+
+def test_conversation_runner_records_usage_to_budget_tracker() -> None:
+    rendered = RenderedPrompt(text="system")
+    responses = [
+        DummyResponse(
+            [DummyChoice(DummyMessage(content="Hello"))],
+            usage={"input_tokens": 100, "output_tokens": 50, "cached_tokens": 10},
+        )
+    ]
+    provider = ProviderStub(responses)
+    bus = RecordingBus()
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    runner = build_runner(
+        rendered=rendered, provider=provider, bus=bus, budget_tracker=tracker
+    )
+    runner.run()
+
+    consumed = tracker.consumed
+    assert consumed.input_tokens == 100
+    assert consumed.output_tokens == 50
+    assert consumed.cached_tokens == 10
+
+
+def test_conversation_runner_raises_on_budget_exceeded() -> None:
+    rendered = RenderedPrompt(text="system")
+    responses = [
+        DummyResponse(
+            [DummyChoice(DummyMessage(content="Hello"))],
+            usage={"input_tokens": 600, "output_tokens": 500, "cached_tokens": 0},
+        )
+    ]
+    provider = ProviderStub(responses)
+    bus = RecordingBus()
+    budget = Budget(max_total_tokens=500)
+    tracker = BudgetTracker(budget=budget)
+
+    runner = build_runner(
+        rendered=rendered, provider=provider, bus=bus, budget_tracker=tracker
+    )
+
+    with pytest.raises(PromptEvaluationError) as exc_info:
+        runner.run()
+
+    error = cast(PromptEvaluationError, exc_info.value)
+    assert error.phase == PROMPT_EVALUATION_PHASE_BUDGET
+    assert "Budget exceeded" in str(error)

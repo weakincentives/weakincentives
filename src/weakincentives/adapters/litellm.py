@@ -20,6 +20,7 @@ from http import HTTPStatus
 from importlib import import_module
 from typing import Any, Final, Protocol, TypeVar, cast, override
 
+from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt._visibility import SectionVisibility
 from ..prompt.errors import SectionPath
@@ -240,6 +241,8 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         parse_output: bool = True,
         deadline: Deadline | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        budget: Budget | None = None,
+        budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
         has_structured_output = prompt.structured_output is not None
         should_disable_instructions = (
@@ -299,6 +302,11 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 first_choice(response, prompt_name=prompt_name),
             )
 
+        # Create tracker if budget provided but tracker not supplied
+        effective_tracker = budget_tracker
+        if effective_tracker is None and budget is not None:
+            effective_tracker = BudgetTracker(budget=budget)
+
         conversation_config = ConversationConfig(
             bus=bus,
             session=session,
@@ -313,6 +321,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             parse_arguments=parse_tool_arguments,
             logger_override=logger,
             deadline=deadline,
+            budget_tracker=effective_tracker,
         )
 
         inputs = ConversationInputs[OutputT](
