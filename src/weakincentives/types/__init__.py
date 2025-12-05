@@ -14,6 +14,12 @@
 
 from __future__ import annotations
 
+from .dataclass import (
+    DataclassFieldMapping,
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 from .json import (
     ContractResult,
     JSONArray,
@@ -26,10 +32,14 @@ from .json import (
 
 __all__ = [
     "ContractResult",
+    "DataclassFieldMapping",
     "JSONArray",
     "JSONArrayT",
     "JSONObject",
     "JSONObjectT",
     "JSONValue",
     "ParseableDataclassT",
+    "SupportsDataclass",
+    "SupportsDataclassOrNone",
+    "SupportsToolResult",
 ]

@@ -10,26 +10,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Internal typing helpers for the :mod:`weakincentives.prompt` package."""
+"""Dataclass typing helpers."""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from collections.abc import Sequence
+from dataclasses import Field
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
-# Re-export core dataclass protocols from centralized location
-from ..types.dataclass import (
-    DataclassFieldMapping,
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
+type DataclassFieldMapping = dict[str, Field[Any]]
 
 
 @runtime_checkable
-class ToolRenderableResult(SupportsDataclass, Protocol):
-    """Protocol implemented by tool result payloads providing render()."""
+class SupportsDataclass(Protocol):
+    """Protocol satisfied by dataclass types and instances.
 
-    def render(self) -> str: ...
+    This protocol uses structural typing to detect any class decorated with
+    :func:`dataclasses.dataclass` or equivalent. It's marked ``@runtime_checkable``
+    to allow ``isinstance()`` checks for duck-typing scenarios.
+    """
+
+    __dataclass_fields__: ClassVar[DataclassFieldMapping]
+
+
+SupportsDataclassOrNone = SupportsDataclass | None
+SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass] | None
 
 
 __all__ = [
@@ -37,5 +42,4 @@ __all__ = [
     "SupportsDataclass",
     "SupportsDataclassOrNone",
     "SupportsToolResult",
-    "ToolRenderableResult",
 ]
