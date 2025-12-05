@@ -28,19 +28,23 @@ At least one limit must be set. Token limits must be positive when provided.
 
 ### BudgetTracker
 
-Thread-safe accumulator for token consumption:
+Thread-safe tracker for token consumption across conversations:
 
 ```python
 @dataclass
 class BudgetTracker:
-    """Accumulates TokenUsage against a Budget."""
+    """Tracks cumulative TokenUsage per conversation against a Budget."""
 
     budget: Budget
-    _consumed: TokenUsage = field(default_factory=lambda: TokenUsage())
+    _per_conversation: dict[str, TokenUsage] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def record(self, usage: TokenUsage) -> None:
-        """Add usage to running totals (thread-safe)."""
+    def record_cumulative(self, conversation_id: str, usage: TokenUsage) -> None:
+        """Record cumulative usage for a conversation (replaces previous)."""
+
+    @property
+    def consumed(self) -> TokenUsage:
+        """Sum usage across all conversations."""
 
     def check(self) -> None:
         """Raise BudgetExceededError if any limit is breached."""
@@ -74,14 +78,14 @@ limits at checkpoints. Omitting `budget` preserves current behavior.
 
 ## Enforcement Checkpoints
 
-1. **After every provider response** – Record usage, then check limits
+1. **After every provider response** – Record cumulative usage, then check limits
 2. **After every tool call** – Check limits before continuing
 3. **On evaluation completion** – Final check before returning
 
 ```python
-# Conversation loop
+# Conversation loop (each evaluate() has a unique conversation_id)
 response = provider.call(...)
-budget_tracker.record(token_usage_from_payload(response))
+budget_tracker.record_cumulative(conversation_id, token_usage_from_payload(response))
 budget_tracker.check()
 
 for tool_call in tool_calls:
@@ -100,33 +104,68 @@ The `BudgetTracker` is **always shared** with children, regardless of isolation:
 
 This ensures parallel subagents contribute to the parent's global limits.
 
-## Parallel Token Accounting
+## Token Accounting
 
-When subagents run in parallel via `ThreadPoolExecutor`:
+`token_usage_from_payload` returns **cumulative** values within a single
+provider conversation. The tracker must account for this:
 
-```
-Parent evaluate()
-├── Provider call → record(usage_1)
-├── dispatch_subagents (3 children)
-│   ├── Child A (thread 1) → record(usage_a)  ─┐
-│   ├── Child B (thread 2) → record(usage_b)  ─┼─ Same BudgetTracker
-│   └── Child C (thread 3) → record(usage_c)  ─┘
-│   └── (join)
-├── check() → enforce limits
-└── continue...
-```
+### Single Evaluation
 
-**Thread safety**: `BudgetTracker.record()` uses a `threading.Lock` to serialize
-updates. The lock is held only during the atomic addition:
+Within one `evaluate()` call, provider responses report running totals. The
+tracker replaces (not adds) per-conversation usage:
 
 ```python
-def record(self, usage: TokenUsage) -> None:
+def record_cumulative(self, conversation_id: str, usage: TokenUsage) -> None:
+    """Replace the cumulative total for a conversation."""
     with self._lock:
-        self._consumed = TokenUsage(
-            input_tokens=(self._consumed.input_tokens or 0) + (usage.input_tokens or 0),
-            output_tokens=(self._consumed.output_tokens or 0) + (usage.output_tokens or 0),
-            cached_tokens=(self._consumed.cached_tokens or 0) + (usage.cached_tokens or 0),
-        )
+        self._per_conversation[conversation_id] = usage
+```
+
+### Parallel Subagents
+
+Each subagent runs its own provider conversation with independent cumulative
+counters. The tracker sums final totals across conversations:
+
+```
+Parent evaluate() [conv_0]
+├── Provider call → cumulative=100 (conv_0)
+├── Provider call → cumulative=250 (conv_0, replaces 100)
+├── dispatch_subagents
+│   ├── Child A [conv_1] → final cumulative=500
+│   ├── Child B [conv_2] → final cumulative=300
+│   └── Child C [conv_3] → final cumulative=400
+│   └── (join)
+├── check() → total = 250 + 500 + 300 + 400 = 1450
+└── Provider call → cumulative=400 (conv_0, replaces 250)
+    check() → total = 400 + 500 + 300 + 400 = 1600
+```
+
+### BudgetTracker Implementation
+
+```python
+@dataclass
+class BudgetTracker:
+    budget: Budget
+    _per_conversation: dict[str, TokenUsage] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def record_cumulative(self, conversation_id: str, usage: TokenUsage) -> None:
+        """Record cumulative usage for a conversation (replaces previous)."""
+        with self._lock:
+            self._per_conversation[conversation_id] = usage
+
+    @property
+    def consumed(self) -> TokenUsage:
+        """Sum across all conversations."""
+        with self._lock:
+            return TokenUsage(
+                input_tokens=sum(u.input_tokens or 0 for u in self._per_conversation.values()),
+                output_tokens=sum(u.output_tokens or 0 for u in self._per_conversation.values()),
+                cached_tokens=sum(u.cached_tokens or 0 for u in self._per_conversation.values()),
+            )
+
+    def check(self) -> None:
+        """Raise BudgetExceededError if any limit is breached."""
 ```
 
 **Key invariant**: Even with `FULL_ISOLATION`, children share the parent's
@@ -140,7 +179,8 @@ tracker. Session and event bus isolation is orthogonal to budget enforcement.
 
 ## Testing
 
-- Verify `BudgetTracker.record()` is correct under concurrent calls
+- Verify cumulative replacement per conversation is correct
+- Verify `consumed` sums across conversations correctly under concurrent calls
 - Test parallel subagents that collectively exceed the budget
 - Confirm `FULL_ISOLATION` still shares the tracker
 - Check enforcement triggers at correct checkpoints
