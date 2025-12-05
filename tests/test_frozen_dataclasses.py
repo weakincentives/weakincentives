@@ -228,5 +228,101 @@ def test_merge_requires_source_fields() -> None:
 
     target = cast(HasFrozenOps, Target(1))
 
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="no matching fields"):
         target.merge(object())
+
+
+def test_merge_with_partial_object_attributes() -> None:
+    """Objects only need matching attributes, not all fields."""
+
+    @FrozenDataclass()
+    class Multi:
+        a: int
+        b: int
+        c: int
+
+    multi = cast(HasFrozenOps, Multi(1, 2, 3))
+
+    class PartialSource:
+        a = 10
+
+    merged = multi.merge(PartialSource())
+    assert merged.a == 10
+    assert merged.b == 2
+    assert merged.c == 3
+
+
+def test_frozen_dataclass_without_pre_init() -> None:
+    """Classes without __pre_init__ work normally."""
+
+    @FrozenDataclass()
+    class Simple:
+        value: int
+        label: str = "default"
+
+    simple = Simple(42)
+    assert simple.value == 42
+    assert simple.label == "default"
+
+    simple2 = Simple(value=10, label="custom")
+    assert simple2.value == 10
+    assert simple2.label == "custom"
+
+    # Copy helpers still work
+    simple_ops = cast(HasFrozenOps, simple)
+    updated = simple_ops.update(label="updated")
+    assert updated.label == "updated"
+    assert updated.value == 42
+
+
+def test_update_rejects_unknown_fields() -> None:
+    @FrozenDataclass()
+    class Target:
+        value: int
+
+    target = cast(HasFrozenOps, Target(1))
+
+    with pytest.raises(TypeError, match="unexpected field"):
+        target.update(unknown=99)
+
+
+def test_pre_init_with_positional_args() -> None:
+    @FrozenDataclass()
+    class Positional:
+        a: int
+        b: str
+        c: float = 1.5
+
+        @classmethod
+        def __pre_init__(
+            cls, *, a: int, b: str, c: float = 1.5
+        ) -> dict[str, int | str | float]:
+            return {"a": a * 2, "b": b.upper(), "c": c}
+
+    # All positional
+    p1 = Positional(5, "hello")
+    assert p1.a == 10
+    assert p1.b == "HELLO"
+    assert p1.c == 1.5
+
+    # Mixed positional and keyword
+    p2 = Positional(3, b="world", c=2.5)
+    assert p2.a == 6
+    assert p2.b == "WORLD"
+    assert p2.c == 2.5
+
+
+def test_dataclass_options_passthrough() -> None:
+    """Custom dataclass options are respected."""
+
+    @FrozenDataclass(frozen=False, slots=False, order=True)
+    class Mutable:
+        value: int
+
+    m = Mutable(1)
+    m.value = 2
+    assert m.value == 2
+    assert not hasattr(m, "__slots__")
+
+    # Order should work
+    assert Mutable(1) < Mutable(2)
