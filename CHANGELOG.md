@@ -4,16 +4,72 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Documentation
+
+- Added `CLAUDE.md` as a comprehensive reference for AI assistants working in the
+  repository, covering essential commands, architecture, code conventions, and
+  spec document index.
+- Polished README for clarity and impact (~40% smaller with sharper focus on
+  what makes WINK different).
+
+### FrozenDataclass
+
+- Introduced `FrozenDataclass` decorator providing pre-init normalization hooks,
+  copy helpers (`merge`, `replace`, `keys`, `values`, `items`), and mapping
+  utilities for immutable dataclass patterns.
+- Applied `FrozenDataclass` to adapter helpers (tool parameter rejection, render
+  context, tool outcomes) and conversation helpers (`ConversationInputs`,
+  `ConversationConfig`) to enforce immutability.
+
+### Prompts & Adapters
+
+- Refactored to introduce generic typed `PromptTemplate[OutputT]` and
+  `Prompt[OutputT]` abstractions that derive structured-output schema (object vs
+  array, allow-extra-keys) and optionally inject response-format instructions.
+- Simplified `PromptTemplate` immutability and descriptor caching while exposing
+  placeholders through the registry snapshot.
+- Hardened prompt tool validation with named constants replacing magic numbers.
+
+### Token Usage & Telemetry
+
+- Added `TokenUsage` helper to prompt execution events and threaded provider
+  token accounting through shared adapter responses.
+- Capture token usage metadata from provider payloads when publishing tool
+  invocations.
+
+### Tools
+
+- Added `Tool.wrap` static helper that constructs Tool instances from handler
+  annotations and docstrings with validation for parameter/result types.
+- Support tools that accept or return `None`, including schema generation and
+  prompt rendering normalization.
+- Log warning when tool result dataclasses omit a `render()` implementation.
+- Added render helpers for VFS directory listings and `shell_execute` results.
+
+### Serde
+
+- Added dataclass type reference support with serialization, parsing helpers,
+  and public resolvers; snapshot slices now include type metadata.
+
 ### Examples
 
 - Removed the `initialize_code_reviewer_runtime` helper from the code reviewer
   example; tests now call `_create_runtime_context` directly when constructing
   prompt and session state.
+- Enabled override support across code reviewer example sections including
+  workspace, planning, and delegation blocks.
 
 ### Tools & Sandboxes
 
 - Podman sandbox containers now start with networking disabled (`network_mode=none`),
   and an integration test verifies they cannot reach external hosts.
+
+### Specs
+
+- Added frozen dataclasses decorator spec documenting pre-init derivation hooks,
+  copy helpers, and recommended usage patterns.
+- Added TODO tool spec describing a simplified `TodoList` with string items and
+  append-style session storage.
 
 ## v0.12.0 - 2025-11-30
 
