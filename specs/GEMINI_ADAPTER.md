@@ -275,7 +275,9 @@ config = types.GenerateContentConfig(
             for spec in tool_specs
         ])
     ],
-    tool_config=types.FunctionCallingConfig(mode=tool_mode),
+    tool_config=types.ToolConfig(
+        function_calling_config=types.FunctionCallingConfig(mode=tool_mode),
+    ),
 )
 ```
 
@@ -294,23 +296,33 @@ Map weakincentives `ToolChoice` to Gemini's `FunctionCallingConfig`:
 def _normalize_tool_choice(
     tool_choice: ToolChoice | None,
     tool_specs: Sequence[Mapping[str, Any]],
-) -> types.FunctionCallingConfig | None:
-    """Convert tool choice to Gemini FunctionCallingConfig."""
+) -> types.ToolConfig | None:
+    """Convert tool choice to Gemini ToolConfig.
+
+    GenerateContentConfig.tool_config expects a ToolConfig wrapper around
+    FunctionCallingConfig, not the inner FunctionCallingConfig directly.
+    """
+    function_calling_config: types.FunctionCallingConfig | None = None
+
     if tool_choice is None or tool_choice == "auto":
-        return types.FunctionCallingConfig(mode="AUTO")
-    if tool_choice == "none":
-        return types.FunctionCallingConfig(mode="NONE")
-    if tool_choice == "required":
-        return types.FunctionCallingConfig(mode="ANY")
-    if isinstance(tool_choice, Mapping):
+        function_calling_config = types.FunctionCallingConfig(mode="AUTO")
+    elif tool_choice == "none":
+        function_calling_config = types.FunctionCallingConfig(mode="NONE")
+    elif tool_choice == "required":
+        function_calling_config = types.FunctionCallingConfig(mode="ANY")
+    elif isinstance(tool_choice, Mapping):
         # Force specific function
         function_name = tool_choice.get("function", {}).get("name")
         if function_name:
-            return types.FunctionCallingConfig(
+            function_calling_config = types.FunctionCallingConfig(
                 mode="ANY",
                 allowed_function_names=[function_name],
             )
-    return None
+
+    if function_calling_config is None:
+        return None
+
+    return types.ToolConfig(function_calling_config=function_calling_config)
 ```
 
 ### Function Call Response Handling
