@@ -23,6 +23,7 @@ from typing import Any, Literal, TypeVar, cast
 from ..deadlines import Deadline
 from ..prompt import MarkdownSection, Prompt, PromptTemplate
 from ..prompt._types import SupportsDataclass
+from ..prompt.errors import SectionPath
 from ..prompt.overrides import PromptLike, PromptOverridesError, PromptOverridesStore
 from ..prompt.section import Section
 from ..runtime.events._types import EventBus
@@ -270,7 +271,7 @@ class ProviderAdapter(ABC):
 
     def _find_section_path(
         self, prompt: Prompt[OutputT], section_key: str
-    ) -> tuple[str, ...]:
+    ) -> SectionPath:
         for node in prompt.sections:
             if node.section.key == section_key:
                 return node.path

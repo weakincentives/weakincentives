@@ -18,7 +18,7 @@ import textwrap
 from dataclasses import dataclass
 from typing import cast, override
 
-from ..prompt._types import SupportsDataclass
+from ..prompt._types import ComponentKey, SupportsDataclass
 from ..prompt.section import Section
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session
@@ -29,11 +29,11 @@ from ..runtime.session.protocols import SessionProtocol
 class WorkspaceDigest(SupportsDataclass):
     """Digest entry persisted within a :class:`Session` slice."""
 
-    section_key: str
+    section_key: ComponentKey
     body: str
 
 
-def _normalized_key(section_key: str) -> str:
+def _normalized_key(section_key: str) -> ComponentKey:
     from ..prompt._normalization import normalize_component_key
 
     return normalize_component_key(section_key, owner="WorkspaceDigest")

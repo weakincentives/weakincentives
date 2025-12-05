@@ -14,13 +14,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-SectionPath = tuple[str, ...]
+from ._types import ComponentKey
+
+SectionPath = tuple[ComponentKey, ...]
 
 
 def _normalize_section_path(section_path: Sequence[str] | None) -> SectionPath:
     if section_path is None:
         return ()
-    return tuple(section_path)
+    return tuple(ComponentKey(part) for part in section_path)
 
 
 class PromptError(Exception):

@@ -16,9 +16,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import Field
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, NewType, Protocol, runtime_checkable
 
 type DataclassFieldMapping = dict[str, Field[Any]]
+
+ComponentKey = NewType("ComponentKey", str)
+"""Validated, normalized component key (lowercase, no surrounding whitespace)."""
 
 
 @runtime_checkable
@@ -40,6 +43,7 @@ SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass] | None
 
 
 __all__ = [
+    "ComponentKey",
     "DataclassFieldMapping",
     "SupportsDataclass",
     "SupportsDataclassOrNone",

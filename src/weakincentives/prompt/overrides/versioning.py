@@ -21,9 +21,10 @@ from typing import Literal, Protocol, TypeVar, cast, overload
 from ...serde.schema import schema
 from ...types import JSONValue
 from .._types import SupportsDataclass, SupportsDataclassOrNone
+from ..errors import SectionPath
 
 
-def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:
+def _section_override_mapping_factory() -> dict[SectionPath, SectionOverride]:
     return {}
 
 
@@ -53,7 +54,7 @@ class SectionLike(Protocol):
 
 
 class SectionNodeLike(Protocol):
-    path: tuple[str, ...]
+    path: SectionPath
     number: str
     section: SectionLike
 
@@ -113,7 +114,7 @@ def ensure_hex_digest(value: object, *, field_name: str) -> HexDigest:
 class SectionDescriptor:
     """Hash metadata for a single section within a prompt."""
 
-    path: tuple[str, ...]
+    path: SectionPath
     content_hash: HexDigest
     number: str
 
@@ -122,7 +123,7 @@ class SectionDescriptor:
 class ToolDescriptor:
     """Stable metadata describing a tool exposed by a prompt."""
 
-    path: tuple[str, ...]
+    path: SectionPath
     name: str
     contract_hash: HexDigest
 
@@ -197,7 +198,7 @@ class PromptOverride:
     ns: str
     prompt_key: str
     tag: str
-    sections: dict[tuple[str, ...], SectionOverride] = field(
+    sections: dict[SectionPath, SectionOverride] = field(
         default_factory=_section_override_mapping_factory
     )
     tool_overrides: dict[str, ToolOverride] = field(
@@ -233,7 +234,7 @@ class PromptOverridesStore(Protocol):
         prompt: PromptLike,
         *,
         tag: str = "latest",
-        path: tuple[str, ...],
+        path: SectionPath,
         body: str,
     ) -> PromptOverride: ...
 

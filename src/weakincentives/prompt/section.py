@@ -22,7 +22,12 @@ if TYPE_CHECKING:
 from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
-from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
+from ._types import (
+    ComponentKey,
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -105,7 +110,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         return None
 
     @staticmethod
-    def _normalize_key(key: str) -> str:
+    def _normalize_key(key: str) -> ComponentKey:
         return normalize_component_key(key, owner="Section")
 
     @staticmethod

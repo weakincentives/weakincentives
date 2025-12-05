@@ -19,6 +19,8 @@ from typing import cast
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
+from .._types import ComponentKey
+from ..errors import SectionPath
 from .versioning import (
     HexDigest,
     PromptDescriptor,
@@ -61,7 +63,7 @@ def validate_header(
 
 def _section_descriptor_index(
     descriptor: PromptDescriptor,
-) -> dict[tuple[str, ...], SectionDescriptor]:
+) -> dict[SectionPath, SectionDescriptor]:
     return {section.path: section for section in descriptor.sections}
 
 
@@ -71,7 +73,7 @@ def _tool_descriptor_index(
     return {tool.name: tool for tool in descriptor.tools}
 
 
-def _format_section_path(path: tuple[str, ...]) -> str:
+def _format_section_path(path: SectionPath) -> str:
     return "/".join(path)
 
 
@@ -100,7 +102,7 @@ class SectionValidationConfig:
 
 def _normalize_section_override(
     *,
-    path: tuple[str, ...],
+    path: SectionPath,
     descriptor_section: SectionDescriptor | None,
     expected_hash: JSONValue,
     body: JSONValue,
@@ -273,12 +275,14 @@ def _load_section_override_entry(
     *,
     path_key_raw: object,
     section_payload_raw: JSONValue,
-    descriptor_index: Mapping[tuple[str, ...], SectionDescriptor],
-) -> tuple[tuple[str, ...], SectionOverride] | None:
+    descriptor_index: Mapping[SectionPath, SectionDescriptor],
+) -> tuple[SectionPath, SectionOverride] | None:
     if not isinstance(path_key_raw, str):
         raise PromptOverridesError("Section keys must be strings.")
     path_key = path_key_raw
-    path = tuple(part for part in path_key.split("/") if part)
+    path: SectionPath = tuple(
+        ComponentKey(part) for part in path_key.split("/") if part
+    )
     if not isinstance(section_payload_raw, Mapping):
         raise PromptOverridesError("Section payload must be an object.")
     section_payload = cast(Mapping[str, JSONValue], section_payload_raw)
@@ -340,7 +344,7 @@ def _load_tool_override_entry(
 def load_sections(
     payload: JSONValue | None,
     descriptor: PromptDescriptor,
-) -> dict[tuple[str, ...], SectionOverride]:
+) -> dict[SectionPath, SectionOverride]:
     if payload is None:
         return {}
     if not isinstance(payload, Mapping):
@@ -350,7 +354,7 @@ def load_sections(
     mapping_payload = cast(Mapping[object, JSONValue], payload)
     mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
     descriptor_index = _section_descriptor_index(descriptor)
-    overrides: dict[tuple[str, ...], SectionOverride] = {}
+    overrides: dict[SectionPath, SectionOverride] = {}
     for path_key_raw, section_payload_raw in mapping_entries:
         normalized_section = _load_section_override_entry(
             path_key_raw=path_key_raw,
@@ -366,7 +370,7 @@ def load_sections(
 def filter_override_for_descriptor(
     descriptor: PromptDescriptor,
     override: PromptOverride,
-) -> tuple[dict[tuple[str, ...], SectionOverride], dict[str, ToolOverride]]:
+) -> tuple[dict[SectionPath, SectionOverride], dict[str, ToolOverride]]:
     if override.ns != descriptor.ns or override.prompt_key != descriptor.key:
         _log_mismatched_override_metadata(descriptor, override)
         return {}, {}
@@ -374,7 +378,7 @@ def filter_override_for_descriptor(
     descriptor_sections = _section_descriptor_index(descriptor)
     descriptor_tools = _tool_descriptor_index(descriptor)
 
-    filtered_sections: dict[tuple[str, ...], SectionOverride] = {}
+    filtered_sections: dict[SectionPath, SectionOverride] = {}
     for path, section_override in override.sections.items():
         section_config = SectionValidationConfig(
             strict=False,
@@ -440,11 +444,11 @@ def load_tools(
 
 
 def validate_sections_for_write(
-    sections: Mapping[tuple[str, ...], SectionOverride],
+    sections: Mapping[SectionPath, SectionOverride],
     descriptor: PromptDescriptor,
-) -> dict[tuple[str, ...], SectionOverride]:
+) -> dict[SectionPath, SectionOverride]:
     descriptor_index = _section_descriptor_index(descriptor)
-    validated: dict[tuple[str, ...], SectionOverride] = {}
+    validated: dict[SectionPath, SectionOverride] = {}
     for path, section_override in sections.items():
         path_display = "/".join(path)
         section_config = SectionValidationConfig(
@@ -499,7 +503,7 @@ def validate_tools_for_write(
 
 
 def serialize_sections(
-    sections: Mapping[tuple[str, ...], SectionOverride],
+    sections: Mapping[SectionPath, SectionOverride],
 ) -> dict[str, dict[str, str]]:
     serialized: dict[str, dict[str, str]] = {}
     for path, section_override in sections.items():
@@ -527,9 +531,9 @@ def serialize_tools(
 def seed_sections(
     prompt: PromptLike,
     descriptor: PromptDescriptor,
-) -> dict[tuple[str, ...], SectionOverride]:
+) -> dict[SectionPath, SectionOverride]:
     section_lookup = {node.path: node.section for node in prompt.sections}
-    seeded: dict[tuple[str, ...], SectionOverride] = {}
+    seeded: dict[SectionPath, SectionOverride] = {}
     for section in descriptor.sections:
         section_obj = section_lookup.get(section.path)
         if section_obj is None:

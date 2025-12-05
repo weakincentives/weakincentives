@@ -18,6 +18,7 @@ from typing import cast, override
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
+from ..errors import SectionPath
 from ._fs import OverrideFilesystem
 from .validation import (
     FORMAT_VERSION,
@@ -244,7 +245,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         prompt: PromptLike,
         *,
         tag: str = "latest",
-        path: tuple[str, ...],
+        path: SectionPath,
         body: str,
     ) -> PromptOverride:
         descriptor = descriptor_for_prompt(prompt)
@@ -302,9 +303,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             return self.upsert(descriptor, seed_override)
 
 
-def _lookup_section_hash(
-    descriptor: PromptDescriptor, path: tuple[str, ...]
-) -> HexDigest:
+def _lookup_section_hash(descriptor: PromptDescriptor, path: SectionPath) -> HexDigest:
     for candidate in descriptor.sections:
         if candidate.path == path:
             return candidate.content_hash

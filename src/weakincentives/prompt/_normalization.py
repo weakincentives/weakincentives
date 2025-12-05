@@ -17,12 +17,14 @@ from __future__ import annotations
 import re
 from typing import Final
 
+from ._types import ComponentKey
+
 COMPONENT_KEY_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^[a-z0-9][a-z0-9._-]{0,63}$"
 )
 
 
-def normalize_component_key(key: str, *, owner: str) -> str:
+def normalize_component_key(key: str, *, owner: str) -> ComponentKey:
     """Normalize component keys across prompt primitives.
 
     Args:
@@ -42,7 +44,7 @@ def normalize_component_key(key: str, *, owner: str) -> str:
         raise ValueError(f"{owner} key must be a non-empty string.")
     if not COMPONENT_KEY_PATTERN.match(normalized):
         raise ValueError(f"{owner} key must match {COMPONENT_KEY_PATTERN.pattern}.")
-    return normalized
+    return ComponentKey(normalized)
 
 
 __all__ = ["COMPONENT_KEY_PATTERN", "normalize_component_key"]
