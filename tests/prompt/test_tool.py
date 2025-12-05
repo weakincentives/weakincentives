@@ -13,8 +13,9 @@
 from __future__ import annotations
 
 import types
+import typing
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Annotated, Literal, cast
 
 import pytest
 
@@ -312,3 +313,161 @@ def test_tool_examples_must_be_tool_example_instances() -> None:
             handler=None,
             examples=("not-an-example",),  # type: ignore[arg-type]
         )
+
+
+def test_tool_wrap_builds_tool_from_handler() -> None:
+    def lookup(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Lookup information."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    tool = Tool.wrap(lookup)
+
+    assert tool.name == "lookup"
+    assert tool.description == "Lookup information."
+    assert tool.handler is lookup
+    assert tool.params_type is ExampleParams
+    assert tool.result_type is ExampleResult
+
+
+def test_tool_wrap_requires_docstring() -> None:
+    def docless(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    with pytest.raises(PromptValidationError):
+        Tool.wrap(docless)
+
+
+def test_tool_wrap_enforces_handler_constraints() -> None:
+    def invalid_handler(
+        params: ExampleParams, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    with pytest.raises(PromptValidationError):
+        Tool.wrap(invalid_handler)
+
+
+def test_tool_wrap_requires_parameter_annotation() -> None:
+    def missing_annotation(
+        params: object, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Missing param annotation."""
+
+        return ToolResult(message="ok", value=ExampleResult(value="result"))
+
+    missing_annotation.__annotations__.pop("params", None)
+
+    with pytest.raises(PromptValidationError):
+        Tool.wrap(missing_annotation)
+
+
+def test_tool_wrap_supports_annotated_params() -> None:
+    def annotated_params(
+        params: Annotated[ExampleParams, "meta"], *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Annotated params."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    tool = Tool.wrap(annotated_params)
+
+    assert tool.params_type is ExampleParams
+
+
+def test_tool_wrap_supports_literal_params() -> None:
+    def literal_params(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Literal params."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    literal_params.__annotations__["params"] = Literal[ExampleParams]  # type: ignore[invalid-type-form]
+
+    tool = Tool.wrap(literal_params)
+
+    assert tool.params_type is ExampleParams
+
+
+def test_tool_wrap_supports_annotated_return() -> None:
+    def annotated_return(
+        params: ExampleParams, *, context: ToolContext
+    ) -> Annotated[ToolResult[ExampleResult], "meta"]:
+        """Annotated return."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    tool = Tool.wrap(annotated_return)
+
+    assert tool.result_type is ExampleResult
+
+
+def test_tool_wrap_requires_return_annotation() -> None:
+    def missing_return(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Missing return annotation."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    missing_return.__annotations__.pop("return", None)
+
+    with pytest.raises(PromptValidationError):
+        Tool.wrap(missing_return)
+
+
+def test_tool_wrap_requires_toolresult_return() -> None:
+    def wrong_return(params: ExampleParams, *, context: ToolContext) -> ExampleResult:
+        """Wrong return annotation."""
+
+        return ExampleResult(value=params.query)
+
+    with pytest.raises(PromptValidationError):
+        Tool.wrap(wrong_return)  # type: ignore[arg-type]
+
+
+def test_tool_wrap_requires_result_argument() -> None:
+    def unparameterized_result(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult:
+        """ToolResult without parameter."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    unparameterized_result.__annotations__["return"] = ToolResult
+
+    with pytest.raises(PromptValidationError):
+        Tool.wrap(unparameterized_result)
+
+
+def test_tool_wrap_handles_empty_toolresult_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    @dataclass
+    class ExampleParams:
+        value: int
+
+    def handler(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[int]:  # pragma: no cover - exercised via wrap
+        """Docstring for Tool.wrap coverage."""
+
+        return ToolResult(message="ok", value=params.value)
+
+    handler.__annotations__["return"] = ToolResult[int]
+
+    def fake_get_args(annotation: object) -> tuple[object, ...]:
+        return () if annotation == ToolResult[int] else typing.get_args(annotation)
+
+    monkeypatch.setattr(tool_module, "get_args", fake_get_args)
+
+    with pytest.raises(
+        PromptValidationError,
+        match=r"Tool handler return annotation must be ToolResult\[ResultT\].",
+    ):
+        Tool.wrap(handler)

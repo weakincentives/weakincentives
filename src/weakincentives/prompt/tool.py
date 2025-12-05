@@ -68,6 +68,8 @@ ParamsT_contra = TypeVar(
     "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
 )
 ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
+ParamsT_runtime = TypeVar("ParamsT_runtime", bound=SupportsDataclassOrNone)
+ResultT_runtime = TypeVar("ResultT_runtime", bound=SupportsToolResult)
 type ParamsType = type[SupportsDataclass] | type[None]
 type ResultType = type[SupportsDataclass] | type[None]
 
@@ -669,6 +671,114 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         return cast(
             "type[Tool[SupportsDataclassOrNone, SupportsToolResult]]",
             _SpecializedTool,
+        )
+
+    @staticmethod
+    def _resolve_wrapped_description(
+        fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
+    ) -> str:
+        description = inspect.getdoc(fn)
+        if description is None:
+            raise PromptValidationError(
+                "Tool handler must define a docstring to use as the description.",
+                placeholder="description",
+            )
+        return description
+
+    @staticmethod
+    def _resolve_wrapped_params_type(
+        parameter: inspect.Parameter, hints: dict[str, object]
+    ) -> ParamsType:
+        annotation = hints.get(parameter.name, parameter.annotation)
+        if annotation is inspect.Parameter.empty:
+            raise PromptValidationError(
+                "Tool handler parameter must be annotated with ParamsT.",
+                placeholder="handler",
+            )
+
+        params_annotation = annotation
+        if get_origin(params_annotation) is Annotated:
+            params_annotation = get_args(params_annotation)[0]
+        if get_origin(params_annotation) is Literal:
+            literal_args = get_args(params_annotation)
+            params_annotation = literal_args[0] if literal_args else params_annotation
+
+        return cast(ParamsType, _coerce_none_type(params_annotation))
+
+    @staticmethod
+    def _resolve_wrapped_result_annotation(
+        signature: inspect.Signature,
+        hints: dict[str, object],
+        params_type: ParamsType,
+    ) -> SupportsToolResult:
+        return_annotation = hints.get("return", signature.return_annotation)
+        if return_annotation is inspect.Signature.empty:
+            raise PromptValidationError(
+                "Tool handler must annotate its return value with ToolResult[ResultT].",
+                dataclass_type=params_type,
+                placeholder="return",
+            )
+        result_annotation = return_annotation
+        if get_origin(result_annotation) is Annotated:
+            result_annotation = get_args(result_annotation)[0]
+
+        if get_origin(result_annotation) is not ToolResult:
+            raise PromptValidationError(
+                "Tool handler return annotation must be ToolResult[ResultT].",
+                dataclass_type=params_type,
+                placeholder="return",
+            )
+
+        try:
+            result_arg = next(
+                iter(cast(tuple[object, ...], get_args(result_annotation)))
+            )
+        except StopIteration as error:
+            raise PromptValidationError(
+                "Tool handler return annotation must be ToolResult[ResultT].",
+                dataclass_type=params_type,
+                placeholder="return",
+            ) from error
+
+        return cast(SupportsToolResult, _coerce_none_type(result_arg))
+
+    @staticmethod
+    def wrap(
+        fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
+    ) -> Tool[ParamsT_runtime, ResultT_runtime]:
+        """Create a Tool from a handler using its name and docstring."""
+
+        description = Tool._resolve_wrapped_description(fn)
+
+        signature = inspect.signature(fn)
+        parameter = Tool._validate_parameter_count(
+            list(signature.parameters.values()),
+            _NONE_TYPE,
+        )[0]
+
+        hints = Tool._resolve_annotations(fn)
+        params_type: ParamsType = Tool._resolve_wrapped_params_type(parameter, hints)
+        normalized_result = cast(
+            ResultT_runtime,
+            Tool._resolve_wrapped_result_annotation(
+                signature,
+                hints,
+                params_type,
+            ),
+        )
+
+        tool_type = Tool.__class_getitem__((params_type, normalized_result))
+        specialized_tool_type = cast(
+            "type[Tool[ParamsT_runtime, ResultT_runtime]]",
+            tool_type,
+        )
+
+        handler_name = getattr(fn, "__name__", type(fn).__name__)
+
+        return specialized_tool_type(
+            name=handler_name,
+            description=description,
+            handler=fn,
         )
 
 
