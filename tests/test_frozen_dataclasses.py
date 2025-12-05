@@ -326,3 +326,59 @@ def test_dataclass_options_passthrough() -> None:
 
     # Order should work
     assert Mutable(1) < Mutable(2)  # type: ignore[operator]
+
+
+class _WithDerivedOps(Protocol):
+    value: int
+    derived: int
+
+    def update(self, **kwargs: object) -> Self: ...
+    def merge(self, source: object) -> Self: ...
+
+
+def test_copy_helpers_reject_changes_to_non_init_fields() -> None:
+    """Copy helpers reject attempts to change derived (non-init) fields."""
+
+    @FrozenDataclass()
+    class WithDerived:
+        value: int
+        derived: int = field(init=False, default=0)
+
+        @classmethod
+        def __pre_init__(cls, *, value: int) -> dict[str, int]:
+            return {"value": value, "derived": value * 2}
+
+    instance = cast(_WithDerivedOps, WithDerived(value=5))
+    assert instance.derived == 10
+
+    with pytest.raises(TypeError, match="cannot update derived field"):
+        instance.update(derived=20)
+
+    # merge() rejects unknown fields (non-init fields are not in merge's field list)
+    with pytest.raises(TypeError, match="received unexpected fields"):
+        instance.merge({"derived": 20})
+
+
+def test_copy_helpers_recompute_derived_fields() -> None:
+    """Copy helpers recompute non-init fields via __pre_init__."""
+
+    @FrozenDataclass()
+    class WithDerived:
+        value: int
+        derived: int = field(init=False, default=0)
+
+        @classmethod
+        def __pre_init__(cls, *, value: int) -> dict[str, int]:
+            return {"value": value, "derived": value * 2}
+
+    instance = cast(_WithDerivedOps, WithDerived(value=5))
+    assert instance.value == 5
+    assert instance.derived == 10
+
+    updated = instance.update(value=7)
+    assert updated.value == 7
+    assert updated.derived == 14  # Recomputed via __pre_init__
+
+    merged = instance.merge({"value": 3})
+    assert merged.value == 3
+    assert merged.derived == 6  # Recomputed via __pre_init__

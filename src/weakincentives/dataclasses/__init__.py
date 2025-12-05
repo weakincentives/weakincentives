@@ -119,28 +119,49 @@ def _build_pre_init_wrapper(
     pre_init: Callable[..., Mapping[str, object]],
     original_init: Callable[..., None],
 ) -> Callable[..., None]:
-    field_defs = [field for field in fields(cls) if field.init]
-    field_names = [field.name for field in field_defs]
+    all_fields = fields(cls)
+    init_field_defs = [field for field in all_fields if field.init]
+    init_field_names = [field.name for field in init_field_defs]
+    non_init_field_names = {field.name for field in all_fields if not field.init}
+    all_field_names = init_field_names + list(non_init_field_names)
+    # Get the underlying function from the classmethod to allow calling with
+    # the actual subclass type, not the class where __pre_init__ was defined.
+    pre_init_func = pre_init.__func__  # type: ignore[union-attr]
 
     def wrapper(self: object, *args: object, **kwargs: object) -> None:
-        if len(args) > len(field_defs):
+        actual_cls = type(self)
+        if len(args) > len(init_field_defs):
             raise TypeError(
-                f"{cls.__name__}() takes {len(field_defs)} positional arguments but {len(args)} were given"
+                f"{actual_cls.__name__}() takes {len(init_field_defs)} positional arguments but {len(args)} were given"
             )
 
         provided = dict(kwargs)
-        bound = _bind_fields(cls, field_defs, field_names, args, provided)
+        bound = _bind_fields(
+            actual_cls, init_field_defs, init_field_names, args, provided
+        )
         if provided:
             unexpected = ", ".join(sorted(provided))
             raise TypeError(
-                f"{cls.__name__}() got unexpected keyword arguments: {unexpected}"
+                f"{actual_cls.__name__}() got unexpected keyword arguments: {unexpected}"
             )
 
-        normalized = pre_init(**bound)
-        _ensure_mapping(cls, normalized)
-        _validate_normalized_fields(cls, field_names, normalized)
+        normalized = pre_init_func(actual_cls, **bound)
+        _ensure_mapping(actual_cls, normalized)
+        _validate_normalized_fields(
+            actual_cls, all_field_names, init_field_names, normalized
+        )
 
-        original_init(self, **normalized)
+        # Separate init and non-init fields
+        init_kwargs = {k: v for k, v in normalized.items() if k in init_field_names}
+        non_init_values = {
+            k: v for k, v in normalized.items() if k in non_init_field_names
+        }
+
+        original_init(self, **init_kwargs)
+
+        # Set non-init fields directly (bypassing frozen restriction)
+        for name, value in non_init_values.items():
+            object.__setattr__(self, name, value)
 
     return wrapper
 
@@ -179,12 +200,15 @@ def _ensure_mapping(cls: type[Any], value: object) -> None:
 
 
 def _validate_normalized_fields(
-    cls: type[Any], field_names: list[str], normalized: Mapping[str, object]
+    cls: type[Any],
+    all_field_names: list[str],
+    required_field_names: list[str],
+    normalized: Mapping[str, object],
 ) -> None:
-    unexpected = normalized.keys() - set(field_names)
+    unexpected = normalized.keys() - set(all_field_names)
     missing = {
         name
-        for name in field_names
+        for name in required_field_names
         if name not in normalized or normalized[name] is MISSING
     }
 
@@ -222,9 +246,11 @@ def _build_map_helper(cls: type[Any]) -> Callable[..., _SupportsUpdate]:
         self: _SupportsUpdate,
         transform: Callable[[dict[str, object]], Mapping[str, object]],
     ) -> _SupportsUpdate:
+        # Only expose init fields to transform (non-init fields are derived)
         current = {
-            field.name: getattr(self, field.name)
-            for field in fields(self)  # type: ignore[arg-type]
+            f.name: getattr(self, f.name)
+            for f in fields(self)  # type: ignore[arg-type]
+            if f.init
         }
         updates = transform(current)
         _ensure_mapping(cls, updates)
@@ -263,16 +289,34 @@ def _apply_changes(
 ) -> _SupportsUpdate:
     cls = type(instance)
     field_defs = fields(instance)  # type: ignore[arg-type]
-    values = {field.name: getattr(instance, field.name) for field in field_defs}
+    init_fields = [f for f in field_defs if f.init]
+    non_init_fields = [f for f in field_defs if not f.init]
+    init_field_names = {f.name for f in init_fields}
+    all_field_names = {f.name for f in field_defs}
 
-    unknown = set(changes) - values.keys()
+    # Validate changes against known fields
+    unknown = set(changes) - all_field_names
     if unknown:
         joined = ", ".join(sorted(unknown))
         raise TypeError(f"{cls.__name__}() got unexpected field(s): {joined}")
 
-    values.update(changes)
+    # Disallow direct changes to non-init (derived) fields
+    non_init_changes = set(changes) - init_field_names
+    if non_init_changes:
+        joined = ", ".join(sorted(non_init_changes))
+        raise TypeError(f"{cls.__name__}() cannot update derived field(s): {joined}")
+
+    # Collect current init-field values and apply changes
+    init_values = {f.name: getattr(instance, f.name) for f in init_fields}
+    init_values.update(changes)
+
+    # If class has non-init fields, call constructor so __pre_init__ recomputes them
+    if non_init_fields:
+        return cls(**init_values)
+
+    # Fast path: class has no derived fields, bypass __pre_init__
     new_instance = cls.__new__(cls)
-    for name, value in values.items():
+    for name, value in init_values.items():
         object.__setattr__(new_instance, name, value)
 
     post_init = getattr(new_instance, "__post_init__", None)

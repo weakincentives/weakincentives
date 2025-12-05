@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -23,6 +23,7 @@ from weakincentives.prompt import (
     PromptDescriptor,
     PromptTemplate,
     PromptValidationError,
+    SectionNode,
     SupportsDataclass,
 )
 from weakincentives.prompt.section import Section
@@ -73,9 +74,10 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         sections=[root],
     )
 
-    titles = [node.section.title for node in prompt.sections]
-    depths = [node.depth for node in prompt.sections]
-    paths = [node.path for node in prompt.sections]
+    sections = cast(tuple[SectionNode[Any], ...], prompt.sections)
+    titles = [node.section.title for node in sections]
+    depths = [node.depth for node in sections]
+    paths = [node.path for node in sections]
 
     assert titles == ["Root", "Child", "Sibling"]
     assert depths == [0, 1, 1]
@@ -245,12 +247,12 @@ def test_prompt_template_is_immutable() -> None:
     with pytest.raises(AttributeError):
         prompt.ns = "changed"
     with pytest.raises(AttributeError):
-        prompt.placeholders = {}
+        prompt.placeholders = {}  # type: ignore[misc]
     with pytest.raises(AttributeError):
         prompt.inject_output_instructions = False
 
 
-def test_prompt_descriptor_cached_during_initialization(
+def test_prompt_descriptor_cached_on_first_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     section = MarkdownSection[RootParams](
@@ -259,16 +261,39 @@ def test_prompt_descriptor_cached_during_initialization(
 
     prompt = PromptTemplate(ns="tests/prompts", key="descriptor", sections=[section])
 
+    # First access triggers lazy creation and caches the descriptor
+    first_descriptor = prompt.descriptor
+    assert first_descriptor.ns == "tests/prompts"
+
     def _fail(
         cls: type[PromptDescriptor], prompt_like: PromptTemplate[SupportsDataclass]
     ) -> PromptDescriptor:
-        raise AssertionError("from_prompt should not be invoked after initialization")
+        raise AssertionError("from_prompt should not be invoked after first access")
 
     monkeypatch.setattr(PromptDescriptor, "from_prompt", classmethod(_fail))
 
+    # Subsequent accesses should use the cached descriptor
     rendered = prompt.render(RootParams(title="hello"))
     bound_prompt = prompt.bind(RootParams(title="hello"))
 
-    assert prompt.descriptor.ns == "tests/prompts"
+    assert prompt.descriptor is first_descriptor
     assert bound_prompt.descriptor is prompt.descriptor
     assert "Root: hello" in rendered.text
+
+
+def test_prompt_missing_ns_raises_type_error() -> None:
+    section = MarkdownSection[RootParams](
+        title="Root", template="Root: ${title}", key="root"
+    )
+
+    with pytest.raises(TypeError, match="missing required argument: 'ns'"):
+        PromptTemplate(key="my-key", sections=[section])  # type: ignore[call-arg]
+
+
+def test_prompt_missing_key_raises_type_error() -> None:
+    section = MarkdownSection[RootParams](
+        title="Root", template="Root: ${title}", key="root"
+    )
+
+    with pytest.raises(TypeError, match="missing required argument: 'key'"):
+        PromptTemplate(ns="my-ns", sections=[section])  # type: ignore[call-arg]

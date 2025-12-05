@@ -190,7 +190,9 @@ def test_workspace_digest_override_applied_when_no_session_digest(
     prompt = build_task_prompt(session=session)
 
     digest_node = next(
-        node for node in prompt.sections if node.section.key == "workspace-digest"
+        node
+        for node in prompt.sections
+        if node.section.key == "workspace-digest"  # type: ignore[union-attr]
     )
     overrides_store.set_section_override(
         prompt,
@@ -214,7 +216,9 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     session = Session()
     prompt = build_task_prompt(session=session)
     digest_node = next(
-        node for node in prompt.sections if node.section.key == "workspace-digest"
+        node
+        for node in prompt.sections
+        if node.section.key == "workspace-digest"  # type: ignore[union-attr]
     )
 
     overrides_store.set_section_override(
