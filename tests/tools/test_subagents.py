@@ -743,8 +743,13 @@ def test_subagent_task_dataclass() -> None:
     assert task_no_steps.steps == ()
 
 
-def test_dispatch_subagents_filters_duplicate_planning_tools() -> None:
-    """Verify parent planning tools are replaced with standalone ones to avoid duplicates."""
+def test_dispatch_subagents_does_not_inherit_parent_tools() -> None:
+    """Verify parent tools are not passed to children in full isolation mode.
+
+    Parent tools may be bound to the parent session and would fail with
+    session mismatch errors. Children only receive planning tools bound
+    to their own session.
+    """
     from weakincentives.tools.planning import PlanningToolsSection
 
     bus = InProcessEventBus()
@@ -783,15 +788,14 @@ def test_dispatch_subagents_filters_duplicate_planning_tools() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        tasks=(SubagentTask(objective="test-dedup", steps=("Step 1",)),),
+        tasks=(SubagentTask(objective="test-no-inherit", steps=("Step 1",)),),
     )
 
     handler = dispatch_subagents.handler
     assert handler is not None
     result = handler(params, context=context)
 
-    # Should succeed without "Duplicate tool name" error
-    # Prior to the fix, this would fail with "Duplicate tool name registered"
+    # Should succeed - children get their own planning tools, not parent's
     assert result.success is True
     assert result.value is not None
     assert result.value[0].success is True

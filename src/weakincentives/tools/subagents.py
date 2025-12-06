@@ -44,12 +44,7 @@ from ..runtime.events._types import EventBus
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
 from ..serde import dump
-from .planning import (
-    Plan,
-    PlanStep,
-    build_standalone_planning_tools,
-    initialize_planning_session,
-)
+from .planning import Plan, PlanStep, initialize_planning_session
 
 
 class SubagentIsolationLevel(Enum):
@@ -241,15 +236,6 @@ _PLAN_DELEGATION_TEMPLATE: Final[str] = (
 )
 
 
-def _parent_has_planning_tools(rendered_parent: RenderedPromptProtocol[Any]) -> bool:
-    """Check if the parent prompt includes planning tools."""
-    planning_tool_names = {"planning_read_plan", "planning_update_step"}
-    for tool in rendered_parent.tools:
-        if getattr(tool, "name", None) in planning_tool_names:
-            return True
-    return False
-
-
 def _build_plan_delegation_prompt(
     *,
     parent_prompt: PromptProtocol[Any],
@@ -258,53 +244,22 @@ def _build_plan_delegation_prompt(
 ) -> Prompt[Any]:
     """Build a delegation prompt that instructs the child to complete its plan.
 
-    The prompt includes parent tools and planning tools, with instructions to
-    complete all steps in the pre-populated plan.
-
-    If the parent already has planning tools, they are filtered out and the
-    delegation section includes the remaining parent tools. If the parent
-    does not have planning tools, a PlanningToolsSection is added bound to
-    the child session.
+    The child receives only planning tools bound to its session. Parent tools
+    are NOT inherited because they may be bound to the parent session and would
+    fail with session mismatch errors in full isolation mode.
     """
     from ..prompt import PromptTemplate
     from .planning import PlanningToolsSection
 
-    # Check if parent has planning tools
-    parent_has_planning = _parent_has_planning_tools(rendered_parent)
+    # Create delegation section with instructions (no tools attached here)
+    delegation_section = MarkdownSection[_PlanDelegationParams](
+        title="Subagent Task",
+        key="subagent-task",
+        template=_PLAN_DELEGATION_TEMPLATE,
+    )
 
-    if parent_has_planning:
-        # Filter out planning tools from parent - child session already has
-        # planning reducers registered and will use its own tools
-        planning_tool_names = {"planning_read_plan", "planning_update_step"}
-        parent_tools = tuple(
-            t
-            for t in rendered_parent.tools
-            if getattr(t, "name", None) not in planning_tool_names
-        )
-        # Combine with standalone planning tools for the child's session
-        planning_tools = build_standalone_planning_tools()
-        combined_tools = (*parent_tools, *planning_tools)
-
-        # Create a section for the delegation instructions with tools
-        delegation_section = MarkdownSection[_PlanDelegationParams](
-            title="Subagent Task",
-            key="subagent-task",
-            template=_PLAN_DELEGATION_TEMPLATE,
-            tools=combined_tools,
-        )
-        sections: tuple[object, ...] = (delegation_section,)
-    else:
-        # Parent doesn't have planning tools - add PlanningToolsSection
-        # Create delegation section with only parent tools
-        delegation_section = MarkdownSection[_PlanDelegationParams](
-            title="Subagent Task",
-            key="subagent-task",
-            template=_PLAN_DELEGATION_TEMPLATE,
-            tools=rendered_parent.tools,
-        )
-        # Add PlanningToolsSection bound to the child session
-        planning_section = PlanningToolsSection(session=child_session)
-        sections = (delegation_section, planning_section)
+    # Add PlanningToolsSection bound to the child session
+    planning_section = PlanningToolsSection(session=child_session)
 
     # Get the output type from the parent prompt - already validated as dataclass
     output_type = rendered_parent.output_type
@@ -316,7 +271,7 @@ def _build_plan_delegation_prompt(
     delegation_prompt = prompt_cls(
         ns=f"{parent_prompt.ns}.subagent",
         key=f"{parent_prompt.key}-delegation",
-        sections=sections,
+        sections=(delegation_section, planning_section),
         inject_output_instructions=False,
         allow_extra_keys=bool(rendered_parent.allow_extra_keys),
     )
