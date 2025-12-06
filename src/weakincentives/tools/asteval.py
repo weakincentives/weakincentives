@@ -38,7 +38,6 @@ from ..runtime.session import (
     ReducerEventWithValue,
     Session,
     TypedReducer,
-    select_latest,
 )
 from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
@@ -672,7 +671,7 @@ class _AstevalToolSuite:
         if read_paths & write_paths:
             raise ToolValidationError("Reads and writes must not target the same path.")
 
-        snapshot = select_latest(session, VirtualFileSystem) or VirtualFileSystem()
+        snapshot = session.query(VirtualFileSystem).latest() or VirtualFileSystem()
         read_globals = _build_eval_globals(snapshot, reads)
         user_globals = _parse_user_globals(params.globals)
 

@@ -34,7 +34,6 @@ from ..runtime.session import (
     Session,
     TypedReducer,
     replace_latest,
-    select_latest,
 )
 from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
@@ -667,7 +666,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         )
 
     def latest_snapshot(self) -> VirtualFileSystem:
-        snapshot = select_latest(self._session, VirtualFileSystem)
+        snapshot = self._session.query(VirtualFileSystem).latest()
         return snapshot or VirtualFileSystem()
 
     @override

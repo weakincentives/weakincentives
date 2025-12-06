@@ -219,10 +219,9 @@ review: ReviewResponse = response.output  # typed, validated
 Every action is recorded. Query the session for plans, tool calls, or any slice:
 
 ```python
-from weakincentives.runtime.session import select_latest
 from weakincentives.tools.planning import Plan
 
-plan = select_latest(session, Plan)
+plan = session.query(Plan).latest()
 if plan:
     for step in plan.steps:
         print(f"[{step.status}] {step.title}")

@@ -28,6 +28,7 @@ from .events import (
 from .logging import StructuredLogger, configure_logging, get_logger
 from .session import (
     DataEvent,
+    QueryBuilder,
     ReducerContext,
     ReducerContextProtocol,
     ReducerEvent,
@@ -44,9 +45,6 @@ from .session import (
     iter_sessions_bottom_up,
     replace_latest,
     replace_latest_by,
-    select_all,
-    select_latest,
-    select_where,
     upsert_by,
 )
 
@@ -58,6 +56,7 @@ __all__ = [
     "PromptExecuted",
     "PromptRendered",
     "PublishResult",
+    "QueryBuilder",
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
@@ -80,9 +79,6 @@ __all__ = [
     "iter_sessions_bottom_up",
     "replace_latest",
     "replace_latest_by",
-    "select_all",
-    "select_latest",
-    "select_where",
     "session",
     "upsert_by",
 ]

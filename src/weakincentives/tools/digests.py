@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import textwrap
-from typing import cast, override
+from typing import override
 
 from ..dataclasses import FrozenDataclass
 from ..prompt._types import SupportsDataclass
@@ -51,7 +51,7 @@ def set_workspace_digest(
     entry = WorkspaceDigest(section_key=normalized_key, body=body.strip())
     existing = tuple(
         digest
-        for digest in session.select_all(WorkspaceDigest)
+        for digest in session.query(WorkspaceDigest).all()
         if getattr(digest, "section_key", None) != normalized_key
     )
     session.seed_slice(WorkspaceDigest, (*existing, entry))
@@ -76,7 +76,7 @@ def latest_workspace_digest(
 
     normalized_key = _normalized_key(section_key)
 
-    entries = cast(tuple[WorkspaceDigest, ...], session.select_all(WorkspaceDigest))
+    entries = session.query(WorkspaceDigest).all()
     for digest in reversed(entries):
         if getattr(digest, "section_key", None) == normalized_key:
             return digest

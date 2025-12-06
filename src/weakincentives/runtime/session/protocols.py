@@ -15,11 +15,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from typing import Protocol, Self
+from typing import TYPE_CHECKING, Protocol, Self
 
 from ...prompt._types import SupportsDataclass
 from ..events._types import EventBus
 from .snapshots import Snapshot
+
+if TYPE_CHECKING:
+    from .query import QueryBuilder
 
 type SnapshotProtocol = Snapshot
 
@@ -39,6 +42,8 @@ class SessionProtocol(Protocol):
     def select_all(
         self, slice_type: type[SupportsDataclass]
     ) -> tuple[SupportsDataclass, ...]: ...
+
+    def query[T: SupportsDataclass](self, slice_type: type[T]) -> QueryBuilder[T]: ...
 
     def seed_slice(
         self,

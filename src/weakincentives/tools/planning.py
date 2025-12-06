@@ -31,7 +31,6 @@ from ..runtime.session import (
     ReducerEventWithValue,
     Session,
     replace_latest,
-    select_latest,
 )
 from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
@@ -437,7 +436,7 @@ class _PlanningToolSuite:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
-        plan = select_latest(session, Plan)
+        plan = session.query(Plan).latest()
         if plan is None:
             message = "No plan is currently initialised."
             raise ToolValidationError(message)
@@ -563,7 +562,7 @@ def _normalize_text(value: str, field_name: str) -> str:
 
 
 def _require_plan(session: Session) -> Plan:
-    plan = select_latest(session, Plan)
+    plan = session.query(Plan).latest()
     if plan is None:
         message = "No plan is currently initialised."
         raise ToolValidationError(message)

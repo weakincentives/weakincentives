@@ -32,6 +32,7 @@ from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
 from .protocols import SessionProtocol, SnapshotProtocol
+from .query import QueryBuilder
 from .reducers import append
 from .snapshots import (
     Snapshot,
@@ -265,6 +266,19 @@ class Session(SessionProtocol):
         """Return the tuple slice maintained for the provided type."""
 
         return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
+
+    @override
+    def query[S: SupportsDataclass](self, slice_type: type[S]) -> QueryBuilder[S]:
+        """Return a query builder for fluent slice queries.
+
+        Usage::
+
+            session.query(Plan).latest()
+            session.query(Plan).all()
+            session.query(Plan).where(lambda p: p.active)
+
+        """
+        return QueryBuilder(self, slice_type)
 
     @override
     @_locked_method
@@ -522,6 +536,7 @@ class Session(SessionProtocol):
 
 __all__ = [
     "DataEvent",
+    "QueryBuilder",
     "Session",
     "TypedReducer",
 ]

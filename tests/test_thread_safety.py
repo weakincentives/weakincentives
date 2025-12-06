@@ -143,13 +143,13 @@ def test_session_collects_tool_data_across_threads(
         for future in futures:
             future.result()
 
-    tool_data = session.select_all(ToolInvoked)
+    tool_data = session.query(ToolInvoked).all()
     assert len(tool_data) == total_events
     assert {data.call_id for data in tool_data} == {
         str(index) for index in range(total_events)
     }
 
-    result_slice = session.select_all(ExampleResult)
+    result_slice = session.query(ExampleResult).all()
     assert len(result_slice) == total_events
     assert {value.value for value in result_slice} == set(range(total_events))
 
@@ -197,8 +197,8 @@ def test_session_snapshots_restore_across_threads(
         restored.seed_slice(ExampleResult, ())
         restored.rollback(snapshot)
 
-        restored_tool_events = restored.select_all(ToolInvoked)
-        restored_results = restored.select_all(ExampleResult)
+        restored_tool_events = restored.query(ToolInvoked).all()
+        restored_results = restored.query(ExampleResult).all()
 
         assert restored_tool_events == expected_tool_events
         assert restored_results == expected_results
@@ -273,8 +273,8 @@ def test_code_reviewer_session_reset_clears_runtime_state(tmp_path: Path) -> Non
     session = context.session
     session.seed_slice(ExampleResult, (seeded_value,))
 
-    assert session.select_all(ExampleResult) == (seeded_value,)
+    assert session.query(ExampleResult).all() == (seeded_value,)
 
     session.reset()
 
-    assert session.select_all(ExampleResult) == ()
+    assert session.query(ExampleResult).all() == ()

@@ -19,9 +19,9 @@ from ._types import (
     TypedReducer,
 )
 from .protocols import SessionProtocol, SnapshotProtocol
+from .query import QueryBuilder
 from .reducer_context import ReducerContext, build_reducer_context
 from .reducers import append, replace_latest, replace_latest_by, upsert_by
-from .selectors import select_all, select_latest, select_where
 from .session import DataEvent, Session, iter_sessions_bottom_up
 from .snapshots import (
     Snapshot,
@@ -31,6 +31,7 @@ from .snapshots import (
 
 __all__ = [
     "DataEvent",
+    "QueryBuilder",
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
@@ -47,8 +48,5 @@ __all__ = [
     "iter_sessions_bottom_up",
     "replace_latest",
     "replace_latest_by",
-    "select_all",
-    "select_latest",
-    "select_where",
     "upsert_by",
 ]

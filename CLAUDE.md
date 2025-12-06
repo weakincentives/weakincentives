@@ -178,13 +178,13 @@ prompt = Prompt[OutputType](
 
 ```python
 from weakincentives.runtime import Session, InProcessEventBus
-from weakincentives.runtime.session import select_latest, append
+from weakincentives.runtime.session import append
 
 bus = InProcessEventBus()
 session = Session(bus=bus)
 
 # Query state
-plan = select_latest(session, Plan)
+plan = session.query(Plan).latest()
 
 # Append events (reducers handle state updates)
 session = append(session, my_event)
