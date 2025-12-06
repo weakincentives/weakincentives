@@ -12,6 +12,7 @@ exclude = [
     "integration-tests",
     "build",
     "dist",
+    "src/examples/**",
     "src/weakincentives/prompt/**",
     "src/weakincentives/tools/**",
 ]
