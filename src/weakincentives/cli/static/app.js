@@ -64,6 +64,11 @@ const elements = {
   shortcutsOverlay: document.getElementById("shortcuts-overlay"),
   shortcutsClose: document.getElementById("shortcuts-close"),
   helpButton: document.getElementById("help-button"),
+  // Markdown modal elements
+  markdownModal: document.getElementById("markdown-modal"),
+  markdownModalClose: document.getElementById("markdown-modal-close"),
+  markdownModalTitle: document.getElementById("markdown-modal-title"),
+  markdownModalBody: document.getElementById("markdown-modal-body"),
   // Layout element for sidebar toggle
   layout: document.querySelector(".layout"),
 };
@@ -387,6 +392,27 @@ function toggleShortcuts() {
 elements.shortcutsClose.addEventListener("click", closeShortcuts);
 elements.shortcutsOverlay.querySelector(".shortcuts-backdrop").addEventListener("click", closeShortcuts);
 elements.helpButton.addEventListener("click", openShortcuts);
+
+// --- Markdown Modal ---
+
+function openMarkdownModal(title, html) {
+  elements.markdownModalTitle.textContent = title;
+  const rendered = document.createElement("div");
+  rendered.className = "markdown-rendered";
+  rendered.innerHTML = html;
+  elements.markdownModalBody.innerHTML = "";
+  elements.markdownModalBody.appendChild(rendered);
+  elements.markdownModal.classList.remove("hidden");
+}
+
+function closeMarkdownModal() {
+  elements.markdownModal.classList.add("hidden");
+  elements.markdownModalBody.innerHTML = "";
+}
+
+// Markdown modal event listeners
+elements.markdownModalClose.addEventListener("click", closeMarkdownModal);
+elements.markdownModal.querySelector(".markdown-modal-backdrop").addEventListener("click", closeMarkdownModal);
 
 // --- Item Navigation (J/K) ---
 
@@ -871,7 +897,7 @@ const isPrimitive = (value) =>
 const isSimpleArray = (value) =>
   Array.isArray(value) && value.every((item) => isPrimitive(item));
 
-// Check if a key or value matches the object filter query
+// Check if a key matches the object filter query (property names only)
 function matchesObjectFilter(key, value, query) {
   if (!query) return true;
   const lowerQuery = query.toLowerCase();
@@ -881,14 +907,9 @@ function matchesObjectFilter(key, value, query) {
     return true;
   }
 
-  // Check if primitive value matches
-  if (isPrimitive(value)) {
-    return String(value).toLowerCase().includes(lowerQuery);
-  }
-
-  // For objects and arrays, check if any child matches
+  // For objects and arrays, check if any child key matches
   if (Array.isArray(value)) {
-    return value.some((item, index) => matchesObjectFilter(String(index), item, query));
+    return value.some((item, index) => matchesObjectFilter(null, item, query));
   }
 
   if (typeof value === "object" && value !== null) {
@@ -896,6 +917,12 @@ function matchesObjectFilter(key, value, query) {
   }
 
   return false;
+}
+
+// Check if a key directly matches the query (for highlighting)
+function keyMatchesFilter(key, query) {
+  if (!query || !key) return false;
+  return key.toLowerCase().includes(query.toLowerCase());
 }
 
 // Filter an object/array to only include matching properties
@@ -1088,7 +1115,13 @@ function renderTree(value, path, depth, label) {
 
   const name = document.createElement("span");
   name.className = "tree-label";
-  name.textContent = label;
+  // Highlight matching property names when object filter is active
+  if (state.objectFilterQuery && keyMatchesFilter(label, state.objectFilterQuery)) {
+    name.innerHTML = highlightMatch(label, state.objectFilterQuery);
+    name.classList.add("filter-match");
+  } else {
+    name.textContent = label;
+  }
   header.appendChild(name);
 
   const badge = document.createElement("span");
@@ -1167,6 +1200,28 @@ function renderTree(value, path, depth, label) {
       renderedSection.className = "markdown-section";
       renderedSection.appendChild(renderedLabel);
       renderedSection.appendChild(rendered);
+
+      // Add controls with pop-out button for rendered section
+      const renderedControls = document.createElement("div");
+      renderedControls.className = "markdown-controls";
+
+      const popoutButton = document.createElement("button");
+      popoutButton.type = "button";
+      popoutButton.className = "markdown-expand-btn";
+      popoutButton.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <polyline points="9 21 3 21 3 15"></polyline>
+          <line x1="21" y1="3" x2="14" y2="10"></line>
+          <line x1="3" y1="21" x2="10" y2="14"></line>
+        </svg>
+        Pop out
+      `;
+      popoutButton.addEventListener("click", () => {
+        openMarkdownModal(label, markdown.html);
+      });
+      renderedControls.appendChild(popoutButton);
+      renderedSection.appendChild(renderedControls);
 
       const rawSection = document.createElement("div");
       rawSection.className = "markdown-section";
@@ -1446,6 +1501,11 @@ document.addEventListener("keydown", (event) => {
       closeShortcuts();
       return;
     }
+    if (!elements.markdownModal.classList.contains("hidden")) {
+      event.preventDefault();
+      closeMarkdownModal();
+      return;
+    }
     // Clear search if focused
     if (document.activeElement === elements.itemSearch && elements.itemSearch.value) {
       event.preventDefault();
@@ -1481,7 +1541,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   // Don't process other shortcuts if a dialog is open
-  if (state.commandPaletteOpen || state.shortcutsOpen) {
+  if (state.commandPaletteOpen || state.shortcutsOpen || !elements.markdownModal.classList.contains("hidden")) {
     return;
   }
 
