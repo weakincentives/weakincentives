@@ -114,9 +114,44 @@ extend-select = [
     "TRY",
     "PLR",
     "PERF",
+    "PT",      # pytest style
+    "ERA",     # commented-out code
+    "ARG",     # unused arguments
+    "T20",     # print statements
+    "PIE",     # misc lints
+    "DTZ",     # datetime timezone
+    "LOG",     # logging
+    "TC",      # type-checking imports
+    "SLOT",    # __slots__
+    "FA",      # future annotations
+    "FBT",     # boolean trap
+    "FURB",    # refurb modernization
+    "PLC",     # pylint convention
+    "PLE",     # pylint error
+    "PLW",     # pylint warning
 ]
-extend-ignore = ["TRY003"]
-fixable = ["I001", "F401"]
+extend-ignore = [
+    "TRY003",   # long exception messages
+    "TC006",    # runtime-cast-value (stylistic - quoting in cast())
+    "TC001",    # move app imports to TYPE_CHECKING (invasive change)
+    "TC002",    # move third-party imports to TYPE_CHECKING
+    "TC003",    # move stdlib imports to TYPE_CHECKING
+    "TC008",    # quote forward references
+    "FBT001",   # boolean positional arg (legitimate API design)
+    "FBT002",   # boolean default in function def
+    "PLC0415",  # import outside top-level (intentional lazy imports)
+    "PLC1901",  # compare to empty string (explicit is clearer than falsey check)
+    "PLC2801",  # object.__setattr__ required for frozen dataclasses
+    "PLC0105",  # TypeVar naming variance suffix (stylistic)
+    "FURB110",  # ternary vs or operator (explicit is clearer)
+    "FURB113",  # extend vs append (less readable with mixed logic)
+    "FURB118",  # itemgetter vs lambda (lambda more readable)
+    "FURB142",  # extend vs add loop (often less readable)
+    "FURB189",  # subclassing str/dict (legitimate pattern)
+    "PIE807",   # prefer dict over lambda (lambda can be intentional)
+    "PLW0108",  # unnecessary lambda (can be intentional for lazy eval)
+]
+fixable = ["I001", "F401", "TC001", "TC002", "TC003", "FA100", "UP006", "UP007"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["weakincentives"]
@@ -124,13 +159,52 @@ combine-as-imports = true
 
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
-"tests/**" = ["PLR2004", "PLR0913", "PLR0914"]
-"src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
+"tests/**" = [
+    "PLR2004",  # magic values
+    "PLR0913",  # too many arguments
+    "PLR0914",  # too many locals
+    "PLC2701",  # import-private-name (intentional for testing internals)
+    "ARG001",   # unused-function-argument (fixtures, protocols)
+    "ARG002",   # unused-method-argument
+    "ARG004",   # unused-static-method-argument
+    "ARG005",   # unused-lambda-argument (test stubs)
+    "PT001",    # @pytest.fixture() vs @pytest.fixture
+    "PT006",    # parametrize arg type
+    "PT007",    # parametrize values type
+    "PT011",    # pytest.raises too broad (acceptable in tests)
+    "PT012",    # pytest.raises block single statement
+    "PT013",    # import pytest style
+    "PT018",    # composite assertion
+    "PT019",    # fixture without value
+    "PLW3201",  # custom dunder methods (__pre_init__, __validate__)
+    "FBT001",   # boolean positional arg
+    "FBT003",   # boolean positional value
+    "DTZ001",   # naive datetime (intentional for testing validation)
+    "DTZ005",   # datetime.now without tz (intentional for testing)
+    "PLW1514",  # read_text/write_text without encoding (test files)
+    "SLOT000",  # __slots__ in test classes
+    "FURB156",  # hardcoded charset (test data)
+]
+"integration-tests/**" = [
+    "PLR2004",  # magic values
+    "PLC2701",  # import-private-name
+    "ARG001",   # unused arguments
+    "DTZ001",   # naive datetime
+    "DTZ005",   # datetime.now without tz
+    "PT018",    # composite assertion
+]
+# Example and CLI files use print() for user interaction
+"code_reviewer_example.py" = ["T201", "ARG001"]
+"src/weakincentives/debug.py" = ["FBT003"]
+"src/weakincentives/cli/**" = ["T201"]
+"src/weakincentives/prompt/overrides/validation.py" = ["PLR0913", "ARG001"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
+"src/weakincentives/prompt/progressive_disclosure.py" = ["ARG001"]
 "src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/adapters/openai.py" = ["PLR0913"]
-"src/weakincentives/dbc/__init__.py" = ["PLR0913"]
+"src/weakincentives/dataclasses/__init__.py" = ["ARG001"]
+"src/weakincentives/dbc/__init__.py" = ["PLR0913", "ARG001", "PLW0603"]
 "src/weakincentives/prompt/_enabled_predicate.py" = ["PLR6201"]
 "src/weakincentives/prompt/composition.py" = ["PLR6301"]
 "src/weakincentives/prompt/markdown.py" = ["PLR0913"]
@@ -138,13 +212,21 @@ combine-as-imports = true
 "src/weakincentives/prompt/section.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/structured_output.py" = ["PLR0913"]
 "src/weakincentives/prompt/tool_result.py" = ["PLR0911"]
+"src/weakincentives/runtime/session/reducers.py" = ["ARG001"]
 "src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915"]
-"src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
+"src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004", "ARG001"]
 "src/weakincentives/tools/asteval.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
-"src/weakincentives/tools/planning.py" = ["PLR6301"]
+"src/weakincentives/tools/planning.py" = ["PLR6301", "ARG001"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.ruff.lint.pylint]
+# Custom dunder methods used by the library's dataclass system
+allow-dunder-method-names = ["__pre_init__", "__validate__", "__post_validate__"]
+
+[tool.ruff.lint.flake8-pytest-style]
+raises-require-match-for = []  # Don't require match= for any exception types
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Version 2.0 \(the "License"\);

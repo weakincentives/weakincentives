@@ -140,7 +140,7 @@ def load_snapshot(snapshot_path: Path) -> tuple[LoadedSnapshot, ...]:
         raise SnapshotLoadError(msg)
 
     try:
-        raw_text = snapshot_path.read_text()
+        raw_text = snapshot_path.read_text(encoding="utf-8")
     except OSError as error:  # pragma: no cover - filesystem failures are unlikely
         msg = f"Snapshot file cannot be read: {snapshot_path}"
         raise SnapshotLoadError(msg) from error

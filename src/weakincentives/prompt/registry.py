@@ -384,7 +384,7 @@ class PromptRegistry:
         self._placeholders[path] = set(section_placeholders)
         if params_type is None:
             if section_placeholders:
-                placeholder = sorted(section_placeholders)[0]
+                placeholder = min(section_placeholders)
                 raise PromptValidationError(
                     "Section does not accept parameters but declares placeholders.",
                     section_path=path,
@@ -395,7 +395,7 @@ class PromptRegistry:
         param_fields = {field.name for field in fields(params_type)}
         unknown_placeholders = section_placeholders - param_fields
         if unknown_placeholders:
-            placeholder = sorted(unknown_placeholders)[0]
+            placeholder = min(unknown_placeholders)
             raise PromptValidationError(
                 "Template references unknown placeholder.",
                 section_path=path,

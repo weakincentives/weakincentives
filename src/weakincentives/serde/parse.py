@@ -133,7 +133,7 @@ def _coerce_union(
         return _apply_constraints(coerced, merged_meta, path)
     if last_error is not None:
         message = str(last_error)
-        if message.startswith(f"{path}:") or message.startswith(f"{path}."):
+        if message.startswith((f"{path}:", f"{path}.")):
             raise last_error
         if isinstance(last_error, TypeError):
             raise TypeError(f"{path}: {message}") from last_error

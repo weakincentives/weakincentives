@@ -440,6 +440,7 @@ def _default_exec_runner(
         text=True if text is None else text,
         capture_output=True if capture_output is None else capture_output,
         timeout=timeout,
+        check=False,
     )
     return cast(subprocess.CompletedProcess[str], completed)
 

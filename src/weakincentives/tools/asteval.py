@@ -279,8 +279,6 @@ class EvalResult:
 class _AstevalSectionParams:
     """Placeholder params container for the asteval section."""
 
-    pass
-
 
 def _now() -> datetime:
     value = datetime.now(UTC)

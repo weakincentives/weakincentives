@@ -659,10 +659,11 @@ def _handle_unexpected_tool_error(
     provider_payload: dict[str, Any] | None,
     error: Exception,
 ) -> ToolResult[SupportsToolResult]:
-    log.exception(
+    log.error(
         "Tool handler raised an unexpected exception.",
         event="tool_handler_exception",
         context={"provider_payload": provider_payload},
+        exc_info=error,
     )
     return ToolResult(
         message=f"Tool '{tool_name}' execution failed: {error}",
