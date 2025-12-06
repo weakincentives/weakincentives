@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import textwrap
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
@@ -41,6 +41,8 @@ from weakincentives.prompt import (
     PromptTemplate,
     SectionVisibility,
     SupportsDataclass,
+    Task,
+    TaskSection,
     VisibilityExpansionRequired,
 )
 from weakincentives.prompt.errors import SectionPath
@@ -108,10 +110,20 @@ class ReviewGuidance:
 
 
 @dataclass(slots=True, frozen=True)
-class ReviewTurnParams:
-    """Dataclass for dynamic parameters provided at runtime."""
+class CodeReviewTask(Task):
+    """Task for code review requests.
 
-    request: str = field(metadata={"description": "User-provided review request."})
+    Extends the base Task with optional fields for code review focus.
+    """
+
+    files: tuple[str, ...] | None = field(
+        default=None,
+        metadata={"description": "Specific files to focus the review on."},
+    )
+    focus: str | None = field(
+        default=None,
+        metadata={"description": "Review focus such as 'security' or 'performance'."},
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -203,9 +215,11 @@ class CodeReviewApp:
 
         When the model requests expanded sections via `open_sections`, this method
         catches the VisibilityExpansionRequired exception, updates visibility
-        overrides, and retries evaluation with the expanded content.
+        overrides, and retries evaluation with the expanded content. The task
+        is rebinded with expansion instructions to provide continuity.
         """
-        bound_prompt = self.prompt.bind(ReviewTurnParams(request=user_prompt))
+        task = CodeReviewTask(request=user_prompt)
+        bound_prompt = self.prompt.bind(task)
 
         while True:
             try:
@@ -224,6 +238,9 @@ class CodeReviewApp:
                     e.reason,
                 )
                 self.visibility_overrides.update(e.requested_overrides)
+                # Rebind with expansion instructions for continuity
+                task = replace(task, expansion_instructions=e.expansion_instructions)
+                bound_prompt = self.prompt.bind(task)
                 # Continue loop to retry with expanded visibility
 
     def _handle_optimize_command(self) -> None:
@@ -290,11 +307,7 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
             accepts_overrides=True,
         ),
         workspace_section,
-        MarkdownSection[ReviewTurnParams](
-            title="Review Request",
-            template="${request}",
-            key="review-request",
-        ),
+        TaskSection[CodeReviewTask](title="Review Task", key="review-task"),
     )
     return PromptTemplate[ReviewResponse](
         ns="examples/code-review",

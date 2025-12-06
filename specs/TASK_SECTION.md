@@ -210,11 +210,11 @@ Update the evaluation loop to rebind with expansion instructions as shown above.
 
 ## Implementation Checklist
 
-- [ ] `Task` base dataclass with `expansion_instructions` field
-- [ ] `TaskSection` component with expansion block rendering
-- [ ] Add `expansion_instructions` to `VisibilityExpansionRequired`
-- [ ] Update `open_sections` handler to populate instructions
-- [ ] Migrate code reviewer example
+- [x] `Task` base dataclass with `expansion_instructions` field
+- [x] `TaskSection` component with expansion block rendering
+- [x] Add `expansion_instructions` to `VisibilityExpansionRequired`
+- [x] Update `open_sections` handler to populate instructions
+- [x] Migrate code reviewer example
 
 ## Testing Requirements
 

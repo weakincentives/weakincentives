@@ -51,7 +51,7 @@ from .overrides import (
     hash_json,
     hash_text,
 )
-from .progressive_disclosure import OpenSectionsParams
+from .progressive_disclosure import OpenSectionsParams, build_expansion_instructions
 from .prompt import Prompt, PromptTemplate, SectionNode
 from .protocols import (
     PromptProtocol,
@@ -66,6 +66,7 @@ from .structured_output import (
     StructuredOutputConfig,
     parse_structured_output,
 )
+from .task import Task, TaskSection
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
@@ -106,6 +107,8 @@ __all__ = [
     "SupportsDataclass",
     "SupportsDataclassOrNone",
     "SupportsToolResult",
+    "Task",
+    "TaskSection",
     "Tool",
     "ToolContext",
     "ToolDescriptor",
@@ -115,6 +118,7 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "VisibilityExpansionRequired",
+    "build_expansion_instructions",
     "hash_json",
     "hash_text",
     "parse_structured_output",
