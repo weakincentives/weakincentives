@@ -208,30 +208,6 @@ def _normalize_tool_arguments(arguments: object) -> str | None:
         return str(arguments)
 
 
-def _normalize_tool_call(call: object) -> ProviderToolCallData:
-    call_id = getattr(call, "id", None)
-    function_obj = getattr(call, "function", None)
-    if isinstance(call, Mapping):
-        mapping_call = cast(Mapping[str, object], call)
-        call_id = mapping_call.get("id", call_id)
-        function_obj = mapping_call.get("function", function_obj)
-
-    function_name = getattr(function_obj, "name", None)
-    arguments_obj = getattr(function_obj, "arguments", None)
-    if isinstance(function_obj, Mapping):
-        function_mapping = cast(Mapping[str, object], function_obj)
-        function_name = function_mapping.get("name", function_name)
-        arguments_obj = function_mapping.get("arguments", arguments_obj)
-
-    return ProviderToolCallData(
-        id=str(call_id) if call_id is not None else None,
-        function=ProviderFunctionCallData(
-            name=function_name if isinstance(function_name, str) else "tool",
-            arguments=_normalize_tool_arguments(arguments_obj),
-        ),
-    )
-
-
 def _tool_call_from_output(output: object) -> ProviderToolCallData | None:
     name = getattr(output, "name", None)
     arguments_obj = getattr(output, "arguments", None)
@@ -249,18 +225,6 @@ def _tool_call_from_output(output: object) -> ProviderToolCallData | None:
             arguments=_normalize_tool_arguments(arguments_obj),
         ),
     )
-
-
-def _tool_calls_from_content(parts: Sequence[object]) -> list[ProviderToolCallData]:
-    for part in parts:
-        tool_calls_obj = getattr(part, "tool_calls", None)
-        if tool_calls_obj is None and isinstance(part, Mapping):
-            mapping_part = cast(Mapping[str, object], part)
-            tool_calls_obj = mapping_part.get("tool_calls")
-        if tool_calls_obj:
-            tool_calls = cast(Sequence[object], tool_calls_obj)
-            return [_normalize_tool_call(call) for call in tool_calls]
-    return []
 
 
 def _parsed_from_content(parts: Sequence[object]) -> object | None:
@@ -543,11 +507,10 @@ def _choice_from_response(response: object, *, prompt_name: str) -> ProviderChoi
         content_output = fallback_output
 
     content_parts = _content_from_output(content_output, prompt_name=prompt_name)
-    legacy_tool_calls = _tool_calls_from_content(content_parts)
     parsed = _parsed_from_content(content_parts)
     message = ProviderMessageData(
         content=_normalize_content_parts(content_parts),
-        tool_calls=tuple(legacy_tool_calls) if legacy_tool_calls else None,
+        tool_calls=None,
         parsed=parsed,
     )
     return ProviderChoiceData(message=message)
