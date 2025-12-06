@@ -750,6 +750,9 @@ button.ghost:hover {
   border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 12px;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
 }
 
 .markdown-rendered code {
@@ -758,6 +761,7 @@ button.ghost:hover {
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 12px;
+  word-break: break-all;
 }
 
 .markdown-rendered pre {
@@ -765,6 +769,13 @@ button.ghost:hover {
   padding: 10px;
   border-radius: 6px;
   overflow-x: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
+.markdown-rendered pre code {
+  word-break: break-word;
 }
 
 .markdown-raw {
