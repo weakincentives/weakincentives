@@ -554,3 +554,164 @@ def test_planning_tools_section_allows_configuring_overrides() -> None:
     assert add_tool.accepts_overrides is True
     assert read_tool.accepts_overrides is True
     assert setup_tool.accepts_overrides is True
+
+
+# ---------------------------------------------------------------------------
+# Standalone planning tools tests
+# ---------------------------------------------------------------------------
+
+
+def test_standalone_read_plan_returns_plan_from_context_session() -> None:
+    from weakincentives.tools.planning import (
+        ReadPlan,
+        build_standalone_planning_tools,
+        initialize_planning_session,
+    )
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    initialize_planning_session(session)
+
+    # Seed a plan into the session
+    session.seed_slice(
+        Plan,
+        (Plan(objective="test", status="active", steps=()),),
+    )
+
+    tools = build_standalone_planning_tools()
+    read_tool = next(t for t in tools if t.name == "planning_read_plan")
+    context = build_tool_context(bus, session)
+
+    result = read_tool.handler(ReadPlan(), context=context)
+    assert result.success is True
+    assert result.value is not None
+    assert result.value.objective == "test"
+
+
+def test_standalone_read_plan_fails_without_plan() -> None:
+    from weakincentives.tools.planning import (
+        ReadPlan,
+        build_standalone_planning_tools,
+        initialize_planning_session,
+    )
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    initialize_planning_session(session)
+
+    tools = build_standalone_planning_tools()
+    read_tool = next(t for t in tools if t.name == "planning_read_plan")
+    context = build_tool_context(bus, session)
+
+    result = read_tool.handler(ReadPlan(), context=context)
+    assert result.success is False
+    assert "No plan" in result.message
+
+
+def test_standalone_read_plan_requires_session_instance() -> None:
+    from unittest.mock import Mock
+
+    from weakincentives.tools.planning import ReadPlan, build_standalone_planning_tools
+
+    tools = build_standalone_planning_tools()
+    read_tool = next(t for t in tools if t.name == "planning_read_plan")
+
+    mock_session = Mock()
+    bus = InProcessEventBus()
+    context = build_tool_context(bus, mock_session)
+
+    result = read_tool.handler(ReadPlan(), context=context)
+    assert result.success is False
+    assert "Session instance" in result.message
+
+
+def test_standalone_update_step_updates_step() -> None:
+    from weakincentives.tools.planning import (
+        UpdateStep,
+        build_standalone_planning_tools,
+        initialize_planning_session,
+    )
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    initialize_planning_session(session)
+
+    session.seed_slice(
+        Plan,
+        (
+            Plan(
+                objective="test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="step 1", status="pending"),),
+            ),
+        ),
+    )
+
+    tools = build_standalone_planning_tools()
+    update_tool = next(t for t in tools if t.name == "planning_update_step")
+    context = build_tool_context(bus, session)
+
+    result = update_tool.handler(
+        UpdateStep(step_id=1, status="in_progress"),
+        context=context,
+    )
+    assert result.success is True
+    assert result.value is not None
+    assert result.value.step_id == 1
+    assert result.value.status == "in_progress"
+
+
+def test_standalone_update_step_fails_without_plan() -> None:
+    from weakincentives.tools.planning import (
+        UpdateStep,
+        build_standalone_planning_tools,
+        initialize_planning_session,
+    )
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    initialize_planning_session(session)
+
+    tools = build_standalone_planning_tools()
+    update_tool = next(t for t in tools if t.name == "planning_update_step")
+    context = build_tool_context(bus, session)
+
+    result = update_tool.handler(
+        UpdateStep(step_id=1, status="done"),
+        context=context,
+    )
+    assert result.success is False
+    assert "No plan" in result.message
+
+
+def test_standalone_update_step_requires_session_instance() -> None:
+    from unittest.mock import Mock
+
+    from weakincentives.tools.planning import (
+        UpdateStep,
+        build_standalone_planning_tools,
+    )
+
+    tools = build_standalone_planning_tools()
+    update_tool = next(t for t in tools if t.name == "planning_update_step")
+
+    mock_session = Mock()
+    bus = InProcessEventBus()
+    context = build_tool_context(bus, mock_session)
+
+    result = update_tool.handler(
+        UpdateStep(step_id=1, status="done"),
+        context=context,
+    )
+    assert result.success is False
+    assert "Session instance" in result.message
+
+
+def test_standalone_tools_respect_accepts_overrides() -> None:
+    from weakincentives.tools.planning import build_standalone_planning_tools
+
+    tools_default = build_standalone_planning_tools()
+    tools_with_overrides = build_standalone_planning_tools(accepts_overrides=True)
+
+    assert all(t.accepts_overrides is False for t in tools_default)
+    assert all(t.accepts_overrides is True for t in tools_with_overrides)

@@ -594,6 +594,111 @@ def initialize_planning_session(session: Session) -> None:
     session.register_reducer(UpdateStep, _update_step_reducer, slice_type=Plan)
 
 
+def build_standalone_planning_tools(
+    *, accepts_overrides: bool = False
+) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
+    """Build planning tools that work with any session from context.
+
+    Unlike the tools from PlanningToolsSection, these tools are not bound to a
+    specific session. They use whatever session is available in the tool context,
+    making them suitable for subagent delegation where each child has its own
+    isolated session.
+
+    The session must have planning reducers registered via
+    `initialize_planning_session()` before using these tools.
+    """
+
+    def _read_plan(params: ReadPlan, *, context: ToolContext) -> ToolResult[Plan]:
+        del params
+        session = context.session
+        if not isinstance(session, Session):
+            return ToolResult(
+                message="Planning tools require a Session instance.",
+                value=None,
+                success=False,
+            )
+        plan = select_latest(session, Plan)
+        if plan is None:
+            return ToolResult(
+                message="No plan is currently initialised.",
+                value=None,
+                success=False,
+            )
+        return ToolResult(message="Plan retrieved.", value=plan)
+
+    def _update_step(
+        params: UpdateStep, *, context: ToolContext
+    ) -> ToolResult[UpdateStep]:
+        session = context.session
+        if not isinstance(session, Session):
+            return ToolResult(
+                message="Planning tools require a Session instance.",
+                value=None,
+                success=False,
+            )
+        plan = select_latest(session, Plan)
+        if plan is None:
+            return ToolResult(
+                message="No plan is currently initialised.",
+                value=None,
+                success=False,
+            )
+        _ensure_active(plan)
+        _ensure_step_exists(plan, params.step_id)
+        title = (
+            _normalize_text(params.title, "title") if params.title is not None else None
+        )
+        normalized = UpdateStep(
+            step_id=params.step_id, title=title, status=params.status
+        )
+        return ToolResult(message=f"Step {params.step_id} updated.", value=normalized)
+
+    return cast(
+        tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+        (
+            Tool[ReadPlan, Plan](
+                name="planning_read_plan",
+                description="Return the latest plan snapshot.",
+                handler=_read_plan,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample[ReadPlan, Plan](
+                        description="Inspect the current plan.",
+                        input=ReadPlan(),
+                        output=Plan(
+                            objective="Complete assigned task",
+                            status="active",
+                            steps=(
+                                PlanStep(
+                                    step_id=1, title="First step", status="pending"
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            Tool[UpdateStep, UpdateStep](
+                name="planning_update_step",
+                description="Update a step's title or status by its ID.",
+                handler=_update_step,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample[UpdateStep, UpdateStep](
+                        description="Mark step 1 as in progress.",
+                        input=UpdateStep(step_id=1, status="in_progress"),
+                        output=UpdateStep(step_id=1, status="in_progress"),
+                    ),
+                    ToolExample[UpdateStep, UpdateStep](
+                        description="Mark step 1 as done.",
+                        input=UpdateStep(step_id=1, status="done"),
+                        output=UpdateStep(step_id=1, status="done"),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
 __all__ = [
     "AddStep",
     "Plan",
@@ -605,5 +710,6 @@ __all__ = [
     "SetupPlan",
     "StepStatus",
     "UpdateStep",
+    "build_standalone_planning_tools",
     "initialize_planning_session",
 ]

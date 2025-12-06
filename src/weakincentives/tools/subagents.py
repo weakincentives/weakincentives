@@ -44,7 +44,12 @@ from ..runtime.events._types import EventBus
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
 from ..serde import dump
-from .planning import Plan, PlanStep, initialize_planning_session
+from .planning import (
+    Plan,
+    PlanStep,
+    build_standalone_planning_tools,
+    initialize_planning_session,
+)
 
 
 class SubagentIsolationLevel(Enum):
@@ -248,12 +253,17 @@ def _build_plan_delegation_prompt(
     """
     from ..prompt import PromptTemplate
 
+    # Combine parent tools with standalone planning tools so subagents can
+    # read and update the Plan injected into their sessions
+    planning_tools = build_standalone_planning_tools()
+    combined_tools = (*rendered_parent.tools, *planning_tools)
+
     # Create a section for the delegation instructions
     delegation_section = MarkdownSection[_PlanDelegationParams](
         title="Subagent Task",
         key="subagent-task",
         template=_PLAN_DELEGATION_TEMPLATE,
-        tools=rendered_parent.tools,
+        tools=combined_tools,
     )
 
     # Get the output type from the parent prompt - already validated as dataclass
