@@ -1,131 +1,295 @@
-# Wink CLI Debug Server
+# WINK Debug Server Specification
 
-## Goals and Scope
+## Purpose
 
-- Add a `wink debug <snapshot-path>` subcommand that loads a session snapshot and
-  serves a read-only FastAPI app for inspecting its contents.
-- Optimize for the demo snapshots stored under `snapshots/`, but accept any valid
-  snapshot JSON path (absolute or relative).
-- Keep the feature self-contained in the CLI package; it should not alter
-  runtime session behavior or snapshot serialization formats.
-- FastAPI (plus the ASGI server) ships via the `"wink"` extra so the base install
-  remains dependency-light.
+The `wink debug` command launches a local web server for inspecting session
+snapshot files. It provides a browser-based UI for exploring session state,
+slice contents, and snapshot metadata without writing code.
 
-## Non-Goals
+## CLI Contract
 
-- No live session capture or write-back into snapshots; the server is read-only.
-- No remote deployment concerns (auth, TLS, reverse proxies). The server binds to
-  localhost by default and targets local debugging only.
-- No front-end build step or new asset pipeline; ship static HTML/JS served from
-  the FastAPI app.
+```
+wink debug <snapshot_path> [--host HOST] [--port PORT] [--open-browser|--no-open-browser]
+```
 
-## CLI Contract (wink debug)
+### Arguments
 
-- Invocation: `uv run --extra wink wink debug snapshots/<id>.jsonl [options]`.
-- Required argument:
-  - `snapshot_path`: path to a snapshot JSONL file or a directory containing
-    snapshots. Resolve relative paths against the current working directory.
-    - File inputs must contain newline-delimited snapshots (one JSON object per
-      non-empty line). Pretty-printed/multi-line JSON is not supported.
-    - `.json` files are accepted but still parsed as JSONL; use single-line
-      payloads.
-    - Directory inputs scan only the top level for `*.jsonl`/`*.json` files and
-      pick the most recently modified snapshot file. Switching is limited to
-      files within that same directory.
-    - Surface a clear error and exit non-zero if the path is missing, unreadable,
-      or yields no snapshots.
-- Options:
-  - `--host` (default `127.0.0.1`) and `--port` (default `8000`) for the server
-    bind address.
-  - `--open-browser/--no-open-browser` (default on): open the default browser to
-    the UI root after the server starts; log the URL if opening fails.
-  - Inherit existing logging flags (`--log-level`, `--json-logs`) and apply them
-    to both CLI startup and FastAPI/uvicorn logs.
-- Exit codes:
-  - `0` on clean shutdown.
-  - `2` on argument/validation errors (missing file, unreadable JSONL payloads,
-    schema/tag validation failures, or no snapshots found).
-  - `3` on server startup failures (port in use, FastAPI import errors).
+| Argument | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `snapshot_path` | Yes | - | Path to a JSONL snapshot file or directory containing snapshots |
+| `--host` | No | `127.0.0.1` | Host interface to bind the server |
+| `--port` | No | `8000` | Port to bind the server |
+| `--open-browser` | No | `True` | Open the default browser automatically |
 
-## Snapshot Loading and Validation
+### Global Options
 
-- Reuse `Snapshot.from_json` and `SnapshotPayload` from
-  `weakincentives.runtime.session.snapshots` to parse the provided file.
-- Validate at startup before binding the server:
-  - File must exist and be readable.
-  - JSON lines must match the snapshot schema version; surface the underlying
-    `SnapshotRestoreError` message to the user along with the failing line
-    number.
-  - Every line must include a `session_id` tag; fail fast with the line number
-    when the tag is missing or empty.
-- Store every parsed snapshot line in memory for fast API responses. Provide a
-  manual reload endpoint that re-reads the file and replaces the cached
-  snapshots so users can iterate without restarting the server. Reload failures
-  should return a 400 response with the validation message and leave the prior
-  snapshot intact.
+The CLI inherits global options from the `wink` command:
 
-## Server and API Surface
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--log-level` | `None` | Override log level (CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET) |
+| `--json-logs` | `True` | Emit structured JSON logs (disable with `--no-json-logs`) |
 
-- Build a FastAPI app in `weakincentives.cli` (e.g., `debug_app.py`) to avoid
-  mixing parsing logic with `argparse` wiring.
-- Mount routes under `/api`:
-  - `GET /api/meta` → `{created_at, slices:[{slice_type, item_type, count}]}`
-    for the selected snapshot entry.
-  - `GET /api/entries` → list of snapshot entries when a JSONL file contains
-    multiple lines. Entries are indexed by `session_id` and line number.
-  - `GET /api/snapshots` → available snapshot files under the provided
-    directory root (non-recursive).
-  - `GET /api/slices/{slice_type}` → `{slice_type, item_type, items:[...]}`
-    where `slice_type` is URL-encoded (use `urllib.parse.quote`). Allow
-    `?limit=` and `?offset=` query params for large slices.
-  - `GET /api/raw` → the entire snapshot payload as loaded (for download).
-  - `POST /api/reload` → reloads from disk and returns the new meta payload
-    while preserving the currently selected session when possible.
-  - `POST /api/select` → switch between entries within a multi-line snapshot
-    file via `session_id` or `line_number`.
-  - `POST /api/switch` → switch to another snapshot file under the same root.
-- Serve a static `index.html` (and a small CSS/JS bundle) from `/` that consumes
-  the API. No additional build tooling; ship assets as strings or files under
-  `src/weakincentives/cli/static/`.
-- Run the app via uvicorn inside the `debug` command to avoid an extra entry
-  point. Gracefully shut down on SIGINT/SIGTERM.
+### Exit Codes
 
-## Web UI Expectations
+| Code | Meaning |
+|------|---------|
+| `0` | Server stopped normally |
+| `2` | Snapshot validation failed at startup |
+| `3` | Server failed to start |
 
-- Purpose-built for exploring snapshot contents quickly:
-  - A metadata header with snapshot path, creation timestamp, and schema version.
-  - Slice list panel showing `slice_type`, `item_type`, and item counts with a
-    search filter.
-  - Detail view that renders items as formatted JSON with copy-to-clipboard and
-    collapsible long fields. Preserve ordering from the snapshot.
-  - Raw JSON download button plus a reload button that calls `/api/reload` and
-    refreshes the views.
-- Keep the UI responsive without a build step: vanilla JS or a tiny helper like
-  htmx/htmx-style fetch patterns inlined in the page. Avoid adding new frontend
-  dependencies to the Python extras.
-- Style lightly for readability (monospace for JSON blocks, wrapping for long
-  text bodies, sticky slice list on wide screens).
+## Snapshot Loading
 
-## Packaging and Operations
+### Path Resolution
 
-- Add `fastapi` and `uvicorn` to the `"wink"` optional dependency group. Tests
-  using `--all-extras` already install extras; ensure the new extra keeps that
-  contract.
-- Keep the `wink` console script target unchanged; subcommands live inside the
-  existing entrypoint module.
-- Document the new command in `README.md` (or a dedicated CLI section) with an
-  example using `snapshots/<id>.json`.
+When `snapshot_path` is a directory:
 
-## Testing and Observability
+1. Glob for `*.jsonl` and `*.json` files
+1. Sort by modification time (newest first)
+1. Load the most recent file
+1. Use the directory as the root for snapshot switching
 
-- Unit tests:
-  - `argparse` coverage for required path and options.
-  - Snapshot load failure paths (missing file, invalid JSON, schema mismatch).
-  - FastAPI app tested with `TestClient` for meta, slice detail, raw, and reload
-    routes (including pagination parameters).
-  - Browser-opening helper mocked so tests stay headless.
-- Keep coverage at 100% across the new module(s). Prefer small helpers so tests
-  avoid spinning up uvicorn.
-- Emit structured logs for server lifecycle events (`debug.server.start`,
-  `debug.server.reload`, `debug.server.error`) respecting the existing logging
-  configuration.
+When `snapshot_path` is a file:
+
+1. Load the specified file directly
+1. Use the parent directory as the root for snapshot switching
+
+### JSONL Format
+
+Snapshot files contain one JSON object per line. Each line represents a complete
+session snapshot. The loader:
+
+1. Skips empty lines
+1. Parses each non-empty line as JSON
+1. Validates the `SnapshotPayload` structure
+1. Attempts full `Snapshot` restoration (validation errors are captured but don't
+   block loading)
+1. Requires a `session_id` tag on every entry
+
+### Validation Errors
+
+When a snapshot line fails full validation (e.g., missing dataclass types),
+the server:
+
+- Logs a warning with event `wink.debug.snapshot_error`
+- Stores the validation error message in metadata
+- Continues serving the raw payload for inspection
+
+## API Routes
+
+### `GET /`
+
+Returns the HTML index page for the web UI.
+
+### `GET /api/meta`
+
+Returns metadata for the currently selected snapshot entry.
+
+```json
+{
+  "version": "1",
+  "created_at": "2024-01-15T10:30:00+00:00",
+  "path": "/path/to/snapshot.jsonl",
+  "session_id": "abc123",
+  "line_number": 1,
+  "tags": {"session_id": "abc123", "custom_tag": "value"},
+  "validation_error": null,
+  "slices": [
+    {"slice_type": "mymodule.Plan", "item_type": "mymodule.Plan", "count": 3}
+  ]
+}
+```
+
+### `GET /api/entries`
+
+Lists all snapshot entries in the current file.
+
+```json
+[
+  {
+    "session_id": "abc123",
+    "name": "abc123 (line 1)",
+    "path": "/path/to/snapshot.jsonl",
+    "line_number": 1,
+    "created_at": "2024-01-15T10:30:00+00:00",
+    "tags": {"session_id": "abc123"},
+    "selected": true
+  }
+]
+```
+
+### `GET /api/slices/{encoded_slice_type}`
+
+Returns items from a specific slice. The `encoded_slice_type` must be
+URL-encoded (e.g., `mymodule.Plan` → `mymodule.Plan`).
+
+Query parameters:
+
+- `offset` (int, >= 0): Skip this many items
+- `limit` (int, >= 0, optional): Return at most this many items
+
+```json
+{
+  "slice_type": "mymodule.Plan",
+  "item_type": "mymodule.Plan",
+  "items": [
+    {"field": "value", "__markdown__": {"text": "# Header", "html": "<h1>Header</h1>"}}
+  ]
+}
+```
+
+String values that look like Markdown are automatically wrapped with rendered
+HTML. The detection heuristic checks for:
+
+- Headers (`# `, `## `, etc.)
+- Lists (`- `, `* `, `+ `, `1. `)
+- Code spans (`` `code` ``)
+- Links (`[text](url)`)
+- Bold (`**text**`)
+- Paragraph breaks (`\n\n`)
+
+Minimum length for Markdown detection: 16 characters.
+
+### `GET /api/raw`
+
+Returns the raw JSON payload of the current snapshot entry without any
+transformation.
+
+### `POST /api/reload`
+
+Reloads the current snapshot file from disk. If the previously selected
+`session_id` still exists, it remains selected; otherwise, the first entry
+is selected.
+
+Returns the updated metadata (same format as `/api/meta`).
+
+### `GET /api/snapshots`
+
+Lists all snapshot files in the root directory, sorted by modification time
+(newest first).
+
+```json
+[
+  {
+    "path": "/path/to/snapshot.jsonl",
+    "name": "snapshot.jsonl",
+    "created_at": "2024-01-15T10:30:00+00:00"
+  }
+]
+```
+
+### `POST /api/select`
+
+Selects a different entry within the current snapshot file.
+
+Request body (one of):
+
+```json
+{"session_id": "abc123"}
+{"line_number": 1}
+```
+
+Returns the updated metadata.
+
+### `POST /api/switch`
+
+Switches to a different snapshot file. The file must be under the same root
+directory established at startup.
+
+Request body:
+
+```json
+{
+  "path": "/path/to/other-snapshot.jsonl",
+  "session_id": "optional-session-id",
+  "line_number": null
+}
+```
+
+Returns the updated metadata.
+
+## Data Types
+
+### SnapshotLoadError
+
+Raised when a snapshot cannot be loaded or validated. Inherits from `WinkError`
+and `RuntimeError`.
+
+### LoadedSnapshot
+
+```python
+@FrozenDataclass()
+class LoadedSnapshot:
+    meta: SnapshotMeta
+    slices: Mapping[str, SnapshotSlicePayload]
+    raw_payload: Mapping[str, JSONValue]
+    raw_text: str
+    path: Path
+```
+
+### SnapshotMeta
+
+```python
+@FrozenDataclass()
+class SnapshotMeta:
+    version: str
+    created_at: str
+    path: str
+    session_id: str
+    line_number: int
+    slices: tuple[SliceSummary, ...]
+    tags: Mapping[str, str]
+    validation_error: str | None = None
+```
+
+### SliceSummary
+
+```python
+@FrozenDataclass()
+class SliceSummary:
+    slice_type: str
+    item_type: str
+    count: int
+```
+
+### SnapshotStore
+
+Thread-safe in-memory store for loaded snapshots with support for:
+
+- Loading entries from a snapshot file
+- Selecting entries by `session_id` or `line_number`
+- Reloading the current file from disk
+- Switching to a different file within the root directory
+- Listing available snapshot files
+
+## Static Assets
+
+The web UI is served from `src/weakincentives/cli/static/`:
+
+| File | Purpose |
+|------|---------|
+| `index.html` | Main HTML page |
+| `style.css` | Stylesheet |
+| `app.js` | Client-side JavaScript |
+
+Static files are mounted at `/static/`.
+
+## Logging
+
+| Event | Level | Context |
+|-------|-------|---------|
+| `wink.debug.snapshot_error` | WARNING | `path`, `line_number`, `error` |
+| `debug.server.start` | INFO | `url` |
+| `debug.server.reload` | INFO | `path` |
+| `debug.server.reload_failed` | WARNING | `path`, `error` |
+| `debug.server.switch` | INFO | `path` |
+| `debug.server.error` | ERROR | `url`, `error` |
+| `debug.server.browser` | WARNING | `url`, `error` |
+
+## Implementation Notes
+
+- Uses FastAPI for the HTTP server
+- Uses uvicorn as the ASGI server
+- Uses markdown-it for Markdown rendering
+- Browser opening uses a 0.2-second timer to avoid blocking server startup
+- Snapshot path validation restricts file switching to the initial root directory

@@ -1,97 +1,27 @@
-# Adapter Implementation Reference
+# Provider Adapters Specification
 
-## Overview
+## Purpose
 
-**Scope:** This document covers the adapter architecture in `src/weakincentives/adapters/`, the public
-`ProviderAdapter` contract, and the concrete adapters that ship today. It is the design source of truth and the
-runtime reference guide for how prompts become provider calls.
+Provider adapters bridge the prompt abstraction and external LLM services. They
+handle request formatting, response parsing, rate limiting, and error recovery
+so orchestration code remains provider-agnostic. This specification covers the
+shared adapter protocol, provider-specific implementations, structured output
+handling, and throttling behavior.
 
-**Design goals**
+## Guiding Principles
 
-- Present a uniform adapter surface so prompts behave identically across providers and test doubles.
-- Preserve deterministic, synchronous execution to align with session reducers and the DbC enforcement model.
-- Keep all provider interactions observable through the `EventBus` while isolating prompt rendering from transport
-  details.
-- Minimize adapter-specific branches by centralizing lifecycles in shared helpers.
+- **Provider-agnostic orchestration**: Callers interact with a uniform protocol;
+  provider differences stay encapsulated in adapter implementations.
+- **Fail predictable**: Errors surface as typed exceptions with enough context
+  for callers to retry, degrade, or abort gracefully.
+- **Observable by default**: Adapters emit structured events and logs at each
+  decision point so operators can trace requests, retries, and failures.
+- **Protect upstream health**: Rate limiting is reactive rather than
+  pre-emptive; adapters respect provider signals and avoid amplifying overload.
 
-**Constraints**
+## Adapter Protocol
 
-- Adapters must run synchronously and honor the caller-supplied `Deadline` at every blocking boundary (request,
-  tools, response parsing).
-- Structured output parsing must remain compatible with providers that lack native schema enforcement; adapters cannot
-  rely solely on provider-side validation.
-- Tool execution must reuse the active `Session` and its `EventBus` so reducers observe the same state mutations that
-  the adapter returns.
-
-**Rationale for the architecture**
-
-- A single runner (`shared.run_inner_loop` / `InnerLoop`) coordinates provider calls, tool dispatch, and
-  structured output parsing so new adapters inherit identical behavior without reimplementing loops.
-- Provider-specific layers (`openai.py`, `litellm.py`, and future modules) only handle payload translation and choice
-  selection, keeping SDK dependencies out of core logic.
-- Centralizing error handling (`PromptEvaluationError`) gives callers stable failure semantics while leaving providers
-  free to change their native exceptions.
-
-**Guiding principles**
-
-- Prefer adapter configuration over branching logic—surface provider toggles as constructor parameters rather than
-  inline conditionals.
-- Treat prompt rendering as immutable input: adapters should not mutate `RenderedPrompt` objects outside of sanctioned
-  instruction toggles for response formats.
-- Keep observability first-class: every render, tool invocation, and final response should emit the corresponding bus
-  events unless publication fails and rollbacks occur.
-- Document live behaviors alongside code paths so tests and operators can trace how settings map to runtime effects.
-
-Adapter responsibilities:
-
-- render the prompt with the supplied dataclass params (respecting overrides and output instructions),
-- translate prompt tools into the provider's JSON schema,
-- call the provider until a final assistant message is produced,
-- execute requested tools inside the active session,
-- parse structured output into typed dataclasses, and
-- raise `PromptEvaluationError` with precise context when any phase fails.
-
-### Architecture map
-
-- `core.py` – Defines `ProviderAdapter`, `PromptResponse`, and the shared error model. All adapters inherit from this
-  layer to guarantee consistent typing and DbC coverage.
-- `shared.py` – Implements `run_inner_loop` / `InnerLoop`, tool serialization (`tool_to_spec`), and response
-  parsing. This is the live execution path for every adapter.
-- `config.py` – Typed configuration dataclasses for adapter instantiation and model parameters (`LLMConfig`,
-  `OpenAIClientConfig`, `OpenAIModelConfig`, `LiteLLMClientConfig`, `LiteLLMModelConfig`).
-- `_provider_protocols.py` – Structural typing for provider choices, responses, and completion callables so adapters can
-  remain import-light when extras are missing.
-- `_tool_messages.py` – Utilities for formatting tool transcripts that flow back into provider conversations.
-- `openai.py` / `litellm.py` – Provider-specific shims that translate runner payloads into SDK calls and map responses
-  back into the shared representation.
-
-### Adapter type map
-
-- **LiteLLMAdapter** (`src/weakincentives/adapters/litellm.py`)
-
-  - **Configuration surfaces:** Optional dependency (`uv sync --extra litellm`); requires `model` and accepts
-    `tool_choice`; callers provide either a `completion` callable or a `LiteLLMClientConfig` for client instantiation.
-    Model parameters (temperature, max_tokens, etc.) are configured via `LiteLLMModelConfig`. Structured output requests
-    always enable `require_structured_output_text=True` so the runner expects text even when forwarding schemas.
-  - **Known caveats/limitations:** Behavior depends on downstream providers LiteLLM proxies. Errors bubble up as
-    LiteLLM exceptions wrapped in `PromptEvaluationError`. Because the API lacks native parsed payloads, structured
-    outputs rely on textual content and prompt-level parsing.
-
-- **OpenAIAdapter** (`src/weakincentives/adapters/openai.py`)
-
-  - **Configuration surfaces:** Optional dependency (`uv sync --extra openai`); requires `model` and accepts
-    `tool_choice`; callers can pass a concrete client or an `OpenAIClientConfig` for client instantiation. Model
-    parameters (temperature, max_tokens, logprobs, etc.) are configured via `OpenAIModelConfig`. The
-    `use_native_response_format` toggle disables inline output instructions when structured parsing is requested and
-    forwards JSON schemas under `response_format`.
-  - **Known caveats/limitations:** Requires OpenAI's Responses API. Deadlines are enforced before each request and tool
-    execution. When `use_native_response_format=False`, parsing falls back to prompt instructions and requires textual
-    outputs.
-
-Use this map when wiring new adapters: mirror the configuration surfaces, expose extras explicitly, and document any
-parser or provider limitations up front.
-
-## Core Interfaces
+All adapters implement `ProviderAdapter[ConfigT]`:
 
 ```python
 class ProviderAdapter(ABC):
@@ -99,44 +29,31 @@ class ProviderAdapter(ABC):
     def evaluate(
         self,
         prompt: Prompt[OutputT],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        budget: Budget | None = None,
+        budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]: ...
 ```
 
-- `prompt` / `params`: forwarded directly to `Prompt.render`. Each adapter must keep the positional dataclass order
-  intact so template placeholders continue to line up with `supports_dataclass`.
-- `parse_output`: toggles whether structured output metadata on the rendered prompt is honored.
-- `bus`: every adapter publishes `PromptRendered`, `ToolInvoked`, and `PromptExecuted` events through the supplied bus.
-- `session`: provides storage for tool handlers, digest slices, and rollback when the bus rejects an event.
-- `deadline`: optional guard enforced before issuing a provider request, before every tool handler, and while
-  finalizing responses. When omitted the prompt's own `RenderedPrompt.deadline` flows through.
-- `overrides_store` / `overrides_tag`: passed straight to `Prompt.render` so callers can pin prompts to a versioned
-  override store.
+**Parameters:**
 
-```python
-@dataclass(slots=True)
-class PromptResponse(Generic[OutputT]):
-    prompt_name: str
-    text: str | None
-    output: OutputT | None
-```
+- `prompt` - The prompt template to evaluate
+- `parse_output` - Whether to parse structured output from response
+- `bus` - Event bus for telemetry
+- `session` - Session for state management
+- `deadline` - Optional wall-clock deadline
+- `visibility_overrides` - Section visibility controls for progressive disclosure
+- `budget` - Optional token/time budget limits
+- `budget_tracker` - Optional shared tracker for budget consumption
 
-`PromptEvaluationError` carries a human-readable message, the prompt name, a `phase` literal (`"request"`, `"response"`,
-or `"tool"`), and the provider payload (when available). Adapters use this exception for every failure mode so tests and
-callers can safely assert on phase-specific error handling.
+### Configuration
 
-### Typed Configuration
-
-Adapters use frozen dataclass configurations for type-safe instantiation and model parameter control. All config
-classes are defined in `config.py` and exported from the adapters package.
-
-**Base Configuration**
+Adapters use frozen dataclass configurations for type-safe instantiation:
 
 ```python
 @FrozenDataclass()
@@ -151,292 +68,340 @@ class LLMConfig:
     seed: int | None = None
 ```
 
-`LLMConfig` provides common model parameters shared across providers. Only non-None fields are included in request
-payloads, allowing selective override of provider defaults.
+Provider-specific configs extend this base with additional fields. Only non-None
+fields are included in request payloads.
 
-**OpenAI Configuration**
+### Lifecycle
 
-```python
-@FrozenDataclass()
-class OpenAIClientConfig:
-    """Configuration for OpenAI client instantiation."""
-    api_key: str | None = None
-    base_url: str | None = None
-    organization: str | None = None
-    timeout: float | None = None
-    max_retries: int | None = None
+1. **Render** - Call `prompt.render(params)` to produce a `RenderedPrompt` with
+   markdown text, tools, and structured output metadata.
+1. **Format** - Convert the rendered prompt into the provider wire format.
+1. **Call** - Issue the provider request with throttle protection and deadline
+   checks.
+1. **Parse** - Extract assistant content and dispatch tool calls.
+1. **Emit** - Publish `PromptRendered` and `PromptExecuted` events.
 
-@FrozenDataclass()
-class OpenAIModelConfig(LLMConfig):
-    """OpenAI-specific model parameters."""
-    logprobs: bool | None = None
-    top_logprobs: int | None = None
-    parallel_tool_calls: bool | None = None
-    store: bool | None = None
-    user: str | None = None
-```
+## Provider Implementations
 
-`OpenAIClientConfig` controls client instantiation (API key, base URL, timeouts). `OpenAIModelConfig` extends
-`LLMConfig` with OpenAI-specific parameters like `logprobs` and `parallel_tool_calls`. Note that `max_tokens` is
-automatically renamed to `max_output_tokens` in request payloads to match the Responses API convention. The
-Responses API does **not** accept `seed`, `stop`, `presence_penalty`, or `frequency_penalty`; supplying any of
-these fields raises `ValueError` at construction time so callers fail fast.
+### OpenAI Adapter
 
-**LiteLLM Configuration**
-
-```python
-@FrozenDataclass()
-class LiteLLMClientConfig:
-    """Configuration for LiteLLM client instantiation."""
-    api_key: str | None = None
-    api_base: str | None = None
-    timeout: float | None = None
-    num_retries: int | None = None
-
-@FrozenDataclass()
-class LiteLLMModelConfig(LLMConfig):
-    """LiteLLM-specific model parameters."""
-    n: int | None = None
-    user: str | None = None
-```
-
-`LiteLLMClientConfig` controls completion callable instantiation. `LiteLLMModelConfig` extends `LLMConfig` with
-LiteLLM-specific parameters.
-
-**Usage Examples**
+`OpenAIAdapter` targets the OpenAI Responses API via the official SDK.
 
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter, OpenAIClientConfig, OpenAIModelConfig
 
-# Configure client and model parameters
-client_config = OpenAIClientConfig(
-    api_key="sk-...",
-    timeout=30.0,
-)
-model_config = OpenAIModelConfig(
-    temperature=0.7,
-    max_tokens=1024,
-)
+client_config = OpenAIClientConfig(api_key="sk-...", timeout=30.0)
+model_config = OpenAIModelConfig(temperature=0.7, max_tokens=1024)
 
 adapter = OpenAIAdapter(
     model="gpt-4o",
     client_config=client_config,
     model_config=model_config,
-)
-
-# Or with pre-configured client
-from openai import OpenAI
-client = OpenAI(api_key="sk-...")
-adapter = OpenAIAdapter(
-    model="gpt-4o",
-    client=client,
-    model_config=model_config,  # Model params still apply
+    use_native_response_format=True,  # Use provider's JSON schema enforcement
 )
 ```
+
+**Configuration:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `api_key` | `str \| None` | API key (falls back to env) |
+| `base_url` | `str \| None` | Custom API endpoint |
+| `organization` | `str \| None` | Organization ID |
+| `timeout` | `float \| None` | Request timeout seconds |
+| `max_retries` | `int \| None` | SDK-level retries |
+
+**Model Parameters (OpenAIModelConfig):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `logprobs` | `bool \| None` | Return log probabilities |
+| `top_logprobs` | `int \| None` | Number of top logprobs |
+| `parallel_tool_calls` | `bool \| None` | Allow parallel tool calls |
+| `store` | `bool \| None` | Store conversation |
+| `user` | `str \| None` | End-user identifier |
+
+**Constructor Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | required | Model identifier |
+| `client_config` | `OpenAIClientConfig \| None` | `None` | Client settings |
+| `model_config` | `OpenAIModelConfig \| None` | `None` | Model parameters |
+| `use_native_response_format` | `bool` | `True` | Use provider JSON schema |
+
+Note: `max_tokens` is renamed to `max_output_tokens` for Responses API. The
+Responses API does not accept `seed`, `stop`, `presence_penalty`, or
+`frequency_penalty`; supplying these raises `ValueError` at construction.
+
+**Structured Output Modes:**
+
+The adapter supports two structured output paths:
+
+1. **Native JSON Schema** - When `use_native_response_format=True` and the
+   prompt has structured output, the adapter sets `response_format.type = "json_schema"` with the dataclass schema. The provider enforces structure at
+   generation time and returns a `.parsed` payload.
+
+1. **Prompt-based fallback** - When native mode is disabled, the prompt's
+   `ResponseFormatSection` instructs the model to return JSON. The adapter
+   parses and validates the response text.
+
+### LiteLLM Adapter
+
+`LiteLLMAdapter` provides access to 100+ providers through LiteLLM.
 
 ```python
 from weakincentives.adapters.litellm import LiteLLMAdapter, LiteLLMClientConfig, LiteLLMModelConfig
 
-# Configure completion and model parameters
-completion_config = LiteLLMClientConfig(
-    api_key="...",
-    timeout=60.0,
-)
-model_config = LiteLLMModelConfig(
-    temperature=0.5,
-    max_tokens=2048,
-)
+completion_config = LiteLLMClientConfig(api_key="...", timeout=60.0)
+model_config = LiteLLMModelConfig(temperature=0.5, max_tokens=2048)
 
 adapter = LiteLLMAdapter(
-    model="claude-3-sonnet-20240229",
+    model="anthropic/claude-3-opus",
     completion_config=completion_config,
     model_config=model_config,
 )
 ```
 
-### Optimization API
+**Constructor Parameters:**
 
-`ProviderAdapter.optimize(...)` automates workspace digest generation for prompts that include a
-`WorkspaceDigestSection`. The helper renders an internal prompt composed of:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | required | Model identifier |
+| `completion_config` | `LiteLLMClientConfig \| None` | `None` | Client settings |
+| `model_config` | `LiteLLMModelConfig \| None` | `None` | Model parameters |
+| `completion` | `LiteLLMCompletion \| None` | `None` | Pre-configured completion |
+| `completion_factory` | `Callable \| None` | `None` | Factory for completions |
+| `completion_kwargs` | `Mapping \| None` | `None` | Extra completion kwargs |
 
-1. a Markdown section describing the optimization goal,
-1. a Markdown section enumerating expectations,
-1. a `PlanningToolsSection` configured for the goal-decompose-route-synthesise strategy, and
-1. clones of the prompt's workspace section (`PodmanSandboxSection` or `VfsToolsSection`) plus its digest section.
+**Configuration:**
 
-The optimization run executes in an inner `Session` and `EventBus` so tool handlers used for standard prompts cannot
-mutate the original session. Callers may override this isolation by supplying an explicit
-`optimization_session`; in that case the method reuses the provided session and event bus verbatim. The result is stored
-according to the selected scope:
+| Field | Type | Description |
+|-------|------|-------------|
+| `api_key` | `str \| None` | Provider API key |
+| `api_base` | `str \| None` | Custom API endpoint |
+| `timeout` | `float \| None` | Request timeout seconds |
+| `num_retries` | `int \| None` | LiteLLM-level retries |
 
-- `OptimizationScope.SESSION`: call `set_workspace_digest` on the caller's session.
-- `OptimizationScope.GLOBAL`: require both `overrides_store` and `overrides_tag`; persist the digest in the overrides
-  store and remove session copies via `clear_workspace_digest`.
+**Constraints and Caveats:**
+
+- Tool calling, structured output, and streaming support varies by underlying
+  provider.
+- LiteLLM exceptions are normalized to `ThrottleError` or
+  `PromptEvaluationError`.
+- Token counting uses LiteLLM's estimation which may differ from actuals.
+- Structured outputs always set `require_structured_output_text=True` because
+  LiteLLM does not return structured `.parsed` payloads.
+
+## Rate Limiting and Throttling
+
+Adapters implement reactive throttling to protect upstream services.
+
+### Throttle Policy
+
+```python
+from weakincentives.adapters.shared import ThrottlePolicy, new_throttle_policy
+
+policy = new_throttle_policy(
+    max_attempts=5,
+    base_delay_ms=500,
+    max_delay_ms=8000,
+    max_total_delay_ms=30000,
+)
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `max_attempts` | `5` | Maximum retry attempts |
+| `base_delay_ms` | `500` | Initial backoff delay |
+| `max_delay_ms` | `8000` | Cap on individual delays |
+| `max_total_delay_ms` | `30000` | Total time budget |
+
+### Signal Classification
+
+| Signal | Examples | Behavior |
+|--------|----------|----------|
+| **Rate limit** | HTTP 429, `RateLimitError` | Retry with backoff |
+| **Quota exhaustion** | `insufficient_quota` | Longer backoff, alerting |
+| **Timeout** | Connection/read timeout | Retry if deadline permits |
+| **Server error** | HTTP 500-503 | Retry with backoff |
+
+### Backoff Strategy
+
+- **Exponential with jitter**: Delays double from base, capped at max, with full
+  jitter to avoid thundering herd.
+- **Retry-After respect**: Provider-supplied values set the minimum delay.
+- **Deadline awareness**: Retries abort early if remaining time is insufficient.
+- **No pre-send shaping**: Requests are never altered before hitting the
+  provider; all mitigation is reactive.
+
+### ThrottleError
 
 ```python
 @dataclass(slots=True)
-class OptimizationResult:
-    response: PromptResponse[Any]
-    digest: str
-    scope: OptimizationScope
-    section_key: str
+class ThrottleDetails:
+    kind: ThrottleKind  # RATE_LIMIT, QUOTA_EXHAUSTED, TIMEOUT
+    retry_after: timedelta | None
+    attempts: int
+    retry_safe: bool
+    provider_payload: dict[str, Any] | None
+
+@dataclass(slots=True)
+class ThrottleError(PromptEvaluationError):
+    details: ThrottleDetails
+
+    # Properties provide access to details fields
+    @property
+    def kind(self) -> ThrottleKind: ...
+    @property
+    def retry_after(self) -> timedelta | None: ...
+    @property
+    def attempts(self) -> int: ...
+    @property
+    def retry_safe(self) -> bool: ...
 ```
 
-## Execution Lifecycle
+## Inner Loop Architecture
 
-All adapters rely on `shared.run_inner_loop` (implemented through `InnerLoop`) to coordinate provider calls.
-The lifecycle is identical for LiteLLM, OpenAI, and future adapters:
+The shared `InnerLoop` drives the request/response cycle:
 
-1. **Render** – Call `prompt.render(*params, overrides_store, tag)` once. When structured output parsing is enabled
-   and the prompt supports inline instructions (`inject_output_instructions=True`), adapters may disable those
-   instructions when the provider has first-class JSON schema support (OpenAI's `response_format` path). Explicit
-   deadlines on `evaluate` override the rendered prompt's deadline via `dataclasses.replace`.
-1. **Publish `PromptRendered`** – `InnerLoop` emits `PromptRendered` with the namespace, key, optional name,
-   adapter label, session id, serialized render inputs, and the full rendered markdown. Subscribers (for example,
-   the `Session` reducers in `specs/SESSIONS.md`) now have complete context before the provider request runs.
-1. **Prepare tool payloads** – Every tool from `rendered.tools` is converted to the provider-agnostic JSON schema
-   produced by `tool_to_spec`. The adapter keeps a registry keyed by tool name for resolving tool calls.
-1. **Call the provider** – `run_inner_loop` builds the chat payload (`messages`, `tools`, `tool_choice`,
-   optional `response_format`) and invokes the provider-specific callable supplied by the concrete adapter. The first
-   choice (`first_choice`) becomes authoritative. Failures are wrapped in `PromptEvaluationError` with
-   `phase="request"`.
-1. **Handle tool calls** – When the provider responds with `tool_calls`, `InnerLoop` records an assistant turn
-   containing the serialized tool calls before executing them via `ToolExecutor`. Each tool invocation produces
-   `ToolInvoked` events, textual responses (`serialize_tool_message`), and optional dataclass values. When tool_choice
-   was forced to a specific function, the runner automatically reverts to `"auto"` after the first accepted call so the
-   next provider turn can elide the restriction.
-1. **Loop until completion** – The provider call/response/tool loop repeats until a message arrives without tool calls.
-1. **Parse output** – `ResponseParser` inspects the final assistant message. When `parse_output` is `True` and the prompt
-   declares structured output, the parser prefers provider-native structured payloads (`message.parsed` or segmented
-   content) and falls back to the prompt's `parse_structured_output` helper. Parsed dataclasses null out the `text`
-   field. When parsing is disabled the final text is returned verbatim.
-1. **Publish `PromptExecuted`** – The finished `PromptResponse` is published as a `PromptExecuted` event. Subscribers can
-   inspect the dataclass output or the raw text depending on which field is populated.
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   Render    │───▶│    Call     │───▶│    Parse    │
+│   Prompt    │    │   Provider  │    │   Response  │
+└─────────────┘    └─────────────┘    └─────────────┘
+                         │                   │
+                         ▼                   ▼
+                   ┌───────────┐       ┌───────────┐
+                   │  Throttle │       │   Tools   │
+                   │  Handler  │       │  Dispatch │
+                   └───────────┘       └───────────┘
+```
 
-Throughout the lifecycle adapters call `deadline.remaining()` before issuing provider requests, before each tool handler,
-and before finalizing the response. When the deadline is exceeded `PromptEvaluationError` includes the ISO timestamp
-returned by `deadline_provider_payload`.
+1. **Render** - Produce `RenderedPrompt` from prompt + params.
+1. **Publish `PromptRendered`** - Emit event with namespace, key, adapter label,
+   and rendered markdown.
+1. **Prepare tools** - Convert tools to provider-agnostic JSON schemas via
+   `tool_to_spec`.
+1. **Call provider** - Build chat payload and invoke provider callable. Failures
+   wrap in `PromptEvaluationError` with `phase="request"`.
+1. **Handle tool calls** - Execute handlers via `ToolExecutor`, emit
+   `ToolInvoked` events, collect results.
+1. **Loop** - Repeat until a message arrives without tool calls.
+1. **Parse output** - Extract structured output from `.parsed` or text.
+1. **Publish `PromptExecuted`** - Emit final response event.
 
-## Tool Invocation Semantics
+### Tool Execution
 
-`ToolExecutor` in `shared.py` owns tool scheduling, argument parsing, and event publication:
+`ToolExecutor` owns tool scheduling, argument parsing, and event publication:
 
-- Tool call arguments are decoded via `parse_tool_arguments`, which enforces JSON objects with string keys. Providers
-  that omit arguments simply receive `{}`.
-- Arguments map to dataclasses through `serde.parse`. Validation errors produce `ToolResult(success=False)` responses and
-  log warnings rather than raising immediately. When validation fails, the raw arguments and error message are stored in
-  `_RejectedToolParams` and emitted as the tool parameters for observability.
-- `ToolContext` exposes the `Prompt`, `RenderedPrompt`, current adapter, session, event bus, and deadline to tool
-  handlers. The context matches `PromptProtocol`/`ProviderAdapterProtocol` so handlers do not need to import concrete
-  classes.
-- Tool handlers run synchronously. If a handler raises `DeadlineExceededError` or the `Deadline` has already expired,
-  `PromptEvaluationError` is raised and the provider turn aborts. Other exceptions are logged and converted into failed
-  `ToolResult` instances that still flow back to the provider.
-- Before emitting an event, the adapter captures a session snapshot. After a handler completes it publishes a
-  `ToolInvoked` event. When the publish fails the session rolls back to the saved snapshot and the tool message is
-  replaced with the aggregated reducer errors
-  (`format_publish_failures`).
-- Tool messages forwarded to the provider contain the handler's message plus the rendered value (if the tool opted into
-  sharing it). After structured output parsing succeeds, the final successful tool message is patched with the parsed
-  payload so the provider can continue referencing it if needed.
+- Arguments are decoded via `parse_tool_arguments` (JSON objects with string
+  keys).
+- Dataclass parsing uses `serde.parse`. Validation errors produce
+  `ToolResult(success=False)` rather than raising.
+- `ToolContext` exposes prompt, adapter, session, event bus, and deadline.
+- Handlers run synchronously. Exceptions are logged and converted to failed
+  results.
+- Before event emission, the adapter captures a session snapshot. On publish
+  failure, it rolls back and replaces the tool message with error details.
 
-## Structured Output and Response Formats
+## Error Handling
 
-`build_json_schema_response_format` inspects the rendered prompt's `output_type`, container type (`"object"` or
-`"array"`), and `allow_extra_keys` flag to construct a JSON schema payload suitable for providers that support schema
-constrained outputs. `run_inner_loop` passes this payload to the concrete adapter, which decides whether the provider
-supports it:
+### Exception Hierarchy
 
-- OpenAI: when `use_native_response_format=True`, adapters disable inline structured-output instructions and pass the
-  schema under `response_format`. OpenAI responses include a `.parsed` payload which `ResponseParser` prefers. The
-  parser accepts empty message text because the schema covers validation.
-- LiteLLM: forwards the schema when structured output parsing is requested (LiteLLM proxies it to the target model) but
-  still requires textual output for parsing (`require_structured_output_text=True`) because the API does not return a
-  structured `.parsed` payload.
+```
+PromptEvaluationError
+├── ThrottleError          # Retryable provider errors
+├── PromptRenderError      # Template/section failures
+├── OutputParseError       # Structured output validation
+└── DeadlineExceededError  # Time budget exhausted
+```
 
-When providers return schema-constrained payloads the parser calls `parse_schema_constrained_payload`. Otherwise it falls
-back to `parse_structured_output`, raising `PromptEvaluationError` on any mismatch. If `parse_output=False`, the parser
-skips structured parsing entirely and simply returns the assistant text.
+### Error Propagation
 
-## Deadlines, Sessions, and Overrides
+- **Tool failures** - Wrapped in `ToolResult(success=False)` and returned to the
+  model; never abort evaluation.
+- **Parse failures** - Raise `OutputParseError` with raw response attached.
+- **Throttle exhaustion** - Raise `ThrottleError` with `retry_safe=False`.
+- **Deadline exceeded** - Raise `DeadlineExceededError` immediately.
 
-- The `Deadline` passed to `evaluate` (or attached to the rendered prompt) flows into `InnerLoop`, each
-  tool's `ToolContext`, and every error message produced by deadline guards. The runner rejects requests immediately if
-  `deadline.remaining()` is already non-positive.
-- `SessionProtocol` provides snapshots, rollbacks, and typed slices. Tool handlers use it for stateful reducers,
-  workspace digests (`set_workspace_digest` / `clear_workspace_digest`), and domain-specific caches. Because tool event
-  publication can trigger reducer failures, adapters roll back the session snapshot whenever a publish fails.
-- The same session's `event_bus` should be injected into `evaluate` so reducers listening for `PromptRendered`,
-  `ToolInvoked`, and `PromptExecuted` events stay in sync with the state slices.
-- `PromptOverridesStore` is optional yet supported by every adapter. Callers provide the store plus a tag (defaults to
-  `"latest"`) to render prompts with the same overrides system used by the CLI.
+## Budget Tracking
 
-## Optimization Workflow
+Adapters integrate with the budget system for token and time limits:
 
-`ProviderAdapter.optimize(...)` streamlines workspace digest refreshes:
+```python
+from weakincentives.budget import Budget, BudgetTracker
 
-1. Locate the prompt's `WorkspaceDigestSection` and workspace section (`PodmanSandboxSection` or `VfsToolsSection`).
-   Failure to find either raises `PromptEvaluationError` with `phase="request"`.
-1. Clone both sections with a fresh inner `Session`/`EventBus` so destructive tools (filesystem exploration, podman
-   sandboxes) cannot mutate the caller's session.
-1. Compose the optimization prompt (namespace `f"{prompt.ns}.optimization"` and key `f"{prompt.key}-workspace-digest"`).
-1. Evaluate the prompt through `evaluate` with `parse_output=True`. Any overrides/tag passed to `optimize` are forwarded.
-1. Extract digest content from `PromptResponse.output` (`str` or dataclass with a `digest` field) or fall back to
-   `PromptResponse.text`. Empty responses raise `PromptEvaluationError` with `phase="response"`.
-1. Store the digest based on the requested `OptimizationScope` (session or overrides store).
+budget = Budget(
+    deadline=Deadline(expires_at=...),
+    max_total_tokens=10000,
+    max_input_tokens=8000,
+    max_output_tokens=2000,
+)
 
-The returned `OptimizationResult` includes the original `PromptResponse` so callers can inspect the assistant reasoning
-that produced the digest.
+tracker = BudgetTracker(budget)
 
-## Built-in Adapters
+response = adapter.evaluate(
+    prompt,
+    bus=bus,
+    session=session,
+    budget=budget,
+    budget_tracker=tracker,
+)
+```
 
-### `LiteLLMAdapter`
+The adapter records token usage after each provider response and checks limits
+at defined checkpoints. Budget tracking is thread-safe for concurrent subagent
+execution.
 
-- Optional dependency enabled via `uv sync --extra litellm`.
-- Accepts either a concrete `completion` callable or a `LiteLLMClientConfig` for typed client instantiation.
-- Model parameters (temperature, max_tokens, etc.) are configured via `LiteLLMModelConfig`.
-- Forwards `model`, rendered system instructions, tools, tool choice, model parameters, and JSON schema response format
-  to LiteLLM.
-- Because LiteLLM proxies downstream providers, `require_structured_output_text=True` ensures we still see a readable
-  assistant message even if the provider does not populate a structured payload.
-- Tool choice defaults to `"auto"` but callers can provide any supported `ToolChoice` literal/mapping.
-- Provider failures (network, authentication, model errors) are wrapped in `PromptEvaluationError` with
-  `phase="request"`.
+## Telemetry
 
-### `OpenAIAdapter`
+Adapters emit events through the provided `EventBus`:
 
-- Optional dependency enabled via `uv sync --extra openai`.
-- Accepts either a concrete OpenAI client (`openai.OpenAI`) or an `OpenAIClientConfig` for typed client instantiation.
-  The helper raises a descriptive `RuntimeError` if the package is missing.
-- Model parameters (temperature, max_tokens, logprobs, etc.) are configured via `OpenAIModelConfig`.
-- Calls `client.responses.create(model=..., input=..., tools=..., tool_choice=..., ...)` with model config parameters
-  merged into the request payload.
-- When `use_native_response_format=True` the adapter disables prompt-level output instructions any time structured
-  output parsing is requested. This prevents duplicate requirements because OpenAI now enforces the JSON schema.
-- `response_format` is only passed when structured output is requested **and** native response formats are enabled.
-  Otherwise OpenAI renders plain text output and the parser falls back to prompt-based instructions.
-- OpenAI responses include native `parsed` content when response formats are enabled, allowing
-  `require_structured_output_text=False`.
+| Event | When | Payload |
+|-------|------|---------|
+| `PromptRendered` | After render | Text, tools, metadata |
+| `PromptExecuted` | After parse | Response, tokens, timing |
+| `ToolInvoked` | After dispatch | Name, params, result |
+
+Structured logs include:
+
+- `prompt.render.start` / `prompt.render.complete`
+- `prompt.call.start` / `prompt.call.complete`
+- `prompt.throttled` (on retry)
+- `prompt.error` (on failure)
 
 ## Implementing New Adapters
 
-1. **Decide on an `AdapterName`** – Extend `_names.py` if you need a new identifier and export it from
-   `src/weakincentives/adapters/__init__.py`.
-1. **Define typed configuration** – Create `ClientConfig` and `ModelConfig` frozen dataclasses in `config.py` for
-   type-safe instantiation. Extend `LLMConfig` for model parameters to inherit common fields. Export configs from the
-   adapter module and the adapters package.
-1. **Instantiate the provider client** – Follow the LiteLLM/OpenAI examples by accepting either a concrete client or a
-   typed config dataclass so tests can inject fakes.
-1. **Render the prompt** – Always call `prompt.render` exactly once, respecting the `override_store`, `tag`, and optional
-   instruction toggles when structured output parsing needs provider help.
-1. **Delegate to `run_inner_loop`** – Supply provider-specific `call_provider` and `select_choice` functions plus any
-   adapter-specific defaults (`tool_choice`, `response_format`, `require_structured_output_text`). Merge model config
-   parameters into the request payload via `config.to_request_params()`. The helper handles logging, deadlines, events,
-   tool execution, and structured output.
-1. **Wrap SDK failures** – Catch provider-specific exceptions and re-raise `PromptEvaluationError` with
-   `phase="request"` so callers can respond consistently.
-1. **Expose extras** – If the adapter requires optional dependencies, raise a helpful `RuntimeError` mirroring the
-   LiteLLM/OpenAI error strings when the import fails.
+1. **Define configuration** - Create `ClientConfig` and `ModelConfig` frozen
+   dataclasses extending `LLMConfig`.
+1. **Instantiate client** - Accept either concrete client or config so tests can
+   inject fakes.
+1. **Render prompt** - Call `prompt.render` once, respecting overrides and
+   instruction toggles.
+1. **Delegate to `run_inner_loop`** - Supply provider-specific `call_provider`
+   and `select_choice` functions.
+1. **Wrap SDK failures** - Catch exceptions and re-raise
+   `PromptEvaluationError`.
+1. **Expose extras** - Raise helpful `RuntimeError` when optional dependencies
+   are missing.
 
-Following these conventions ensures every adapter integrates seamlessly with the prompt orchestration runtime, event bus,
-session reducers, and optimization workflows described across the rest of the specs.
+## Testing
+
+### Unit Tests
+
+- Mock provider responses for success, throttle, and error paths.
+- Verify backoff calculations respect policy and jitter bounds.
+- Test structured output parsing for valid and malformed payloads.
+- Confirm deadline checks abort before provider calls when expired.
+
+### Integration Tests
+
+- Use provider test endpoints or sandboxed accounts.
+- Verify tool dispatch round-trips through the full stack.
+- Test throttle recovery with artificial 429 responses.
+
+### Fixtures
+
+- `tests/helpers/adapters.py` provides `MockAdapter` for prompt tests.
+- `tests/fixtures/responses/` contains sample provider payloads.

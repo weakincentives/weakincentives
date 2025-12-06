@@ -53,13 +53,22 @@ Runtime modules attach to Python's standard library logging without custom
 handlers. The table below captures the current surface area and should be kept
 in sync with code changes.
 
-| Module | Logger Variable | Level | Message / Event | Context Fields |
+| Module | Logger Variable | Level | Event Name | Context Fields |
 | --- | --- | --- | --- | --- |
-| `src/weakincentives/runtime/events/__init__.py` | `logger` | `exception` (ERROR) | "Error delivering event %s to handler %r" | `event_type` (`type(event).__name__`), `handler` |
-| `src/weakincentives/runtime/session/session.py` | `logger` | `exception` (ERROR) | "Reducer %r failed for data type %s" | `reducer`, `data_type` |
-| `src/weakincentives/adapters/shared.py` | `logger` (or override) | `exception` (ERROR) | "Tool '%s' raised an unexpected exception." | `tool_name` |
-| `src/weakincentives/prompt/overrides/local_store.py` | `_LOGGER` | `debug` | Missing override file, empty override payload, persistence success, delete-miss, unknown section/tool, stale hashes | `ns`, `prompt_key`, `tag`, `section_path`, `expected_hash`, `found_hash`, `tool_name` |
-| `src/weakincentives/tools/asteval.py` | `_logger` | `debug` | event="asteval.run" | `event`, `mode`, `stdout_len`, `stderr_len`, `write_count`, `code_preview` |
+| `runtime/events/__init__.py` | `logger` | `exception` | `event_delivery_failed` | `event_type`, `handler` |
+| `runtime/session/session.py` | `logger` | `exception` | `session_reducer_failed` | `reducer`, `data_type`, `slice_type` |
+| `adapters/shared.py` | `log` | `exception` | `tool_handler_exception` | `provider_payload` |
+| `adapters/shared.py` | `log` | `info` | `prompt_execution_started` | (context varies) |
+| `adapters/shared.py` | `log` | `info` | `prompt_execution_succeeded` | (context varies) |
+| `adapters/shared.py` | `log` | `info` | `tool_handler_completed` | (context varies) |
+| `adapters/shared.py` | `log` | `warning` | `tool_validation_failed` | `reason` |
+| `adapters/shared.py` | `log` | `warning` | `prompt_throttled` | `kind`, `delay_seconds` |
+| `prompt/overrides/local_store.py` | `_LOGGER` | `info` | `prompt_override_resolved` | `ns`, `prompt_key`, `tag` |
+| `prompt/overrides/local_store.py` | `_LOGGER` | `info` | `prompt_override_persisted` | `ns`, `prompt_key`, `tag` |
+| `prompt/overrides/local_store.py` | `_LOGGER` | `debug` | `prompt_override_missing` | `ns`, `prompt_key`, `tag` |
+| `prompt/overrides/local_store.py` | `_LOGGER` | `debug` | `prompt_override_empty` | `ns`, `prompt_key`, `tag` |
+| `prompt/overrides/local_store.py` | `_LOGGER` | `debug` | `prompt_override_delete_missing` | `ns`, `prompt_key`, `tag` |
+| `tools/asteval.py` | `_LOGGER` | `debug` | `asteval_run` | `stdout_len`, `stderr_len`, `write_count`, `code_preview` |
 
 ### Module Notes and Caveats
 
@@ -67,22 +76,18 @@ in sync with code changes.
   publish operation continues, collecting the failures for the caller. The
   structured context exposes the event class name and handler reference to
   support debugging misbehaving subscribers.
-- **session/session.py**: Reducer failures are logged at ERROR. The session
-  suppresses the exception, skips the reducer, and continues dispatching. Log
-  payloads currently rely on message formatting instead of `extra`—future
-  changes SHOULD add `event="session.reducer.failed"` plus reducer metadata.
+- **session/session.py**: Reducer failures are logged at ERROR with structured
+  context including `reducer`, `data_type`, and `slice_type`. The session
+  suppresses the exception, skips the reducer, and continues dispatching.
 - **adapters/shared.py**: Unexpected tool handler failures are logged at ERROR.
   The adapter converts the exception into a failed `ToolResult` and continues.
   Adapter implementations MAY supply their own logger if they wish to enrich
   context fields, but SHOULD preserve the message for compatibility.
-- **prompt/overrides/local_store.py**: Diagnostic messages for override
-  lookups, persistence, and validation run at DEBUG. They use positional
-  formatting to emit namespace, prompt key, tag, and mismatch details. These
-  logs are intentionally verbose to aid local debugging and are not expected to
-  surface in production default log levels.
-- **tools/asteval.py**: Tool runs emit a DEBUG record with an explicit
-  `event` field (`"asteval.run"`) and additional telemetry describing the run.
-  This is the primary structured log suitable for aggregation pipelines today.
+- **prompt/overrides/local_store.py**: Override resolution and persistence
+  are logged at INFO; diagnostic messages for missing files run at DEBUG.
+  Structured context includes namespace, prompt key, and tag.
+- **tools/asteval.py**: Tool runs emit a DEBUG record with event `asteval_run`
+  and telemetry describing the run. Note: event name uses underscore, not period.
 
 ## Required Context Keys
 

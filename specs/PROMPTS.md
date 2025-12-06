@@ -1,298 +1,373 @@
-# Prompt Class Specification
+# Prompt System Specification
 
-## Introduction
+## Purpose
 
-The `Prompt` abstraction centralizes every string template that flows to an LLM so the codebase has a single,
-inspectable source for system prompts and per-turn instructions. Each prompt is a markdown document assembled from
-typed `Section` objects whose templates rely on Python's `string.Template` engine. By forcing prompt authors to
-declare explicit data carriers we reduce the chance of mismatched placeholders, make it easy to audit prompt usage,
-and give downstream callers a predictable, debuggable API. Treat this document as both design guide and reference:
-it outlines the scope of the abstraction, enumerates the classes that realize the contract, and calls out
-limitations that implementers must respect.
-
-## Scope and terminology
-
-- **Where this applies**: Everything under `src/weakincentives/prompt/` including `Prompt` orchestration,
-  section composition, rendering, structured output, and override plumbing. Downstream usages (for
-  example adapters) consume the public surface but do not alter the rules defined here.
-- **Core documents**: This spec anchors prompt behavior; the glossary and runtime specs define adjacent concepts
-  (sessions, tool invocation) but do not override prompt semantics.
-- **Intended consumers**: Prompt authors, tool builders, and contract reviewers. Each audience should be able to
-  map behaviors described here to concrete classes without spelunking through implementation files.
-
-## Goals
-
-Keep authoring friction low while providing strong validation. Make prompt structure obvious in logs and docs without
-forcing developers to learn complex templating rules. Encourage reuse by composing hierarchical sections, yet ensure
-that every placeholder a template references is captured in a dataclass so rendering bugs surface before a request
-reaches an LLM. The design should be simple enough to maintain but strict enough to prevent silent failures.
+The `Prompt` abstraction centralizes every string template that flows to an LLM
+so the codebase has a single, inspectable source for system prompts and per-turn
+instructions. This specification covers prompt construction, section composition,
+structured output, prompt wrapping for delegation, and progressive disclosure.
 
 ## Guiding Principles
 
-- **Type-Safety First**: Every placeholder maps to a dataclass field so template issues surface early in development
-  rather than during an LLM call.
-- **Strict, Predictable Failures**: Validation and render errors fail loudly with actionable context instead of
-  silently dropping sections or placeholders.
-- **Composable Markdown Structure**: Hierarchical sections with deterministic heading levels keep long prompts
-  readable and easy to audit.
-- **Minimal Templating Surface**: Limiting features to `Template.substitute` plus boolean selectors prevents
-  complex control flow while still allowing dynamic content.
-- **Declarative over Imperative**: Prompts describe structured content (sections + params) instead of embedding logic,
-  which keeps diffs clear and tooling feasible.
+- **Type-Safety First**: Every placeholder maps to a dataclass field so issues
+  surface early in development.
+- **Strict, Predictable Failures**: Validation and render errors fail loudly
+  with actionable context.
+- **Composable Markdown Structure**: Hierarchical sections with deterministic
+  heading levels keep prompts readable.
+- **Minimal Templating Surface**: Limit to `Template.substitute` plus boolean
+  selectors to prevent complex control flow.
+- **Declarative over Imperative**: Prompts describe structure, not logic.
 
-## Reference map (classes and responsibilities)
+## Core Components
 
-- **`Prompt` (`prompt.py`)**: Coordinates namespace/key identity, registers sections, hydrates the response-format
-  appendage when structured output is declared, and delegates rendering to `PromptRenderer`. It rejects empty namespaces
-  or keys up front and snapshots placeholder metadata for tooling.
-- **`Section` (`section.py`)**: Abstract base with metadata, `is_enabled`, `render`, child handling, and the
-  `accepts_overrides` gate used by the overrides layer. All concrete sections specialize `Section[ParamsT]` and expose
-  `params_type` plus optional defaults.
-- **`MarkdownSection` (`markdown.py`)**: Default concrete section that dedents, strips, and runs `Template.substitute`;
-  missing placeholders explode via `PromptRenderError`. It also wires optional tools and passes them through the
-  override gating defined by the base class.
-- **Rendering pipeline (`rendering.py`)**: `PromptRenderer` builds the dataclass lookup, enforces uniqueness of types,
-  walks enabled sections depth-first, and collates rendered markdown plus tool metadata into `RenderedPrompt`. It is
-  also responsible for respecting tool overrides and cloning field description patches into immutable maps.
-- **Overrides and registry (`registry.py`, `overrides/`)**: The registry binds section paths to params types and
-  placeholder sets, while the overrides store resolves per-tag replacement bodies and tool description tweaks. Section
-  instances with `accepts_overrides=False` are excluded from these substitutions.
+### PromptTemplate and Prompt
 
-## Design Overview
-
-A `Prompt` owns a **namespace** (`ns`), a required machine-readable `key`, an optional human-readable `name`, and
-an ordered tree of `Section` instances. Rendering walks this tree depth first and produces markdown where the
-heading level is `##` for roots and adds one `#` per level of depth (so depth one becomes `###`, depth two `####`,
-and so on). Each heading is also prefixed with a hierarchical number derived from its position in the traversal:
-top-level sections start at `1`, their first child becomes `1.1`, its child becomes `1.1.1`, and so on.
-A prompt's namespace
-groups prompts by logical domain (for example `webapp/agents`, `backoffice/cron`, `infra/sweeper`) and participates
-in versioning plus override resolution to prevent collisions across applications. The implementation keeps
-`Section` as the abstract base class that defines the shared contract—metadata, parameter typing, optional defaults,
-`children`, and two core methods: `is_enabled(params)` to determine visibility and `render(params, depth)` to emit
-the markdown fragment (including the heading). Future variants can plug in alternative templating engines or emit
-structured output (markdown tables, CSV, JSON) without rewriting prompt logic, so long as they honor the heading
-pipeline. The default concrete subclass, `MarkdownSection`, relies on `Template.substitute` to render its `body` string
-(missing placeholders raise immediately), applies `textwrap.dedent` and stripping before substitution, and emits
-normalized markdown. Concrete sections are instantiated by specializing the generic `Section[ParamsT]` base class
-(for example `MarkdownSection[GuidanceParams](...)`). This pins the dataclass type to the section before any instance is
-created, and the base class rejects attempts to construct an unspecialized section or provide multiple type arguments.
-Each specialized section exposes the `params_type` metadata, accepts an optional `default_params` instance that
-pre-populates values, stores the raw `body` string interpreted by the concrete section class, wires optional child
-sections through the `children` collection, optionally contributes prompt tools through the `tools` sequence, and
-supports an optional boolean `enabled` callable. The callable receives the effective dataclass instance (either the
-override passed to `render` or the fallback defaults) and lets authors skip entire subtrees dynamically while still
-staying inside the strict `Template` feature set. Sections also declare an `accepts_overrides: bool` flag that defaults
-to `True`. When false, the section is excluded from prompt descriptors and the override system ignores any supplied
-replacement bodies. Built-in sections provided by the framework (including the generated response format section)
-default this flag to `False` so automatic optimization infrastructure leaves them untouched, but their constructors
-expose an `accepts_overrides` argument so callers can opt in when a specific deployment is ready for tuning. When a built-in section opts in, the tools it contributes inherit the same `accepts_overrides` value so the entire suite toggles together.
-Sections also accept a `visibility` value that defaults to `SectionVisibility.FULL`. Authors may supply
-`Callable[[ParamsT], SectionVisibility]` (or a parameterless callable for sections without params) to dynamically
-select summary vs. full rendering based on the effective parameters.
-
-## Construction Rules
-
-### Rendering behavior (current implementation snapshot)
-
-- **Traversal and headings**: `PromptRenderer.render` walks the registry's section tree in depth-first order. Each
-  enabled node emits a heading with deterministic numbering derived from its path.
-- **Parameter lookup**: The renderer builds a map of dataclass type → instance, rejecting duplicate or unexpected
-  types before any template is evaluated. When a section lacks an override and no default is configured, the renderer
-  instantiates the declared dataclass with no arguments and surfaces `PromptRenderError` if required fields are
-  missing.
-- **Overrides and tooling**: Section overrides apply only when `accepts_overrides=True`; tool description overrides
-  follow the same flag. Effective tool param descriptions are frozen into immutable mappings on `RenderedPrompt` so
-  callers cannot mutate shared state.
-- **Structured output**: When a prompt declares structured output, `Prompt` injects a `ResponseFormatSection` keyed to
-  `response-format` and binds the resolved `StructuredOutputConfig` to the returned `RenderedPrompt`. The injected
-  section can be toggled off at render-time via `inject_output_instructions=False` for scenarios where raw text is
-  preferred.
-
-## Construction Rules
-
-When a `Prompt` is instantiated it registers every section by the type of its parameter dataclass, storing the default
-instance if provided. Parameter types can repeat across sections—callers supply overrides by type and the prompt fans
-that instance out to every matching section. Each section may still define its own default instance; when no override is
-provided, the prompt uses the section-specific default, falling back to the first default declared for that type, and
-finally the dataclass' zero-argument constructor. The constructor also parses each section's template, extracts
-every placeholder token, and verifies that each token corresponds to an attribute on the declared dataclass. Extra
-dataclass attributes are acceptable, but missing placeholders trigger `PromptValidationError` with enough context
-(section title, placeholder name) for developers to resolve the issue quickly. Default instances are optional; when
-absent we rely on the dataclass' own default field values by instantiating it with no arguments during rendering.
-
-## Cloning and reuse
-
-Sections MUST expose a `clone(**kwargs)` method that returns a deep copy of the component tree
-suited for insertion into a new prompt. Clones behave as if they were constructed from scratch:
-numbering restarts from the destination prompt, default parameter dataclasses are duplicated
-(not reused), and the cloned objects share no references to the original prompt, `Session`, or
-`EventBus` instances. Implementations must recursively clone children so the entire subtree
-remains decoupled.
-
-Tool-backed sections MAY accept runtime objects (for example `session` or `bus`) as keyword
-arguments to `clone`. When supplied, the clone MUST wire reducers and tool handlers against the
-provided instances instead of the originals. This is critical for reusable sections such as the
-VFS and Podman tool suites, which need to register their reducers on the target session and bind
-tool telemetry to the new event bus when transplanted into another prompt.
-
-### Prompt namespace (`ns`) — REQUIRED
-
-Prompts MUST declare a non-empty `ns: str`. The `(ns, key)` pair identifies a prompt
-family during versioning/overrides and avoids collisions across complex apps.
-
-### Prompt key (`key`) — REQUIRED
-
-Prompts MUST declare a non-empty `key: str`. Keys scope prompt instances within a namespace and participate in
-hashing, override lookup, and tool descriptor construction.
-
-### Section key (`key`) — REQUIRED
-
-All `Section` instances MUST declare a non-empty `key: str`. Keys MUST match:
-
-```
-^[a-z0-9][a-z0-9._-]{0,63}$
-```
-
-Rationale: stable machine identifiers that are safe for file names, JSON keys, and CLIs.
-The `key` becomes part of the **SectionPath** used by the versioning system.
-Relying on title slugs is no longer permitted.
-
-### Built-in Response Format section key
-
-When structured output is enabled, the framework appends a built-in
-`Response Format` section. Its **key is fixed** to `response-format` so
-SectionPaths are deterministic.
-
-## Rendering Flow
-
-`Prompt.render` accepts dataclass instances as positional arguments. Ordering is irrelevant because rendering matches
-instances by their concrete dataclass type. For each section we compute the effective params by starting with its
-configured default when present, otherwise instantiating the dataclass with no arguments (trusting field defaults and
-factories). If instantiating the dataclass fails because required fields lack values and no override was supplied we
-surface `PromptRenderError`. Once parameters are in place we call
-`section.is_enabled(params)`; disabled sections short-circuit the traversal, meaning their children do not render and
-their defaults are ignored. Active sections invoke `section.render(params, depth)`, which always emits a markdown
-heading at the appropriate depth followed by the body content. Heading titles must include the numbering prefix
-generated from the section's location in the tree (`1`, `1.2`, `1.2.1`, etc.) so rendered prompts expose the same
-structure optimization tooling inspects. Text bodies are dedented, stripped, and separated by a
-single blank line so the final document is readable and deterministic. Enabled sections contribute any registered
-`Tool` instances to the rendered prompt; tools from disabled sections never appear in the result.
-
-Rendering returns a `RenderedPrompt` dataclass. Besides the markdown string (`.text`) and structured output metadata,
-the object surfaces:
-
-- `.tools` – ordered tuple of tools contributed by enabled sections.
-- `.tool_param_descriptions` – optional mapping of tool name → field description overrides supplied by the
-  override system.
-- Prompt descriptors MUST capture the numbering string assigned to each section so callers can map section keys or
-  `SectionPath`s back to the human-facing headings rendered in `.text`.
-
-## Validation and Error Handling
-
-All validation errors throw `PromptValidationError`, while issues discovered during rendering—missing dataclass
-instances, failed selector callables, `Template` substitution failures—raise `PromptRenderError`. Both exceptions
-should carry structured data describing the section path, the offending placeholder, and the dataclass type so calling
-code can log or surface actionable diagnostics. The library intentionally exposes no configuration switches for
-silently dropping sections or coercing mismatched data; strict failure modes keep bugs visible and avoid confusing LLM
-transcripts.
-
-## Caveats and implementation limits
-
-- **Dataclass-only inputs**: `PromptRenderer.build_param_lookup` rejects non-dataclass instances and raises if multiple
-  instances of the same type are supplied. Callers must conform to the declared `params_type` set exposed by the prompt
-  registry.
-- **Unspecialized sections are illegal**: `Section` generics must be concretely specialized (for example
-  `MarkdownSection[MyParams]`); attempts to instantiate without a concrete type or with multiple parameters are
-  blocked during section construction.
-- **Override fences**: Sections and tools default to `accepts_overrides=False` when provided by the framework. Override
-  stores simply ignore replacement bodies or description patches for fenced components to prevent accidental
-  prompt-tuning of required instructions.
-- **Limited templating surface**: Only `Template.substitute` and optional boolean `enabled` callables control
-  conditional rendering. Complex logic, loops, or computed placeholders belong in the dataclass factory code rather
-  than the template itself.
-
-## Non-Goals
-
-We deliberately exclude templating features that go beyond `Template.substitute`: no conditionals, loops, or
-arbitrary expression evaluation. Prompt composition also stops at sections; we do not embed one prompt inside another,
-favoring explicit `children` for reuse. Telemetry, logging sinks, and additional metadata such as channel tags or
-custom heading levels remain out of scope until real-world usage demonstrates a need. The only validation we perform
-concerns placeholder presence and dataclass coverage; naming conventions are unchecked by design.
-
-## Usage Sketch
+`PromptTemplate` is the configuration blueprint that owns a namespace (`ns`),
+a required `key`, an optional `name`, and an ordered tree of `Section`
+instances:
 
 ```python
-from dataclasses import dataclass
-from weakincentives.prompt import Prompt, MarkdownSection
-
-@dataclass
-class MessageRoutingParams:
-    recipient: str
-    subject: str | None = None
-
-@dataclass
-class ToneParams:
-    tone: str = "friendly"
-
-@dataclass
-class ContentParams:
-    summary: str
-
-
-@dataclass
-class InstructionParams:
-    pass
-
-tone_section = MarkdownSection[ToneParams](
-    title="Tone",
-    template="""
-    Target tone: ${tone}
-    """,
-    key="tone",
-)
-
-content_section = MarkdownSection[ContentParams](
-    title="Content Guidance",
-    template="""
-    Include the following summary:
-    ${summary}
-    """,
-    key="content-guidance",
-    enabled=lambda params: bool(params.summary.strip()),
-)
-
-compose_email = Prompt(
+template = PromptTemplate[OutputType](
     ns="demo",
     key="compose-email",
     name="compose_email",
+    sections=[...],
+)
+```
+
+`Prompt` is a wrapper that binds parameters to a template for rendering:
+
+```python
+# Create from template with bound parameters
+prompt = template.bind(MyParams(field="value"))
+
+# Or render directly from template
+rendered = template.render(MyParams(field="value"))
+```
+
+**Construction Rules:**
+
+- `ns` and `key` are required and non-empty.
+- The `(ns, key)` pair identifies a prompt for versioning and overrides.
+- Section keys must match: `^[a-z0-9][a-z0-9._-]{0,63}$`
+- Duplicate parameter types are allowed; instances fan out to matching sections.
+
+### Section
+
+Abstract base with metadata, `is_enabled`, `render`, child handling, and
+override gating.
+
+```python
+class Section(ABC, Generic[ParamsT]):
+    title: str
+    key: str
+    children: tuple[Section, ...] = ()
+    tools: tuple[Tool, ...] = ()
+    enabled: Callable[[ParamsT], bool] | None = None
+    default_params: ParamsT | None = None
+    accepts_overrides: bool = True
+    visibility: SectionVisibility | Callable[[ParamsT], SectionVisibility] | Callable[[], SectionVisibility] = FULL
+```
+
+**Key Behaviors:**
+
+- Sections must be specialized: `MarkdownSection[MyParams]`
+- `accepts_overrides=False` excludes sections from the override system
+- `visibility` controls full vs. summary rendering
+
+### MarkdownSection
+
+Default concrete section that dedents, strips, and runs `Template.substitute`:
+
+```python
+tone_section = MarkdownSection[ToneParams](
+    title="Tone",
+    key="tone",
+    template="Target tone: ${tone}",
+    summary="Tone guidance available.",  # Optional for progressive disclosure
+)
+```
+
+## Rendering
+
+`Prompt.render` accepts dataclass instances as positional arguments matched by
+type. Rendering walks the section tree depth-first and produces markdown with
+deterministic headings.
+
+### Heading Levels
+
+- Root sections: `##`
+- Each depth level adds one `#` (depth 1 = `###`, depth 2 = `####`)
+- Headings include numbering: `## 1 Title`, `### 1.1 Subtitle`
+
+### Parameter Lookup
+
+The renderer builds a map of dataclass type to instance. When a section lacks
+an override:
+
+1. Use `default_params` if configured
+1. Else use the first default for that type
+1. Else instantiate with no arguments
+
+Missing required fields raise `PromptRenderError`.
+
+### RenderedPrompt
+
+```python
+@FrozenDataclass()
+class RenderedPrompt(Generic[OutputT]):
+    text: str
+    structured_output: StructuredOutputConfig | None = None
+    deadline: Deadline | None = None
+    descriptor: PromptDescriptor | None = None
+
+    # Properties derived from structured_output
+    @property
+    def tools(self) -> tuple[Tool, ...]: ...
+    @property
+    def tool_param_descriptions(self) -> Mapping[str, Mapping[str, str]]: ...
+    @property
+    def output_type(self) -> type | None: ...
+    @property
+    def container(self) -> Literal["object", "array"] | None: ...
+    @property
+    def allow_extra_keys(self) -> bool | None: ...
+```
+
+## Structured Output
+
+Prompts can declare typed outputs via generic specialization:
+
+```python
+@dataclass
+class Summary:
+    title: str
+    gist: str
+
+prompt = Prompt[Summary](...)
+```
+
+### Declaration
+
+- `Prompt[T]` - JSON object output matching dataclass `T`
+- `Prompt[list[T]]` - JSON array of objects matching `T`
+- Non-dataclass types raise `PromptValidationError`
+
+### Response Format Section
+
+When structured output is declared and `inject_output_instructions=True`
+(default), the framework appends a `ResponseFormatSection` keyed as
+`response-format`:
+
+```
+## Response Format
+Return ONLY a single fenced JSON code block. Do not include any text
+before or after the block.
+
+The top-level JSON value MUST be an object that matches the fields
+of the expected schema. Do not add extra keys.
+```
+
+### Parsing
+
+`parse_structured_output(output_text, rendered)` validates assistant responses:
+
+1. **Extract JSON**: Prefer fenced `json` block, else parse entire message,
+   else scan for `{...}` or `[...]`
+1. **Validate container**: Object vs. array must match declaration
+1. **Validate dataclass**: Required fields, no extra keys (unless allowed),
+   conservative type coercions
+
+Failures raise `OutputParseError` with the raw response attached.
+
+### Configuration
+
+```python
+prompt = Prompt[Output](
+    ...,
+    inject_output_instructions=True,  # Default: append format section
+    allow_extra_keys=False,           # Default: reject unknown keys
+)
+```
+
+## Prompt Composition
+
+Delegation composes a new prompt that wraps a parent prompt for subagent
+execution.
+
+### Required Layout
+
+1. `# Delegation Summary`
+1. `## Response Format` (conditional)
+1. `## Parent Prompt (Verbatim)`
+1. `## Recap` (optional)
+
+### DelegationPrompt
+
+```python
+from weakincentives.prompt.composition import DelegationPrompt, DelegationParams
+
+delegation = DelegationPrompt[ParentOutput, DelegationOutput](
+    parent_prompt,
+    rendered_parent,
+    recap_lines=("Check constraints before planning.",),
+)
+
+rendered = delegation.render(
+    DelegationParams(
+        reason="Investigate filesystem",
+        expected_result="Actionable plan",
+        may_delegate_further="no",
+    ),
+    parent=ParentPromptParams(body=rendered_parent.text),  # Optional, defaults to parent text
+    recap=RecapParams(...),  # Optional recap section
+)
+```
+
+### Composition Rules
+
+- Parent prompt is embedded byte-for-byte with markers:
+  `<!-- PARENT PROMPT START -->` and `<!-- PARENT PROMPT END -->`
+- Tools from parent are inherited, not redeclared
+- Response format section appears only when adapter needs fallback instructions
+- Truncation is never allowed; abort if size limits prevent embedding
+
+## Progressive Disclosure
+
+Sections can render with `SUMMARY` visibility to reduce token usage. The
+`open_sections` tool lets models request expanded content.
+
+### Section Visibility
+
+```python
+class SectionVisibility(Enum):
+    FULL = auto()
+    SUMMARY = auto()
+
+section = MarkdownSection[Params](
+    ...,
+    template="Full detailed content...",
+    summary="Brief overview available.",
+    visibility=SectionVisibility.SUMMARY,
+)
+```
+
+### Automatic Tool Registration
+
+When any section has `SUMMARY` visibility, the framework injects the
+`open_sections` tool:
+
+```python
+@dataclass
+class OpenSectionsParams:
+    section_keys: tuple[str, ...]  # Dot notation for nested sections
+    reason: str                     # Why expansion is needed
+```
+
+### Exception-Based Signaling
+
+The tool raises `VisibilityExpansionRequired` rather than returning a result:
+
+```python
+@dataclass
+class VisibilityExpansionRequired(PromptError):
+    requested_overrides: Mapping[tuple[str, ...], SectionVisibility]
+    reason: str
+    section_keys: tuple[str, ...]
+```
+
+### Caller Pattern
+
+```python
+visibility_overrides = {}
+
+while True:
+    try:
+        rendered = prompt.render(*params, visibility_overrides=visibility_overrides)
+        response = adapter.evaluate(rendered, session=session, bus=bus)
+        break
+    except VisibilityExpansionRequired as e:
+        visibility_overrides.update(e.requested_overrides)
+```
+
+### Summary Suffix
+
+Summarized sections automatically append:
+
+```
+---
+[This section is summarized. To view full content, call `open_sections` with key "context".]
+```
+
+## Cloning
+
+Sections expose `clone(**kwargs)` for insertion into new prompts:
+
+```python
+cloned = section.clone(session=new_session, bus=new_bus)
+```
+
+- Clones are fully decoupled (no shared references)
+- Tool-backed sections rewire reducers and handlers to provided instances
+- Children are recursively cloned
+
+## Error Handling
+
+### Exception Types
+
+- `PromptValidationError` - Construction failures (missing key, invalid type)
+- `PromptRenderError` - Rendering failures (missing params, template errors)
+- `OutputParseError` - Structured output validation failures
+- `VisibilityExpansionRequired` - Progressive disclosure expansion request
+
+### Validation Rules
+
+- Empty namespace or key: `PromptValidationError`
+- Unspecialized section: `PromptValidationError`
+- Missing placeholder in dataclass: `PromptValidationError`
+- Missing required field at render: `PromptRenderError`
+- Template substitution failure: `PromptRenderError`
+- Wrong container type in output: `OutputParseError`
+- Missing required fields in output: `OutputParseError`
+
+## Usage Example
+
+```python
+from dataclasses import dataclass
+from weakincentives.prompt import Prompt, MarkdownSection, parse_structured_output
+
+@dataclass
+class TaskParams:
+    objective: str
+
+@dataclass
+class TaskResult:
+    summary: str
+    steps: list[str]
+
+template = PromptTemplate[TaskResult](
+    ns="agents/assistant",
+    key="task-planner",
     sections=[
-        MarkdownSection[MessageRoutingParams](
-            title="Message Routing",
-            template="""
-            To: ${recipient}
-            Subject: ${subject}
-            """,
-            key="routing",
-            default_params=MessageRoutingParams(subject="(optional subject)"),
-        ),
-        MarkdownSection[InstructionParams](
-            title="Instruction",
-            template="""
-            Please craft the email below.
-            """,
-            key="instruction",
-            children=[tone_section, content_section],
+        MarkdownSection[TaskParams](
+            title="Task",
+            key="task",
+            template="Plan the following: ${objective}",
         ),
     ],
 )
 
-rendered = compose_email.render(
-    MessageRoutingParams(recipient="Jordan", subject="Q2 sync"),
-    ToneParams(tone="warm"),
-    ContentParams(summary="Top takeaways from yesterday's meeting."),
-)
-# Example SectionPaths now:
-# ("routing",), ("instruction",), ("instruction","tone"),
-# ("instruction","content-guidance"), ("response-format",)
+rendered = template.render(TaskParams(objective="Refactor auth module"))
+
+# After adapter evaluation...
+result: TaskResult = parse_structured_output(response_text, rendered)
 ```
+
+## Limitations
+
+- **Dataclass-only inputs**: Non-dataclass params are rejected
+- **Limited templating**: Only `Template.substitute` and boolean `enabled`
+- **No nested prompts**: Use `children` for reuse, not prompt embedding
+- **Single-turn expansion**: Progressive disclosure halts the current turn
+- **No partial expansion**: Sections open fully or remain summarized
