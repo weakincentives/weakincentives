@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-from demo_utils import attach_logging_subscribers, configure_logging
+from examples import attach_logging_subscribers, configure_logging
 from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.core import OptimizationScope
 from weakincentives.adapters.openai import OpenAIAdapter
