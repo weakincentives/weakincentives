@@ -81,20 +81,32 @@ src/weakincentives/adapters/
 ### Adapter Class
 
 ```python
-@dataclass(slots=True)
 class GeminiAdapter(ProviderAdapter[Any]):
-    """Adapter that evaluates prompts against Google's Gemini API."""
+    """Adapter that evaluates prompts against Google's Gemini API.
+
+    Args:
+        model: Model identifier (e.g., "gemini-3.0-pro").
+        model_config: Typed configuration for model parameters like temperature,
+            max_tokens, thinking_level, etc. When provided, these values are
+            merged into each request payload.
+        tool_choice: Tool selection directive. Defaults to "auto".
+        use_native_response_format: When True, uses Gemini's JSON schema response
+            format for structured outputs. Defaults to True.
+        client: Pre-configured Gemini client instance. Mutually exclusive with
+            client_config.
+        client_config: Typed configuration for client instantiation. Used when
+            client is not provided.
+    """
 
     def __init__(
         self,
         *,
         model: str = "gemini-3.0-pro",
+        model_config: GeminiModelConfig | None = None,
         tool_choice: ToolChoice = "auto",
         use_native_response_format: bool = True,
-        thinking_level: Literal["low", "high"] | None = None,
         client: GeminiClientProtocol | None = None,
-        client_factory: GeminiClientFactory | None = None,
-        client_kwargs: Mapping[str, object] | None = None,
+        client_config: GeminiClientConfig | None = None,
     ) -> None: ...
 
     @override
@@ -106,6 +118,9 @@ class GeminiAdapter(ProviderAdapter[Any]):
         session: SessionProtocol,
         parse_output: bool = True,
         deadline: Deadline | None = None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        budget: Budget | None = None,
+        budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]: ...
 ```
 
@@ -114,12 +129,126 @@ class GeminiAdapter(ProviderAdapter[Any]):
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model` | `str` | `"gemini-3.0-pro"` | Gemini model identifier |
+| `model_config` | `GeminiModelConfig \| None` | `None` | Typed model parameters |
 | `tool_choice` | `ToolChoice` | `"auto"` | Tool invocation mode |
 | `use_native_response_format` | `bool` | `True` | Enable JSON schema output |
-| `thinking_level` | `Literal["low", "high"] \| None` | `None` | Reasoning depth control |
 | `client` | `GeminiClientProtocol \| None` | `None` | Pre-configured client |
-| `client_factory` | `GeminiClientFactory \| None` | `None` | Factory for client creation |
-| `client_kwargs` | `Mapping[str, object] \| None` | `None` | Arguments for factory |
+| `client_config` | `GeminiClientConfig \| None` | `None` | Typed client configuration |
+
+### Typed Configuration
+
+Gemini adapter uses frozen dataclass configurations for type-safe instantiation and model parameter
+control, following the pattern established by OpenAI and LiteLLM adapters.
+
+**Client Configuration**
+
+```python
+@FrozenDataclass()
+class GeminiClientConfig:
+    """Configuration for Gemini client instantiation.
+
+    Attributes:
+        api_key: Google API key. None uses the GOOGLE_API_KEY environment variable.
+        vertexai: Whether to use Vertex AI instead of Gemini Developer API.
+        project: GCP project ID for Vertex AI. Required when vertexai=True.
+        location: GCP region for Vertex AI. Defaults to "us-central1".
+        api_version: API version string. Defaults to "v1".
+    """
+
+    api_key: str | None = None
+    vertexai: bool = False
+    project: str | None = None
+    location: str | None = None
+    api_version: str = "v1"
+
+    def __post_init__(self) -> None:
+        if self.vertexai and self.project is None:
+            raise ValueError("project is required when vertexai=True")
+
+    def to_client_kwargs(self) -> dict[str, Any]:
+        """Convert non-None fields to client constructor kwargs."""
+        kwargs: dict[str, Any] = {}
+        if self.api_key is not None:
+            kwargs["api_key"] = self.api_key
+        if self.vertexai:
+            kwargs["vertexai"] = True
+            kwargs["project"] = self.project
+            if self.location is not None:
+                kwargs["location"] = self.location
+        kwargs["http_options"] = HttpOptions(api_version=self.api_version)
+        return kwargs
+```
+
+**Model Configuration**
+
+```python
+@FrozenDataclass()
+class GeminiModelConfig(LLMConfig):
+    """Gemini-specific model configuration.
+
+    Extends LLMConfig with parameters specific to Gemini's API.
+
+    Attributes:
+        thinking_level: Reasoning depth control ("low" or "high"). Gemini 3.0+
+            feature that balances response quality vs latency/cost.
+        candidate_count: Number of response variations to generate. None uses
+            the provider default (1).
+        safety_settings: Safety threshold configuration. None uses provider defaults.
+
+    Notes:
+        Gemini uses ``max_output_tokens`` instead of ``max_tokens`` in the API,
+        but this config accepts ``max_tokens`` for consistency with LLMConfig
+        and performs the rename in ``to_request_params()``.
+    """
+
+    thinking_level: Literal["low", "high"] | None = None
+    candidate_count: int | None = None
+    safety_settings: Mapping[str, str] | None = None
+
+    @override
+    def to_request_params(self) -> dict[str, Any]:
+        """Convert non-None fields to GenerateContentConfig parameters."""
+        params: dict[str, Any] = {}
+
+        # Core LLM parameters
+        if self.temperature is not None:
+            params["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            params["max_output_tokens"] = self.max_tokens
+        if self.top_p is not None:
+            params["top_p"] = self.top_p
+        if self.stop is not None:
+            params["stop_sequences"] = list(self.stop)
+        if self.seed is not None:
+            params["seed"] = self.seed
+        if self.presence_penalty is not None:
+            params["presence_penalty"] = self.presence_penalty
+        if self.frequency_penalty is not None:
+            params["frequency_penalty"] = self.frequency_penalty
+
+        # Gemini-specific parameters
+        if self.thinking_level is not None:
+            params["thinking_level"] = self.thinking_level
+        if self.candidate_count is not None:
+            params["candidate_count"] = self.candidate_count
+        if self.safety_settings is not None:
+            params["safety_settings"] = dict(self.safety_settings)
+
+        return params
+```
+
+**Configuration in config.py**
+
+Add these classes to `src/weakincentives/adapters/config.py` and export from the package:
+
+```python
+# In config.py
+__all__ = [
+    # ... existing exports
+    "GeminiClientConfig",
+    "GeminiModelConfig",
+]
+```
 
 ## SDK Integration
 
@@ -140,37 +269,46 @@ def create_gemini_client(**kwargs: object) -> genai.Client:
             "`pip install weakincentives[gemini]`."
         ) from exc
 
-    # Support both API key and Vertex AI authentication
-    http_options = kwargs.pop("http_options", None)
-    if http_options is None:
-        http_options = HttpOptions(api_version="v1")
+    return genai.Client(**kwargs)
+```
 
-    return genai.Client(http_options=http_options, **kwargs)
+The adapter instantiates clients via `GeminiClientConfig.to_client_kwargs()`:
+
+```python
+# In adapter __init__
+if client is not None:
+    if client_config is not None:
+        raise ValueError(
+            "client_config cannot be provided when an explicit client is supplied."
+        )
+else:
+    client_kwargs = client_config.to_client_kwargs() if client_config else {}
+    client = create_gemini_client(**client_kwargs)
 ```
 
 ### Authentication
 
-The SDK supports multiple authentication modes:
+The SDK supports multiple authentication modes, all configurable via `GeminiClientConfig`:
 
 1. **API Key (Gemini Developer API):**
    ```python
-   client = genai.Client(api_key="YOUR_API_KEY")
+   config = GeminiClientConfig(api_key="YOUR_API_KEY")
+   adapter = GeminiAdapter(model="gemini-3.0-pro", client_config=config)
    ```
 
 2. **Application Default Credentials (Vertex AI):**
    ```python
-   client = genai.Client(
+   config = GeminiClientConfig(
        vertexai=True,
        project="your-project",
        location="us-central1",
    )
+   adapter = GeminiAdapter(model="gemini-3.0-pro", client_config=config)
    ```
 
 3. **Environment Variables:**
-   - `GOOGLE_API_KEY` for API key authentication
+   - `GOOGLE_API_KEY` for API key authentication (used when `api_key=None`)
    - `GOOGLE_APPLICATION_CREDENTIALS` for service account
-
-The adapter should accept `client_kwargs` to pass through these options transparently.
 
 ## Structured Output
 
@@ -495,6 +633,10 @@ def _build_provider_invoker(
             "system_instruction": system_instruction,
         }
 
+        # Merge model config parameters (temperature, max_output_tokens, thinking_level, etc.)
+        if self._model_config is not None:
+            config_kwargs.update(self._model_config.to_request_params())
+
         # Add tools if provided
         if tool_specs:
             declarations = [
@@ -511,10 +653,6 @@ def _build_provider_invoker(
         if response_format_payload:
             config_kwargs["response_mime_type"] = "application/json"
             config_kwargs["response_schema"] = response_format_payload.get("schema")
-
-        # Add thinking level if configured
-        if self._thinking_level:
-            config_kwargs["thinking_level"] = self._thinking_level
 
         config = types.GenerateContentConfig(**config_kwargs)
 
@@ -596,11 +734,14 @@ gemini = ["google-genai>=1.0.0"]
 
 ```python
 # src/weakincentives/adapters/__init__.py
+from .config import GeminiClientConfig, GeminiModelConfig
 from .gemini import GeminiAdapter, create_gemini_client
 
 __all__ = [
     # ... existing exports
     "GeminiAdapter",
+    "GeminiClientConfig",
+    "GeminiModelConfig",
     "create_gemini_client",
 ]
 ```
@@ -632,7 +773,24 @@ class TestGeminiAdapter:
     def test_quota_exhausted_error_handling(self, mock_gemini_client): ...
     def test_schema_conversion_to_gemini_format(self): ...
     def test_message_normalization(self): ...
-    def test_thinking_level_configuration(self, mock_gemini_client): ...
+    def test_model_config_merged_into_request(self, mock_gemini_client): ...
+    def test_budget_tracking(self, mock_gemini_client): ...
+    def test_budget_exceeded_error(self, mock_gemini_client): ...
+    def test_visibility_overrides(self, mock_gemini_client): ...
+
+
+class TestGeminiClientConfig:
+    def test_api_key_config(self): ...
+    def test_vertexai_requires_project(self): ...
+    def test_to_client_kwargs_api_key(self): ...
+    def test_to_client_kwargs_vertexai(self): ...
+
+
+class TestGeminiModelConfig:
+    def test_to_request_params_basic(self): ...
+    def test_to_request_params_thinking_level(self): ...
+    def test_max_tokens_renamed_to_max_output_tokens(self): ...
+    def test_stop_renamed_to_stop_sequences(self): ...
 ```
 
 ### Test Stubs
@@ -712,6 +870,41 @@ response = adapter.evaluate(
 print(response.text)  # "Hello, World!"
 ```
 
+### With Typed Configuration
+
+```python
+from weakincentives.adapters import (
+    GeminiAdapter,
+    GeminiClientConfig,
+    GeminiModelConfig,
+)
+
+# Configure client and model parameters
+client_config = GeminiClientConfig(
+    api_key="YOUR_API_KEY",
+)
+model_config = GeminiModelConfig(
+    temperature=0.7,
+    max_tokens=1024,
+    thinking_level="high",
+)
+
+adapter = GeminiAdapter(
+    model="gemini-3.0-pro",
+    client_config=client_config,
+    model_config=model_config,
+)
+
+# Or with pre-configured client
+from google import genai
+client = genai.Client(api_key="YOUR_API_KEY")
+adapter = GeminiAdapter(
+    model="gemini-3.0-pro",
+    client=client,
+    model_config=model_config,  # Model params still apply
+)
+```
+
 ### Structured Output
 
 ```python
@@ -779,23 +972,63 @@ prompt = Prompt[str](
 ### Vertex AI Deployment
 
 ```python
+from weakincentives.adapters import GeminiAdapter, GeminiClientConfig
+
+client_config = GeminiClientConfig(
+    vertexai=True,
+    project="my-gcp-project",
+    location="us-central1",
+)
+
 adapter = GeminiAdapter(
     model="gemini-3.0-pro",
-    client_kwargs={
-        "vertexai": True,
-        "project": "my-gcp-project",
-        "location": "us-central1",
-    },
+    client_config=client_config,
 )
 ```
 
-### With Thinking Level
+### With Budget Tracking
 
 ```python
+from weakincentives.budget import Budget, BudgetTracker
+from weakincentives.deadlines import Deadline
+from datetime import timedelta
+
+# Create a budget with token and time limits
+budget = Budget(
+    deadline=Deadline.from_timeout(timedelta(minutes=5)),
+    max_total_tokens=10000,
+    max_output_tokens=2000,
+)
+
+# Optionally share a tracker across multiple evaluations
+tracker = BudgetTracker(budget=budget)
+
+response = adapter.evaluate(
+    prompt.with_params(name="World"),
+    bus=bus,
+    session=session,
+    budget=budget,
+    budget_tracker=tracker,  # Optional: share across calls
+)
+
+# Check consumed tokens
+print(f"Tokens used: {tracker.consumed.total_tokens}")
+```
+
+### With Thinking Level (via Model Config)
+
+```python
+from weakincentives.adapters import GeminiAdapter, GeminiModelConfig
+
 # For complex reasoning tasks
+model_config = GeminiModelConfig(
+    thinking_level="high",  # Use deeper reasoning
+    temperature=0.3,        # Lower temperature for more focused output
+)
+
 adapter = GeminiAdapter(
     model="gemini-3.0-pro",
-    thinking_level="high",  # Use deeper reasoning
+    model_config=model_config,
 )
 ```
 
@@ -809,14 +1042,21 @@ If currently using `LiteLLMAdapter` with Gemini models, migrate to `GeminiAdapte
 - Direct SDK error handling
 - Access to Gemini-specific features (thinking level, etc.)
 - Reduced latency (no LiteLLM proxy layer)
+- Type-safe configuration via `GeminiClientConfig` and `GeminiModelConfig`
 
 ### API Key Environment Variable
 
 The SDK reads from `GOOGLE_API_KEY` by default. For explicit configuration:
 
 ```python
+from weakincentives.adapters import GeminiAdapter, GeminiClientConfig
+
+client_config = GeminiClientConfig(
+    api_key=os.getenv("MY_GEMINI_KEY"),
+)
 adapter = GeminiAdapter(
-    client_kwargs={"api_key": os.getenv("MY_GEMINI_KEY")},
+    model="gemini-3.0-pro",
+    client_config=client_config,
 )
 ```
 
@@ -830,5 +1070,8 @@ adapter = GeminiAdapter(
 
 ## Changelog
 
-- **Initial Version**: Gemini adapter specification with native structured output support
-  and Gemini 3.0 Pro default model.
+- **v2**: Updated to use typed configuration pattern (`GeminiClientConfig`, `GeminiModelConfig`)
+  matching OpenAI/LiteLLM adapters. Added budget tracking support (`Budget`, `BudgetTracker`),
+  visibility overrides, and moved `thinking_level` to `GeminiModelConfig`.
+- **v1**: Initial specification with native structured output support and Gemini 3.0 Pro
+  default model.
