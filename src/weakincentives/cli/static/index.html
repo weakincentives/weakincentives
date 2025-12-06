@@ -7,6 +7,14 @@
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+      <div class="loading-spinner"></div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toast-container" class="toast-container"></div>
+
     <header class="top-bar">
       <div class="heading">
         <p class="eyebrow">wink debug</p>
@@ -14,10 +22,35 @@
         <p id="snapshot-path" class="muted"></p>
       </div>
       <div class="actions">
+        <button id="theme-toggle" class="icon-button" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">
+          <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+        <button id="reload-button" class="icon-button" type="button" title="Reload snapshot (R)" aria-label="Reload snapshot">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
         <label class="select-label">
           <span>Bundles</span>
-          <select id="snapshot-select"></select>
+          <select id="snapshot-select" aria-label="Select snapshot bundle"></select>
         </label>
+        <div class="keyboard-hints" title="Keyboard shortcuts: ←→ navigate, R reload, D dark mode">
+          <kbd>←</kbd><kbd>→</kbd> <kbd>R</kbd> <kbd>D</kbd>
+        </div>
       </div>
     </header>
     <main class="layout">
@@ -79,49 +112,72 @@
           </div>
         </div>
         <div id="slice-card" class="card">
-          <div class="card-header">
-            <div>
-              <p class="label">Slice</p>
-              <p id="slice-title"></p>
-            </div>
-            <div class="chip" id="item-count"></div>
+          <!-- Empty state shown when no slice is selected -->
+          <div id="slice-empty-state" class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <h3>Select a slice to inspect</h3>
+            <p class="muted">Choose a state or event slice from the sidebar to view its contents</p>
           </div>
-          <div class="pill-row" id="type-row"></div>
-          <div class="viewer">
-            <div class="viewer-toolbar">
-              <div class="viewer-controls">
-                <label class="inline-label">
-                  <span>Search items</span>
-                  <input
-                    id="item-search"
-                    type="search"
-                    placeholder="keyword"
-                    autocomplete="off"
-                  />
-                </label>
-                <label class="inline-label">
-                  <span>Expand to depth</span>
-                  <input
-                    id="depth-input"
-                    type="number"
-                    min="1"
-                    max="10"
-                    value="2"
-                    aria-label="Expand tree to depth"
-                  />
-                </label>
-                <div class="button-group">
-                  <button id="expand-all" class="ghost" type="button">
-                    Expand all
-                  </button>
-                  <button id="collapse-all" class="ghost" type="button">
-                    Collapse all
-                  </button>
-                </div>
+
+          <!-- Content shown when a slice is selected -->
+          <div id="slice-content" class="slice-content hidden">
+            <div class="card-header">
+              <div>
+                <p class="label">Slice</p>
+                <p id="slice-title"></p>
               </div>
-              <button id="copy-button" class="ghost">Copy JSON</button>
+              <div class="chip" id="item-count"></div>
             </div>
-            <div id="json-viewer" class="items" aria-live="polite"></div>
+            <div class="pill-row" id="type-row"></div>
+            <div class="viewer">
+              <div class="viewer-toolbar">
+                <div class="viewer-controls">
+                  <label class="inline-label">
+                    <span>Search items</span>
+                    <input
+                      id="item-search"
+                      type="search"
+                      placeholder="keyword"
+                      autocomplete="off"
+                      aria-label="Search items"
+                    />
+                  </label>
+                  <label class="inline-label">
+                    <span>Expand to depth</span>
+                    <input
+                      id="depth-input"
+                      type="number"
+                      min="1"
+                      max="10"
+                      value="2"
+                      aria-label="Expand tree to depth"
+                    />
+                  </label>
+                  <div class="button-group">
+                    <button id="expand-all" class="ghost" type="button" aria-label="Expand all tree nodes">
+                      Expand all
+                    </button>
+                    <button id="collapse-all" class="ghost" type="button" aria-label="Collapse all tree nodes">
+                      Collapse all
+                    </button>
+                  </div>
+                </div>
+                <button id="copy-button" class="ghost" aria-label="Copy JSON to clipboard">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  Copy JSON
+                </button>
+              </div>
+              <div id="json-viewer" class="items" aria-live="polite"></div>
+            </div>
           </div>
         </div>
       </section>

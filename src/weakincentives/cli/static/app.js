@@ -10,6 +10,8 @@ const state = {
   expandDepth: 2,
   searchQuery: "",
   sliceBuckets: { state: [], event: [] },
+  loading: false,
+  theme: localStorage.getItem("wink-theme") || "light",
 };
 
 const MARKDOWN_KEY = "__markdown__";
@@ -37,7 +39,53 @@ const elements = {
   expandAll: document.getElementById("expand-all"),
   collapseAll: document.getElementById("collapse-all"),
   itemSearch: document.getElementById("item-search"),
+  loadingOverlay: document.getElementById("loading-overlay"),
+  toastContainer: document.getElementById("toast-container"),
+  themeToggle: document.getElementById("theme-toggle"),
+  sliceEmptyState: document.getElementById("slice-empty-state"),
+  sliceContent: document.getElementById("slice-content"),
 };
+
+// --- Theme Management ---
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  state.theme = theme;
+  localStorage.setItem("wink-theme", theme);
+}
+
+function toggleTheme() {
+  const next = state.theme === "dark" ? "light" : "dark";
+  applyTheme(next);
+}
+
+// Initialize theme on load
+applyTheme(state.theme);
+
+elements.themeToggle.addEventListener("click", toggleTheme);
+
+// --- Loading State ---
+
+function setLoading(loading) {
+  state.loading = loading;
+  elements.loadingOverlay.classList.toggle("hidden", !loading);
+}
+
+// --- Toast Notifications ---
+
+function showToast(message, type = "default") {
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  elements.toastContainer.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add("hiding");
+    setTimeout(() => toast.remove(), 200);
+  }, 2500);
+}
+
+// --- API Fetching ---
 
 async function fetchJSON(url, options) {
   const response = await fetch(url, options);
@@ -46,6 +94,15 @@ async function fetchJSON(url, options) {
     throw new Error(detail || `Request failed (${response.status})`);
   }
   return response.json();
+}
+
+async function fetchWithLoading(url, options) {
+  setLoading(true);
+  try {
+    return await fetchJSON(url, options);
+  } finally {
+    setLoading(false);
+  }
 }
 
 function renderMeta(meta) {
@@ -230,7 +287,13 @@ function renderSliceList() {
   elements.eventSliceCount.textContent = `${state.sliceBuckets.event.length} total`;
 }
 
+function showSliceContent(show) {
+  elements.sliceEmptyState.classList.toggle("hidden", show);
+  elements.sliceContent.classList.toggle("hidden", !show);
+}
+
 function renderSliceDetail(slice) {
+  showSliceContent(true);
   elements.sliceTitle.textContent = slice.slice_type;
   elements.itemCount.textContent = `${slice.items.length} items`;
   elements.typeRow.innerHTML = "";
@@ -287,14 +350,37 @@ async function refreshMeta() {
 }
 
 elements.sliceFilter.addEventListener("input", renderSliceList);
-elements.copy.addEventListener("click", () => {
+elements.copy.addEventListener("click", async () => {
   const text = JSON.stringify(
     getFilteredItems().map((entry) => entry.item),
     null,
     2
   );
-  navigator.clipboard.writeText(text);
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("Copied to clipboard", "success");
+  } catch {
+    showToast("Failed to copy", "error");
+  }
 });
+
+// --- Reload Functionality ---
+
+async function reloadSnapshot() {
+  elements.reload.classList.add("spinning");
+  try {
+    await fetchJSON("/api/reload", { method: "POST" });
+    await refreshMeta();
+    await refreshEntries();
+    showToast("Snapshot reloaded", "success");
+  } catch (error) {
+    showToast(`Reload failed: ${error.message}`, "error");
+  } finally {
+    elements.reload.classList.remove("spinning");
+  }
+}
+
+elements.reload.addEventListener("click", reloadSnapshot);
 
 elements.depthInput.addEventListener("change", () => {
   const value = Number(elements.depthInput.value);
@@ -320,13 +406,18 @@ elements.itemSearch.addEventListener("input", () => {
   renderItems(state.currentItems);
 });
 
-document.addEventListener("DOMContentLoaded", () => {
-  refreshMeta()
-    .then(refreshEntries)
-    .then(refreshSnapshots)
-    .catch((error) => {
-      elements.jsonViewer.textContent = error.message;
-    });
+document.addEventListener("DOMContentLoaded", async () => {
+  setLoading(true);
+  try {
+    await refreshMeta();
+    await refreshEntries();
+    await refreshSnapshots();
+  } catch (error) {
+    showToast(`Load failed: ${error.message}`, "error");
+    elements.jsonViewer.textContent = error.message;
+  } finally {
+    setLoading(false);
+  }
 });
 
 const isObject = (value) => typeof value === "object" && value !== null;
@@ -359,6 +450,26 @@ function valueType(value) {
   if (Array.isArray(value)) return "array";
   if (value === null) return "null";
   return typeof value;
+}
+
+// Type icons for tree visualization
+const TYPE_ICONS = {
+  string: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>`,
+  number: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="8" y2="21"></line><line x1="16" y1="3" x2="14" y2="21"></line></svg>`,
+  boolean: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
+  null: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`,
+  array: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>`,
+  object: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>`,
+  markdown: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`,
+  undefined: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`,
+};
+
+function createTypeIcon(type) {
+  const icon = document.createElement("span");
+  icon.className = `type-icon type-${type}`;
+  icon.innerHTML = TYPE_ICONS[type] || TYPE_ICONS.undefined;
+  icon.title = type;
+  return icon;
 }
 
 const isPrimitive = (value) =>
@@ -516,6 +627,12 @@ function renderTree(value, path, depth, label) {
   const header = document.createElement("div");
   header.className = "tree-header";
 
+  const markdown = getMarkdownPayload(value);
+  const type = valueType(value);
+
+  // Add type icon
+  header.appendChild(createTypeIcon(type));
+
   const name = document.createElement("span");
   name.className = "tree-label";
   name.textContent = label;
@@ -523,8 +640,6 @@ function renderTree(value, path, depth, label) {
 
   const badge = document.createElement("span");
   badge.className = "pill pill-quiet";
-  const markdown = getMarkdownPayload(value);
-  const type = valueType(value);
   const childCount =
     type === "array"
       ? value.length
@@ -849,6 +964,27 @@ elements.snapshotSelect.addEventListener("change", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  // Ignore if typing in an input
+  const tag = event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+    return;
+  }
+
+  // Reload shortcut
+  if (event.key === "r" || event.key === "R") {
+    event.preventDefault();
+    reloadSnapshot();
+    return;
+  }
+
+  // Theme toggle shortcut
+  if (event.key === "d" || event.key === "D") {
+    event.preventDefault();
+    toggleTheme();
+    return;
+  }
+
+  // Snapshot navigation
   if (!state.snapshots.length) {
     return;
   }
