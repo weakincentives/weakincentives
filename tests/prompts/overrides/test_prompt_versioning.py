@@ -17,6 +17,7 @@ from typing import Any
 
 from weakincentives.prompt import (
     MarkdownSection,
+    Prompt,
     PromptTemplate,
     Section,
     SectionVisibility,
@@ -314,11 +315,12 @@ def test_prompt_render_applies_matching_sections() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        prompt,
         _GreetingParams(subject="Operators"),
         overrides_store=store,
-        tag="experiment",
-    )
+        overrides_tag="experiment",
+    ).render()
 
     assert "Cheer loudly for Operators." in rendered.text
     assert store.calls == [(descriptor, "experiment")]
@@ -346,11 +348,12 @@ def test_prompt_render_respects_section_acceptance() -> None:
 
     prompt.sections[0].section.accepts_overrides = False  # type: ignore[union-attr]
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        prompt,
         _GreetingParams(subject="Operators"),
         overrides_store=store,
-        tag="experiment",
-    )
+        overrides_tag="experiment",
+    ).render()
 
     assert "Greet Operators warmly." in rendered.text
 
@@ -371,10 +374,11 @@ def test_prompt_render_ignores_non_matching_override() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        prompt,
         _GreetingParams(subject="Operators"),
         overrides_store=store,
-    )
+    ).render()
 
     assert "Greet Operators warmly." in rendered.text
 
@@ -383,10 +387,11 @@ def test_prompt_render_handles_missing_override() -> None:
     prompt = _build_prompt()
     store = _RecordingOverridesStore(None)
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        prompt,
         _GreetingParams(subject="Operators"),
         overrides_store=store,
-    )
+    ).render()
 
     assert "Greet Operators warmly." in rendered.text
     assert store.calls[0][1] == "latest"
@@ -413,10 +418,11 @@ def test_prompt_render_with_tool_overrides_updates_description() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        prompt,
         _GreetingParams(subject="Operators"),
         overrides_store=store,
-    )
+    ).render()
 
     assert (
         rendered.tools[0].description == "Offer a celebratory greeting for the subject."
@@ -448,10 +454,11 @@ def test_prompt_render_with_tool_overrides_respects_acceptance() -> None:
 
     prompt.sections[0].section.tools()[0].accepts_overrides = False  # type: ignore[union-attr]
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        prompt,
         _GreetingParams(subject="Operators"),
         overrides_store=store,
-    )
+    ).render()
 
     assert rendered.tools[0].description == tool.description
 
@@ -475,10 +482,11 @@ def test_prompt_render_with_tool_override_rejects_mismatched_contract() -> None:
     )
     store = _RecordingOverridesStore(override)
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        prompt,
         _GreetingParams(subject="Operators"),
         overrides_store=store,
-    )
+    ).render()
 
     assert rendered.tools[0].description == tool.description
     assert rendered.tool_param_descriptions == {}

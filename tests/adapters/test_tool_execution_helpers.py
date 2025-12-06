@@ -40,6 +40,7 @@ from weakincentives.adapters.shared import (
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,
+    Prompt,
     PromptTemplate,
     SupportsDataclassOrNone,
     SupportsToolResult,
@@ -77,7 +78,7 @@ def _base_context(
 ) -> ToolExecutionContext:
     bus = InProcessEventBus()
     prompt_template = _build_prompt(tool)
-    prompt = prompt_template.bind()
+    prompt = Prompt(prompt_template)
     return ToolExecutionContext(
         adapter_name="adapter",
         adapter=cast(Any, object()),

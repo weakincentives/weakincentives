@@ -21,7 +21,7 @@ An agent harness in WINK wires together five core components:
 
 1. **PromptTemplate** (`weakincentives.prompt.PromptTemplate`): Immutable blueprint defining sections, tools, and structured output schema. Import from `weakincentives.prompt`.
 
-1. **Prompt** (`weakincentives.Prompt`): Wraps a template with parameter bindings and optional overrides. Call `.bind()` to attach runtime params before evaluation.
+1. **Prompt** (`weakincentives.Prompt`): Wraps a template with parameter bindings and optional overrides. Pass params to the constructor or call `.bind()` to attach additional params before evaluation.
 
 1. **Session** (`weakincentives.runtime.Session`): Redux-like event ledger that records all prompt renders, tool invocations, and custom state. Creates its own `EventBus` internally (access via `session.event_bus`).
 

@@ -157,7 +157,7 @@ def _evaluate_prompt(
     *params: SupportsDataclass,
     **kwargs: object,
 ) -> PromptResponse[Any]:
-    bound_prompt = Prompt(prompt_template).bind(*params)
+    bound_prompt = Prompt(prompt_template, *params)
     return adapter.evaluate(bound_prompt, **kwargs)
 
 
@@ -221,7 +221,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="policies"))
 
     adapter.evaluate(
         bound_prompt,
@@ -273,7 +273,7 @@ def test_adapter_tool_context_receives_deadline(
     session = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="policies"))
 
     adapter.evaluate(
         bound_prompt,
@@ -314,7 +314,7 @@ def test_adapter_tool_deadline_exceeded(
     session = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="policies"))
 
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(
@@ -363,7 +363,7 @@ def test_adapter_deadline_preflight_rejection(
     deadline = Deadline(anchor + timedelta(seconds=5))
     frozen_utcnow.advance(timedelta(seconds=10))
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="policies"))
 
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(
@@ -412,7 +412,7 @@ def test_adapter_tool_execution_validation_error(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="invalid"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="invalid"))
 
     adapter.evaluate(
         bound_prompt,
@@ -471,7 +471,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="policies"))
 
     adapter.evaluate(
         bound_prompt,
@@ -531,7 +531,7 @@ def test_adapter_tool_execution_rejects_type_errors(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="policies"))
 
     adapter.evaluate(
         bound_prompt,
@@ -585,7 +585,7 @@ def test_adapter_tool_execution_unexpected_exception(
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="policies"))
 
     adapter.evaluate(
         bound_prompt,
@@ -664,7 +664,7 @@ def test_adapter_tool_execution_rolls_back_session(
 
     events = _record_tool_events(bus)
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="policies"))
 
     adapter.evaluate(
         bound_prompt,
@@ -726,7 +726,7 @@ def test_adapter_tool_visibility_expansion_propagates(
     bus = InProcessEventBus()
     session = Session(bus=bus)
 
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="docs"))
+    bound_prompt = Prompt(prompt_template, ToolParams(query="docs"))
 
     with pytest.raises(VisibilityExpansionRequired) as exc_info:
         adapter.evaluate(

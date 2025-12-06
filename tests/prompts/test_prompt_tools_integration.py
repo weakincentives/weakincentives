@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from weakincentives.prompt import (
     MarkdownSection,
+    Prompt,
     PromptTemplate,
     Tool,
     ToolContext,
@@ -129,7 +130,9 @@ def test_prompt_tools_integration_example() -> None:
         sections=[guidance],
     )
 
-    rendered = prompt_template.render(GuidanceParams(primary_tool="lookup_entity"))
+    rendered = Prompt(
+        prompt_template, GuidanceParams(primary_tool="lookup_entity")
+    ).render()
     markdown = rendered.text
 
     assert markdown == (
@@ -168,14 +171,14 @@ def test_prompt_renders_tool_examples_with_rendered_output() -> None:
         default_params=ToolDescriptionParams(),
     )
 
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="tools-rendered-output",
         name="tools_rendered_output",
         sections=[tools_section],
     )
 
-    rendered = prompt.render()
+    rendered = Prompt(template).render()
 
     assert rendered.text == (
         "## 1. Available Tools\n\n"
@@ -244,7 +247,9 @@ def test_prompt_renders_tool_examples_inline() -> None:
         sections=[guidance],
     )
 
-    rendered = prompt_template.render(GuidanceParams(primary_tool="lookup_entity"))
+    rendered = Prompt(
+        prompt_template, GuidanceParams(primary_tool="lookup_entity")
+    ).render()
 
     assert rendered.text == (
         "## 1. Guidance\n\nUse tools when you need up-to-date context. "

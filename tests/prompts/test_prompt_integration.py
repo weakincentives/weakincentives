@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from weakincentives import prompt
-from weakincentives.prompt import MarkdownSection, PromptTemplate
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 
 
 @dataclass
@@ -75,13 +75,14 @@ def build_compose_prompt() -> PromptTemplate:
 
 
 def test_prompt_integration_renders_expected_markdown() -> None:
-    prompt = build_compose_prompt()
+    template = build_compose_prompt()
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        template,
         RoutingParams(recipient="Jordan", subject="Q2 sync"),
         ToneParams(tone="warm"),
         ContentParams(summary="Top takeaways from yesterday's meeting."),
-    )
+    ).render()
 
     assert rendered.text == "\n\n".join(
         [
@@ -93,13 +94,14 @@ def test_prompt_integration_renders_expected_markdown() -> None:
 
 
 def test_prompt_integration_handles_disabled_sections() -> None:
-    prompt = build_compose_prompt()
+    template = build_compose_prompt()
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        template,
         RoutingParams(recipient="Avery"),
         ToneParams(tone="direct"),
         ContentParams(summary="   \n"),
-    )
+    ).render()
 
     assert "Content Guidance" not in rendered.text
     assert "Target tone: direct" in rendered.text

@@ -99,13 +99,13 @@ def test_prompt_renders_section_without_params() -> None:
     static_section = MarkdownSection(
         title="Static", key="static", template="Static content."
     )
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests.prompts",
         key="paramless-section",
         sections=(static_section,),
     )
 
-    rendered = prompt.render()
+    rendered = Prompt(template).render()
 
     assert rendered.text.strip().endswith("Static content.")
 
@@ -149,12 +149,13 @@ def build_nested_prompt() -> PromptTemplate:
 
 
 def test_prompt_render_merges_defaults_and_overrides() -> None:
-    prompt = build_prompt()
+    template = build_prompt()
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        template,
         IntroParams(title="hello"),
         DetailsParams(body="world"),
-    )
+    ).render()
 
     assert rendered.text == "\n\n".join(
         [
@@ -166,56 +167,60 @@ def test_prompt_render_merges_defaults_and_overrides() -> None:
 
 
 def test_prompt_render_accepts_unordered_inputs() -> None:
-    prompt = build_prompt()
+    template = build_prompt()
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        template,
         DetailsParams(body="unordered"),
         IntroParams(title="still works"),
-    )
+    ).render()
 
     assert "still works" in rendered.text
     assert "unordered" in rendered.text
 
 
 def test_prompt_render_requires_parameter_values() -> None:
-    prompt = build_prompt()
+    template = build_prompt()
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(IntroParams(title="missing detail"))
+        Prompt(template, IntroParams(title="missing detail")).render()
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.dataclass_type is DetailsParams
 
 
 def test_prompt_render_requires_dataclass_instances() -> None:
-    prompt = build_prompt()
+    template = build_prompt()
 
     with pytest.raises(PromptValidationError) as exc:
-        prompt.render(cast(SupportsDataclass, IntroParams))
+        Prompt(template, cast(SupportsDataclass, IntroParams)).render()
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.dataclass_type is IntroParams
 
 
 def test_prompt_render_rejects_duplicate_param_instances() -> None:
-    prompt = build_prompt()
+    template = build_prompt()
 
     with pytest.raises(PromptValidationError) as exc:
-        prompt.render(IntroParams(title="first"), IntroParams(title="second"))
+        Prompt(
+            template, IntroParams(title="first"), IntroParams(title="second")
+        ).render()
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.dataclass_type is IntroParams
 
 
 def test_prompt_render_renders_nested_sections_and_depth() -> None:
-    prompt = build_nested_prompt()
+    template = build_nested_prompt()
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        template,
         ParentToggleParams(heading="Main Heading", include_children=True),
         ChildNestedParams(detail="Child detail"),
         LeafParams(note="Deep note"),
         SummaryParams(summary="All done"),
-    )
+    ).render()
 
     assert rendered.text == "\n\n".join(
         [
@@ -228,12 +233,13 @@ def test_prompt_render_renders_nested_sections_and_depth() -> None:
 
 
 def test_prompt_render_skips_disabled_parent_and_children() -> None:
-    prompt = build_nested_prompt()
+    template = build_nested_prompt()
 
-    rendered = prompt.render(
+    rendered = Prompt(
+        template,
         ParentToggleParams(heading="Unused", include_children=False),
         SummaryParams(summary="Visible"),
-    )
+    ).render()
 
     assert rendered.text == "## 2. Summary\n\nSummary: Visible"
     assert "Parent" not in rendered.text
@@ -263,10 +269,12 @@ def test_prompt_render_wraps_template_errors_with_context() -> None:
         template="unused",
         key="explode",
     )
-    prompt = PromptTemplate(ns="tests/prompts", key="render-error", sections=[section])
+    template = PromptTemplate(
+        ns="tests/prompts", key="render-error", sections=[section]
+    )
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(ErrorParams(value="x"))
+        Prompt(template, ErrorParams(value="x")).render()
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.section_path == ("explode",)
@@ -287,14 +295,14 @@ def test_prompt_render_propagates_enabled_errors() -> None:
         key="guard",
         enabled=cast(Callable[[SupportsDataclass], bool], raising_enabled),
     )
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="render-enabled-error",
         sections=[section],
     )
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(ToggleParams(flag=True))
+        Prompt(template, ToggleParams(flag=True)).render()
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.section_path == ("guard",)

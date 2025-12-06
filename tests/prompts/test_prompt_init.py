@@ -20,6 +20,7 @@ import pytest
 
 from weakincentives.prompt import (
     MarkdownSection,
+    Prompt,
     PromptDescriptor,
     PromptTemplate,
     PromptValidationError,
@@ -122,17 +123,17 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
         default_params=DuplicateParams(value="beta"),
     )
 
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="duplicate-defaults",
         sections=[first, second],
     )
 
-    rendered = prompt.render()
+    rendered = Prompt(template).render()
 
     assert "First: alpha" in rendered.text
     assert "Second: beta" in rendered.text
-    assert prompt.param_types == {DuplicateParams}
+    assert template.param_types == {DuplicateParams}
 
 
 def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
@@ -147,13 +148,13 @@ def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
         key="second",
     )
 
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="duplicate-shared",
         sections=[first, second],
     )
 
-    rendered = prompt.render(DuplicateParams(value="shared"))
+    rendered = Prompt(template, DuplicateParams(value="shared")).render()
 
     assert "First: shared" in rendered.text
     assert "Second: shared" in rendered.text
@@ -184,13 +185,13 @@ def test_prompt_duplicate_sections_share_type_defaults_when_missing_section_defa
         key="second",
     )
 
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="duplicate-type-default",
         sections=[first, second],
     )
 
-    rendered = prompt.render()
+    rendered = Prompt(template).render()
 
     assert "First: alpha" in rendered.text
     assert "Second: alpha" in rendered.text
@@ -259,10 +260,10 @@ def test_prompt_descriptor_cached_on_first_access(
         title="Root", template="Root: ${title}", key="root"
     )
 
-    prompt = PromptTemplate(ns="tests/prompts", key="descriptor", sections=[section])
+    template = PromptTemplate(ns="tests/prompts", key="descriptor", sections=[section])
 
     # First access triggers lazy creation and caches the descriptor
-    first_descriptor = prompt.descriptor
+    first_descriptor = template.descriptor
     assert first_descriptor.ns == "tests/prompts"
 
     def _fail(
@@ -273,11 +274,11 @@ def test_prompt_descriptor_cached_on_first_access(
     monkeypatch.setattr(PromptDescriptor, "from_prompt", classmethod(_fail))
 
     # Subsequent accesses should use the cached descriptor
-    rendered = prompt.render(RootParams(title="hello"))
-    bound_prompt = prompt.bind(RootParams(title="hello"))
+    prompt = Prompt(template, RootParams(title="hello"))
+    rendered = prompt.render()
 
-    assert prompt.descriptor is first_descriptor
-    assert bound_prompt.descriptor is prompt.descriptor
+    assert template.descriptor is first_descriptor
+    assert prompt.descriptor is template.descriptor
     assert "Root: hello" in rendered.text
 
 

@@ -19,6 +19,7 @@ import pytest
 
 from weakincentives.prompt import (
     MarkdownSection,
+    Prompt,
     PromptTemplate,
     Section,
     SectionVisibility,
@@ -122,22 +123,33 @@ def _build_prompt() -> tuple[
 
 
 def test_prompt_tools_depth_first_and_enablement() -> None:
-    prompt, primary_tool, secondary_tool = _build_prompt()
+    template, primary_tool, secondary_tool = _build_prompt()
 
-    default_tools = prompt.render(GuidanceParams(primary_tool="primary_lookup")).tools
+    default_tools = (
+        Prompt(template, GuidanceParams(primary_tool="primary_lookup")).render().tools
+    )
 
     assert default_tools == (primary_tool, secondary_tool)
 
-    disabled_parent = prompt.render(
-        GuidanceParams(primary_tool="primary_lookup", allow_tools=False)
-    ).tools
+    disabled_parent = (
+        Prompt(
+            template, GuidanceParams(primary_tool="primary_lookup", allow_tools=False)
+        )
+        .render()
+        .tools
+    )
 
     assert disabled_parent == (secondary_tool,)
 
-    disabled_secondary = prompt.render(
-        GuidanceParams(primary_tool="primary_lookup"),
-        SecondaryToggleParams(enabled=False),
-    ).tools
+    disabled_secondary = (
+        Prompt(
+            template,
+            GuidanceParams(primary_tool="primary_lookup"),
+            SecondaryToggleParams(enabled=False),
+        )
+        .render()
+        .tools
+    )
 
     assert disabled_secondary == (primary_tool,)
 
@@ -193,13 +205,13 @@ def test_prompt_tools_allows_duplicate_tool_params_dataclass() -> None:
         default_params=SecondaryToggleParams(),
     )
 
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="tools-duplicate-params",
         sections=[first_section, second_section],
     )
 
-    tools = prompt.render().tools
+    tools = Prompt(template).render().tools
     assert {tool.name for tool in tools} == {"primary_lookup", "alternate_primary"}
     assert all(tool.params_type is PrimaryToolParams for tool in tools)
 

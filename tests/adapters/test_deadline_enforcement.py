@@ -118,7 +118,7 @@ def test_raise_tool_deadline_error() -> None:
 
 
 def test_inner_loop_raise_deadline_error() -> None:
-    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    prompt = Prompt(_build_prompt(), BodyParams(content="ready"))
     rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
@@ -153,7 +153,7 @@ def test_inner_loop_raise_deadline_error() -> None:
 def test_inner_loop_detects_expired_deadline(
     frozen_utcnow: FrozenUtcNow,
 ) -> None:
-    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    prompt = Prompt(_build_prompt(), BodyParams(content="ready"))
     rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
@@ -193,7 +193,7 @@ def test_inner_loop_detects_expired_deadline(
 def test_execute_tool_call_raises_when_deadline_expired(
     frozen_utcnow: FrozenUtcNow,
 ) -> None:
-    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    prompt = Prompt(_build_prompt(), BodyParams(content="ready"))
     rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
@@ -237,7 +237,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
 
 
 def test_execute_tool_call_publishes_invocation() -> None:
-    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    prompt = Prompt(_build_prompt(), BodyParams(content="ready"))
     rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
@@ -287,7 +287,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
 
 
 def test_run_inner_loop_replaces_rendered_deadline() -> None:
-    prompt = _build_prompt().bind(BodyParams(content="ready"))
+    prompt = Prompt(_build_prompt(), BodyParams(content="ready"))
     rendered = prompt.render()
     bus = InProcessEventBus()
     session = Session(bus=bus)
