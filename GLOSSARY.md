@@ -21,7 +21,7 @@ for prompts, tools, and sessions. Detailed contract in
 
 Adapters accept a caller-supplied wall-clock deadline that applies to the entire
 evaluation, including nested subagents and tool calls. Enforcement semantics are
-defined in the [Deadlines specification](specs/DEADLINES.md).
+defined in the [Resource Limits specification](specs/RESOURCE_LIMITS.md).
 
 ## Event Bus
 
@@ -48,13 +48,13 @@ text-based parsing when native support is unavailable. See
 
 The `PlanningToolsSection` registers a todo-list tool suite that keeps a single
 session-scoped plan, replacing the current snapshot on each update. Reducers and
-data models are documented in the [Planning Tool specification](specs/PLANNING_TOOL.md).
+data models are documented in the [Planning specification](specs/PLANNING.md).
 
 ## Planning Strategies
 
 A strategy enum customizes the guidance copy rendered by `PlanningToolsSection`
 without altering its tool surface. Available mindsets are cataloged in the
-[Planning Strategy Templates specification](specs/PLANNING_STRATEGIES.md).
+[Planning specification](specs/PLANNING.md).
 
 ## Prompt
 

@@ -87,20 +87,18 @@ a goal at any time.
   helpers or dataclass models.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
   modules.
-- **DEADLINES.md**: Deadline propagation—when adding timeouts or scheduling
-  logic.
-- **EVENTS.md**: Event model—when emitting or handling runtime events.
+- **RESOURCE_LIMITS.md**: Deadline and budget enforcement—when adding timeouts,
+  token limits, or scheduling logic.
 - **LITE_LLM_ADAPTER.md**: Lite LLM adapter rules—before touching lightweight
   adapter integrations.
-- **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
+- **EVENTS.md**: Event model and logging—when emitting, handling runtime events,
+  or adjusting logging surfaces.
 - **NATIVE_OPENAI_STRUCTURED_OUTPUTS.md**: Native structured outputs for OpenAI
   models—when implementing or updating OpenAI structured outputs.
 - **OPENAI_RESPONSES_API.md**: OpenAI responses API behaviors—when modifying
   OpenAI adapter responses.
-- **PLANNING_STRATEGIES.md**: Planning approach inventory—when changing planner
-  logic.
-- **PLANNING_TOOL.md**: Planning tool contract—when editing the planning tool or
-  its prompts.
+- **PLANNING.md**: Planning tool contract and strategies—when editing the
+  planning tool, prompts, or changing planner logic.
 - **PODMAN_SANDBOX.md**: Podman-based sandboxing—when integrating or altering
   sandbox execution.
 - **PROMPTS.md**: Prompt abstraction deep dive—required for prompt system work.

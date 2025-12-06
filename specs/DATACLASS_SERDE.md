@@ -1,6 +1,112 @@
-# Dataclass Serde Utilities
+# Dataclass Utilities
 
-## Guiding Principles
+This specification covers both the `FrozenDataclass` decorator and the serde
+(serialization/deserialization) helpers.
+
+______________________________________________________________________
+
+## Frozen Dataclasses
+
+### Motivation
+
+A lightweight decorator makes immutable dataclasses easy to author without
+leaning on the serde helpers or invoking `__setattr__` in `__post_init__`.
+
+### Goals
+
+- **Immutability by default**: Apply `frozen=True` and `slots=True` so instances
+  behave predictably and stay lean.
+- **Pre-construction shaping**: Provide a hook to derive or normalise inputs
+  before the dataclass initialises.
+- **Ergonomic copy-on-write**: Mirror `dataclasses.replace` via small helpers.
+- **Serde independence**: Keep the decorator free of `weakincentives.serde`.
+
+### Decorator Surface
+
+`@FrozenDataclass` wraps the stdlib `@dataclass` with frozen defaults:
+
+```python
+from weakincentives.dataclasses import FrozenDataclass
+
+@FrozenDataclass()
+class Invoice:
+    total_cents: int
+    tax_rate: float
+    tax_cents: int
+    grand_total_cents: int
+```
+
+- **Defaults**: `frozen=True`, `slots=True`, `kw_only=False`, `order=False`,
+  `eq=True`, `repr=True`. Keyword arguments pass through to `dataclasses.dataclass`.
+- **Module location**: `src/weakincentives/dataclasses/`.
+
+### Input Normalisation Hook
+
+Models can define an optional `__pre_init__(cls, **kwargs) -> dict[str, Any]`
+classmethod. When present, the decorator calls it before the generated
+`__init__`, using the returned mapping as the constructor inputs:
+
+- Deriving fields from others (e.g., computing `tax_cents` from `total_cents`).
+- Normalising or defaulting values without mutation in `__post_init__`.
+
+Rules:
+
+- Must accept keyword-only arguments matching the dataclass fields.
+- The returned mapping must provide every required field.
+- Runs before validation in `__post_init__`.
+
+### Copy Helpers
+
+The decorator injects ergonomic copy-on-write helpers:
+
+- `update(**changes)`: Constructs a new instance with the specified changes,
+  re-running `__post_init__`.
+- `merge(mapping_or_obj)`: Merges fields from a mapping or object.
+- `map(transform)`: Provides current fields to a callable, applies replacements.
+
+```python
+updated = invoice.update(tax_rate=0.24)
+from_mapping = invoice.merge({"tax_rate": 0.24})
+remapped = invoice.map(lambda fields: {"tax_cents": fields["total_cents"] * 0.24})
+```
+
+These helpers do **not** invoke `__pre_init__`; callers should recompute
+dependent fields explicitly.
+
+### Frozen Dataclass Example
+
+```python
+from dataclasses import field
+from weakincentives.dataclasses import FrozenDataclass
+
+@FrozenDataclass()
+class User:
+    name: str
+    slug: str
+    tags: tuple[str, ...] = field(default_factory=tuple)
+
+    @classmethod
+    def __pre_init__(cls, *, name: str, slug: str | None = None, tags=()):
+        base = slug or name
+        return {
+            "name": name.strip(),
+            "slug": base.lower().replace(" ", "-"),
+            "tags": tuple(tags),
+        }
+
+    def __post_init__(self):
+        if not self.name:
+            raise ValueError("name is required")
+
+user = User(name=" Ada Lovelace ")
+updated = user.update(tags=("pioneer",))
+```
+
+______________________________________________________________________
+
+## Serde Utilities
+
+### Guiding Principles
 
 - **Dependency-free contracts**: Bridge standard library `dataclasses` with validation and serialisation guarantees without
   runtime decorators or third-party packages.

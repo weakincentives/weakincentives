@@ -138,7 +138,7 @@ Consult these specs before modifying related code:
 | `specs/STRUCTURED_OUTPUT.md` | Schema or parser logic |
 | `specs/TOOLS.md` | Adding or modifying tools |
 | `specs/VFS_TOOLS.md` | Virtual filesystem behavior |
-| `specs/PLANNING_TOOL.md` | Planning tool or prompts |
+| `specs/PLANNING.md` | Planning tool or prompts |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 
 Full spec index in `AGENTS.md`.

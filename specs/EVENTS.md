@@ -260,3 +260,77 @@ the core synchronous semantics.
   `handled_count == 0` and no errors.
 - Add targeted coverage in adapter/session tests to assert that a publish result with errors triggers the expected
   aggregated logging or, when configured, a propagated `ExceptionGroup` via `raise_if_errors()`.
+
+## Logging Schema and Conventions
+
+This section describes the runtime logging mini-framework that accompanies
+event emission. It is an **internal** facility shared by runtime modules;
+callers do not consume it directly.
+
+### Design Intent
+
+The logging framework is intentionally minimal: it provides shared semantics for
+event names, severity, and structured payloads without wrapping the standard
+library API. Key design choices:
+
+- **Module isolation**: Each module owns its logger instance via
+  `logging.getLogger(__name__)`.
+- **Structured-first**: Prefer stable key/value pairs (`extra`) over message
+  formatting.
+- **Event taxonomy**: Every non-error record SHOULD carry an `event` key so
+  collectors can bucket logs predictably.
+
+### Current Implementation
+
+Runtime modules attach to Python's standard library logging without custom
+handlers:
+
+| Module | Logger | Level | Message / Event | Context Fields |
+| --- | --- | --- | --- | --- |
+| `runtime/events/__init__.py` | `logger` | ERROR | "Error delivering event %s to handler %r" | `event_type`, `handler` |
+| `runtime/session/session.py` | `logger` | ERROR | "Reducer %r failed for data type %s" | `reducer`, `data_type` |
+| `adapters/shared.py` | `logger` | ERROR | "Tool '%s' raised an unexpected exception." | `tool_name` |
+| `prompt/overrides/local_store.py` | `_LOGGER` | DEBUG | Override resolution events | `ns`, `prompt_key`, `tag`, `section_path` |
+| `tools/asteval.py` | `_logger` | DEBUG | event="asteval.run" | `event`, `mode`, `stdout_len`, `stderr_len` |
+
+### Required Context Keys
+
+Logging calls SHOULD include the following fields when available:
+
+- `event`: Stable event name categorizing the log entry.
+- `prompt_name`: Name of the prompt being evaluated.
+- `adapter`: Adapter identifier.
+- `tool`: Tool identifier.
+- `mode`: Execution mode for tools that support multiple behaviors.
+
+### Severity Conventions
+
+- `DEBUG`: Diagnostic and lifecycle messages for local development.
+- `INFO`: High-level lifecycle events for default logs.
+- `WARNING`: Recoverable conditions that may require operator attention.
+- `ERROR`: Unexpected exceptions caught and converted into fallback paths.
+- `CRITICAL`: Process about to exit or enter unrecoverable degraded state.
+
+### Structured Context Delivery
+
+Pass structured fields via the logger's `extra` mapping:
+
+```python
+logger.info(
+    "Tool execution completed",
+    extra={
+        "event": "tool.run",
+        "prompt_name": prompt.name,
+        "adapter": adapter_id,
+        "tool": tool.name,
+    },
+)
+```
+
+### Error Handling Expectations
+
+- Publishing events MUST NOT raise from subscriber failures; the bus logs and
+  exposes failures through the `PublishResult`.
+- Reducers that raise are logged and skipped, leaving previous state in place.
+- Tool handlers that raise are logged and converted into `ToolResult` instances
+  with `success=False`.
