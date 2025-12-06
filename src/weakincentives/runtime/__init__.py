@@ -28,6 +28,7 @@ from .events import (
 from .logging import StructuredLogger, configure_logging, get_logger
 from .session import (
     DataEvent,
+    QueryBuilder,
     ReducerContext,
     ReducerContextProtocol,
     ReducerEvent,
@@ -58,6 +59,7 @@ __all__ = [
     "PromptExecuted",
     "PromptRendered",
     "PublishResult",
+    "QueryBuilder",
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",

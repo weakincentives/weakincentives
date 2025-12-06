@@ -10,7 +10,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Helpers for querying Session slices."""
+"""Helpers for querying Session slices.
+
+These standalone functions are convenience wrappers around the fluent
+``session.query(T)`` API. They are maintained for backward compatibility
+and for cases where a functional style is preferred.
+"""
 
 from __future__ import annotations
 
@@ -25,21 +30,22 @@ from .session import Session
 def select_all[T: SupportsDataclass](
     session: Session, slice_type: type[T]
 ) -> tuple[T, ...]:
-    """Return the entire slice for the provided type."""
+    """Return the entire slice for the provided type.
 
-    return session.select_all(slice_type)
+    Equivalent to ``session.query(slice_type).all()``.
+    """
+    return session.query(slice_type).all()
 
 
 @pure
 def select_latest[T: SupportsDataclass](
     session: Session, slice_type: type[T]
 ) -> T | None:
-    """Return the most recent item in the slice, if any."""
+    """Return the most recent item in the slice, if any.
 
-    values = session.select_all(slice_type)
-    if not values:
-        return None
-    return values[-1]
+    Equivalent to ``session.query(slice_type).latest()``.
+    """
+    return session.query(slice_type).latest()
 
 
 @pure
@@ -48,9 +54,11 @@ def select_where[T: SupportsDataclass](
     slice_type: type[T],
     predicate: Callable[[T], bool],
 ) -> tuple[T, ...]:
-    """Return items that satisfy the predicate."""
+    """Return items that satisfy the predicate.
 
-    return tuple(value for value in session.select_all(slice_type) if predicate(value))
+    Equivalent to ``session.query(slice_type).where(predicate)``.
+    """
+    return session.query(slice_type).where(predicate)
 
 
 __all__ = ["select_all", "select_latest", "select_where"]

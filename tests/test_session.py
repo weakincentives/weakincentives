@@ -32,6 +32,7 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.session import (
+    QueryBuilder,
     ReducerContextProtocol,
     ReducerEvent,
     ReducerEventWithValue,
@@ -710,3 +711,111 @@ def test_session_requires_timezone_aware_created_at() -> None:
 def test_session_instantiates_default_bus_when_none_provided() -> None:
     session = Session()
     assert isinstance(session.event_bus, InProcessEventBus)
+
+
+def test_query_returns_query_builder(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    builder = session.query(ExampleOutput)
+
+    assert isinstance(builder, QueryBuilder)
+
+
+def test_query_all_returns_empty_tuple_when_no_values(
+    session_factory: SessionFactory,
+) -> None:
+    session, _ = session_factory()
+
+    result = session.query(ExampleOutput).all()
+
+    assert result == ()
+
+
+def test_query_latest_returns_none_when_no_values(
+    session_factory: SessionFactory,
+) -> None:
+    session, _ = session_factory()
+
+    result = session.query(ExampleOutput).latest()
+
+    assert result is None
+
+
+def test_query_where_returns_empty_tuple_when_no_values(
+    session_factory: SessionFactory,
+) -> None:
+    session, _ = session_factory()
+
+    result = session.query(ExampleOutput).where(lambda x: True)
+
+    assert result == ()
+
+
+def test_query_all_returns_all_values(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+
+    result = session.query(ExampleOutput).all()
+
+    assert result == (ExampleOutput(text="first"), ExampleOutput(text="second"))
+
+
+def test_query_latest_returns_most_recent_value(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+
+    result = session.query(ExampleOutput).latest()
+
+    assert result == ExampleOutput(text="second")
+
+
+def test_query_where_filters_values(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="apple")))
+    bus.publish(make_prompt_event(ExampleOutput(text="banana")))
+    bus.publish(make_prompt_event(ExampleOutput(text="apricot")))
+
+    result = session.query(ExampleOutput).where(lambda x: x.text.startswith("a"))
+
+    assert result == (ExampleOutput(text="apple"), ExampleOutput(text="apricot"))
+
+
+def test_query_respects_dbc_purity(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+
+    with dbc_enabled():
+        assert session.query(ExampleOutput).all() == (
+            ExampleOutput(text="first"),
+            ExampleOutput(text="second"),
+        )
+        assert session.query(ExampleOutput).latest() == ExampleOutput(text="second")
+        assert session.query(ExampleOutput).where(lambda x: x.text.startswith("f")) == (
+            ExampleOutput(text="first"),
+        )
+
+
+def test_query_where_logs_violate_purity_contract(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+
+    logger = logging.getLogger(__name__)
+
+    def predicate(value: ExampleOutput) -> bool:
+        logger.warning("Saw %s", value)
+        return True
+
+    with dbc_enabled(), pytest.raises(AssertionError):
+        session.query(ExampleOutput).where(predicate)
