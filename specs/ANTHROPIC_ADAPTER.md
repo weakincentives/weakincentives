@@ -2,56 +2,61 @@
 
 ## Overview
 
-**Scope:** This document specifies the design for an Anthropic adapter that integrates the native
-`anthropic` Python SDK with WINK's adapter architecture. The adapter will leverage Anthropic's native
-structured output capabilities (currently in public beta) and default to Claude Opus 4.5 as the
-primary model.
+**Scope:** This document specifies the design for an Anthropic adapter that
+integrates the native `anthropic` Python SDK with WINK's adapter architecture.
+The adapter will leverage Anthropic's native structured output capabilities
+(currently in public beta) and default to Claude Opus 4.5 as the primary model.
 
 **Design goals**
 
-- Present a uniform adapter surface consistent with existing OpenAI and LiteLLM adapters so prompts
-  behave identically across providers.
-- Leverage Anthropic's native structured output feature for schema-guaranteed JSON responses,
-  eliminating reliance on prompt-based instruction injection when possible.
-- Support tool use (function calling) with optional strict mode for guaranteed tool definition
-  compliance.
-- Preserve deterministic, synchronous execution aligned with session reducers and the DbC
-  enforcement model.
-- Keep all provider interactions observable through the `EventBus` while isolating prompt rendering
-  from transport details.
+- Present a uniform adapter surface consistent with existing OpenAI and LiteLLM
+  adapters so prompts behave identically across providers.
+- Leverage Anthropic's native structured output feature for schema-guaranteed
+  JSON responses, eliminating reliance on prompt-based instruction injection
+  when possible.
+- Support tool use (function calling) with optional strict mode for guaranteed
+  tool definition compliance.
+- Preserve deterministic, synchronous execution aligned with session reducers
+  and the DbC enforcement model.
+- Keep all provider interactions observable through the `EventBus` while
+  isolating prompt rendering from transport details.
 
 **Constraints**
 
-- The adapter must run synchronously and honor the caller-supplied `Deadline` at every blocking
-  boundary (request, tools, response parsing).
-- Native structured outputs are a beta feature requiring the `anthropic-beta:
-  structured-outputs-2025-11-13` header; the adapter must gracefully fall back to prompt-based
-  parsing when the feature is unavailable or disabled.
-- Tool execution must reuse the active `Session` and its `EventBus` so reducers observe the same
-  state mutations that the adapter returns.
-- The Anthropic SDK is an optional dependency; missing packages must fail fast with actionable
-  errors.
+- The adapter must run synchronously and honor the caller-supplied `Deadline` at
+  every blocking boundary (request, tools, response parsing).
+- Native structured outputs are a beta feature requiring the
+  `anthropic-beta: structured-outputs-2025-11-13` header; the adapter must
+  gracefully fall back to prompt-based parsing when the feature is unavailable
+  or disabled.
+- Tool execution must reuse the active `Session` and its `EventBus` so reducers
+  observe the same state mutations that the adapter returns.
+- The Anthropic SDK is an optional dependency; missing packages must fail fast
+  with actionable errors.
 
 **Default model**
 
-The adapter defaults to `claude-opus-4-5-20250929` (Claude Opus 4.5), the most capable model
-available for complex reasoning and agentic tasks. Callers may override this via the `model`
-constructor parameter.
+The adapter defaults to `claude-opus-4-5-20250929` (Claude Opus 4.5), the most
+capable model available for complex reasoning and agentic tasks. Callers may
+override this via the `model` constructor parameter.
 
 ## Anthropic API Integration
 
 ### SDK Requirements
 
-- **Package:** `anthropic` (version >= 0.75.0 for structured outputs and Opus 4.5 support)
-- **Optional dependency:** `uv sync --extra anthropic` or `pip install weakincentives[anthropic]`
-- **Import guard:** Raise a descriptive `RuntimeError` if the package is missing, mirroring
-  OpenAI/LiteLLM patterns.
+- **Package:** `anthropic` (version >= 0.75.0 for structured outputs and Opus
+  4.5 support)
+- **Optional dependency:** `uv sync --extra anthropic` or
+  `pip install weakincentives[anthropic]`
+- **Import guard:** Raise a descriptive `RuntimeError` if the package is
+  missing, mirroring OpenAI/LiteLLM patterns.
 
 ### Native Structured Outputs
 
-Anthropic's structured outputs feature (public beta) guarantees that API responses match specified
-JSON schemas by constraining token generation at inference time. This differs from prompt-based
-approaches that rely on the model following instructions.
+Anthropic's structured outputs feature (public beta) guarantees that API
+responses match specified JSON schemas by constraining token generation at
+inference time. This differs from prompt-based approaches that rely on the model
+following instructions.
 
 **Beta header:** `anthropic-beta: structured-outputs-2025-11-13`
 
@@ -59,8 +64,9 @@ approaches that rely on the model following instructions.
 
 **Two implementation approaches:**
 
-1. **`client.beta.messages.parse()`** - Higher-level helper that handles schema transformation
-   automatically:
+1. **`client.beta.messages.parse()`** - Higher-level helper that handles schema
+   transformation automatically:
+
    ```python
    response = client.beta.messages.parse(
        model="claude-opus-4-5-20250929",
@@ -72,7 +78,9 @@ approaches that rely on the model following instructions.
    output = response.parsed_output
    ```
 
-2. **`client.beta.messages.create()`** - Lower-level control with explicit schema:
+1. **`client.beta.messages.create()`** - Lower-level control with explicit
+   schema:
+
    ```python
    response = client.beta.messages.create(
        model="claude-opus-4-5-20250929",
@@ -87,9 +95,10 @@ approaches that rely on the model following instructions.
    # Parse response.content[0].text as JSON
    ```
 
-**Response format:** When structured outputs are enabled, the response text is guaranteed to be
-valid JSON matching the provided schema. Access via `response.content[0].text` for the raw JSON
-string, or `response.parsed_output` when using the `parse()` helper.
+**Response format:** When structured outputs are enabled, the response text is
+guaranteed to be valid JSON matching the provided schema. Access via
+`response.content[0].text` for the raw JSON string, or `response.parsed_output`
+when using the `parse()` helper.
 
 ### Tool Use (Function Calling)
 
@@ -111,10 +120,12 @@ tools = [
 ]
 ```
 
-**Strict tool use:** Add `"strict": True` to tool definitions for guaranteed schema compliance
-(requires the structured outputs beta header).
+**Strict tool use:** Add `"strict": True` to tool definitions for guaranteed
+schema compliance (requires the structured outputs beta header).
 
-**Tool call response format:** When the model invokes a tool, the response includes:
+**Tool call response format:** When the model invokes a tool, the response
+includes:
+
 ```python
 response.content[0].type == "tool_use"
 response.content[0].id      # Tool call ID
@@ -123,6 +134,7 @@ response.content[0].input   # Parsed arguments dict
 ```
 
 **Tool result message format:**
+
 ```python
 {
     "role": "user",
@@ -143,7 +155,8 @@ Anthropic uses a different message structure than OpenAI:
 - **System prompt:** Passed as a separate `system` parameter, not a message
 - **User messages:** `{"role": "user", "content": "..."}`
 - **Assistant messages:** `{"role": "assistant", "content": "..."}`
-- **Multi-part content:** Content can be a list of content blocks for mixed media
+- **Multi-part content:** Content can be a list of content blocks for mixed
+  media
 
 ## Adapter Architecture
 
@@ -159,8 +172,9 @@ src/weakincentives/adapters/
 
 ### Typed Configuration
 
-Following the pattern established by OpenAI and LiteLLM adapters, the Anthropic adapter uses frozen
-dataclass configurations for type-safe instantiation and model parameter control.
+Following the pattern established by OpenAI and LiteLLM adapters, the Anthropic
+adapter uses frozen dataclass configurations for type-safe instantiation and
+model parameter control.
 
 **Client Configuration**
 
@@ -294,14 +308,17 @@ class AnthropicAdapter(ProviderAdapter[Any]):
 **Parameters:**
 
 - `model`: Model identifier (default: `claude-opus-4-5-20250929`)
-- `model_config`: Typed configuration for model parameters (temperature, max_tokens, top_k, etc.)
-- `tool_choice`: Tool selection strategy (`"auto"`, `"any"`, `"none"`, or specific tool)
-- `use_native_structured_output`: Enable beta structured outputs feature (default: `True`)
+- `model_config`: Typed configuration for model parameters (temperature,
+  max_tokens, top_k, etc.)
+- `tool_choice`: Tool selection strategy (`"auto"`, `"any"`, `"none"`, or
+  specific tool)
+- `use_native_structured_output`: Enable beta structured outputs feature
+  (default: `True`)
 - `client`: Pre-configured Anthropic client instance
 - `client_config`: Typed configuration for client instantiation
 
-**Mutual exclusivity:** Reject providing `client` alongside `client_config` to avoid ambiguous
-execution paths.
+**Mutual exclusivity:** Reject providing `client` alongside `client_config` to
+avoid ambiguous execution paths.
 
 **Usage Examples**
 
@@ -339,6 +356,7 @@ adapter = AnthropicAdapter(
 ### Adapter Name
 
 Add to `_names.py`:
+
 ```python
 ANTHROPIC_ADAPTER_NAME: Final[AdapterName] = "anthropic"
 """Canonical label for the Anthropic adapter."""
@@ -367,8 +385,8 @@ class _AnthropicClientFactory(Protocol):
 
 ### Evaluate Signature
 
-The adapter implements the standard `ProviderAdapter.evaluate()` signature with full support for
-budgets and visibility overrides:
+The adapter implements the standard `ProviderAdapter.evaluate()` signature with
+full support for budgets and visibility overrides:
 
 ```python
 @override
@@ -395,56 +413,67 @@ def evaluate(
 
 **Budget Integration:**
 
-- When `budget` is provided without `budget_tracker`, create a new `BudgetTracker` for this
-  evaluation.
-- When `budget_tracker` is supplied (e.g., from a parent agent), use it directly for shared limit
-  enforcement across subagent calls.
-- Token usage is recorded after each provider response via `budget_tracker.record_cumulative()`.
-- Budget limits are checked after provider responses and tool executions; violations raise
-  `PromptEvaluationError` with `phase="budget"`.
+- When `budget` is provided without `budget_tracker`, create a new
+  `BudgetTracker` for this evaluation.
+- When `budget_tracker` is supplied (e.g., from a parent agent), use it directly
+  for shared limit enforcement across subagent calls.
+- Token usage is recorded after each provider response via
+  `budget_tracker.record_cumulative()`.
+- Budget limits are checked after provider responses and tool executions;
+  violations raise `PromptEvaluationError` with `phase="budget"`.
 
 **Visibility Overrides:**
 
-- Pass `visibility_overrides` to `prompt.render()` for progressive disclosure control.
+- Pass `visibility_overrides` to `prompt.render()` for progressive disclosure
+  control.
 - Sections can be hidden, collapsed, or expanded based on the override mapping.
 
 ### Evaluate Flow
 
-1. **Validate deadline and budget** - Reject already-expired deadlines before rendering. Initialize
-   budget tracker if budget is provided.
+1. **Validate deadline and budget** - Reject already-expired deadlines before
+   rendering. Initialize budget tracker if budget is provided.
 
-2. **Render prompt** - Call `prompt.render(visibility_overrides=...)`, optionally disabling output
-   instructions when native structured outputs are enabled.
+1. **Render prompt** - Call `prompt.render(visibility_overrides=...)`,
+   optionally disabling output instructions when native structured outputs are
+   enabled.
 
-3. **Build request payload:**
+1. **Build request payload:**
+
    - Extract system prompt from rendered text
    - Assemble user messages
    - Convert tools via `tool_to_anthropic_spec()`
    - Build `output_format` when structured output is requested
    - Merge model config parameters via `model_config.to_request_params()`
 
-4. **Call provider:**
-   - Use `client.beta.messages.create()` with the structured outputs beta header
-   - Pass `betas=["structured-outputs-2025-11-13"]` when native structured output is enabled
+1. **Call provider:**
 
-5. **Record and check budget** - After each provider response:
+   - Use `client.beta.messages.create()` with the structured outputs beta header
+   - Pass `betas=["structured-outputs-2025-11-13"]` when native structured
+     output is enabled
+
+1. **Record and check budget** - After each provider response:
+
    - Extract token usage from response
    - Record cumulative usage via `budget_tracker.record_cumulative()`
    - Check budget limits via `budget_tracker.check()`
 
-6. **Handle tool calls** - When response contains `tool_use` blocks:
-   - Execute tools via `ToolExecutor` (which receives `budget_tracker` in `ToolContext`)
+1. **Handle tool calls** - When response contains `tool_use` blocks:
+
+   - Execute tools via `ToolExecutor` (which receives `budget_tracker` in
+     `ToolContext`)
    - Format tool results as Anthropic-style `tool_result` messages
    - Check budget after tool execution
    - Continue conversation loop
 
-7. **Parse response:**
+1. **Parse response:**
+
    - Extract text from content blocks
    - When structured output is enabled, parse JSON from response text
    - Fall back to prompt-based parsing when native parsing fails
    - Final budget check before returning
 
-8. **Publish events** - Emit `PromptRendered`, `ToolInvoked`, and `PromptExecuted` events.
+1. **Publish events** - Emit `PromptRendered`, `ToolInvoked`, and
+   `PromptExecuted` events.
 
 ### Tool Specification Translation
 
@@ -477,10 +506,10 @@ def tool_to_anthropic_spec(
 Anthropic tool choice differs from OpenAI:
 
 | WINK ToolChoice | Anthropic Equivalent |
-|-----------------|---------------------|
-| `"auto"` | `{"type": "auto"}` |
-| `"none"` | Not passed (omit tools) |
-| `{"type": "function", "function": {"name": "x"}}` | `{"type": "tool", "name": "x"}` |
+|-----------------|---------------------| | `"auto"` | `{"type": "auto"}` | |
+`"none"` | Not passed (omit tools) | |
+`{"type": "function", "function": {"name": "x"}}` |
+`{"type": "tool", "name": "x"}` |
 
 ### Message Normalization
 
@@ -540,8 +569,9 @@ def _normalize_messages_for_anthropic(
 
 ### Schema Construction
 
-Reuse `build_json_schema_response_format()` from shared utilities to construct the JSON schema,
-then extract the schema portion for Anthropic's `output_format` parameter:
+Reuse `build_json_schema_response_format()` from shared utilities to construct
+the JSON schema, then extract the schema portion for Anthropic's `output_format`
+parameter:
 
 ```python
 def _build_anthropic_output_format(
@@ -563,13 +593,15 @@ def _build_anthropic_output_format(
 
 ### Response Parsing Strategy
 
-1. **Native structured output path:** When `use_native_structured_output=True` and the response
-   contains valid JSON in `content[0].text`, parse directly into the target dataclass.
+1. **Native structured output path:** When `use_native_structured_output=True`
+   and the response contains valid JSON in `content[0].text`, parse directly
+   into the target dataclass.
 
-2. **Fallback path:** When native parsing fails or is disabled, use `parse_structured_output()` with
-   the rendered prompt's parsing helpers.
+1. **Fallback path:** When native parsing fails or is disabled, use
+   `parse_structured_output()` with the rendered prompt's parsing helpers.
 
-3. **Text-only path:** When `parse_output=False`, return raw text without structured parsing.
+1. **Text-only path:** When `parse_output=False`, return raw text without
+   structured parsing.
 
 ### Content Extraction
 
@@ -638,7 +670,8 @@ Native structured outputs are currently in public beta. The feature:
 
 - Requires the `anthropic-beta: structured-outputs-2025-11-13` header
 - May change without notice before GA
-- Guarantees format compliance, not content accuracy (hallucinations remain possible)
+- Guarantees format compliance, not content accuracy (hallucinations remain
+  possible)
 
 ### Model Availability
 
@@ -655,38 +688,42 @@ Native structured outputs are currently in public beta. The feature:
 
 ### Token Limits
 
-Claude Opus 4.5 supports up to 200K input tokens and 8K output tokens by default. Configure
-output token limits via `AnthropicModelConfig.max_tokens`.
+Claude Opus 4.5 supports up to 200K input tokens and 8K output tokens by
+default. Configure output token limits via `AnthropicModelConfig.max_tokens`.
 
 ### Budget Enforcement
 
 The adapter fully integrates with WINK's `Budget` abstraction:
 
-- **Token limits:** `max_total_tokens`, `max_input_tokens`, `max_output_tokens` are enforced
-  cumulatively across all provider calls within an evaluation.
+- **Token limits:** `max_total_tokens`, `max_input_tokens`, `max_output_tokens`
+  are enforced cumulatively across all provider calls within an evaluation.
 - **Deadline:** `Budget.deadline` is checked alongside the `deadline` parameter.
-- **Subagent sharing:** When `budget_tracker` is passed (e.g., from a parent prompt), token usage
-  is aggregated across the entire agent tree.
-- **Error phase:** Budget violations raise `PromptEvaluationError` with `phase="budget"`.
+- **Subagent sharing:** When `budget_tracker` is passed (e.g., from a parent
+  prompt), token usage is aggregated across the entire agent tree.
+- **Error phase:** Budget violations raise `PromptEvaluationError` with
+  `phase="budget"`.
 
-Anthropic responses include `usage.input_tokens` and `usage.output_tokens` which the adapter
-extracts and records via `token_usage_from_payload()`.
+Anthropic responses include `usage.input_tokens` and `usage.output_tokens` which
+the adapter extracts and records via `token_usage_from_payload()`.
 
 ## Testing Expectations
 
-- **Unit tests:** Mock the Anthropic client and verify request payload construction, response
-  parsing, and error handling.
-- **Integration tests:** Require `ANTHROPIC_API_KEY` environment variable; opt-in via
-  `make integration-tests`.
+- **Unit tests:** Mock the Anthropic client and verify request payload
+  construction, response parsing, and error handling.
+- **Integration tests:** Require `ANTHROPIC_API_KEY` environment variable;
+  opt-in via `make integration-tests`.
 - **Structured output tests:** Verify both native and fallback parsing paths.
 - **Tool execution tests:** Cover single and multi-turn tool conversations.
-- **Budget tests:** Verify token tracking, cumulative usage across tool calls, and
-  `BudgetExceededError` propagation as `PromptEvaluationError` with `phase="budget"`.
-- **Visibility tests:** Verify `visibility_overrides` are passed through to prompt rendering.
-- **Config tests:** Verify `AnthropicClientConfig` and `AnthropicModelConfig` produce correct
-  request parameters, and that unsupported fields raise `ValueError`.
-- **Error handling tests:** Verify throttle detection, deadline enforcement, and graceful
-  degradation when the beta feature is unavailable.
+- **Budget tests:** Verify token tracking, cumulative usage across tool calls,
+  and `BudgetExceededError` propagation as `PromptEvaluationError` with
+  `phase="budget"`.
+- **Visibility tests:** Verify `visibility_overrides` are passed through to
+  prompt rendering.
+- **Config tests:** Verify `AnthropicClientConfig` and `AnthropicModelConfig`
+  produce correct request parameters, and that unsupported fields raise
+  `ValueError`.
+- **Error handling tests:** Verify throttle detection, deadline enforcement, and
+  graceful degradation when the beta feature is unavailable.
 
 ## Public API
 
@@ -749,11 +786,12 @@ response = adapter.evaluate(
 
 ## Migration Notes
 
-- Callers currently using LiteLLM with `anthropic/` model prefixes can migrate to the native
-  adapter for improved structured output support.
-- The adapter follows identical `evaluate()` signature and `PromptResponse` return type as
-  OpenAI/LiteLLM adapters.
-- Tool handlers require no changes; the shared `ToolExecutor` handles provider-agnostic execution.
+- Callers currently using LiteLLM with `anthropic/` model prefixes can migrate
+  to the native adapter for improved structured output support.
+- The adapter follows identical `evaluate()` signature and `PromptResponse`
+  return type as OpenAI/LiteLLM adapters.
+- Tool handlers require no changes; the shared `ToolExecutor` handles
+  provider-agnostic execution.
 
 ## References
 
