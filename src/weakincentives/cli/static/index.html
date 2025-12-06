@@ -15,6 +15,100 @@
     <!-- Toast container -->
     <div id="toast-container" class="toast-container"></div>
 
+    <!-- Command palette -->
+    <div id="command-palette" class="command-palette hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="command-palette-backdrop"></div>
+      <div class="command-palette-container">
+        <div class="command-palette-header">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            id="command-input"
+            type="text"
+            placeholder="Search slices, sessions, or actions..."
+            autocomplete="off"
+            aria-label="Command search"
+          />
+          <kbd>Esc</kbd>
+        </div>
+        <div id="command-results" class="command-results"></div>
+        <div class="command-footer">
+          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+          <span><kbd>Enter</kbd> select</span>
+          <span><kbd>Esc</kbd> close</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Markdown pop-out modal -->
+    <div id="markdown-modal" class="markdown-modal hidden" role="dialog" aria-modal="true" aria-label="Markdown viewer">
+      <div class="markdown-modal-backdrop"></div>
+      <div class="markdown-modal-container">
+        <div class="markdown-modal-header">
+          <h2>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+            <span id="markdown-modal-title">Markdown Content</span>
+          </h2>
+          <button id="markdown-modal-close" class="icon-button" type="button" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div id="markdown-modal-body" class="markdown-modal-body"></div>
+      </div>
+    </div>
+
+    <!-- Keyboard shortcuts help overlay -->
+    <div id="shortcuts-overlay" class="shortcuts-overlay hidden" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+      <div class="shortcuts-backdrop"></div>
+      <div class="shortcuts-container">
+        <div class="shortcuts-header">
+          <h2>Keyboard Shortcuts</h2>
+          <button id="shortcuts-close" class="icon-button" type="button" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="shortcuts-body">
+          <div class="shortcuts-section">
+            <h3>Navigation</h3>
+            <div class="shortcut-row"><kbd>J</kbd> / <kbd>↓</kbd><span>Next item</span></div>
+            <div class="shortcut-row"><kbd>K</kbd> / <kbd>↑</kbd><span>Previous item</span></div>
+            <div class="shortcut-row"><kbd>H</kbd><span>Previous slice</span></div>
+            <div class="shortcut-row"><kbd>L</kbd><span>Next slice</span></div>
+            <div class="shortcut-row"><kbd>←</kbd><span>Previous snapshot</span></div>
+            <div class="shortcut-row"><kbd>→</kbd><span>Next snapshot</span></div>
+          </div>
+          <div class="shortcuts-section">
+            <h3>Actions</h3>
+            <div class="shortcut-row"><kbd>⌘</kbd><kbd>K</kbd> / <kbd>Ctrl</kbd><kbd>K</kbd><span>Open command palette</span></div>
+            <div class="shortcut-row"><kbd>/</kbd><span>Focus item search</span></div>
+            <div class="shortcut-row"><kbd>O</kbd><span>Focus object filter</span></div>
+            <div class="shortcut-row"><kbd>R</kbd><span>Reload snapshot</span></div>
+            <div class="shortcut-row"><kbd>E</kbd><span>Export JSON</span></div>
+            <div class="shortcut-row"><kbd>D</kbd><span>Toggle dark mode</span></div>
+          </div>
+          <div class="shortcuts-section">
+            <h3>View</h3>
+            <div class="shortcut-row"><kbd>[</kbd><span>Toggle sidebar</span></div>
+            <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
+            <div class="shortcut-row"><kbd>Esc</kbd><span>Close dialogs / Clear search</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <header class="top-bar">
       <div class="heading">
         <p class="eyebrow">wink debug</p>
@@ -48,8 +142,11 @@
           <span>Bundles</span>
           <select id="snapshot-select" aria-label="Select snapshot bundle"></select>
         </label>
-        <div class="keyboard-hints" title="Keyboard shortcuts: ←→ navigate, R reload, D dark mode">
-          <kbd>←</kbd><kbd>→</kbd> <kbd>R</kbd> <kbd>D</kbd>
+        <div class="keyboard-hints" title="Press ? for all shortcuts">
+          <kbd>⌘K</kbd>
+          <button id="help-button" class="hint-button" type="button" aria-label="Show keyboard shortcuts">
+            <kbd>?</kbd>
+          </button>
         </div>
       </div>
     </header>
@@ -146,6 +243,16 @@
                       placeholder="keyword"
                       autocomplete="off"
                       aria-label="Search items"
+                    />
+                  </label>
+                  <label class="inline-label">
+                    <span>Filter objects</span>
+                    <input
+                      id="object-filter"
+                      type="search"
+                      placeholder="property"
+                      autocomplete="off"
+                      aria-label="Filter object properties"
                     />
                   </label>
                   <label class="inline-label">
