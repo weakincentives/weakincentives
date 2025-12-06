@@ -254,9 +254,16 @@ def _build_plan_delegation_prompt(
     from ..prompt import PromptTemplate
 
     # Combine parent tools with standalone planning tools so subagents can
-    # read and update the Plan injected into their sessions
+    # read and update the Plan injected into their sessions.
+    # Filter out any existing planning tools from parent to avoid duplicates.
+    planning_tool_names = {"planning_read_plan", "planning_update_step"}
+    parent_tools = tuple(
+        t
+        for t in rendered_parent.tools
+        if getattr(t, "name", None) not in planning_tool_names
+    )
     planning_tools = build_standalone_planning_tools()
-    combined_tools = (*rendered_parent.tools, *planning_tools)
+    combined_tools = (*parent_tools, *planning_tools)
 
     # Create a section for the delegation instructions
     delegation_section = MarkdownSection[_PlanDelegationParams](

@@ -741,3 +741,57 @@ def test_subagent_task_dataclass() -> None:
     # Default steps should be empty tuple
     task_no_steps = SubagentTask(objective="No steps")
     assert task_no_steps.steps == ()
+
+
+def test_dispatch_subagents_filters_duplicate_planning_tools() -> None:
+    """Verify parent planning tools are replaced with standalone ones to avoid duplicates."""
+    from weakincentives.tools.planning import PlanningToolsSection
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    # Create a parent prompt that includes PlanningToolsSection (has planning tools)
+    planning_section = PlanningToolsSection(session=session)
+
+    parent_template = PromptTemplate[ParentOutput](
+        ns="test",
+        key="with-planning",
+        sections=(
+            MarkdownSection[ParentSectionParams](
+                title="Instructions",
+                key="instructions",
+                template="${instructions}",
+            ),
+            planning_section,
+        ),
+    )
+    rendered = parent_template.bind(
+        ParentSectionParams(instructions="Test body")
+    ).render()
+
+    # Verify parent has planning tools
+    parent_tool_names = {t.name for t in rendered.tools}
+    assert "planning_read_plan" in parent_tool_names
+    assert "planning_update_step" in parent_tool_names
+
+    adapter = RecordingAdapter()
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], parent_template),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        tasks=(SubagentTask(objective="test-dedup", steps=("Step 1",)),),
+    )
+
+    handler = dispatch_subagents.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    # Should succeed without "Duplicate tool name" error
+    # Prior to the fix, this would fail with "Duplicate tool name registered"
+    assert result.success is True
+    assert result.value is not None
+    assert result.value[0].success is True
