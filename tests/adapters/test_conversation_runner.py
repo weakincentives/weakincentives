@@ -33,7 +33,6 @@ from weakincentives.adapters.core import (
     SessionProtocol,
 )
 from weakincentives.adapters.shared import (
-    ConversationRunner,
     InnerLoop,
     InnerLoopConfig,
     InnerLoopInputs,
@@ -159,46 +158,6 @@ class RecordingBus(EventBus):
         )
 
 
-def build_runner(
-    *,
-    rendered: RenderedPrompt[object],
-    provider: ProviderStub,
-    bus: RecordingBus,
-    tool_choice: ToolChoice = "auto",
-    parse_output: bool = False,
-    response_format: Mapping[str, Any] | None = None,
-    session: SessionProtocol | None = None,
-    render_inputs: tuple[SupportsDataclass, ...] | None = None,
-    throttle_policy: ThrottlePolicy | None = None,
-    budget_tracker: BudgetTracker | None = None,
-    deadline: Deadline | None = None,
-) -> ConversationRunner[object]:
-    template = PromptTemplate(ns="tests", key="example")
-    prompt = Prompt(template, params=render_inputs or ())
-    session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
-    return ConversationRunner[object](
-        adapter_name=DUMMY_ADAPTER_NAME,
-        adapter=DummyAdapter(),
-        prompt=prompt,
-        prompt_name="example",
-        rendered=rendered,
-        render_inputs=prompt.params,
-        initial_messages=[{"role": "system", "content": rendered.text}],
-        parse_output=parse_output,
-        bus=bus,
-        session=session_arg,
-        tool_choice=tool_choice,
-        response_format=response_format,
-        require_structured_output_text=False,
-        call_provider=provider,
-        select_choice=lambda response: response.choices[0],
-        serialize_tool_message_fn=serialize_tool_message,
-        throttle_policy=throttle_policy or new_throttle_policy(),
-        budget_tracker=budget_tracker,
-        deadline=deadline,
-    )
-
-
 def build_inner_loop(
     *,
     rendered: RenderedPrompt[object],
@@ -244,41 +203,6 @@ def build_inner_loop(
     return InnerLoop[object](inputs=inputs, config=config)
 
 
-def test_conversation_runner_success() -> None:
-    rendered = RenderedPrompt(text="system")
-    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
-    provider = ProviderStub(responses)
-    bus = RecordingBus()
-
-    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
-    response = runner.run()
-
-    assert response.text == "Hello"
-    assert response.output is None
-    assert isinstance(bus.events[-1], PromptExecuted)
-    assert provider.calls[0]["messages"][0]["content"] == "system"
-
-
-def test_conversation_runner_includes_usage_in_event() -> None:
-    rendered = RenderedPrompt(text="system")
-    responses = [
-        DummyResponse(
-            [DummyChoice(DummyMessage(content="Hello"))],
-            usage={"input_tokens": 12, "output_tokens": 5, "cached_tokens": 3},
-        )
-    ]
-    provider = ProviderStub(responses)
-    bus = RecordingBus()
-
-    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
-    _ = runner.run()
-
-    prompt_event = cast(PromptExecuted, bus.events[-1])
-    assert prompt_event.usage == TokenUsage(
-        input_tokens=12, output_tokens=5, cached_tokens=3
-    )
-
-
 def test_token_usage_from_payload_handles_missing_counts() -> None:
     payload = {
         "usage": {
@@ -289,83 +213,6 @@ def test_token_usage_from_payload_handles_missing_counts() -> None:
     }
 
     assert token_usage_from_payload(payload) is None
-
-
-def test_conversation_runner_includes_prompt_descriptor_in_event() -> None:
-    descriptor = PromptDescriptor(ns="tests", key="example", sections=[], tools=[])
-    rendered = RenderedPrompt(text="system", descriptor=descriptor)
-    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
-    provider = ProviderStub(responses)
-    bus = RecordingBus()
-
-    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
-    runner.run()
-
-    rendered_event = next(
-        event for event in bus.events if isinstance(event, PromptRendered)
-    )
-    assert rendered_event.descriptor is descriptor
-
-
-def test_conversation_runner_publishes_prompt_rendered_event() -> None:
-    rendered = RenderedPrompt(text="system")
-    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
-    provider = ProviderStub(responses)
-    bus = RecordingBus()
-    params = EchoParams(value="hello")
-
-    runner = build_runner(
-        rendered=rendered,
-        provider=provider,
-        bus=bus,
-        render_inputs=(params,),
-    )
-    runner.run()
-
-    assert provider.calls
-    assert bus.events and isinstance(bus.events[0], PromptRendered)
-    event = cast(PromptRendered, bus.events[0])
-    assert event.rendered_prompt == "system"
-    assert event.render_inputs == (params,)
-    assert event.prompt_ns == "tests"
-    assert event.prompt_key == "example"
-
-
-def test_conversation_runner_continues_on_prompt_rendered_publish_failure() -> None:
-    rendered = RenderedPrompt(text="system")
-    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
-    provider = ProviderStub(responses)
-    bus = RecordingBus(fail_rendered=True)
-    params = EchoParams(value="blocked")
-
-    runner = build_runner(
-        rendered=rendered,
-        provider=provider,
-        bus=bus,
-        render_inputs=(params,),
-    )
-    response = runner.run()
-
-    assert response.text == "Hello"
-    assert provider.calls
-    assert bus.events and isinstance(bus.events[0], PromptRendered)
-    assert isinstance(bus.events[-1], PromptExecuted)
-
-
-def test_conversation_runner_raises_on_prompt_publish_failure() -> None:
-    rendered = RenderedPrompt(text="system")
-    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
-    provider = ProviderStub(responses)
-    bus = RecordingBus(fail_prompt=True)
-
-    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
-
-    with pytest.raises(ExceptionGroup) as exc_info:
-        runner.run()
-
-    assert "prompt publish failure" in str(exc_info.value)
-    assert isinstance(bus.events[-1], PromptExecuted)
-    assert provider.calls[0]["messages"][0]["content"] == "system"
 
 
 @dataclass
@@ -410,64 +257,9 @@ def build_tool_responses() -> Sequence[DummyResponse]:
     return (first, second)
 
 
-def test_conversation_runner_formats_publish_failures() -> None:
-    tool = Tool[EchoParams, EchoPayload](
-        name="echo",
-        description="Echo the provided value.",
-        handler=echo_handler,
-    )
-    rendered = tool_rendered_prompt(tool)
-    provider = ProviderStub(build_tool_responses())
-    bus = RecordingBus(fail_tool=True)
-
-    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
-    response = runner.run()
-
-    assert response.text == "All done"
-    tool_event = next(event for event in bus.events if isinstance(event, ToolInvoked))
-    failure_message = tool_event.result.message
-    assert "Reducer errors prevented applying tool result" in failure_message
-
-
 @dataclass
 class StructuredOutput:
     answer: str
-
-
-def test_conversation_runner_parses_structured_output() -> None:
-    rendered = RenderedPrompt(
-        text="system",
-        structured_output=StructuredOutputConfig(
-            dataclass_type=StructuredOutput,
-            container="object",
-            allow_extra_keys=False,
-        ),
-    )
-    responses = [
-        DummyResponse(
-            [
-                DummyChoice(
-                    DummyMessage(
-                        content=None,
-                        parsed={"answer": "42"},
-                    )
-                )
-            ]
-        )
-    ]
-    provider = ProviderStub(responses)
-    bus = RecordingBus()
-
-    runner = build_runner(
-        rendered=rendered,
-        provider=provider,
-        bus=bus,
-        parse_output=True,
-    )
-    response = runner.run()
-
-    assert response.text is None
-    assert response.output == StructuredOutput(answer="42")
 
 
 class SessionStub(SessionProtocol):
@@ -487,100 +279,11 @@ class SessionStub(SessionProtocol):
         pass
 
 
-def test_conversation_runner_rolls_back_on_publish_failure() -> None:
-    tool = Tool[EchoParams, EchoPayload](
-        name="echo",
-        description="Echo the provided value.",
-        handler=echo_handler,
-    )
-    rendered = tool_rendered_prompt(tool)
-    provider = ProviderStub(build_tool_responses())
-    bus = RecordingBus(fail_tool=True)
-    session = SessionStub()
-
-    runner = build_runner(
-        rendered=rendered,
-        provider=provider,
-        bus=bus,
-        session=session,
-    )
-    response = runner.run()
-
-    assert response.text == "All done"
-    assert session.snapshots and session.rollbacks
-    assert session.rollbacks == session.snapshots
-
-
-def test_conversation_runner_requires_message_payload() -> None:
-    rendered = RenderedPrompt(text="system")
-
-    class MissingMessageResponse(DummyResponse):
-        def __init__(self) -> None:
-            super().__init__(choices=[DummyChoice(DummyMessage(content=None))])
-            self.choices[0].message = None
-
-    provider = ProviderStub([MissingMessageResponse()])
-    bus = RecordingBus()
-    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
-
-    with pytest.raises(PromptEvaluationError):
-        runner.run()
-
-
-def test_conversation_runner_records_usage_to_budget_tracker() -> None:
-    rendered = RenderedPrompt(text="system")
-    responses = [
-        DummyResponse(
-            [DummyChoice(DummyMessage(content="Hello"))],
-            usage={"input_tokens": 100, "output_tokens": 50, "cached_tokens": 10},
-        )
-    ]
-    provider = ProviderStub(responses)
-    bus = RecordingBus()
-    budget = Budget(max_total_tokens=1000)
-    tracker = BudgetTracker(budget=budget)
-
-    runner = build_runner(
-        rendered=rendered, provider=provider, bus=bus, budget_tracker=tracker
-    )
-    runner.run()
-
-    consumed = tracker.consumed
-    assert consumed.input_tokens == 100
-    assert consumed.output_tokens == 50
-    assert consumed.cached_tokens == 10
-
-
-def test_conversation_runner_raises_on_budget_exceeded() -> None:
-    rendered = RenderedPrompt(text="system")
-    responses = [
-        DummyResponse(
-            [DummyChoice(DummyMessage(content="Hello"))],
-            usage={"input_tokens": 600, "output_tokens": 500, "cached_tokens": 0},
-        )
-    ]
-    provider = ProviderStub(responses)
-    bus = RecordingBus()
-    budget = Budget(max_total_tokens=500)
-    tracker = BudgetTracker(budget=budget)
-
-    runner = build_runner(
-        rendered=rendered, provider=provider, bus=bus, budget_tracker=tracker
-    )
-
-    with pytest.raises(PromptEvaluationError) as exc_info:
-        runner.run()
-
-    error = cast(PromptEvaluationError, exc_info.value)
-    assert error.phase == PROMPT_EVALUATION_PHASE_BUDGET
-    assert "Budget exceeded" in str(error)
-
-
-# Tests for the new InnerLoop API
+# Tests for the InnerLoop API
 
 
 def test_inner_loop_success() -> None:
-    """Test that InnerLoop produces the same result as ConversationRunner."""
+    """Test that InnerLoop produces the expected result."""
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
@@ -934,18 +637,6 @@ def test_inner_loop_raise_deadline_error() -> None:
 
     error = cast(PromptEvaluationError, exc_info.value)
     assert error.phase == PROMPT_EVALUATION_PHASE_REQUEST
-
-
-def test_conversation_runner_ensure_deadline_remaining_no_deadline() -> None:
-    """Test that ConversationRunner deadline check passes when no deadline is set."""
-    rendered = RenderedPrompt(text="system")
-    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
-    provider = ProviderStub(responses)
-    bus = RecordingBus()
-
-    runner = build_runner(rendered=rendered, provider=provider, bus=bus)
-    # This should not raise since there's no deadline
-    runner._ensure_deadline_remaining("test", phase=PROMPT_EVALUATION_PHASE_REQUEST)
 
 
 def test_inner_loop_ensure_deadline_remaining_expired(

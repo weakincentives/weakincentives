@@ -117,13 +117,14 @@ def test_raise_tool_deadline_error() -> None:
     }
 
 
-def test_conversation_runner_raise_deadline_error() -> None:
+def test_inner_loop_raise_deadline_error() -> None:
     prompt = _build_prompt().bind(BodyParams(content="ready"))
     rendered = prompt.render()
     bus = InProcessEventBus()
     session: SessionProtocol = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
-    runner = shared.ConversationRunner[BodyResult](
+
+    inputs = shared.InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
@@ -131,7 +132,8 @@ def test_conversation_runner_raise_deadline_error() -> None:
         rendered=rendered,
         render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
-        parse_output=False,
+    )
+    config = shared.InnerLoopConfig(
         bus=bus,
         session=session,
         tool_choice="auto",
@@ -140,13 +142,15 @@ def test_conversation_runner_raise_deadline_error() -> None:
         call_provider=lambda *_args: SimpleNamespace(choices=[]),
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
+        parse_output=False,
         deadline=deadline,
     )
+    loop = shared.InnerLoop[BodyResult](inputs=inputs, config=config)
     with pytest.raises(PromptEvaluationError):
-        runner._raise_deadline_error("expired", phase=PROMPT_EVALUATION_PHASE_REQUEST)
+        loop._raise_deadline_error("expired", phase=PROMPT_EVALUATION_PHASE_REQUEST)
 
 
-def test_conversation_runner_detects_expired_deadline(
+def test_inner_loop_detects_expired_deadline(
     frozen_utcnow: FrozenUtcNow,
 ) -> None:
     prompt = _build_prompt().bind(BodyParams(content="ready"))
@@ -156,7 +160,8 @@ def test_conversation_runner_detects_expired_deadline(
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
-    runner = shared.ConversationRunner[BodyResult](
+
+    inputs = shared.InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
@@ -164,7 +169,8 @@ def test_conversation_runner_detects_expired_deadline(
         rendered=rendered,
         render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
-        parse_output=False,
+    )
+    config = shared.InnerLoopConfig(
         bus=bus,
         session=session,
         tool_choice="auto",
@@ -173,11 +179,13 @@ def test_conversation_runner_detects_expired_deadline(
         call_provider=lambda *_args: SimpleNamespace(choices=[]),
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
+        parse_output=False,
         deadline=deadline,
     )
+    loop = shared.InnerLoop[BodyResult](inputs=inputs, config=config)
     frozen_utcnow.advance(timedelta(seconds=10))
     with pytest.raises(PromptEvaluationError):
-        runner._ensure_deadline_remaining(
+        loop._ensure_deadline_remaining(
             "expired", phase=PROMPT_EVALUATION_PHASE_REQUEST
         )
 
@@ -278,7 +286,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
     assert invocation.params.content == "hi"
 
 
-def test_run_conversation_replaces_rendered_deadline() -> None:
+def test_run_inner_loop_replaces_rendered_deadline() -> None:
     prompt = _build_prompt().bind(BodyParams(content="ready"))
     rendered = prompt.render()
     bus = InProcessEventBus()
@@ -304,7 +312,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
     def select_choice(response: SimpleNamespace, /) -> shared.ProviderChoice:
         return cast(shared.ProviderChoice, response.choices[0])
 
-    conversation_config = shared.ConversationConfig(
+    config = shared.InnerLoopConfig(
         bus=bus,
         session=session,
         tool_choice="auto",
@@ -319,7 +327,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         deadline=deadline,
     )
 
-    inputs = shared.ConversationInputs[BodyResult](
+    inputs = shared.InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
@@ -329,6 +337,6 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
 
-    result = shared.run_conversation(inputs=inputs, config=conversation_config)
+    result = shared.run_inner_loop(inputs=inputs, config=config)
 
     assert isinstance(result, PromptResponse)

@@ -1062,10 +1062,6 @@ __all__ = (  # noqa: RUF022
     "AdapterRenderContext",
     "AdapterRenderOptions",
     "ChoiceSelector",
-    "ConversationConfig",
-    "ConversationInputs",
-    "ConversationRequest",
-    "ConversationRunner",
     "InnerLoop",
     "InnerLoopConfig",
     "InnerLoopInputs",
@@ -1101,7 +1097,6 @@ __all__ = (  # noqa: RUF022
     "parse_schema_constrained_payload",
     "parse_tool_arguments",
     "prepare_adapter_conversation",
-    "run_conversation",
     "run_inner_loop",
     "serialize_tool_call",
     "throttle_details",
@@ -1122,9 +1117,6 @@ ProviderCall = Callable[
 ]
 """Callable responsible for invoking the provider with assembled payloads."""
 
-ConversationRequest = ProviderCall
-"""Deprecated alias for ProviderCall. Use ProviderCall instead."""
-
 
 ChoiceSelector = Callable[[object], ProviderChoice]
 """Callable that extracts the relevant choice from a provider response."""
@@ -1133,19 +1125,6 @@ ChoiceSelector = Callable[[object], ProviderChoice]
 @FrozenDataclass()
 class InnerLoopInputs[OutputT]:
     """Inputs required to start a conversation with a provider."""
-
-    adapter_name: AdapterName
-    adapter: ProviderAdapter[OutputT]
-    prompt: Prompt[OutputT]
-    prompt_name: str
-    rendered: RenderedPrompt[OutputT]
-    render_inputs: tuple[SupportsDataclass, ...]
-    initial_messages: list[dict[str, Any]]
-
-
-@FrozenDataclass()
-class ConversationInputs[OutputT]:
-    """Deprecated alias for InnerLoopInputs. Use InnerLoopInputs instead."""
 
     adapter_name: AdapterName
     adapter: ProviderAdapter[OutputT]
@@ -1191,29 +1170,6 @@ class InnerLoopConfig:
         """Fill in optional settings using rendered prompt metadata."""
 
         return replace(self, deadline=self.deadline or rendered.deadline)
-
-
-@FrozenDataclass()
-class ConversationConfig:
-    """Deprecated alias for InnerLoopConfig. Use InnerLoopConfig instead."""
-
-    bus: EventBus
-    session: SessionProtocol
-    tool_choice: ToolChoice
-    response_format: Mapping[str, Any] | None
-    require_structured_output_text: bool
-    call_provider: ProviderCall
-    select_choice: ChoiceSelector
-    serialize_tool_message_fn: ToolMessageSerializer
-    parse_output: bool = True
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
-        format_publish_failures
-    )
-    parse_arguments: ToolArgumentsParser = parse_tool_arguments
-    logger_override: StructuredLogger | None = None
-    deadline: Deadline | None = None
-    throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
-    budget_tracker: BudgetTracker | None = None
 
 
 @dataclass(slots=True)
@@ -1380,132 +1336,6 @@ class ResponseParser[OutputT]:
     @property
     def should_parse_structured_output(self) -> bool:
         return self._should_parse_structured_output
-
-
-@dataclass(slots=True)
-class ConversationRunner[OutputT]:
-    """Coordinate a conversational exchange with a provider.
-
-    This class delegates to InnerLoop for the actual execution. It is maintained
-    for backward compatibility but new code should use InnerLoop directly.
-    """
-
-    adapter_name: AdapterName
-    adapter: ProviderAdapter[OutputT]
-    prompt: Prompt[OutputT]
-    prompt_name: str
-    rendered: RenderedPrompt[OutputT]
-    render_inputs: tuple[SupportsDataclass, ...]
-    initial_messages: list[dict[str, Any]]
-    parse_output: bool
-    bus: EventBus
-    session: SessionProtocol
-    tool_choice: ToolChoice
-    response_format: Mapping[str, Any] | None
-    require_structured_output_text: bool
-    call_provider: ProviderCall
-    select_choice: ChoiceSelector
-    serialize_tool_message_fn: ToolMessageSerializer
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
-        format_publish_failures
-    )
-    parse_arguments: ToolArgumentsParser = parse_tool_arguments
-    logger_override: StructuredLogger | None = None
-    deadline: Deadline | None = None
-    throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
-    budget_tracker: BudgetTracker | None = None
-    _inner_loop: InnerLoop[OutputT] = field(init=False)
-
-    def __post_init__(self) -> None:
-        inputs = InnerLoopInputs[OutputT](
-            adapter_name=self.adapter_name,
-            adapter=self.adapter,
-            prompt=self.prompt,
-            prompt_name=self.prompt_name,
-            rendered=self.rendered,
-            render_inputs=self.render_inputs,
-            initial_messages=self.initial_messages,
-        )
-        config = InnerLoopConfig(
-            bus=self.bus,
-            session=self.session,
-            tool_choice=self.tool_choice,
-            response_format=self.response_format,
-            require_structured_output_text=self.require_structured_output_text,
-            call_provider=self.call_provider,
-            select_choice=self.select_choice,
-            serialize_tool_message_fn=self.serialize_tool_message_fn,
-            parse_output=self.parse_output,
-            format_publish_failures=self.format_publish_failures,
-            parse_arguments=self.parse_arguments,
-            logger_override=self.logger_override,
-            deadline=self.deadline,
-            throttle_policy=self.throttle_policy,
-            budget_tracker=self.budget_tracker,
-        )
-        object.__setattr__(self, "_inner_loop", InnerLoop[OutputT](inputs, config))
-
-    def _raise_deadline_error(
-        self, message: str, *, phase: PromptEvaluationPhase
-    ) -> NoReturn:
-        raise PromptEvaluationError(
-            message,
-            prompt_name=self.prompt_name,
-            phase=phase,
-            provider_payload=deadline_provider_payload(self.deadline),
-        )
-
-    def _ensure_deadline_remaining(
-        self, message: str, *, phase: PromptEvaluationPhase
-    ) -> None:
-        if self.deadline is None:
-            return
-        if self.deadline.remaining() <= timedelta(0):
-            self._raise_deadline_error(message, phase=phase)
-
-    def run(self) -> PromptResponse[OutputT]:
-        """Execute the conversation loop and return the final response."""
-        return self._inner_loop.run()
-
-
-def run_conversation[
-    OutputT,
-](
-    *,
-    inputs: ConversationInputs[OutputT],
-    config: ConversationConfig,
-) -> PromptResponse[OutputT]:
-    """Execute a conversational exchange with a provider and return the result.
-
-    Deprecated: Use run_inner_loop instead.
-    """
-    inner_inputs = InnerLoopInputs[OutputT](
-        adapter_name=inputs.adapter_name,
-        adapter=inputs.adapter,
-        prompt=inputs.prompt,
-        prompt_name=inputs.prompt_name,
-        rendered=inputs.rendered,
-        render_inputs=inputs.render_inputs,
-        initial_messages=inputs.initial_messages,
-    )
-    inner_config = InnerLoopConfig(
-        bus=config.bus,
-        session=config.session,
-        tool_choice=config.tool_choice,
-        response_format=config.response_format,
-        require_structured_output_text=config.require_structured_output_text,
-        call_provider=config.call_provider,
-        select_choice=config.select_choice,
-        serialize_tool_message_fn=config.serialize_tool_message_fn,
-        parse_output=config.parse_output,
-        format_publish_failures=config.format_publish_failures,
-        parse_arguments=config.parse_arguments,
-        logger_override=config.logger_override,
-        deadline=config.deadline,
-        throttle_policy=config.throttle_policy,
-        budget_tracker=config.budget_tracker,
-    )
-    return run_inner_loop(inputs=inner_inputs, config=inner_config)
 
 
 @dataclass(slots=True)
