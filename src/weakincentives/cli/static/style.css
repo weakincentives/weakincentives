@@ -543,7 +543,7 @@ button.ghost:hover {
   display: inline-flex;
   align-items: center;
   background: var(--color-text-main);
-  color: white;
+  color: var(--color-bg);
   padding: 4px 10px;
   border-radius: var(--radius-full);
   font-size: 12px;
