@@ -181,7 +181,8 @@ All helpers:
 - Return new instances (immutable)
 - Re-run `__post_init__` for invariants
 - Raise `TypeError` for unknown fields
-- Do NOT invoke `__pre_init__`
+- Invoke `__pre_init__` when the class defines non-init fields (so derived
+  fields stay consistent); skip `__pre_init__` for simple all-init dataclasses
 
 ## Examples
 

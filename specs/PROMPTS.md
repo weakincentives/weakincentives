@@ -99,7 +99,7 @@ deterministic headings.
 
 - Root sections: `##`
 - Each depth level adds one `#` (depth 1 = `###`, depth 2 = `####`)
-- Headings include numbering: `## 1 Title`, `### 1.1 Subtitle`
+- Headings include numbering with a trailing period after the index: `## 1. Title`, `### 1.1. Subtitle`
 
 ### Parameter Lookup
 
@@ -110,7 +110,9 @@ an override:
 1. Else use the first default for that type
 1. Else instantiate with no arguments
 
-Missing required fields raise `PromptRenderError`.
+Missing required fields raise `PromptRenderError`. Supplying the same
+dataclass type more than once is rejected with `PromptValidationError` (the
+renderer does **not** fan out duplicate param types).
 
 ### RenderedPrompt
 

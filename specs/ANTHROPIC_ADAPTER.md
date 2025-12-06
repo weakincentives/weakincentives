@@ -24,8 +24,7 @@ primary model.
 
 - The adapter must run synchronously and honor the caller-supplied `Deadline` at every blocking
   boundary (request, tools, response parsing).
-- Native structured outputs are a beta feature requiring the `anthropic-beta:
-  structured-outputs-2025-11-13` header; the adapter must gracefully fall back to prompt-based
+- Native structured outputs are a beta feature requiring the `anthropic-beta: structured-outputs-2025-11-13` header; the adapter must gracefully fall back to prompt-based
   parsing when the feature is unavailable or disabled.
 - Tool execution must reuse the active `Session` and its `EventBus` so reducers observe the same
   state mutations that the adapter returns.
@@ -61,6 +60,7 @@ approaches that rely on the model following instructions.
 
 1. **`client.beta.messages.parse()`** - Higher-level helper that handles schema transformation
    automatically:
+
    ```python
    response = client.beta.messages.parse(
        model="claude-opus-4-5-20250929",
@@ -72,7 +72,8 @@ approaches that rely on the model following instructions.
    output = response.parsed_output
    ```
 
-2. **`client.beta.messages.create()`** - Lower-level control with explicit schema:
+1. **`client.beta.messages.create()`** - Lower-level control with explicit schema:
+
    ```python
    response = client.beta.messages.create(
        model="claude-opus-4-5-20250929",
@@ -115,6 +116,7 @@ tools = [
 (requires the structured outputs beta header).
 
 **Tool call response format:** When the model invokes a tool, the response includes:
+
 ```python
 response.content[0].type == "tool_use"
 response.content[0].id      # Tool call ID
@@ -123,6 +125,7 @@ response.content[0].input   # Parsed arguments dict
 ```
 
 **Tool result message format:**
+
 ```python
 {
     "role": "user",
@@ -339,6 +342,7 @@ adapter = AnthropicAdapter(
 ### Adapter Name
 
 Add to `_names.py`:
+
 ```python
 ANTHROPIC_ADAPTER_NAME: Final[AdapterName] = "anthropic"
 """Canonical label for the Anthropic adapter."""
@@ -413,38 +417,43 @@ def evaluate(
 1. **Validate deadline and budget** - Reject already-expired deadlines before rendering. Initialize
    budget tracker if budget is provided.
 
-2. **Render prompt** - Call `prompt.render(visibility_overrides=...)`, optionally disabling output
+1. **Render prompt** - Call `prompt.render(visibility_overrides=...)`, optionally disabling output
    instructions when native structured outputs are enabled.
 
-3. **Build request payload:**
+1. **Build request payload:**
+
    - Extract system prompt from rendered text
    - Assemble user messages
    - Convert tools via `tool_to_anthropic_spec()`
    - Build `output_format` when structured output is requested
    - Merge model config parameters via `model_config.to_request_params()`
 
-4. **Call provider:**
+1. **Call provider:**
+
    - Use `client.beta.messages.create()` with the structured outputs beta header
    - Pass `betas=["structured-outputs-2025-11-13"]` when native structured output is enabled
 
-5. **Record and check budget** - After each provider response:
+1. **Record and check budget** - After each provider response:
+
    - Extract token usage from response
    - Record cumulative usage via `budget_tracker.record_cumulative()`
    - Check budget limits via `budget_tracker.check()`
 
-6. **Handle tool calls** - When response contains `tool_use` blocks:
+1. **Handle tool calls** - When response contains `tool_use` blocks:
+
    - Execute tools via `ToolExecutor` (which receives `budget_tracker` in `ToolContext`)
    - Format tool results as Anthropic-style `tool_result` messages
    - Check budget after tool execution
    - Continue conversation loop
 
-7. **Parse response:**
+1. **Parse response:**
+
    - Extract text from content blocks
    - When structured output is enabled, parse JSON from response text
    - Fall back to prompt-based parsing when native parsing fails
    - Final budget check before returning
 
-8. **Publish events** - Emit `PromptRendered`, `ToolInvoked`, and `PromptExecuted` events.
+1. **Publish events** - Emit `PromptRendered`, `ToolInvoked`, and `PromptExecuted` events.
 
 ### Tool Specification Translation
 
@@ -566,10 +575,10 @@ def _build_anthropic_output_format(
 1. **Native structured output path:** When `use_native_structured_output=True` and the response
    contains valid JSON in `content[0].text`, parse directly into the target dataclass.
 
-2. **Fallback path:** When native parsing fails or is disabled, use `parse_structured_output()` with
+1. **Fallback path:** When native parsing fails or is disabled, use `parse_structured_output()` with
    the rendered prompt's parsing helpers.
 
-3. **Text-only path:** When `parse_output=False`, return raw text without structured parsing.
+1. **Text-only path:** When `parse_output=False`, return raw text without structured parsing.
 
 ### Content Extraction
 

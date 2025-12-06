@@ -221,10 +221,24 @@ result = adapter.optimize(
 
 ### OptimizationResult
 
+Generic container used by optimizers:
+
 ```python
-@dataclass(slots=True)
-class OptimizationResult:
-    response: PromptResponse[Any]
+@dataclass(slots=True, frozen=True)
+class OptimizationResult[ArtifactT]:
+    response: PromptResponse[object] | None
+    artifact: ArtifactT
+    metadata: dict[str, object]
+```
+
+### WorkspaceDigestResult
+
+Specific to the workspace digest optimizer:
+
+```python
+@dataclass(slots=True, frozen=True)
+class WorkspaceDigestResult:
+    response: PromptResponse[object]
     digest: str
     scope: OptimizationScope
     section_key: str

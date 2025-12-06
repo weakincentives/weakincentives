@@ -58,11 +58,18 @@ in sync with code changes.
 | `runtime/events/__init__.py` | `logger` | `exception` | `event_delivery_failed` | `event_type`, `handler` |
 | `runtime/session/session.py` | `logger` | `exception` | `session_reducer_failed` | `reducer`, `data_type`, `slice_type` |
 | `adapters/shared.py` | `log` | `exception` | `tool_handler_exception` | `provider_payload` |
-| `adapters/shared.py` | `log` | `info` | `prompt_execution_started` | (context varies) |
-| `adapters/shared.py` | `log` | `info` | `prompt_execution_succeeded` | (context varies) |
-| `adapters/shared.py` | `log` | `info` | `tool_handler_completed` | (context varies) |
+| `adapters/shared.py` | `log` | `info` | `prompt_execution_started` | `tool_count`, `parse_output` |
+| `adapters/shared.py` | `log` | `info` | `prompt_execution_succeeded` | `tool_count`, `has_output`, `text_length`, `structured_output`, `handler_count` |
+| `adapters/shared.py` | `log` | `error` | `prompt_execution_publish_failed` | `failure_count`, `failed_handlers` |
+| `adapters/shared.py` | `log` | `debug` | `prompt_rendered_published` | `handler_count` |
+| `adapters/shared.py` | `log` | `error` | `prompt_rendered_publish_failed` | `failure_count`, `failed_handlers` |
+| `adapters/shared.py` | `log` | `debug` | `prompt_tool_calls_detected` | `count` |
+| `adapters/shared.py` | `log` | `info` | `tool_handler_completed` | `success`, `has_value` |
 | `adapters/shared.py` | `log` | `warning` | `tool_validation_failed` | `reason` |
-| `adapters/shared.py` | `log` | `warning` | `prompt_throttled` | `kind`, `delay_seconds` |
+| `adapters/shared.py` | `log` | `warning` | `prompt_throttled` | `kind`, `delay_seconds`, `attempt`, `retry_after_seconds` |
+| `adapters/shared.py` | `log` | `warning` | `session_rollback_due_to_publish_failure` | (none) |
+| `adapters/shared.py` | `log` | `error` | `tool_event_publish_failed` | `failure_count`, `failed_handlers` |
+| `adapters/shared.py` | `log` | `debug` | `tool_event_published` | `handler_count` |
 | `prompt/overrides/local_store.py` | `_LOGGER` | `info` | `prompt_override_resolved` | `ns`, `prompt_key`, `tag` |
 | `prompt/overrides/local_store.py` | `_LOGGER` | `info` | `prompt_override_persisted` | `ns`, `prompt_key`, `tag` |
 | `prompt/overrides/local_store.py` | `_LOGGER` | `debug` | `prompt_override_missing` | `ns`, `prompt_key`, `tag` |
