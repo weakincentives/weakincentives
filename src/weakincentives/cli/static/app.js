@@ -10,6 +10,8 @@ const state = {
   expandDepth: 2,
   searchQuery: "",
   sliceBuckets: { state: [], event: [] },
+  isCurrentSliceEvent: false,
+  highlightedEventIndex: null,
 };
 
 const MARKDOWN_KEY = "__markdown__";
@@ -37,6 +39,11 @@ const elements = {
   expandAll: document.getElementById("expand-all"),
   collapseAll: document.getElementById("collapse-all"),
   itemSearch: document.getElementById("item-search"),
+  timelineContainer: document.getElementById("timeline-container"),
+  timelineEvents: document.getElementById("timeline-events"),
+  timelineStart: document.getElementById("timeline-start"),
+  timelineEnd: document.getElementById("timeline-end"),
+  timelineCount: document.getElementById("timeline-count"),
 };
 
 async function fetchJSON(url, options) {
@@ -178,6 +185,165 @@ async function bucketSlices(entries) {
   return buckets;
 }
 
+function checkIsEventSlice(items) {
+  if (!items || items.length === 0) return false;
+  const sample = items[0];
+  if (sample && typeof sample === "object") {
+    const hasEventId = Object.prototype.hasOwnProperty.call(sample, "event_id");
+    const hasCreatedAt = Object.prototype.hasOwnProperty.call(sample, "created_at");
+    return hasEventId && hasCreatedAt;
+  }
+  return false;
+}
+
+function parseEventTimestamp(item) {
+  if (!item || typeof item !== "object") return null;
+  const createdAt = item.created_at;
+  if (typeof createdAt === "string") {
+    const date = new Date(createdAt);
+    if (!isNaN(date.getTime())) return date;
+  }
+  return null;
+}
+
+function formatTimestamp(date) {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return `${hours}:${minutes}:${seconds}.${ms}`;
+}
+
+function formatDuration(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`;
+  const minutes = Math.floor(ms / 60000);
+  const seconds = ((ms % 60000) / 1000).toFixed(1);
+  return `${minutes}m ${seconds}s`;
+}
+
+function getEventTypeName(item) {
+  if (!item || typeof item !== "object") return "Event";
+  const typeRef = item["__type__"];
+  if (typeof typeRef === "string") {
+    const parts = typeRef.split(".");
+    return parts[parts.length - 1];
+  }
+  return "Event";
+}
+
+function renderTimeline(items) {
+  const container = elements.timelineContainer;
+  const eventsContainer = elements.timelineEvents;
+
+  if (!state.isCurrentSliceEvent || items.length === 0) {
+    container.style.display = "none";
+    return;
+  }
+
+  const events = items
+    .map((item, index) => ({
+      item,
+      index,
+      timestamp: parseEventTimestamp(item),
+    }))
+    .filter((e) => e.timestamp !== null);
+
+  if (events.length === 0) {
+    container.style.display = "none";
+    return;
+  }
+
+  events.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+  const startTime = events[0].timestamp.getTime();
+  const endTime = events[events.length - 1].timestamp.getTime();
+  const duration = endTime - startTime;
+
+  elements.timelineStart.textContent = formatTimestamp(events[0].timestamp);
+  elements.timelineEnd.textContent = formatTimestamp(events[events.length - 1].timestamp);
+  elements.timelineCount.textContent = `${events.length} events over ${formatDuration(duration)}`;
+
+  eventsContainer.innerHTML = "";
+
+  const bar = document.createElement("div");
+  bar.className = "timeline-bar";
+  eventsContainer.appendChild(bar);
+
+  const padding = 16;
+
+  events.forEach((event, displayIndex) => {
+    const position =
+      duration === 0
+        ? 50
+        : padding + ((event.timestamp.getTime() - startTime) / duration) * (100 - 2 * padding);
+
+    const marker = document.createElement("div");
+    marker.className = "timeline-event";
+    if (state.highlightedEventIndex === event.index) {
+      marker.classList.add("active");
+    }
+    marker.style.left = `${position}%`;
+    marker.dataset.index = String(event.index);
+
+    const tooltip = document.createElement("div");
+    tooltip.className = "timeline-event-tooltip";
+
+    const typeLine = document.createElement("span");
+    typeLine.className = "timeline-event-tooltip-line event-type";
+    typeLine.textContent = getEventTypeName(event.item);
+    tooltip.appendChild(typeLine);
+
+    const timeLine = document.createElement("span");
+    timeLine.className = "timeline-event-tooltip-line";
+    timeLine.textContent = formatTimestamp(event.timestamp);
+    tooltip.appendChild(timeLine);
+
+    const indexLine = document.createElement("span");
+    indexLine.className = "timeline-event-tooltip-line";
+    indexLine.textContent = `Item ${event.index + 1} of ${items.length}`;
+    tooltip.appendChild(indexLine);
+
+    marker.appendChild(tooltip);
+
+    marker.addEventListener("click", () => {
+      state.highlightedEventIndex = event.index;
+      renderTimeline(items);
+      scrollToItem(event.index);
+    });
+
+    eventsContainer.appendChild(marker);
+  });
+
+  container.style.display = "block";
+}
+
+function scrollToItem(index) {
+  const itemCards = elements.jsonViewer.querySelectorAll(".item-card");
+  const filtered = getFilteredItems();
+  const filteredIndex = filtered.findIndex((entry) => entry.index === index);
+
+  if (filteredIndex !== -1 && itemCards[filteredIndex]) {
+    const card = itemCards[filteredIndex];
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.classList.add("highlighted");
+    setTimeout(() => card.classList.remove("highlighted"), 1500);
+  } else if (index >= 0 && index < state.currentItems.length) {
+    state.searchQuery = "";
+    elements.itemSearch.value = "";
+    renderItems(state.currentItems);
+
+    requestAnimationFrame(() => {
+      const updatedCards = elements.jsonViewer.querySelectorAll(".item-card");
+      if (updatedCards[index]) {
+        updatedCards[index].scrollIntoView({ behavior: "smooth", block: "center" });
+        updatedCards[index].classList.add("highlighted");
+        setTimeout(() => updatedCards[index].classList.remove("highlighted"), 1500);
+      }
+    });
+  }
+}
+
 function renderSliceList() {
   const filter = elements.sliceFilter.value.toLowerCase().trim();
   const renderBucket = (target, entries, emptyLabel) => {
@@ -237,6 +403,8 @@ function renderSliceDetail(slice) {
   state.currentItems = slice.items;
   state.markdownViews = new Map();
   state.searchQuery = "";
+  state.highlightedEventIndex = null;
+  state.isCurrentSliceEvent = checkIsEventSlice(slice.items);
   elements.itemSearch.value = "";
   applyDepth(state.currentItems, state.expandDepth);
 
@@ -251,6 +419,7 @@ function renderSliceDetail(slice) {
   elements.typeRow.appendChild(slicePill);
   elements.typeRow.appendChild(itemPill);
 
+  renderTimeline(slice.items);
   renderItems(slice.items);
 }
 
