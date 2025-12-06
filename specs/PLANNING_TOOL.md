@@ -2,76 +2,30 @@
 
 ## Overview
 
-The planning tool suite lets background agents maintain a single session-scoped todo list. It is designed for lightweight
-execution planning: capture the objective, keep a few ordered steps, and observe progress while staying inside the
-existing session/state infrastructure. Nothing in this suite persists beyond the session and no calendar, deadline, or
-multi-user concepts are exposed.
+The planning tool suite lets background agents maintain a single session-scoped todo list. It captures an objective, tracks ordered steps, and observes progress within the session infrastructure. Nothing persists beyond the session.
 
-## Rationale and Scope
+## Rationale
 
-- **Keep orchestration lightweight**: The suite is the smallest possible coordination layer for background agents that
-  need to remember a handful of steps across tool calls. It intentionally avoids calendars, blockers, or owner fields so
-  the cognitive and implementation footprint stays small.
-- **Session-only provenance**: Plans exist only inside a `Session`; they die with the session and never write to external
-  stores. This keeps the suite safe for background runs where persistence is undesired or disallowed.
-- **Single-plan focus**: Each session tracks exactly one plan at a time. Tools replace or mutate the existing snapshot but
-  never spawn branches or per-actor plans. This mirrors the orchestrator's need for one shared source of truth.
-- **No scheduling semantics**: Deadlines, reminders, or dependency graphs are out-of-scope. Agents should use the
-  broader runtime or other tools for time-aware coordination.
-
-## Guiding Principles
-
-- **Deterministic state transitions**: Reducers are the only place that mutate plan state. Every reducer invocation emits
-  a fresh immutable snapshot so callers can diff and cache safely.
-- **Tool-first validation**: Handlers eagerly validate inputs and normalise strings/collections before dispatching to
-  reducers. The `ToolValidationError` surface is consistent across all planning operations to keep error handling simple.
-- **Minimal, stable identifiers**: Step IDs are numeric suffixes in the `S###` format, generated exclusively by reducers
-  to preserve idempotency and human readability.
-- **Plan lifecycle guardrails**: Tools fail fast when prerequisites are not met (e.g., `planning_add_step` requires an
-  active plan). This keeps the plan coherent and avoids accidental resurrection of abandoned work.
-- **Prompt clarity over verbosity**: The prompt copy steers agents toward concise, ASCII-only objectives and discourages
-  planning when a direct answer suffices.
-
-## Module Surface
-
-- Planning code lives in `weakincentives.tools.planning`.
-- Tool validation errors use `ToolValidationError` from `weakincentives.tools.errors`. This exception acts as the shared
-  params validation failure for every built-in tool.
-- `PlanningToolsSection` is the public entry point. It owns the deskilled prompt copy and registers all tool definitions
-  internally, so callers integrate the suite by adding the section rather than importing individual tool functions.
-
-## Session Integration
-
-- `PlanningToolsSection` must be constructed with a `Session` instance from
-  `weakincentives.runtime.session` so reducers register before any tools run.
-- During initialisation the section registers `replace_latest` for the `Plan` slice so every tool result replaces the
-  current plan snapshot automatically.
-- Reducers produce copy-on-write `Plan` instances; every invocation builds a new snapshot that replaces the previous
-  tuple in the session store so orchestrators always observe a single, immutable plan.
-- Orchestrators obtain the latest plan via `select_latest(session, Plan)` and may fall back to `None` when no plan exists.
+- **Lightweight coordination**: Smallest possible layer for agents needing to track steps across tool calls.
+- **Session-only**: Plans exist only in a `Session`; they die with the session.
+- **Single-plan focus**: One plan at a time per session.
+- **No scheduling**: Deadlines, reminders, or dependency graphs are out-of-scope.
 
 ## Data Model
 
-The schemas below are defined as frozen dataclasses to keep reducer snapshots immutable and trivially comparable. Lists
-exposed through tool params are normalised into tuples when persisted.
-
 ```python
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import Literal, Sequence
+from typing import Literal
 
-PlanStatus = Literal["active", "completed", "abandoned"]
-StepStatus = Literal["pending", "in_progress", "blocked", "done"]
+StepStatus = Literal["pending", "in_progress", "done"]
+PlanStatus = Literal["active", "completed"]
 
 
 @dataclass(slots=True, frozen=True)
 class PlanStep:
-    step_id: str
+    step_id: int
     title: str
-    details: str | None
     status: StepStatus
-    notes: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True, frozen=True)
@@ -79,42 +33,38 @@ class Plan:
     objective: str
     status: PlanStatus
     steps: tuple[PlanStep, ...] = field(default_factory=tuple)
+```
 
+## Tools
 
-@dataclass(slots=True, frozen=True)
-class NewPlanStep:
-    title: str
-    details: str | None = None
+The suite provides 4 tools:
 
+| Tool | Purpose | Notes |
+| ---------------------- | ------------------------------- | -------------------------------------------------------------- |
+| `planning_setup_plan` | Create or replace the plan | Sets objective and optional initial steps; step IDs start at 1 |
+| `planning_add_step` | Append steps to active plan | Fails if no plan exists or plan is completed |
+| `planning_update_step` | Modify a step's title or status | Auto-completes plan when all steps are done |
+| `planning_read_plan` | Retrieve current plan state | Fails if no plan exists |
 
+### Tool Params
+
+```python
 @dataclass(slots=True, frozen=True)
 class SetupPlan:
     objective: str
-    initial_steps: tuple[NewPlanStep, ...] = field(default_factory=tuple)
+    initial_steps: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True, frozen=True)
 class AddStep:
-    steps: tuple[NewPlanStep, ...]
+    steps: tuple[str, ...]  # step titles
 
 
 @dataclass(slots=True, frozen=True)
 class UpdateStep:
-    step_id: str
+    step_id: int
     title: str | None = None
-    details: str | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class MarkStep:
-    step_id: str
-    status: StepStatus
-    note: str | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class ClearPlan:
-    pass
+    status: StepStatus | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -122,128 +72,40 @@ class ReadPlan:
     pass
 ```
 
-Implementation detail notes:
+## Behaviour
 
-- Tool handlers perform parameter validation and return informative messages alongside the original params dataclass.
-- Reducers are responsible for merging tool params into the latest `Plan` snapshot, constructing a fresh instance on
-  every invocation before persisting it via `replace_latest`.
-- `ReadPlan` is the sole tool that returns a `Plan`. Its handler is defined as a closure over the target `Session`
-  instance so it can call `select_latest` and render a short summary message for the LLM.
-- `NewPlanStep` sequences supplied by callers can be any `Sequence` at runtime; handlers coerce them into tuples before
-  storing the new snapshot.
-- `PlanStep.step_id` values are always generated by reducers. They use the `S###` format, scanning the existing plan for
-  the highest numeric suffix and assigning the next unused value (e.g., `S001`, `S002`, …). Deletions never cause suffixes
-  to be reused.
-- `UpdateStep` rejects empty updates; at least one of `title` or `details` must be non-`None`.
-- String validation rules enforce ASCII payloads, trim surrounding whitespace, and limit lengths to:
-  - `objective`: 1–240 characters
-  - `title`: 1–160 characters
-  - `details` and notes: ≤512 characters each
-- `PlanStep.step_id` remains stable across updates to keep `MarkStep` invocations idempotent for the caller.
+- **Plan lifecycle**: `planning_setup_plan` creates or replaces the plan. Other tools require an existing plan.
+- **Step IDs**: Simple incrementing integers (1, 2, 3...). IDs are never reused within a plan.
+- **Auto-completion**: When all steps reach `done`, plan status becomes `completed`.
+- **Validation**: Titles must be non-empty and \<= 500 characters. At least one of `title` or `status` required for updates.
 
-## Tool Contracts
+## Session Integration
 
-All tools raise `ToolValidationError` when inputs are invalid. Every successful call writes the updated `Plan` through
-the session reducer pipeline.
-
-| Tool | Summary | Parameters | Result | Behaviour highlights |
-| ---- | ------- | ---------- | ------ | -------------------- |
-| `planning_setup_plan` | Create or replace the session plan | `SetupPlan` | `SetupPlan` | Emits validated setup payload; reducer replaces any existing plan, seeds sequential `step_id`s (`S001`, `S002`, …), sets status to `active`. |
-| `planning_add_step` | Append one or more steps | `AddStep` | `AddStep` | Fails if no plan or plan not active, appends validated steps in order when reducer applies the update and allocates the next unused `S###` identifier even if earlier steps were removed. |
-| `planning_update_step` | Edit an existing step description | `UpdateStep` | `UpdateStep` | Rejects empty updates, trims strings; reducer mutates the target step before persisting snapshot. |
-| `planning_mark_step` | Change a step status | `MarkStep` | `MarkStep` | Validates step/status, attaches optional note; reducer auto-completes plan when all steps done. |
-| `planning_clear_plan` | Abandon the current plan | `ClearPlan` | `ClearPlan` | Signals abandonment; reducer marks status `abandoned` and resets to an empty step list. |
-| `planning_read_plan` | Retrieve current plan state | `ReadPlan` | `Plan` | Returns the latest reducer-managed plan or raises when the plan has never been initialised. |
-
-Reducers enforce unique `step_id` values whenever the plan is mutated. If the plan snapshot already contains a step with the
-next calculated identifier, the reducer must raise `ToolValidationError` because duplicates break status updates and
-marking flows. Clearing or abandoning the plan removes all steps but preserves the `PlanStep.step_id` generator's monotonic
-counter. Replacing the plan via `planning_setup_plan` creates a fresh plan and restarts IDs at `S001` for the new snapshot.
-
-## Behaviour Mapping and Caveats
-
-- **Plan lifecycle**: `planning_setup_plan` is the only entry to create or replace a plan; all other tools assume a plan
-  already exists. `planning_clear_plan` abandons the plan but keeps the session ready for a new setup. `planning_read_plan`
-  raises when no plan exists, reinforcing the single-plan contract.
-- **Step identity**: Reducers own ID generation and never recycle suffixes within a plan snapshot. Agents must treat
-  `step_id` as opaque handles rather than user-editable fields; injecting IDs via tool inputs is not supported.
-- **Status transitions**: Plan status is implicitly managed: setup seeds `active`, marking steps to `done` can auto-complete
-  the plan, and clearing marks it `abandoned`. There is no status to represent "on hold" or scheduling delays.
-- **Validation boundaries**: ASCII enforcement and length limits apply to all string inputs, including notes. Attempts to
-  submit empty updates or missing required fields surface as `ToolValidationError` before reducers run.
-- **Session isolation**: Reducers operate on the session-local store only. Copying a plan between sessions or exporting it
-  for reuse requires bespoke tooling; this suite does not provide it.
-- **Telemetry**: No tool-specific metrics are emitted beyond the shared `ToolInvoked` events. Consumers should rely on the
-  session event bus if they need observability.
-
-## Prompt Template Guidance
-
-`PlanningToolsSection` emits markdown that must:
-
-1. Explain when to engage planning (multi-step or stateful work) versus responding directly.
-1. Describe how to initialise the plan with `planning_setup_plan` and keep the objective concise.
-1. Document how to expand and refine the plan (`planning_add_step`, `planning_update_step`).
-1. Call out that `step_id`s follow the `S###` pattern, never get reused after removal, and must be referenced when updating or marking steps.
-1. Outline status tracking with `planning_mark_step` and how to inspect progress with `planning_read_plan`.
-1. Warn that `planning_clear_plan` discards the current plan and should be used sparingly.
-1. Remind agents to stay brief, ASCII-only, and avoid planning trivial single-step tasks.
-
-The section follows the standard prompt system rules (see `specs/PROMPTS.md`) and contributes tool definitions so
-`RenderedPrompt.tools` contains the planning suite without additional orchestration code.
-
-## Usage Sketch
+`PlanningToolsSection` registers reducers on construction. Every tool invocation produces a fresh `Plan` snapshot via `replace_latest`.
 
 ```python
-from dataclasses import dataclass
-from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.prompt import MarkdownSection, Prompt
-from weakincentives.runtime.session import Session
-from weakincentives.runtime.session.selectors import select_latest
-from weakincentives.tools import planning
+from weakincentives.runtime.session import Session, select_latest
+from weakincentives.tools import Plan, PlanningToolsSection
 
-@dataclass
-class BehaviourParams:
-    objective: str
-
-bus = InProcessEventBus()
 session = Session(bus=bus)
-
-prompt = Prompt(
-    ns="agents/background",
-    key="session-plan",
-    name="session-plan",
-    sections=[
-        MarkdownSection[BehaviourParams](
-            title="Behaviour",
-            template="Stay focused on ${objective} and call planning tools for multi-step work.",
-        ),
-        planning.PlanningToolsSection(),
-    ],
-)
-
-rendered = prompt.render(BehaviourParams(objective="triage open bug reports"))
-latest_plan = select_latest(session, planning.Plan)
+section = PlanningToolsSection(session=session)
+# ... after tool calls ...
+plan = select_latest(session, Plan)
 ```
 
-Adapters dispatch `ToolInvoked` events onto the shared bus; the session handles persistence automatically via the reducer
-registered by the section.
+## Prompt Guidance
 
-## Telemetry
+The section emits markdown instructing agents to:
 
-No custom telemetry is required. The planning tools rely solely on the default `ToolInvoked` events defined in
-`specs/EVENTS.md`.
+1. Use planning for multi-step work, skip for trivial tasks
+1. Initialize with `planning_setup_plan`
+1. Add steps with `planning_add_step`
+1. Update progress with `planning_update_step`
+1. Check state with `planning_read_plan`
 
 ## Testing Checklist
 
-- Tool unit tests covering success paths and validation errors (missing plan, invalid step ID, empty patch, etc.).
-- Reducer tests asserting step ID continuity: setup seeds `S001…`, `planning_add_step` assigns the next unused suffix even
-  when earlier steps were removed, and clearing then re-running setup restarts numbering from `S001`.
-- Session integration tests ensuring the reducer stores exactly one `Plan` snapshot per invocation.
-- Prompt snapshot tests verifying `PlanningToolsSection` renders the instructional template and exposes all tools.
-- End-to-end test showing an agent setting up a plan, updating it, marking completion, and clearing it at the end.
-
-## Documentation Tasks
-
-- Add `openai_example.py` demonstrating the typical flow using the openai adapter.
-- Update the README to reference the planning suite and link to this specification.
-- Generate API reference entries for all dataclasses and tool functions in `weakincentives.tools.planning`.
+- Tool success paths and validation errors
+- Step ID continuity across add operations
+- Auto-completion when all steps done
+- Session stores single Plan snapshot

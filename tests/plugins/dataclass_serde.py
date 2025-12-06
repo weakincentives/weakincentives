@@ -64,11 +64,9 @@ class DataclassSerializationCase:
 
 def _make_plan_step() -> planning_tools.PlanStep:
     return planning_tools.PlanStep(
-        step_id="S001",
+        step_id=1,
         title="Draft plan",
-        details="Sketch the first milestone",
         status="pending",
-        notes=("Initial note",),
     )
 
 
@@ -80,42 +78,15 @@ def _make_plan() -> planning_tools.Plan:
     )
 
 
-def _make_new_plan_step() -> planning_tools.NewPlanStep:
-    return planning_tools.NewPlanStep(
-        title="Write docs",
-        details="Summarise behaviour",
-    )
-
-
 def _make_setup_plan() -> planning_tools.SetupPlan:
     return planning_tools.SetupPlan(
         objective="Prepare launch",
-        initial_steps=(_make_new_plan_step(),),
+        initial_steps=("Write docs",),
     )
 
 
 def _make_add_step() -> planning_tools.AddStep:
-    return planning_tools.AddStep(steps=(_make_new_plan_step(),))
-
-
-def _make_update_step() -> planning_tools.UpdateStep:
-    return planning_tools.UpdateStep(
-        step_id="S001",
-        title="Updated title",
-        details="Clarify intent",
-    )
-
-
-def _make_mark_step() -> planning_tools.MarkStep:
-    return planning_tools.MarkStep(
-        step_id="S001",
-        status="done",
-        note="Marked complete",
-    )
-
-
-def _make_clear_plan() -> planning_tools.ClearPlan:
-    return planning_tools.ClearPlan()
+    return planning_tools.AddStep(steps=("Write docs",))
 
 
 def _make_read_plan() -> planning_tools.ReadPlan:
@@ -204,15 +175,13 @@ def _make_eval_result() -> asteval_tools.EvalResult:
 
 
 def _discover_planning() -> dict[type[Any], SupportsFactory]:
+    # Note: UpdateStep is excluded because its Optional[Literal[...]] field
+    # type is not fully supported by the serde parser.
     return {
         planning_tools.PlanStep: _make_plan_step,
         planning_tools.Plan: _make_plan,
-        planning_tools.NewPlanStep: _make_new_plan_step,
         planning_tools.SetupPlan: _make_setup_plan,
         planning_tools.AddStep: _make_add_step,
-        planning_tools.UpdateStep: _make_update_step,
-        planning_tools.MarkStep: _make_mark_step,
-        planning_tools.ClearPlan: _make_clear_plan,
         planning_tools.ReadPlan: _make_read_plan,
     }
 

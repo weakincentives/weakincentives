@@ -34,9 +34,6 @@ from weakincentives.runtime.session import (
 )
 from weakincentives.tools import (
     AddStep,
-    ClearPlan,
-    MarkStep,
-    NewPlanStep,
     Plan,
     PlanningToolsSection,
     PlanStep,
@@ -47,10 +44,8 @@ from weakincentives.tools import (
 )
 from weakincentives.tools.planning import (
     _add_step_reducer,
-    _clear_plan_reducer,
     _latest_plan,
-    _mark_step_reducer,
-    _next_step_index,
+    _next_step_id,
     _update_step_reducer,
 )
 
@@ -77,35 +72,25 @@ def _make_reducer_context() -> ReducerContext:
 
 
 def test_plan_render_helpers() -> None:
-    step = PlanStep(
-        step_id="S001",
-        title="draft",
-        details="write docs",
-        status="pending",
-        notes=("note",),
-    )
+    step = PlanStep(step_id=1, title="draft", status="pending")
     plan = Plan(objective="ship", status="active", steps=(step,))
-    assert "S001" in step.render()
+    assert "1" in step.render()
     assert "Objective" in plan.render()
 
 
 def test_plan_command_renders() -> None:
-    setup = SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),))
-    add = AddStep(steps=(NewPlanStep(title="refine"),))
+    setup = SetupPlan(objective="ship", initial_steps=("draft",))
+    add = AddStep(steps=("refine",))
     empty_add = AddStep(steps=())
-    update = UpdateStep(step_id="S001", title="rename")
-    detail_update = UpdateStep(step_id="S002", title=None, details="full")
-    mark = MarkStep(step_id="S001", status="done", note="all set")
-    clear = ClearPlan()
+    update = UpdateStep(step_id=1, title="rename")
+    status_update = UpdateStep(step_id=2, status="done")
     read = ReadPlan()
 
     assert "ship" in setup.render()
     assert "refine" in add.render()
     assert "no steps" in empty_add.render()
     assert "rename" in update.render()
-    assert "full" in detail_update.render()
-    assert "done" in mark.render()
-    assert "Plan cleared" in clear.render()
+    assert "done" in status_update.render()
     assert "snapshot" in read.render()
 
 
@@ -145,7 +130,7 @@ def test_setup_plan_normalizes_payloads() -> None:
 
     params = SetupPlan(
         objective="  refine onboarding flow  ",
-        initial_steps=(NewPlanStep(title=" draft checklist ", details=" review doc "),),
+        initial_steps=(" draft checklist ",),
     )
     invoke_tool(bus, setup_tool, params, session=session)
 
@@ -154,31 +139,8 @@ def test_setup_plan_normalizes_payloads() -> None:
     assert plan.objective == "refine onboarding flow"
     assert plan.status == "active"
     assert plan.steps == (
-        PlanStep(
-            step_id="S001",
-            title="draft checklist",
-            details="review doc",
-            status="pending",
-            notes=(),
-        ),
+        PlanStep(step_id=1, title="draft checklist", status="pending"),
     )
-
-
-def test_setup_plan_normalizes_blank_details() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
-    setup_tool = find_tool(section, "planning_setup_plan")
-
-    params = SetupPlan(
-        objective="ship",
-        initial_steps=(NewPlanStep(title="draft", details="   "),),
-    )
-    invoke_tool(bus, setup_tool, params, session=session)
-
-    plan = select_latest(session, Plan)
-    assert plan is not None
-    assert plan.steps[0].details is None
 
 
 def test_setup_plan_rejects_invalid_objective() -> None:
@@ -190,7 +152,7 @@ def test_setup_plan_rejects_invalid_objective() -> None:
     with pytest.raises(ToolValidationError):
         invoke_tool(bus, setup_tool, SetupPlan(objective="   "), session=session)
 
-    long_objective = "x" * 241
+    long_objective = "x" * 501
     with pytest.raises(ToolValidationError):
         invoke_tool(
             bus,
@@ -210,7 +172,7 @@ def test_add_step_requires_existing_plan() -> None:
         invoke_tool(
             bus,
             add_tool,
-            AddStep(steps=(NewPlanStep(title="task"),)),
+            AddStep(steps=("task",)),
             session=session,
         )
 
@@ -225,24 +187,19 @@ def test_add_step_appends_new_steps() -> None:
     invoke_tool(
         bus,
         setup_tool,
-        SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        SetupPlan(objective="ship", initial_steps=("draft",)),
         session=session,
     )
     invoke_tool(
         bus,
         add_tool,
-        AddStep(
-            steps=(
-                NewPlanStep(title="review"),
-                NewPlanStep(title="release"),
-            )
-        ),
+        AddStep(steps=("review", "release")),
         session=session,
     )
 
     plan = select_latest(session, Plan)
     assert plan is not None
-    assert [step.step_id for step in plan.steps] == ["S001", "S002", "S003"]
+    assert [step.step_id for step in plan.steps] == [1, 2, 3]
     assert [step.title for step in plan.steps] == ["draft", "review", "release"]
 
 
@@ -269,19 +226,19 @@ def test_add_step_rejects_when_plan_not_active() -> None:
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
-    mark_tool = find_tool(section, "planning_mark_step")
+    update_tool = find_tool(section, "planning_update_step")
     add_tool = find_tool(section, "planning_add_step")
 
     invoke_tool(
         bus,
         setup_tool,
-        SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        SetupPlan(objective="ship", initial_steps=("draft",)),
         session=session,
     )
     invoke_tool(
         bus,
-        mark_tool,
-        MarkStep(step_id="S001", status="done"),
+        update_tool,
+        UpdateStep(step_id=1, status="done"),
         session=session,
     )
 
@@ -289,7 +246,7 @@ def test_add_step_rejects_when_plan_not_active() -> None:
         invoke_tool(
             bus,
             add_tool,
-            AddStep(steps=(NewPlanStep(title="later"),)),
+            AddStep(steps=("later",)),
             session=session,
         )
 
@@ -310,7 +267,7 @@ def test_session_keeps_single_plan_snapshot() -> None:
     invoke_tool(
         bus,
         add_tool,
-        AddStep(steps=(NewPlanStep(title="draft"),)),
+        AddStep(steps=("draft",)),
         session=session,
     )
 
@@ -328,15 +285,15 @@ def test_update_step_rejects_empty_patch() -> None:
     invoke_tool(
         bus,
         setup_tool,
-        SetupPlan(objective="ship", initial_steps=()),
+        SetupPlan(objective="ship", initial_steps=("draft",)),
         session=session,
     )
 
     with pytest.raises(ToolValidationError):
-        invoke_tool(bus, update_tool, UpdateStep(step_id="S001"), session=session)
+        invoke_tool(bus, update_tool, UpdateStep(step_id=1), session=session)
 
 
-def test_update_step_updates_existing_step() -> None:
+def test_update_step_updates_existing_step_title() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
@@ -348,10 +305,7 @@ def test_update_step_updates_existing_step() -> None:
         setup_tool,
         SetupPlan(
             objective="ship",
-            initial_steps=(
-                NewPlanStep(title="triage requests"),
-                NewPlanStep(title="categorise follow-ups"),
-            ),
+            initial_steps=("triage requests", "categorise follow-ups"),
         ),
         session=session,
     )
@@ -359,7 +313,7 @@ def test_update_step_updates_existing_step() -> None:
     invoke_tool(
         bus,
         update_tool,
-        UpdateStep(step_id="S002", title="categorise replies"),
+        UpdateStep(step_id=2, title="categorise replies"),
         session=session,
     )
 
@@ -369,10 +323,10 @@ def test_update_step_updates_existing_step() -> None:
         "triage requests",
         "categorise replies",
     ]
-    assert plan.steps[1].step_id == "S002"
+    assert plan.steps[1].step_id == 2
 
 
-def test_update_step_requires_step_identifier() -> None:
+def test_update_step_updates_status() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
@@ -382,17 +336,20 @@ def test_update_step_requires_step_identifier() -> None:
     invoke_tool(
         bus,
         setup_tool,
-        SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        SetupPlan(objective="ship", initial_steps=("draft", "review")),
+        session=session,
+    )
+    invoke_tool(
+        bus,
+        update_tool,
+        UpdateStep(step_id=1, status="done"),
         session=session,
     )
 
-    with pytest.raises(ToolValidationError):
-        invoke_tool(
-            bus,
-            update_tool,
-            UpdateStep(step_id="  ", title="rename"),
-            session=session,
-        )
+    plan = select_latest(session, Plan)
+    assert plan is not None
+    assert plan.steps[0].status == "done"
+    assert plan.status == "active"  # Not all steps done yet
 
 
 def test_update_step_rejects_unknown_identifier() -> None:
@@ -405,7 +362,7 @@ def test_update_step_rejects_unknown_identifier() -> None:
     invoke_tool(
         bus,
         setup_tool,
-        SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        SetupPlan(objective="ship", initial_steps=("draft",)),
         session=session,
     )
 
@@ -413,227 +370,87 @@ def test_update_step_rejects_unknown_identifier() -> None:
         invoke_tool(
             bus,
             update_tool,
-            UpdateStep(step_id="S999", title="rename"),
+            UpdateStep(step_id=999, title="rename"),
             session=session,
         )
 
 
-def test_mark_step_appends_note_and_updates_status() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
-    setup_tool = find_tool(section, "planning_setup_plan")
-    mark_tool = find_tool(section, "planning_mark_step")
-
-    invoke_tool(
-        bus,
-        setup_tool,
-        SetupPlan(
-            objective="ship",
-            initial_steps=(NewPlanStep(title="draft"), NewPlanStep(title="review")),
-        ),
-        session=session,
-    )
-    invoke_tool(
-        bus,
-        mark_tool,
-        MarkStep(step_id="S001", status="done", note="notes added"),
-        session=session,
-    )
-
-    plan = select_latest(session, Plan)
-    assert plan is not None
-    first, _second = plan.steps
-    assert first.status == "done"
-    assert first.notes == ("notes added",)
-    assert plan.status == "active"
-
-
-def test_mark_step_sets_plan_completed_when_all_done() -> None:
+def test_update_step_sets_plan_completed_when_all_done() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
-    mark_tool = find_tool(section, "planning_mark_step")
+    update_tool = find_tool(section, "planning_update_step")
 
     invoke_tool(
         bus,
         setup_tool,
         SetupPlan(
             objective="resolve support backlog",
-            initial_steps=(
-                NewPlanStep(title="triage requests"),
-                NewPlanStep(title="categorise follow-ups"),
-            ),
+            initial_steps=("triage requests", "categorise follow-ups"),
         ),
         session=session,
     )
     invoke_tool(
         bus,
         add_tool,
-        AddStep(steps=(NewPlanStep(title="draft update"),)),
+        AddStep(steps=("draft update",)),
         session=session,
     )
 
     invoke_tool(
         bus,
-        mark_tool,
-        MarkStep(step_id="S001", status="done", note="triage complete"),
+        update_tool,
+        UpdateStep(step_id=1, status="done"),
         session=session,
     )
     invoke_tool(
         bus,
-        mark_tool,
-        MarkStep(step_id="S002", status="done"),
+        update_tool,
+        UpdateStep(step_id=2, status="done"),
         session=session,
     )
     invoke_tool(
         bus,
-        mark_tool,
-        MarkStep(step_id="S003", status="done"),
+        update_tool,
+        UpdateStep(step_id=3, status="done"),
         session=session,
     )
 
     plan = select_latest(session, Plan)
     assert plan is not None
     assert plan.status == "completed"
-    assert plan.steps[0].notes == ("triage complete",)
     assert all(step.status == "done" for step in plan.steps)
 
 
-def test_mark_step_rejects_abandoned_plan() -> None:
+def test_update_step_rejects_completed_plan() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
-    mark_tool = find_tool(section, "planning_mark_step")
-    clear_tool = find_tool(section, "planning_clear_plan")
+    update_tool = find_tool(section, "planning_update_step")
 
     invoke_tool(
         bus,
         setup_tool,
-        SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        SetupPlan(objective="ship", initial_steps=("draft",)),
         session=session,
     )
-    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
-
-    with pytest.raises(ToolValidationError):
-        invoke_tool(
-            bus,
-            mark_tool,
-            MarkStep(step_id="S001", status="done"),
-            session=session,
-        )
-
-
-def test_mark_step_requires_identifier() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
-    setup_tool = find_tool(section, "planning_setup_plan")
-    mark_tool = find_tool(section, "planning_mark_step")
-
     invoke_tool(
         bus,
-        setup_tool,
-        SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
+        update_tool,
+        UpdateStep(step_id=1, status="done"),
         session=session,
     )
 
     with pytest.raises(ToolValidationError):
         invoke_tool(
             bus,
-            mark_tool,
-            MarkStep(step_id="  ", status="done"),
+            update_tool,
+            UpdateStep(step_id=1, title="new title"),
             session=session,
         )
-
-
-def test_mark_step_rejects_empty_note() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
-    setup_tool = find_tool(section, "planning_setup_plan")
-    mark_tool = find_tool(section, "planning_mark_step")
-
-    invoke_tool(
-        bus,
-        setup_tool,
-        SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
-        session=session,
-    )
-
-    with pytest.raises(ToolValidationError):
-        invoke_tool(
-            bus,
-            mark_tool,
-            MarkStep(step_id="S001", status="done", note="   "),
-            session=session,
-        )
-
-
-def test_mark_step_rejects_overlong_note() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
-    setup_tool = find_tool(section, "planning_setup_plan")
-    mark_tool = find_tool(section, "planning_mark_step")
-
-    invoke_tool(
-        bus,
-        setup_tool,
-        SetupPlan(objective="ship", initial_steps=(NewPlanStep(title="draft"),)),
-        session=session,
-    )
-
-    with pytest.raises(ToolValidationError):
-        invoke_tool(
-            bus,
-            mark_tool,
-            MarkStep(step_id="S001", status="done", note="x" * 513),
-            session=session,
-        )
-
-
-def test_clear_plan_marks_status_abandoned() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
-    setup_tool = find_tool(section, "planning_setup_plan")
-    clear_tool = find_tool(section, "planning_clear_plan")
-
-    invoke_tool(
-        bus,
-        setup_tool,
-        SetupPlan(objective="ship", initial_steps=()),
-        session=session,
-    )
-    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
-
-    plan = select_latest(session, Plan)
-    assert plan is not None
-    assert plan.status == "abandoned"
-    assert plan.steps == ()
-
-
-def test_clear_plan_rejects_when_already_abandoned() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = PlanningToolsSection(session=session)
-    setup_tool = find_tool(section, "planning_setup_plan")
-    clear_tool = find_tool(section, "planning_clear_plan")
-
-    invoke_tool(
-        bus,
-        setup_tool,
-        SetupPlan(objective="ship", initial_steps=()),
-        session=session,
-    )
-    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
-
-    with pytest.raises(ToolValidationError):
-        invoke_tool(bus, clear_tool, ClearPlan(), session=session)
 
 
 def test_read_plan_returns_snapshot() -> None:
@@ -646,10 +463,7 @@ def test_read_plan_returns_snapshot() -> None:
     invoke_tool(
         bus,
         setup_tool,
-        SetupPlan(
-            objective="ship",
-            initial_steps=(NewPlanStep(title="draft"), NewPlanStep(title="review")),
-        ),
+        SetupPlan(objective="ship", initial_steps=("draft", "review")),
         session=session,
     )
 
@@ -673,7 +487,6 @@ def test_read_plan_reports_empty_steps() -> None:
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
-    clear_tool = find_tool(section, "planning_clear_plan")
     read_tool = find_tool(section, "planning_read_plan")
 
     invoke_tool(
@@ -682,45 +495,38 @@ def test_read_plan_reports_empty_steps() -> None:
         SetupPlan(objective="ship", initial_steps=()),
         session=session,
     )
-    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
 
     result = invoke_tool(bus, read_tool, ReadPlan(), session=session)
     assert result.message == "Retrieved the current plan (no steps recorded)."
 
 
 def test_reducers_ignore_events_without_plan() -> None:
-    add_event = _make_tool_event(
-        "planning_add_step",
-        AddStep(steps=(NewPlanStep(title="draft"),)),
-    )
+    add_event = _make_tool_event("planning_add_step", AddStep(steps=("draft",)))
     update_event = _make_tool_event(
         "planning_update_step",
-        UpdateStep(step_id="S001", title="rename"),
+        UpdateStep(step_id=1, title="rename"),
     )
-    mark_event = _make_tool_event(
-        "planning_mark_step",
-        MarkStep(step_id="S001", status="done"),
-    )
-    clear_event = _make_tool_event("planning_clear_plan", ClearPlan())
 
     context = _make_reducer_context()
 
     assert _add_step_reducer((), add_event, context=context) == ()
     assert _update_step_reducer((), update_event, context=context) == ()
-    assert _mark_step_reducer((), mark_event, context=context) == ()
-    assert _clear_plan_reducer((), clear_event, context=context) == ()
 
 
 def test_latest_plan_returns_none_when_empty() -> None:
     assert _latest_plan(()) is None
 
 
-def test_next_step_index_skips_non_numeric_suffix() -> None:
-    steps = (
-        PlanStep(step_id="S001", title="a", details=None, status="pending"),
-        PlanStep(step_id="Sbad", title="b", details=None, status="pending"),
-    )
-    assert _next_step_index(steps) == 1
+def test_next_step_id_returns_one_when_empty() -> None:
+    assert _next_step_id([]) == 1
+
+
+def test_next_step_id_returns_max_plus_one() -> None:
+    steps = [
+        PlanStep(step_id=1, title="a", status="pending"),
+        PlanStep(step_id=5, title="b", status="pending"),
+    ]
+    assert _next_step_id(steps) == 6
 
 
 def test_planning_tools_section_disables_tool_overrides_by_default() -> None:

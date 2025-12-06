@@ -36,9 +36,6 @@ from .digests import (
 from .errors import DeadlineExceededError, ToolValidationError
 from .planning import (
     AddStep,
-    ClearPlan,
-    MarkStep,
-    NewPlanStep,
     Plan,
     PlanningStrategy,
     PlanningToolsSection,
@@ -90,7 +87,6 @@ PodmanWorkspace: Any
 __all__ = [
     "AddStep",
     "AstevalSection",
-    "ClearPlan",
     "DeadlineExceededError",
     "DeleteEntry",
     "DispatchSubagentsParams",
@@ -108,8 +104,6 @@ __all__ = [
     "ListDirectory",
     "ListDirectoryParams",
     "ListDirectoryResult",
-    "MarkStep",
-    "NewPlanStep",
     "Plan",
     "PlanStatus",
     "PlanStep",
