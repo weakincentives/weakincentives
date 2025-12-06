@@ -60,6 +60,14 @@ class VisibilityExpansionRequired(PromptError):
 
     Callers should catch this exception, extract the visibility overrides,
     and retry prompt evaluation with the requested sections expanded.
+
+    Attributes:
+        requested_overrides: Mapping from section paths to their new visibility.
+        reason: The reason provided by the model for requesting expansion.
+        section_keys: Keys of the sections requested for expansion.
+        expansion_instructions: Guidance on how to proceed after sections are
+            expanded. Can be injected into a Task to provide continuity between
+            render cycles.
     """
 
     def __init__(
@@ -69,6 +77,7 @@ class VisibilityExpansionRequired(PromptError):
         requested_overrides: Mapping[SectionPath, SectionVisibility],
         reason: str,
         section_keys: tuple[str, ...],
+        expansion_instructions: str | None = None,
     ) -> None:
         super().__init__(message)
         self.requested_overrides: Mapping[SectionPath, SectionVisibility] = (
@@ -76,6 +85,7 @@ class VisibilityExpansionRequired(PromptError):
         )
         self.reason = reason
         self.section_keys = section_keys
+        self.expansion_instructions = expansion_instructions
 
     @override
     def __str__(self) -> str:

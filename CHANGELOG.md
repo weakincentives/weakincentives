@@ -13,6 +13,14 @@ Release highlights for weakincentives.
 
 ### Prompts & Templates
 
+- Added `Task` base dataclass for capturing user intent with `request`, `background`,
+  and `expansion_instructions` fields. Subclass to define domain-specific task types.
+- Added `TaskSection` component that renders a `Task` with optional background context
+  and expansion instructions for progressive disclosure continuity.
+- Added `expansion_instructions` attribute to `VisibilityExpansionRequired` exception,
+  enabling prompts to include guidance when sections are expanded via `open_sections`.
+- Added `build_expansion_instructions` helper function for constructing standardized
+  expansion context messages after progressive disclosure.
 - Added generic `PromptTemplate[OutputT]` and `Prompt[OutputT]` abstractions that
   derive structured-output schema (object vs array, allow-extra-keys) and
   optionally inject response-format instructions into rendered prompts.

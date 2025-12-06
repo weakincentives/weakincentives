@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from ._visibility import SectionVisibility
 from .errors import PromptValidationError, SectionPath, VisibilityExpansionRequired
+from .task import build_expansion_instructions
 from .tool import Tool, ToolContext
 from .tool_result import ToolResult
 
@@ -109,11 +110,13 @@ def _raise_visibility_expansion(
 ) -> NoReturn:
     """Raise VisibilityExpansionRequired with the computed overrides."""
     keys_str = ", ".join(section_keys)
+    expansion_instructions = build_expansion_instructions(section_keys, reason)
     raise VisibilityExpansionRequired(
         f"Model requested expansion of sections: {keys_str}",
         requested_overrides=requested_overrides,
         reason=reason,
         section_keys=section_keys,
+        expansion_instructions=expansion_instructions,
     )
 
 
@@ -245,6 +248,7 @@ def compute_current_visibility(
 __all__ = [
     "OpenSectionsParams",
     "VisibilityExpansionRequired",
+    "build_expansion_instructions",
     "build_summary_suffix",
     "compute_current_visibility",
     "create_open_sections_handler",

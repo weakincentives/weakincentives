@@ -27,8 +27,8 @@ from pytest import CaptureFixture
 import code_reviewer_example as reviewer_example
 from code_reviewer_example import (
     CodeReviewApp,
+    CodeReviewTask,
     ReviewResponse,
-    ReviewTurnParams,
     build_task_prompt,
 )
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
@@ -145,7 +145,7 @@ def test_workspace_digest_section_empty_by_default() -> None:
     session = Session(bus=bus)
     prompt = build_task_prompt(session=session)
 
-    rendered = prompt.render(ReviewTurnParams(request="demo request"))
+    rendered = prompt.render(CodeReviewTask(request="demo request"))
 
     assert "## 2. Workspace Digest" in rendered.text
     post_section = rendered.text.split("## 2. Workspace Digest", 1)[1]
@@ -174,7 +174,7 @@ def test_workspace_digest_override_applied_when_no_session_digest(
     )
 
     rendered = prompt.render(
-        ReviewTurnParams(request="demo request"),
+        CodeReviewTask(request="demo request"),
         overrides_store=overrides_store,
         tag="seed",
     )
@@ -202,7 +202,7 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     set_workspace_digest(session, "workspace-digest", "- Session digest")
 
     rendered = prompt.render(
-        ReviewTurnParams(request="demo request"),
+        CodeReviewTask(request="demo request"),
         overrides_store=overrides_store,
         tag="seed",
     )
