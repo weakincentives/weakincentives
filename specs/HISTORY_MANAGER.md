@@ -130,6 +130,289 @@ class CurationContext:
 Strategies that only need the message list can ignore the context. Strategies
 that need other constraints can use it.
 
+## Conversation Entry Model
+
+The history manager operates on typed conversation entries rather than raw
+dictionaries. This provides type safety, serialization support, and a
+provider-agnostic representation of messages.
+
+### MessageRole Enum
+
+```python
+from enum import StrEnum
+
+
+class MessageRole(StrEnum):
+    """Role of a message in the conversation."""
+
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
+```
+
+### ToolCall Model
+
+```python
+@dataclass(slots=True, frozen=True)
+class ToolCall:
+    """A tool invocation requested by the assistant."""
+
+    id: str
+    """Provider-assigned identifier for correlating with tool results."""
+
+    name: str
+    """Name of the tool being invoked."""
+
+    arguments: str
+    """JSON-encoded arguments for the tool."""
+```
+
+### ConversationEntry Model
+
+```python
+from uuid import UUID
+
+@dataclass(slots=True, frozen=True)
+class ConversationEntry:
+    """A single entry in the conversation history."""
+
+    role: MessageRole
+    """The role of the message sender."""
+
+    content: str | None
+    """Text content of the message. May be None for tool-call-only messages."""
+
+    evaluation_id: UUID
+    """Identifier correlating all entries from a single evaluate() call."""
+
+    sequence: int
+    """Zero-based position within the evaluation's conversation."""
+
+    created_at: datetime
+    """Timestamp when the entry was created."""
+
+    tool_calls: tuple[ToolCall, ...] | None = None
+    """Tool calls requested by the assistant. Only present for assistant role."""
+
+    tool_call_id: str | None = None
+    """Identifier of the tool call this message responds to. Only for tool role."""
+
+    tool_name: str | None = None
+    """Name of the tool that produced this result. Only for tool role."""
+```
+
+### Design Rationale
+
+- **Immutable**: Frozen dataclass ensures entries cannot be modified after
+  creation.
+- **evaluation_id**: Links all entries from a single `evaluate()` call,
+  enabling reconstruction of complete conversations from the session.
+- **sequence**: Preserves ordering within an evaluation, critical for replay.
+- **Provider-agnostic**: No provider-specific fields. Adapters convert to/from
+  provider formats.
+
+### Conversion Utilities
+
+```python
+def entry_to_provider_message(entry: ConversationEntry) -> dict[str, Any]:
+    """Convert a ConversationEntry to provider message format."""
+    msg: dict[str, Any] = {
+        "role": entry.role.value,
+        "content": entry.content,
+    }
+    if entry.tool_calls:
+        msg["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.name, "arguments": tc.arguments},
+            }
+            for tc in entry.tool_calls
+        ]
+    if entry.tool_call_id:
+        msg["tool_call_id"] = entry.tool_call_id
+    return msg
+
+
+def provider_message_to_entry(
+    msg: dict[str, Any],
+    *,
+    evaluation_id: UUID,
+    sequence: int,
+    created_at: datetime,
+) -> ConversationEntry:
+    """Convert a provider message to ConversationEntry."""
+    role = MessageRole(msg["role"])
+    tool_calls = None
+    if raw_calls := msg.get("tool_calls"):
+        tool_calls = tuple(
+            ToolCall(
+                id=tc["id"],
+                name=tc["function"]["name"],
+                arguments=tc["function"]["arguments"],
+            )
+            for tc in raw_calls
+        )
+    return ConversationEntry(
+        role=role,
+        content=msg.get("content"),
+        evaluation_id=evaluation_id,
+        sequence=sequence,
+        created_at=created_at,
+        tool_calls=tool_calls,
+        tool_call_id=msg.get("tool_call_id"),
+        tool_name=msg.get("name"),
+    )
+```
+
+## Session Tracking
+
+**Invariant**: The complete conversation history is always preserved in the
+session, regardless of what the history manager sends to the provider.
+
+The history manager affects only the *provider's view*—what gets sent in API
+calls. The session maintains the *authoritative record* of all conversation
+entries for debugging, auditing, and replay.
+
+### ConversationRecorded Event
+
+```python
+@FrozenDataclass()
+class ConversationRecorded:
+    """Emitted when a conversation entry is added to history."""
+
+    entry: ConversationEntry
+    """The recorded conversation entry."""
+
+    session_id: UUID | None
+    """Session that recorded this entry."""
+
+    created_at: datetime
+    """When the event was emitted."""
+```
+
+### Recording Flow
+
+The `ConversationRunner` records entries to the session at two points:
+
+1. **After provider response**: Record the assistant's message (with any
+   tool calls).
+2. **After tool execution**: Record each tool result message.
+
+```python
+@dataclass(slots=True)
+class ConversationRunner[OutputT]:
+    # ... existing fields ...
+
+    evaluation_id: UUID = field(default_factory=uuid4)
+    """Unique identifier for this evaluation."""
+
+    _sequence: int = field(init=False, default=0)
+    """Next sequence number for entries."""
+
+    def _record_entry(self, msg: dict[str, Any]) -> ConversationEntry:
+        """Record a message to the session and return the entry."""
+        entry = provider_message_to_entry(
+            msg,
+            evaluation_id=self.evaluation_id,
+            sequence=self._sequence,
+            created_at=datetime.now(UTC),
+        )
+        self._sequence += 1
+
+        self.bus.publish(ConversationRecorded(
+            entry=entry,
+            session_id=getattr(self.session, "session_id", None),
+            created_at=entry.created_at,
+        ))
+
+        return entry
+
+    def _handle_tool_calls(self, message: object, tool_calls: ...) -> None:
+        # Record assistant message with tool calls
+        assistant_msg = self._serialize_assistant_message(message)
+        self._record_entry(assistant_msg)
+        self._messages.append(assistant_msg)
+
+        # Execute tools and record results
+        for tool_result in self._execute_tools(tool_calls):
+            self._record_entry(tool_result)
+            self._messages.append(tool_result)
+```
+
+### Session Slice for Conversation History
+
+Sessions automatically collect `ConversationRecorded` events into a
+`ConversationEntry` slice:
+
+```python
+# Default reducer appends entries
+session.register_reducer(
+    ConversationRecorded,
+    lambda slice, event, *, context: (*slice, event.entry),
+    slice_type=ConversationEntry,
+)
+```
+
+### Querying Conversation History
+
+```python
+from weakincentives.runtime.session import select_all, select_where
+
+# Get all entries for an evaluation
+def get_evaluation_history(
+    session: SessionProtocol,
+    evaluation_id: UUID,
+) -> tuple[ConversationEntry, ...]:
+    """Return all conversation entries for a specific evaluation."""
+    return select_where(
+        session,
+        ConversationEntry,
+        lambda e: e.evaluation_id == evaluation_id,
+    )
+
+# Get complete conversation history
+all_entries = select_all(session, ConversationEntry)
+
+# Get entries by role
+assistant_entries = select_where(
+    session,
+    ConversationEntry,
+    lambda e: e.role == MessageRole.ASSISTANT,
+)
+```
+
+### Relationship to HistoryManager
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     ConversationRunner                          │
+│                                                                 │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────────┐   │
+│  │  _messages  │───▶│HistoryManager│───▶│ Provider API     │   │
+│  │ (complete)  │    │  (curates)   │    │ (receives subset)│   │
+│  └─────────────┘    └──────────────┘    └──────────────────┘   │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌─────────────┐    ┌──────────────┐                           │
+│  │ _record_    │───▶│   EventBus   │                           │
+│  │  entry()    │    │  (publishes) │                           │
+│  └─────────────┘    └──────────────┘                           │
+│                            │                                    │
+└────────────────────────────┼────────────────────────────────────┘
+                             ▼
+                    ┌──────────────┐
+                    │   Session    │
+                    │  (records    │
+                    │   complete   │
+                    │   history)   │
+                    └──────────────┘
+```
+
+The history manager only affects the path to the provider. The session always
+receives the complete, unfiltered conversation history.
+
 ## Built-in Strategies
 
 The library provides several composable strategies. Each is a concrete
@@ -507,9 +790,11 @@ src/weakincentives/history/
 ├── __init__.py           # Public exports
 ├── _protocol.py          # HistoryManager protocol
 ├── _context.py           # CurationContext dataclass
+├── _entry.py             # ConversationEntry, ToolCall, MessageRole
+├── _conversion.py        # entry_to_provider_message, provider_message_to_entry
 ├── _coherence.py         # _align_to_coherent_boundary helper
 ├── _managers.py          # Built-in manager implementations
-└── _events.py            # HistoryCurated event
+└── _events.py            # HistoryCurated, ConversationRecorded events
 ```
 
 ## Testing Requirements
@@ -519,6 +804,10 @@ src/weakincentives/history/
 - Tests for composition: multiple managers chain correctly.
 - Tests for edge cases: empty messages, no system message, window of zero.
 - Integration tests verifying ConversationRunner uses the manager correctly.
+- Tests for ConversationEntry serialization round-trip.
+- Tests verifying session records complete history even when manager curates.
+- Tests for evaluation_id correlation: all entries from one evaluate() share ID.
+- Tests for sequence ordering within an evaluation.
 
 ## Future Extensions
 
