@@ -23,7 +23,11 @@ from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
-from ._visibility import SectionVisibility
+from ._visibility import (
+    SectionVisibility,
+    VisibilitySelector,
+    normalize_visibility_selector,
+)
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -44,7 +48,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         tools: Sequence[object] | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
-        visibility: SectionVisibility = SectionVisibility.FULL,
+        visibility: VisibilitySelector = SectionVisibility.FULL,
     ) -> None:
         super().__init__()
         params_candidate = getattr(self.__class__, "_params_type", None)
@@ -78,6 +82,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             normalize_enabled_predicate(enabled, params_type)
         )
         self._tools = self._normalize_tools(tools)
+        self._visibility = normalize_visibility_selector(visibility, params_type)
 
     def is_enabled(self, params: SupportsDataclass | None) -> bool:
         """Return True when the section should render for the given params."""
@@ -132,13 +137,16 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         return self.summary
 
     def effective_visibility(
-        self, override: SectionVisibility | None = None
+        self,
+        override: SectionVisibility | None = None,
+        params: SupportsDataclass | None = None,
     ) -> SectionVisibility:
         """Return the visibility to use for rendering.
 
         Args:
             override: Optional visibility override. When provided, this takes
                 precedence over the section's configured visibility.
+            params: Parameters used to render the section, when available.
 
         Returns:
             The effective visibility to use. If an override is provided, it is
@@ -146,7 +154,9 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             If no summary is available and SUMMARY visibility is requested,
             FULL visibility is used as a fallback.
         """
-        visibility = override if override is not None else self.visibility
+        visibility = override
+        if visibility is None:
+            visibility = self._visibility(params)
         if visibility == SectionVisibility.SUMMARY and self.summary is None:
             return SectionVisibility.FULL
         return visibility
