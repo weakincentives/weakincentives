@@ -12,11 +12,7 @@
 
 """Common helpers and scaffolding shared across runnable examples."""
 
-from examples.logging import (  # noqa: F401
-    attach_logging_subscribers,
-    configure_logging,
-    format_for_log,
-)
+from .logging import attach_logging_subscribers, configure_logging, format_for_log
 
 __all__ = [
     "attach_logging_subscribers",

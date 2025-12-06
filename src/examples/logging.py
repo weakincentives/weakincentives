@@ -18,11 +18,12 @@ import json
 import logging
 import sys
 from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
-from weakincentives.prompt import PromptRendered
 from weakincentives.runtime import (
     EventBus,
     PromptExecuted,
+    PromptRendered,
     TokenUsage,
     ToolInvoked,
 )
@@ -147,13 +148,18 @@ def _coerce_for_log(payload: object) -> object:
     if payload is None or isinstance(payload, (str, int, float, bool)):
         return payload
     if isinstance(payload, Mapping):
-        return {str(key): _coerce_for_log(value) for key, value in payload.items()}
+        mapping_payload: Mapping[Any, Any] = cast(Mapping[Any, Any], payload)
+        return {
+            str(key): _coerce_for_log(value) for key, value in mapping_payload.items()
+        }
     if isinstance(payload, Sequence) and not isinstance(
         payload, (str, bytes, bytearray)
     ):
-        return [_coerce_for_log(item) for item in payload]
+        sequence_payload: Sequence[Any] = cast(Sequence[Any], payload)
+        return [_coerce_for_log(item) for item in sequence_payload]
     if hasattr(payload, "__dataclass_fields__"):
         return dump(payload, exclude_none=True)
     if isinstance(payload, set):
-        return sorted(_coerce_for_log(item) for item in payload)
+        set_payload: set[Any] = cast(set[Any], payload)
+        return sorted((_coerce_for_log(item) for item in set_payload), key=str)
     return str(payload)
