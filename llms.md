@@ -186,11 +186,9 @@ Optional extras enable specific providers or tooling:
     - `append`: Append an event to a session.
     - `build_reducer_context`: Build a reducer context.
     - `iter_sessions_bottom_up`: Iterate over sessions bottom-up.
+    - `QueryBuilder`: Fluent query builder for session slices.
     - `replace_latest`: Replace the latest value in a session.
     - `replace_latest_by`: Replace the latest value in a session by key.
-    - `select_all`: Select all values from a session.
-    - `select_latest`: Select the latest value from a session.
-    - `select_where`: Select values from a session matching a predicate.
     - `upsert_by`: Upsert a value in a session by key.
 - `weakincentives.optimizers`: Prompt optimization algorithms and utilities.
   - Protocol and base classes:
@@ -376,11 +374,11 @@ section = MarkdownSection(
 ### Multi-turn with session state
 
 ```python
-from weakincentives.runtime import append, select_latest
+from weakincentives.runtime import append
 
 response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
 session = append(session, response.output)  # Store result
-later = select_latest(session, TaskResponse)  # Retrieve later
+later = session.query(TaskResponse).latest()  # Retrieve later
 ```
 
 ### Error handling
@@ -487,9 +485,9 @@ response = adapter.evaluate(..., throttle=policy)
 - **`Session`**: Immutable event ledger with Redux-like reducers. Feed events in
   with `append(session, event)` or convenience selectors like `replace_latest`
   and `upsert_by`. `Snapshot`/`SnapshotProtocol` provide persistence helpers.
-- **Reducers and selectors**: Use `TypedReducer` with `ReducerContext` to manage
-  typed state slices. `select_all`, `select_latest`, and `select_where` help read
-  accumulated data for analytics, auditing, or downstream actions.
+- **Reducers and query API**: Use `TypedReducer` with `ReducerContext` to manage
+  typed state slices. The `session.query(T)` API provides fluent access to
+  accumulated data: `.all()`, `.latest()`, and `.where(predicate)`.
 - **Events**: `PromptExecuted` and `ToolInvoked` events capture every model
   exchange. `EventBus`/`InProcessEventBus` publish events to reducers and custom
   observers. `HandlerFailure` and `PublishResult` offer backpressure and error
@@ -540,15 +538,15 @@ digest = WorkspaceDigestSection(session=session)  # Renders workspace summary
 
 ## Session State Management
 
-### Selectors
+### Query API
 
 ```python
-from weakincentives.runtime import append, select_latest, select_all, select_where, replace_latest
+from weakincentives.runtime import append, replace_latest
 
 session = append(session, my_data)
-latest = select_latest(session, MyType)
-all_items = select_all(session, MyType)
-filtered = select_where(session, MyType, lambda x: x.status == "done")
+latest = session.query(MyType).latest()
+all_items = session.query(MyType).all()
+filtered = session.query(MyType).where(lambda x: x.status == "done")
 session = replace_latest(session, MyType, updated)
 ```
 
@@ -556,7 +554,7 @@ session = replace_latest(session, MyType, updated)
 
 ```python
 def handler(params, *, context: ToolContext) -> ToolResult:
-    plan = select_latest(context.session, Plan)
+    plan = context.session.query(Plan).latest()
     # Tool handlers can't mutate session; adapters record ToolInvoked events
 ```
 

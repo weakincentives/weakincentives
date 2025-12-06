@@ -87,7 +87,7 @@ section = VfsToolsSection(
 )
 
 # Query state
-vfs = select_latest(session, VirtualFileSystem)
+vfs = session.query(VirtualFileSystem).latest()
 ```
 
 ## Podman Sandbox
@@ -248,7 +248,7 @@ class WorkspaceDigestResult:
 
 ```python
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session, select_latest
+from weakincentives.runtime.session import Session
 from weakincentives.prompt import Prompt, MarkdownSection
 from weakincentives.tools import vfs, podman, asteval
 
@@ -287,8 +287,8 @@ podman_prompt = Prompt(
 )
 
 # After tool invocations
-filesystem = select_latest(session, vfs.VirtualFileSystem)
-workspace = select_latest(session, podman.PodmanWorkspace)
+filesystem = session.query(vfs.VirtualFileSystem).latest()
+workspace = session.query(podman.PodmanWorkspace).latest()
 ```
 
 ## Cloning

@@ -41,6 +41,7 @@ from weakincentives.runtime.session import Session
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
     SubagentResult,
+    build_dispatch_subagents_tool,
     dispatch_subagents,
 )
 
@@ -529,5 +530,13 @@ def test_dispatch_subagents_shares_state_without_isolation() -> None:
     result = handler(params, context=context)
 
     assert result.success is True
-    captured = session.select_all(ChildRecord)
+    captured = session.query(ChildRecord).all()
     assert captured == (ChildRecord(field="value"),)
+
+
+def test_build_dispatch_subagents_tool_respects_accepts_overrides() -> None:
+    default_tool = build_dispatch_subagents_tool()
+    overriding_tool = build_dispatch_subagents_tool(accepts_overrides=True)
+
+    assert default_tool.accepts_overrides is False
+    assert overriding_tool.accepts_overrides is True

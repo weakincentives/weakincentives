@@ -74,7 +74,6 @@ from weakincentives.runtime.session import (
     Session,
     SessionProtocol,
     replace_latest,
-    select_latest,
 )
 from weakincentives.tools import DeadlineExceededError, ToolValidationError
 
@@ -681,7 +680,7 @@ def test_adapter_tool_execution_rolls_back_session(
     assert invocation.result.success is True
     assert invocation.result.value == ToolPayload(answer="policies")
 
-    latest_payload = select_latest(session, ToolPayload)
+    latest_payload = session.query(ToolPayload).latest()
     assert latest_payload == ToolPayload(answer="baseline")
 
     tool_message = _second_tool_message(requests)

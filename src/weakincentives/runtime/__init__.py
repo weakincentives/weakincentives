@@ -45,9 +45,6 @@ from .session import (
     iter_sessions_bottom_up,
     replace_latest,
     replace_latest_by,
-    select_all,
-    select_latest,
-    select_where,
     upsert_by,
 )
 
@@ -82,9 +79,6 @@ __all__ = [
     "iter_sessions_bottom_up",
     "replace_latest",
     "replace_latest_by",
-    "select_all",
-    "select_latest",
-    "select_where",
     "session",
     "upsert_by",
 ]

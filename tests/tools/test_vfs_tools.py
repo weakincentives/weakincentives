@@ -25,7 +25,7 @@ import pytest
 import weakincentives.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session, select_latest
+from weakincentives.runtime.session import Session
 from weakincentives.tools import (
     DeleteEntry,
     EditFileParams,
@@ -203,7 +203,7 @@ def _write(
 
 
 def _snapshot(session: Session) -> VirtualFileSystem:
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is not None
     return snapshot
 
@@ -482,7 +482,7 @@ def test_rm_removes_directory_tree(
     params = RemoveParams(path="src/pkg")
     invoke_tool(bus, rm_tool, params, session=session)
 
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is not None
     assert snapshot.files == ()
 

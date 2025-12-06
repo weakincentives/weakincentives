@@ -99,7 +99,6 @@ from weakincentives.runtime.session import (
     ReducerEvent,
     Session,
     replace_latest,
-    select_latest,
 )
 from weakincentives.tools import ToolValidationError
 
@@ -550,7 +549,7 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
     )
     assert "Reducer crashed" in tool_event.result.message
 
-    latest_payload = select_latest(session, ToolPayload)
+    latest_payload = session.query(ToolPayload).latest()
     assert latest_payload == ToolPayload(answer="baseline")
 
     assert prompt_events

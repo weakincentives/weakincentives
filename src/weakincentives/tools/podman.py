@@ -37,7 +37,7 @@ from ..dataclasses import FrozenDataclass
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.logging import StructuredLogger, get_logger
-from ..runtime.session import Session, replace_latest, select_latest
+from ..runtime.session import Session, replace_latest
 from . import vfs as vfs_module
 from ._context import ensure_context_uses_session
 from .asteval import (
@@ -954,7 +954,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         )
 
     def latest_snapshot(self) -> VirtualFileSystem:
-        snapshot = select_latest(self._session, VirtualFileSystem)
+        snapshot = self._session.query(VirtualFileSystem).latest()
         return snapshot or self._mount_snapshot
 
     @staticmethod

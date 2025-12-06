@@ -25,7 +25,7 @@ import weakincentives.tools.asteval as asteval_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives.prompt.tool import Tool, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session, select_latest
+from weakincentives.runtime.session import Session
 from weakincentives.tools import (
     AstevalSection,
     EvalFileRead,
@@ -187,7 +187,7 @@ def test_expression_success() -> None:
     assert payload.reads == ()
     assert payload.globals == {}
 
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is None or not snapshot.files
 
 
@@ -249,7 +249,7 @@ def test_multiline_reads_and_writes() -> None:
         ),
     )
 
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is not None
     written = {file.path.segments: file.content for file in snapshot.files}
     assert written["output", "summary.txt"] == "Report: hello"
@@ -275,7 +275,7 @@ def test_helper_write_appends() -> None:
     assert payload.value_repr == "'done'"
     assert payload.stderr == ""
 
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
     assert files["logs", "activity.log"] == "started-continued"
@@ -342,7 +342,7 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload.stderr == "Execution timed out."
     assert payload.writes == ()
 
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is None or not snapshot.files
 
 
@@ -651,7 +651,7 @@ def test_create_mode_rejects_existing_file() -> None:
     )
 
     _assert_success_message(result)
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
     assert files[existing_path.segments] == "original"
@@ -677,7 +677,7 @@ def test_append_requires_existing_file() -> None:
     )
 
     _assert_success_message(result)
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is None or not snapshot.files
 
 
@@ -706,7 +706,7 @@ def test_overwrite_updates_existing_file() -> None:
     )
 
     _assert_success_message(result)
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is not None
     files = {file.path.segments: file.content for file in snapshot.files}
     assert files[path.segments] == "updated"
@@ -732,7 +732,7 @@ def test_message_summarizes_multiple_writes() -> None:
         "writes=4 file(s): output/file0.txt, output/file1.txt, output/file2.txt, +1 more"
         in result.message
     )
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is not None
     paths = sorted(file.path.segments for file in snapshot.files)
     assert paths == [("output", f"file{i}.txt") for i in range(4)]
@@ -979,7 +979,7 @@ def test_overwrite_requires_existing_file() -> None:
 
     result = invoke_tool(bus, tool, params, session=session)
     _assert_success_message(result)
-    snapshot = select_latest(session, VirtualFileSystem)
+    snapshot = session.query(VirtualFileSystem).latest()
     assert snapshot is None or not snapshot.files
 
 

@@ -19,7 +19,7 @@ from typing import cast
 from tests.tools.helpers import invoke_tool
 from weakincentives.prompt.tool import Tool
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session, select_latest
+from weakincentives.runtime.session import Session
 from weakincentives.tools import (
     AddStep,
     Plan,
@@ -57,7 +57,7 @@ def test_planning_end_to_end_flow() -> None:
         session=session,
     )
 
-    plan = select_latest(session, Plan)
+    plan = session.query(Plan).latest()
     assert plan is not None
     assert [step.title for step in plan.steps] == [
         "triage requests",
@@ -90,7 +90,7 @@ def test_planning_end_to_end_flow() -> None:
         session=session,
     )
 
-    plan = select_latest(session, Plan)
+    plan = session.query(Plan).latest()
     assert plan is not None
     assert plan.status == "completed"
 

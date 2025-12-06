@@ -96,14 +96,12 @@ Built-in reducers:
 - `replace_latest` - Stores only the most recent value
 - `replace_latest_by(key_fn)` - Like `replace_latest` but keyed
 
-### Selectors
+### Query API
 
 ```python
-from weakincentives.runtime.session import select_all, select_latest, select_where
-
-latest_plan = select_latest(session, Plan)
-all_results = select_all(session, SearchResult)
-filtered = select_where(session, Issue, lambda i: i.severity == "high")
+latest_plan = session.query(Plan).latest()
+all_results = session.query(SearchResult).all()
+filtered = session.query(Issue).where(lambda i: i.severity == "high")
 ```
 
 ### Session Hierarchy
@@ -376,7 +374,7 @@ Converted to `PromptEvaluationError` with `phase="budget"` by runtime.
 
 ```python
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session, select_latest
+from weakincentives.runtime.session import Session
 from weakincentives.deadlines import Deadline
 from weakincentives.budget import Budget, BudgetTracker
 
@@ -406,8 +404,8 @@ response = adapter.evaluate(
 )
 
 # Query state
-latest_plan = select_latest(session, Plan)
-all_metrics = select_all(session, ResearchMetrics)
+latest_plan = session.query(Plan).latest()
+all_metrics = session.query(ResearchMetrics).all()
 
 # Snapshot for persistence
 snapshot = session.snapshot()
