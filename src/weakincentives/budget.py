@@ -89,36 +89,36 @@ class BudgetExceededError(WinkError, RuntimeError):
 
 @dataclass
 class BudgetTracker:
-    """Tracks cumulative TokenUsage per conversation against a Budget.
+    """Tracks cumulative TokenUsage per evaluation against a Budget.
 
     Thread-safe for concurrent subagent execution.
     """
 
     budget: Budget
-    _per_conversation: dict[str, TokenUsage] = field(default_factory=lambda: {})
+    _per_evaluation: dict[str, TokenUsage] = field(default_factory=lambda: {})
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def record_cumulative(self, conversation_id: str, usage: TokenUsage) -> None:
-        """Record cumulative usage for a conversation (replaces previous)."""
+    def record_cumulative(self, evaluation_id: str, usage: TokenUsage) -> None:
+        """Record cumulative usage for an evaluation (replaces previous)."""
         with self._lock:
-            self._per_conversation[conversation_id] = usage
+            self._per_evaluation[evaluation_id] = usage
 
     @property
     def consumed(self) -> TokenUsage:
-        """Sum usage across all conversations."""
+        """Sum usage across all evaluations."""
         # Import lazily to avoid circular import
         from .runtime.events import TokenUsage as TokenUsageClass
 
         with self._lock:
             return TokenUsageClass(
                 input_tokens=sum(
-                    u.input_tokens or 0 for u in self._per_conversation.values()
+                    u.input_tokens or 0 for u in self._per_evaluation.values()
                 ),
                 output_tokens=sum(
-                    u.output_tokens or 0 for u in self._per_conversation.values()
+                    u.output_tokens or 0 for u in self._per_evaluation.values()
                 ),
                 cached_tokens=sum(
-                    u.cached_tokens or 0 for u in self._per_conversation.values()
+                    u.cached_tokens or 0 for u in self._per_evaluation.values()
                 ),
             )
 

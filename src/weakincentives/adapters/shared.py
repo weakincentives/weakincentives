@@ -1366,7 +1366,7 @@ class ConversationRunner[OutputT]:
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
-    _conversation_id: str = field(init=False)
+    _evaluation_id: str = field(init=False)
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
@@ -1400,7 +1400,7 @@ class ConversationRunner[OutputT]:
 
         usage = token_usage_from_payload(self._provider_payload)
         if usage is not None:
-            self.budget_tracker.record_cumulative(self._conversation_id, usage)
+            self.budget_tracker.record_cumulative(self._evaluation_id, usage)
 
         self._check_budget()
 
@@ -1527,12 +1527,12 @@ class ConversationRunner[OutputT]:
     def _prepare_payload(self) -> None:
         """Initialize execution state prior to the provider loop."""
 
-        self._conversation_id = str(uuid4())
+        self._evaluation_id = str(uuid4())
         self._messages = list(self.initial_messages)
         self._log = (self.logger_override or logger).bind(
             adapter=self.adapter_name,
             prompt=self.prompt_name,
-            conversation_id=self._conversation_id,
+            evaluation_id=self._evaluation_id,
         )
         self._log.info(
             "Prompt execution started.",

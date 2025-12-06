@@ -146,7 +146,7 @@ def test_tracker_records_cumulative_usage() -> None:
     tracker = BudgetTracker(budget=budget)
 
     usage = TokenUsage(input_tokens=100, output_tokens=50)
-    tracker.record_cumulative("conv-1", usage)
+    tracker.record_cumulative("eval-1", usage)
 
     consumed = tracker.consumed
     assert consumed.input_tokens == 100
@@ -161,8 +161,8 @@ def test_tracker_replaces_usage_for_same_conversation() -> None:
     usage1 = TokenUsage(input_tokens=100, output_tokens=50)
     usage2 = TokenUsage(input_tokens=200, output_tokens=100)
 
-    tracker.record_cumulative("conv-1", usage1)
-    tracker.record_cumulative("conv-1", usage2)
+    tracker.record_cumulative("eval-1", usage1)
+    tracker.record_cumulative("eval-1", usage2)
 
     consumed = tracker.consumed
     assert consumed.input_tokens == 200
@@ -174,8 +174,8 @@ def test_tracker_sums_across_conversations() -> None:
     budget = Budget(max_total_tokens=1000)
     tracker = BudgetTracker(budget=budget)
 
-    tracker.record_cumulative("conv-1", TokenUsage(input_tokens=100, output_tokens=50))
-    tracker.record_cumulative("conv-2", TokenUsage(input_tokens=150, output_tokens=75))
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=100, output_tokens=50))
+    tracker.record_cumulative("eval-2", TokenUsage(input_tokens=150, output_tokens=75))
 
     consumed = tracker.consumed
     assert consumed.input_tokens == 250
@@ -188,7 +188,7 @@ def test_tracker_check_passes_within_budget() -> None:
     budget = Budget(max_total_tokens=1000)
     tracker = BudgetTracker(budget=budget)
 
-    tracker.record_cumulative("conv-1", TokenUsage(input_tokens=400, output_tokens=200))
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=400, output_tokens=200))
 
     # Should not raise
     tracker.check()
@@ -199,7 +199,7 @@ def test_tracker_check_raises_when_total_exceeded() -> None:
     budget = Budget(max_total_tokens=500)
     tracker = BudgetTracker(budget=budget)
 
-    tracker.record_cumulative("conv-1", TokenUsage(input_tokens=400, output_tokens=200))
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=400, output_tokens=200))
 
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
@@ -215,7 +215,7 @@ def test_tracker_check_raises_when_input_exceeded() -> None:
     budget = Budget(max_input_tokens=300)
     tracker = BudgetTracker(budget=budget)
 
-    tracker.record_cumulative("conv-1", TokenUsage(input_tokens=400, output_tokens=100))
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=400, output_tokens=100))
 
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
@@ -229,7 +229,7 @@ def test_tracker_check_raises_when_output_exceeded() -> None:
     budget = Budget(max_output_tokens=150)
     tracker = BudgetTracker(budget=budget)
 
-    tracker.record_cumulative("conv-1", TokenUsage(input_tokens=100, output_tokens=200))
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=100, output_tokens=200))
 
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
@@ -268,7 +268,7 @@ def test_tracker_thread_safety() -> None:
     def update_tracker(thread_id: int) -> None:
         for i in range(updates_per_thread):
             usage = TokenUsage(input_tokens=1, output_tokens=1)
-            tracker.record_cumulative(f"conv-{thread_id}-{i}", usage)
+            tracker.record_cumulative(f"eval-{thread_id}-{i}", usage)
 
     threads = [
         threading.Thread(target=update_tracker, args=(tid,))
@@ -290,9 +290,9 @@ def test_tracker_handles_none_token_counts() -> None:
     budget = Budget(max_total_tokens=1000)
     tracker = BudgetTracker(budget=budget)
 
-    tracker.record_cumulative("conv-1", TokenUsage(input_tokens=None, output_tokens=50))
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=None, output_tokens=50))
     tracker.record_cumulative(
-        "conv-2", TokenUsage(input_tokens=100, output_tokens=None)
+        "eval-2", TokenUsage(input_tokens=100, output_tokens=None)
     )
 
     consumed = tracker.consumed
@@ -356,15 +356,15 @@ def test_budget_tracker_reuse_across_conversations() -> None:
     tracker = BudgetTracker(budget=budget)
 
     # Simulate first conversation
-    tracker.record_cumulative("conv-1", TokenUsage(input_tokens=100, output_tokens=50))
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=100, output_tokens=50))
     tracker.check()  # Should pass
 
     # Simulate second conversation
-    tracker.record_cumulative("conv-2", TokenUsage(input_tokens=200, output_tokens=100))
+    tracker.record_cumulative("eval-2", TokenUsage(input_tokens=200, output_tokens=100))
     tracker.check()  # Should pass (total: 450)
 
     # Third conversation would exceed
-    tracker.record_cumulative("conv-3", TokenUsage(input_tokens=100, output_tokens=50))
+    tracker.record_cumulative("eval-3", TokenUsage(input_tokens=100, output_tokens=50))
 
     with pytest.raises(BudgetExceededError):
         tracker.check()
@@ -385,11 +385,11 @@ def test_budget_with_all_limits(frozen_utcnow: FrozenUtcNow) -> None:
     tracker = BudgetTracker(budget=budget)
 
     # Within all limits
-    tracker.record_cumulative("conv-1", TokenUsage(input_tokens=300, output_tokens=200))
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=300, output_tokens=200))
     tracker.check()
 
     # Exceed input limit
-    tracker.record_cumulative("conv-2", TokenUsage(input_tokens=400, output_tokens=50))
+    tracker.record_cumulative("eval-2", TokenUsage(input_tokens=400, output_tokens=50))
 
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
