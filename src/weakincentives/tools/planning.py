@@ -582,6 +582,18 @@ def _ensure_step_exists(plan: Plan, step_id: int) -> None:
         raise ToolValidationError(message)
 
 
+def initialize_planning_session(session: Session) -> None:
+    """Register planning reducers on the session.
+
+    This is useful for scenarios where you need to set up planning on a session
+    without using a PlanningToolsSection, such as subagent dispatch.
+    """
+    session.register_reducer(Plan, replace_latest)
+    session.register_reducer(SetupPlan, _setup_plan_reducer, slice_type=Plan)
+    session.register_reducer(AddStep, _add_step_reducer, slice_type=Plan)
+    session.register_reducer(UpdateStep, _update_step_reducer, slice_type=Plan)
+
+
 __all__ = [
     "AddStep",
     "Plan",
@@ -593,4 +605,5 @@ __all__ = [
     "SetupPlan",
     "StepStatus",
     "UpdateStep",
+    "initialize_planning_session",
 ]

@@ -51,6 +51,7 @@ from .subagents import (
     SubagentIsolationLevel,
     SubagentResult,
     SubagentsSection,
+    SubagentTask,
     build_dispatch_subagents_tool,
     dispatch_subagents,
 )
@@ -123,6 +124,7 @@ __all__ = [
     "StepStatus",
     "SubagentIsolationLevel",
     "SubagentResult",
+    "SubagentTask",
     "SubagentsSection",
     "ToolValidationError",
     "UpdateStep",

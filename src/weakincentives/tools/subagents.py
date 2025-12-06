@@ -10,7 +10,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tooling for dispatching subagents in parallel."""
+"""Tooling for dispatching subagents in parallel.
+
+Subagent dispatch is centered around the Plan object from the planning tools.
+Each subagent receives a pre-populated plan in its cloned session and is
+instructed to complete all steps before returning. Full isolation is the
+default mode, meaning each child gets its own session and event bus.
+"""
 
 from __future__ import annotations
 
@@ -22,19 +28,23 @@ from enum import Enum, auto
 from typing import Any, Final, cast, override
 
 from ..dataclasses import FrozenDataclass
-from ..prompt import SupportsDataclass
+from ..prompt import Prompt, SupportsDataclass
 from ..prompt._visibility import SectionVisibility
-from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
-from ..prompt.prompt import RenderedPrompt
-from ..prompt.protocols import PromptProtocol, PromptResponseProtocol
+from ..prompt.protocols import (
+    PromptProtocol,
+    PromptResponseProtocol,
+    RenderedPromptProtocol,
+)
 from ..prompt.tool import Tool, ToolContext, ToolExample
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
 from ..runtime.events._types import EventBus
+from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
 from ..serde import dump
+from .planning import Plan, PlanStep, initialize_planning_session
 
 
 class SubagentIsolationLevel(Enum):
@@ -42,6 +52,23 @@ class SubagentIsolationLevel(Enum):
 
     NO_ISOLATION = auto()
     FULL_ISOLATION = auto()
+
+
+@FrozenDataclass()
+class SubagentTask:
+    """A task to delegate to a subagent, expressed as a plan.
+
+    Each subagent receives a pre-populated Plan in its cloned session
+    and is instructed to complete all steps before returning.
+    """
+
+    objective: str = field(
+        metadata={"description": "Single-sentence goal for this subagent to achieve."}
+    )
+    steps: tuple[str, ...] = field(
+        default_factory=tuple,
+        metadata={"description": "Ordered steps the subagent should complete."},
+    )
 
 
 def _default_max_workers() -> int:
@@ -54,14 +81,18 @@ _DEFAULT_MAX_WORKERS: Final[int] = _default_max_workers()
 
 @FrozenDataclass()
 class DispatchSubagentsParams:
-    """Parameters describing the delegations to execute."""
+    """Parameters describing the tasks to delegate.
 
-    delegations: tuple[DelegationParams, ...] = field(
+    Each task becomes a Plan in the subagent's cloned session. The subagent
+    is instructed to complete all steps in the plan before returning.
+    """
+
+    tasks: tuple[SubagentTask, ...] = field(
         default_factory=tuple,
         metadata={
             "description": (
-                "Ordered delegations to evaluate. Each entry carries the recap "
-                "lines and expected output for a child agent."
+                "Ordered tasks to delegate. Each task specifies an objective "
+                "and steps that form a plan for the subagent to complete."
             )
         },
     )
@@ -139,16 +170,27 @@ def _clone_session(
 
 def _prepare_child_contexts(
     *,
-    delegations: Iterable[DelegationParams],
+    tasks: Iterable[SubagentTask],
     session: SessionProtocol,
     bus: EventBus,
     isolation_level: SubagentIsolationLevel,
-) -> tuple[tuple[SessionProtocol, EventBus], ...] | str:
-    if isolation_level is SubagentIsolationLevel.NO_ISOLATION:
-        return tuple((session, bus) for _ in delegations)
+) -> tuple[tuple[Session, EventBus], ...] | str:
+    """Prepare isolated session/bus pairs for each task.
 
-    child_pairs: list[tuple[SessionProtocol, EventBus]] = []
-    for _ in delegations:
+    In FULL_ISOLATION mode (default), each child gets a cloned session with
+    the task's Plan pre-populated. In NO_ISOLATION mode, all children share
+    the parent session and bus (Plan injection is skipped since there's no
+    isolation).
+    """
+    tasks_list = list(tasks)
+
+    if isolation_level is SubagentIsolationLevel.NO_ISOLATION:
+        # No isolation - children share parent session and bus
+        # Plan injection is skipped since children share state
+        return tuple((cast(Session, session), bus) for _ in tasks_list)
+
+    child_pairs: list[tuple[Session, EventBus]] = []
+    for task in tasks_list:
         child_bus = InProcessEventBus()
         try:
             cloned = _clone_session(session, bus=child_bus, parent=session)
@@ -156,16 +198,93 @@ def _prepare_child_contexts(
             return _build_error(str(error))
         if cloned is None:
             return "Parent session does not support cloning for full isolation."
+        if not isinstance(cloned, Session):
+            return "Cloned session must be a Session instance for plan injection."
+
+        # Initialize planning reducers and inject the task's Plan directly
+        initialize_planning_session(cloned)
+        steps = tuple(
+            PlanStep(step_id=idx + 1, title=title, status="pending")
+            for idx, title in enumerate(task.steps)
+        )
+        plan = Plan(objective=task.objective, status="active", steps=steps)
+        cloned.seed_slice(Plan, (plan,))
+
         child_pairs.append((cloned, child_bus))
     return tuple(child_pairs)
 
 
+@FrozenDataclass()
+class _PlanDelegationParams:
+    """Parameters for the plan delegation prompt section."""
+
+    objective: str = field(
+        metadata={"description": "The objective for this subagent to achieve."}
+    )
+
+
+_PLAN_DELEGATION_TEMPLATE: Final[str] = (
+    "You are a subagent executing a delegated task. Your session contains a Plan\n"
+    "that you must complete before returning.\n\n"
+    "**Objective**: ${objective}\n\n"
+    "Use `planning_read_plan` to see your assigned steps. Work through each step\n"
+    "in order, updating status as you go:\n"
+    "- Mark steps `in_progress` when you start working on them\n"
+    "- Mark steps `done` when completed\n\n"
+    "Complete ALL steps before returning your final response. The plan will\n"
+    "automatically transition to `completed` status when all steps are done."
+)
+
+
+def _build_plan_delegation_prompt(
+    *,
+    parent_prompt: PromptProtocol[Any],
+    rendered_parent: RenderedPromptProtocol[Any],
+) -> Prompt[Any]:
+    """Build a delegation prompt that instructs the child to complete its plan.
+
+    The prompt includes parent tools and planning tools, with instructions to
+    complete all steps in the pre-populated plan.
+    """
+    from ..prompt import PromptTemplate
+
+    # Create a section for the delegation instructions
+    delegation_section = MarkdownSection[_PlanDelegationParams](
+        title="Subagent Task",
+        key="subagent-task",
+        template=_PLAN_DELEGATION_TEMPLATE,
+        tools=rendered_parent.tools,
+    )
+
+    # Get the output type from the parent prompt - already validated as dataclass
+    output_type = rendered_parent.output_type
+
+    # Build the delegation prompt with the same output type as the parent
+    prompt_cls: type[PromptTemplate[Any]] = PromptTemplate.__class_getitem__(
+        output_type
+    )
+    delegation_prompt = prompt_cls(
+        ns=f"{parent_prompt.ns}.subagent",
+        key=f"{parent_prompt.key}-delegation",
+        sections=(delegation_section,),
+        inject_output_instructions=False,
+        allow_extra_keys=bool(rendered_parent.allow_extra_keys),
+    )
+
+    return Prompt(delegation_prompt)
+
+
 def build_dispatch_subagents_tool(
     *,
-    isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.NO_ISOLATION,
+    isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.FULL_ISOLATION,
     accepts_overrides: bool = False,
 ) -> Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]:
-    """Return a configured dispatch tool bound to the desired isolation level."""
+    """Return a configured dispatch tool bound to the desired isolation level.
+
+    Full isolation is the default: each child gets a cloned session with the
+    task's Plan pre-populated. The child is instructed to complete all steps
+    in the plan before returning.
+    """
 
     examples: tuple[
         ToolExample[DispatchSubagentsParams, tuple[SubagentResult, ...]], ...
@@ -173,23 +292,21 @@ def build_dispatch_subagents_tool(
         ToolExample(
             description="Fan out competitor research and FAQ drafting in parallel.",
             input=DispatchSubagentsParams(
-                delegations=(
-                    DelegationParams(
-                        reason="Summarize feature gaps across direct competitors.",
-                        expected_result="Three bullets highlighting strengths and weaknesses.",
-                        may_delegate_further="No follow-on delegation expected.",
-                        recap_lines=(
-                            "Scan Acme and Globex product docs.",
-                            "Call out notable differentiators.",
+                tasks=(
+                    SubagentTask(
+                        objective="Summarize feature gaps across direct competitors.",
+                        steps=(
+                            "Scan Acme and Globex product docs",
+                            "List strengths and weaknesses",
+                            "Call out notable differentiators",
                         ),
                     ),
-                    DelegationParams(
-                        reason="Draft concise FAQ responses from support backlog.",
-                        expected_result="Five ready-to-send FAQ answers.",
-                        may_delegate_further="May consult style guide if needed.",
-                        recap_lines=(
-                            "Use the latest ticket summaries.",
-                            "Keep each answer under 50 words.",
+                    SubagentTask(
+                        objective="Draft concise FAQ responses from support backlog.",
+                        steps=(
+                            "Review latest ticket summaries",
+                            "Draft five FAQ answers",
+                            "Keep each answer under 50 words",
                         ),
                     ),
                 )
@@ -197,15 +314,15 @@ def build_dispatch_subagents_tool(
             output=(
                 SubagentResult(
                     output=(
-                        "Acme focuses on analytics depth; Globex excels in billing flexibility; "
-                        "both advertise 99.9% uptime SLAs."
+                        "Acme focuses on analytics depth; Globex excels in billing "
+                        "flexibility; both advertise 99.9% uptime SLAs."
                     ),
                     success=True,
                 ),
                 SubagentResult(
                     output=(
-                        "Auth setup, SSO access, refund timeline, data export, and plan upgrade "
-                        "FAQs drafted with concise answers."
+                        "Auth setup, SSO access, refund timeline, data export, and "
+                        "plan upgrade FAQs drafted with concise answers."
                     ),
                     success=True,
                 ),
@@ -235,27 +352,16 @@ def build_dispatch_subagents_tool(
                 success=False,
             )
 
-        delegation_prompt_cls: type[DelegationPrompt[Any, Any]] = (
-            DelegationPrompt.__class_getitem__(
-                (rendered_parent.output_type, rendered_parent.output_type)
-            )
-        )
-        delegation_prompt = delegation_prompt_cls(
-            context.prompt,
-            cast(RenderedPrompt[Any], rendered_parent),
-            include_response_format=rendered_parent.container is not None,
-        )
-
-        delegations = tuple(params.delegations)
-        if not delegations:
+        tasks = tuple(params.tasks)
+        if not tasks:
             empty_results = cast(tuple[SubagentResult, ...], ())
             return ToolResult(
-                message="No delegations supplied.",
+                message="No tasks supplied.",
                 value=empty_results,
             )
 
         contexts = _prepare_child_contexts(
-            delegations=delegations,
+            tasks=tasks,
             session=context.session,
             bus=context.event_bus,
             isolation_level=isolation_level,
@@ -273,15 +379,22 @@ def build_dispatch_subagents_tool(
         # Budget tracker is always shared with children regardless of isolation
         parent_budget_tracker = context.budget_tracker
 
+        # Build a delegation prompt that instructs the child to complete its plan
+        delegation_prompt = _build_plan_delegation_prompt(
+            parent_prompt=context.prompt,
+            rendered_parent=rendered_parent,
+        )
+
         def _run_child(
-            payload: tuple[DelegationParams, SessionProtocol, EventBus],
+            payload: tuple[SubagentTask, Session, EventBus],
         ) -> SubagentResult:
-            delegation, child_session, child_bus = payload
-            recap = RecapParams(bullets=delegation.recap_lines)
+            task, child_session, child_bus = payload
             try:
                 bound_prompt = cast(
                     PromptProtocol[Any],
-                    delegation_prompt.prompt.bind(delegation, recap),
+                    delegation_prompt.bind(
+                        _PlanDelegationParams(objective=task.objective)
+                    ),
                 )
                 response = adapter.evaluate(
                     bound_prompt,
@@ -302,11 +415,9 @@ def build_dispatch_subagents_tool(
                 success=True,
             )
 
-        payloads = [
-            (delegation, child_session, child_bus)
-            for delegation, (child_session, child_bus) in zip(
-                delegations, contexts, strict=True
-            )
+        payloads: list[tuple[SubagentTask, Session, EventBus]] = [
+            (task, child_session, child_bus)
+            for task, (child_session, child_bus) in zip(tasks, contexts, strict=True)
         ]
 
         max_workers = min(len(payloads), _DEFAULT_MAX_WORKERS) or 1
@@ -332,7 +443,11 @@ def build_dispatch_subagents_tool(
 
     return Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]](
         name="dispatch_subagents",
-        description="Run delegated child prompts in parallel.",
+        description=(
+            "Dispatch tasks to subagents running in parallel. Each task becomes "
+            "a Plan in the subagent's isolated session. The subagent completes "
+            "all plan steps before returning."
+        ),
         handler=_dispatch_subagents,
         accepts_overrides=accepts_overrides,
         examples=examples,
@@ -348,14 +463,19 @@ class _SubagentsSectionParams:
 
 _DELEGATION_BODY: Final[str] = (
     "Use `dispatch_subagents` to offload work that can proceed in parallel.\n"
-    "Each delegation must include recap bullet points so the parent can audit\n"
-    "the child plan. Prefer dispatching concurrent tasks over running them\n"
-    "sequentially yourself."
+    "Each task becomes a Plan in the subagent's isolated session. Subagents\n"
+    "complete all plan steps before returning. Prefer dispatching concurrent\n"
+    "tasks over running them sequentially yourself."
 )
 
 
 class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
-    """Explain the delegation workflow and expose the dispatch tool."""
+    """Explain the delegation workflow and expose the dispatch tool.
+
+    Each subagent receives a pre-populated Plan in its cloned session and is
+    instructed to complete all steps before returning. Full isolation is the
+    default mode.
+    """
 
     def __init__(
         self,
@@ -366,7 +486,7 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
         effective_level = (
             isolation_level
             if isolation_level is not None
-            else SubagentIsolationLevel.NO_ISOLATION
+            else SubagentIsolationLevel.FULL_ISOLATION
         )
         self._isolation_level = effective_level
         tool = build_dispatch_subagents_tool(
@@ -413,6 +533,7 @@ __all__ = [
     "DispatchSubagentsParams",
     "SubagentIsolationLevel",
     "SubagentResult",
+    "SubagentTask",
     "SubagentsSection",
     "build_dispatch_subagents_tool",
     "dispatch_subagents",

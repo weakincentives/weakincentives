@@ -24,25 +24,21 @@ from typing import Any, Literal, cast
 from tests.helpers.adapters import RECORDING_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import (
-    DelegationParams,
-    MarkdownSection,
-    Prompt,
-    PromptTemplate,
-    RecapParams,
-)
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.session import Session, select_latest
 from weakincentives.runtime.session.protocols import SessionProtocol, SnapshotProtocol
+from weakincentives.tools.planning import Plan
 from weakincentives.tools.subagents import (
     DispatchSubagentsParams,
     SubagentIsolationLevel,
     SubagentResult,
+    SubagentTask,
     build_dispatch_subagents_tool,
     dispatch_subagents,
 )
@@ -71,6 +67,12 @@ class ParentOutput:
 
 
 class RecordingAdapter(ProviderAdapter[Any]):
+    """Test adapter that records calls and returns configurable responses.
+
+    The adapter extracts the objective from the delegation prompt's first
+    parameter (which has an `objective` field from _PlanDelegationParams).
+    """
+
     def __init__(
         self,
         *,
@@ -80,7 +82,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
         raw_outputs: dict[str, object] | None = None,
         empty_text: set[str] | None = None,
     ) -> None:
-        self.calls: list[tuple[str, tuple[str, ...]]] = []
+        self.calls: list[str] = []
         self.sessions: list[Session | None] = []
         self.buses: list[InProcessEventBus] = []
         self.deadlines: list[Deadline | None] = []
@@ -103,19 +105,17 @@ class RecordingAdapter(ProviderAdapter[Any]):
     ) -> PromptResponse[Any]:
         del parse_output, budget_tracker
         params = prompt.params
-        delegation = cast(DelegationParams, params[0])
-        recap = (
-            cast(RecapParams, params[1]) if len(params) > 1 else RecapParams(bullets=())
-        )
-        reason = delegation.reason
+        # Extract objective from the delegation params (_PlanDelegationParams)
+        delegation_params = params[0]
+        objective = getattr(delegation_params, "objective", "unknown")
         with self._lock:
-            self.calls.append((reason, recap.bullets))
+            self.calls.append(objective)
             self.sessions.append(session)
             self.buses.append(bus)
             self.deadlines.append(deadline)
-        if reason in self._failures:
-            raise RuntimeError(f"failure: {reason}")
-        delay = self._delays.get(reason, 0.0)
+        if objective in self._failures:
+            raise RuntimeError(f"failure: {objective}")
+        delay = self._delays.get(objective, 0.0)
         if delay:
             time.sleep(delay)
         prompt_name = prompt.name or prompt.key
@@ -137,7 +137,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
             )
             return response
 
-        if reason in self._empty_text:
+        if objective in self._empty_text:
             return _emit(
                 PromptResponse(
                     prompt_name=prompt_name,
@@ -145,7 +145,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
                     output=None,
                 )
             )
-        structured = self._structured_outputs.get(reason)
+        structured = self._structured_outputs.get(objective)
         if structured is not None:
             return _emit(
                 PromptResponse(
@@ -154,7 +154,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
                     output=structured,
                 )
             )
-        raw_output = self._raw_outputs.get(reason)
+        raw_output = self._raw_outputs.get(objective)
         if raw_output is not None:
             return _emit(
                 PromptResponse(
@@ -166,7 +166,7 @@ class RecordingAdapter(ProviderAdapter[Any]):
         return _emit(
             PromptResponse(
                 prompt_name=prompt_name,
-                text=f"child:{reason}",
+                text=f"child:{objective}",
                 output=None,
             )
         )
@@ -206,14 +206,7 @@ def test_dispatch_subagents_requires_rendered_prompt() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="missing",
-                expected_result="",
-                may_delegate_further="no",
-                recap_lines=("recap",),
-            ),
-        )
+        tasks=(SubagentTask(objective="missing", steps=("step1",)),)
     )
 
     handler = dispatch_subagents.handler
@@ -227,7 +220,7 @@ def test_dispatch_subagents_requires_rendered_prompt() -> None:
 
 def test_dispatch_subagents_runs_children_in_parallel() -> None:
     prompt, rendered = _build_parent_prompt()
-    adapter = RecordingAdapter(delays={"slow": 0.05, "fast": 0.01})
+    adapter = RecordingAdapter(delays={"slow-objective": 0.05, "fast-objective": 0.01})
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
@@ -238,18 +231,14 @@ def test_dispatch_subagents_runs_children_in_parallel() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="slow",
-                expected_result="slow output",
-                may_delegate_further="no",
-                recap_lines=("Focus on slow path",),
+        tasks=(
+            SubagentTask(
+                objective="slow-objective",
+                steps=("Focus on slow path",),
             ),
-            DelegationParams(
-                reason="fast",
-                expected_result="fast output",
-                may_delegate_further="no",
-                recap_lines=("Focus on fast path",),
+            SubagentTask(
+                objective="fast-objective",
+                steps=("Focus on fast path",),
             ),
         )
     )
@@ -261,15 +250,13 @@ def test_dispatch_subagents_runs_children_in_parallel() -> None:
     assert result.success is True
     assert isinstance(result.value, tuple)
     assert [child.output for child in result.value] == [
-        "child:slow",
-        "child:fast",
+        "child:slow-objective",
+        "child:fast-objective",
     ]
-    assert adapter.calls == [
-        ("slow", ("Focus on slow path",)),
-        ("fast", ("Focus on fast path",)),
-    ]
-    assert all(bus is context.event_bus for bus in adapter.buses)
-    assert all(s is session for s in adapter.sessions)
+    assert adapter.calls == ["slow-objective", "fast-objective"]
+    # Full isolation is the default - children get cloned sessions and new buses
+    assert all(child_bus is not bus for child_bus in adapter.buses)
+    assert all(s is not session for s in adapter.sessions)
 
 
 def test_dispatch_subagents_propagates_deadline() -> None:
@@ -286,14 +273,7 @@ def test_dispatch_subagents_propagates_deadline() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="one",
-                expected_result="",
-                may_delegate_further="no",
-                recap_lines=(),
-            ),
-        ),
+        tasks=(SubagentTask(objective="one", steps=()),),
     )
 
     handler = dispatch_subagents.handler
@@ -306,7 +286,7 @@ def test_dispatch_subagents_propagates_deadline() -> None:
 
 def test_dispatch_subagents_collects_failures() -> None:
     prompt, rendered = _build_parent_prompt()
-    adapter = RecordingAdapter(failures={"fail"})
+    adapter = RecordingAdapter(failures={"fail-objective"})
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
@@ -317,18 +297,14 @@ def test_dispatch_subagents_collects_failures() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="ok",
-                expected_result="success",
-                may_delegate_further="no",
-                recap_lines=("Keep things tidy",),
+        tasks=(
+            SubagentTask(
+                objective="ok-objective",
+                steps=("Keep things tidy",),
             ),
-            DelegationParams(
-                reason="fail",
-                expected_result="error",
-                may_delegate_further="no",
-                recap_lines=("Handle the failure",),
+            SubagentTask(
+                objective="fail-objective",
+                steps=("Handle the failure",),
             ),
         )
     )
@@ -347,7 +323,7 @@ def test_dispatch_subagents_collects_failures() -> None:
     assert second.success is False
     assert second.error is not None
     assert "fail" in second.error
-    assert adapter.calls[1][0] == "fail"
+    assert adapter.calls[1] == "fail-objective"
 
 
 def test_dispatch_subagents_requires_dataclass_output_type() -> None:
@@ -372,14 +348,7 @@ def test_dispatch_subagents_requires_dataclass_output_type() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="invalid",
-                expected_result="",
-                may_delegate_further="no",
-                recap_lines=("recap",),
-            ),
-        ),
+        tasks=(SubagentTask(objective="invalid", steps=("recap",)),),
     )
 
     handler = dispatch_subagents.handler
@@ -391,7 +360,7 @@ def test_dispatch_subagents_requires_dataclass_output_type() -> None:
     assert "dataclass" in result.message
 
 
-def test_dispatch_subagents_handles_empty_delegations() -> None:
+def test_dispatch_subagents_handles_empty_tasks() -> None:
     prompt, rendered = _build_parent_prompt()
     adapter = RecordingAdapter()
     bus = InProcessEventBus()
@@ -403,7 +372,7 @@ def test_dispatch_subagents_handles_empty_delegations() -> None:
         session=session,
         event_bus=bus,
     )
-    params = DispatchSubagentsParams(delegations=())
+    params = DispatchSubagentsParams(tasks=())
 
     handler = dispatch_subagents.handler
     assert handler is not None
@@ -411,7 +380,7 @@ def test_dispatch_subagents_handles_empty_delegations() -> None:
 
     assert result.success is True
     assert result.value == ()
-    assert "No delegations" in result.message
+    assert "No tasks" in result.message
 
 
 def test_dispatch_subagents_formats_structured_outputs() -> None:
@@ -438,18 +407,14 @@ def test_dispatch_subagents_formats_structured_outputs() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="structured",
-                expected_result="json",
-                may_delegate_further="no",
-                recap_lines=("Render structured",),
+        tasks=(
+            SubagentTask(
+                objective="structured",
+                steps=("Render structured",),
             ),
-            DelegationParams(
-                reason="raw",
-                expected_result="fallback",
-                may_delegate_further="no",
-                recap_lines=("Render raw",),
+            SubagentTask(
+                objective="raw",
+                steps=("Render raw",),
             ),
         ),
     )
@@ -478,14 +443,7 @@ def test_dispatch_subagents_returns_empty_output_when_child_returns_none() -> No
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="empty",
-                expected_result="",
-                may_delegate_further="no",
-                recap_lines=("Produce nothing",),
-            ),
-        ),
+        tasks=(SubagentTask(objective="empty", steps=("Produce nothing",)),),
     )
 
     handler = dispatch_subagents.handler
@@ -499,6 +457,8 @@ def test_dispatch_subagents_returns_empty_output_when_child_returns_none() -> No
 
 
 def test_dispatch_subagents_shares_state_without_isolation() -> None:
+    """NO_ISOLATION mode shares session and bus with children."""
+
     @dataclass(slots=True)
     class ChildRecord:
         field: str
@@ -509,6 +469,10 @@ def test_dispatch_subagents_shares_state_without_isolation() -> None:
     )
     bus = InProcessEventBus()
     session = Session(bus=bus)
+    # Explicitly use NO_ISOLATION to share state
+    tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.NO_ISOLATION
+    )
     context = ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=rendered,
@@ -517,17 +481,10 @@ def test_dispatch_subagents_shares_state_without_isolation() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="shared",
-                expected_result="capture state",
-                may_delegate_further="no",
-                recap_lines=("Record to session",),
-            ),
-        ),
+        tasks=(SubagentTask(objective="shared", steps=("Record to session",)),),
     )
 
-    handler = dispatch_subagents.handler
+    handler = tool.handler
     assert handler is not None
     result = handler(params, context=context)
 
@@ -537,6 +494,8 @@ def test_dispatch_subagents_shares_state_without_isolation() -> None:
 
 
 def test_dispatch_subagents_full_isolation_clones_state() -> None:
+    """Full isolation (default) clones sessions so parent state is untouched."""
+
     @dataclass(slots=True)
     class ChildRecord:
         field: str
@@ -547,9 +506,7 @@ def test_dispatch_subagents_full_isolation_clones_state() -> None:
     )
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    tool = build_dispatch_subagents_tool(
-        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
-    )
+    # FULL_ISOLATION is the default
     context = ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=rendered,
@@ -558,17 +515,10 @@ def test_dispatch_subagents_full_isolation_clones_state() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="isolated",
-                expected_result="capture state",
-                may_delegate_further="no",
-                recap_lines=("Record to clone",),
-            ),
-        ),
+        tasks=(SubagentTask(objective="isolated", steps=("Record to clone",)),),
     )
 
-    handler = tool.handler
+    handler = dispatch_subagents.handler
     assert handler is not None
     result = handler(params, context=context)
 
@@ -578,13 +528,12 @@ def test_dispatch_subagents_full_isolation_clones_state() -> None:
 
 
 def test_dispatch_subagents_full_isolation_sets_parent_session() -> None:
+    """Full isolation sets parent reference and creates child sessions."""
     prompt, rendered = _build_parent_prompt()
     adapter = RecordingAdapter()
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    tool = build_dispatch_subagents_tool(
-        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
-    )
+    # FULL_ISOLATION is the default
     context = ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=rendered,
@@ -593,17 +542,10 @@ def test_dispatch_subagents_full_isolation_sets_parent_session() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="inherit-parent",
-                expected_result="preserve lineage",
-                may_delegate_further="no",
-                recap_lines=("Track parent session",),
-            ),
-        ),
+        tasks=(SubagentTask(objective="inherit-parent", steps=("Track parent",)),),
     )
 
-    handler = tool.handler
+    handler = dispatch_subagents.handler
     assert handler is not None
     result = handler(params, context=context)
 
@@ -618,6 +560,8 @@ def test_dispatch_subagents_full_isolation_sets_parent_session() -> None:
 
 
 def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
+    """Full isolation fails if session doesn't support cloning."""
+
     class NonCloningSession(SessionProtocol):
         def snapshot(self) -> SnapshotProtocol:
             raise NotImplementedError
@@ -632,9 +576,7 @@ def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
     adapter = RecordingAdapter()
     bus = InProcessEventBus()
     session = NonCloningSession()
-    tool = build_dispatch_subagents_tool(
-        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
-    )
+    # FULL_ISOLATION is the default
     context = ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=rendered,
@@ -643,17 +585,10 @@ def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
         event_bus=bus,
     )
     params = DispatchSubagentsParams(
-        delegations=(
-            DelegationParams(
-                reason="non-clone",
-                expected_result="",
-                may_delegate_further="no",
-                recap_lines=("Should fail",),
-            ),
-        ),
+        tasks=(SubagentTask(objective="non-clone", steps=("Should fail",)),),
     )
 
-    handler = tool.handler
+    handler = dispatch_subagents.handler
     assert handler is not None
     result = handler(params, context=context)
 
@@ -662,9 +597,147 @@ def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
     assert "cloning" in result.message.lower()
 
 
+def test_dispatch_subagents_full_isolation_requires_session_instance() -> None:
+    """Full isolation requires clone() to return a Session instance."""
+
+    class NonSessionCloneSession(SessionProtocol):
+        def snapshot(self) -> SnapshotProtocol:
+            raise NotImplementedError
+
+        def rollback(self, snapshot: SnapshotProtocol) -> None:
+            raise NotImplementedError
+
+        def reset(self) -> None:
+            raise NotImplementedError
+
+        def clone(self, **kwargs: object) -> SessionProtocol:  # noqa: PLR6301
+            # Return a non-Session clone
+            return NonSessionCloneSession()
+
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = NonSessionCloneSession()
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], prompt),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        tasks=(SubagentTask(objective="non-session", steps=("Should fail",)),),
+    )
+
+    handler = dispatch_subagents.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is False
+    assert result.value is None
+    assert "Session instance" in result.message
+
+
 def test_build_dispatch_subagents_tool_respects_accepts_overrides() -> None:
     default_tool = build_dispatch_subagents_tool()
     overriding_tool = build_dispatch_subagents_tool(accepts_overrides=True)
 
     assert default_tool.accepts_overrides is False
     assert overriding_tool.accepts_overrides is True
+
+
+def test_dispatch_subagents_injects_plan_in_full_isolation() -> None:
+    """Full isolation injects the task as a Plan into the child session."""
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], prompt),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        tasks=(
+            SubagentTask(
+                objective="Test plan injection",
+                steps=("Step one", "Step two"),
+            ),
+        ),
+    )
+
+    handler = dispatch_subagents.handler
+    assert handler is not None
+    result = handler(params, context=context)
+
+    assert result.success is True
+    assert adapter.sessions
+    child_session = adapter.sessions[0]
+    assert child_session is not None
+
+    # Verify the plan was injected into the child session
+    plan = select_latest(child_session, Plan)
+    assert plan is not None
+    assert plan.objective == "Test plan injection"
+    assert plan.status == "active"
+    assert len(plan.steps) == 2
+    assert plan.steps[0].title == "Step one"
+    assert plan.steps[0].status == "pending"
+    assert plan.steps[1].title == "Step two"
+    assert plan.steps[1].status == "pending"
+
+
+def test_dispatch_subagents_default_isolation_is_full() -> None:
+    """Verify that the default isolation level is FULL_ISOLATION."""
+    default_tool = build_dispatch_subagents_tool()
+    no_isolation_tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.NO_ISOLATION
+    )
+    full_isolation_tool = build_dispatch_subagents_tool(
+        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
+    )
+
+    # The default should behave the same as FULL_ISOLATION
+    prompt, rendered = _build_parent_prompt()
+    adapter = RecordingAdapter()
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = ToolContext(
+        prompt=cast(PromptProtocol[Any], prompt),
+        rendered_prompt=rendered,
+        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        session=session,
+        event_bus=bus,
+    )
+    params = DispatchSubagentsParams(
+        tasks=(SubagentTask(objective="test-default", steps=()),),
+    )
+
+    # Default tool should create a cloned session (full isolation)
+    assert default_tool.handler is not None
+    result = default_tool.handler(params, context=context)
+    assert result.success is True
+    assert adapter.sessions[0] is not session
+    assert adapter.buses[0] is not bus
+
+    # Verify tools are configured correctly by checking handler identity
+    assert default_tool.handler is not None
+    assert no_isolation_tool.handler is not None
+    assert full_isolation_tool.handler is not None
+
+
+def test_subagent_task_dataclass() -> None:
+    """Verify SubagentTask dataclass works correctly."""
+    task = SubagentTask(
+        objective="Test objective",
+        steps=("Step 1", "Step 2", "Step 3"),
+    )
+
+    assert task.objective == "Test objective"
+    assert task.steps == ("Step 1", "Step 2", "Step 3")
+
+    # Default steps should be empty tuple
+    task_no_steps = SubagentTask(objective="No steps")
+    assert task_no_steps.steps == ()
