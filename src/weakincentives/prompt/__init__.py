@@ -36,6 +36,7 @@ from .errors import (
     SectionPath,
     VisibilityExpansionRequired,
 )
+from .hosted_tool import HostedTool
 from .markdown import MarkdownSection
 from .overrides import (
     LocalPromptOverridesStore,
@@ -73,6 +74,7 @@ __all__ = [
     "DelegationParams",
     "DelegationPrompt",
     "DelegationSummarySection",
+    "HostedTool",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",
