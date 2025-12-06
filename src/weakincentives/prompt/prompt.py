@@ -128,11 +128,11 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         | tuple[SectionNode[SupportsDataclass], ...]
     ) = ()
     allow_extra_keys: bool = False
-    _renderer: PromptRenderer[OutputT] | None = field(init=False, default=None)
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
     _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
         init=False, default=None
     )
+    _response_section: ResponseFormatSection | None = field(init=False, default=None)
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -230,11 +230,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             )
 
         snapshot = registry.snapshot()
-        renderer: PromptRenderer[Any] = PromptRenderer(
-            registry=snapshot,
-            structured_output=structured_output,
-            response_section=response_section,
-        )
 
         return {
             "ns": stripped_ns,
@@ -243,9 +238,9 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             "inject_output_instructions": inject_val,
             "sections": snapshot.sections,
             "allow_extra_keys": allow_extra,
-            "_renderer": renderer,
             "_snapshot": snapshot,
             "_structured_output": structured_output,
+            "_response_section": response_section,
         }
 
     @property
@@ -361,14 +356,17 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
         return self.template.structured_output
 
-    @property
+    @cached_property
     def renderer(self) -> PromptRenderer[OutputT]:
-        """Return the prompt renderer for this template."""
-        # Prompt requires internal access to PromptTemplate's renderer by design.
-        renderer = self.template._renderer  # pyright: ignore[reportPrivateUsage]
-        if renderer is None:  # pragma: no cover
-            raise RuntimeError("PromptTemplate._renderer not initialized")
-        return renderer
+        """Return the prompt renderer, created lazily on first access."""
+        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
+        if snapshot is None:  # pragma: no cover
+            raise RuntimeError("PromptTemplate._snapshot not initialized")
+        return PromptRenderer(
+            registry=snapshot,
+            structured_output=self.template._structured_output,  # pyright: ignore[reportPrivateUsage]
+            response_section=self.template._response_section,  # pyright: ignore[reportPrivateUsage]
+        )
 
     def bind(self, *params: SupportsDataclass) -> Prompt[OutputT]:
         """Mutate this prompt's bound parameters; return self for chaining.
