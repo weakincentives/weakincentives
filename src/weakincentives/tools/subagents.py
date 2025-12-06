@@ -379,17 +379,16 @@ def build_dispatch_subagents_tool(
         # Budget tracker is always shared with children regardless of isolation
         parent_budget_tracker = context.budget_tracker
 
-        # Build a delegation prompt that instructs the child to complete its plan
-        delegation_prompt = _build_plan_delegation_prompt(
-            parent_prompt=context.prompt,
-            rendered_parent=rendered_parent,
-        )
-
         def _run_child(
             payload: tuple[SubagentTask, Session, EventBus],
         ) -> SubagentResult:
             task, child_session, child_bus = payload
             try:
+                # Build a fresh delegation prompt for each child to avoid races
+                delegation_prompt = _build_plan_delegation_prompt(
+                    parent_prompt=context.prompt,
+                    rendered_parent=rendered_parent,
+                )
                 bound_prompt = cast(
                     PromptProtocol[Any],
                     delegation_prompt.bind(
