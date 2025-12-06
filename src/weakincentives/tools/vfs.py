@@ -652,18 +652,10 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         return self._session
 
     def _initialize_session(self, session: Session) -> None:
-        session.register_reducer(VirtualFileSystem, replace_latest)
-        session.seed_slice(VirtualFileSystem, (self._mount_snapshot,))
-        session.register_reducer(
-            WriteFile,
-            _make_write_reducer(),
-            slice_type=VirtualFileSystem,
-        )
-        session.register_reducer(
-            DeleteEntry,
-            _make_delete_reducer(),
-            slice_type=VirtualFileSystem,
-        )
+        session.mutate(VirtualFileSystem).register(VirtualFileSystem, replace_latest)
+        session.mutate(VirtualFileSystem).seed(self._mount_snapshot)
+        session.mutate(VirtualFileSystem).register(WriteFile, _make_write_reducer())
+        session.mutate(VirtualFileSystem).register(DeleteEntry, _make_delete_reducer())
 
     def latest_snapshot(self) -> VirtualFileSystem:
         snapshot = self._session.query(VirtualFileSystem).latest()

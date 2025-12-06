@@ -232,8 +232,8 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
         value = cast(ExampleOutput, event.value)
         return (*slice_values, SecondSlice(value.text))
 
-    session.register_reducer(ExampleOutput, first, slice_type=FirstSlice)
-    session.register_reducer(ExampleOutput, second, slice_type=SecondSlice)
+    session.mutate(FirstSlice).register(ExampleOutput, first)
+    session.mutate(SecondSlice).register(ExampleOutput, second)
 
     result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
@@ -313,7 +313,9 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
 def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.register_reducer(ExamplePayload, upsert_by(lambda payload: payload.value))
+    session.mutate(ExamplePayload).register(
+        ExamplePayload, upsert_by(lambda payload: payload.value)
+    )
 
     first_result = bus.publish(make_tool_event(1))
     second_result = bus.publish(make_tool_event(1))
@@ -333,7 +335,7 @@ def test_replace_latest_keeps_only_newest_value(
 ) -> None:
     session, bus = session_factory()
 
-    session.register_reducer(ExamplePayload, replace_latest)
+    session.mutate(ExamplePayload).register(ExamplePayload, replace_latest)
 
     first_result = bus.publish(make_tool_event(1))
     second_result = bus.publish(make_tool_event(2))
@@ -377,7 +379,7 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 ) -> None:
     session, bus = session_factory()
 
-    session.register_reducer(ExampleOutput, append)
+    session.mutate(ExampleOutput).register(ExampleOutput, append)
 
     def faulty(
         slice_values: tuple[ExampleOutput, ...],
@@ -388,7 +390,7 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
         del context
         raise RuntimeError("boom")
 
-    session.register_reducer(ExampleOutput, faulty)
+    session.mutate(ExampleOutput).register(ExampleOutput, faulty)
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
@@ -420,7 +422,7 @@ def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> 
     assert session.query(ExampleOutput).all() != original_state
     assert third_result.ok
 
-    session.rollback(restored)
+    session.mutate().rollback(restored)
 
     assert session.query(ExampleOutput).all() == original_state
 
@@ -446,7 +448,7 @@ def test_snapshot_preserves_custom_reducer_behavior(
         entries = slice_values[-1].entries if slice_values else ()
         return (Summary((*entries, value.text)),)
 
-    session.register_reducer(ExampleOutput, aggregate, slice_type=Summary)
+    session.mutate(Summary).register(ExampleOutput, aggregate)
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="start")))
     snapshot = session.snapshot()
@@ -454,7 +456,7 @@ def test_snapshot_preserves_custom_reducer_behavior(
     second_result = bus.publish(make_prompt_event(ExampleOutput(text="after")))
     assert session.query(Summary).all()[0].entries == ("start", "after")
 
-    session.rollback(snapshot)
+    session.mutate().rollback(snapshot)
 
     assert session.query(Summary).all()[0].entries == ("start",)
 
@@ -530,7 +532,7 @@ def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> No
 
     second_child = Session(bus=bus, parent=parent)
 
-    parent.rollback(parent_snapshot)
+    parent.mutate().rollback(parent_snapshot)
 
     assert parent.children == (first_child, second_child)
 
@@ -547,15 +549,14 @@ def test_snapshot_rollback_requires_registered_slices(
     target = Session(bus=InProcessEventBus())
 
     with pytest.raises(SnapshotRestoreError):
-        target.rollback(snapshot)
+        target.mutate().rollback(snapshot)
 
     assert target.query(ExampleOutput).all() == ()
 
 
 def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
-    session.seed_slice(
-        cast(type[SupportsDataclass], str),
+    session.mutate(cast(type[SupportsDataclass], str)).seed(
         cast(tuple[SupportsDataclass, ...], ("value",)),
     )
 
@@ -566,13 +567,13 @@ def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) 
 def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.register_reducer(ExampleOutput, append)
+    session.mutate(ExampleOutput).register(ExampleOutput, append)
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert first_result.ok
     assert session.query(ExampleOutput).all()
 
-    session.reset()
+    session.mutate().reset()
 
     assert session.query(ExampleOutput).all() == ()
 
@@ -590,7 +591,7 @@ def test_clone_preserves_state_and_reducer_registration(
         session_id=provided_session_id, created_at=provided_created_at
     )
 
-    session.register_reducer(ExampleOutput, replace_latest)
+    session.mutate(ExampleOutput).register(ExampleOutput, replace_latest)
 
     result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert result.ok
@@ -885,7 +886,7 @@ def test_mutate_register_adds_reducer(session_factory: SessionFactory) -> None:
 def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.register_reducer(ExampleOutput, append)
+    session.mutate(ExampleOutput).register(ExampleOutput, append)
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert session.query(ExampleOutput).all()
 
@@ -897,7 +898,7 @@ def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None
 def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.register_reducer(ExampleOutput, append)
+    session.mutate(ExampleOutput).register(ExampleOutput, append)
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     snapshot = session.snapshot()

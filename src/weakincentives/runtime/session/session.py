@@ -143,7 +143,7 @@ def _normalize_tags(
     return MappingProxyType(normalized)
 
 
-@invariant(  # noqa: PLR0904
+@invariant(
     _session_id_is_well_formed,
     _created_at_has_tz,
     _created_at_is_utc,
@@ -229,7 +229,7 @@ class Session(SessionProtocol):
 
         for data_type, registrations in reducer_snapshot:
             for registration in registrations:
-                clone.register_reducer(
+                clone.mutation_register_reducer(
                     data_type,
                     registration.reducer,
                     slice_type=registration.slice_type,
@@ -239,19 +239,6 @@ class Session(SessionProtocol):
             clone._state = state_snapshot
 
         return clone
-
-    def register_reducer[S: SupportsDataclass](
-        self,
-        data_type: SessionSliceType,
-        reducer: TypedReducer[S],
-        *,
-        slice_type: type[S] | None = None,
-    ) -> None:
-        """Register a reducer for the provided data type.
-
-        Prefer ``session.mutate(T).register(E, reducer)`` for new code.
-        """
-        self.mutation_register_reducer(data_type, reducer, slice_type=slice_type)
 
     @override
     @_locked_method
@@ -409,40 +396,6 @@ class Session(SessionProtocol):
         """
         self._dispatch_data_event(slice_type, cast(ReducerEvent, event))
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Legacy methods (delegate to internal implementations)
-    # ──────────────────────────────────────────────────────────────────────
-
-    @override
-    def seed_slice[S: SupportsDataclass](
-        self, slice_type: type[S], values: Iterable[S]
-    ) -> None:
-        """Initialize or replace the stored tuple for the provided type.
-
-        Prefer ``session.mutate(T).seed(values)`` for new code.
-        """
-        self.mutation_seed_slice(slice_type, values)
-
-    @override
-    def clear_slice[S: SupportsDataclass](
-        self,
-        slice_type: type[S],
-        predicate: Callable[[S], bool] | None = None,
-    ) -> None:
-        """Remove items from the slice, optionally filtering by predicate.
-
-        Prefer ``session.mutate(T).clear(predicate)`` for new code.
-        """
-        self.mutation_clear_slice(slice_type, predicate)
-
-    @override
-    def reset(self) -> None:
-        """Clear all stored slices while preserving reducer registrations.
-
-        Prefer ``session.mutate().reset()`` for new code.
-        """
-        self.mutation_reset()
-
     @property
     @override
     def event_bus(self) -> EventBus:
@@ -494,14 +447,6 @@ class Session(SessionProtocol):
             slices=normalized,
             tags=self.tags,
         )
-
-    @override
-    def rollback(self, snapshot: SnapshotProtocol) -> None:
-        """Restore session slices from the provided snapshot.
-
-        Prefer ``session.mutate().rollback(snapshot)`` for new code.
-        """
-        self.mutation_rollback(snapshot)
 
     def _registered_slice_types(self) -> set[SessionSliceType]:
         with self.locked():

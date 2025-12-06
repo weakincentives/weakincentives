@@ -794,7 +794,7 @@ def _publish_tool_invocation(
     )
     publish_result = context.bus.publish(invocation)
     if not publish_result.ok:
-        context.session.rollback(snapshot)
+        context.session.mutate().rollback(snapshot)
         outcome.log.warning(
             "Session rollback triggered after publish failure.",
             event="session_rollback_due_to_publish_failure",

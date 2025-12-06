@@ -46,19 +46,14 @@ class Session:
     @property
     def tags(self) -> Mapping[object, object]: ...
 
-    def register_reducer[T, S](
-        self,
-        data_type: type[T],
-        reducer: TypedReducer[T, S],
-        *,
-        slice_type: type[S] | None = None,
-    ) -> None: ...
-
     def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]: ...
 
-    def snapshot(self) -> Snapshot: ...
+    def query[T](self, slice_type: type[T]) -> QueryBuilder[T]: ...
 
-    def rollback(self, snapshot: Snapshot) -> None: ...
+    def mutate[T](self, slice_type: type[T]) -> MutationBuilder[T]: ...
+    def mutate(self) -> GlobalMutationBuilder: ...
+
+    def snapshot(self) -> Snapshot: ...
 
     def clone(
         self,
@@ -69,11 +64,6 @@ class Session:
         created_at: datetime | None = None,
         tags: Mapping[object, object] | None = None,
     ) -> "Session": ...
-
-    # Additional state management methods
-    def seed_slice[S](self, slice_type: type[S], values: Iterable[S]) -> None: ...
-    def clear_slice[S](self, slice_type: type[S], predicate: Callable[[S], bool] | None = None) -> None: ...
-    def reset(self) -> None: ...
 ```
 
 ### Reducers
@@ -258,7 +248,7 @@ json_str = snapshot.to_json()
 
 # Restore
 loaded = Snapshot.from_json(json_str)
-session.rollback(loaded)
+session.mutate().rollback(loaded)
 ```
 
 ### Serialization
@@ -418,11 +408,7 @@ bus = InProcessEventBus()
 session = Session(bus=bus)
 
 # Optional: register custom reducers
-session.register_reducer(
-    ResearchSummary,
-    update_metrics_reducer,
-    slice_type=ResearchMetrics,
-)
+session.mutate(ResearchMetrics).register(ResearchSummary, update_metrics_reducer)
 
 # Configure limits
 deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))

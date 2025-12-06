@@ -571,7 +571,7 @@ session.event_bus.subscribe(PromptExecuted, lambda e: print(e.usage))
 ## Session Snapshots
 
 Use `Session.snapshot()` to capture session state for debugging or replay.
-Restore with `Snapshot.from_json(...)` and `Session.rollback(...)`.
+Restore with `Snapshot.from_json(...)` and `session.mutate().rollback(...)`.
 
 ## Deadlines
 

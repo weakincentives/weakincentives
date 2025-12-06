@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol, Self, overload
 
 from ...prompt._types import SupportsDataclass
@@ -32,10 +32,6 @@ class SessionProtocol(Protocol):
     """Structural protocol implemented by session state containers."""
 
     def snapshot(self) -> SnapshotProtocol: ...
-
-    def rollback(self, snapshot: SnapshotProtocol) -> None: ...
-
-    def reset(self) -> None: ...
 
     @property
     def event_bus(self) -> EventBus: ...
@@ -57,18 +53,6 @@ class SessionProtocol(Protocol):
     def mutate[T: SupportsDataclass](
         self, slice_type: type[T] | None = None
     ) -> MutationBuilder[T] | GlobalMutationBuilder: ...
-
-    def seed_slice(
-        self,
-        slice_type: type[SupportsDataclass],
-        values: Iterable[SupportsDataclass],
-    ) -> None: ...
-
-    def clear_slice(
-        self,
-        slice_type: type[SupportsDataclass],
-        predicate: Callable[[SupportsDataclass], bool] | None = None,
-    ) -> None: ...
 
     @property
     def parent(self) -> Self | None: ...
