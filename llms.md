@@ -72,7 +72,11 @@ Optional extras enable specific providers or tooling:
 - `weakincentives`: Curated entrypoints for building prompts, tools, and
   sessions.
   - Classes and functions:
+    - `Budget`: Resource envelope combining time and token limits.
+    - `BudgetExceededError`: Exception raised when a budget limit is breached.
+    - `BudgetTracker`: Thread-safe tracker for cumulative token usage against a Budget.
     - `Deadline`: Immutable value object describing a wall-clock expiration.
+    - `FrozenDataclass`: Decorator providing immutable dataclass utilities (copy, asdict, normalization).
     - `JSONValue`: Type alias for JSON-compatible primitives, objects, and arrays.
     - `MarkdownSection`: Render markdown content using `string.Template`.
     - `Prompt`: Coordinate prompt sections and their parameter bindings.
@@ -83,11 +87,12 @@ Optional extras enable specific providers or tooling:
     - `ToolContext`: Immutable container exposing prompt execution state to handlers.
     - `ToolHandler`: Callable protocol implemented by tool handlers.
     - `ToolResult`: Structured response emitted by a tool handler.
+    - `WinkError`: Base class for all weakincentives exceptions.
     - `configure_logging`: Configure the root logger with sensible defaults.
     - `get_logger`: Return a `StructuredLogger` scoped to a name.
     - `parse_structured_output`: Parse a model response into the structured output type declared by the prompt.
-  - Modules: `adapters`, `cli`, `deadlines`, `debug`, `prompt`, `runtime`,
-    `serde`, `tools`, `types`.
+  - Modules: `adapters`, `cli`, `deadlines`, `debug`, `optimizers`, `prompt`,
+    `runtime`, `serde`, `tools`, `types`.
 - `weakincentives.adapters`: Provider integrations and throttling primitives.
   - Constants: `LITELLM_ADAPTER_NAME`, `OPENAI_ADAPTER_NAME`.
   - Types:
@@ -106,7 +111,9 @@ Optional extras enable specific providers or tooling:
     - `Prompt`: Coordinate prompt sections and their parameter bindings.
     - `RenderedPrompt`: Result of rendering a prompt.
     - `Section`: Base class for prompt sections.
+    - `SectionNode`: Node in section tree.
     - `SectionPath`: Path to a section.
+    - `SectionVisibility`: Enum controlling how a section is rendered (`FULL`, `SUMMARY`).
     - `Tool`: Describe a callable tool exposed by prompt sections.
     - `ToolContext`: Immutable container exposing prompt execution state to handlers.
     - `ToolExample`: Representative invocation for a tool documenting inputs and outputs.
@@ -114,14 +121,17 @@ Optional extras enable specific providers or tooling:
     - `ToolRenderableResult`: Protocol for tool results that can be rendered.
     - `ToolResult`: Structured response emitted by a tool handler.
     - `SupportsDataclass`: Protocol satisfied by dataclass types and instances.
+    - `SupportsDataclassOrNone`: Protocol for dataclass types or None.
     - `SupportsToolResult`: Protocol for tool results.
     - `PromptProtocol`: Protocol for prompts.
+    - `PromptTemplateProtocol`: Protocol for prompt templates.
     - `RenderedPromptProtocol`: Protocol for rendered prompts.
     - `ProviderAdapterProtocol`: Protocol for provider adapters.
   - Composition:
     - `DelegationParams`: Parameters for delegation prompts.
     - `DelegationPrompt`: Prompt for delegating tasks to sub-agents.
     - `DelegationSummarySection`: Section for summarizing delegation results.
+    - `OpenSectionsParams`: Parameters for progressive disclosure of sections.
     - `ParentPromptParams`: Parameters for parent prompts.
     - `ParentPromptSection`: Section for including parent prompt context.
     - `RecapParams`: Parameters for recap sections.
@@ -146,6 +156,7 @@ Optional extras enable specific providers or tooling:
     - `PromptError`: Base class for prompt errors.
     - `PromptRenderError`: Raised when prompt rendering fails.
     - `PromptValidationError`: Raised when prompt validation fails.
+    - `VisibilityExpansionRequired`: Raised when model requests expansion of summarized sections.
 - `weakincentives.runtime`: Session and event primitives.
   - Logging:
     - `StructuredLogger`: Logger adapter enforcing a minimal structured event schema.
@@ -181,6 +192,22 @@ Optional extras enable specific providers or tooling:
     - `select_latest`: Select the latest value from a session.
     - `select_where`: Select values from a session matching a predicate.
     - `upsert_by`: Upsert a value in a session by key.
+- `weakincentives.optimizers`: Prompt optimization algorithms and utilities.
+  - Protocol and base classes:
+    - `PromptOptimizer`: Protocol for prompt optimization algorithms.
+    - `BasePromptOptimizer`: Abstract base class for prompt optimizers.
+    - `OptimizerConfig`: Base configuration dataclass with `accepts_overrides` field.
+  - Context and results:
+    - `OptimizationContext`: Immutable context bundle with adapter, event bus, deadline, and overrides.
+    - `OptimizationResult`: Generic result container with response, artifact, and metadata.
+    - `WorkspaceDigestResult`: Result of workspace digest optimization.
+    - `PersistenceScope`: Enum for artifact storage location (`SESSION`, `GLOBAL`).
+  - Concrete implementations:
+    - `WorkspaceDigestOptimizer`: Optimizer for generating task-agnostic workspace summaries.
+  - Events:
+    - `OptimizationStarted`: Event emitted when optimizer begins work.
+    - `OptimizationCompleted`: Event emitted on successful completion.
+    - `OptimizationFailed`: Event emitted when optimization raises exception.
 - `weakincentives.tools`: Built-in tool sections and dataclasses.
   - Planning:
     - `AddStep`: Add a step to a plan.
@@ -559,6 +586,28 @@ deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
 # In handlers: if deadline.remaining() <= timedelta(0): ...
 ```
 
+## Budgets
+
+Budgets combine time and token limits into a single resource envelope:
+
+```python
+from datetime import datetime, timedelta, UTC
+from weakincentives import Budget, BudgetTracker, BudgetExceededError, Deadline
+
+# Create a budget with deadline and token limits
+budget = Budget(
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10)),
+    max_total_tokens=100_000,
+    max_input_tokens=80_000,
+    max_output_tokens=20_000,
+)
+
+# Track usage across evaluations
+tracker = BudgetTracker(budget=budget)
+tracker.record_cumulative("eval-1", usage)  # Record TokenUsage from response
+tracker.check()  # Raises BudgetExceededError if any limit breached
+```
+
 ## Serialization (`weakincentives.serde`)
 
 ```python
@@ -593,6 +642,40 @@ tool = Tool[P, R](name="search", description="...", handler=h, examples=(
 from weakincentives.dbc import require, ensure
 @require(lambda p: p.query, "Query required")
 def handler(params, *, context): ...
+```
+
+### Section visibility (progressive disclosure)
+
+```python
+from weakincentives.prompt import MarkdownSection, SectionVisibility
+
+# Section with summary for progressive disclosure
+section = MarkdownSection(
+    title="Details",
+    template="Full detailed content...",
+    key="details",
+    summary="Brief summary of the section",
+    visibility=SectionVisibility.SUMMARY,  # Show summary by default
+)
+```
+
+### Prompt optimizers
+
+```python
+from weakincentives.optimizers import (
+    OptimizationContext,
+    PersistenceScope,
+    WorkspaceDigestOptimizer,
+)
+
+context = OptimizationContext(
+    adapter=adapter,
+    event_bus=session.event_bus,
+    overrides_store=overrides_store,
+)
+optimizer = WorkspaceDigestOptimizer(context, store_scope=PersistenceScope.SESSION)
+result = optimizer.optimize(prompt, session=session)
+# result.digest contains the workspace summary
 ```
 
 ## CLI
