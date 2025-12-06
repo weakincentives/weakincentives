@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from .adapters import PromptResponse
+from .budget import Budget, BudgetExceededError, BudgetTracker
 from .dataclasses import FrozenDataclass
 from .deadlines import Deadline
 from .errors import WinkError
@@ -32,6 +33,9 @@ from .runtime import StructuredLogger, configure_logging, get_logger
 from .types import JSONValue
 
 __all__ = [
+    "Budget",
+    "BudgetExceededError",
+    "BudgetTracker",
     "Deadline",
     "FrozenDataclass",
     "JSONValue",

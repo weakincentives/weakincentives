@@ -73,6 +73,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     )
 from tests.helpers.events import NullEventBus
 from weakincentives.adapters import PromptEvaluationError
+from weakincentives.budget import Budget
 from weakincentives.prompt import (
     MarkdownSection,
     PromptTemplate,
@@ -1897,3 +1898,38 @@ def test_openai_normalize_input_messages_allows_passthrough() -> None:
         prompt_name="prompt",
     )
     assert messages[-1]["content"] == "raw"
+
+
+def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
+    module = cast(Any, _reload_module())
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="openai-budget-test",
+        name="budget_test",
+        sections=[
+            MarkdownSection[GreetingParams](
+                title="Greeting",
+                key="greeting",
+                template="Say hello to ${user}.",
+            )
+        ],
+    )
+
+    message = DummyMessage(content="Hello!", tool_calls=None)
+    response = DummyResponse([DummyChoice(message)])
+    client = DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    budget = Budget(max_total_tokens=1000)
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    result = adapter.evaluate(
+        prompt.bind(GreetingParams(user="Test")),
+        bus=bus,
+        session=session,
+        budget=budget,
+    )
+
+    assert result.text == "Hello!"

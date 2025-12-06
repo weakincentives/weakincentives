@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cast
 from uuid import uuid4
 
+from ..budget import BudgetExceededError, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt._types import (
@@ -67,6 +68,7 @@ from ._provider_protocols import (
     ProviderToolCall,
 )
 from .core import (
+    PROMPT_EVALUATION_PHASE_BUDGET,
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -713,6 +715,7 @@ def tool_execution(
             session=context.session,
             event_bus=context.bus,
             deadline=context.deadline,
+            budget_tracker=context.budget_tracker,
         )
         tool_result = _invoke_tool_handler(
             handler=handler,
@@ -1161,6 +1164,7 @@ class ConversationConfig:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
+    budget_tracker: BudgetTracker | None = None
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> ConversationConfig:
         """Fill in optional settings using rendered prompt metadata."""
@@ -1185,6 +1189,7 @@ class ToolExecutor:
     parse_arguments: ToolArgumentsParser
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
+    budget_tracker: BudgetTracker | None = None
     _log: StructuredLogger = field(init=False)
     _context: ToolExecutionContext = field(init=False)
     _tool_message_records: list[
@@ -1209,6 +1214,7 @@ class ToolExecutor:
             format_publish_failures=self.format_publish_failures,
             deadline=self.deadline,
             logger_override=self.logger_override,
+            budget_tracker=self.budget_tracker,
         )
         self._tool_message_records = []
 
@@ -1359,6 +1365,8 @@ class ConversationRunner[OutputT]:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
+    budget_tracker: BudgetTracker | None = None
+    _evaluation_id: str = field(init=False)
     _log: StructuredLogger = field(init=False)
     _messages: list[dict[str, Any]] = field(init=False)
     _tool_specs: list[dict[str, Any]] = field(init=False)
@@ -1385,6 +1393,32 @@ class ConversationRunner[OutputT]:
         if self.deadline.remaining() <= timedelta(0):
             self._raise_deadline_error(message, phase=phase)
 
+    def _record_and_check_budget(self) -> None:
+        """Record cumulative token usage and check budget limits."""
+        if self.budget_tracker is None:
+            return
+
+        usage = token_usage_from_payload(self._provider_payload)
+        if usage is not None:
+            self.budget_tracker.record_cumulative(self._evaluation_id, usage)
+
+        self._check_budget()
+
+    def _check_budget(self) -> None:
+        """Check budget limits and raise if exceeded."""
+        if self.budget_tracker is None:
+            return
+
+        try:
+            self.budget_tracker.check()
+        except BudgetExceededError as error:
+            raise PromptEvaluationError(
+                str(error),
+                prompt_name=self.prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_BUDGET,
+                provider_payload=self._provider_payload,
+            ) from error
+
     def run(self) -> PromptResponse[OutputT]:
         """Execute the conversation loop and return the final response."""
 
@@ -1394,6 +1428,10 @@ class ConversationRunner[OutputT]:
             response = self._issue_provider_request()
 
             self._provider_payload = extract_payload(response)
+
+            # Record and check budget after provider response
+            self._record_and_check_budget()
+
             choice = self.select_choice(response)
             message = getattr(choice, "message", None)
             if message is None:
@@ -1489,10 +1527,12 @@ class ConversationRunner[OutputT]:
     def _prepare_payload(self) -> None:
         """Initialize execution state prior to the provider loop."""
 
+        self._evaluation_id = str(uuid4())
         self._messages = list(self.initial_messages)
         self._log = (self.logger_override or logger).bind(
             adapter=self.adapter_name,
             prompt=self.prompt_name,
+            evaluation_id=self._evaluation_id,
         )
         self._log.info(
             "Prompt execution started.",
@@ -1523,6 +1563,7 @@ class ConversationRunner[OutputT]:
             parse_arguments=self.parse_arguments,
             logger_override=self.logger_override,
             deadline=self.deadline,
+            budget_tracker=self.budget_tracker,
         )
         self._response_parser = ResponseParser[OutputT](
             prompt_name=self.prompt_name,
@@ -1586,6 +1627,9 @@ class ConversationRunner[OutputT]:
         )
         self._messages.extend(tool_messages)
 
+        # Check budget after tool execution
+        self._check_budget()
+
         if isinstance(self._next_tool_choice, Mapping):
             tool_choice_mapping = cast(Mapping[str, object], self._next_tool_choice)
             if tool_choice_mapping.get("type") == "function":
@@ -1598,6 +1642,9 @@ class ConversationRunner[OutputT]:
             "Deadline expired while finalizing provider response.",
             phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
+
+        # Final budget check before returning
+        self._check_budget()
 
         output, text_value = self._response_parser.parse(
             message, self._provider_payload
@@ -1706,6 +1753,7 @@ def run_conversation[
         logger_override=normalized_config.logger_override,
         deadline=normalized_config.deadline,
         throttle_policy=normalized_config.throttle_policy,
+        budget_tracker=normalized_config.budget_tracker,
     )
     return runner.run()
 
@@ -1727,6 +1775,7 @@ class ToolExecutionContext:
     deadline: Deadline | None
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
+    budget_tracker: BudgetTracker | None = None
 
     def with_provider_payload(
         self, provider_payload: dict[str, Any] | None

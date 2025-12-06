@@ -31,6 +31,7 @@ from typing import (
     get_type_hints,
 )
 
+from ..budget import BudgetTracker
 from ..deadlines import Deadline
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptValidationError
@@ -93,6 +94,7 @@ class ToolContext:
     session: SessionProtocol
     event_bus: EventBus
     deadline: Deadline | None = None
+    budget_tracker: BudgetTracker | None = None
 
 
 def _normalize_specialization(item: object) -> tuple[object, object]:

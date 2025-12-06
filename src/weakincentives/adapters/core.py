@@ -18,6 +18,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from typing import Any, Literal, TypeVar
 
+from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import WinkError
@@ -55,8 +56,15 @@ class ProviderAdapter(ABC):
         session: SessionProtocol,
         deadline: Deadline | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        budget: Budget | None = None,
+        budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
-        """Evaluate the prompt and return a structured response."""
+        """Evaluate the prompt and return a structured response.
+
+        When ``budget`` is provided and ``budget_tracker`` is not, a new tracker
+        is created. When ``budget_tracker`` is supplied (typically by a parent
+        during subagent dispatch), it is used directly for shared limit enforcement.
+        """
 
         ...
 
@@ -79,7 +87,7 @@ class PromptEvaluationError(WinkError, RuntimeError):
         self.provider_payload = provider_payload
 
 
-PromptEvaluationPhase = Literal["request", "response", "tool"]
+PromptEvaluationPhase = Literal["request", "response", "tool", "budget"]
 """Phases where a prompt evaluation error can occur."""
 
 PROMPT_EVALUATION_PHASE_REQUEST: PromptEvaluationPhase = "request"
@@ -91,11 +99,17 @@ PROMPT_EVALUATION_PHASE_RESPONSE: PromptEvaluationPhase = "response"
 PROMPT_EVALUATION_PHASE_TOOL: PromptEvaluationPhase = "tool"
 """Prompt evaluation failed while handling a tool invocation."""
 
+PROMPT_EVALUATION_PHASE_BUDGET: PromptEvaluationPhase = "budget"
+"""Prompt evaluation failed due to budget limits being exceeded."""
+
 
 __all__ = [
+    "PROMPT_EVALUATION_PHASE_BUDGET",
     "PROMPT_EVALUATION_PHASE_REQUEST",
     "PROMPT_EVALUATION_PHASE_RESPONSE",
     "PROMPT_EVALUATION_PHASE_TOOL",
+    "Budget",
+    "BudgetTracker",
     "PromptEvaluationError",
     "PromptEvaluationPhase",
     "PromptResponse",
