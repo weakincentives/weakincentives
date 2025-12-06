@@ -251,6 +251,19 @@ reportUnnecessaryTypeIgnoreComment = "error"
 reportUnreachable = "error"
 reportUnusedCallResult = "error"
 reportUnusedExpression = "error"
+# Tier 1: High-impact rules
+reportInconsistentConstructor = "error"
+reportMatchNotExhaustive = "error"
+reportUnnecessaryComparison = "error"
+reportDeprecated = "error"
+# Tier 2: Medium-impact rules
+reportUnnecessaryIsInstance = "error"
+reportUnnecessaryCast = "error"
+reportUnnecessaryContains = "error"
+reportConstantRedefinition = "error"
+# Tier 3: Style rules
+reportUntypedNamedTuple = "error"
+reportTypeCommentUsage = "error"
 
 [tool.ty]
 
@@ -270,3 +283,6 @@ unresolved-global = "error"
 unsupported-base = "error"
 unused-ignore-comment = "error"
 useless-overload-body = "error"
+# High-impact additions
+possibly-missing-attribute = "error"
+ignore-comment-unknown-rule = "error"
