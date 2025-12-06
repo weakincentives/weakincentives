@@ -131,6 +131,7 @@ Consult these specs before modifying related code:
 | `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
+| `specs/HOSTED_TOOLS.md` | Provider-executed tools (web search, code interpreter) |
 | `specs/PROMPTS.md` | Prompt system, composition, structured output |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
