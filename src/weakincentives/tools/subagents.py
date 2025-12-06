@@ -18,7 +18,6 @@ import json
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field, is_dataclass
-from enum import Enum, auto
 from typing import Any, Final, cast, override
 
 from ..dataclasses import FrozenDataclass
@@ -31,17 +30,9 @@ from ..prompt.prompt import RenderedPrompt
 from ..prompt.protocols import PromptProtocol, PromptResponseProtocol
 from ..prompt.tool import Tool, ToolContext, ToolExample
 from ..prompt.tool_result import ToolResult
-from ..runtime.events import InProcessEventBus
 from ..runtime.events._types import EventBus
 from ..runtime.session.protocols import SessionProtocol
 from ..serde import dump
-
-
-class SubagentIsolationLevel(Enum):
-    """Isolation modes describing how children interact with parent state."""
-
-    NO_ISOLATION = auto()
-    FULL_ISOLATION = auto()
 
 
 def _default_max_workers() -> int:
@@ -122,50 +113,20 @@ def _build_error(message: str) -> str:
     return cleaned or "Subagent execution failed"
 
 
-def _clone_session(
-    session: SessionProtocol,
-    *,
-    bus: EventBus,
-    parent: SessionProtocol | None = None,
-) -> SessionProtocol | None:
-    clone_method = getattr(session, "clone", None)
-    if not callable(clone_method):
-        return None
-    kwargs: dict[str, object] = {"bus": bus}
-    if parent is not None:
-        kwargs["parent"] = parent
-    return cast(SessionProtocol, clone_method(**kwargs))
-
-
 def _prepare_child_contexts(
     *,
     delegations: Iterable[DelegationParams],
     session: SessionProtocol,
     bus: EventBus,
-    isolation_level: SubagentIsolationLevel,
-) -> tuple[tuple[SessionProtocol, EventBus], ...] | str:
-    if isolation_level is SubagentIsolationLevel.NO_ISOLATION:
-        return tuple((session, bus) for _ in delegations)
-
-    child_pairs: list[tuple[SessionProtocol, EventBus]] = []
-    for _ in delegations:
-        child_bus = InProcessEventBus()
-        try:
-            cloned = _clone_session(session, bus=child_bus, parent=session)
-        except Exception as error:  # pragma: no cover - defensive
-            return _build_error(str(error))
-        if cloned is None:
-            return "Parent session does not support cloning for full isolation."
-        child_pairs.append((cloned, child_bus))
-    return tuple(child_pairs)
+) -> tuple[tuple[SessionProtocol, EventBus], ...]:
+    return tuple((session, bus) for _ in delegations)
 
 
 def build_dispatch_subagents_tool(
     *,
-    isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.NO_ISOLATION,
     accepts_overrides: bool = False,
 ) -> Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]:
-    """Return a configured dispatch tool bound to the desired isolation level."""
+    """Return a configured dispatch tool for parallel subagent execution."""
 
     examples: tuple[
         ToolExample[DispatchSubagentsParams, tuple[SubagentResult, ...]], ...
@@ -258,19 +219,11 @@ def build_dispatch_subagents_tool(
             delegations=delegations,
             session=context.session,
             bus=context.event_bus,
-            isolation_level=isolation_level,
         )
-        if isinstance(contexts, str):
-            return ToolResult(
-                message=contexts,
-                value=None,
-                success=False,
-            )
 
         adapter = context.adapter
         parse_output = rendered_parent.container is not None
         parent_deadline = rendered_parent.deadline
-        # Budget tracker is always shared with children regardless of isolation
         parent_budget_tracker = context.budget_tracker
 
         def _run_child(
@@ -360,17 +313,9 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
     def __init__(
         self,
         *,
-        isolation_level: SubagentIsolationLevel | None = None,
         accepts_overrides: bool = False,
     ) -> None:
-        effective_level = (
-            isolation_level
-            if isolation_level is not None
-            else SubagentIsolationLevel.NO_ISOLATION
-        )
-        self._isolation_level = effective_level
         tool = build_dispatch_subagents_tool(
-            isolation_level=effective_level,
             accepts_overrides=accepts_overrides,
         )
         super().__init__(
@@ -401,7 +346,6 @@ class SubagentsSection(MarkdownSection[_SubagentsSectionParams]):
     @override
     def clone(self, **kwargs: object) -> SubagentsSection:
         return SubagentsSection(
-            isolation_level=self._isolation_level,
             accepts_overrides=self.accepts_overrides,
         )
 
@@ -411,7 +355,6 @@ dispatch_subagents = build_dispatch_subagents_tool()
 
 __all__ = [
     "DispatchSubagentsParams",
-    "SubagentIsolationLevel",
     "SubagentResult",
     "SubagentsSection",
     "build_dispatch_subagents_tool",

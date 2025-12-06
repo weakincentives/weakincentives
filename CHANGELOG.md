@@ -44,6 +44,10 @@ Release highlights for weakincentives.
 
 - Podman sandbox containers now start with networking disabled (`network_mode=none`),
   and an integration test verifies they cannot reach external hosts.
+- **Breaking**: Removed `SubagentIsolationLevel` enum and `isolation_level`
+  parameter from `SubagentsSection` and `build_dispatch_subagents_tool`. Subagents
+  now always share the parent's session and event bus (the previous default
+  behavior). Full isolation mode has been dropped.
 
 ## v0.12.0 - 2025-11-30
 
