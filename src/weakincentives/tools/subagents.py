@@ -241,37 +241,70 @@ _PLAN_DELEGATION_TEMPLATE: Final[str] = (
 )
 
 
+def _parent_has_planning_tools(rendered_parent: RenderedPromptProtocol[Any]) -> bool:
+    """Check if the parent prompt includes planning tools."""
+    planning_tool_names = {"planning_read_plan", "planning_update_step"}
+    for tool in rendered_parent.tools:
+        if getattr(tool, "name", None) in planning_tool_names:
+            return True
+    return False
+
+
 def _build_plan_delegation_prompt(
     *,
     parent_prompt: PromptProtocol[Any],
     rendered_parent: RenderedPromptProtocol[Any],
+    child_session: Session,
 ) -> Prompt[Any]:
     """Build a delegation prompt that instructs the child to complete its plan.
 
     The prompt includes parent tools and planning tools, with instructions to
     complete all steps in the pre-populated plan.
+
+    If the parent already has planning tools, they are filtered out and the
+    delegation section includes the remaining parent tools. If the parent
+    does not have planning tools, a PlanningToolsSection is added bound to
+    the child session.
     """
     from ..prompt import PromptTemplate
+    from .planning import PlanningToolsSection
 
-    # Combine parent tools with standalone planning tools so subagents can
-    # read and update the Plan injected into their sessions.
-    # Filter out any existing planning tools from parent to avoid duplicates.
-    planning_tool_names = {"planning_read_plan", "planning_update_step"}
-    parent_tools = tuple(
-        t
-        for t in rendered_parent.tools
-        if getattr(t, "name", None) not in planning_tool_names
-    )
-    planning_tools = build_standalone_planning_tools()
-    combined_tools = (*parent_tools, *planning_tools)
+    # Check if parent has planning tools
+    parent_has_planning = _parent_has_planning_tools(rendered_parent)
 
-    # Create a section for the delegation instructions
-    delegation_section = MarkdownSection[_PlanDelegationParams](
-        title="Subagent Task",
-        key="subagent-task",
-        template=_PLAN_DELEGATION_TEMPLATE,
-        tools=combined_tools,
-    )
+    if parent_has_planning:
+        # Filter out planning tools from parent - child session already has
+        # planning reducers registered and will use its own tools
+        planning_tool_names = {"planning_read_plan", "planning_update_step"}
+        parent_tools = tuple(
+            t
+            for t in rendered_parent.tools
+            if getattr(t, "name", None) not in planning_tool_names
+        )
+        # Combine with standalone planning tools for the child's session
+        planning_tools = build_standalone_planning_tools()
+        combined_tools = (*parent_tools, *planning_tools)
+
+        # Create a section for the delegation instructions with tools
+        delegation_section = MarkdownSection[_PlanDelegationParams](
+            title="Subagent Task",
+            key="subagent-task",
+            template=_PLAN_DELEGATION_TEMPLATE,
+            tools=combined_tools,
+        )
+        sections: tuple[object, ...] = (delegation_section,)
+    else:
+        # Parent doesn't have planning tools - add PlanningToolsSection
+        # Create delegation section with only parent tools
+        delegation_section = MarkdownSection[_PlanDelegationParams](
+            title="Subagent Task",
+            key="subagent-task",
+            template=_PLAN_DELEGATION_TEMPLATE,
+            tools=rendered_parent.tools,
+        )
+        # Add PlanningToolsSection bound to the child session
+        planning_section = PlanningToolsSection(session=child_session)
+        sections = (delegation_section, planning_section)
 
     # Get the output type from the parent prompt - already validated as dataclass
     output_type = rendered_parent.output_type
@@ -283,7 +316,7 @@ def _build_plan_delegation_prompt(
     delegation_prompt = prompt_cls(
         ns=f"{parent_prompt.ns}.subagent",
         key=f"{parent_prompt.key}-delegation",
-        sections=(delegation_section,),
+        sections=sections,
         inject_output_instructions=False,
         allow_extra_keys=bool(rendered_parent.allow_extra_keys),
     )
@@ -405,6 +438,7 @@ def build_dispatch_subagents_tool(
                 delegation_prompt = _build_plan_delegation_prompt(
                     parent_prompt=context.prompt,
                     rendered_parent=rendered_parent,
+                    child_session=child_session,
                 )
                 bound_prompt = cast(
                     PromptProtocol[Any],
