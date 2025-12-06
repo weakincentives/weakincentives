@@ -62,8 +62,8 @@ class ProviderAdapter(ABC):
         """Evaluate the prompt and return a structured response.
 
         When ``budget`` is provided and ``budget_tracker`` is not, a new tracker
-        is created. When ``budget_tracker`` is supplied (typically by a parent
-        during subagent dispatch), it is used directly for shared limit enforcement.
+        is created. When ``budget_tracker`` is supplied, it is used directly for
+        shared limit enforcement.
         """
 
         ...

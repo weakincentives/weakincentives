@@ -20,8 +20,8 @@ for prompts, tools, and sessions. Detailed contract in
 ## Deadlines
 
 Adapters accept a caller-supplied wall-clock deadline that applies to the entire
-evaluation, including nested subagents and tool calls. Enforcement semantics are
-defined in the [Deadlines specification](specs/DEADLINES.md).
+evaluation, including all tool calls. Enforcement semantics are defined in the
+[Deadlines specification](specs/DEADLINES.md).
 
 ## Event Bus
 
@@ -62,12 +62,6 @@ The central abstraction for assembling markdown system prompts from typed
 sections. Prompts validate placeholders, compose tooling, and optionally declare
 structured outputs. Full contract in the [Prompt specification](specs/PROMPTS.md).
 
-## Prompt Composition
-
-Delegating agents wrap an existing rendered prompt with a prescriptive header so
-child runs inherit the full parent context unchanged. Layout and invariants are
-defined in the [Prompt Wrapping specification](specs/PROMPTS_COMPOSITION.md).
-
 ## Prompt Overrides
 
 Hash-addressed override files let optimizers or humans replace prompt sections or
@@ -97,12 +91,6 @@ producing immutable reducer-managed snapshots for each slice. Details in the
 `Prompt[OutputT]` specializes a prompt with an output dataclass so the runtime
 instructs models to return JSON and parses replies into typed objects. Behavior
 is defined in [Structured Output via `Prompt[OutputT]`](specs/STRUCTURED_OUTPUT.md).
-
-## Subagent
-
-The `SubagentsSection` introduces a delegation tool that spawns parallel child
-runs sharing the parent's tools, session, and telemetry. Requirements appear in
-the [Subagents specification](specs/SUBAGENTS.md).
 
 ## Thread Safety
 

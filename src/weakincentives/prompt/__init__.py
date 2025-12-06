@@ -20,15 +20,6 @@ from ._types import (
     SupportsToolResult,
     ToolRenderableResult,
 )
-from .composition import (
-    DelegationParams,
-    DelegationPrompt,
-    DelegationSummarySection,
-    ParentPromptParams,
-    ParentPromptSection,
-    RecapParams,
-    RecapSection,
-)
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -70,15 +61,10 @@ from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
-    "DelegationParams",
-    "DelegationPrompt",
-    "DelegationSummarySection",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",
     "OutputParseError",
-    "ParentPromptParams",
-    "ParentPromptSection",
     "Prompt",
     "PromptDescriptor",
     "PromptError",
@@ -92,8 +78,6 @@ __all__ = [
     "PromptTemplateProtocol",
     "PromptValidationError",
     "ProviderAdapterProtocol",
-    "RecapParams",
-    "RecapSection",
     "RenderedPrompt",
     "RenderedPromptProtocol",
     "Section",

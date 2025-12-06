@@ -302,7 +302,6 @@ class Deadline:
 
 - Stored on `RenderedPrompt.deadline`
 - Available via `ToolContext.deadline`
-- Subagents inherit parent deadline (use tighter of the two)
 
 ### DeadlineExceededError
 
@@ -368,16 +367,6 @@ class BudgetTracker:
 1. **After every provider response** - Record usage, check limits
 1. **After every tool call** - Check limits
 1. **On evaluation completion** - Final check
-
-### Subagent Propagation
-
-| Isolation Level | Session/Bus | BudgetTracker |
-|-----------------|-------------|---------------|
-| NO_ISOLATION | Shared | Shared |
-| FULL_ISOLATION | Cloned | Shared |
-
-Budget tracking is always shared so parallel subagents contribute to global
-limits.
 
 ### BudgetExceededError
 

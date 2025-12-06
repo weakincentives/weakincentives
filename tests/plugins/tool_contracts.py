@@ -39,7 +39,6 @@ _MODULES_TO_AUDIT: tuple[str, ...] = (
     "weakincentives.tools.planning",
     "weakincentives.tools.vfs",
     "weakincentives.tools.asteval",
-    "weakincentives.tools.subagents",
 )
 
 

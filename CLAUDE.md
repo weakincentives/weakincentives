@@ -52,7 +52,7 @@ src/weakincentives/
 ├── prompt/          # Section/Prompt composition, overrides, tools
 ├── runtime/         # Session, events, logging
 ├── serde/           # Dataclass serialization (no Pydantic)
-├── tools/           # Planning, VFS, asteval, subagents, Podman
+├── tools/           # Planning, VFS, asteval, Podman
 └── types/           # JSON type aliases
 ```
 
@@ -137,7 +137,6 @@ Consult these specs before modifying related code:
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
-| `specs/SUBAGENTS.md` | Sub-agent orchestration |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/LOGGING.md` | Logging surfaces |
 

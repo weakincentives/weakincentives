@@ -3,7 +3,7 @@
 This document describes the `code_reviewer_example.py` script that ships with
 the library. The script assembles a full-featured code review agent
 demonstrating prompt composition, progressive disclosure, workspace tools,
-planning, subagents, and adapter optimization in one place.
+planning, and adapter optimization in one place.
 
 ## Rationale and Scope
 
@@ -119,7 +119,7 @@ class RuntimeContext:
 
 1. **Code Review Brief** (`MarkdownSection[ReviewGuidance]`)
 
-   - Template describing tooling, delegation, and output format
+   - Template describing tooling and output format
    - Key: `code-review-brief`
 
 1. **Workspace Digest** (`WorkspaceDigestSection`)
@@ -133,11 +133,6 @@ class RuntimeContext:
    - Key: `reference-docs`
    - Visibility: `SectionVisibility.SUMMARY`
    - Summary: "Documentation for ${project_name} is available..."
-
-1. **Subagents** (`SubagentsSection`)
-
-   - Enables `dispatch_subagents` for parallel exploration
-   - `accepts_overrides=True`
 
 1. **Planning Tools** (`PlanningToolsSection`)
 

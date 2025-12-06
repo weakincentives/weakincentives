@@ -58,10 +58,10 @@ Release highlights for weakincentives.
 
 - Podman sandbox containers now start with networking disabled (`network_mode=none`),
   and an integration test verifies they cannot reach external hosts.
-- **Breaking**: Removed `SubagentIsolationLevel` enum and `isolation_level`
-  parameter from `SubagentsSection` and `build_dispatch_subagents_tool`. Subagents
-  now always share the parent's session and event bus (the previous default
-  behavior). Full isolation mode has been dropped.
+- **Breaking**: Removed all subagent and prompt delegation code including
+  `SubagentsSection`, `dispatch_subagents`, `DelegationPrompt`, and related
+  composition helpers. This approach is not the right fit from a state and
+  context management perspective.
 
 ## v0.12.0 - 2025-11-30
 
@@ -77,10 +77,8 @@ Release highlights for weakincentives.
   payloads are reused across the UI, and snapshot path handling is documented so
   missing or renamed files stay discoverable.
 
-### Sessions & Subagents
+### Sessions
 
-- Isolated subagents now inherit their parent session so reducers, tags, and
-  event context stay consistent across nested runs.
 - Session locking was simplified and invariant/`skip_invariant` typing tightened
   to keep reducer mutations predictable and thread-safe.
 
@@ -108,7 +106,7 @@ Release highlights for weakincentives.
 - Host mount traversal now uses `Path.walk` for more reliable discovery in VFS
   and Podman-backed workspaces.
 - Tool validation tightened with explicit `ToolExample` support and new examples
-  covering VFS, planning, ASTEval, subagents, and Podman tools.
+  covering VFS, planning, ASTEval, and Podman tools.
 - Tool execution flow now relies on focused helpers for argument parsing,
   deadline checks, handler invocation, and result logging to reduce complexity
   while preserving structured events.
@@ -213,8 +211,7 @@ Release highlights for weakincentives.
 - Added `PodmanSandboxSection` (renamed from `PodmanToolsSection`) as a
   Podman-backed workspace that mirrors the VFS
   contract, exposes `shell_execute`, `ls`/`read_file`/`write_file`/`rm`, and
-  publishes `PodmanWorkspace` slices so reducers and subagents can inspect
-  container state. The section sits behind the new `weakincentives[podman]`
+  publishes `PodmanWorkspace` slices so reducers can inspect container state. The section sits behind the new `weakincentives[podman]`
   optional extra, is re-exported from `weakincentives.tools`, and ships with a
   spec plus pytest marker for Podman-only suites.
 - `evaluate_python` is now available inside the Podman sandbox with the same
@@ -240,9 +237,9 @@ Release highlights for weakincentives.
 
 - `Prompt.render` accepts any overrides store implementing the new
   `PromptOverridesStoreProtocol`, and we now export `PromptProtocol`,
-  `ProviderAdapterProtocol`, and `RenderedPromptProtocol` for adapters, subagent
-  dispatchers, and tool authors that need structural typing without importing
-  the concrete prompt classes.
+  `ProviderAdapterProtocol`, and `RenderedPromptProtocol` for adapters and tool
+  authors that need structural typing without importing the concrete prompt
+  classes.
 - `Prompt` exposes a `structured_output` descriptor (and `RenderedPrompt` mirrors
   it) so runtimes can inspect the resolved dataclass/container contract directly
   instead of juggling separate `output_type`, `container`, and `allow_extra_keys`
@@ -276,15 +273,11 @@ Release highlights for weakincentives.
   `VfsPath`/`VirtualFileSystem` dataclasses, ASCII/UTF-8 guards, list/glob/grep/edit
   helpers, host mount previews, and refreshed exports/specs/tests keep VFS sessions
   deterministic.
-- `SubagentsSection` now renders via the markdown template stack, can opt into prompt
-  overrides, and propagates the overrides flag down to `dispatch_subagents` so
-  delegated prompts respect the same tooling toggles.
 - The ASTEval tool always runs multi-line inputs, dropping the expression-mode toggle
   while refreshing the section template, serde fixtures, and tests to reflect the
   simplified contract.
 - Added pytest-powered audits that enforce documentation, slots, tuple defaults, and
-  precise typing on every built-in tool dataclass while relaxing the subagent payload
-  dataclasses so tuple inputs normalize cleanly.
+  precise typing on every built-in tool dataclass.
 
 ### Runtime & Infrastructure
 
@@ -317,12 +310,10 @@ Release highlights for weakincentives.
   timezone-aware timestamps, wiring the DbC utilities into the public export
   surface to keep runtime guarantees consistent across adapters.
 
-### Prompt Authoring & Subagents
+### Prompt Authoring
 
 - Parameterless prompts and sections now accept zero-argument `enabled`
   callables, keeping declarative gating logic concise.
-- The subagent dispatch tool gained explicit isolation levels that can clone
-  sessions and event buses per delegation when sandboxing is required.
 - Centralized structured output payload parsing into shared helpers used by the
   prompt runtime and adapters to keep response handling consistent.
 
@@ -341,11 +332,8 @@ Release highlights for weakincentives.
 
 ## v0.6.0 - 2025-11-05
 
-### Prompt & Delegation
+### Prompt & Overrides
 
-- Added delegation prompt composition helpers, a `SubagentsSection`, and the
-  `dispatch_subagents` tool so parent prompts can fan work out to subagents
-  while reusing parent response formats and reducer wiring.
 - Rebuilt the local prompt overrides store with structured logging, strict
   slug/tag validation, file-level locks, and atomic writes, and taught sections
   and tools to declare an `accepts_overrides` flag so override pipelines target
@@ -383,8 +371,8 @@ Release highlights for weakincentives.
   `code_reviewer_example.py` that mounts repositories, tracks tool calls, and
   emits structured logs, removing the legacy example modules/tests.
 - Expanded the specs portfolio with new documents for the CLI, logging schema,
-  tool context, planning strategies, prompt composition, subagents, and thread
-  safety, plus refreshed README sections.
+  tool context, planning strategies, prompt composition, and thread safety, plus
+  refreshed README sections.
 - Added a `make demo` target, tightened the Bandit compatibility shim, and
   refreshed dependency locks.
 
@@ -414,7 +402,7 @@ Release highlights for weakincentives.
 
 ### Documentation
 
-- Added specs covering session snapshots, local prompt overrides, prompt subagent dispatch, and tool error handling.
+- Added specs covering session snapshots, local prompt overrides, and tool error handling.
 - Expanded ASTEval guidance with tool invocation examples and refreshed README tutorials with spec links and symbol search tooling.
 
 ## v0.4.0 - 2025-11-01
