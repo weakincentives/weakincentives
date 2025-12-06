@@ -67,11 +67,14 @@ class OpenAIWebSearchConfig:
         user_location: Geographic context for search results.
         search_context_size: Amount of context from search results.
             One of "low", "medium", or "high". Defaults to "medium".
+        external_web_access: Whether to allow external web access.
+            Defaults to True.
     """
 
     filters: OpenAIWebSearchFilters | None = None
     user_location: OpenAIUserLocation | None = None
     search_context_size: str | None = None
+    external_web_access: bool = True
 
 
 @dataclass(slots=True, frozen=True)
@@ -128,6 +131,9 @@ class OpenAIWebSearchCodec:
         if config.search_context_size:
             spec["search_context_size"] = config.search_context_size
 
+        if not config.external_web_access:
+            spec["external_web_access"] = False
+
         return spec
 
     @staticmethod
@@ -145,9 +151,7 @@ class OpenAIWebSearchCodec:
             spec["filters"] = filters
 
     @staticmethod
-    def _add_user_location(
-        spec: dict[str, Any], config: OpenAIWebSearchConfig
-    ) -> None:
+    def _add_user_location(spec: dict[str, Any], config: OpenAIWebSearchConfig) -> None:
         """Add user location to the spec if configured."""
         if not config.user_location:
             return

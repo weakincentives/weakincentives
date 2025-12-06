@@ -72,11 +72,12 @@ class TestOpenAIWebSearchConfig:
         assert loc.timezone == "America/Los_Angeles"
 
     def test_default_config(self) -> None:
-        """Default config has None for all fields."""
+        """Default config has None for optional fields and True for external_web_access."""
         config = OpenAIWebSearchConfig()
         assert config.filters is None
         assert config.user_location is None
         assert config.search_context_size is None
+        assert config.external_web_access is True
 
     def test_config_with_all_options(self) -> None:
         """Config can be created with all options."""
@@ -86,10 +87,12 @@ class TestOpenAIWebSearchConfig:
             ),
             user_location=OpenAIUserLocation(country="US"),
             search_context_size="high",
+            external_web_access=False,
         )
         assert config.filters is not None
         assert config.user_location is not None
         assert config.search_context_size == "high"
+        assert config.external_web_access is False
 
 
 class TestOpenAIWebSearchFactory:
@@ -233,6 +236,25 @@ class TestOpenAIWebSearchCodec:
 
         assert result["search_context_size"] == "high"
 
+    def test_serialize_with_external_web_access_disabled(self) -> None:
+        """Serialize config with external_web_access disabled."""
+        codec = OpenAIWebSearchCodec()
+        config = OpenAIWebSearchConfig(external_web_access=False)
+        tool = openai_web_search(config)
+        result = codec.serialize(tool)
+
+        assert result["external_web_access"] is False
+
+    def test_serialize_with_external_web_access_enabled(self) -> None:
+        """Serialize config with external_web_access enabled (default)."""
+        codec = OpenAIWebSearchCodec()
+        config = OpenAIWebSearchConfig(external_web_access=True)
+        tool = openai_web_search(config)
+        result = codec.serialize(tool)
+
+        # Default True should not add the field
+        assert "external_web_access" not in result
+
     def test_serialize_full_config(self) -> None:
         """Serialize fully configured tool."""
         codec = OpenAIWebSearchCodec()
@@ -242,6 +264,7 @@ class TestOpenAIWebSearchCodec:
             ),
             user_location=OpenAIUserLocation(country="US"),
             search_context_size="medium",
+            external_web_access=False,
         )
         tool = openai_web_search(config)
         result = codec.serialize(tool)
@@ -250,6 +273,7 @@ class TestOpenAIWebSearchCodec:
         assert result["filters"] == {"allowed_domains": ["example.com"]}
         assert result["user_location"]["country"] == "US"
         assert result["search_context_size"] == "medium"
+        assert result["external_web_access"] is False
 
 
 @dataclass
@@ -455,6 +479,34 @@ class TestOpenAIWebSearchCodecParseOutput:
         assert result.text == ""
         assert result.citations == ()
 
+    def test_parse_response_ignores_non_output_text_parts(self) -> None:
+        """Parsing response ignores content parts that are not output_text."""
+        codec = OpenAIWebSearchCodec()
+        tool = openai_web_search()
+
+        items = [
+            MockResponseItem(type="web_search_call"),
+            MockResponseItem(
+                type="message",
+                content=[
+                    MockContentPart(
+                        type="thinking",
+                        text="This is thinking, not output.",
+                    ),
+                    MockContentPart(
+                        type="output_text",
+                        text="Actual output text.",
+                        annotations=[],
+                    ),
+                ],
+            ),
+        ]
+
+        result = codec.parse_output(items, tool)
+
+        assert result is not None
+        assert result.text == "Actual output text."
+
 
 class TestOpenAIWebSearchSection:
     """Tests for the convenience web search section."""
@@ -528,3 +580,16 @@ class TestEmptyParams:
         # Frozen dataclass can raise AttributeError or TypeError depending on implementation
         with pytest.raises((AttributeError, TypeError)):
             params.foo = "bar"  # type: ignore[attr-defined]
+
+
+class TestModuleDir:
+    """Tests for module __dir__ function."""
+
+    def test_module_dir_includes_exports(self) -> None:
+        """Module __dir__ includes all expected exports."""
+        from weakincentives.adapters import openai_hosted
+
+        exported = dir(openai_hosted)
+        assert "OpenAIWebSearchConfig" in exported
+        assert "OpenAIWebSearchSection" in exported
+        assert "openai_web_search" in exported

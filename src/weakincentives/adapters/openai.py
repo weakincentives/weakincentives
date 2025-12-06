@@ -643,7 +643,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._model = model
         self._model_config = model_config
         self._tool_choice: ToolChoice = tool_choice
-        self._use_native_response_format = use_native_response_format
         self._hosted_tool_codecs = (
             hosted_tool_codecs
             if hosted_tool_codecs is not None

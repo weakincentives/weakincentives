@@ -21,6 +21,7 @@ from typing import cast
 import pytest
 
 from weakincentives.prompt import (
+    HostedTool,
     MarkdownSection,
     Prompt,
     PromptRenderError,
@@ -369,3 +370,46 @@ def test_markdown_section_missing_placeholder_raises_prompt_error() -> None:
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.placeholder == "name"
+
+
+@dataclass
+class HostedToolSectionConfig:
+    """Configuration for test hosted tool."""
+
+    value: str = "test"
+
+
+class SectionWithHostedTools(MarkdownSection[IntroParams]):
+    """A section that provides hosted tools."""
+
+    def __init__(self) -> None:
+        self._tool = HostedTool(
+            kind="test_tool",
+            name="test_tool",
+            description="Test hosted tool",
+            config=HostedToolSectionConfig(),
+        )
+        super().__init__(
+            title="Hosted Tools Section",
+            key="hosted_tools_section",
+            template="Section with hosted tools: ${title}",
+        )
+
+    def hosted_tools(self) -> tuple[HostedTool[HostedToolSectionConfig], ...]:
+        return (self._tool,)
+
+
+def test_prompt_collects_hosted_tools_from_sections() -> None:
+    """Rendered prompt collects hosted tools from sections."""
+    section_with_tools = SectionWithHostedTools()
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="hosted-tools-test",
+        sections=(section_with_tools,),
+    )
+
+    rendered = Prompt(template).bind(IntroParams(title="test")).render()
+
+    assert len(rendered.hosted_tools) == 1
+    assert rendered.hosted_tools[0].kind == "test_tool"
+    assert rendered.hosted_tools[0].name == "test_tool"

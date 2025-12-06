@@ -47,9 +47,7 @@ class TestHostedToolValidation:
 
     def test_empty_name_raises(self) -> None:
         """Empty name raises PromptValidationError."""
-        with pytest.raises(
-            PromptValidationError, match="HostedTool name must match"
-        ):
+        with pytest.raises(PromptValidationError, match="HostedTool name must match"):
             HostedTool(
                 kind="web_search",
                 name="",
