@@ -26,7 +26,7 @@ from ._types import (
     SupportsToolResult,
 )
 from .errors import PromptRenderError
-from .section import Section, SectionVisibility
+from .section import Section, SectionVisibility, VisibilitySelector
 from .tool import Tool
 from .tool_result import render_tool_payload
 
@@ -52,7 +52,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
         tools: Sequence[object] | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
-        visibility: SectionVisibility = SectionVisibility.FULL,
+        visibility: VisibilitySelector = SectionVisibility.FULL,
     ) -> None:
         self.template = template
         super().__init__(
@@ -76,7 +76,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
         *,
         visibility: SectionVisibility | None = None,
     ) -> str:
-        effective = self.effective_visibility(visibility)
+        effective = self.effective_visibility(override=visibility, params=params)
         if effective == SectionVisibility.SUMMARY and self.summary is not None:
             return self.render_with_template(self.summary, params, depth, number)
         return self.render_with_template(self.template, params, depth, number)

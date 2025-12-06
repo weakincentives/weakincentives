@@ -232,7 +232,7 @@ def test_text_section_effective_visibility_returns_override() -> None:
 
     assert section.effective_visibility() == SectionVisibility.FULL
     assert (
-        section.effective_visibility(SectionVisibility.SUMMARY)
+        section.effective_visibility(override=SectionVisibility.SUMMARY)
         == SectionVisibility.SUMMARY
     )
 
@@ -252,7 +252,7 @@ def test_text_section_effective_visibility_fallback_to_full_without_summary() ->
     assert section.effective_visibility() == SectionVisibility.FULL
     # Falls back to FULL when requesting SUMMARY but no summary is set
     assert (
-        section.effective_visibility(SectionVisibility.SUMMARY)
+        section.effective_visibility(override=SectionVisibility.SUMMARY)
         == SectionVisibility.FULL
     )
 

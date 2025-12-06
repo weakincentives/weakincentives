@@ -144,7 +144,7 @@ def test_section_effective_visibility_returns_override_when_provided() -> None:
     )
 
     assert (
-        section.effective_visibility(SectionVisibility.SUMMARY)
+        section.effective_visibility(override=SectionVisibility.SUMMARY)
         == SectionVisibility.SUMMARY
     )
 
@@ -156,9 +156,42 @@ def test_section_effective_visibility_fallback_to_full_without_summary() -> None
     assert section.effective_visibility() == SectionVisibility.FULL
     # Falls back to FULL when requesting SUMMARY but no summary is set
     assert (
-        section.effective_visibility(SectionVisibility.SUMMARY)
+        section.effective_visibility(override=SectionVisibility.SUMMARY)
         == SectionVisibility.FULL
     )
+
+
+def test_section_visibility_callable_receives_params() -> None:
+    def selector(params: ExampleParams) -> SectionVisibility:
+        return (
+            SectionVisibility.SUMMARY
+            if params.value == "summarize"
+            else SectionVisibility.FULL
+        )
+
+    section = ExampleSection(
+        title="Toggle", key="toggle", summary="Short", visibility=selector
+    )
+
+    assert (
+        section.effective_visibility(params=ExampleParams(value="summarize"))
+        == SectionVisibility.SUMMARY
+    )
+    assert (
+        section.effective_visibility(params=ExampleParams(value="full"))
+        == SectionVisibility.FULL
+    )
+
+
+def test_section_visibility_callable_without_params() -> None:
+    section = PlainSection(
+        title="Static",
+        key="static",
+        summary="Short",
+        visibility=lambda: SectionVisibility.SUMMARY,
+    )
+
+    assert section.effective_visibility() == SectionVisibility.SUMMARY
 
 
 def test_section_original_summary_template_returns_summary() -> None:

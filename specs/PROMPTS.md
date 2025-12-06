@@ -87,6 +87,9 @@ to `True`. When false, the section is excluded from prompt descriptors and the o
 replacement bodies. Built-in sections provided by the framework (including the generated response format section)
 default this flag to `False` so automatic optimization infrastructure leaves them untouched, but their constructors
 expose an `accepts_overrides` argument so callers can opt in when a specific deployment is ready for tuning. When a built-in section opts in, the tools it contributes inherit the same `accepts_overrides` value so the entire suite toggles together.
+Sections also accept a `visibility` value that defaults to `SectionVisibility.FULL`. Authors may supply
+`Callable[[ParamsT], SectionVisibility]` (or a parameterless callable for sections without params) to dynamically
+select summary vs. full rendering based on the effective parameters.
 
 ## Construction Rules
 

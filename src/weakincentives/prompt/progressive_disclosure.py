@@ -33,6 +33,7 @@ from .tool_result import ToolResult
 if TYPE_CHECKING:
     from collections.abc import Mapping, Set
 
+    from ._types import SupportsDataclass
     from .registry import RegistrySnapshot
 
 
@@ -182,20 +183,28 @@ def build_summary_suffix(section_key: str, child_keys: tuple[str, ...]) -> str:
 def has_summarized_sections(
     registry: RegistrySnapshot,
     visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+    param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass] | None = None,
 ) -> bool:
     """Check if the prompt contains any sections that will render as SUMMARY.
 
     Args:
         registry: The prompt's section registry snapshot.
         visibility_overrides: Optional visibility overrides applied at render time.
+        param_lookup: Optional parameter lookup used to evaluate visibility
+            selectors that depend on section parameters.
 
     Returns:
         True if at least one section renders with SUMMARY visibility.
     """
     overrides = visibility_overrides or {}
+    params = dict(param_lookup or {})
 
     for node in registry.sections:
-        effective = overrides.get(node.path, node.section.visibility)
+        section_params = registry.resolve_section_params(node, dict(params))
+        effective = node.section.effective_visibility(
+            overrides.get(node.path),
+            section_params,
+        )
         if effective == SectionVisibility.SUMMARY and node.section.summary is not None:
             return True
 
@@ -205,21 +214,29 @@ def has_summarized_sections(
 def compute_current_visibility(
     registry: RegistrySnapshot,
     visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+    param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass] | None = None,
 ) -> dict[SectionPath, SectionVisibility]:
     """Compute the effective visibility for all sections.
 
     Args:
         registry: The prompt's section registry snapshot.
         visibility_overrides: Optional visibility overrides.
+        param_lookup: Optional parameter lookup used to evaluate visibility
+            selectors that depend on section parameters.
 
     Returns:
         Mapping from section paths to their effective visibility.
     """
     overrides = visibility_overrides or {}
+    params = dict(param_lookup or {})
     result: dict[SectionPath, SectionVisibility] = {}
 
     for node in registry.sections:
-        effective = node.section.effective_visibility(overrides.get(node.path))
+        section_params = registry.resolve_section_params(node, dict(params))
+        effective = node.section.effective_visibility(
+            overrides.get(node.path),
+            section_params,
+        )
         result[node.path] = effective
 
     return result

@@ -196,7 +196,7 @@ class PromptRenderer[OutputT]:
             )
             visibility_override = visibility_override_lookup.get(node.path)
             effective_visibility = node.section.effective_visibility(
-                visibility_override
+                visibility_override, section_params
             )
 
             # When rendering with SUMMARY visibility, skip children
@@ -234,7 +234,9 @@ class PromptRenderer[OutputT]:
         # Inject open_sections tool when there are summarized sections
         if has_summarized:
             current_visibility = compute_current_visibility(
-                self._registry, visibility_overrides
+                self._registry,
+                visibility_overrides,
+                param_lookup,
             )
             open_sections_tool = create_open_sections_handler(
                 registry=self._registry,

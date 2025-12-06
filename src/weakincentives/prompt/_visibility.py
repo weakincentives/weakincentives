@@ -14,7 +14,12 @@
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Callable
 from enum import Enum
+from typing import cast
+
+from ._types import SupportsDataclass
 
 
 class SectionVisibility(Enum):
@@ -31,4 +36,73 @@ class SectionVisibility(Enum):
     """Render only the summary content."""
 
 
-__all__ = ["SectionVisibility"]
+VisibilitySelector = (
+    Callable[[SupportsDataclass], SectionVisibility]
+    | Callable[[], SectionVisibility]
+    | SectionVisibility
+)
+
+
+def _coerce_section_visibility(value: object) -> SectionVisibility:
+    if isinstance(value, SectionVisibility):
+        return value
+    raise TypeError("Visibility selector must return SectionVisibility.")
+
+
+def normalize_visibility_selector(
+    visibility: VisibilitySelector,
+    params_type: type[SupportsDataclass] | None,
+) -> Callable[[SupportsDataclass | None], SectionVisibility]:
+    """Normalize static or callable visibility into a shared interface."""
+
+    if callable(visibility):
+        if params_type is None and not _visibility_requires_positional_argument(
+            visibility
+        ):
+            zero_arg_selector = cast(Callable[[], SectionVisibility], visibility)
+
+            def _without_params(_: SupportsDataclass | None) -> SectionVisibility:
+                return _coerce_section_visibility(zero_arg_selector())
+
+            return _without_params
+
+        selector = cast(Callable[[SupportsDataclass], SectionVisibility], visibility)
+
+        def _with_params(value: SupportsDataclass | None) -> SectionVisibility:
+            return _coerce_section_visibility(selector(cast(SupportsDataclass, value)))
+
+        return _with_params
+
+    constant_visibility = visibility
+
+    def _constant(_: SupportsDataclass | None) -> SectionVisibility:
+        return constant_visibility
+
+    return _constant
+
+
+def _visibility_requires_positional_argument(
+    callback: Callable[..., SectionVisibility],
+) -> bool:
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        return True
+    for parameter in signature.parameters.values():
+        if (
+            parameter.kind
+            in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            }
+            and parameter.default is inspect.Signature.empty
+        ):
+            return True
+    return False
+
+
+__all__ = [
+    "SectionVisibility",
+    "VisibilitySelector",
+    "normalize_visibility_selector",
+]

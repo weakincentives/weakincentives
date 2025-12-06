@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 from unittest.mock import MagicMock
@@ -48,7 +49,9 @@ def _make_section(
     *,
     key: str = "test-section",
     summary: str | None = None,
-    visibility: SectionVisibility = SectionVisibility.FULL,
+    visibility: SectionVisibility
+    | Callable[[_TestParams], SectionVisibility]
+    | Callable[[], SectionVisibility] = SectionVisibility.FULL,
 ) -> MarkdownSection[_TestParams]:
     return MarkdownSection[_TestParams](
         title="Test Section",
@@ -186,6 +189,35 @@ def test_compute_current_visibility_with_overrides() -> None:
     overrides = {("sec",): SectionVisibility.FULL}
     result = compute_current_visibility(snapshot, overrides)
     assert result["sec",] == SectionVisibility.FULL
+
+
+def test_compute_current_visibility_uses_params_for_callable() -> None:
+    """Visibility selectors can depend on section parameters."""
+
+    def selector(params: _TestParams) -> SectionVisibility:
+        return (
+            SectionVisibility.SUMMARY
+            if params.name == "summarize"
+            else SectionVisibility.FULL
+        )
+
+    section = _make_section(
+        key="sec",
+        summary="Summary",
+        visibility=selector,
+    )
+    registry = _make_registry((section,))
+    snapshot = registry.snapshot()
+
+    summarized = compute_current_visibility(
+        snapshot, param_lookup={_TestParams: _TestParams(name="summarize")}
+    )
+    assert summarized["sec",] == SectionVisibility.SUMMARY
+
+    expanded = compute_current_visibility(
+        snapshot, param_lookup={_TestParams: _TestParams(name="full")}
+    )
+    assert expanded["sec",] == SectionVisibility.FULL
 
 
 # Tests for open_sections handler
