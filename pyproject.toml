@@ -72,6 +72,12 @@ tag-pattern = "v(?P<version>.+)"
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/weakincentives"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["src/examples"]
+
 [dependency-groups]
 dev = [
     "bandit>=1.8.6",
