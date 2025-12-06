@@ -30,7 +30,7 @@ from weakincentives.prompt.response_format import (
 from weakincentives.runtime.session import Session
 from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import PlanningStrategy, PlanningToolsSection
-from weakincentives.tools.subagents import SubagentIsolationLevel, SubagentsSection
+from weakincentives.tools.subagents import SubagentsSection
 from weakincentives.tools.vfs import VfsToolsSection
 
 
@@ -86,7 +86,7 @@ def test_tool_sections_clone_to_new_sessions() -> None:
         session=original_session, strategy=PlanningStrategy.REACT
     )
     asteval = AstevalSection(session=original_session)
-    subagents = SubagentsSection(isolation_level=SubagentIsolationLevel.NO_ISOLATION)
+    subagents = SubagentsSection()
 
     new_session = Session()
 

@@ -48,7 +48,6 @@ from .planning import (
 )
 from .subagents import (
     DispatchSubagentsParams,
-    SubagentIsolationLevel,
     SubagentResult,
     SubagentsSection,
     build_dispatch_subagents_tool,
@@ -121,7 +120,6 @@ __all__ = [
     "RemoveParams",
     "SetupPlan",
     "StepStatus",
-    "SubagentIsolationLevel",
     "SubagentResult",
     "SubagentsSection",
     "ToolValidationError",

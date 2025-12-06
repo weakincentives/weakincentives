@@ -16,11 +16,7 @@ import pytest
 
 from weakincentives.prompt.errors import PromptRenderError
 from weakincentives.tools import SubagentsSection
-from weakincentives.tools.subagents import (
-    SubagentIsolationLevel,
-    build_dispatch_subagents_tool,
-    dispatch_subagents,
-)
+from weakincentives.tools.subagents import dispatch_subagents
 
 
 def test_subagents_section_render_mentions_tool() -> None:
@@ -37,20 +33,6 @@ def test_subagents_section_render_mentions_tool() -> None:
 
     assert "dispatch_subagents" in rendered
     assert "parallel" in rendered.lower()
-
-
-def test_subagents_section_builds_isolated_tool() -> None:
-    section = SubagentsSection(isolation_level=SubagentIsolationLevel.FULL_ISOLATION)
-    tools = section.tools()
-    assert len(tools) == 1
-    tool = tools[0]
-    assert tool is not dispatch_subagents
-
-    expected = build_dispatch_subagents_tool(
-        isolation_level=SubagentIsolationLevel.FULL_ISOLATION
-    )
-    assert tool.name == expected.name
-    assert tool.description == expected.description
 
 
 def test_subagents_section_rejects_missing_params() -> None:

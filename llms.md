@@ -227,7 +227,6 @@ Optional extras enable specific providers or tooling:
     - `AstevalSection`: Section for asteval tools.
     - `DispatchSubagentsParams`: Parameters for dispatching subagents.
     - `HostMount`: Host mount configuration.
-    - `SubagentIsolationLevel`: Isolation level for subagents.
     - `SubagentResult`: Result of a subagent.
     - `SubagentsSection`: Section for subagents.
     - `VirtualFileSystem`: Virtual file system.
@@ -527,8 +526,8 @@ Tools: `setup_plan`, `read_plan`, `add_step`, `update_step`, `mark_step`
 ### SubagentsSection - Parallel delegation
 
 ```python
-from weakincentives.tools import SubagentsSection, SubagentIsolationLevel
-subagents = SubagentsSection(isolation_level=SubagentIsolationLevel.FORK)
+from weakincentives.tools import SubagentsSection
+subagents = SubagentsSection()
 ```
 
 Tools: `dispatch_subagents`
