@@ -12,6 +12,16 @@ const state = {
   sliceBuckets: { state: [], event: [] },
   loading: false,
   theme: localStorage.getItem("wink-theme") || "light",
+  // Command palette state
+  commandPaletteOpen: false,
+  commandSelectedIndex: 0,
+  commandItems: [],
+  // Shortcuts overlay state
+  shortcutsOpen: false,
+  // Sidebar state
+  sidebarCollapsed: localStorage.getItem("wink-sidebar-collapsed") === "true",
+  // Focused item index for J/K navigation
+  focusedItemIndex: -1,
 };
 
 const MARKDOWN_KEY = "__markdown__";
@@ -44,6 +54,16 @@ const elements = {
   themeToggle: document.getElementById("theme-toggle"),
   sliceEmptyState: document.getElementById("slice-empty-state"),
   sliceContent: document.getElementById("slice-content"),
+  // Command palette elements
+  commandPalette: document.getElementById("command-palette"),
+  commandInput: document.getElementById("command-input"),
+  commandResults: document.getElementById("command-results"),
+  // Shortcuts overlay elements
+  shortcutsOverlay: document.getElementById("shortcuts-overlay"),
+  shortcutsClose: document.getElementById("shortcuts-close"),
+  helpButton: document.getElementById("help-button"),
+  // Layout element for sidebar toggle
+  layout: document.querySelector(".layout"),
 };
 
 // --- Theme Management ---
@@ -63,6 +83,362 @@ function toggleTheme() {
 applyTheme(state.theme);
 
 elements.themeToggle.addEventListener("click", toggleTheme);
+
+// --- Sidebar Toggle ---
+
+function applySidebarState() {
+  elements.layout.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+}
+
+function toggleSidebar() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  localStorage.setItem("wink-sidebar-collapsed", state.sidebarCollapsed);
+  applySidebarState();
+  showToast(state.sidebarCollapsed ? "Sidebar hidden" : "Sidebar shown", "default");
+}
+
+// Initialize sidebar state on load
+applySidebarState();
+
+// --- Command Palette ---
+
+const COMMAND_ICONS = {
+  slice: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>`,
+  session: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
+  action: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`,
+};
+
+function getCommandItems() {
+  const items = [];
+
+  // Actions
+  items.push({
+    type: "action",
+    id: "reload",
+    title: "Reload Snapshot",
+    subtitle: "Refresh data from disk",
+    shortcut: "R",
+    action: reloadSnapshot,
+  });
+  items.push({
+    type: "action",
+    id: "export",
+    title: "Export JSON",
+    subtitle: "Copy current slice to clipboard",
+    shortcut: "E",
+    action: () => elements.copy.click(),
+  });
+  items.push({
+    type: "action",
+    id: "toggle-theme",
+    title: "Toggle Dark Mode",
+    subtitle: state.theme === "dark" ? "Switch to light mode" : "Switch to dark mode",
+    shortcut: "D",
+    action: toggleTheme,
+  });
+  items.push({
+    type: "action",
+    id: "toggle-sidebar",
+    title: "Toggle Sidebar",
+    subtitle: state.sidebarCollapsed ? "Show sidebar" : "Hide sidebar",
+    shortcut: "[",
+    action: toggleSidebar,
+  });
+  items.push({
+    type: "action",
+    id: "shortcuts",
+    title: "Keyboard Shortcuts",
+    subtitle: "Show all available shortcuts",
+    shortcut: "?",
+    action: openShortcuts,
+  });
+
+  // Slices
+  const allSlices = [...state.sliceBuckets.state, ...state.sliceBuckets.event];
+  allSlices.forEach((slice) => {
+    items.push({
+      type: "slice",
+      id: `slice:${slice.slice_type}`,
+      title: slice.slice_type,
+      subtitle: `${slice.item_type} · ${slice.count} items`,
+      action: () => selectSlice(slice.slice_type),
+    });
+  });
+
+  // Sessions
+  state.entries.forEach((entry) => {
+    items.push({
+      type: "session",
+      id: `session:${entry.session_id}`,
+      title: entry.session_id,
+      subtitle: `Line ${entry.line_number} · ${entry.created_at || ""}`,
+      action: () => {
+        if (state.meta && state.meta.path === entry.path) {
+          selectEntry(entry.session_id);
+        } else {
+          switchSnapshot(entry.path, entry.session_id);
+        }
+      },
+    });
+  });
+
+  return items;
+}
+
+function highlightMatch(text, query) {
+  if (!query) return text;
+  const index = text.toLowerCase().indexOf(query.toLowerCase());
+  if (index === -1) return text;
+  const before = text.slice(0, index);
+  const match = text.slice(index, index + query.length);
+  const after = text.slice(index + query.length);
+  return `${before}<span class="command-highlight">${match}</span>${after}`;
+}
+
+function filterCommandItems(query) {
+  const items = getCommandItems();
+  if (!query.trim()) {
+    return items;
+  }
+  const lowerQuery = query.toLowerCase();
+  return items.filter(
+    (item) =>
+      item.title.toLowerCase().includes(lowerQuery) ||
+      item.subtitle.toLowerCase().includes(lowerQuery)
+  );
+}
+
+function renderCommandResults(query) {
+  const filtered = filterCommandItems(query);
+  state.commandItems = filtered;
+  state.commandSelectedIndex = Math.min(state.commandSelectedIndex, Math.max(0, filtered.length - 1));
+
+  elements.commandResults.innerHTML = "";
+
+  if (filtered.length === 0) {
+    elements.commandResults.innerHTML = `
+      <div class="command-empty">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <p>No results found for "${query}"</p>
+      </div>
+    `;
+    return;
+  }
+
+  // Group by type
+  const groups = { action: [], slice: [], session: [] };
+  filtered.forEach((item) => {
+    groups[item.type].push(item);
+  });
+
+  const groupLabels = {
+    action: "Actions",
+    slice: "Slices",
+    session: "Sessions",
+  };
+
+  let globalIndex = 0;
+  Object.entries(groups).forEach(([type, items]) => {
+    if (items.length === 0) return;
+
+    const group = document.createElement("div");
+    group.className = "command-group";
+
+    const label = document.createElement("div");
+    label.className = "command-group-label";
+    label.textContent = groupLabels[type];
+    group.appendChild(label);
+
+    items.forEach((item) => {
+      const itemEl = document.createElement("div");
+      itemEl.className = "command-item" + (globalIndex === state.commandSelectedIndex ? " selected" : "");
+      itemEl.dataset.index = globalIndex;
+
+      itemEl.innerHTML = `
+        <div class="command-item-icon">${COMMAND_ICONS[type]}</div>
+        <div class="command-item-content">
+          <div class="command-item-title">${highlightMatch(item.title, query)}</div>
+          <div class="command-item-subtitle">${highlightMatch(item.subtitle, query)}</div>
+        </div>
+        ${item.shortcut ? `<div class="command-item-shortcut"><kbd>${item.shortcut}</kbd></div>` : ""}
+      `;
+
+      itemEl.addEventListener("click", () => {
+        executeCommandItem(item);
+      });
+
+      itemEl.addEventListener("mouseenter", () => {
+        state.commandSelectedIndex = parseInt(itemEl.dataset.index, 10);
+        updateCommandSelection();
+      });
+
+      group.appendChild(itemEl);
+      globalIndex++;
+    });
+
+    elements.commandResults.appendChild(group);
+  });
+}
+
+function updateCommandSelection() {
+  const items = elements.commandResults.querySelectorAll(".command-item");
+  items.forEach((item, index) => {
+    item.classList.toggle("selected", index === state.commandSelectedIndex);
+  });
+
+  // Scroll selected item into view
+  const selected = elements.commandResults.querySelector(".command-item.selected");
+  if (selected) {
+    selected.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function executeCommandItem(item) {
+  closeCommandPalette();
+  if (item && typeof item.action === "function") {
+    item.action();
+  }
+}
+
+function openCommandPalette() {
+  state.commandPaletteOpen = true;
+  state.commandSelectedIndex = 0;
+  elements.commandPalette.classList.remove("hidden");
+  elements.commandInput.value = "";
+  renderCommandResults("");
+  elements.commandInput.focus();
+}
+
+function closeCommandPalette() {
+  state.commandPaletteOpen = false;
+  elements.commandPalette.classList.add("hidden");
+  elements.commandInput.value = "";
+}
+
+function toggleCommandPalette() {
+  if (state.commandPaletteOpen) {
+    closeCommandPalette();
+  } else {
+    openCommandPalette();
+  }
+}
+
+// Command palette event listeners
+elements.commandInput.addEventListener("input", () => {
+  renderCommandResults(elements.commandInput.value);
+});
+
+elements.commandInput.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    state.commandSelectedIndex = Math.min(state.commandSelectedIndex + 1, state.commandItems.length - 1);
+    updateCommandSelection();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    state.commandSelectedIndex = Math.max(state.commandSelectedIndex - 1, 0);
+    updateCommandSelection();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    const item = state.commandItems[state.commandSelectedIndex];
+    executeCommandItem(item);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeCommandPalette();
+  }
+});
+
+// Close on backdrop click
+elements.commandPalette.querySelector(".command-palette-backdrop").addEventListener("click", closeCommandPalette);
+
+// --- Keyboard Shortcuts Overlay ---
+
+function openShortcuts() {
+  state.shortcutsOpen = true;
+  elements.shortcutsOverlay.classList.remove("hidden");
+}
+
+function closeShortcuts() {
+  state.shortcutsOpen = false;
+  elements.shortcutsOverlay.classList.add("hidden");
+}
+
+function toggleShortcuts() {
+  if (state.shortcutsOpen) {
+    closeShortcuts();
+  } else {
+    openShortcuts();
+  }
+}
+
+// Shortcuts overlay event listeners
+elements.shortcutsClose.addEventListener("click", closeShortcuts);
+elements.shortcutsOverlay.querySelector(".shortcuts-backdrop").addEventListener("click", closeShortcuts);
+elements.helpButton.addEventListener("click", openShortcuts);
+
+// --- Item Navigation (J/K) ---
+
+function focusItem(index) {
+  const items = elements.jsonViewer.querySelectorAll(".item-card");
+  if (items.length === 0) return;
+
+  // Clamp index
+  const newIndex = Math.max(0, Math.min(index, items.length - 1));
+  state.focusedItemIndex = newIndex;
+
+  // Update visual focus
+  items.forEach((item, i) => {
+    item.classList.toggle("focused", i === newIndex);
+  });
+
+  // Scroll into view
+  items[newIndex].scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function focusNextItem() {
+  const items = elements.jsonViewer.querySelectorAll(".item-card");
+  if (items.length === 0) return;
+  focusItem(state.focusedItemIndex + 1);
+}
+
+function focusPrevItem() {
+  const items = elements.jsonViewer.querySelectorAll(".item-card");
+  if (items.length === 0) return;
+  focusItem(state.focusedItemIndex - 1);
+}
+
+// --- Slice Navigation (H/L) ---
+
+function getAllSlices() {
+  return [...state.sliceBuckets.state, ...state.sliceBuckets.event];
+}
+
+function getCurrentSliceIndex() {
+  const allSlices = getAllSlices();
+  return allSlices.findIndex((s) => s.slice_type === state.selectedSlice);
+}
+
+function selectNextSlice() {
+  const allSlices = getAllSlices();
+  if (allSlices.length === 0) return;
+  const currentIndex = getCurrentSliceIndex();
+  const nextIndex = Math.min(currentIndex + 1, allSlices.length - 1);
+  if (nextIndex !== currentIndex) {
+    selectSlice(allSlices[nextIndex].slice_type);
+  }
+}
+
+function selectPrevSlice() {
+  const allSlices = getAllSlices();
+  if (allSlices.length === 0) return;
+  const currentIndex = getCurrentSliceIndex();
+  const prevIndex = Math.max(currentIndex - 1, 0);
+  if (prevIndex !== currentIndex) {
+    selectSlice(allSlices[prevIndex].slice_type);
+  }
+}
 
 // --- Loading State ---
 
@@ -964,27 +1340,122 @@ elements.snapshotSelect.addEventListener("change", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  // Ignore if typing in an input
+  // Handle Escape key globally (works even in inputs for closing dialogs)
+  if (event.key === "Escape") {
+    if (state.commandPaletteOpen) {
+      event.preventDefault();
+      closeCommandPalette();
+      return;
+    }
+    if (state.shortcutsOpen) {
+      event.preventDefault();
+      closeShortcuts();
+      return;
+    }
+    // Clear search if focused
+    if (document.activeElement === elements.itemSearch && elements.itemSearch.value) {
+      event.preventDefault();
+      elements.itemSearch.value = "";
+      state.searchQuery = "";
+      renderItems(state.currentItems);
+      elements.itemSearch.blur();
+      return;
+    }
+    if (document.activeElement === elements.sliceFilter && elements.sliceFilter.value) {
+      event.preventDefault();
+      elements.sliceFilter.value = "";
+      renderSliceList();
+      elements.sliceFilter.blur();
+      return;
+    }
+    return;
+  }
+
+  // Command palette shortcut (Cmd/Ctrl+K) - works globally
+  if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+    event.preventDefault();
+    toggleCommandPalette();
+    return;
+  }
+
+  // Don't process other shortcuts if a dialog is open
+  if (state.commandPaletteOpen || state.shortcutsOpen) {
+    return;
+  }
+
+  // Ignore if typing in an input (except for command palette shortcut above)
   const tag = event.target.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
     return;
   }
 
-  // Reload shortcut
+  // Focus search (/)
+  if (event.key === "/") {
+    event.preventDefault();
+    elements.itemSearch.focus();
+    return;
+  }
+
+  // Reload shortcut (R)
   if (event.key === "r" || event.key === "R") {
     event.preventDefault();
     reloadSnapshot();
     return;
   }
 
-  // Theme toggle shortcut
+  // Export shortcut (E)
+  if (event.key === "e" || event.key === "E") {
+    event.preventDefault();
+    elements.copy.click();
+    return;
+  }
+
+  // Theme toggle shortcut (D)
   if (event.key === "d" || event.key === "D") {
     event.preventDefault();
     toggleTheme();
     return;
   }
 
-  // Snapshot navigation
+  // Sidebar toggle ([)
+  if (event.key === "[") {
+    event.preventDefault();
+    toggleSidebar();
+    return;
+  }
+
+  // Shortcuts help (?)
+  if (event.key === "?" || (event.shiftKey && event.key === "/")) {
+    event.preventDefault();
+    openShortcuts();
+    return;
+  }
+
+  // Item navigation (J/K)
+  if (event.key === "j" || event.key === "J") {
+    event.preventDefault();
+    focusNextItem();
+    return;
+  }
+  if (event.key === "k" || event.key === "K") {
+    event.preventDefault();
+    focusPrevItem();
+    return;
+  }
+
+  // Slice navigation (H/L)
+  if (event.key === "h" || event.key === "H") {
+    event.preventDefault();
+    selectPrevSlice();
+    return;
+  }
+  if (event.key === "l" || event.key === "L") {
+    event.preventDefault();
+    selectNextSlice();
+    return;
+  }
+
+  // Snapshot navigation (Arrow keys)
   if (!state.snapshots.length) {
     return;
   }
