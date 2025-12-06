@@ -196,7 +196,10 @@ The `encoded_ns` must be URL-encoded (e.g., `webapp/agents` → `webapp%2Fagents
   "ns": "webapp/agents",
   "key": "code-reviewer",
   "name": "Code Reviewer",
-  "rendered_text": "You are a code reviewer...",
+  "rendered_prompt": {
+    "text": "You are a code reviewer.\n\n## Instructions\n\nReview the code...",
+    "html": "<p>You are a code reviewer.</p>\n<h2>Instructions</h2>\n<p>Review the code...</p>"
+  },
   "created_at": "2024-01-15T10:30:00+00:00",
   "tag": "latest",
   "is_seeded": true,
@@ -334,6 +337,11 @@ The UI follows the same three-panel design as `wink debug`:
 1. **Content Area** (main, flexible width)
 
    - **Prompt Header**: Namespace, key, name, creation timestamp
+   - **Rendered Prompt Panel**: Full prompt text with markdown rendering
+     - Collapsible panel showing the complete rendered prompt from the snapshot
+     - Toggle between rendered markdown view and raw text view
+     - Syntax highlighting for code blocks
+     - Read-only display for reference while editing overrides
    - **Sections Panel**: Expandable list of sections
      - Each section shows path, number, override status
      - Inline editor for section body (CodeMirror or textarea)
@@ -350,7 +358,15 @@ The UI follows the same three-panel design as `wink debug`:
 
 1. Click a prompt in the sidebar
 1. Content area loads full override state
+1. Rendered prompt panel shows the full prompt text
 1. Sections and tools are shown in expandable accordions
+
+**Viewing the Rendered Prompt:**
+
+1. The rendered prompt panel is expanded by default when selecting a prompt
+1. Click the panel header to collapse/expand
+1. Toggle "Raw" button to switch between markdown-rendered and raw text views
+1. Use the panel as reference while editing section overrides below
 
 **Editing a Section Override:**
 
@@ -381,6 +397,8 @@ The UI follows the same three-panel design as `wink debug`:
 |-----|--------|
 | `D` | Toggle dark mode |
 | `R` | Reload snapshot |
+| `P` | Toggle rendered prompt panel collapse |
+| `M` | Toggle markdown/raw view in rendered prompt |
 | `↑/↓` | Navigate prompt list |
 | `Enter` | Select highlighted prompt |
 | `Esc` | Close editor / cancel edit |
@@ -563,6 +581,8 @@ consistent styling with `wink debug`.
 - Uses FastAPI for the HTTP server
 - Uses uvicorn as the ASGI server
 - Shares snapshot loading logic with `wink debug` (`debug_app.load_snapshot`)
+- Uses markdown-it for server-side markdown rendering (same as `wink debug`)
+- Rendered HTML is generated on-demand when fetching prompt details
 - Browser opening uses a 0.2-second timer to avoid blocking server startup
 - All write operations acquire filesystem locks via `OverrideFilesystem`
 - Override state is always read fresh from disk to avoid stale cache issues
