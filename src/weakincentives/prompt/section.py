@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
+    from .hosted_tool import HostedTool
     from .tool import Tool
 
 from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
@@ -127,6 +128,15 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         """Return the tools exposed by this section."""
 
         return self._tools
+
+    def hosted_tools(self) -> tuple[HostedTool[object], ...]:
+        """Return hosted tools exposed by this section.
+
+        Hosted tools are provider-executed capabilities that run server-side.
+        Override this method in subclasses to expose hosted tools.
+        """
+
+        return ()
 
     def original_body_template(self) -> str | None:
         """Return the template text that participates in hashing, when available."""

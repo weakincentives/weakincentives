@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
+from types import MappingProxyType
 from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
@@ -27,6 +28,7 @@ from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
 from ..prompt._visibility import SectionVisibility
 from ..prompt.errors import SectionPath
+from ..prompt.hosted_tool import HostedTool
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
 from ..runtime.logging import StructuredLogger, get_logger
@@ -49,6 +51,7 @@ from .core import (
     ProviderAdapter,
     SessionProtocol,
 )
+from .openai_hosted import OpenAIWebSearchCodec
 from .shared import (
     OPENAI_ADAPTER_NAME,
     InnerLoopConfig,
@@ -94,11 +97,19 @@ class _OpenAIModule(Protocol):
 
 
 @dataclass(slots=True)
+class _ResponseCapture:
+    """Mutable container to capture the last provider response."""
+
+    value: object | None = None
+
+
+@dataclass(slots=True)
 class _EvaluationContext[OutputT]:
     prompt_name: str
     render_inputs: tuple[SupportsDataclass, ...]
     rendered: RenderedPrompt[OutputT]
     response_format: dict[str, Any] | None
+    last_response: _ResponseCapture = field(default_factory=_ResponseCapture)
 
 
 ProviderInvoker = Callable[
@@ -559,6 +570,38 @@ def _normalize_openai_throttle(
 logger: StructuredLogger = get_logger(__name__, context={"component": "adapter.openai"})
 
 
+OutputT_co = TypeVar("OutputT_co", covariant=True)
+
+
+class HostedToolCodec(Protocol[OutputT_co]):
+    """Protocol for hosted tool codecs that serialize and parse outputs."""
+
+    @property
+    def kind(self) -> str:
+        """The tool kind this codec handles."""
+        ...
+
+    def serialize(
+        self,
+        tool: HostedTool[Any],
+    ) -> dict[str, Any]:
+        """Convert tool configuration to provider wire format."""
+        ...
+
+    def parse_output(
+        self,
+        response_items: Sequence[object],
+        tool: HostedTool[Any],
+    ) -> OutputT_co | None:
+        """Extract typed output from provider response, if present."""
+        ...
+
+
+def _default_hosted_tool_codecs() -> Mapping[str, HostedToolCodec[Any]]:
+    """Return the default mapping of hosted tool codecs."""
+    return MappingProxyType({"web_search": OpenAIWebSearchCodec()})
+
+
 class OpenAIAdapter(ProviderAdapter[Any]):
     """Adapter that evaluates prompts against OpenAI's Responses API.
 
@@ -572,6 +615,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             client_config.
         client_config: Typed configuration for client instantiation. Used when
             client is not provided.
+        hosted_tool_codecs: Registry of codecs for hosted tools. Defaults to
+            built-in codecs for web_search.
     """
 
     def __init__(
@@ -582,6 +627,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         tool_choice: ToolChoice = "auto",
         client: _OpenAIProtocol | None = None,
         client_config: OpenAIClientConfig | None = None,
+        hosted_tool_codecs: Mapping[str, HostedToolCodec[Any]] | None = None,
     ) -> None:
         super().__init__()
         if client is not None:
@@ -597,6 +643,12 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._model = model
         self._model_config = model_config
         self._tool_choice: ToolChoice = tool_choice
+        self._use_native_response_format = use_native_response_format
+        self._hosted_tool_codecs = (
+            hosted_tool_codecs
+            if hosted_tool_codecs is not None
+            else _default_hosted_tool_codecs()
+        )
 
     @override
     def evaluate(
@@ -625,7 +677,11 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             tool_choice=self._tool_choice,
             response_format=context.response_format,
             require_structured_output_text=False,
-            call_provider=self._build_provider_invoker(context.prompt_name),
+            call_provider=self._build_provider_invoker(
+                context.prompt_name,
+                context.rendered.hosted_tools,
+                context.last_response,
+            ),
             select_choice=self._build_choice_selector(context.prompt_name),
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=format_publish_failures,
@@ -645,7 +701,17 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             initial_messages=[{"role": "system", "content": context.rendered.text}],
         )
 
-        return run_inner_loop(inputs=inputs, config=config)
+        result = run_inner_loop(inputs=inputs, config=config)
+
+        # Parse hosted tool outputs from the last response
+        hosted_outputs = self._parse_hosted_outputs(
+            context.rendered.hosted_tools,
+            context.last_response,
+        )
+
+        if hosted_outputs:
+            return replace(result, hosted_outputs=MappingProxyType(hosted_outputs))
+        return result
 
     def _setup_evaluation(
         self,
@@ -721,7 +787,17 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             return {"format": text_format}
         return None
 
-    def _build_provider_invoker(self, prompt_name: str) -> ProviderInvoker:
+    def _build_provider_invoker(
+        self,
+        prompt_name: str,
+        hosted_tools: tuple[HostedTool[Any], ...],
+        response_capture: _ResponseCapture,
+    ) -> ProviderInvoker:
+        # Serialize hosted tools once at setup time
+        hosted_tool_specs = [
+            self._serialize_hosted_tool(tool, prompt_name) for tool in hosted_tools
+        ]
+
         def _call_provider(
             messages: list[dict[str, Any]],
             tool_specs: Sequence[Mapping[str, Any]],
@@ -734,20 +810,28 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             }
             if self._model_config is not None:
                 request_payload.update(self._model_config.to_request_params())
+
+            # Combine regular tools and hosted tools
+            all_tools: list[dict[str, Any]] = []
             if tool_specs:
-                request_payload["tools"] = [
+                all_tools.extend(
                     _responses_tool_spec(spec, prompt_name=prompt_name)
                     for spec in tool_specs
-                ]
-                if tool_choice_directive is not None:
+                )
+            all_tools.extend(hosted_tool_specs)
+
+            if all_tools:
+                request_payload["tools"] = all_tools
+                if tool_choice_directive is not None and tool_specs:
                     request_payload["tool_choice"] = _responses_tool_choice(
                         tool_choice_directive, prompt_name=prompt_name
                     )
+
             if response_format_payload is not None:
                 request_payload["text"] = response_format_payload
 
             try:
-                return self._client.responses.create(**request_payload)
+                response = self._client.responses.create(**request_payload)
             except Exception as error:  # pragma: no cover - network/SDK failure
                 throttle_error = _normalize_openai_throttle(
                     error, prompt_name=prompt_name
@@ -760,8 +844,54 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
                     provider_payload=_error_payload(error),
                 ) from error
+            else:
+                response_capture.value = response
+                return response
 
         return _call_provider
+
+    def _serialize_hosted_tool(
+        self,
+        tool: HostedTool[Any],
+        prompt_name: str,
+    ) -> dict[str, Any]:
+        """Serialize a hosted tool using the appropriate codec."""
+        codec = self._hosted_tool_codecs.get(tool.kind)
+        if codec is None:
+            raise PromptEvaluationError(
+                f"Unsupported hosted tool kind '{tool.kind}' for OpenAI adapter.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            )
+        return codec.serialize(tool)
+
+    def _parse_hosted_outputs(
+        self,
+        hosted_tools: tuple[HostedTool[Any], ...],
+        response_capture: _ResponseCapture,
+    ) -> dict[str, object]:
+        """Parse hosted tool outputs from the provider response."""
+        if not hosted_tools or response_capture.value is None:
+            return {}
+
+        response = response_capture.value
+        output_items = getattr(response, "output", None)
+        if not isinstance(output_items, Sequence):
+            return {}
+
+        # Cast to Sequence[object] for type safety
+        typed_output_items: Sequence[object] = cast(Sequence[object], output_items)
+
+        results: dict[str, object] = {}
+        for tool in hosted_tools:
+            codec = self._hosted_tool_codecs.get(tool.kind)
+            if codec is None:
+                continue
+            parsed = codec.parse_output(typed_output_items, tool)
+            if parsed is not None:
+                results[tool.name] = parsed
+
+        return results
 
     @staticmethod
     def _build_choice_selector(

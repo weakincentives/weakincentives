@@ -24,6 +24,7 @@ from ..deadlines import Deadline
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._visibility import SectionVisibility
 from .errors import PromptRenderError, PromptValidationError, SectionPath
+from .hosted_tool import HostedTool
 from .progressive_disclosure import (
     build_summary_suffix,
     compute_current_visibility,
@@ -55,6 +56,7 @@ class RenderedPrompt[OutputT_co]:
     _tools: tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...] = field(
         default_factory=tuple
     )
+    _hosted_tools: tuple[HostedTool[object], ...] = field(default_factory=tuple)
     _tool_param_descriptions: Mapping[str, Mapping[str, str]] = field(
         default=_EMPTY_TOOL_PARAM_DESCRIPTIONS
     )
@@ -68,6 +70,12 @@ class RenderedPrompt[OutputT_co]:
         """Tools contributed by enabled sections in traversal order."""
 
         return self._tools
+
+    @property
+    def hosted_tools(self) -> tuple[HostedTool[object], ...]:
+        """Hosted tools contributed by enabled sections in traversal order."""
+
+        return self._hosted_tools
 
     @property
     def tool_param_descriptions(
@@ -168,6 +176,7 @@ class PromptRenderer[OutputT]:
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
+        collected_hosted_tools: list[HostedTool[object]] = []
         override_lookup = dict(overrides or {})
         tool_override_lookup = dict(tool_overrides or {})
         visibility_override_lookup = dict(visibility_overrides or {})
@@ -220,6 +229,10 @@ class PromptRenderer[OutputT]:
                     collected_tools,
                     field_description_patches,
                 )
+                self._collect_section_hosted_tools(
+                    node.section,
+                    collected_hosted_tools,
+                )
 
             if rendered:
                 rendered_sections.append(rendered)
@@ -249,6 +262,7 @@ class PromptRenderer[OutputT]:
             structured_output=self._structured_output,
             descriptor=descriptor,
             _tools=tuple(collected_tools),
+            _hosted_tools=tuple(collected_hosted_tools),
             _tool_param_descriptions=_freeze_tool_param_descriptions(
                 field_description_patches
             ),
@@ -306,6 +320,17 @@ class PromptRenderer[OutputT]:
                         override.param_descriptions
                     )
             collected_tools.append(patched_tool)
+
+    @staticmethod
+    def _collect_section_hosted_tools(
+        section: Section[SupportsDataclass],
+        collected_hosted_tools: list[HostedTool[object]],
+    ) -> None:
+        section_hosted_tools = section.hosted_tools()
+        if not section_hosted_tools:
+            return
+
+        collected_hosted_tools.extend(section_hosted_tools)
 
     def _iter_enabled_sections(
         self,
