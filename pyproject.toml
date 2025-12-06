@@ -253,6 +253,16 @@ reportUnreachable = "error"
 reportUnusedCallResult = "error"
 reportUnusedExpression = "error"
 
+[tool.vulture]
+paths = ["src/weakincentives"]
+min_confidence = 80
+ignore_names = [
+    "__dir__",
+    "__getattr__",
+    "visit_*",
+    "expression",  # Protocol method parameter in InterpreterProtocol.eval
+]
+
 [tool.ty]
 
 [tool.ty.environment]

@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck bandit deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo all clean
+.PHONY: format check test lint typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo all clean
 
 # Format code with ruff
 format:
@@ -19,6 +19,10 @@ lint-fix:
 # Run Bandit security scanner
 bandit:
 	@uv run python build/run_bandit.py -q -r src/weakincentives
+
+# Find unused code with vulture
+vulture:
+	@uv run vulture
 
 # Check for unused or missing dependencies with deptry
 deptry:
@@ -69,8 +73,8 @@ integration-tests:
 demo:
 	@uv run --all-extras python code_reviewer_example.py
 
-# Run all checks (format check, lint, typecheck, bandit, deptry, pip-audit, markdown, test)
-check: format-check lint typecheck bandit deptry pip-audit markdown-check test
+# Run all checks (format check, lint, typecheck, bandit, vulture, deptry, pip-audit, markdown, test)
+check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test
 
 # Run all checks and fixes
 all: format lint-fix bandit deptry pip-audit typecheck test
