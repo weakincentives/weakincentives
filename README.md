@@ -83,21 +83,21 @@ structure itself.
 - **Redux-style state management.** Every state change flows through pure reducers
   processing published events. Tool calls, prompt evaluations, and internal
   decisions become a replayable ledger—not scattered mutations in free-form dicts.
-  See [Session State](specs/SESSIONS.md) and [Events](specs/EVENTS.md).
+  See [Session State](specs/SESSIONS.md).
 
 - **Hash-based prompt overrides.** Prompt descriptors carry content hashes so
   overrides apply only to the intended version. Teams iterate on prompts via
   version-controlled JSON without risking stale edits.
-  See [Prompt Overrides](specs/PROMPT_OVERRIDES.md).
+  See [Prompt Optimization](specs/PROMPT_OPTIMIZATION.md).
 
 - **Sandboxed virtual filesystem.** Agents get an in-memory VFS tracked as session
   state. Mount host directories read-only when needed; the sandbox prevents
-  accidental writes to the host. See [VFS Tools](specs/VFS_TOOLS.md).
+  accidental writes to the host. See [Workspace Tools](specs/WORKSPACE.md).
 
 - **Provider-agnostic adapters.** Swap between OpenAI, LiteLLM, or other providers
   without touching agent logic. Adapters handle tool negotiation, structured
   output schemas, and response normalization.
-  See [Adapters](specs/ADAPTERS.md) and [LiteLLM](specs/LITE_LLM_ADAPTER.md).
+  See [Adapters](specs/ADAPTERS.md).
 
 - **Minimal dependencies.** No Pydantic, no heavyweight stacks. Custom serde
   modules provide validation without sprawling dependency trees.
@@ -137,8 +137,7 @@ failures.
 Build a code review assistant that browses files, answers questions, and creates
 review plans—all in a structured, observable, sandboxed way.
 
-Full source: [`code_reviewer_example.py`](code_reviewer_example.py) •
-Architecture: [`specs/code_reviewer_example.md`](specs/code_reviewer_example.md)
+Full source: [`code_reviewer_example.py`](code_reviewer_example.py)
 
 ### 1. Define structured output
 
