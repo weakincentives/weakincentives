@@ -283,6 +283,25 @@ def test_litellm_adapter_rejects_completion_config_with_explicit_completion() ->
         )
 
 
+def test_litellm_adapter_rejects_completion_factory_with_explicit_completion() -> None:
+    module = cast(Any, _reload_module())
+    completion = RecordingCompletion([])
+
+    with pytest.raises(ValueError):
+        module.LiteLLMAdapter(
+            model="gpt-test",
+            completion=completion,
+            completion_factory=lambda **_kwargs: completion,
+        )
+
+    with pytest.raises(ValueError):
+        module.LiteLLMAdapter(
+            model="gpt-test",
+            completion=completion,
+            completion_kwargs={"api_key": "secret"},
+        )
+
+
 def test_litellm_adapter_uses_model_config() -> None:
     module = cast(Any, _reload_module())
 
@@ -1811,3 +1830,48 @@ def test_litellm_adapter_creates_budget_tracker_when_budget_provided() -> None:
     )
 
     assert result.text == "Hello!"
+
+
+def test_litellm_adapter_completion_factory_merges_config_and_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = cast(Any, _reload_module())
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="litellm-factory",
+        name="greeting",
+        sections=[
+            MarkdownSection[GreetingParams](
+                title="Greeting",
+                key="greeting",
+                template="Say hello to ${user}.",
+            )
+        ],
+    )
+
+    response = DummyResponse(
+        [DummyChoice(DummyMessage(content="Hello from factory!", tool_calls=None))]
+    )
+
+    captured_kwargs: list[dict[str, object]] = []
+
+    def fake_factory(**kwargs: object) -> RecordingCompletion:
+        captured_kwargs.append(dict(kwargs))
+        return RecordingCompletion([response])
+
+    adapter = module.LiteLLMAdapter(
+        model="gpt-test",
+        completion_factory=fake_factory,
+        completion_config=LiteLLMClientConfig(api_key="cfg-key"),
+        completion_kwargs={"timeout": 5},
+    )
+
+    result = _evaluate_with_bus(
+        adapter,
+        prompt,
+        GreetingParams(user="Factory"),
+    )
+
+    assert result.text == "Hello from factory!"
+    assert captured_kwargs == [{"api_key": "cfg-key", "timeout": 5}]

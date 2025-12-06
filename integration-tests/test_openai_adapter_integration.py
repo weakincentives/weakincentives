@@ -386,7 +386,6 @@ def test_openai_adapter_with_model_config(
     model_config = OpenAIModelConfig(
         temperature=0.3,
         max_tokens=150,
-        seed=42,
     )
 
     adapter = OpenAIAdapter(

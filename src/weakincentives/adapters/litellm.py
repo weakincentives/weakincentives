@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
@@ -208,31 +208,48 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             request payload.
         tool_choice: Tool selection directive. Defaults to "auto".
         completion: Pre-configured LiteLLM completion callable. Mutually exclusive
-            with completion_config.
+            with factory inputs.
+        completion_factory: Callable that returns a LiteLLM completion when
+            invoked. Useful in tests to inject instrumented completions.
+        completion_kwargs: Extra kwargs forwarded to ``completion_factory`` when
+            it is used.
         completion_config: Typed configuration for completion instantiation. Used
-            when completion is not provided.
+            when neither ``completion`` nor ``completion_factory`` is provided.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         model: str,
         model_config: LiteLLMModelConfig | None = None,
         tool_choice: ToolChoice = "auto",
         completion: LiteLLMCompletion | None = None,
+        completion_factory: Callable[..., LiteLLMCompletion] | None = None,
+        completion_kwargs: Mapping[str, object] | None = None,
         completion_config: LiteLLMClientConfig | None = None,
     ) -> None:
         super().__init__()
         if completion is not None:
+            if completion_factory is not None or completion_kwargs is not None:
+                raise ValueError(
+                    "completion_factory and completion_kwargs cannot be provided when an explicit completion is supplied.",
+                )
             if completion_config is not None:
                 raise ValueError(
                     "completion_config cannot be provided when an explicit completion is supplied.",
                 )
+        elif completion_factory is not None:
+            factory_kwargs: dict[str, object] = {}
+            if completion_config is not None:
+                factory_kwargs.update(completion_config.to_completion_kwargs())
+            if completion_kwargs is not None:
+                factory_kwargs.update(completion_kwargs)
+            completion = completion_factory(**factory_kwargs)
         else:
-            completion_kwargs = (
+            completion_params = (
                 completion_config.to_completion_kwargs() if completion_config else {}
             )
-            completion = create_litellm_completion(**completion_kwargs)
+            completion = create_litellm_completion(**completion_params)
 
         self._completion = completion
         self._model = model

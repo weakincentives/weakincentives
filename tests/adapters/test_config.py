@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from weakincentives.adapters.config import (
     LiteLLMClientConfig,
     LiteLLMModelConfig,
@@ -132,7 +134,6 @@ def test_openai_model_config_to_request_params_all_set() -> None:
         temperature=0.7,
         max_tokens=200,
         top_p=0.9,
-        logprobs=True,
         top_logprobs=3,
         user="user-456",
     )
@@ -142,10 +143,24 @@ def test_openai_model_config_to_request_params_all_set() -> None:
         "temperature": 0.7,
         "max_output_tokens": 200,
         "top_p": 0.9,
-        "logprobs": True,
         "top_logprobs": 3,
         "user": "user-456",
     }
+
+
+def test_openai_model_config_rejects_unsupported_fields() -> None:
+    expected_message = "Unsupported OpenAI Responses parameters: seed"
+    with pytest.raises(ValueError, match=expected_message):
+        OpenAIModelConfig(seed=123)
+
+    with pytest.raises(ValueError, match="stop"):
+        OpenAIModelConfig(stop=("STOP",))
+
+    with pytest.raises(ValueError, match="presence_penalty"):
+        OpenAIModelConfig(presence_penalty=0.5)
+
+    with pytest.raises(ValueError, match="frequency_penalty"):
+        OpenAIModelConfig(frequency_penalty=0.1)
 
 
 # LiteLLMClientConfig tests
