@@ -16,11 +16,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from ..prompt import Prompt
 from ..runtime.session import Session
-from ..runtime.session.protocols import SessionProtocol
-from ._context import OptimizationContext
+
+if TYPE_CHECKING:
+    from ..prompt import Prompt
+    from ..runtime.session.protocols import SessionProtocol
+    from ._context import OptimizationContext
 
 
 @dataclass(slots=True, frozen=True)

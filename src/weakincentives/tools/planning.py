@@ -14,14 +14,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
 from dataclasses import field
 from enum import Enum
-from typing import Final, Literal, cast, override
+from typing import TYPE_CHECKING, Final, Literal, cast, override
 
 from ..dataclasses import FrozenDataclass
-from ..prompt import SupportsDataclass, SupportsToolResult
-from ..prompt._visibility import SectionVisibility
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
@@ -35,6 +32,12 @@ from ..runtime.session import (
 )
 from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    from ..prompt import SupportsDataclass, SupportsToolResult
+    from ..prompt._visibility import SectionVisibility
 
 PlanStatus = Literal["active", "completed", "abandoned"]
 StepStatus = Literal["pending", "in_progress", "blocked", "done"]
@@ -434,7 +437,7 @@ def _build_tools(
 ) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
     suite = _PlanningToolSuite(section=section)
     return cast(
-        tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+        "tuple[Tool[SupportsDataclass, SupportsToolResult], ...]",
         (
             Tool[SetupPlan, SetupPlan](
                 name="planning_setup_plan",
@@ -782,7 +785,7 @@ def _setup_plan_reducer(
     if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
         msg = "Planning reducer requires an event with a value payload."
         raise TypeError(msg)
-    params = cast(SetupPlan, event.value)
+    params = cast("SetupPlan", event.value)
     steps = tuple(
         PlanStep(
             step_id=_format_step_id(index + 1),
@@ -810,7 +813,7 @@ def _add_step_reducer(
     if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
         msg = "Planning reducer requires an event with a value payload."
         raise TypeError(msg)
-    params = cast(AddStep, event.value)
+    params = cast("AddStep", event.value)
     existing = list(previous.steps)
     next_index = _next_step_index(existing)
     for step in params.steps:
@@ -845,7 +848,7 @@ def _update_step_reducer(
     if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
         msg = "Planning reducer requires an event with a value payload."
         raise TypeError(msg)
-    params = cast(UpdateStep, event.value)
+    params = cast("UpdateStep", event.value)
     updated_steps: list[PlanStep] = []
     for step in previous.steps:
         if step.step_id != params.step_id:
@@ -883,7 +886,7 @@ def _mark_step_reducer(
     if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
         msg = "Planning reducer requires an event with a value payload."
         raise TypeError(msg)
-    params = cast(MarkStep, event.value)
+    params = cast("MarkStep", event.value)
     updated_steps: list[PlanStep] = []
     for step in previous.steps:
         if step.step_id != params.step_id:

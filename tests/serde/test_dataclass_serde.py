@@ -14,13 +14,12 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 from uuid import UUID
 
 import pytest
@@ -33,7 +32,11 @@ from weakincentives.serde._utils import (
     _ParseConfig,
 )
 from weakincentives.serde.parse import _bool_from_str, _coerce_to_type
-from weakincentives.types import JSONValue
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from weakincentives.types import JSONValue
 
 parse_module = importlib.import_module("weakincentives.serde.parse")
 
@@ -67,12 +70,12 @@ TIMESTAMP = "2024-01-01T10:00:00"
 
 def as_dict(value: object) -> dict[str, object]:
     assert isinstance(value, dict)
-    return cast(dict[str, object], value)
+    return cast("dict[str, object]", value)
 
 
 def as_list(value: object) -> list[object]:
     assert isinstance(value, list)
-    return cast(list[object], value)
+    return cast("list[object]", value)
 
 
 def camel(name: str) -> str:
@@ -253,7 +256,7 @@ class LiteralModel:
 # Use literal bools to exercise coercion and schema branches.
 @dataclass
 class LiteralBoolModel:
-    flag: Literal[True, False]  # noqa: RUF038 - keep literal bools for schema coverage
+    flag: Literal[True, False]
 
 
 @dataclass
@@ -348,7 +351,7 @@ def test_parse_requires_mapping_and_dataclass() -> None:
     with pytest.raises(TypeError):
         parse(int, {})
     with pytest.raises(TypeError):
-        parse(User, cast(Mapping[str, object], []))
+        parse(User, cast("Mapping[str, object]", []))
 
 
 def test_parse_strict_type_errors_when_coercion_disabled() -> None:
@@ -415,8 +418,8 @@ def test_parse_literal_bool_strings() -> None:
 
 def test_schema_literal_bool_includes_boolean_type() -> None:
     schema_payload: dict[str, JSONValue] = schema(LiteralBoolModel)
-    properties = cast(dict[str, JSONValue], schema_payload["properties"])
-    flag_schema = cast(dict[str, JSONValue], properties["flag"])
+    properties = cast("dict[str, JSONValue]", schema_payload["properties"])
+    flag_schema = cast("dict[str, JSONValue]", properties["flag"])
     assert flag_schema["enum"] == [True, False]
     assert flag_schema["type"] == "boolean"
 
@@ -778,7 +781,7 @@ def test_dump_set_sort_fallback_on_bad_repr() -> None:
 
     holder = FancySetHolder({BadReprStr("b"), BadReprStr("a")})
     payload = dump(holder)
-    values = cast(list[str], payload["values"])
+    values = cast("list[str]", payload["values"])
     assert set(values) == {"a", "b"}
     assert BadReprStr.repr_calls > 0
 
@@ -869,13 +872,13 @@ def test_schema_reflects_types_constraints_and_aliases() -> None:
     schema_dict = schema(User, alias_generator=camel, extra="forbid")
     assert schema_dict["title"] == "User"
     assert schema_dict["additionalProperties"] is False
-    required = cast(list[str], schema_dict["required"])
+    required = cast("list[str]", schema_dict["required"])
     assert set(required) == {"id", "name", "email"}
 
     properties = as_dict(schema_dict["properties"])
     assert as_dict(properties["id"])["format"] == "uuid"
     assert as_dict(properties["name"])["minLength"] == 1
-    email_pattern = cast(str, as_dict(properties["email"])["pattern"])
+    email_pattern = cast("str", as_dict(properties["email"])["pattern"])
     assert email_pattern.startswith("^[^")
     assert as_dict(properties["createdAt"])["format"] == "date-time"
 
@@ -915,7 +918,7 @@ def test_schema_reflects_types_constraints_and_aliases() -> None:
     home_schema = as_dict(properties["home"])
     assert home_schema["type"] == "object"
     assert home_schema["title"] == "Address"
-    assert set(cast(list[str], home_schema["required"])) == {"street", "city", "zip"}
+    assert set(cast("list[str]", home_schema["required"])) == {"street", "city", "zip"}
     assert as_dict(as_dict(home_schema["properties"])["street"])["minLength"] == 1
     assert "pattern" in as_dict(as_dict(home_schema["properties"])["zip"])
 
@@ -963,7 +966,7 @@ def test_schema_collection_and_literal_models() -> None:
     assert "computed" not in properties_dict
 
     allow_schema = schema(User, extra="allow")
-    assert cast(bool, allow_schema["additionalProperties"]) is True
+    assert cast("bool", allow_schema["additionalProperties"]) is True
 
     @dataclass
     class LiteralNumbers:

@@ -165,7 +165,7 @@ def test_prompt_tools_rejects_duplicate_tool_names() -> None:
             sections=[first_section, second_section],
         )
 
-    error = cast(PromptValidationError, error_info.value)
+    error = cast("PromptValidationError", error_info.value)
     assert error.section_path == ("second-tools",)
     assert error.dataclass_type is PrimaryToolParams
 
@@ -235,7 +235,7 @@ def test_prompt_tools_requires_tool_instances() -> None:
             sections=[invalid_section],
         )
 
-    error = cast(PromptValidationError, error_info.value)
+    error = cast("PromptValidationError", error_info.value)
     assert error.section_path == ("invalid",)
     assert error.dataclass_type is GuidanceParams
 
@@ -259,6 +259,6 @@ def test_prompt_tools_rejects_tool_with_non_dataclass_params_type() -> None:
             sections=[section],
         )
 
-    error = cast(PromptValidationError, error_info.value)
+    error = cast("PromptValidationError", error_info.value)
     assert error.section_path == ("primary",)
     assert error.dataclass_type is str

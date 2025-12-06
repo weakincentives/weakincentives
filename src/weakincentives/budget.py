@@ -20,10 +20,10 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Literal, override
 
 from .dataclasses import FrozenDataclass
-from .deadlines import Deadline
 from .errors import WinkError
 
 if TYPE_CHECKING:
+    from .deadlines import Deadline
     from .runtime.events import TokenUsage
 
 __all__ = [

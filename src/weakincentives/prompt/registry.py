@@ -14,17 +14,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import fields, is_dataclass, replace
 from types import MappingProxyType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ..dataclasses import FrozenDataclass
 from ..dbc import invariant
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
-from .section import Section
 from .tool import Tool
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, MutableMapping, Sequence
+
+    from .section import Section
 
 
 @FrozenDataclass()
@@ -88,7 +91,7 @@ class RegistrySnapshot:
         node: SectionNode[SupportsDataclass],
     ) -> SupportsDataclass | None:
         try:
-            constructor = cast(Callable[[], SupportsDataclass | None], params_type)
+            constructor = cast("Callable[[], SupportsDataclass | None]", params_type)
             return constructor()
         except TypeError as error:
             raise PromptRenderError(
@@ -409,7 +412,7 @@ class PromptRegistry:
         path: SectionPath,
         params_type: type[SupportsDataclass] | None,
     ) -> None:
-        section_tools = cast(tuple[object, ...], section.tools())
+        section_tools = cast("tuple[object, ...]", section.tools())
         if not section_tools:
             return
 
@@ -420,7 +423,7 @@ class PromptRegistry:
                     section_path=path,
                     dataclass_type=params_type,
                 )
-            typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
+            typed_tool = cast("Tool[SupportsDataclassOrNone, SupportsToolResult]", tool)
             self._register_section_tools(
                 typed_tool,
                 path,
@@ -503,7 +506,7 @@ class PromptRegistry:
 def clone_dataclass(instance: SupportsDataclass) -> SupportsDataclass:
     """Return a shallow copy of the provided dataclass instance."""
 
-    return cast(SupportsDataclass, replace(cast(Any, instance)))
+    return cast("SupportsDataclass", replace(cast("Any", instance)))
 
 
 __all__ = [

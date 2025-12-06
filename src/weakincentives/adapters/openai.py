@@ -20,16 +20,9 @@ from dataclasses import dataclass, replace
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
-from typing import Any, Final, Protocol, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
-from ..deadlines import Deadline
-from ..prompt._types import SupportsDataclass
-from ..prompt._visibility import SectionVisibility
-from ..prompt.errors import SectionPath
-from ..prompt.prompt import Prompt
-from ..prompt.rendering import RenderedPrompt
-from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
 from ._provider_protocols import (
@@ -63,6 +56,15 @@ from .shared import (
     run_conversation,
     throttle_details,
 )
+
+if TYPE_CHECKING:
+    from ..deadlines import Deadline
+    from ..prompt._types import SupportsDataclass
+    from ..prompt._visibility import SectionVisibility
+    from ..prompt.errors import SectionPath
+    from ..prompt.prompt import Prompt
+    from ..prompt.rendering import RenderedPrompt
+    from ..runtime.events import EventBus
 
 OutputT = TypeVar("OutputT")
 
@@ -117,7 +119,7 @@ def _load_openai_module() -> _OpenAIModule:
         module = import_module("openai")
     except ModuleNotFoundError as exc:
         raise RuntimeError(_ERROR_MESSAGE) from exc
-    return cast(_OpenAIModule, module)
+    return cast("_OpenAIModule", module)
 
 
 def create_openai_client(**kwargs: object) -> _OpenAIProtocol:
@@ -155,15 +157,15 @@ def _retry_after_from_error(error: object) -> timedelta | None:
         return direct
     headers = getattr(error, "headers", None)
     retry_after = _retry_after_from_headers(
-        cast(Mapping[str, object], headers) if isinstance(headers, Mapping) else None
+        cast("Mapping[str, object]", headers) if isinstance(headers, Mapping) else None
     )
     if retry_after is not None:
         return retry_after
-    response = cast(object | None, getattr(error, "response", None))
+    response = cast("object | None", getattr(error, "response", None))
     if isinstance(response, Mapping):
-        response_mapping = cast(Mapping[str, object], response)
+        response_mapping = cast("Mapping[str, object]", response)
         retry_after = _retry_after_from_headers(
-            cast(Mapping[str, object], response_mapping.get("headers"))
+            cast("Mapping[str, object]", response_mapping.get("headers"))
             if isinstance(response_mapping.get("headers"), Mapping)
             else None
         )
@@ -178,7 +180,7 @@ def _retry_after_from_error(error: object) -> timedelta | None:
             getattr(response, "headers", None) if response is not None else None
         )
     return _retry_after_from_headers(
-        cast(Mapping[str, object], response_headers_obj)
+        cast("Mapping[str, object]", response_headers_obj)
         if isinstance(response_headers_obj, Mapping)
         else None
     )
@@ -187,11 +189,11 @@ def _retry_after_from_error(error: object) -> timedelta | None:
 def _error_payload(error: object) -> dict[str, Any] | None:
     payload_candidate = getattr(error, "response", None)
     if isinstance(payload_candidate, Mapping):
-        payload_mapping = cast(Mapping[object, Any], payload_candidate)
+        payload_mapping = cast("Mapping[object, Any]", payload_candidate)
         return {str(key): value for key, value in payload_mapping.items()}
     payload_candidate = getattr(error, "json_body", None)
     if isinstance(payload_candidate, Mapping):
-        payload_mapping = cast(Mapping[object, Any], payload_candidate)
+        payload_mapping = cast("Mapping[object, Any]", payload_candidate)
         return {str(key): value for key, value in payload_mapping.items()}
     return None
 
@@ -211,14 +213,14 @@ def _normalize_tool_call(call: object) -> ProviderToolCallData:
     call_id = getattr(call, "id", None)
     function_obj = getattr(call, "function", None)
     if isinstance(call, Mapping):
-        mapping_call = cast(Mapping[str, object], call)
+        mapping_call = cast("Mapping[str, object]", call)
         call_id = mapping_call.get("id", call_id)
         function_obj = mapping_call.get("function", function_obj)
 
     function_name = getattr(function_obj, "name", None)
     arguments_obj = getattr(function_obj, "arguments", None)
     if isinstance(function_obj, Mapping):
-        function_mapping = cast(Mapping[str, object], function_obj)
+        function_mapping = cast("Mapping[str, object]", function_obj)
         function_name = function_mapping.get("name", function_name)
         arguments_obj = function_mapping.get("arguments", arguments_obj)
 
@@ -254,10 +256,10 @@ def _tool_calls_from_content(parts: Sequence[object]) -> list[ProviderToolCallDa
     for part in parts:
         tool_calls_obj = getattr(part, "tool_calls", None)
         if tool_calls_obj is None and isinstance(part, Mapping):
-            mapping_part = cast(Mapping[str, object], part)
+            mapping_part = cast("Mapping[str, object]", part)
             tool_calls_obj = mapping_part.get("tool_calls")
         if tool_calls_obj:
-            tool_calls = cast(Sequence[object], tool_calls_obj)
+            tool_calls = cast("Sequence[object]", tool_calls_obj)
             return [_normalize_tool_call(call) for call in tool_calls]
     return []
 
@@ -266,7 +268,7 @@ def _parsed_from_content(parts: Sequence[object]) -> object | None:
     for part in parts:
         parsed = getattr(part, "parsed", None)
         if parsed is None and isinstance(part, Mapping):
-            mapping_part = cast(Mapping[str, object], part)
+            mapping_part = cast("Mapping[str, object]", part)
             parsed = mapping_part.get("parsed")
         if parsed is not None:
             return parsed
@@ -283,7 +285,7 @@ def _select_output_with_content(response: object, *, prompt_name: str) -> object
         )
 
     usable_outputs: list[object] = []
-    for output in cast(Sequence[object], outputs):
+    for output in cast("Sequence[object]", outputs):
         if getattr(output, "type", None) == "reasoning":
             continue
         if _tool_call_from_output(output) is not None:
@@ -311,14 +313,14 @@ def _content_from_output(output: object, *, prompt_name: str) -> Sequence[object
             prompt_name=prompt_name,
             phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
-    return cast(Sequence[object], content)
+    return cast("Sequence[object]", content)
 
 
 def _normalize_content_parts(parts: Sequence[object]) -> list[object]:
     normalized: list[object] = []
     for part in parts:
         if isinstance(part, Mapping):
-            mapping_part = cast(Mapping[str, object], part)
+            mapping_part = cast("Mapping[str, object]", part)
             normalized.append(dict(mapping_part))
         else:
             normalized.append(part)
@@ -347,7 +349,7 @@ def _responses_tool_spec(
             provider_payload={"tools": [spec]},
         )
 
-    function_mapping = cast(Mapping[str, Any], function_payload)
+    function_mapping = cast("Mapping[str, Any]", function_payload)
     name_obj = function_mapping.get("name")
     if not isinstance(name_obj, str) or not name_obj.strip():
         raise PromptEvaluationError(
@@ -386,7 +388,7 @@ def _responses_tool_choice(
     if tool_choice is None or isinstance(tool_choice, str):
         return tool_choice
 
-    tool_choice_items = cast(Iterable[tuple[str, Any]], tool_choice.items())
+    tool_choice_items = cast("Iterable[tuple[str, Any]]", tool_choice.items())
     tool_choice_mapping: dict[str, Any] = dict(tool_choice_items)
     tool_type_obj = tool_choice_mapping.get("type")
     tool_type = tool_type_obj if isinstance(tool_type_obj, str) else None
@@ -394,7 +396,7 @@ def _responses_tool_choice(
         function_payload = tool_choice_mapping.get("function")
         name_val: str | None = None
         if isinstance(function_payload, Mapping):
-            function_items = cast(Iterable[tuple[str, Any]], function_payload.items())
+            function_items = cast("Iterable[tuple[str, Any]]", function_payload.items())
             function_mapping: dict[str, Any] = dict(function_items)
             function_name = function_mapping.get("name")
             if isinstance(function_name, str):
@@ -437,10 +439,10 @@ def _normalize_input_messages(
                 normalized.append(
                     {"type": "message", "role": "assistant", "content": content}
                 )
-            for tool_call in cast(Sequence[Mapping[str, Any]], tool_calls):
+            for tool_call in cast("Sequence[Mapping[str, Any]]", tool_calls):
                 function_payload_obj = tool_call.get("function")
                 function_payload = (
-                    cast(Mapping[str, Any], function_payload_obj)
+                    cast("Mapping[str, Any]", function_payload_obj)
                     if isinstance(function_payload_obj, Mapping)
                     else None
                 )
@@ -469,7 +471,7 @@ def _normalize_input_messages(
         if role == "tool":
             # Mutate the original message so downstream updates (final output rewrites)
             # are visible to recorded payloads.
-            mutable_message = cast(dict[str, Any], message)
+            mutable_message = cast("dict[str, Any]", message)
             call_id = mutable_message.get("tool_call_id")
             if call_id is None:
                 raise PromptEvaluationError(
@@ -488,7 +490,7 @@ def _normalize_input_messages(
             continue
 
         if role in {"assistant", "system", "developer", "user"}:
-            mutable_message = cast(dict[str, Any], message)
+            mutable_message = cast("dict[str, Any]", message)
             mutable_message["type"] = "message"
             normalized.append(
                 {
@@ -745,14 +747,14 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         )
         if should_parse_structured_output and self._use_native_response_format:
             response_format = cast(
-                Mapping[str, Any],
+                "Mapping[str, Any]",
                 build_json_schema_response_format(rendered, prompt_name),
             )
-            json_schema = cast(Mapping[str, Any], response_format["json_schema"])
+            json_schema = cast("Mapping[str, Any]", response_format["json_schema"])
             text_format: dict[str, Any] = {
                 "type": "json_schema",
                 "name": json_schema["name"],
-                "schema": dict(cast(Mapping[str, Any], json_schema["schema"])),
+                "schema": dict(cast("Mapping[str, Any]", json_schema["schema"])),
             }
 
             return {"format": text_format}
@@ -804,7 +806,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
     ) -> Callable[[object], ProviderChoice]:
         def _select_choice(response: object) -> ProviderChoice:
             return cast(
-                ProviderChoice, _choice_from_response(response, prompt_name=prompt_name)
+                "ProviderChoice",
+                _choice_from_response(response, prompt_name=prompt_name),
             )
 
         return _select_choice

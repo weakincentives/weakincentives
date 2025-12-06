@@ -14,15 +14,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
@@ -34,13 +32,18 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.prompt._types import SupportsDataclassOrNone, SupportsToolResult
-from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
-from weakincentives.runtime.session.protocols import SessionProtocol
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from tests.helpers import FrozenUtcNow
+    from weakincentives.prompt._types import SupportsDataclassOrNone, SupportsToolResult
+    from weakincentives.prompt.prompt import RenderedPrompt
+    from weakincentives.runtime.session.protocols import SessionProtocol
 
 
 @dataclass(slots=True)
@@ -85,7 +88,7 @@ def _tool_context(
 ) -> shared.ToolExecutionContext:
     return shared.ToolExecutionContext(
         adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[BodyResult], object()),
+        adapter=cast("ProviderAdapter[BodyResult]", object()),
         prompt=prompt,
         rendered_prompt=rendered,
         tool_registry=tool_registry,
@@ -125,7 +128,7 @@ def test_conversation_runner_raise_deadline_error() -> None:
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
     runner = shared.ConversationRunner[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[BodyResult], object()),
+        adapter=cast("ProviderAdapter[BodyResult]", object()),
         prompt=prompt,
         prompt_name="deadline",
         rendered=rendered,
@@ -158,7 +161,7 @@ def test_conversation_runner_detects_expired_deadline(
     deadline = Deadline(anchor + timedelta(seconds=5))
     runner = shared.ConversationRunner[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[BodyResult], object()),
+        adapter=cast("ProviderAdapter[BodyResult]", object()),
         prompt=prompt,
         prompt_name="deadline",
         rendered=rendered,
@@ -200,7 +203,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
         handler=handler,
     )
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        "Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]",
         {tool.name: tool},
     )
     call = SimpleNamespace(
@@ -221,7 +224,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
                 prompt_name="deadline",
                 deadline=deadline,
             ),
-            tool_call=cast(shared.ProviderToolCall, call),
+            tool_call=cast("shared.ProviderToolCall", call),
         )
     assert isinstance(excinfo.value, PromptEvaluationError)
     error = excinfo.value
@@ -252,7 +255,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
         handler=handler,
     )
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        "Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]",
         {tool.name: tool},
     )
     call = SimpleNamespace(
@@ -268,7 +271,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
             session=session,
             prompt_name="publish",
         ),
-        tool_call=cast(shared.ProviderToolCall, call),
+        tool_call=cast("shared.ProviderToolCall", call),
     )
 
     assert result.success is True
@@ -302,7 +305,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
         )
 
     def select_choice(response: SimpleNamespace, /) -> shared.ProviderChoice:
-        return cast(shared.ProviderChoice, response.choices[0])
+        return cast("shared.ProviderChoice", response.choices[0])
 
     conversation_config = shared.ConversationConfig(
         bus=bus,
@@ -321,7 +324,7 @@ def test_run_conversation_replaces_rendered_deadline() -> None:
 
     inputs = shared.ConversationInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[BodyResult], object()),
+        adapter=cast("ProviderAdapter[BodyResult]", object()),
         prompt=prompt,
         prompt_name="deadline",
         rendered=rendered,

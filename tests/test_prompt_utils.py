@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -27,6 +27,9 @@ from weakincentives.tools.digests import (
     WorkspaceDigest,
     WorkspaceDigestSection,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _build_prompt() -> PromptTemplate[str]:

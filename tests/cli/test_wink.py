@@ -16,15 +16,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from weakincentives import cli
 from weakincentives.cli import wink
 from weakincentives.dbc import dbc_enabled
 from weakincentives.runtime.session.snapshots import Snapshot
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 @dataclass(slots=True, frozen=True)
@@ -38,7 +40,7 @@ def _write_snapshot(path: Path) -> None:
         slices={_ExampleSlice: (_ExampleSlice("a"),)},
         tags={"suite": "wink", "session_id": path.stem},
     )
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         path.write_text(snapshot.to_json() + "\n")
 
 

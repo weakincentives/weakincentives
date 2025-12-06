@@ -259,10 +259,9 @@ class EvalResult:
         lines: list[str] = ["Python evaluation result:"]
         if self.value_repr is not None:
             lines.append(f"Result: {self.value_repr}")
-        lines.append("STDOUT:")
-        lines.append(self.stdout or "<empty>")
-        lines.append("STDERR:")
-        lines.append(self.stderr or "<empty>")
+        lines.extend(
+            ("STDOUT:", self.stdout or "<empty>", "STDERR:", self.stderr or "<empty>")
+        )
         if self.reads:
             lines.append("Reads:")
             lines.extend(f"- {read.render()}" for read in self.reads)
@@ -521,7 +520,7 @@ def _sanitize_interpreter(interpreter: InterpreterProtocol) -> None:
         _ = interpreter.symtable.pop(name, None)
     node_handlers = getattr(interpreter, "node_handlers", None)
     if isinstance(node_handlers, MutableMapping):
-        handlers = cast(MutableMapping[str, object], node_handlers)
+        handlers = cast("MutableMapping[str, object]", node_handlers)
         for key in ("Eval", "Exec", "Import", "ImportFrom"):
             _ = handlers.pop(key, None)
 
@@ -534,7 +533,7 @@ def _create_interpreter() -> InterpreterProtocol:
         raise TypeError(message)
 
     interpreter = cast(
-        InterpreterProtocol, interpreter_cls(use_numpy=False, minimal=True)
+        "InterpreterProtocol", interpreter_cls(use_numpy=False, minimal=True)
     )
     interpreter.symtable = dict(_SAFE_GLOBALS)
     _sanitize_interpreter(interpreter)
@@ -565,7 +564,7 @@ def _execute_with_timeout(
     if not completed.is_set():
         return True, None, timeout_message
     if "error" in result_container:
-        error = cast(Exception, result_container["error"])
+        error = cast("Exception", result_container["error"])
         raise error
     return False, result_container.get("value"), error_container["message"]
 
@@ -741,7 +740,7 @@ class _AstevalToolSuite:
             interpreter=interpreter,
             stdout_buffer=io.StringIO(),
             stderr_buffer=io.StringIO(),
-            symtable=cast(dict[str, object], interpreter.symtable),
+            symtable=cast("dict[str, object]", interpreter.symtable),
             write_queue=write_queue,
             helper_writes=[],
             write_targets={write.path.segments for write in write_queue},
@@ -786,7 +785,7 @@ class _AstevalToolSuite:
                 EvalFileWrite(
                     path=normalized_path,
                     content=content,
-                    mode=cast(Literal["create", "overwrite", "append"], mode),
+                    mode=cast("Literal['create', 'overwrite', 'append']", mode),
                 )
             )
             key = helper_write.path.segments
@@ -966,7 +965,7 @@ def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
             msg = "Eval result reducer requires an event with a value payload."
             raise TypeError(msg)
 
-        value = cast(EvalResult, event.value)
+        value = cast("EvalResult", event.value)
         if not value.writes:
             return (previous,)
         snapshot = _apply_writes(previous, value.writes)

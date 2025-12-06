@@ -25,7 +25,7 @@ SelfClass = TypeVar(
 )
 
 
-class GenericParamsSpecializer(Generic[ParamsT]):  # noqa: UP046
+class GenericParamsSpecializer(Generic[ParamsT]):
     """Mixin providing ``ParamsT`` specialization for prompt components."""
 
     _params_type: ClassVar[type[SupportsDataclass] | None] = None
@@ -41,7 +41,7 @@ class GenericParamsSpecializer(Generic[ParamsT]):  # noqa: UP046
         specialized.__name__ = cls.__name__
         specialized.__qualname__ = cls.__qualname__
         specialized.__module__ = cls.__module__
-        specialized._params_type = cast(type[SupportsDataclass], params_type)
+        specialized._params_type = cast("type[SupportsDataclass]", params_type)
         return specialized
 
     @classmethod

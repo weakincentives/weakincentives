@@ -19,10 +19,12 @@ from collections.abc import Callable, Iterable, Mapping, Sized
 from decimal import Decimal
 from importlib import import_module
 from re import Pattern
-from typing import Any as _AnyType, Final, Literal, cast, get_args
+from typing import TYPE_CHECKING, Any as _AnyType, Final, Literal, cast, get_args
 
 from ..dataclasses import FrozenDataclass
-from ..types import JSONValue
+
+if TYPE_CHECKING:
+    from ..types import JSONValue
 
 MISSING_SENTINEL: Final[object] = object()
 _UNION_TYPE = type(int | str)
@@ -100,7 +102,7 @@ def _merge_annotated_meta(
         base = args[0]
         for extra in args[1:]:
             if isinstance(extra, Mapping):
-                merged.update(cast(Mapping[str, object], extra))
+                merged.update(cast("Mapping[str, object]", extra))
     return base, merged
 
 
@@ -117,7 +119,7 @@ def _apply_constraints[ConstrainedT](
     _validate_membership(normalized_value, meta, path)
     validated = _run_validators(normalized_value, meta, path)
     converted = _apply_converter(validated, meta, path)
-    return cast(ConstrainedT, converted)
+    return cast("ConstrainedT", converted)
 
 
 def _normalize_string(value: object, meta: Mapping[str, object]) -> object:
@@ -188,7 +190,7 @@ def _validate_pattern(candidate: object, meta: Mapping[str, object], path: str) 
         if not re.search(pattern, candidate):
             _fail(path, f"does not match pattern {pattern}")
     elif isinstance(pattern, Pattern):
-        compiled_pattern = cast(Pattern[str], pattern)
+        compiled_pattern = cast("Pattern[str]", pattern)
         if not compiled_pattern.search(candidate):
             _fail(path, f"does not match pattern {pattern}")
 
@@ -207,7 +209,7 @@ def _validate_inclusion(
     if not isinstance(members, Iterable) or isinstance(members, (str, bytes)):
         return
 
-    options_iter = cast(Iterable[JSONValue], members)
+    options_iter = cast("Iterable[JSONValue]", members)
     options = _ordered_values(options_iter)
     normalized_options = [
         _normalize_option(option, candidate, meta) for option in options
@@ -223,7 +225,7 @@ def _validate_exclusion(
     if not isinstance(not_members, Iterable) or isinstance(not_members, (str, bytes)):
         return
 
-    forbidden_iter = cast(Iterable[JSONValue], not_members)
+    forbidden_iter = cast("Iterable[JSONValue]", not_members)
     forbidden = _ordered_values(forbidden_iter)
     normalized_forbidden = [
         _normalize_option(option, candidate, meta) for option in forbidden
@@ -255,9 +257,9 @@ def _run_validators(candidate: object, meta: Mapping[str, object], path: str) ->
 
     callables: Iterable[Callable[[object], object]]
     if isinstance(validators, Iterable) and not isinstance(validators, (str, bytes)):
-        callables = cast(Iterable[Callable[[object], object]], validators)
+        callables = cast("Iterable[Callable[[object], object]]", validators)
     else:
-        callables = (cast(Callable[[object], object], validators),)
+        callables = (cast("Callable[[object], object]", validators),)
 
     current = candidate
     for validator in callables:
@@ -283,7 +285,7 @@ def _apply_converter(
     if not converter:
         return candidate
 
-    converter_fn = cast(Callable[[object], object], converter)
+    converter_fn = cast("Callable[[object], object]", converter)
     try:
         return converter_fn(candidate)
     except (TypeError, ValueError) as error:
@@ -324,14 +326,14 @@ def type_identifier(cls: type[object]) -> str:
     return _type_identifier(cls)
 
 
-__all__ = [  # noqa: RUF022
+__all__ = [
     "MISSING_SENTINEL",
     "TYPE_REF_KEY",
+    "_SLOTTED_EXTRAS",
+    "_UNION_TYPE",
     "_AnyType",
     "_ExtrasDescriptor",
     "_ParseConfig",
-    "_SLOTTED_EXTRAS",
-    "_UNION_TYPE",
     "_apply_constraints",
     "_merge_annotated_meta",
     "_ordered_values",

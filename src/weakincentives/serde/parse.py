@@ -24,6 +24,7 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Literal,
     cast,
     get_args as typing_get_args,
@@ -32,7 +33,6 @@ from typing import (
 )
 from uuid import UUID
 
-from ..types import JSONValue
 from ._utils import (
     _UNION_TYPE,
     TYPE_REF_KEY,
@@ -44,6 +44,9 @@ from ._utils import (
     _set_extras,
     _type_identifier,
 )
+
+if TYPE_CHECKING:
+    from ..types import JSONValue
 
 get_args = typing_get_args
 
@@ -87,7 +90,7 @@ def _time_from_any(value: object) -> object:
 
 
 _PRIMITIVE_COERCERS: dict[type[object], Callable[[object], object]] = cast(
-    dict[type[object], Callable[[object], object]],
+    "dict[type[object], Callable[[object], object]]",
     {
         int: int,
         float: float,
@@ -115,7 +118,7 @@ def _coerce_union(
     if (
         config.coerce
         and isinstance(value, str)
-        and value.strip() == ""
+        and not value.strip()
         and any(arg is type(None) for arg in get_args(base_type))
     ):
         return _apply_constraints(None, merged_meta, path)
@@ -157,7 +160,7 @@ def _coerce_literal(
         if value == literal:
             return _apply_constraints(literal, merged_meta, path)
         if config.coerce:
-            literal_type = cast(type[object], type(literal))
+            literal_type = cast("type[object]", type(literal))
             try:
                 if isinstance(literal, bool) and isinstance(value, str):
                     coerced_literal = _bool_from_str(value)
@@ -192,11 +195,11 @@ def _coerce_primitive(
     path: str,
     config: _ParseConfig,
 ) -> object:
-    coercer = _PRIMITIVE_COERCERS.get(cast(type[object], base_type))
+    coercer = _PRIMITIVE_COERCERS.get(cast("type[object]", base_type))
     if coercer is None:
         return _NOT_HANDLED
 
-    literal_type = cast(type[object], base_type)
+    literal_type = cast("type[object]", base_type)
     if isinstance(value, literal_type):
         return _apply_constraints(value, merged_meta, path)
     if not config.coerce:
@@ -228,7 +231,7 @@ def _coerce_dataclass(
     try:
         parsed = parse(
             dataclass_type,
-            cast(Mapping[str, object], value),
+            cast("Mapping[str, object]", value),
             extra=config.extra,
             coerce=config.coerce,
             case_insensitive=config.case_insensitive,
@@ -253,7 +256,7 @@ def _normalize_list_like(
     value: object, path: str, config: _ParseConfig
 ) -> list[JSONValue]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return list(cast(Iterable[JSONValue], value))
+        return list(cast("Iterable[JSONValue]", value))
     if config.coerce and isinstance(value, str):
         return [value]
     raise TypeError(f"{path}: expected sequence")
@@ -263,12 +266,12 @@ def _normalize_set_value(
     value: object, path: str, config: _ParseConfig
 ) -> list[JSONValue]:
     if isinstance(value, (set, list, tuple)):
-        return list(cast(Iterable[JSONValue], value))
+        return list(cast("Iterable[JSONValue]", value))
     if config.coerce:
         if isinstance(value, str):
             return [value]
         if isinstance(value, Iterable):
-            return list(cast(Iterable[JSONValue], value))
+            return list(cast("Iterable[JSONValue]", value))
     raise TypeError(f"{path}: expected set")
 
 
@@ -276,7 +279,7 @@ def _normalize_tuple_value(
     value: object, path: str, config: _ParseConfig
 ) -> list[JSONValue]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return list(cast(Iterable[JSONValue], value))
+        return list(cast("Iterable[JSONValue]", value))
     if config.coerce and isinstance(value, str):
         return [value]
     raise TypeError(f"{path}: expected tuple")
@@ -324,7 +327,7 @@ def _coerce_sequence(
     path: str,
     config: _ParseConfig,
 ) -> object:
-    origin = cast(type[object] | None, get_origin(base_type))
+    origin = cast("type[object] | None", get_origin(base_type))
     if origin not in {list, Sequence, tuple, set}:
         return _NOT_HANDLED
     items = _normalize_sequence_value(value, origin, path, config)
@@ -351,10 +354,8 @@ def _coerce_mapping(
         return _NOT_HANDLED
     if not isinstance(value, Mapping):
         raise TypeError(f"{path}: expected mapping")
-    key_type, value_type = (
-        get_args(base_type) if get_args(base_type) else (object, object)
-    )
-    mapping_value = cast(Mapping[JSONValue, JSONValue], value)
+    key_type, value_type = get_args(base_type) or (object, object)
+    mapping_value = cast("Mapping[JSONValue, JSONValue]", value)
     result_dict: dict[object, object] = {}
     for key, item in mapping_value.items():
         coerced_key = _coerce_to_type(key, key_type, None, f"{path} keys", config)
@@ -454,7 +455,7 @@ def _coerce_to_type(
 
 
 def _find_key(
-    data: Mapping[str, object], name: str, alias: str | None, case_insensitive: bool
+    data: Mapping[str, object], name: str, alias: str | None, *, case_insensitive: bool
 ) -> str | None:
     candidates = [alias, name]
     for candidate in candidates:
@@ -487,7 +488,7 @@ def _resolve_field_alias(
         return aliases[field.name]
     alias_value = field_meta.get("alias")
     if alias_value is not None:
-        return cast(str, alias_value)
+        return cast("str", alias_value)
     if alias_generator is not None:
         return alias_generator(field.name)
     return None
@@ -524,7 +525,12 @@ def _collect_field_kwargs(
         field_meta = dict(field.metadata)
         field_alias = _resolve_field_alias(field, aliases, alias_generator, field_meta)
 
-        key = _find_key(mapping_data, field.name, field_alias, config.case_insensitive)
+        key = _find_key(
+            mapping_data,
+            field.name,
+            field_alias,
+            case_insensitive=config.case_insensitive,
+        )
         if key is None:
             if field.default is MISSING and field.default_factory is MISSING:
                 raise ValueError(f"Missing required field: '{field.name}'")
@@ -583,14 +589,14 @@ def _resolve_target_dataclass[T](
         if not isinstance(type_identifier, str):
             raise TypeError(f"{type_key} must be a string type reference")
         try:
-            resolved_cls = cast(type[T], _resolve_type_identifier(type_identifier))
+            resolved_cls = cast("type[T]", _resolve_type_identifier(type_identifier))
         except (TypeError, ValueError) as error:
             raise TypeError(f"{type_key}: {error}") from error
         if not dataclasses.is_dataclass(resolved_cls):
             raise TypeError(f"{type_key}: resolved type is not a dataclass")
         referenced_cls = resolved_cls
         payload = cast(
-            Mapping[str, object],
+            "Mapping[str, object]",
             {key: value for key, value in mapping_data.items() if key != type_key},
         )
 
@@ -631,7 +637,7 @@ def parse[T](
     if extra not in {"ignore", "forbid", "allow"}:
         raise ValueError("extra must be one of 'ignore', 'forbid', or 'allow'")
 
-    mapping_data = cast(Mapping[str, object], data)
+    mapping_data = cast("Mapping[str, object]", data)
     target_cls, mapping_data = _resolve_target_dataclass(
         cls,
         mapping_data,

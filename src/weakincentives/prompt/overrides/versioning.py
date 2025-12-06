@@ -16,13 +16,15 @@ import json
 import re
 from dataclasses import field
 from hashlib import sha256
-from typing import Literal, Protocol, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Literal, Protocol, TypeVar, cast, overload
 
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
 from ...serde.schema import schema
-from ...types import JSONValue
-from .._types import SupportsDataclass, SupportsDataclassOrNone
+
+if TYPE_CHECKING:
+    from ...types import JSONValue
+    from .._types import SupportsDataclass, SupportsDataclassOrNone
 
 
 def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:
@@ -271,7 +273,7 @@ def _tool_contract_hash(tool: ToolContractProtocol) -> HexDigest:
     description_hash = hash_text(tool.description)
     params_schema_hash = hash_json(_params_schema(tool.params_type))
     container = cast(
-        Literal["object", "array"], getattr(tool, "result_container", "object")
+        "Literal['object', 'array']", getattr(tool, "result_container", "object")
     )
     result_schema_hash = hash_json(_result_schema(tool.result_type, container))
     return hash_text(

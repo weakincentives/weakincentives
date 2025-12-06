@@ -12,9 +12,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -26,7 +25,11 @@ from weakincentives.prompt import (
     SectionNode,
     SupportsDataclass,
 )
-from weakincentives.prompt.section import Section
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from weakincentives.prompt.section import Section
 
 
 @dataclass
@@ -74,7 +77,7 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         sections=[root],
     )
 
-    sections = cast(tuple[SectionNode[Any], ...], prompt.sections)
+    sections = cast("tuple[SectionNode[Any], ...]", prompt.sections)
     titles = [node.section.title for node in sections]
     depths = [node.depth for node in sections]
     paths = [node.path for node in sections]
@@ -229,7 +232,7 @@ def test_text_section_rejects_non_section_children() -> None:
             template="${value}",
             key="parent",
             children=cast(
-                Sequence[Section[SupportsDataclass]],
+                "Sequence[Section[SupportsDataclass]]",
                 ["not a section"],
             ),
         )

@@ -15,26 +15,29 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import field, is_dataclass
 from enum import Enum, auto
-from typing import Any, Final, cast, override
+from typing import TYPE_CHECKING, Any, Final, cast, override
 
 from ..dataclasses import FrozenDataclass
-from ..prompt import SupportsDataclass
-from ..prompt._visibility import SectionVisibility
 from ..prompt.composition import DelegationParams, DelegationPrompt, RecapParams
 from ..prompt.errors import PromptRenderError
 from ..prompt.markdown import MarkdownSection
-from ..prompt.prompt import RenderedPrompt
-from ..prompt.protocols import PromptProtocol, PromptResponseProtocol
 from ..prompt.tool import Tool, ToolContext, ToolExample
 from ..prompt.tool_result import ToolResult
 from ..runtime.events import InProcessEventBus
-from ..runtime.events._types import EventBus
-from ..runtime.session.protocols import SessionProtocol
 from ..serde import dump
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ..prompt import SupportsDataclass
+    from ..prompt._visibility import SectionVisibility
+    from ..prompt.prompt import RenderedPrompt
+    from ..prompt.protocols import PromptProtocol, PromptResponseProtocol
+    from ..runtime.events._types import EventBus
+    from ..runtime.session.protocols import SessionProtocol
 
 
 class SubagentIsolationLevel(Enum):
@@ -134,7 +137,7 @@ def _clone_session(
     kwargs: dict[str, object] = {"bus": bus}
     if parent is not None:
         kwargs["parent"] = parent
-    return cast(SessionProtocol, clone_method(**kwargs))
+    return cast("SessionProtocol", clone_method(**kwargs))
 
 
 def _prepare_child_contexts(
@@ -242,13 +245,13 @@ def build_dispatch_subagents_tool(
         )
         delegation_prompt = delegation_prompt_cls(
             context.prompt,
-            cast(RenderedPrompt[Any], rendered_parent),
+            cast("RenderedPrompt[Any]", rendered_parent),
             include_response_format=rendered_parent.container is not None,
         )
 
         delegations = tuple(params.delegations)
         if not delegations:
-            empty_results = cast(tuple[SubagentResult, ...], ())
+            empty_results = cast("tuple[SubagentResult, ...]", ())
             return ToolResult(
                 message="No delegations supplied.",
                 value=empty_results,
@@ -280,7 +283,7 @@ def build_dispatch_subagents_tool(
             recap = RecapParams(bullets=delegation.recap_lines)
             try:
                 bound_prompt = cast(
-                    PromptProtocol[Any],
+                    "PromptProtocol[Any]",
                     delegation_prompt.prompt.bind(delegation, recap),
                 )
                 response = adapter.evaluate(

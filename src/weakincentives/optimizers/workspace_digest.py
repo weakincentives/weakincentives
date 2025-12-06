@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
-from typing import Any, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 from ..adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
@@ -25,11 +25,7 @@ from ..adapters.core import (
     PromptResponse,
 )
 from ..prompt import MarkdownSection, Prompt, PromptTemplate
-from ..prompt._types import SupportsDataclass
 from ..prompt.overrides import PromptLike, PromptOverridesError
-from ..prompt.section import Section
-from ..runtime.session import Session
-from ..runtime.session.protocols import SessionProtocol
 from ..tools.asteval import AstevalSection
 from ..tools.digests import (
     WorkspaceDigestSection,
@@ -40,8 +36,14 @@ from ..tools.planning import PlanningStrategy, PlanningToolsSection
 from ..tools.podman import PodmanSandboxSection
 from ..tools.vfs import VfsToolsSection
 from ._base import BasePromptOptimizer, OptimizerConfig
-from ._context import OptimizationContext
 from ._results import PersistenceScope, WorkspaceDigestResult
+
+if TYPE_CHECKING:
+    from ..prompt._types import SupportsDataclass
+    from ..prompt.section import Section
+    from ..runtime.session import Session
+    from ..runtime.session.protocols import SessionProtocol
+    from ._context import OptimizationContext
 
 
 @dataclass(slots=True, frozen=True)
@@ -76,7 +78,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         return "workspace_digest"
 
     @override
-    def optimize(  # noqa: PLR0914 - keeping local clarity for optimization flow
+    def optimize(
         self,
         prompt: Prompt[object],
         *,
@@ -154,7 +156,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         if self._config.accepts_overrides and effective_store is not None:
             try:
                 _ = effective_store.seed(
-                    cast(PromptLike, optimization_prompt), tag=normalized_tag
+                    cast("PromptLike", optimization_prompt), tag=normalized_tag
                 )
             except PromptOverridesError as exc:
                 raise PromptEvaluationError(
@@ -188,7 +190,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                 )
             section_path = self._find_section_path(prompt, digest_section.key)
             _ = global_store.set_section_override(
-                cast(PromptLike, prompt),
+                cast("PromptLike", prompt),
                 tag=global_tag,
                 path=section_path,
                 body=digest,
@@ -196,13 +198,13 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             clear_workspace_digest(outer_session, digest_section.key)
 
         return WorkspaceDigestResult(
-            response=cast(PromptResponse[object], response),
+            response=cast("PromptResponse[object]", response),
             digest=digest,
             scope=self._store_scope,
             section_key=digest_section.key,
         )
 
-    def _resolve_workspace_section(  # noqa: PLR6301
+    def _resolve_workspace_section(
         self, prompt: Prompt[object], prompt_name: str
     ) -> Section[SupportsDataclass]:
         try:
@@ -214,7 +216,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                 phase=PROMPT_EVALUATION_PHASE_REQUEST,
             ) from error
 
-    def _resolve_tool_sections(  # noqa: PLR6301
+    def _resolve_tool_sections(
         self, prompt: Prompt[object]
     ) -> tuple[Section[SupportsDataclass], ...]:
         sections: list[Section[SupportsDataclass]] = []
@@ -225,12 +227,12 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                 continue
         return tuple(sections)
 
-    def _clone_section(  # noqa: PLR6301
+    def _clone_section(
         self, section: Section[SupportsDataclass], *, session: Session
     ) -> Section[SupportsDataclass]:
         return section.clone(session=session, bus=session.event_bus)
 
-    def _require_workspace_digest_section(  # noqa: PLR6301
+    def _require_workspace_digest_section(
         self, prompt: Prompt[object], *, prompt_name: str
     ) -> WorkspaceDigestSection:
         try:
@@ -241,9 +243,9 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                 prompt_name=prompt_name,
                 phase=PROMPT_EVALUATION_PHASE_REQUEST,
             ) from error
-        return cast(WorkspaceDigestSection, section)
+        return cast("WorkspaceDigestSection", section)
 
-    def _find_section_path(  # noqa: PLR6301
+    def _find_section_path(
         self, prompt: Prompt[object], section_key: str
     ) -> tuple[str, ...]:
         for node in prompt.sections:
@@ -256,7 +258,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
         )
 
-    def _extract_digest(  # noqa: PLR6301
+    def _extract_digest(
         self, *, response: PromptResponse[Any], prompt_name: str
     ) -> str:
         digest: str | None = None

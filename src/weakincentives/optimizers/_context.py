@@ -17,13 +17,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..deadlines import Deadline
-from ..prompt.overrides import PromptOverridesStore
-from ..runtime.events._types import EventBus
-from ..runtime.session import Session
-
 if TYPE_CHECKING:
     from ..adapters.core import ProviderAdapter
+    from ..deadlines import Deadline
+    from ..prompt.overrides import PromptOverridesStore
+    from ..runtime.events._types import EventBus
+    from ..runtime.session import Session
 
 
 @dataclass(slots=True, frozen=True)

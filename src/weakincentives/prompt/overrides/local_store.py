@@ -14,10 +14,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast, override
+from typing import TYPE_CHECKING, cast, override
 
 from ...runtime.logging import StructuredLogger, get_logger
-from ...types import JSONValue
 from ._fs import OverrideFilesystem
 from .validation import (
     FORMAT_VERSION,
@@ -42,6 +41,9 @@ from .versioning import (
     SectionOverride,
     descriptor_for_prompt,
 )
+
+if TYPE_CHECKING:
+    from ...types import JSONValue
 
 _LOGGER: StructuredLogger = get_logger(
     __name__, context={"component": "prompt_overrides"}
@@ -94,7 +96,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             payload: dict[str, JSONValue]
             try:
                 with file_path.open("r", encoding="utf-8") as handle:
-                    payload = cast(dict[str, JSONValue], json.load(handle))
+                    payload = cast("dict[str, JSONValue]", json.load(handle))
             except json.JSONDecodeError as error:
                 raise PromptOverridesError(
                     f"Failed to parse prompt override JSON: {file_path}"

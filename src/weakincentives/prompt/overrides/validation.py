@@ -14,11 +14,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
-from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from ...runtime.logging import StructuredLogger, get_logger
-from ...types import JSONValue
 from .versioning import (
     HexDigest,
     PromptDescriptor,
@@ -32,6 +30,11 @@ from .versioning import (
     ToolOverride,
     ensure_hex_digest,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ...types import JSONValue
 
 _LOGGER: StructuredLogger = get_logger(
     __name__, context={"component": "prompt_overrides"}
@@ -118,7 +121,7 @@ def _normalize_section_override(
         )
         return None
     expected_digest = ensure_hex_digest(
-        cast(HexDigest | str, expected_hash),
+        cast("HexDigest | str", expected_hash),
         field_name="Section expected_hash",
     )
     if expected_digest != descriptor_section.content_hash:
@@ -178,7 +181,7 @@ def _validate_tool_expected_hash(
     strict: bool,
 ) -> HexDigest | None:
     expected_digest = ensure_hex_digest(
-        cast(HexDigest | str, expected_hash),
+        cast("HexDigest | str", expected_hash),
         field_name="Tool expected_contract_hash",
     )
     if expected_digest != descriptor_tool.contract_hash:
@@ -217,7 +220,7 @@ def _normalize_param_descriptions(
         param_descriptions = {}
     if not isinstance(param_descriptions, Mapping):
         raise PromptOverridesError(param_mapping_error_message)
-    mapping_params = cast(Mapping[str, JSONValue], param_descriptions)
+    mapping_params = cast("Mapping[str, JSONValue]", param_descriptions)
     normalized_params: dict[str, str] = {}
     for key, value in mapping_params.items():
         if not isinstance(value, str):
@@ -281,7 +284,7 @@ def _load_section_override_entry(
     path = tuple(part for part in path_key.split("/") if part)
     if not isinstance(section_payload_raw, Mapping):
         raise PromptOverridesError("Section payload must be an object.")
-    section_payload = cast(Mapping[str, JSONValue], section_payload_raw)
+    section_payload = cast("Mapping[str, JSONValue]", section_payload_raw)
     expected_hash = section_payload.get("expected_hash")
     body = section_payload.get("body")
     config = SectionValidationConfig(
@@ -312,7 +315,7 @@ def _load_tool_override_entry(
     if not isinstance(tool_payload_raw, Mapping):
         raise PromptOverridesError("Tool payload must be an object.")
     tool_name = tool_name_raw
-    tool_payload = cast(Mapping[str, JSONValue], tool_payload_raw)
+    tool_payload = cast("Mapping[str, JSONValue]", tool_payload_raw)
     expected_hash = tool_payload.get("expected_contract_hash")
     description = tool_payload.get("description")
     param_payload = tool_payload.get("param_descriptions")
@@ -347,8 +350,10 @@ def load_sections(
         raise PromptOverridesError("Sections payload must be a mapping.")
     if not payload:
         return {}
-    mapping_payload = cast(Mapping[object, JSONValue], payload)
-    mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
+    mapping_payload = cast("Mapping[object, JSONValue]", payload)
+    mapping_entries = cast(
+        "Iterable[tuple[object, JSONValue]]", mapping_payload.items()
+    )
     descriptor_index = _section_descriptor_index(descriptor)
     overrides: dict[tuple[str, ...], SectionOverride] = {}
     for path_key_raw, section_payload_raw in mapping_entries:
@@ -423,8 +428,10 @@ def load_tools(
         raise PromptOverridesError("Tools payload must be a mapping.")
     if not payload:
         return {}
-    mapping_payload = cast(Mapping[object, JSONValue], payload)
-    mapping_entries = cast(Iterable[tuple[object, JSONValue]], mapping_payload.items())
+    mapping_payload = cast("Mapping[object, JSONValue]", payload)
+    mapping_entries = cast(
+        "Iterable[tuple[object, JSONValue]]", mapping_payload.items()
+    )
     descriptor_index = _tool_descriptor_index(descriptor)
     overrides: dict[str, ToolOverride] = {}
     for tool_name_raw, tool_payload_raw in mapping_entries:
@@ -461,7 +468,7 @@ def validate_sections_for_write(
             body=section_override.body,
             config=section_config,
         )
-        validated[path] = cast(SectionOverride, normalized_section)
+        validated[path] = cast("SectionOverride", normalized_section)
     return validated
 
 
@@ -494,7 +501,7 @@ def validate_tools_for_write(
             param_descriptions=tool_override.param_descriptions,
             config=tool_config,
         )
-        validated[name] = cast(ToolOverride, normalized_tool)
+        validated[name] = cast("ToolOverride", normalized_tool)
     return validated
 
 

@@ -14,10 +14,11 @@
 
 from __future__ import annotations
 
-from typing import Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
-from ..prompt import Prompt
-from ..runtime.session.protocols import SessionProtocol
+if TYPE_CHECKING:
+    from ..prompt import Prompt
+    from ..runtime.session.protocols import SessionProtocol
 
 InputT = TypeVar("InputT", contravariant=True)
 OutputT = TypeVar("OutputT", covariant=True)

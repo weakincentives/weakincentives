@@ -85,7 +85,7 @@ class PublishResult:
         message = f"Errors while publishing {type(self.event).__name__}: {failures}"
         raise ExceptionGroup(
             message,
-            tuple(cast(Exception, failure.error) for failure in self.errors),
+            tuple(cast("Exception", failure.error) for failure in self.errors),
         )
 
 

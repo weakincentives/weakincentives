@@ -14,8 +14,11 @@
 
 from __future__ import annotations
 
-from ..prompt.tool import ToolContext
-from ..runtime.session import Session
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..prompt.tool import ToolContext
+    from ..runtime.session import Session
 
 
 def ensure_context_uses_session(*, context: ToolContext, session: Session) -> None:

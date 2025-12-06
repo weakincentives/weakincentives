@@ -13,12 +13,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 
-from weakincentives.prompt import SupportsDataclassOrNone, SupportsToolResult
 from weakincentives.prompt.overrides.validation import (
     FORMAT_VERSION,
     load_sections,
@@ -42,7 +40,12 @@ from weakincentives.prompt.overrides.versioning import (
     _tool_contract_hash,
 )
 from weakincentives.prompt.tool import Tool
-from weakincentives.types import JSONValue
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from weakincentives.prompt import SupportsDataclassOrNone, SupportsToolResult
+    from weakincentives.types import JSONValue
 
 _NONE_TYPE = type(None)
 
@@ -98,7 +101,7 @@ def _build_prompt_with_tool() -> tuple[
     )
     section = _Section(
         template="Body template",
-        _tools=(cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool),),
+        _tools=(cast("Tool[SupportsDataclassOrNone, SupportsToolResult]", tool),),
     )
     node = _SectionNode(path=("intro",), number="1", section=section)
     prompt = _Prompt(ns="demo", key="example", _section_nodes=(node,))
@@ -112,7 +115,7 @@ OTHER_DIGEST = HexDigest("b" * 64)
 
 def test_hex_digest_rejects_non_strings() -> None:
     with pytest.raises(TypeError):
-        HexDigest(cast(object, 123))
+        HexDigest(cast("object", 123))
 
 
 def test_validate_header_accepts_matching_metadata(tmp_path: Path) -> None:

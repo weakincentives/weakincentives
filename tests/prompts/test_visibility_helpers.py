@@ -12,9 +12,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -24,6 +23,9 @@ from weakincentives.prompt._visibility import (
     normalize_visibility_selector,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 @dataclass
 class _VisibilityParams:
@@ -32,7 +34,7 @@ class _VisibilityParams:
 
 def test_visibility_selector_rejects_invalid_return_type() -> None:
     selector = normalize_visibility_selector(
-        lambda params: cast(SectionVisibility, "not-visibility"), _VisibilityParams
+        lambda params: cast("SectionVisibility", "not-visibility"), _VisibilityParams
     )
 
     with pytest.raises(TypeError):
@@ -50,7 +52,7 @@ def test_visibility_requires_positional_argument_branches() -> None:
     )
     assert (
         _visibility_requires_positional_argument(
-            cast(Callable[..., SectionVisibility], object())
+            cast("Callable[..., SectionVisibility]", object())
         )
         is True
     )

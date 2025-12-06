@@ -15,16 +15,13 @@
 from __future__ import annotations
 
 import fnmatch
-import os
 import re
-from collections.abc import Iterable, Sequence
 from dataclasses import field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, Literal, cast, override
+from typing import TYPE_CHECKING, Final, Literal, cast, override
 
 from ..dataclasses import FrozenDataclass
-from ..prompt import SupportsDataclass, SupportsToolResult
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.session import (
@@ -38,6 +35,12 @@ from ..runtime.session import (
 )
 from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
+
+if TYPE_CHECKING:
+    import os
+    from collections.abc import Iterable, Sequence
+
+    from ..prompt import SupportsDataclass, SupportsToolResult
 
 FileEncoding = Literal["utf-8"]
 WriteMode = Literal["create", "overwrite", "append"]
@@ -695,7 +698,7 @@ def _build_tools(
 ) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
     suite = _VfsToolSuite(section=section)
     return cast(
-        tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+        "tuple[Tool[SupportsDataclass, SupportsToolResult], ...]",
         (
             Tool[ListDirectoryParams, tuple[FileInfo, ...]](
                 name="ls",
@@ -1349,7 +1352,7 @@ def _load_mount(
     )
     files: list[VfsFile] = []
     consumed_bytes = 0
-    for path in _iter_mount_files(resolved_host, mount.follow_symlinks):
+    for path in _iter_mount_files(resolved_host, follow_symlinks=mount.follow_symlinks):
         file, consumed_bytes = _read_mount_entry(
             path=path, context=context, consumed_bytes=consumed_bytes
         )
@@ -1477,7 +1480,7 @@ def _normalize_globs(patterns: Sequence[str], field: str) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
+def _iter_mount_files(root: Path, *, follow_symlinks: bool) -> Iterable[Path]:
     if root.is_file():
         yield root
         return
@@ -1500,7 +1503,7 @@ def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
         if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
             msg = "VFS reducer requires an event with a value payload."
             raise TypeError(msg)
-        params = cast(WriteFile, event.value)
+        params = cast("WriteFile", event.value)
         timestamp = _now()
         files = list(previous.files)
         existing_index = _index_of(files, params.path)
@@ -1549,7 +1552,7 @@ def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
         if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
             msg = "VFS reducer requires an event with a value payload."
             raise TypeError(msg)
-        params = cast(DeleteEntry, event.value)
+        params = cast("DeleteEntry", event.value)
         target = params.path.segments
         files = [
             file

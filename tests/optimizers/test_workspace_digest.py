@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 
@@ -24,7 +24,6 @@ from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
 )
-from weakincentives.deadlines import Deadline
 from weakincentives.optimizers import (
     OptimizationContext,
     OptimizerConfig,
@@ -49,6 +48,9 @@ from weakincentives.tools.digests import (
     set_workspace_digest,
 )
 from weakincentives.tools.vfs import VfsToolsSection
+
+if TYPE_CHECKING:
+    from weakincentives.deadlines import Deadline
 
 
 @dataclass(slots=True, frozen=True)
@@ -75,7 +77,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         descriptor: PromptDescriptor,
         tag: str = "latest",
     ) -> PromptOverride | None:
-        self.calls.append((cast(PromptTemplate[Any], descriptor), tag, (), "resolve"))
+        self.calls.append((cast("PromptTemplate[Any]", descriptor), tag, (), "resolve"))
         return None
 
     def upsert(
@@ -83,7 +85,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         descriptor: PromptLike,
         override: PromptOverride,
     ) -> PromptOverride:
-        self.calls.append((cast(PromptTemplate[Any], descriptor), "", (), "upsert"))
+        self.calls.append((cast("PromptTemplate[Any]", descriptor), "", (), "upsert"))
         return override
 
     def delete(
@@ -94,7 +96,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         tag: str,
     ) -> None:
         self.calls.append(
-            (cast(PromptTemplate[Any], object()), tag, (ns, prompt_key), "delete")
+            (cast("PromptTemplate[Any]", object()), tag, (ns, prompt_key), "delete")
         )
 
     def set_section_override(
@@ -106,7 +108,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         body: str,
     ) -> PromptOverride:
         self.calls.append((prompt, tag, path, body))
-        return cast(PromptOverride, object())
+        return cast("PromptOverride", object())
 
     def seed(
         self,
@@ -114,8 +116,8 @@ class _RecordingOverridesStore(PromptOverridesStore):
         *,
         tag: str = "latest",
     ) -> PromptOverride:
-        self.calls.append((cast(PromptTemplate[Any], prompt), tag, (), "seed"))
-        return cast(PromptOverride, object())
+        self.calls.append((cast("PromptTemplate[Any]", prompt), tag, (), "seed"))
+        return cast("PromptOverride", object())
 
 
 class _FailingSeedOverridesStore(_RecordingOverridesStore):
@@ -125,7 +127,7 @@ class _FailingSeedOverridesStore(_RecordingOverridesStore):
         *,
         tag: str = "latest",
     ) -> PromptOverride:
-        self.calls.append((cast(PromptTemplate[Any], prompt), tag, (), "seed"))
+        self.calls.append((cast("PromptTemplate[Any]", prompt), tag, (), "seed"))
         raise PromptOverridesError("seed failed")
 
 

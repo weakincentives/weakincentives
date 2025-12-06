@@ -15,9 +15,10 @@
 from __future__ import annotations
 
 from dataclasses import is_dataclass
-from typing import TypeGuard
+from typing import TYPE_CHECKING, TypeGuard
 
-from ...prompt._types import SupportsDataclass
+if TYPE_CHECKING:
+    from ...prompt._types import SupportsDataclass
 
 
 def is_dataclass_instance(value: object) -> TypeGuard[SupportsDataclass]:

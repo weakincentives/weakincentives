@@ -17,11 +17,10 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.prompt import (
     MarkdownSection,
@@ -34,6 +33,9 @@ from weakincentives.prompt import (
 from weakincentives.runtime import select_latest
 from weakincentives.runtime.events import PromptExecuted
 from weakincentives.runtime.session import Session
+
+if TYPE_CHECKING:
+    from weakincentives.adapters.core import SessionProtocol
 
 pytest.importorskip("litellm")
 
@@ -75,7 +77,7 @@ def completion_kwargs() -> dict[str, object]:
         payload = json.loads(extra_kwargs)
         if not isinstance(payload, dict):  # pragma: no cover - defensive
             raise TypeError(f"{_ADDITIONAL_KWARGS_ENV} must contain a JSON object.")
-        kwargs.update(cast(dict[str, object], payload))
+        kwargs.update(cast("dict[str, object]", payload))
 
     return kwargs
 
@@ -220,7 +222,7 @@ def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
         prompt,
         parse_output=False,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert response.prompt_name == "greeting"
@@ -240,7 +242,7 @@ def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
     response = adapter.evaluate(
         prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert response.text is not None
@@ -258,7 +260,7 @@ def test_litellm_adapter_parses_structured_output(adapter: LiteLLMAdapter) -> No
     response = adapter.evaluate(
         prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert response.output is not None

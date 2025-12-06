@@ -12,13 +12,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, Final, Literal, Self, cast, override
+from typing import TYPE_CHECKING, Any, Final, Literal, Self, cast, override
 
 from ..dataclasses import FrozenDataclass
 from ..serde import clone as clone_dataclass
-from ._types import SupportsDataclass
 from .markdown import MarkdownSection
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ._types import SupportsDataclass
 
 __all__ = ["ResponseFormatParams", "ResponseFormatSection"]
 
@@ -72,4 +75,4 @@ class ResponseFormatSection(MarkdownSection[ResponseFormatParams]):
             enabled=self._enabled,
             accepts_overrides=self.accepts_overrides,
         )
-        return cast(Self, clone)
+        return cast("Self", clone)

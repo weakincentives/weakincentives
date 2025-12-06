@@ -15,17 +15,20 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
-from typing import Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
-from ..deadlines import Deadline
 from ..errors import WinkError
-from ..prompt import Prompt, SectionVisibility
-from ..prompt.errors import SectionPath
-from ..runtime.events._types import EventBus
 from ..runtime.session.protocols import SessionProtocol
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from ..deadlines import Deadline
+    from ..prompt import Prompt, SectionVisibility
+    from ..prompt.errors import SectionPath
+    from ..runtime.events._types import EventBus
 
 OutputT = TypeVar("OutputT")
 

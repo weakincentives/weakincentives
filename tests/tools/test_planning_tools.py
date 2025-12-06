@@ -15,14 +15,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
 
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.prompt import SupportsDataclass
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import (
@@ -54,6 +53,9 @@ from weakincentives.tools.planning import (
     _update_step_reducer,
 )
 
+if TYPE_CHECKING:
+    from weakincentives.prompt import SupportsDataclass
+
 
 def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
     result = ToolResult(message="ok", value=value)
@@ -62,7 +64,7 @@ def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
         adapter=GENERIC_ADAPTER_NAME,
         name=name,
         params=value,
-        result=cast(ToolResult[object], result),
+        result=cast("ToolResult[object]", result),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
         value=value,

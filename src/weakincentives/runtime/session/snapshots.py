@@ -19,21 +19,23 @@ import types
 from collections.abc import Mapping
 from dataclasses import field, is_dataclass
 from datetime import UTC, datetime
-from typing import TypeGuard, cast, override
+from typing import TYPE_CHECKING, TypeGuard, cast, override
 from uuid import UUID
 
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
-from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
 from ...serde._utils import (
     TYPE_REF_KEY,
     resolve_type_identifier,
     type_identifier,
 )
-from ...types import JSONValue
 from ._slice_types import SessionSlice, SessionSliceType
 from .dataclasses import is_dataclass_instance
+
+if TYPE_CHECKING:
+    from ...prompt._types import SupportsDataclass
+    from ...types import JSONValue
 
 SNAPSHOT_SCHEMA_VERSION = "1"
 
@@ -61,7 +63,7 @@ def _normalize_tags(
                 raise error_cls(msg)
             normalized[key] = value
 
-    return cast(Mapping[str, str], types.MappingProxyType(normalized))
+    return cast("Mapping[str, str]", types.MappingProxyType(normalized))
 
 
 def normalize_snapshot_state(
@@ -92,7 +94,7 @@ def normalize_snapshot_state(
 
         normalized[slice_type] = tuple(items)
 
-    return cast(SnapshotState, types.MappingProxyType(normalized))
+    return cast("SnapshotState", types.MappingProxyType(normalized))
 
 
 def _type_identifier(cls: SessionSliceType) -> str:
@@ -101,7 +103,7 @@ def _type_identifier(cls: SessionSliceType) -> str:
 
 def _resolve_type(identifier: str) -> SessionSliceType:
     try:
-        return cast(SessionSliceType, resolve_type_identifier(identifier))
+        return cast("SessionSliceType", resolve_type_identifier(identifier))
     except (TypeError, ValueError) as error:
         raise SnapshotRestoreError(str(error)) from error
 
@@ -121,7 +123,7 @@ def _load_snapshot_object(raw: str) -> Mapping[str, JSONValue]:
     if not isinstance(payload_obj, Mapping):
         raise SnapshotRestoreError("Snapshot payload must be an object")
 
-    return cast(Mapping[str, JSONValue], payload_obj)
+    return cast("Mapping[str, JSONValue]", payload_obj)
 
 
 def _validate_schema_version(version: str) -> None:
@@ -182,7 +184,7 @@ def _validate_tags(payload: Mapping[str, JSONValue]) -> Mapping[str, str]:
         raise SnapshotRestoreError("Snapshot tags must be an object")
 
     return _normalize_tags(
-        cast(Mapping[object, object] | None, tags_obj),
+        cast("Mapping[object, object] | None", tags_obj),
         error_cls=SnapshotRestoreError,
     )
 
@@ -240,7 +242,7 @@ class SnapshotSlicePayload:
         if not isinstance(obj, Mapping):
             raise SnapshotRestoreError("Slice entry must be an object")
 
-        entry = cast(Mapping[str, JSONValue], obj)
+        entry = cast("Mapping[str, JSONValue]", obj)
         slice_identifier = entry.get("slice_type")
         item_identifier = entry.get("item_type")
 
@@ -258,7 +260,7 @@ class SnapshotSlicePayload:
         for item in items_obj:
             if not isinstance(item, Mapping):
                 raise SnapshotRestoreError("Slice items must be objects")
-            items.append(cast(Mapping[str, JSONValue], item))
+            items.append(cast("Mapping[str, JSONValue]", item))
 
         return cls(
             slice_type=slice_identifier,
@@ -277,7 +279,7 @@ class SnapshotPayload:
     parent_id: str | None = None
     children_ids: tuple[str, ...] = ()
     tags: Mapping[str, str] = field(
-        default_factory=lambda: cast(Mapping[str, str], types.MappingProxyType({}))
+        default_factory=lambda: cast("Mapping[str, str]", types.MappingProxyType({}))
     )
 
     @classmethod
@@ -295,12 +297,12 @@ class Snapshot:
     children_ids: tuple[UUID, ...] = ()
     slices: SnapshotState = field(
         default_factory=lambda: cast(
-            SnapshotState,
+            "SnapshotState",
             types.MappingProxyType({}),
         )
     )
     tags: Mapping[str, str] = field(
-        default_factory=lambda: cast(Mapping[str, str], types.MappingProxyType({}))
+        default_factory=lambda: cast("Mapping[str, str]", types.MappingProxyType({}))
     )
 
     def __post_init__(self) -> None:
@@ -308,12 +310,12 @@ class Snapshot:
         object.__setattr__(
             self,
             "slices",
-            cast(SnapshotState, types.MappingProxyType(dict(self.slices))),
+            cast("SnapshotState", types.MappingProxyType(dict(self.slices))),
         )
         object.__setattr__(
             self,
             "tags",
-            cast(Mapping[str, str], types.MappingProxyType(dict(self.tags))),
+            cast("Mapping[str, str]", types.MappingProxyType(dict(self.tags))),
         )
 
     @override
@@ -340,7 +342,7 @@ class Snapshot:
             try:
                 serialized_items = [
                     cast(
-                        Mapping[str, JSONValue],
+                        "Mapping[str, JSONValue]",
                         dump(
                             value,
                             include_dataclass_type=True,

@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import subprocess
 import time
-from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -35,6 +34,9 @@ from weakincentives.tools import (
     ReadFileResult,
     WriteFileParams,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.mark.integration
@@ -65,7 +67,7 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
 
         assert result.success
         assert result.value is not None
-        value = cast(PodmanShellResult, result.value)
+        value = cast("PodmanShellResult", result.value)
         assert "hello" in value.stdout
         handle = section._workspace_handle
         assert handle is not None
@@ -108,7 +110,7 @@ def test_podman_vfs_round_trip(tmp_path: Path) -> None:
         )
         assert result.success
         assert result.value is not None
-        read_value = cast(ReadFileResult, result.value)
+        read_value = cast("ReadFileResult", result.value)
         assert "hello world" in read_value.content
         handle = section._workspace_handle
         assert handle is not None
@@ -142,7 +144,7 @@ def test_evaluate_python_writes_file(tmp_path: Path) -> None:
         result = eval_handler(params, context=build_tool_context(bus, session))
 
         assert result.success
-        payload = cast(EvalResult, result.value)
+        payload = cast("EvalResult", result.value)
         assert payload is not None
         assert payload.stdout.strip() == "integration-ok"
         assert payload.stderr == ""
@@ -189,7 +191,7 @@ def test_podman_container_has_no_network(tmp_path: Path) -> None:
 
         assert result.success
         assert result.value is not None
-        value = cast(PodmanShellResult, result.value)
+        value = cast("PodmanShellResult", result.value)
         assert value.exit_code == 0
         handle = section._workspace_handle
         assert handle is not None

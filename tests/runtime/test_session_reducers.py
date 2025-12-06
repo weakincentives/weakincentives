@@ -13,11 +13,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from weakincentives.runtime.events import EventBus
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session._types import ReducerContextProtocol
 from weakincentives.runtime.session.reducers import replace_latest_by
+
+if TYPE_CHECKING:
+    from weakincentives.runtime.events import EventBus
 
 
 @dataclass(slots=True)

@@ -13,11 +13,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from threading import Barrier, Lock, Thread
+from typing import TYPE_CHECKING
 
 from weakincentives.runtime.events import InProcessEventBus, PublishResult
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 
 @dataclass(slots=True)

@@ -12,12 +12,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, override
 
 from ..errors import WinkError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from ._visibility import SectionVisibility
 
 SectionPath = tuple[str, ...]

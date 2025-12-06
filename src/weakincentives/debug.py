@@ -15,11 +15,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .dbc import dbc_enabled
 from .runtime.session import Session, iter_sessions_bottom_up
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ def dump_session(root_session: Session, target: str | Path) -> Path | None:
     input, the final snapshot file is named ``<root_session_id>.jsonl``.
     """
 
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         target_path = _resolve_target(Path(target), root_session)
         snapshots = _collect_snapshots(root_session)
         if not snapshots:
@@ -64,7 +67,7 @@ def dump_session(root_session: Session, target: str | Path) -> Path | None:
 
 def _collect_snapshots(root_session: Session) -> list[str]:
     snapshots: list[str] = []
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         for session in _iter_sessions_top_down(root_session):
             snapshot = session.snapshot()
             if not snapshot.slices:

@@ -12,15 +12,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
@@ -40,11 +38,6 @@ from weakincentives.adapters.shared import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
-from weakincentives.prompt._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
@@ -54,10 +47,20 @@ from weakincentives.runtime.events import (
     PublishResult,
     ToolInvoked,
 )
-from weakincentives.runtime.events._types import EventHandler
 from weakincentives.runtime.logging import get_logger
 from weakincentives.runtime.session.session import Session
 from weakincentives.tools.errors import ToolValidationError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from tests.helpers import FrozenUtcNow
+    from weakincentives.prompt._types import (
+        SupportsDataclass,
+        SupportsDataclassOrNone,
+        SupportsToolResult,
+    )
+    from weakincentives.runtime.events._types import EventHandler
 
 
 class RecordingBus(EventBus):
@@ -104,7 +107,7 @@ def test_tool_to_spec_accepts_none_params() -> None:
         handler=handler,
     )
 
-    spec = tool_to_spec(cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool))
+    spec = tool_to_spec(cast("Tool[SupportsDataclassOrNone, SupportsToolResult]", tool))
 
     assert spec["function"]["parameters"] == {
         "type": "object",
@@ -128,7 +131,7 @@ def test_parse_tool_params_rejects_arguments_for_none_params() -> None:
 
     with pytest.raises(ToolValidationError, match="does not accept any arguments"):
         _parse_tool_params(
-            tool=cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool),
+            tool=cast("Tool[SupportsDataclassOrNone, SupportsToolResult]", tool),
             arguments_mapping={"unexpected": "value"},
         )
 
@@ -141,7 +144,7 @@ def test_parse_tool_params_returns_none_for_empty_arguments() -> None:
     )
 
     parsed = _parse_tool_params(
-        tool=cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool),
+        tool=cast("Tool[SupportsDataclassOrNone, SupportsToolResult]", tool),
         arguments_mapping={},
     )
 
@@ -157,20 +160,20 @@ def test_tool_executor_success() -> None:
     rendered = RenderedPrompt(
         text="system",
         _tools=cast(
-            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+            "tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]",
             (tool,),
         ),
     )
     bus = RecordingBus()
     session = Session(bus=bus)
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        "Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]",
         {tool.name: tool},
     )
 
     executor = ToolExecutor(
         adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[Any], object()),
+        adapter=cast("ProviderAdapter[Any]", object()),
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         prompt_name="test",
         rendered=rendered,
@@ -187,7 +190,7 @@ def test_tool_executor_success() -> None:
         function=SimpleNamespace(name="echo", arguments='{"value": "hello"}'),
     )
 
-    messages, next_choice = executor.execute([cast(Any, tool_call)], None)
+    messages, next_choice = executor.execute([cast("Any", tool_call)], None)
     tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
 
     assert len(messages) == 1
@@ -211,14 +214,14 @@ def test_publish_tool_invocation_attaches_usage() -> None:
 
     bus = RecordingBus()
     session = Session(bus=bus)
-    typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
+    typed_tool = cast("Tool[SupportsDataclassOrNone, SupportsToolResult]", tool)
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]] = {
         tool.name: typed_tool
     }
 
     context = ToolExecutionContext(
         adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[Any], object()),
+        adapter=cast("ProviderAdapter[Any]", object()),
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         rendered_prompt=None,
         tool_registry=tool_registry,
@@ -240,8 +243,8 @@ def test_publish_tool_invocation_attaches_usage() -> None:
 
     outcome = ToolExecutionOutcome(
         tool=typed_tool,
-        params=cast(SupportsDataclass, params),
-        result=cast(ToolResult[SupportsToolResult], result),
+        params=cast("SupportsDataclass", params),
+        result=cast("ToolResult[SupportsToolResult]", result),
         call_id="call-usage",
         log=log,
     )
@@ -338,14 +341,14 @@ def test_tool_executor_raises_when_deadline_expired(
     rendered = RenderedPrompt(
         text="system",
         _tools=cast(
-            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+            "tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]",
             (tool,),
         ),
     )
     bus = RecordingBus()
     session = Session(bus=bus)
     tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        "Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]",
         {tool.name: tool},
     )
 
@@ -356,7 +359,7 @@ def test_tool_executor_raises_when_deadline_expired(
 
     executor = ToolExecutor(
         adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[Any], object()),
+        adapter=cast("ProviderAdapter[Any]", object()),
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         prompt_name="test",
         rendered=rendered,
@@ -375,9 +378,9 @@ def test_tool_executor_raises_when_deadline_expired(
     )
 
     with pytest.raises(PromptEvaluationError) as excinfo:
-        executor.execute([cast(Any, tool_call)], None)
+        executor.execute([cast("Any", tool_call)], None)
 
-    error = cast(PromptEvaluationError, excinfo.value)
+    error = cast("PromptEvaluationError", excinfo.value)
     assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
     assert error.provider_payload == {
         "deadline_expires_at": deadline.expires_at.isoformat()

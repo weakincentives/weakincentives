@@ -12,10 +12,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -35,13 +34,7 @@ from weakincentives.adapters.shared import (
     token_usage_from_payload,
 )
 from weakincentives.budget import Budget, BudgetTracker
-from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
-from weakincentives.prompt._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
 from weakincentives.prompt.overrides import PromptDescriptor
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
@@ -56,12 +49,22 @@ from weakincentives.runtime.events import (
     TokenUsage,
     ToolInvoked,
 )
-from weakincentives.runtime.events._types import EventHandler
-from weakincentives.runtime.session.protocols import SnapshotProtocol
 from weakincentives.runtime.session.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
 
 from ._test_stubs import DummyChoice, DummyMessage, DummyResponse, DummyToolCall
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from weakincentives.deadlines import Deadline
+    from weakincentives.prompt._types import (
+        SupportsDataclass,
+        SupportsDataclassOrNone,
+        SupportsToolResult,
+    )
+    from weakincentives.runtime.events._types import EventHandler
+    from weakincentives.runtime.session.protocols import SnapshotProtocol
 
 
 class DummyAdapter(ProviderAdapter[object]):
@@ -217,7 +220,7 @@ def test_conversation_runner_includes_usage_in_event() -> None:
     runner = build_runner(rendered=rendered, provider=provider, bus=bus)
     _ = runner.run()
 
-    prompt_event = cast(PromptExecuted, bus.events[-1])
+    prompt_event = cast("PromptExecuted", bus.events[-1])
     assert prompt_event.usage == TokenUsage(
         input_tokens=12, output_tokens=5, cached_tokens=3
     )
@@ -268,7 +271,7 @@ def test_conversation_runner_publishes_prompt_rendered_event() -> None:
 
     assert provider.calls
     assert bus.events and isinstance(bus.events[0], PromptRendered)
-    event = cast(PromptRendered, bus.events[0])
+    event = cast("PromptRendered", bus.events[0])
     assert event.rendered_prompt == "system"
     assert event.render_inputs == (params,)
     assert event.prompt_ns == "tests"
@@ -333,7 +336,7 @@ def tool_rendered_prompt(tool: Tool[EchoParams, EchoPayload]) -> RenderedPrompt[
     return RenderedPrompt(
         text="system",
         _tools=cast(
-            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+            "tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]",
             (tool,),
         ),
     )
@@ -515,6 +518,6 @@ def test_conversation_runner_raises_on_budget_exceeded() -> None:
     with pytest.raises(PromptEvaluationError) as exc_info:
         runner.run()
 
-    error = cast(PromptEvaluationError, exc_info.value)
+    error = cast("PromptEvaluationError", exc_info.value)
     assert error.phase == PROMPT_EVALUATION_PHASE_BUDGET
     assert "Budget exceeded" in str(error)

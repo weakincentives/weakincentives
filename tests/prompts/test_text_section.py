@@ -347,7 +347,7 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
 
     registry = PromptRegistry()
     registry.register_section(
-        cast(Section[SupportsDataclass], section), path=(section.key,), depth=0
+        cast("Section[SupportsDataclass]", section), path=(section.key,), depth=0
     )
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
@@ -394,7 +394,7 @@ def test_summary_visibility_skips_child_sections() -> None:
     )
 
     registry = PromptRegistry()
-    registry.register_sections((cast(Section[SupportsDataclass], parent),))
+    registry.register_sections((cast("Section[SupportsDataclass]", parent),))
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
         registry=snapshot,
@@ -451,7 +451,7 @@ def test_summary_visibility_skips_child_tools() -> None:
     )
 
     registry = PromptRegistry()
-    registry.register_sections((cast(Section[SupportsDataclass], parent),))
+    registry.register_sections((cast("Section[SupportsDataclass]", parent),))
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
         registry=snapshot,
@@ -500,7 +500,7 @@ def test_summary_visibility_default_excludes_tools() -> None:
 
     registry = PromptRegistry()
     registry.register_section(
-        cast(Section[SupportsDataclass], section), path=(section.key,), depth=0
+        cast("Section[SupportsDataclass]", section), path=(section.key,), depth=0
     )
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
@@ -561,8 +561,8 @@ def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
     registry = PromptRegistry()
     registry.register_sections(
         (
-            cast(Section[SupportsDataclass], parent_with_child),
-            cast(Section[SupportsDataclass], sibling),
+            cast("Section[SupportsDataclass]", parent_with_child),
+            cast("Section[SupportsDataclass]", sibling),
         )
     )
     snapshot = registry.snapshot()

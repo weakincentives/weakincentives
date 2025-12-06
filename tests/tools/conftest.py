@@ -28,7 +28,7 @@ def _compile_stub_segments(source: str) -> tuple[CodeType, CodeType | None]:
     statements = list(parsed.body)
     expr_code = None
     if statements and isinstance(statements[-1], ast.Expr):
-        expr_stmt = cast(ast.Expr, statements.pop())
+        expr_stmt = cast("ast.Expr", statements.pop())
         expression = ast.Expression(expr_stmt.value)
         ast.fix_missing_locations(expression)
         expr_code = compile(expression, filename="<asteval-stub>", mode="eval")

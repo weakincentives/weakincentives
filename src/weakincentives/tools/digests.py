@@ -15,15 +15,17 @@
 from __future__ import annotations
 
 import textwrap
-from typing import cast, override
+from typing import TYPE_CHECKING, cast, override
 
 from ..dataclasses import FrozenDataclass
 from ..prompt._types import SupportsDataclass
-from ..prompt._visibility import SectionVisibility
 from ..prompt.section import Section
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import Session
-from ..runtime.session.protocols import SessionProtocol
+
+if TYPE_CHECKING:
+    from ..prompt._visibility import SectionVisibility
+    from ..runtime.session.protocols import SessionProtocol
 
 
 @FrozenDataclass()
@@ -76,7 +78,7 @@ def latest_workspace_digest(
 
     normalized_key = _normalized_key(section_key)
 
-    entries = cast(tuple[WorkspaceDigest, ...], session.select_all(WorkspaceDigest))
+    entries = cast("tuple[WorkspaceDigest, ...]", session.select_all(WorkspaceDigest))
     for digest in reversed(entries):
         if getattr(digest, "section_key", None) == normalized_key:
             return digest

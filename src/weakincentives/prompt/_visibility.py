@@ -59,17 +59,19 @@ def normalize_visibility_selector(
         if params_type is None and not _visibility_requires_positional_argument(
             visibility
         ):
-            zero_arg_selector = cast(Callable[[], SectionVisibility], visibility)
+            zero_arg_selector = cast("Callable[[], SectionVisibility]", visibility)
 
             def _without_params(_: SupportsDataclass | None) -> SectionVisibility:
                 return _coerce_section_visibility(zero_arg_selector())
 
             return _without_params
 
-        selector = cast(Callable[[SupportsDataclass], SectionVisibility], visibility)
+        selector = cast("Callable[[SupportsDataclass], SectionVisibility]", visibility)
 
         def _with_params(value: SupportsDataclass | None) -> SectionVisibility:
-            return _coerce_section_visibility(selector(cast(SupportsDataclass, value)))
+            return _coerce_section_visibility(
+                selector(cast("SupportsDataclass", value))
+            )
 
         return _with_params
 

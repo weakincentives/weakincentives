@@ -59,7 +59,7 @@ def _build_registry() -> tuple[PromptRegistry, MarkdownSection[_IntroParams]]:
     )
     registry = PromptRegistry()
     registry.register_section(
-        cast(Section[SupportsDataclass], section), path=(section.key,), depth=0
+        cast("Section[SupportsDataclass]", section), path=(section.key,), depth=0
     )
     return registry, section
 
@@ -77,7 +77,7 @@ def test_registry_snapshot_clones_defaults() -> None:
     )
     registry = PromptRegistry()
     registry.register_section(
-        cast(Section[SupportsDataclass], section), path=(section.key,), depth=0
+        cast("Section[SupportsDataclass]", section), path=(section.key,), depth=0
     )
 
     snapshot = registry.snapshot()
@@ -108,7 +108,7 @@ def test_registry_validates_placeholders() -> None:
 
     with pytest.raises(PromptValidationError) as exc:
         registry.register_section(
-            cast(Section[SupportsDataclass], section),
+            cast("Section[SupportsDataclass]", section),
             path=(section.key,),
             depth=0,
         )

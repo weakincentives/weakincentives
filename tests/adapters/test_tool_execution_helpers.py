@@ -13,9 +13,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -24,7 +23,6 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     from ._test_stubs import DummyToolCall, ToolParams, ToolPayload
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
@@ -51,6 +49,11 @@ from weakincentives.prompt import (
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.tools import DeadlineExceededError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from tests.helpers import FrozenUtcNow
 
 
 def _build_prompt(tool: Tool[ToolParams, ToolPayload]) -> PromptTemplate[ToolPayload]:
@@ -80,16 +83,20 @@ def _base_context(
     prompt = prompt_template.bind()
     return ToolExecutionContext(
         adapter_name="adapter",
-        adapter=cast(Any, object()),
+        adapter=cast("Any", object()),
         prompt=prompt,
         rendered_prompt=None,
         tool_registry=cast(
-            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
-            {tool.name: cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)},
+            "Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]",
+            {
+                tool.name: cast(
+                    "Tool[SupportsDataclassOrNone, SupportsToolResult]", tool
+                )
+            },
         ),
         bus=bus,
-        session=cast(SessionProtocol, session or Session(bus=bus)),
-        prompt_name=cast(str, prompt.name),
+        session=cast("SessionProtocol", session or Session(bus=bus)),
+        prompt_name=cast("str", prompt.name),
         parse_arguments=parse_tool_arguments,
         format_publish_failures=format_publish_failures,
         deadline=deadline,
@@ -120,7 +127,7 @@ def test_tool_execution_success_path() -> None:
         assert context.session is not None
         return ToolResult(message="done", value=ToolPayload(answer=params.query))
 
-    tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    tool = _build_tool(cast("ToolHandler[ToolParams, ToolPayload]", handler))
     tool_call = _tool_call({"query": "policies"})
     context = _base_context(tool)
 
@@ -136,7 +143,7 @@ def test_tool_execution_records_validation_failure() -> None:
         del params, context
         return ToolResult(message="ok", value=ToolPayload(answer="noop"))
 
-    tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    tool = _build_tool(cast("ToolHandler[ToolParams, ToolPayload]", handler))
     tool_call = _tool_call({"query": "policies", "extra": True})
     context = _base_context(tool)
 
@@ -154,7 +161,7 @@ def test_tool_execution_raises_on_expired_deadline(
         del params, context
         return ToolResult(message="should not run", value=ToolPayload(answer="x"))
 
-    tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    tool = _build_tool(cast("ToolHandler[ToolParams, ToolPayload]", handler))
     anchor = datetime.now(UTC)
     frozen_utcnow.set(anchor)
     expired_deadline = Deadline(anchor + timedelta(seconds=2))
@@ -180,7 +187,7 @@ def test_tool_execution_wraps_handler_deadline_exceptions() -> None:
         del params, context
         raise DeadlineExceededError("deadline hit")
 
-    tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    tool = _build_tool(cast("ToolHandler[ToolParams, ToolPayload]", handler))
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=10))
     context = _base_context(tool, deadline=deadline)
     tool_call = _tool_call({"query": "policies"})
@@ -203,7 +210,7 @@ def test_tool_execution_converts_unexpected_exceptions() -> None:
         del params, context
         raise RuntimeError("boom")
 
-    tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    tool = _build_tool(cast("ToolHandler[ToolParams, ToolPayload]", handler))
     context = _base_context(tool)
     tool_call = _tool_call({"query": "policies"})
 

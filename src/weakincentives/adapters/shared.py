@@ -27,16 +27,7 @@ from uuid import uuid4
 
 from ..budget import BudgetExceededError, BudgetTracker
 from ..dataclasses import FrozenDataclass
-from ..deadlines import Deadline
-from ..prompt._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
-from ..prompt._visibility import SectionVisibility
 from ..prompt.errors import SectionPath, VisibilityExpansionRequired
-from ..prompt.prompt import Prompt, RenderedPrompt
-from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     OutputParseError,
@@ -57,7 +48,6 @@ from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.dataclasses import is_dataclass_instance
 from ..serde import parse, schema
 from ..tools.errors import DeadlineExceededError, ToolValidationError
-from ..types import JSONValue
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
 from ._provider_protocols import (
     ProviderChoice,
@@ -80,6 +70,16 @@ from .core import (
 
 if TYPE_CHECKING:
     from ..adapters.core import ProviderAdapter
+    from ..deadlines import Deadline
+    from ..prompt._types import (
+        SupportsDataclass,
+        SupportsDataclassOrNone,
+        SupportsToolResult,
+    )
+    from ..prompt._visibility import SectionVisibility
+    from ..prompt.prompt import Prompt, RenderedPrompt
+    from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
+    from ..types import JSONValue
 
 
 logger: StructuredLogger = get_logger(
@@ -362,12 +362,12 @@ def extract_payload(response: object) -> dict[str, Any] | None:
         except Exception:  # pragma: no cover - defensive
             return None
         if isinstance(payload, Mapping):
-            mapping_payload = _mapping_to_str_dict(cast(Mapping[Any, Any], payload))
+            mapping_payload = _mapping_to_str_dict(cast("Mapping[Any, Any]", payload))
             if mapping_payload is not None:
                 return mapping_payload
         return None
     if isinstance(response, Mapping):  # pragma: no cover - defensive
-        mapping_payload = _mapping_to_str_dict(cast(Mapping[Any, Any], response))
+        mapping_payload = _mapping_to_str_dict(cast("Mapping[Any, Any]", response))
         if mapping_payload is not None:
             return mapping_payload
     return None
@@ -390,7 +390,7 @@ def token_usage_from_payload(payload: Mapping[str, Any] | None) -> TokenUsage | 
     usage_value = payload.get("usage")
     if not isinstance(usage_value, Mapping):
         return None
-    usage_payload = cast(Mapping[str, object], usage_value)
+    usage_payload = cast("Mapping[str, object]", usage_value)
 
     input_tokens = _coerce_token_count(
         usage_payload.get("input_tokens") or usage_payload.get("prompt_tokens")
@@ -420,7 +420,7 @@ def first_choice(response: object, *, prompt_name: str) -> object:
             prompt_name=prompt_name,
             phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
-    sequence_choices = cast(Sequence[object], choices)
+    sequence_choices = cast("Sequence[object]", choices)
     try:
         return sequence_choices[0]
     except IndexError as error:  # pragma: no cover - defensive
@@ -471,7 +471,7 @@ def parse_tool_arguments(
             phase=PROMPT_EVALUATION_PHASE_TOOL,
             provider_payload=provider_payload,
         )
-    parsed_mapping = cast(Mapping[Any, Any], parsed)
+    parsed_mapping = cast("Mapping[Any, Any]", parsed)
     arguments: dict[str, Any] = {}
     for key, value in parsed_mapping.items():
         if not isinstance(key, str):
@@ -710,9 +710,9 @@ def tool_execution(
             tool_name=tool_name,
         )
         tool_context = ToolContext(
-            prompt=cast(PromptProtocol[Any], context.prompt),
+            prompt=cast("PromptProtocol[Any]", context.prompt),
             rendered_prompt=context.rendered_prompt,
-            adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
+            adapter=cast("ProviderAdapterProtocol[Any]", context.adapter),
             session=context.session,
             event_bus=context.bus,
             deadline=context.deadline,
@@ -726,7 +726,7 @@ def tool_execution(
     except ToolValidationError as error:
         if tool_params is None:
             tool_params = cast(
-                SupportsDataclass,
+                "SupportsDataclass",
                 _rejected_params(arguments_mapping=arguments_mapping, error=error),
             )
         tool_result = _handle_tool_validation_error(log=log, error=error)
@@ -774,7 +774,7 @@ def _publish_tool_invocation(
     tool_value = outcome.result.value
     dataclass_value: SupportsDataclass | None = None
     if is_dataclass_instance(tool_value):
-        dataclass_value = cast(SupportsDataclass, tool_value)  # pyright: ignore[reportUnnecessaryCast]
+        dataclass_value = cast("SupportsDataclass", tool_value)  # pyright: ignore[reportUnnecessaryCast]
 
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
@@ -784,7 +784,7 @@ def _publish_tool_invocation(
         adapter=context.adapter_name,
         name=outcome.tool.name,
         params=outcome.params,
-        result=cast(ToolResult[object], outcome.result),
+        result=cast("ToolResult[object]", outcome.result),
         session_id=session_id,
         created_at=datetime.now(UTC),
         usage=usage,
@@ -913,7 +913,7 @@ def message_text_content(content: object) -> str:
         content, (str, bytes, bytearray)
     ):
         sequence_content = cast(
-            Sequence[object],
+            "Sequence[object]",
             content,
         )
         fragments = [_content_part_text(part) for part in sequence_content]
@@ -933,7 +933,7 @@ def extract_parsed_content(message: object) -> object | None:
         content, (str, bytes, bytearray)
     ):
         sequence_content = cast(
-            Sequence[object],
+            "Sequence[object]",
             content,
         )
         for part in sequence_content:
@@ -1025,7 +1025,7 @@ def _content_part_text(part: object) -> str:
     if part is None:
         return ""
     if isinstance(part, Mapping):
-        mapping_part = cast(Mapping[str, object], part)
+        mapping_part = cast("Mapping[str, object]", part)
         part_type = mapping_part.get("type")
         if part_type in {"output_text", "text"}:
             text_value = mapping_part.get("text")
@@ -1042,7 +1042,7 @@ def _content_part_text(part: object) -> str:
 
 def _parsed_payload_from_part(part: object) -> object | None:
     if isinstance(part, Mapping):
-        mapping_part = cast(Mapping[str, object], part)
+        mapping_part = cast("Mapping[str, object]", part)
         if mapping_part.get("type") == "output_json":
             return mapping_part.get("json")
         return None
@@ -1055,10 +1055,12 @@ def _parsed_payload_from_part(part: object) -> object | None:
 def _mapping_to_str_dict(mapping: Mapping[Any, Any]) -> dict[str, Any] | None:
     if any(not isinstance(key, str) for key in mapping):
         return None
-    return {cast(str, key): value for key, value in mapping.items()}
+    return {cast("str", key): value for key, value in mapping.items()}
 
 
-__all__ = (  # noqa: RUF022
+__all__ = (
+    "LITELLM_ADAPTER_NAME",
+    "OPENAI_ADAPTER_NAME",
     "AdapterName",
     "AdapterRenderContext",
     "AdapterRenderOptions",
@@ -1067,8 +1069,6 @@ __all__ = (  # noqa: RUF022
     "ConversationInputs",
     "ConversationRequest",
     "ConversationRunner",
-    "LITELLM_ADAPTER_NAME",
-    "OPENAI_ADAPTER_NAME",
     "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
@@ -1300,9 +1300,9 @@ class ResponseParser[OutputT]:
             if parsed_payload is not None:
                 try:
                     output = cast(
-                        OutputT,
+                        "OutputT",
                         parse_schema_constrained_payload(
-                            cast(JSONValue, parsed_payload), self.rendered
+                            cast("JSONValue", parsed_payload), self.rendered
                         ),
                     )
                 except (TypeError, ValueError) as error:
@@ -1632,7 +1632,7 @@ class ConversationRunner[OutputT]:
         self._check_budget()
 
         if isinstance(self._next_tool_choice, Mapping):
-            tool_choice_mapping = cast(Mapping[str, object], self._next_tool_choice)
+            tool_choice_mapping = cast("Mapping[str, object]", self._next_tool_choice)
             if tool_choice_mapping.get("type") == "function":
                 self._next_tool_choice = next_choice
 
@@ -1672,13 +1672,13 @@ class ConversationRunner[OutputT]:
         usage = token_usage_from_payload(self._provider_payload)
         prompt_value: SupportsDataclass | None = None
         if is_dataclass_instance(output):
-            prompt_value = cast(SupportsDataclass, output)  # pyright: ignore[reportUnnecessaryCast]
+            prompt_value = cast("SupportsDataclass", output)  # pyright: ignore[reportUnnecessaryCast]
 
         publish_result = self.bus.publish(
             PromptExecuted(
                 prompt_name=self.prompt_name,
                 adapter=self.adapter_name,
-                result=cast(PromptResponse[object], response_payload),
+                result=cast("PromptResponse[object]", response_payload),
                 session_id=getattr(self.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 usage=usage,

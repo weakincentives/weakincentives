@@ -15,11 +15,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.deadlines import Deadline
+
+if TYPE_CHECKING:
+    from tests.helpers import FrozenUtcNow
 
 
 def test_deadline_rejects_naive_datetime() -> None:

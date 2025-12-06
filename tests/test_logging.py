@@ -17,11 +17,9 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from collections.abc import Iterator
 from contextlib import contextmanager
 from io import StringIO
-from types import TracebackType
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -34,6 +32,10 @@ from weakincentives.runtime.logging import (
     configure_logging,
     get_logger,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from types import TracebackType
 
 
 class _CaptureHandler(logging.Handler):
@@ -223,9 +225,9 @@ def test_configure_logging_force_installs_json_formatter() -> None:
         exc_info = (error.__class__, error, traceback)
     assert exc_info is not None
 
-    non_serializable = cast(JSONValue, object())
+    non_serializable = cast("JSONValue", object())
     context_payload = cast(
-        StructuredLogPayload, {"key": "value", "object": non_serializable}
+        "StructuredLogPayload", {"key": "value", "object": non_serializable}
     )
 
     record = root.makeRecord(

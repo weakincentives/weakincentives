@@ -19,13 +19,15 @@ import re
 # discovery.
 import subprocess  # nosec B404
 import tempfile
-from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .versioning import PromptOverridesError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
 

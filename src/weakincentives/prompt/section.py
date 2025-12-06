@@ -13,10 +13,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from .tool import Tool
 
 from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
@@ -55,10 +56,10 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         candidate_type = (
             params_candidate if isinstance(params_candidate, type) else None
         )
-        params_type = cast(type[SupportsDataclass] | None, candidate_type)
+        params_type = cast("type[SupportsDataclass] | None", candidate_type)
 
         self.params_type: type[SectionParamsT] | None = cast(
-            type[SectionParamsT] | None, params_type
+            "type[SectionParamsT] | None", params_type
         )
         self.param_type: type[SectionParamsT] | None = self.params_type
         self.title = title
@@ -72,11 +73,11 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             raise TypeError("Section without parameters cannot define default_params.")
 
         normalized_children: list[Section[SupportsDataclass]] = []
-        raw_children: Sequence[object] = cast(Sequence[object], children or ())
+        raw_children: Sequence[object] = cast("Sequence[object]", children or ())
         for child in raw_children:
             if not isinstance(child, Section):
                 raise TypeError("Section children must be Section instances.")
-            normalized_children.append(cast(Section[SupportsDataclass], child))
+            normalized_children.append(cast("Section[SupportsDataclass]", child))
         self.children = tuple(normalized_children)
         self._enabled: Callable[[SupportsDataclass | None], bool] | None = (
             normalize_enabled_predicate(enabled, params_type)
@@ -179,7 +180,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             if not isinstance(tool, Tool):
                 raise TypeError("Section tools must be Tool instances.")
             normalized.append(
-                cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
+                cast("Tool[SupportsDataclassOrNone, SupportsToolResult]", tool)
             )
         return tuple(normalized)
 

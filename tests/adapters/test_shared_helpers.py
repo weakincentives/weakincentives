@@ -12,9 +12,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -26,11 +25,15 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
-from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.runtime.events import EventBus
 from weakincentives.runtime.session import Session
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from weakincentives.deadlines import Deadline
+    from weakincentives.runtime.events import EventBus
 
 
 def test_first_choice_returns_first_item() -> None:
@@ -94,7 +97,7 @@ def test_run_conversation_requires_message_payload() -> None:
         return response.choices[0]
 
     serialize_stub = cast(
-        shared.ToolMessageSerializer,
+        "shared.ToolMessageSerializer",
         lambda _result, *, payload=None: "",
     )
 

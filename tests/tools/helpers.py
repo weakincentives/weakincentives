@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from weakincentives.adapters.core import (
@@ -23,7 +23,6 @@ from weakincentives.adapters.core import (
     ProviderAdapter,
     SessionProtocol,
 )
-from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
@@ -31,9 +30,12 @@ from weakincentives.prompt import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
-from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
+
+if TYPE_CHECKING:
+    from weakincentives.deadlines import Deadline
+    from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclassOrNone)
 ResultT = TypeVar("ResultT", bound=SupportsToolResult)
@@ -61,9 +63,9 @@ class _DummyAdapter(ProviderAdapter[Any]):
 
 def build_tool_context(bus: InProcessEventBus, session: SessionProtocol) -> ToolContext:
     prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
-    adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
+    adapter = cast("ProviderAdapterProtocol[Any]", _DummyAdapter())
     return ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=None,
         adapter=adapter,
         session=session,
@@ -102,10 +104,10 @@ def invoke_tool(
         adapter=GENERIC_ADAPTER_NAME,
         name=tool.name,
         params=params,
-        result=cast(ToolResult[object], result),
+        result=cast("ToolResult[object]", result),
         session_id=getattr(session, "session_id", None),
         created_at=datetime.now(UTC),
-        value=cast(SupportsDataclass | None, result.value),
+        value=cast("SupportsDataclass | None", result.value),
         rendered_output=rendered_output,
     )
     publish_result = bus.publish(event)

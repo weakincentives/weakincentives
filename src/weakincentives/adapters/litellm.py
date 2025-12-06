@@ -18,14 +18,9 @@ from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
-from typing import Any, Final, Protocol, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
-from ..deadlines import Deadline
-from ..prompt._visibility import SectionVisibility
-from ..prompt.errors import SectionPath
-from ..prompt.prompt import Prompt
-from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
 from ._provider_protocols import (
@@ -57,6 +52,13 @@ from .shared import (
     throttle_details,
 )
 
+if TYPE_CHECKING:
+    from ..deadlines import Deadline
+    from ..prompt._visibility import SectionVisibility
+    from ..prompt.errors import SectionPath
+    from ..prompt.prompt import Prompt
+    from ..runtime.events import EventBus
+
 OutputT = TypeVar("OutputT")
 
 _ERROR_MESSAGE: Final[str] = (
@@ -83,7 +85,7 @@ def _load_litellm_module() -> _LiteLLMModule:
         module = import_module("litellm")
     except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
         raise RuntimeError(_ERROR_MESSAGE) from exc
-    return cast(_LiteLLMModule, module)
+    return cast("_LiteLLMModule", module)
 
 
 def create_litellm_completion(**kwargs: object) -> LiteLLMCompletion:
@@ -122,7 +124,7 @@ def _retry_after_from_error(error: object) -> timedelta | None:
         return direct
     headers = getattr(error, "headers", None)
     if isinstance(headers, Mapping):
-        header_mapping = cast(Mapping[str, object], headers)
+        header_mapping = cast("Mapping[str, object]", headers)
         retry_after = header_mapping.get("retry-after") or header_mapping.get(
             "Retry-After"
         )
@@ -131,14 +133,14 @@ def _retry_after_from_error(error: object) -> timedelta | None:
             return coerced
     response = getattr(error, "response", None)
     if isinstance(response, Mapping):
-        response_mapping = cast(Mapping[str, object], response)
+        response_mapping = cast("Mapping[str, object]", response)
         retry_after = response_mapping.get("retry_after")
         coerced = _coerce_retry_after(retry_after)
         if coerced is not None:
             return coerced
         headers = response_mapping.get("headers")
         if isinstance(headers, Mapping):
-            header_mapping = cast(Mapping[str, object], headers)
+            header_mapping = cast("Mapping[str, object]", headers)
             retry_after = header_mapping.get("retry-after") or header_mapping.get(
                 "Retry-After"
             )
@@ -151,7 +153,7 @@ def _retry_after_from_error(error: object) -> timedelta | None:
 def _error_payload(error: object) -> dict[str, Any] | None:
     response = getattr(error, "response", None)
     if isinstance(response, Mapping):
-        response_mapping = cast(Mapping[object, Any], response)
+        response_mapping = cast("Mapping[object, Any]", response)
         return {str(key): value for key, value in response_mapping.items()}
     return None
 
@@ -298,7 +300,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
 
         def _select_choice(response: object) -> ProviderChoice:
             return cast(
-                ProviderChoice,
+                "ProviderChoice",
                 first_choice(response, prompt_name=prompt_name),
             )
 

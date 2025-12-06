@@ -14,18 +14,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
 
-from ..deadlines import Deadline
-from ._overrides_protocols import PromptOverridesStore
-from ._types import SupportsDataclass
-
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Mapping
+
     from ..budget import BudgetTracker
+    from ..deadlines import Deadline
     from ..runtime.events._types import EventBus
     from ..runtime.session.protocols import SessionProtocol
+    from ._overrides_protocols import PromptOverridesStore
     from ._structured_output_config import StructuredOutputConfig
+    from ._types import SupportsDataclass
     from .overrides import PromptDescriptor
 
 PromptOutputT = TypeVar("PromptOutputT")

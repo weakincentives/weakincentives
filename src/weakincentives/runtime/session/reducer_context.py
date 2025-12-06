@@ -14,10 +14,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...dataclasses import FrozenDataclass
-from ..events import EventBus
 from ._types import ReducerContextProtocol
-from .protocols import SessionProtocol
+
+if TYPE_CHECKING:
+    from ..events import EventBus
+    from .protocols import SessionProtocol
 
 
 @FrozenDataclass()

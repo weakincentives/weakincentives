@@ -13,16 +13,14 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import CompletedProcess
 from types import MethodType, SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import pytest
@@ -30,7 +28,6 @@ import pytest
 import weakincentives.tools.podman as podman_module
 import weakincentives.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.prompt.tool import Tool
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 from weakincentives.tools import (
@@ -57,6 +54,12 @@ from weakincentives.tools import (
     WriteFileParams,
 )
 from weakincentives.tools.errors import ToolValidationError
+
+if TYPE_CHECKING:
+    import os
+    from collections.abc import Callable, Iterator, Mapping, Sequence
+
+    from weakincentives.prompt.tool import Tool
 
 
 @dataclass(slots=True)
@@ -196,7 +199,7 @@ class _FakeCliRunner:
         self,
         cmd: list[str],
         *,
-        input: str | None = None,  # noqa: A002
+        input: str | None = None,
         text: bool | None = None,
         capture_output: bool | None = None,
         timeout: float | None = None,
@@ -460,7 +463,9 @@ def test_preview_mount_entries_raises_on_oserror(
 def test_iter_host_mount_files_handles_file(tmp_path: Path) -> None:
     file_path = tmp_path / "item.txt"
     file_path.write_text("payload", encoding="utf-8")
-    entries = tuple(podman_module._iter_host_mount_files(file_path, False))
+    entries = tuple(
+        podman_module._iter_host_mount_files(file_path, follow_symlinks=False)
+    )
     assert entries == (file_path,)
 
 
@@ -1128,7 +1133,7 @@ def test_shell_execute_respects_capture_flag(
     params = PodmanShellParams(command=("cat",), capture_output=False)
     result = handler(params, context=build_tool_context(bus, session))
     assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
+    value = cast("PodmanShellResult", result.value)
     assert value.stdout == "capture disabled"
     assert cli_runner.kwargs[-1]["capture_output"] is False
 
@@ -1152,7 +1157,7 @@ def test_shell_execute_captures_output_by_default(
     params = PodmanShellParams(command=("echo", "hi"))
     result = handler(params, context=build_tool_context(bus, session))
     assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
+    value = cast("PodmanShellResult", result.value)
     assert value.stdout == "normal output"
     assert cli_runner.kwargs[-1]["capture_output"] is True
 
@@ -1241,7 +1246,7 @@ def test_shell_execute_cli_fallback(
     assert call[:3] == ["podman", "--connection", "podman-machine-default"]
     assert "--interactive" in call
     assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
+    value = cast("PodmanShellResult", result.value)
     assert value.stdout == "cli output"
 
 
@@ -1268,7 +1273,7 @@ def test_shell_execute_cli_capture_disabled(
     params = PodmanShellParams(command=("echo", "cli"), capture_output=False)
     result = handler(params, context=build_tool_context(bus, session))
     assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
+    value = cast("PodmanShellResult", result.value)
     assert value.stdout == "capture disabled"
     assert value.stderr == "capture disabled"
 
@@ -1283,7 +1288,7 @@ def test_shell_execute_cli_timeout(
     def _timeout_runner(
         cmd: list[str],
         *,
-        input: str | None = None,  # noqa: A002
+        input: str | None = None,
         text: bool | None = None,
         capture_output: bool | None = None,
         timeout: float | None = None,
@@ -1306,7 +1311,7 @@ def test_shell_execute_cli_timeout(
     params = PodmanShellParams(command=("sleep", "1"))
     result = handler(params, context=build_tool_context(bus, session))
     assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
+    value = cast("PodmanShellResult", result.value)
     assert value.timed_out
     assert value.stdout == "partial"
     assert value.stderr == "error"
@@ -1322,7 +1327,7 @@ def test_shell_execute_cli_missing_binary(
     def _missing_runner(
         cmd: list[str],
         *,
-        input: str | None = None,  # noqa: A002
+        input: str | None = None,
         text: bool | None = None,
         capture_output: bool | None = None,
         timeout: float | None = None,
@@ -1392,7 +1397,7 @@ def test_default_exec_runner_invokes_subprocess(
     def _fake_run(
         args: list[str],
         *,
-        input: str | None = None,  # noqa: A002
+        input: str | None = None,
         text: bool | None = None,
         capture_output: bool | None = None,
         timeout: float | None = None,
@@ -1578,7 +1583,7 @@ def test_shell_execute_truncates_output(
         PodmanShellParams(command=("true",)), context=build_tool_context(bus, session)
     )
     assert result.value is not None
-    value = cast(PodmanShellResult, result.value)
+    value = cast("PodmanShellResult", result.value)
     assert value.stdout.endswith("[truncated]")
     assert value.stderr.endswith("[truncated]")
 
@@ -1611,7 +1616,7 @@ def test_evaluate_python_runs_script_passthrough(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     captured: dict[str, object] = {}
 
@@ -1643,7 +1648,7 @@ def test_evaluate_python_runs_script_passthrough(
 
     assert result.success
     assert result.message == "Evaluation succeeded (exit code 0)."
-    payload = cast(EvalResult, result.value)
+    payload = cast("EvalResult", result.value)
     assert payload.stdout == "hello"
     assert payload.stderr == ""
     assert payload.value_repr is None
@@ -1663,7 +1668,7 @@ def test_evaluate_python_accepts_large_scripts(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
     code = "\n".join("print('line')" for _ in range(600))
 
     captured: dict[str, object] = {}
@@ -1701,7 +1706,7 @@ def test_evaluate_python_rejects_control_characters(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     with pytest.raises(ToolValidationError, match="unsupported control characters"):
         invoke_tool(
@@ -1720,7 +1725,7 @@ def test_evaluate_python_marks_failure_on_nonzero_exit(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     def _run_script(
         self: PodmanSandboxSection,
@@ -1743,7 +1748,7 @@ def test_evaluate_python_marks_failure_on_nonzero_exit(
 
     assert not result.success
     assert result.message == "Evaluation failed (exit code 2)."
-    payload = cast(EvalResult, result.value)
+    payload = cast("EvalResult", result.value)
     assert payload.stderr == "boom"
 
 
@@ -1755,7 +1760,7 @@ def test_evaluate_python_reports_timeout(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     def _raise_timeout(
         self: PodmanSandboxSection,
@@ -1780,7 +1785,7 @@ def test_evaluate_python_reports_timeout(
 
     assert not result.success
     assert result.message == "Evaluation timed out."
-    payload = cast(EvalResult, result.value)
+    payload = cast("EvalResult", result.value)
     assert payload.stderr == "Execution timed out."
 
 
@@ -1792,7 +1797,7 @@ def test_evaluate_python_missing_cli_raises(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     def _fail(*_: object, **__: object) -> CompletedProcess[str]:
         raise FileNotFoundError("missing podman")
@@ -1811,7 +1816,7 @@ def test_evaluate_python_truncates_streams(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     def _run_script(
         self: PodmanSandboxSection,
@@ -1837,7 +1842,7 @@ def test_evaluate_python_truncates_streams(
 
     result = invoke_tool(bus, tool, EvalParams(code="0"), session=session)
 
-    payload = cast(EvalResult, result.value)
+    payload = cast("EvalResult", result.value)
     assert payload.stdout.endswith("...")
     assert payload.stderr.endswith("...")
 
@@ -1849,7 +1854,7 @@ def test_evaluate_python_rejects_reads_writes_and_globals(
     session, bus = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     read = EvalFileRead(path=vfs_module.VfsPath(("docs", "notes.txt")))
     write = EvalFileWrite(
@@ -1902,7 +1907,7 @@ def test_ls_lists_workspace_files(
         context=build_tool_context(bus, session),
     )
     assert result.value is not None
-    entries = cast(tuple[FileInfo, ...], result.value)
+    entries = cast("tuple[FileInfo, ...]", result.value)
     assert any(entry.path.segments == ("docs", "README.md") for entry in entries)
 
 
@@ -1924,7 +1929,7 @@ def test_read_file_returns_numbered_lines(
         context=build_tool_context(bus, session),
     )
     assert result.value is not None
-    read_result = cast(ReadFileResult, result.value)
+    read_result = cast("ReadFileResult", result.value)
     assert "1 | first" in read_result.content
     assert "2 | second" in read_result.content
 
@@ -2187,7 +2192,7 @@ def test_glob_matches_files(
         context=build_tool_context(bus, session),
     )
     assert result.value is not None
-    matches = cast(tuple[GlobMatch, ...], result.value)
+    matches = cast("tuple[GlobMatch, ...]", result.value)
     assert any(match.path.segments == ("src", "main.py") for match in matches)
 
 
@@ -2208,7 +2213,7 @@ def test_grep_finds_pattern(
         context=build_tool_context(bus, session),
     )
     assert result.value is not None
-    grep_matches = cast(tuple[GrepMatch, ...], result.value)
+    grep_matches = cast("tuple[GrepMatch, ...]", result.value)
     assert any(match.line_number == 2 for match in grep_matches)
 
 
@@ -2680,7 +2685,7 @@ def test_glob_honors_result_limit(
         context=build_tool_context(bus, session),
     )
     assert result.value is not None
-    matches = cast(tuple[GlobMatch, ...], result.value)
+    matches = cast("tuple[GlobMatch, ...]", result.value)
     assert len(matches) == 1
 
 
@@ -2721,7 +2726,7 @@ def test_grep_honors_glob_argument(
         context=build_tool_context(bus, session),
     )
     assert result.value is not None
-    matches = cast(tuple[GrepMatch, ...], result.value)
+    matches = cast("tuple[GrepMatch, ...]", result.value)
     assert matches[0].path.segments == ("main.py",)
     assert len(matches) == 1
 
@@ -2744,7 +2749,7 @@ def test_grep_supports_default_path(
     )
 
     assert result.value is not None
-    matches = cast(tuple[GrepMatch, ...], result.value)
+    matches = cast("tuple[GrepMatch, ...]", result.value)
     assert matches == (
         GrepMatch(path=vfs_module.VfsPath(("main.txt",)), line_number=1, line="match"),
     )
@@ -2787,7 +2792,7 @@ def test_grep_ignores_blank_glob(
     )
 
     assert result.value is not None
-    matches = cast(tuple[GrepMatch, ...], result.value)
+    matches = cast("tuple[GrepMatch, ...]", result.value)
     assert matches == (
         GrepMatch(path=vfs_module.VfsPath(("notes.txt",)), line_number=1, line="match"),
     )
@@ -2937,7 +2942,7 @@ def test_grep_handles_oserror(
         context=build_tool_context(bus, session),
     )
     assert result.value is not None
-    matches = cast(tuple[GrepMatch, ...], result.value)
+    matches = cast("tuple[GrepMatch, ...]", result.value)
     assert matches == (
         GrepMatch(path=vfs_module.VfsPath(("other.txt",)), line_number=1, line="match"),
     )
@@ -2964,7 +2969,7 @@ def test_grep_honors_result_limit(
         context=build_tool_context(bus, session),
     )
     assert result.value is not None
-    grep_matches = cast(tuple[GrepMatch, ...], result.value)
+    grep_matches = cast("tuple[GrepMatch, ...]", result.value)
     assert len(grep_matches) == 1
 
 
@@ -2987,7 +2992,7 @@ def test_grep_skips_binary_and_collects_match(
     )
 
     assert result.value is not None
-    matches = cast(tuple[GrepMatch, ...], result.value)
+    matches = cast("tuple[GrepMatch, ...]", result.value)
     assert matches == (
         GrepMatch(
             path=vfs_module.VfsPath(("valid.txt",)),

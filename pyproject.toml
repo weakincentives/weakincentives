@@ -131,27 +131,15 @@ extend-select = [
     "PLW",     # pylint warning
 ]
 extend-ignore = [
-    "TRY003",   # long exception messages
-    "TC006",    # runtime-cast-value (stylistic - quoting in cast())
-    "TC001",    # move app imports to TYPE_CHECKING (invasive change)
-    "TC002",    # move third-party imports to TYPE_CHECKING
-    "TC003",    # move stdlib imports to TYPE_CHECKING
-    "TC008",    # quote forward references
-    "FBT001",   # boolean positional arg (legitimate API design)
-    "FBT002",   # boolean default in function def
-    "PLC0415",  # import outside top-level (intentional lazy imports)
-    "PLC1901",  # compare to empty string (explicit is clearer than falsey check)
+    "TRY003",   # long exception messages (context is valuable)
     "PLC2801",  # object.__setattr__ required for frozen dataclasses
-    "PLC0105",  # TypeVar naming variance suffix (stylistic)
-    "FURB110",  # ternary vs or operator (explicit is clearer)
-    "FURB113",  # extend vs append (less readable with mixed logic)
-    "FURB118",  # itemgetter vs lambda (lambda more readable)
-    "FURB142",  # extend vs add loop (often less readable)
-    "FURB189",  # subclassing str/dict (legitimate pattern)
-    "PIE807",   # prefer dict over lambda (lambda can be intentional)
-    "PLW0108",  # unnecessary lambda (can be intentional for lazy eval)
+    "PLC0415",  # import outside top-level (intentional lazy imports)
+    "PLC0105",  # TypeVar naming conventions (_co/_contra) - would require breaking API changes
+    "UP046",    # Generic class uses Generic[] - Python 3.12 syntax migration is a larger effort
+    "UP047",    # Generic function uses TypeVar - Python 3.12 syntax migration is a larger effort
+    "FURB189",  # subclassing str/dict is intentional for type-safe wrappers (HexDigest, etc.)
 ]
-fixable = ["I001", "F401", "TC001", "TC002", "TC003", "FA100", "UP006", "UP007"]
+fixable = ["ALL"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["weakincentives"]
@@ -178,12 +166,19 @@ combine-as-imports = true
     "PT019",    # fixture without value
     "PLW3201",  # custom dunder methods (__pre_init__, __validate__)
     "FBT001",   # boolean positional arg
+    "FBT002",   # boolean default positional arg
     "FBT003",   # boolean positional value
     "DTZ001",   # naive datetime (intentional for testing validation)
     "DTZ005",   # datetime.now without tz (intentional for testing)
     "PLW1514",  # read_text/write_text without encoding (test files)
     "SLOT000",  # __slots__ in test classes
     "FURB156",  # hardcoded charset (test data)
+    "A002",     # input parameter shadowing (subprocess.run signature)
+    "ANN001",   # missing type annotation (testing invalid handlers)
+    "ANN202",   # missing return type (testing invalid handlers)
+    "PLC1901",  # empty string comparison (clarity in assertions)
+    "RUF038",   # Literal[True, False] (testing schema coverage)
+    "PLW0108",  # lambda may be unnecessary (factory functions for tests)
 ]
 "integration-tests/**" = [
     "PLR2004",  # magic values
@@ -192,15 +187,17 @@ combine-as-imports = true
     "DTZ001",   # naive datetime
     "DTZ005",   # datetime.now without tz
     "PT018",    # composite assertion
+    "PLC1901",  # empty string comparison (clarity in assertions)
 ]
 # Example and CLI files use print() for user interaction
 "code_reviewer_example.py" = ["T201", "ARG001"]
 "src/weakincentives/debug.py" = ["FBT003"]
 "src/weakincentives/cli/**" = ["T201"]
+"src/weakincentives/cli/debug_app.py" = ["T201", "TC001"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913", "ARG001"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
-"src/weakincentives/prompt/progressive_disclosure.py" = ["ARG001"]
+"src/weakincentives/prompt/progressive_disclosure.py" = ["ARG001", "TC001"]
 "src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/adapters/openai.py" = ["PLR0913"]
 "src/weakincentives/dataclasses/__init__.py" = ["ARG001"]
@@ -208,15 +205,21 @@ combine-as-imports = true
 "src/weakincentives/prompt/_enabled_predicate.py" = ["PLR6201"]
 "src/weakincentives/prompt/composition.py" = ["PLR6301"]
 "src/weakincentives/prompt/markdown.py" = ["PLR0913"]
-"src/weakincentives/prompt/rendering.py" = ["PLR6301"]
+"src/weakincentives/prompt/rendering.py" = ["PLR6301", "PLR0913", "PLR0914"]
 "src/weakincentives/prompt/section.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/structured_output.py" = ["PLR0913"]
 "src/weakincentives/prompt/tool_result.py" = ["PLR0911"]
 "src/weakincentives/runtime/session/reducers.py" = ["ARG001"]
+"src/weakincentives/runtime/events/__init__.py" = ["TC001", "TC003"]
+"src/weakincentives/runtime/events/_types.py" = ["TC001", "TC003"]
 "src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915"]
+"src/weakincentives/serde/dump.py" = ["PLR0913"]
+"src/weakincentives/tools/podman.py" = ["A002", "PLW0108"]
 "src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004", "ARG001"]
 "src/weakincentives/tools/asteval.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
 "src/weakincentives/tools/planning.py" = ["PLR6301", "ARG001"]
+"src/weakincentives/optimizers/workspace_digest.py" = ["PLR6301", "PLR0914"]
+"src/weakincentives/budget.py" = ["PIE807"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -299,6 +302,9 @@ mutate_only_covered_lines = true
 debug = false
 
 [tool.coverage.run]
+omit = [
+    "src/weakincentives/prompt/_overrides_protocols.py",  # TYPE_CHECKING re-exports only
+]
 
 [tool.deptry]
 

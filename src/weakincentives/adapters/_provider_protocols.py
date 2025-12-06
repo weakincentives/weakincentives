@@ -14,10 +14,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ..dataclasses import FrozenDataclass
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = [
     "ProviderChoice",

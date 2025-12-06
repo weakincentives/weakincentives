@@ -120,7 +120,7 @@ def _text_config_from_json_schema(
     if response_format is None:
         return None
 
-    json_schema = cast(dict[str, Any], response_format["json_schema"])
+    json_schema = cast("dict[str, Any]", response_format["json_schema"])
     text_config: dict[str, Any] = {
         "format": {
             "type": "json_schema",
@@ -157,14 +157,14 @@ def _evaluate_with_bus(
     bus: EventBus | None = None,
 ) -> PromptResponse[OutputT]:
     target_bus = bus or NullEventBus()
-    session: SessionProtocol = cast(SessionProtocol, Session(bus=target_bus))
+    session: SessionProtocol = cast("SessionProtocol", Session(bus=target_bus))
     return _evaluate(adapter, prompt, *params, bus=target_bus, session=session)
 
 
 def test_create_openai_client_requires_optional_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     def fail_import(name: str, package: str | None = None) -> types.ModuleType:
         if name == "openai":
@@ -184,13 +184,13 @@ def test_create_openai_client_requires_optional_dependency(
 def test_create_openai_client_returns_openai_instance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     class DummyOpenAI:
         def __init__(self, **kwargs: object) -> None:
             self.kwargs = kwargs
 
-    dummy_module = cast(Any, types.ModuleType("openai"))
+    dummy_module = cast("Any", types.ModuleType("openai"))
     dummy_module.OpenAI = DummyOpenAI
 
     monkeypatch.setitem(sys.modules, "openai", dummy_module)
@@ -204,7 +204,7 @@ def test_create_openai_client_returns_openai_instance(
 def test_openai_adapter_constructs_client_when_not_provided(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
@@ -246,7 +246,7 @@ def test_openai_adapter_constructs_client_when_not_provided(
 
 
 def test_openai_adapter_supports_custom_client_factory() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
@@ -286,7 +286,7 @@ def test_openai_adapter_supports_custom_client_factory() -> None:
 
 
 def test_openai_adapter_rejects_client_kwargs_with_explicit_client() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
     client = DummyOpenAIClient([])
 
     with pytest.raises(ValueError):
@@ -298,7 +298,7 @@ def test_openai_adapter_rejects_client_kwargs_with_explicit_client() -> None:
 
 
 def test_openai_adapter_rejects_client_factory_with_explicit_client() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
     client = DummyOpenAIClient([])
 
     with pytest.raises(ValueError):
@@ -310,7 +310,7 @@ def test_openai_adapter_rejects_client_factory_with_explicit_client() -> None:
 
 
 def test_openai_adapter_returns_plain_text_response() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
@@ -340,15 +340,15 @@ def test_openai_adapter_returns_plain_text_response() -> None:
     assert result.text == "Hello, Sam!"
     assert result.output is None
 
-    request = cast(dict[str, Any], client.responses.requests[0])
-    messages = cast(list[dict[str, Any]], request["input"])
+    request = cast("dict[str, Any]", client.responses.requests[0])
+    messages = cast("list[dict[str, Any]]", request["input"])
     assert messages[0]["role"] == "system"
     assert str(messages[0]["content"]).startswith("## 1. Greeting")
     assert "tools" not in request
 
 
 def test_openai_adapter_executes_tools_and_parses_output() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     calls: list[str] = []
 
@@ -358,7 +358,7 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
         payload = ToolPayload(answer=f"Result for {params.query}")
         return ToolResult(message="completed", value=payload)
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -396,7 +396,7 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     bus = InProcessEventBus()
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
-        ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
+        ToolInvoked, lambda event: tool_events.append(cast("ToolInvoked", event))
     )
     result = _evaluate_with_bus(
         adapter,
@@ -414,16 +414,16 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     assert record.call_id == "call_1"
     assert calls == ["policies"]
 
-    first_request = cast(dict[str, Any], client.responses.requests[0])
-    tools = cast(list[dict[str, Any]], first_request["tools"])
+    first_request = cast("dict[str, Any]", client.responses.requests[0])
+    tools = cast("list[dict[str, Any]]", first_request["tools"])
     tool_spec = tools[0]
     assert tool_spec["type"] == "function"
     assert tool_spec["name"] == "search_notes"
     assert tool_spec["parameters"]["type"] == "object"
     assert first_request.get("tool_choice") == "auto"
 
-    second_request = cast(dict[str, Any], client.responses.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["input"])
+    second_request = cast("dict[str, Any]", client.responses.requests[1])
+    second_messages = cast("list[dict[str, Any]]", second_request["input"])
     tool_message = second_messages[-1]
     assert tool_message["type"] == "function_call_output"
     assert tool_message["call_id"] == "call_1"
@@ -436,7 +436,7 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
 def test_openai_adapter_rolls_back_session_on_publish_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -533,7 +533,7 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
 
 
 def test_openai_format_publish_failures_handles_defaults() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     failure = HandlerFailure(handler=lambda _: None, error=RuntimeError(""))
     message = module.format_publish_failures((failure,))
@@ -545,13 +545,13 @@ def test_openai_format_publish_failures_handles_defaults() -> None:
 
 
 def test_openai_adapter_surfaces_tool_validation_errors() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     def handler(_: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del context
         raise ToolValidationError("invalid query")
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -602,7 +602,7 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
         prompt,
         ToolParams(query="invalid"),
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert result.text == "Please provide a different query."
@@ -615,12 +615,12 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     assert event.result.value is None
     assert event.call_id == "call_1"
 
-    first_request = cast(dict[str, Any], client.responses.requests[0])
-    first_messages = cast(list[dict[str, Any]], first_request["input"])
+    first_request = cast("dict[str, Any]", client.responses.requests[0])
+    first_messages = cast("list[dict[str, Any]]", first_request["input"])
     assert first_messages[0]["role"] == "system"
 
-    second_request = cast(dict[str, Any], client.responses.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["input"])
+    second_request = cast("dict[str, Any]", client.responses.requests[1])
+    second_messages = cast("list[dict[str, Any]]", second_request["input"])
     tool_message = second_messages[-1]
     assert tool_message["type"] == "function_call_output"
     assert tool_message["call_id"] == "call_1"
@@ -630,7 +630,7 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
 
 
 def test_openai_adapter_surfaces_tool_type_errors() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     invoked = False
 
@@ -643,7 +643,7 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
             value=ToolPayload(answer="should not run"),
         )
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -694,7 +694,7 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
         prompt,
         ToolParams(query="policies"),
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert result.text == "Please adjust the payload."
@@ -708,8 +708,8 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
     assert event.result.value is None
     assert event.call_id == "call_1"
 
-    second_request = cast(dict[str, Any], client.responses.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["input"])
+    second_request = cast("dict[str, Any]", client.responses.requests[1])
+    second_messages = cast("list[dict[str, Any]]", second_request["input"])
     tool_message = second_messages[-1]
     assert tool_message["type"] == "function_call_output"
     assert tool_message["call_id"] == "call_1"
@@ -719,7 +719,7 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
 
 
 def test_openai_adapter_includes_text_config_for_array_outputs() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -752,21 +752,21 @@ def test_openai_adapter_includes_text_config_for_array_outputs() -> None:
     assert isinstance(result.output, list)
     assert [item.answer for item in result.output] == ["First", "Second"]
 
-    request = cast(dict[str, Any], client.responses.requests[0])
-    text_config = cast(dict[str, Any], request["text"])
-    response_format = cast(dict[str, Any], text_config["format"])
+    request = cast("dict[str, Any]", client.responses.requests[0])
+    text_config = cast("dict[str, Any]", request["text"])
+    response_format = cast("dict[str, Any]", text_config["format"])
     assert response_format["type"] == "json_schema"
     assert response_format["name"] == "structured_list_schema"
-    schema_payload = cast(dict[str, Any], response_format["schema"])
-    properties = cast(dict[str, Any], schema_payload["properties"])
+    schema_payload = cast("dict[str, Any]", response_format["schema"])
+    properties = cast("dict[str, Any]", schema_payload["properties"])
     assert ARRAY_WRAPPER_KEY in properties
-    items_schema = cast(dict[str, Any], properties[ARRAY_WRAPPER_KEY])
+    items_schema = cast("dict[str, Any]", properties[ARRAY_WRAPPER_KEY])
     assert items_schema.get("type") == "array"
     assert items_schema.get("items", {}).get("type") == "object"
 
 
 def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -820,14 +820,14 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
     assert result.text == "All done"
 
     assert len(client.responses.requests) == 2
-    first_request = cast(dict[str, Any], client.responses.requests[0])
-    second_request = cast(dict[str, Any], client.responses.requests[1])
+    first_request = cast("dict[str, Any]", client.responses.requests[0])
+    second_request = cast("dict[str, Any]", client.responses.requests[1])
     assert first_request.get("tool_choice") == expected_tool_choice
     assert second_request.get("tool_choice") == "auto"
 
 
 def test_openai_adapter_emits_events_during_evaluation() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -898,7 +898,7 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
 
 
 def test_openai_adapter_raises_when_tool_handler_missing() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -943,7 +943,7 @@ def test_openai_adapter_raises_when_tool_handler_missing() -> None:
 
 
 def test_openai_adapter_handles_tool_call_without_arguments() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     def optional_handler(
         params: OptionalParams, *, context: ToolContext
@@ -990,7 +990,7 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
     bus = InProcessEventBus()
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
-        ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
+        ToolInvoked, lambda event: tool_events.append(cast("ToolInvoked", event))
     )
     result = _evaluate_with_bus(
         adapter,
@@ -1002,12 +1002,12 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
     assert result.text == "All done"
     assert tool_events
     record = tool_events[0]
-    params = cast(OptionalParams, record.params)
+    params = cast("OptionalParams", record.params)
     assert params.query == "default"
 
 
 def test_openai_adapter_reads_output_json_content_blocks() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
@@ -1047,7 +1047,7 @@ def test_openai_adapter_reads_output_json_content_blocks() -> None:
 
 
 def test_openai_adapter_raises_when_structured_output_missing_json() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
@@ -1080,7 +1080,7 @@ def test_openai_adapter_raises_when_structured_output_missing_json() -> None:
 
 
 def test_openai_adapter_raises_on_invalid_parsed_payload() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
@@ -1113,7 +1113,7 @@ def test_openai_adapter_raises_on_invalid_parsed_payload() -> None:
 
 
 def test_openai_message_text_content_handles_structured_parts() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     mapping_parts = [{"type": "output_text", "text": "Hello"}]
     assert module.message_text_content(mapping_parts) == "Hello"
@@ -1137,7 +1137,7 @@ def test_openai_message_text_content_handles_structured_parts() -> None:
 
 
 def test_openai_extract_parsed_content_handles_attribute_blocks() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     class JsonBlock:
         def __init__(self, payload: dict[str, object]) -> None:
@@ -1161,7 +1161,7 @@ def test_openai_extract_parsed_content_handles_attribute_blocks() -> None:
 
 
 def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -1193,7 +1193,7 @@ def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None
 
 
 def test_openai_parse_schema_constrained_payload_handles_object_container() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
@@ -1221,7 +1221,7 @@ def test_openai_parse_schema_constrained_payload_handles_object_container() -> N
 def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt() -> (
     None
 ):
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
@@ -1244,7 +1244,7 @@ def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt(
 
 
 def test_openai_parse_schema_constrained_payload_requires_structured_prompt() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     rendered = RenderedPrompt(text="")
 
@@ -1253,7 +1253,7 @@ def test_openai_parse_schema_constrained_payload_requires_structured_prompt() ->
 
 
 def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
@@ -1275,13 +1275,13 @@ def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays() -
 
 
 def test_openai_parse_schema_constrained_payload_rejects_unknown_container() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     rendered = RenderedPrompt(
         text="",
         structured_output=StructuredOutputConfig(
             dataclass_type=StructuredAnswer,
-            container=cast(Literal["object", "array"], "invalid"),
+            container=cast("Literal['object', 'array']", "invalid"),
             allow_extra_keys=False,
         ),
     )
@@ -1291,7 +1291,7 @@ def test_openai_parse_schema_constrained_payload_rejects_unknown_container() -> 
 
 
 def test_openai_adapter_raises_for_unknown_tool() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
@@ -1329,7 +1329,7 @@ def test_openai_adapter_raises_for_unknown_tool() -> None:
 
 
 def test_openai_adapter_handles_invalid_tool_params() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -1368,7 +1368,7 @@ def test_openai_adapter_handles_invalid_tool_params() -> None:
     bus = InProcessEventBus()
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
-        ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
+        ToolInvoked, lambda event: tool_events.append(cast("ToolInvoked", event))
     )
     result = _evaluate_with_bus(
         adapter,
@@ -1386,7 +1386,7 @@ def test_openai_adapter_handles_invalid_tool_params() -> None:
 
 
 def test_openai_adapter_records_handler_failures() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     def failing_handler(
         params: ToolParams, *, context: ToolContext
@@ -1394,7 +1394,7 @@ def test_openai_adapter_records_handler_failures() -> None:
         del context
         raise RuntimeError("boom")
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], failing_handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", failing_handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -1451,7 +1451,7 @@ def test_openai_adapter_records_handler_failures() -> None:
         prompt,
         ToolParams(query="policies"),
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert result.text == "Please provide a different approach."
@@ -1462,8 +1462,8 @@ def test_openai_adapter_records_handler_failures() -> None:
     assert event.result.value is None
     assert "execution failed: boom" in event.result.message
 
-    second_request = cast(dict[str, Any], client.responses.requests[1])
-    second_messages = cast(list[dict[str, Any]], second_request["input"])
+    second_request = cast("dict[str, Any]", client.responses.requests[1])
+    second_messages = cast("list[dict[str, Any]]", second_request["input"])
     tool_message = second_messages[-1]
     assert tool_message["type"] == "function_call_output"
     assert tool_message["call_id"] == "call_1"
@@ -1473,7 +1473,7 @@ def test_openai_adapter_records_handler_failures() -> None:
 
 
 def test_openai_adapter_records_provider_payload_from_mapping() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
@@ -1504,7 +1504,7 @@ def test_openai_adapter_records_provider_payload_from_mapping() -> None:
 
 
 def test_openai_adapter_ignores_non_mapping_model_dump() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
@@ -1535,7 +1535,7 @@ def test_openai_adapter_ignores_non_mapping_model_dump() -> None:
 
 
 def test_openai_adapter_handles_response_without_model_dump() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,
@@ -1570,7 +1570,7 @@ def test_openai_adapter_handles_response_without_model_dump() -> None:
     ["{", json.dumps("not a dict")],
 )
 def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -1617,7 +1617,7 @@ def test_openai_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None:
 def test_openai_adapter_delegates_to_shared_runner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
@@ -1687,25 +1687,25 @@ def test_openai_adapter_delegates_to_shared_runner(
         None,
         expected_text_config,
     )
-    request_payload = cast(dict[str, Any], client.responses.requests[-1])
+    request_payload = cast("dict[str, Any]", client.responses.requests[-1])
     assert request_payload["model"] == "gpt-test"
-    messages = cast(list[dict[str, Any]], request_payload["input"])
+    messages = cast("list[dict[str, Any]]", request_payload["input"])
     assert messages[0]["content"] == "hi"
     assert request_payload["text"] == expected_text_config
     assert config.response_format == expected_text_config
 
     choice = select_choice(response)
-    content_parts = cast(Sequence[object], getattr(choice.message, "content", ()))
+    content_parts = cast("Sequence[object]", getattr(choice.message, "content", ()))
     first_part = content_parts[0]
     if isinstance(first_part, Mapping):
-        mapping_part = cast(Mapping[str, object], first_part)
+        mapping_part = cast("Mapping[str, object]", first_part)
         assert mapping_part.get("text") == "hi"
     else:
         assert getattr(first_part, "text", None) == "hi"
 
 
 def test_openai_normalizes_tool_call_mapping_arguments() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     tool_call = {
         "id": "call_1",
@@ -1720,7 +1720,7 @@ def test_openai_normalizes_tool_call_mapping_arguments() -> None:
 
 
 def test_openai_normalizes_unserializable_arguments() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     class Unserializable:
         pass
@@ -1732,7 +1732,7 @@ def test_openai_normalizes_unserializable_arguments() -> None:
 
 
 def test_openai_choice_requires_output_and_content() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     class MissingOutput:
         output = None
@@ -1748,7 +1748,7 @@ def test_openai_choice_requires_output_and_content() -> None:
 
 
 def test_openai_choice_handles_tool_call_output() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     class ToolOutput:
         def __init__(self) -> None:
@@ -1769,7 +1769,7 @@ def test_openai_choice_handles_tool_call_output() -> None:
 
 
 def test_openai_choice_skips_reasoning_output() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     class ReasoningOutput:
         def __init__(self) -> None:
@@ -1797,7 +1797,7 @@ def test_openai_choice_skips_reasoning_output() -> None:
 
 
 def test_openai_choice_raises_when_only_reasoning_output_present() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     class ReasoningOutput:
         def __init__(self) -> None:
@@ -1815,7 +1815,7 @@ def test_openai_choice_raises_when_only_reasoning_output_present() -> None:
 
 
 def test_openai_tool_call_from_output_rejects_non_function_type() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     class WrongType:
         name = "tool"
@@ -1826,7 +1826,7 @@ def test_openai_tool_call_from_output_rejects_non_function_type() -> None:
 
 
 def test_openai_responses_tool_spec_requires_function_payload() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     with pytest.raises(PromptEvaluationError):
         module._responses_tool_spec({"type": "non-function"}, prompt_name="prompt")
@@ -1842,7 +1842,7 @@ def test_openai_responses_tool_spec_requires_function_payload() -> None:
 
 
 def test_openai_responses_tool_spec_preserves_strict() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
     normalized = module._responses_tool_spec(
         {
             "type": "function",
@@ -1854,7 +1854,7 @@ def test_openai_responses_tool_spec_preserves_strict() -> None:
 
 
 def test_openai_responses_tool_choice_requires_name() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
     with pytest.raises(PromptEvaluationError):
         module._responses_tool_choice(
             {"type": "function", "function": {}}, prompt_name="prompt"
@@ -1862,7 +1862,7 @@ def test_openai_responses_tool_choice_requires_name() -> None:
 
 
 def test_openai_responses_tool_choice_supports_top_level_name() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
     tool_choice = module._responses_tool_choice(
         {"type": "function", "name": "do_it"}, prompt_name="prompt"
     )
@@ -1870,13 +1870,13 @@ def test_openai_responses_tool_choice_supports_top_level_name() -> None:
 
 
 def test_openai_responses_tool_choice_rejects_unknown_type() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
     with pytest.raises(PromptEvaluationError):
         module._responses_tool_choice({"type": "other"}, prompt_name="prompt")
 
 
 def test_openai_normalize_input_messages_requires_tool_call_fields() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     with pytest.raises(PromptEvaluationError):
         module._normalize_input_messages(
@@ -1892,7 +1892,7 @@ def test_openai_normalize_input_messages_requires_tool_call_fields() -> None:
 
 
 def test_openai_normalize_input_messages_allows_passthrough() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
     messages = module._normalize_input_messages(
         [{"role": "unknown", "content": "raw"}],
         prompt_name="prompt",
@@ -1901,7 +1901,7 @@ def test_openai_normalize_input_messages_allows_passthrough() -> None:
 
 
 def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
-    module = cast(Any, _reload_module())
+    module = cast("Any", _reload_module())
 
     prompt = PromptTemplate(
         ns=PROMPT_NS,

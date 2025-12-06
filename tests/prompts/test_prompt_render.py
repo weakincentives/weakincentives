@@ -14,9 +14,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -33,6 +32,9 @@ from weakincentives.prompt.prompt import (
     RenderedPrompt,
     _format_specialization_argument,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass
@@ -191,7 +193,7 @@ def test_prompt_render_requires_dataclass_instances() -> None:
     prompt = build_prompt()
 
     with pytest.raises(PromptValidationError) as exc:
-        prompt.render(cast(SupportsDataclass, IntroParams))
+        prompt.render(cast("SupportsDataclass", IntroParams))
 
     assert isinstance(exc.value, PromptValidationError)
     assert exc.value.dataclass_type is IntroParams
@@ -285,7 +287,7 @@ def test_prompt_render_propagates_enabled_errors() -> None:
         title="Guard",
         template="Guard: ${flag}",
         key="guard",
-        enabled=cast(Callable[[SupportsDataclass], bool], raising_enabled),
+        enabled=cast("Callable[[SupportsDataclass], bool]", raising_enabled),
     )
     prompt = PromptTemplate(
         ns="tests/prompts",

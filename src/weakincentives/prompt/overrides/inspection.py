@@ -15,14 +15,16 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from hashlib import sha256
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ...dataclasses import FrozenDataclass
 from .local_store import LocalPromptOverridesStore
 from .versioning import HexDigest, PromptOverridesError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 
 @FrozenDataclass()
@@ -112,21 +114,21 @@ def _build_metadata(file_path: Path, overrides_root: Path) -> OverrideFileMetada
         raise PromptOverridesError(
             f"Prompt override payload must be an object: {file_path}"
         )
-    payload = cast(dict[str, Any], payload_obj)
+    payload = cast("dict[str, Any]", payload_obj)
 
     sections_obj = payload.get("sections", {})
     if not isinstance(sections_obj, dict):
         raise PromptOverridesError(
             f"Override file sections must be a mapping: {file_path}"
         )
-    sections = cast(dict[str, Any], sections_obj)
+    sections = cast("dict[str, Any]", sections_obj)
 
     tools_obj = payload.get("tools", {})
     if not isinstance(tools_obj, dict):
         raise PromptOverridesError(
             f"Override file tools must be a mapping: {file_path}"
         )
-    tools = cast(dict[str, Any], tools_obj)
+    tools = cast("dict[str, Any]", tools_obj)
 
     relative_segments = file_path.resolve().relative_to(overrides_root).parts
     content_hash = HexDigest(sha256(raw).hexdigest())

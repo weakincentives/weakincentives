@@ -14,11 +14,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -47,6 +46,9 @@ from weakincentives.tools import (
     WriteFile,
     WriteFileParams,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _make_section(
@@ -340,7 +342,7 @@ def test_ls_lists_directories_and_files(
 
     raw_entries = result.value
     assert raw_entries is not None
-    entries = cast(tuple[FileInfo, ...], raw_entries)
+    entries = cast("tuple[FileInfo, ...]", raw_entries)
     assert [entry.path.segments for entry in entries] == [
         ("docs", "guide"),
         ("docs", "intro.md"),
@@ -445,7 +447,7 @@ def test_glob_filters_matches(
 
     raw_matches = result.value
     assert raw_matches is not None
-    matches = cast(tuple[GlobMatch, ...], raw_matches)
+    matches = cast("tuple[GlobMatch, ...]", raw_matches)
     assert isinstance(matches[0], GlobMatch)
     assert [match.path.segments for match in matches] == [
         ("docs", "guide.md"),
@@ -527,7 +529,7 @@ def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
 
     raw_entries = result.value
     assert raw_entries is not None
-    entries = cast(tuple[FileInfo, ...], raw_entries)
+    entries = cast("tuple[FileInfo, ...]", raw_entries)
     assert entries[0].path.segments == ("workspace", "intro.md")
 
 
@@ -557,7 +559,7 @@ def test_ls_ignores_unrelated_paths(
     result = invoke_tool(bus, list_tool, params, session=session)
     raw_entries = result.value
     assert raw_entries is not None
-    entries = cast(tuple[FileInfo, ...], raw_entries)
+    entries = cast("tuple[FileInfo, ...]", raw_entries)
     assert [entry.path.segments for entry in entries] == [("docs", "intro.md")]
 
 
@@ -797,7 +799,7 @@ def test_glob_filters_with_base_path(
     result = invoke_tool(bus, glob_tool, params, session=session)
     raw_matches = result.value
     assert raw_matches is not None
-    matches = cast(tuple[GrepMatch, ...], raw_matches)
+    matches = cast("tuple[GrepMatch, ...]", raw_matches)
     assert [match.path.segments for match in matches] == [
         ("docs", "guide.md"),
         ("docs", "intro.md"),
@@ -823,7 +825,7 @@ def test_grep_matches_success(
     result = invoke_tool(bus, grep_tool, params, session=session)
     raw_matches = result.value
     assert raw_matches is not None
-    matches = cast(tuple[GlobMatch, ...], raw_matches)
+    matches = cast("tuple[GlobMatch, ...]", raw_matches)
     assert len(matches) == 3
     assert "matches" in result.message
 
@@ -922,7 +924,7 @@ def test_host_mount_defaults_to_relative_destination(tmp_path: Path) -> None:
     result = invoke_tool(bus, list_tool, ListDirectoryParams(), session=session)
     raw_entries = result.value
     assert raw_entries is not None
-    entries = cast(tuple[FileInfo, ...], raw_entries)
+    entries = cast("tuple[FileInfo, ...]", raw_entries)
     assert entries[0].path.segments == ("readme.md",)
 
 
@@ -948,7 +950,7 @@ def test_host_mount_glob_normalization(tmp_path: Path) -> None:
     result = invoke_tool(bus, list_tool, ListDirectoryParams(), session=session)
     raw_entries = result.value
     assert raw_entries is not None
-    entries = cast(tuple[FileInfo, ...], raw_entries)
+    entries = cast("tuple[FileInfo, ...]", raw_entries)
     assert entries[0].path.segments == ("intro.md",)
 
 
@@ -974,7 +976,7 @@ def test_host_mount_exclude_glob_filters_matches(tmp_path: Path) -> None:
 
     raw_entries = result.value
     assert raw_entries is not None
-    entries = cast(tuple[FileInfo, ...], raw_entries)
+    entries = cast("tuple[FileInfo, ...]", raw_entries)
     assert [entry.path.segments for entry in entries] == [("keep.txt",)]
 
 

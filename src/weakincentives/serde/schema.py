@@ -28,11 +28,13 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Literal, cast, get_args, get_origin, get_type_hints
+from typing import TYPE_CHECKING, Literal, cast, get_args, get_origin, get_type_hints
 from uuid import UUID
 
-from ..types import JSONValue
 from ._utils import _UNION_TYPE, _AnyType, _merge_annotated_meta, _ordered_values
+
+if TYPE_CHECKING:
+    from ..types import JSONValue
 
 NULL_TYPE = type(None)
 NULL_JSON_TYPE = "null"
@@ -77,10 +79,10 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
     }
     for key, target in mapping.items():
         if key in meta and target not in schema_meta:
-            schema_meta[target] = cast(JSONValue, meta[key])
+            schema_meta[target] = cast("JSONValue", meta[key])
     members = meta.get("enum") or meta.get("in")
     if isinstance(members, Iterable) and not isinstance(members, (str, bytes)):
-        enum_values = _ordered_values(cast(Iterable[JSONValue], members))
+        enum_values = _ordered_values(cast("Iterable[JSONValue]", members))
         _ = schema_meta.setdefault("enum", enum_values)
     not_members = meta.get("not_in")
     if (
@@ -89,7 +91,7 @@ def _schema_constraints(meta: Mapping[str, object]) -> dict[str, JSONValue]:
         and "not" not in schema_meta
     ):
         schema_meta["not"] = {
-            "enum": _ordered_values(cast(Iterable[JSONValue], not_members))
+            "enum": _ordered_values(cast("Iterable[JSONValue]", not_members))
         }
     return schema_meta
 
@@ -189,6 +191,7 @@ def _collect_union_subschemas(
 def _merge_union_schema(
     subschemas: Sequence[dict[str, JSONValue]],
     base_schema_ref: Mapping[str, JSONValue] | None,
+    *,
     includes_null: bool,
 ) -> dict[str, JSONValue]:
     any_of = list(subschemas)
@@ -234,7 +237,9 @@ def _schema_for_union(
     includes_null, subschemas, base_schema_ref = _collect_union_subschemas(
         base_type, alias_generator
     )
-    schema_data = _merge_union_schema(subschemas, base_schema_ref, includes_null)
+    schema_data = _merge_union_schema(
+        subschemas, base_schema_ref, includes_null=includes_null
+    )
     _apply_union_metadata(schema_data, subschemas, base_schema_ref)
     return schema_data
 

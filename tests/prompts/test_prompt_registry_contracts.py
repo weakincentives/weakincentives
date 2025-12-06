@@ -14,15 +14,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from weakincentives.dbc import dbc_enabled
 from weakincentives.prompt import Section, SectionVisibility
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.registry import PromptRegistry, SectionNode
 from weakincentives.serde import clone as clone_dataclass
+
+if TYPE_CHECKING:
+    from weakincentives.prompt._types import SupportsDataclass
 
 
 @dataclass
@@ -117,10 +119,10 @@ def _build_registry_with_sections() -> PromptRegistry:
         default_params=ExampleParams(value="default"),
         children=[child],
     )
-    registry.register_sections((cast(Section[SupportsDataclass], parent),))
+    registry.register_sections((cast("Section[SupportsDataclass]", parent),))
     no_params = NoParamsSection(title="Static", key="static")
     registry.register_section(
-        cast(Section[SupportsDataclass], no_params),
+        cast("Section[SupportsDataclass]", no_params),
         path=("static",),
         depth=0,
     )
@@ -139,15 +141,15 @@ def test_prompt_registry_invariants_allow_valid_usage() -> None:
     sibling = OtherSection(title="Sibling", key="sibling")
 
     with dbc_enabled():
-        registry.register_sections((cast(Section[SupportsDataclass], parent),))
+        registry.register_sections((cast("Section[SupportsDataclass]", parent),))
         registry.register_section(
-            cast(Section[SupportsDataclass], sibling),
+            cast("Section[SupportsDataclass]", sibling),
             path=("sibling",),
             depth=0,
         )
         snapshot = registry.snapshot()
 
-    default_params = cast(ExampleParams, snapshot.defaults_by_path["parent",])
+    default_params = cast("ExampleParams", snapshot.defaults_by_path["parent",])
     assert default_params.value == "default"
     assert snapshot.placeholders["parent",] == frozenset({"value"})
     assert snapshot.placeholders["parent", "child"] == frozenset({"level"})

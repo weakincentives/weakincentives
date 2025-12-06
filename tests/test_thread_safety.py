@@ -16,13 +16,11 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from random import shuffle
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
@@ -34,6 +32,10 @@ from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 THREAD_SESSION_ID = uuid4()
 
@@ -89,7 +91,7 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
         adapter=UNIT_TEST_ADAPTER_NAME,
         name=f"example-{index}",
         params=params,
-        result=cast(ToolResult[object], result),
+        result=cast("ToolResult[object]", result),
         call_id=str(index),
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -114,7 +116,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         adapter=UNIT_TEST_ADAPTER_NAME,
         name="example-idempotent",
         params=params,
-        result=cast(ToolResult[object], tool_result),
+        result=cast("ToolResult[object]", tool_result),
         call_id="999",
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),

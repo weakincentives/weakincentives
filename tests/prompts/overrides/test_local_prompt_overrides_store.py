@@ -13,10 +13,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -38,7 +36,12 @@ from weakincentives.prompt.overrides.validation import (
     seed_sections,
     seed_tools,
 )
-from weakincentives.types import JSONValue
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
+    from weakincentives.types import JSONValue
 
 
 @dataclass
@@ -222,7 +225,7 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
         },
         "tools": {},
     }
-    sections_payload = cast(dict[str, JSONValue], payload["sections"])
+    sections_payload = cast("dict[str, JSONValue]", payload["sections"])
     sections_payload["unknown/path"] = {
         "expected_hash": section.content_hash,
         "body": "Unused.",
@@ -243,7 +246,7 @@ def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
     assert load_sections(empty_sections, descriptor) == {}
 
     with pytest.raises(PromptOverridesError):
-        load_sections(cast(JSONValue, ["invalid"]), descriptor)
+        load_sections(cast("JSONValue", ["invalid"]), descriptor)
 
     with pytest.raises(PromptOverridesError):
         load_sections({section_key: {"expected_hash": 123, "body": "Body"}}, descriptor)
@@ -258,10 +261,10 @@ def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
         )
 
     with pytest.raises(PromptOverridesError):
-        load_sections(cast(JSONValue, []), descriptor)
+        load_sections(cast("JSONValue", []), descriptor)
 
     with pytest.raises(PromptOverridesError):
-        load_sections(cast(JSONValue, {1: {}}), descriptor)
+        load_sections(cast("JSONValue", {1: {}}), descriptor)
 
 
 def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
@@ -348,10 +351,10 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
         store.resolve(descriptor)
 
     with pytest.raises(PromptOverridesError):
-        load_tools(cast(JSONValue, []), descriptor)
+        load_tools(cast("JSONValue", []), descriptor)
 
     with pytest.raises(PromptOverridesError):
-        load_tools(cast(JSONValue, {1: {}}), descriptor)
+        load_tools(cast("JSONValue", {1: {}}), descriptor)
 
     with pytest.raises(PromptOverridesError):
         load_tools({tool.name: "invalid"}, descriptor)
@@ -545,7 +548,7 @@ def test_upsert_rejects_non_string_section_hash(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                expected_hash=cast(Any, 123),
+                expected_hash=cast("Any", 123),
                 body="Body",
             )
         },
@@ -576,7 +579,7 @@ def test_upsert_rejects_non_string_tool_hash(tmp_path: Path) -> None:
         tool_overrides={
             tool.name: ToolOverride(
                 name=tool.name,
-                expected_contract_hash=cast(Any, 123),
+                expected_contract_hash=cast("Any", 123),
                 param_descriptions={},
             )
         },
@@ -812,7 +815,7 @@ def test_seed_sections_missing_template_raises(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
 
     for node in prompt.sections:
-        section = cast(Any, node.section)  # type: ignore[union-attr]
+        section = cast("Any", node.section)  # type: ignore[union-attr]
         section.original_body_template = lambda: None
 
     with pytest.raises(PromptOverridesError):
@@ -825,7 +828,7 @@ def test_seed_tools_missing_tool_raises(tmp_path: Path) -> None:
     descriptor = PromptDescriptor.from_prompt(prompt)
 
     for node in prompt.sections:
-        section = cast(Any, node.section)  # type: ignore[union-attr]
+        section = cast("Any", node.section)  # type: ignore[union-attr]
         section._tools = ()
 
     with pytest.raises(PromptOverridesError):

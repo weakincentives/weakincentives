@@ -61,20 +61,20 @@ def make_snapshot_payload_with(**mutations: object) -> str:
 
 def make_snapshot_payload_with_slice_mutation(**entry_overrides: object) -> str:
     payload = make_snapshot_payload()
-    slices = cast(list[object], payload["slices"])
-    base_entry = cast(dict[str, object], deepcopy(slices[0]))
+    slices = cast("list[object]", payload["slices"])
+    base_entry = cast("dict[str, object]", deepcopy(slices[0]))
     base_entry.update(entry_overrides)
     return make_snapshot_payload_with(slices=[base_entry])
 
 
 def test_normalize_snapshot_state_validates_keys() -> None:
     with pytest.raises(ValueError):
-        normalize_snapshot_state(cast(SnapshotState, {"not a type": ()}))
+        normalize_snapshot_state(cast("SnapshotState", {"not a type": ()}))
 
 
 def test_normalize_snapshot_state_rejects_nondataclass_values() -> None:
     with pytest.raises(ValueError):
-        normalize_snapshot_state(cast(SnapshotState, {SnapshotItem: ("value",)}))
+        normalize_snapshot_state(cast("SnapshotState", {SnapshotItem: ("value",)}))
 
 
 def test_normalize_snapshot_state_reports_serialization_errors(
@@ -179,10 +179,10 @@ def test_snapshot_to_json_surfaces_serialization_errors(
 
 def test_snapshot_serializes_type_references() -> None:
     payload = make_snapshot_payload()
-    slices = cast(list[object], payload["slices"])
-    entry = cast(dict[str, object], slices[0])
-    items = cast(list[object], entry["items"])
-    first_item = cast(dict[str, object], items[0])
+    slices = cast("list[object]", payload["slices"])
+    entry = cast("dict[str, object]", slices[0])
+    items = cast("list[object]", entry["items"])
+    first_item = cast("dict[str, object]", items[0])
 
     expected_type = f"{SnapshotItem.__module__}:{SnapshotItem.__qualname__}"
 

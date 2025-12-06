@@ -14,12 +14,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from typing import Protocol, Self
+from typing import TYPE_CHECKING, Protocol, Self
 
-from ...prompt._types import SupportsDataclass
-from ..events._types import EventBus
 from .snapshots import Snapshot
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping
+
+    from ...prompt._types import SupportsDataclass
+    from ..events._types import EventBus
 
 type SnapshotProtocol = Snapshot
 

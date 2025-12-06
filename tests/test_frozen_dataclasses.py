@@ -14,13 +14,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 from dataclasses import _MISSING_TYPE, MISSING, FrozenInstanceError, field
-from typing import ClassVar, Protocol, Self, cast
+from typing import TYPE_CHECKING, ClassVar, Protocol, Self, cast
 
 import pytest
 
 from weakincentives.dataclasses import FrozenDataclass
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
 
 
 class HasFrozenOps(Protocol):
@@ -135,7 +137,7 @@ def test_copy_helpers_skip_pre_init_and_support_mapping_and_objects() -> None:
         def __post_init__(self) -> None:
             type(self).calls.append("post")
 
-    tracker = cast(HasFrozenOps, Tracker(1))
+    tracker = cast("HasFrozenOps", Tracker(1))
 
     with pytest.raises(FrozenInstanceError):
         tracker.value = 2
@@ -229,7 +231,7 @@ def test_merge_requires_source_fields() -> None:
         def __pre_init__(cls, *, value: int) -> dict[str, int]:
             return {"value": value}
 
-    target = cast(HasFrozenOps, Target(1))
+    target = cast("HasFrozenOps", Target(1))
 
     with pytest.raises(TypeError, match="no matching fields"):
         target.merge(object())
@@ -249,7 +251,7 @@ def test_merge_with_partial_object_attributes() -> None:
     class PartialSource:
         a = 10
 
-    merged = cast(HasFrozenOps, multi).merge(PartialSource())
+    merged = cast("HasFrozenOps", multi).merge(PartialSource())
     assert merged.a == 10  # type: ignore[attr-defined]
     assert merged.b == 2  # type: ignore[attr-defined]
     assert merged.c == 3  # type: ignore[attr-defined]
@@ -272,7 +274,7 @@ def test_frozen_dataclass_without_pre_init() -> None:
     assert simple2.label == "custom"
 
     # Copy helpers still work
-    simple_ops = cast(HasFrozenOps, simple)
+    simple_ops = cast("HasFrozenOps", simple)
     updated = simple_ops.update(label="updated")
     assert updated.label == "updated"
     assert updated.value == 42
@@ -283,7 +285,7 @@ def test_update_rejects_unknown_fields() -> None:
     class Target:
         value: int
 
-    target = cast(HasFrozenOps, Target(1))
+    target = cast("HasFrozenOps", Target(1))
 
     with pytest.raises(TypeError, match="unexpected field"):
         target.update(unknown=99)
@@ -351,7 +353,7 @@ def test_copy_helpers_reject_changes_to_non_init_fields() -> None:
         def __pre_init__(cls, *, value: int) -> dict[str, int]:
             return {"value": value, "derived": value * 2}
 
-    instance = cast(_WithDerivedOps, WithDerived(value=5))
+    instance = cast("_WithDerivedOps", WithDerived(value=5))
     assert instance.derived == 10
 
     with pytest.raises(TypeError, match="cannot update derived field"):
@@ -374,7 +376,7 @@ def test_copy_helpers_recompute_derived_fields() -> None:
         def __pre_init__(cls, *, value: int) -> dict[str, int]:
             return {"value": value, "derived": value * 2}
 
-    instance = cast(_WithDerivedOps, WithDerived(value=5))
+    instance = cast("_WithDerivedOps", WithDerived(value=5))
     assert instance.value == 5
     assert instance.derived == 10
 

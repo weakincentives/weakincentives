@@ -222,7 +222,7 @@ def test_tool_accepts_none_result_type() -> None:
 def test_tool_example_input_requires_none_when_params_none() -> None:
     example = ToolExample[None, ExampleResult](
         description="invalid input",
-        input=cast(None, ExampleParams(query="oops")),
+        input=cast("None", ExampleParams(query="oops")),
         output=ExampleResult(value="result"),
     )
 
@@ -239,7 +239,7 @@ def test_tool_example_output_requires_none_when_result_none() -> None:
     example = ToolExample[ExampleParams, None](
         description="invalid output",
         input=ExampleParams(query="widgets"),
-        output=cast(None, ExampleResult(value="result")),
+        output=cast("None", ExampleResult(value="result")),
     )
 
     with pytest.raises(PromptValidationError):

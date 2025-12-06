@@ -12,14 +12,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
 
 from weakincentives.prompt.markdown import MarkdownSection
 from weakincentives.prompt.section import Section, SectionVisibility
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @dataclass

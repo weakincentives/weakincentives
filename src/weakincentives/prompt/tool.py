@@ -31,8 +31,6 @@ from typing import (
     get_type_hints,
 )
 
-from ..budget import BudgetTracker
-from ..deadlines import Deadline
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptValidationError
 from .tool_result import ToolResult
@@ -57,6 +55,8 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 
 if TYPE_CHECKING:
+    from ..budget import BudgetTracker
+    from ..deadlines import Deadline
     from ..runtime.events._types import EventBus
     from ..runtime.session.protocols import SessionProtocol
     from .protocols import (
@@ -100,7 +100,7 @@ class ToolContext:
 def _normalize_specialization(item: object) -> tuple[object, object]:
     if not isinstance(item, tuple):
         raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
-    normalized = cast(SequenceABC[object], item)
+    normalized = cast("SequenceABC[object]", item)
     if len(normalized) != _EXPECTED_TYPE_ARGUMENTS:
         raise TypeError("Tool[...] expects two type arguments (ParamsT, ResultT).")
     return _coerce_none_type(normalized[0]), _coerce_none_type(normalized[1])
@@ -157,7 +157,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             params_type,
         )
 
-        self.params_type = cast(type[ParamsT], params_type)
+        self.params_type = cast("type[ParamsT]", params_type)
         self.result_type = result_type
         self.result_container = result_container
         self._result_annotation = raw_result_annotation
@@ -179,7 +179,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     ) -> tuple[ParamsType, ResultT]:
         params_attr = getattr(self, "params_type", None)
         params_type: ParamsType | None = (
-            cast(ParamsType, params_attr) if isinstance(params_attr, type) else None
+            cast("ParamsType", params_attr) if isinstance(params_attr, type) else None
         )
         raw_result_annotation = getattr(self, "_result_annotation", None)
         if params_type is None or raw_result_annotation is None:
@@ -189,9 +189,9 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                 if len(args) == _EXPECTED_TYPE_ARGUMENTS:
                     params_arg, result_arg = args
                     if isinstance(params_arg, type):
-                        params_type = cast(ParamsType, _coerce_none_type(params_arg))
+                        params_type = cast("ParamsType", _coerce_none_type(params_arg))
                         raw_result_annotation = cast(
-                            ResultT, _coerce_none_type(result_arg)
+                            "ResultT", _coerce_none_type(result_arg)
                         )
         if params_type is None or raw_result_annotation is None:
             raise PromptValidationError(
@@ -199,7 +199,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                 placeholder="type_arguments",
             )
 
-        return params_type, cast(ResultT, raw_result_annotation)
+        return params_type, cast("ResultT", raw_result_annotation)
 
     def _validate_name(self, params_type: ParamsType) -> str:
         raw_name = self.name
@@ -322,7 +322,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                     placeholder="examples",
                 )
 
-            sequence_output = cast(SequenceABC[object], example_output)
+            sequence_output = cast("SequenceABC[object]", example_output)
             for item in sequence_output:
                 if (
                     not self._is_dataclass_instance(item)
@@ -350,7 +350,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         params_type: ParamsType,
         result_type: ResultType,
     ) -> tuple[ToolExample[ParamsT, ResultT], ...]:
-        examples_value = cast(tuple[object, ...], self.examples)
+        examples_value = cast("tuple[object, ...]", self.examples)
         if not examples_value:
             return ()
 
@@ -363,7 +363,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                     placeholder="examples",
                 )
 
-            typed_example = cast(ToolExample[ParamsT, ResultT], example)
+            typed_example = cast("ToolExample[ParamsT, ResultT]", example)
 
             self._validate_example_description(typed_example.description, params_type)
             self._validate_example_input(typed_example.input, params_type)
@@ -402,7 +402,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                 placeholder="handler",
             )
 
-        callable_handler = cast(Callable[..., ToolResult[ResultT]], handler)
+        callable_handler = cast("Callable[..., ToolResult[ResultT]]", handler)
         signature = inspect.signature(callable_handler)
         parameters = list(signature.parameters.values())
 
@@ -584,7 +584,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         if annotation is None:
             return _NONE_TYPE, "object"
         if isinstance(annotation, type):
-            return cast(ResultType, annotation), "object"
+            return cast("ResultType", annotation), "object"
 
         origin = get_origin(annotation)
         if origin not in {list, tuple, SequenceABC}:
@@ -614,7 +614,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                 placeholder="ResultT",
             )
 
-        return cast(ResultType, element), "array"
+        return cast("ResultType", element), "array"
 
     @staticmethod
     def _matches_result_annotation(candidate: object, expected: object) -> bool:
@@ -658,12 +658,12 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         params_candidate, result_candidate = _normalize_specialization(item)
         if not isinstance(params_candidate, type):
             raise TypeError("Tool ParamsT type argument must be a type.")
-        params_type = cast(ParamsType, params_candidate)
-        result_annotation = cast(ResultT, result_candidate)
+        params_type = cast("ParamsType", params_candidate)
+        result_annotation = cast("ResultT", result_candidate)
 
         class _SpecializedTool(cls):
             def __post_init__(self) -> None:
-                self.params_type = cast(type[ParamsT], params_type)
+                self.params_type = cast("type[ParamsT]", params_type)
                 self._result_annotation = result_annotation
                 super().__post_init__()
 
@@ -705,7 +705,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             literal_args = get_args(params_annotation)
             params_annotation = literal_args[0] if literal_args else params_annotation
 
-        return cast(ParamsType, _coerce_none_type(params_annotation))
+        return cast("ParamsType", _coerce_none_type(params_annotation))
 
     @staticmethod
     def _resolve_wrapped_result_annotation(
@@ -733,7 +733,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
         try:
             result_arg = next(
-                iter(cast(tuple[object, ...], get_args(result_annotation)))
+                iter(cast("tuple[object, ...]", get_args(result_annotation)))
             )
         except StopIteration as error:
             raise PromptValidationError(
@@ -742,7 +742,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                 placeholder="return",
             ) from error
 
-        return cast(SupportsToolResult, _coerce_none_type(result_arg))
+        return cast("SupportsToolResult", _coerce_none_type(result_arg))
 
     @staticmethod
     def wrap(
@@ -761,7 +761,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         hints = Tool._resolve_annotations(fn)
         params_type: ParamsType = Tool._resolve_wrapped_params_type(parameter, hints)
         normalized_result = cast(
-            ResultT_runtime,
+            "ResultT_runtime",
             Tool._resolve_wrapped_result_annotation(
                 signature,
                 hints,

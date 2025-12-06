@@ -22,10 +22,8 @@ import textwrap
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
-from uuid import UUID
+from typing import TYPE_CHECKING, cast
 
-from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.debug import dump_session as dump_session_tree
 from weakincentives.optimizers import (
@@ -41,7 +39,6 @@ from weakincentives.prompt import (
     SupportsDataclass,
     VisibilityExpansionRequired,
 )
-from weakincentives.prompt.errors import SectionPath
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
@@ -68,6 +65,12 @@ from weakincentives.tools import (
     VfsToolsSection,
     WorkspaceDigestSection,
 )
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from weakincentives.adapters import PromptResponse, ProviderAdapter
+    from weakincentives.prompt.errors import SectionPath
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
@@ -272,7 +275,7 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
     model = os.getenv("OPENAI_MODEL", "gpt-5.1")
-    return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
+    return cast("ProviderAdapter[ReviewResponse]", OpenAIAdapter(model=model))
 
 
 def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
@@ -463,7 +466,7 @@ def _build_logged_session(
     if tags:
         session_tags.update(tags)
 
-    session = Session(parent=parent, tags=cast(Mapping[object, object], session_tags))
+    session = Session(parent=parent, tags=cast("Mapping[object, object]", session_tags))
     _attach_logging_subscribers(session.event_bus)
     return session
 
@@ -538,7 +541,7 @@ def _configure_logging() -> None:
 
 
 def _print_rendered_prompt(event: object) -> None:
-    prompt_event = cast(PromptRendered, event)
+    prompt_event = cast("PromptRendered", event)
     prompt_label = prompt_event.prompt_name or (
         f"{prompt_event.prompt_ns}:{prompt_event.prompt_key}"
     )
@@ -548,7 +551,7 @@ def _print_rendered_prompt(event: object) -> None:
 
 
 def _log_tool_invocation(event: object) -> None:
-    tool_event = cast(ToolInvoked, event)
+    tool_event = cast("ToolInvoked", event)
     params_repr = _format_for_log(dump(tool_event.params, exclude_none=True))
     result_message = _truncate_for_log(tool_event.result.message or "")
     payload_repr: str | None = None
@@ -572,7 +575,7 @@ def _log_tool_invocation(event: object) -> None:
 
 
 def _log_prompt_executed(event: object) -> None:
-    prompt_event = cast(PromptExecuted, event)
+    prompt_event = cast("PromptExecuted", event)
     print("\n[prompt] Execution complete")
     print(f"  {_format_usage_for_log(prompt_event.usage)}\n")
 

@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
 from dataclasses import MISSING, field, is_dataclass
 from functools import cached_property
 from typing import (
@@ -28,20 +27,22 @@ from typing import (
 )
 
 from ..dataclasses import FrozenDataclass
-from ._overrides_protocols import PromptOverridesStore
-from ._types import SupportsDataclass
-from ._visibility import SectionVisibility
 from .errors import PromptValidationError, SectionPath
 from .overrides import PromptDescriptor
 from .registry import PromptRegistry, SectionNode
 from .rendering import PromptRenderer, RenderedPrompt
 from .response_format import ResponseFormatParams, ResponseFormatSection
-from .section import Section
 from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from ._overrides_protocols import PromptOverridesStore
+    from ._types import SupportsDataclass
+    from ._visibility import SectionVisibility
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
+    from .section import Section
 
 OutputT = TypeVar("OutputT", covariant=True)
 
@@ -55,12 +56,12 @@ def _format_specialization_argument(argument: object | None) -> str:
 
 
 def _resolve_output_spec(
-    cls: type[PromptTemplate[Any]], allow_extra_keys: bool
+    cls: type[PromptTemplate[Any]], *, allow_extra_keys: bool
 ) -> StructuredOutputConfig[SupportsDataclass] | None:
     """Resolve structured output from class-level type specialization."""
     candidate = getattr(cls, "_output_dataclass_candidate", None)
     container = cast(
-        Literal["object", "array"] | None,
+        "Literal['object', 'array'] | None",
         getattr(cls, "_output_container_spec", None),
     )
 
@@ -68,20 +69,20 @@ def _resolve_output_spec(
         return None
 
     if not isinstance(candidate, type):
-        candidate_type = cast(type[Any], type(candidate))
+        candidate_type = cast("type[Any]", type(candidate))
         raise PromptValidationError(
             "Prompt output type must be a dataclass.",
             dataclass_type=candidate_type,
         )
 
     if not is_dataclass(candidate):
-        bad_dataclass = cast(type[Any], candidate)
+        bad_dataclass = cast("type[Any]", candidate)
         raise PromptValidationError(
             "Prompt output type must be a dataclass.",
             dataclass_type=bad_dataclass,
         )
 
-    dataclass_type = cast(type[SupportsDataclass], candidate)
+    dataclass_type = cast("type[SupportsDataclass]", candidate)
     return StructuredOutputConfig(
         dataclass_type=dataclass_type,
         container=container,
@@ -107,7 +108,7 @@ def _build_response_format_params(
 
 
 @FrozenDataclass(slots=False)
-class PromptTemplate(Generic[OutputT]):  # noqa: UP046
+class PromptTemplate(Generic[OutputT]):
     """Coordinate prompt sections and their parameter bindings.
 
     PromptTemplate is an immutable dataclass that coordinates prompt sections
@@ -180,21 +181,21 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         if key is MISSING:
             raise TypeError("PromptTemplate() missing required argument: 'key'")
 
-        ns_str = cast(str, ns)
-        key_str = cast(str, key)
-        name_val = cast(str | None, name) if name is not MISSING else None
+        ns_str = cast("str", ns)
+        key_str = cast("str", key)
+        name_val = cast("str | None", name) if name is not MISSING else None
         sections_input = (
-            cast(Sequence[Section[SupportsDataclass]] | None, sections)
+            cast("Sequence[Section[SupportsDataclass]] | None", sections)
             if sections is not MISSING
             else None
         )
         inject_val = (
-            cast(bool, inject_output_instructions)
+            cast("bool", inject_output_instructions)
             if inject_output_instructions is not MISSING
             else True
         )
         allow_extra = (
-            cast(bool, allow_extra_keys) if allow_extra_keys is not MISSING else False
+            cast("bool", allow_extra_keys) if allow_extra_keys is not MISSING else False
         )
 
         stripped_ns = ns_str.strip()
@@ -208,23 +209,23 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         registry = PromptRegistry()
         registry.register_sections(sections_tuple)
 
-        structured_output = _resolve_output_spec(cls, allow_extra)
+        structured_output = _resolve_output_spec(cls, allow_extra_keys=allow_extra)
         response_section: ResponseFormatSection | None = None
         if structured_output is not None:
             response_params = _build_response_format_params(structured_output)
 
             # Create a closure that captures inject_val for the enabled callback
             def make_enabled_callback(
-                default_inject: bool,
+                *, default_inject: bool
             ) -> Callable[[SupportsDataclass], bool]:
                 return lambda _params: default_inject
 
             response_section = ResponseFormatSection(
                 params=response_params,
-                enabled=make_enabled_callback(inject_val),
+                enabled=make_enabled_callback(default_inject=inject_val),
             )
             registry.register_section(
-                cast(Section[SupportsDataclass], response_section),
+                cast("Section[SupportsDataclass]", response_section),
                 path=(response_section.key,),
                 depth=0,
             )
@@ -371,7 +372,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         return _build_response_format_params(spec)
 
 
-class Prompt(Generic[OutputT]):  # noqa: UP046
+class Prompt(Generic[OutputT]):
     """Wrap a prompt template with overrides and bound parameters."""
 
     def __init__(
@@ -402,7 +403,9 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
     @property
     def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
         # sections is always SectionNode tuple after construction
-        return cast(tuple[SectionNode[SupportsDataclass], ...], self.template.sections)
+        return cast(
+            "tuple[SectionNode[SupportsDataclass], ...]", self.template.sections
+        )
 
     @property
     def descriptor(self) -> PromptDescriptor:
@@ -449,7 +452,7 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
             if inject_output_instructions is not None
             else self.inject_output_instructions
         )
-        tag = self.overrides_tag if self.overrides_tag else "latest"
+        tag = self.overrides_tag or "latest"
         return self.template.render(
             *self._params,
             overrides_store=self.overrides_store,

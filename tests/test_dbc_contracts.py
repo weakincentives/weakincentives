@@ -14,11 +14,9 @@
 
 from __future__ import annotations
 
-import pathlib
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
@@ -39,6 +37,10 @@ from weakincentives.runtime.session.session import (
     _created_at_is_utc,
     _session_id_is_well_formed,
 )
+
+if TYPE_CHECKING:
+    import pathlib
+    from collections.abc import Iterator
 
 
 @pytest.fixture(autouse=True)
@@ -138,7 +140,7 @@ def test_invariant_is_inert_when_disabled() -> None:
             self.balance -= amount
 
     counter = Counter()
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         counter.withdraw(5)
     assert counter.balance == -5
 
@@ -170,7 +172,7 @@ def test_pure_is_inert_when_disabled() -> None:
         values.append(1)
         return values
 
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         assert mutate([]) == [1]
 
     with pytest.raises(AssertionError):
@@ -190,7 +192,7 @@ def test_dbc_activation_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     dbc_module.disable_dbc()
     assert dbc_module.dbc_active() is False
 
-    with dbc_module.dbc_enabled(True):
+    with dbc_module.dbc_enabled(active=True):
         assert dbc_module.dbc_active() is True
     assert dbc_module.dbc_active() is False
 
@@ -247,7 +249,7 @@ def test_ensure_skips_when_inactive() -> None:
     def bump(value: int) -> int:
         return value + 1
 
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         assert bump(4) == 5
 
 
@@ -354,7 +356,7 @@ def test_session_invariant_helpers_cover_basics() -> None:
         created_at=datetime.now(UTC),
     )
 
-    typed_session = cast(Session, session)
+    typed_session = cast("Session", session)
 
     assert _session_id_is_well_formed(typed_session)
     assert len(typed_session.session_id.bytes) == SESSION_ID_BYTE_LENGTH

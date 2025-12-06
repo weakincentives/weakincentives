@@ -14,10 +14,9 @@ from __future__ import annotations
 
 import json
 import textwrap
-from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any, Literal, Self, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass, dump
 from ._types import (
@@ -27,8 +26,12 @@ from ._types import (
 )
 from .errors import PromptRenderError
 from .section import Section, SectionVisibility, VisibilitySelector
-from .tool import Tool
 from .tool_result import render_tool_payload
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from .tool import Tool
 
 MarkdownParamsT = TypeVar(
     "MarkdownParamsT",
@@ -174,7 +177,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
             summary=self.summary,
             visibility=self.visibility,
         )
-        return cast(Self, clone)
+        return cast("Self", clone)
 
 
 def _render_tool_examples_block(
@@ -240,7 +243,7 @@ def _render_example_output(
     container: Literal["object", "array"],
 ) -> str:
     if container == "array":
-        sequence_value = cast(Sequence[object], value or [])
+        sequence_value = cast("Sequence[object]", value or [])
         return render_tool_payload(list(sequence_value))
 
     return render_tool_payload(value)

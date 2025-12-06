@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, TypeVar
 _JSONPrimitive = str | int | float | bool | None
 
 
-type JSONArray = Sequence["JSONValue"]
-type JSONObject = Mapping[str, "JSONValue"]
+type JSONArray = Sequence[JSONValue]
+type JSONObject = Mapping[str, JSONValue]
 type JSONValue = _JSONPrimitive | JSONObject | JSONArray
 
 type ContractResult = bool | tuple[bool, *tuple[object, ...]] | None

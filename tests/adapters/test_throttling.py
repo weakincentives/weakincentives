@@ -120,7 +120,7 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
     with pytest.raises(ThrottleError) as excinfo:
         runner.run()
 
-    error = cast(ThrottleError, excinfo.value)
+    error = cast("ThrottleError", excinfo.value)
     assert error.attempts == 1
     assert "budget" in error.message
 

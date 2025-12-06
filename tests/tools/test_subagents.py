@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, is_dataclass, replace
 from datetime import UTC, datetime, timedelta
 from threading import Lock
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from tests.helpers.adapters import RECORDING_ADAPTER_NAME
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
@@ -31,9 +31,7 @@ from weakincentives.prompt import (
     PromptTemplate,
     RecapParams,
 )
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessEventBus, PromptExecuted
@@ -46,6 +44,10 @@ from weakincentives.tools.subagents import (
     build_dispatch_subagents_tool,
     dispatch_subagents,
 )
+
+if TYPE_CHECKING:
+    from weakincentives.prompt._types import SupportsDataclass
+    from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 
 
 def test_subagent_result_render_reports_status() -> None:
@@ -103,9 +105,11 @@ class RecordingAdapter(ProviderAdapter[Any]):
     ) -> PromptResponse[Any]:
         del parse_output, budget_tracker
         params = prompt.params
-        delegation = cast(DelegationParams, params[0])
+        delegation = cast("DelegationParams", params[0])
         recap = (
-            cast(RecapParams, params[1]) if len(params) > 1 else RecapParams(bullets=())
+            cast("RecapParams", params[1])
+            if len(params) > 1
+            else RecapParams(bullets=())
         )
         reason = delegation.reason
         with self._lock:
@@ -125,11 +129,11 @@ class RecordingAdapter(ProviderAdapter[Any]):
                 PromptExecuted(
                     prompt_name=prompt_name,
                     adapter=RECORDING_ADAPTER_NAME,
-                    result=cast(PromptResponse[object], response),
+                    result=cast("PromptResponse[object]", response),
                     session_id=getattr(session, "session_id", None),
                     created_at=datetime.now(UTC),
                     value=(
-                        cast(SupportsDataclass, response.output)
+                        cast("SupportsDataclass", response.output)
                         if response.output is not None and is_dataclass(response.output)
                         else None
                     ),
@@ -199,9 +203,9 @@ def test_dispatch_subagents_requires_rendered_prompt() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=None,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -231,9 +235,9 @@ def test_dispatch_subagents_runs_children_in_parallel() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -279,9 +283,9 @@ def test_dispatch_subagents_propagates_deadline() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -310,9 +314,9 @@ def test_dispatch_subagents_collects_failures() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -356,18 +360,18 @@ def test_dispatch_subagents_requires_dataclass_output_type() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=RenderedPrompt(
             text=rendered.text,
             structured_output=StructuredOutputConfig(
-                dataclass_type=cast(type[SupportsDataclass], cast(object, str)),
-                container=cast(Literal["object", "array"], rendered.container),
+                dataclass_type=cast("type[SupportsDataclass]", cast("object", str)),
+                container=cast("Literal['object', 'array']", rendered.container),
                 allow_extra_keys=bool(rendered.allow_extra_keys),
             ),
             _tools=rendered.tools,
             _tool_param_descriptions=rendered.tool_param_descriptions,
         ),
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -397,9 +401,9 @@ def test_dispatch_subagents_handles_empty_delegations() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -431,9 +435,9 @@ def test_dispatch_subagents_formats_structured_outputs() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -471,9 +475,9 @@ def test_dispatch_subagents_returns_empty_output_when_child_returns_none() -> No
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -510,9 +514,9 @@ def test_dispatch_subagents_shares_state_without_isolation() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -551,9 +555,9 @@ def test_dispatch_subagents_full_isolation_clones_state() -> None:
         isolation_level=SubagentIsolationLevel.FULL_ISOLATION
     )
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -586,9 +590,9 @@ def test_dispatch_subagents_full_isolation_sets_parent_session() -> None:
         isolation_level=SubagentIsolationLevel.FULL_ISOLATION
     )
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )
@@ -636,9 +640,9 @@ def test_dispatch_subagents_full_isolation_requires_clone_support() -> None:
         isolation_level=SubagentIsolationLevel.FULL_ISOLATION
     )
     context = ToolContext(
-        prompt=cast(PromptProtocol[Any], prompt),
+        prompt=cast("PromptProtocol[Any]", prompt),
         rendered_prompt=rendered,
-        adapter=cast(ProviderAdapterProtocol[Any], adapter),
+        adapter=cast("ProviderAdapterProtocol[Any]", adapter),
         session=session,
         event_bus=bus,
     )

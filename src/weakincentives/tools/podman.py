@@ -17,6 +17,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import math
+import operator
 import os
 import posixpath
 import re
@@ -142,7 +143,7 @@ class _ExecRunner(Protocol):
         self,
         cmd: list[str],
         *,
-        input: str | None = None,  # noqa: A002 - matches subprocess API
+        input: str | None = None,
         text: bool | None = None,
         capture_output: bool | None = None,
         timeout: float | None = None,
@@ -415,7 +416,7 @@ def _preview_mount_entries(root: Path) -> tuple[str, ...]:
     return tuple(labels)
 
 
-def _iter_host_mount_files(root: Path, follow_symlinks: bool) -> Iterator[Path]:
+def _iter_host_mount_files(root: Path, *, follow_symlinks: bool) -> Iterator[Path]:
     if root.is_file():
         yield root
         return
@@ -429,7 +430,7 @@ def _iter_host_mount_files(root: Path, follow_symlinks: bool) -> Iterator[Path]:
 def _default_exec_runner(
     cmd: list[str],
     *,
-    input: str | None = None,  # noqa: A002 - matches subprocess API
+    input: str | None = None,
     text: bool | None = None,
     capture_output: bool | None = None,
     timeout: float | None = None,
@@ -442,7 +443,7 @@ def _default_exec_runner(
         timeout=timeout,
         check=False,
     )
-    return cast(subprocess.CompletedProcess[str], completed)
+    return cast("subprocess.CompletedProcess[str]", completed)
 
 
 def _build_client_factory(
@@ -518,7 +519,7 @@ def _normalize_timeout(timeout_seconds: float) -> float:
 
 
 def _normalize_cwd(path: str | None) -> str:
-    if path is None or path == "":
+    if not path:
         return _DEFAULT_WORKDIR
     stripped = path.strip()
     if stripped.startswith("/"):
@@ -626,7 +627,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         self._base_url = base_url
         self._identity = identity_str
         self._base_env = tuple(
-            sorted((config.base_environment or {}).items(), key=lambda item: item[0])
+            sorted((config.base_environment or {}).items(), key=operator.itemgetter(0))
         )
         self._overlay_root = (
             Path(config.cache_dir).expanduser()
@@ -1074,7 +1075,9 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         base_target = _host_path_for(overlay, mount.mount_path)
         consumed_bytes = 0
         source = mount.resolved_host
-        for file_path in _iter_host_mount_files(source, mount.follow_symlinks):
+        for file_path in _iter_host_mount_files(
+            source, follow_symlinks=mount.follow_symlinks
+        ):
             relative = (
                 Path(file_path.name)
                 if source.is_file()
@@ -1919,7 +1922,7 @@ class _PodmanShellSuite:
             completed = self._section.run_cli_exec(
                 config=_ExecConfig(
                     command=exec_cmd,
-                    stdin=params.stdin if params.stdin else None,
+                    stdin=params.stdin or None,
                     cwd=cwd,
                     environment=environment,
                     timeout=timeout_seconds,

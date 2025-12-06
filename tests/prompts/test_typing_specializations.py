@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _run_ty(snippet: str, directory: Path) -> subprocess.CompletedProcess[str]:

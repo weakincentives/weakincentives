@@ -13,15 +13,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import MethodType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-
-from tests.helpers import FrozenUtcNow
 
 try:
     from tests.adapters._test_stubs import (
@@ -65,7 +62,6 @@ from weakincentives.prompt import (
     ToolHandler,
     ToolResult,
 )
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
@@ -77,6 +73,12 @@ from weakincentives.runtime.session import (
     select_latest,
 )
 from weakincentives.tools import DeadlineExceededError, ToolValidationError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from tests.helpers import FrozenUtcNow
+    from weakincentives.prompt._types import SupportsDataclass
 
 
 def _split_tool_message_content(content: str) -> tuple[str, str | None]:
@@ -104,7 +106,7 @@ def adapter_harness(request: pytest.FixtureRequest) -> AdapterHarness:
         ) -> tuple[Any, list[dict[str, object]]]:
             client = DummyOpenAIClient(responses)
             adapter = openai_module.OpenAIAdapter(
-                model="gpt-test", client=cast(Any, client)
+                model="gpt-test", client=cast("Any", client)
             )
             return adapter, client.responses.requests
 
@@ -115,7 +117,7 @@ def adapter_harness(request: pytest.FixtureRequest) -> AdapterHarness:
     def build(responses: Sequence[ResponseType]) -> tuple[Any, list[dict[str, object]]]:
         completion = RecordingCompletion(responses)
         adapter = litellm_module.LiteLLMAdapter(
-            model="gpt-test", completion=cast(Any, completion)
+            model="gpt-test", completion=cast("Any", completion)
         )
         return adapter, completion.requests
 
@@ -177,7 +179,7 @@ def _second_tool_message(requests: list[dict[str, object]]) -> dict[str, object]
     assert len(requests) >= 2
     payload = requests[1]
     message_list = cast(
-        list[dict[str, object]],
+        "list[dict[str, object]]",
         payload.get("input") or payload.get("messages"),
     )
     messages = message_list
@@ -188,7 +190,7 @@ def _tool_message_parts(
     tool_message: Mapping[str, object],
 ) -> tuple[str, str | None]:
     raw = tool_message.get("output") or tool_message.get("content") or ""
-    return _split_tool_message_content(cast(str, raw))
+    return _split_tool_message_content(cast("str", raw))
 
 
 def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None:
@@ -199,7 +201,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
             value=ToolPayload(answer=params.query),
         )
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -227,7 +229,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     adapter.evaluate(
         bound_prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert len(events) == 1
@@ -252,7 +254,7 @@ def test_adapter_tool_context_receives_deadline(
         captured.append(context.deadline)
         return ToolResult(message="ok", value=ToolPayload(answer=params.query))
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
@@ -279,7 +281,7 @@ def test_adapter_tool_context_receives_deadline(
     adapter.evaluate(
         bound_prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
         deadline=deadline,
     )
 
@@ -293,7 +295,7 @@ def test_adapter_tool_deadline_exceeded(
         del params, context
         raise DeadlineExceededError("deadline hit")
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
@@ -321,11 +323,11 @@ def test_adapter_tool_deadline_exceeded(
         adapter.evaluate(
             bound_prompt,
             bus=bus,
-            session=cast(SessionProtocol, session),
+            session=cast("SessionProtocol", session),
             deadline=deadline,
         )
 
-    error = cast(PromptEvaluationError, excinfo.value)
+    error = cast("PromptEvaluationError", excinfo.value)
     assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
     payload = error.provider_payload
     assert isinstance(payload, dict)
@@ -339,7 +341,7 @@ def test_adapter_deadline_preflight_rejection(
         del params, context
         return ToolResult(message="ok", value=ToolPayload(answer="policies"))
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
         description="Search stored notes.",
@@ -370,11 +372,11 @@ def test_adapter_deadline_preflight_rejection(
         adapter.evaluate(
             bound_prompt,
             bus=bus,
-            session=cast(SessionProtocol, session),
+            session=cast("SessionProtocol", session),
             deadline=deadline,
         )
 
-    error = cast(PromptEvaluationError, excinfo.value)
+    error = cast("PromptEvaluationError", excinfo.value)
     assert error.phase == PROMPT_EVALUATION_PHASE_REQUEST
     assert error.provider_payload == {
         "deadline_expires_at": deadline.expires_at.isoformat()
@@ -388,7 +390,7 @@ def test_adapter_tool_execution_validation_error(
         del context
         raise ToolValidationError("invalid query")
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -418,7 +420,7 @@ def test_adapter_tool_execution_validation_error(
     adapter.evaluate(
         bound_prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert len(events) == 1
@@ -447,7 +449,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
             value=ToolPayload(answer="should not run"),
         )
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -477,7 +479,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     adapter.evaluate(
         bound_prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert invoked is False
@@ -507,7 +509,7 @@ def test_adapter_tool_execution_rejects_type_errors(
             value=ToolPayload(answer="should not run"),
         )
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -537,7 +539,7 @@ def test_adapter_tool_execution_rejects_type_errors(
     adapter.evaluate(
         bound_prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert invoked is False
@@ -563,7 +565,7 @@ def test_adapter_tool_execution_unexpected_exception(
         del context
         raise RuntimeError("handler crash")
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -591,7 +593,7 @@ def test_adapter_tool_execution_unexpected_exception(
     adapter.evaluate(
         bound_prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert len(events) == 1
@@ -620,7 +622,7 @@ def test_adapter_tool_execution_rolls_back_session(
             value=ToolPayload(answer=params.query),
         )
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -705,7 +707,7 @@ def test_adapter_tool_visibility_expansion_propagates(
             section_keys=("docs",),
         )
 
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
+    tool_handler = cast("ToolHandler[ToolParams, ToolPayload]", handler)
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_notes",
@@ -733,10 +735,10 @@ def test_adapter_tool_visibility_expansion_propagates(
         adapter.evaluate(
             bound_prompt,
             bus=bus,
-            session=cast(SessionProtocol, session),
+            session=cast("SessionProtocol", session),
         )
 
-    exc = cast(VisibilityExpansionRequired, exc_info.value)
+    exc = cast("VisibilityExpansionRequired", exc_info.value)
     assert exc.section_keys == ("docs",)
     assert exc.reason == "Need documentation details"
     assert ("docs",) in exc.requested_overrides

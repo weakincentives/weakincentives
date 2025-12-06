@@ -55,7 +55,7 @@ def _write_snapshot(path: Path, values: list[str]) -> list[str]:
         )
         entries.append(snapshot.to_json())
         session_ids.append(session_id)
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         path.write_text("\n".join(entries))
     return session_ids
 
@@ -299,7 +299,7 @@ def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
     assert raw_payload["version"] == "1"
     tags_value = raw_payload.get("tags")
     assert isinstance(tags_value, Mapping)
-    tags = cast(Mapping[str, object], tags_value)
+    tags = cast("Mapping[str, object]", tags_value)
     assert tags.get("suite") == "wink-debug"
     assert "session_id" in tags
     assert store.path == snapshot_path.resolve()

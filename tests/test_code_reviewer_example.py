@@ -17,8 +17,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import pytest
@@ -33,9 +32,7 @@ from code_reviewer_example import (
 )
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
-from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.debug import dump_session
-from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptDescriptor,
@@ -46,6 +43,12 @@ from weakincentives.tools.digests import (
     latest_workspace_digest,
     set_workspace_digest,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from weakincentives.adapters.core import ProviderAdapter
+    from weakincentives.prompt import Prompt, SupportsDataclass
 
 
 @dataclass(slots=True, frozen=True)
@@ -213,7 +216,7 @@ def test_optimize_command_persists_override(tmp_path: Path) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
     app = CodeReviewApp(
-        cast(ProviderAdapter[ReviewResponse], adapter),
+        cast("ProviderAdapter[ReviewResponse]", adapter),
         overrides_store=overrides_store,
     )
 

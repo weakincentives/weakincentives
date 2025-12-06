@@ -15,10 +15,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-
-import pytest
+from typing import TYPE_CHECKING
 
 from weakincentives.prompt.tool_result import render_tool_payload
+
+if TYPE_CHECKING:
+    import pytest
 
 
 @dataclass(slots=True)

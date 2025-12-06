@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import (
     MarkdownSection,
@@ -33,6 +32,9 @@ from weakincentives.prompt import (
 from weakincentives.runtime import select_latest
 from weakincentives.runtime.events import PromptExecuted
 from weakincentives.runtime.session import Session
+
+if TYPE_CHECKING:
+    from weakincentives.adapters.core import SessionProtocol
 
 pytest.importorskip("openai")
 
@@ -290,7 +292,7 @@ def test_openai_adapter_parses_structured_output_without_native_schema(
     response = custom_adapter.evaluate(
         prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert response.prompt_name == "structured_review"
@@ -318,7 +320,7 @@ def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -
     response = adapter.evaluate(
         prompt,
         bus=bus,
-        session=cast(SessionProtocol, session),
+        session=cast("SessionProtocol", session),
     )
 
     assert response.prompt_name == "structured_review_list"

@@ -124,7 +124,7 @@ def test_prompt_specialization_requires_dataclass() -> None:
     with pytest.raises(PromptValidationError) as exc:
         PromptTemplate[str](ns="tests/prompts", key="invalid-output", sections=[])
 
-    error = cast(PromptValidationError, exc.value)
+    error = cast("PromptValidationError", exc.value)
     assert error.dataclass_type is str
 
 
@@ -136,7 +136,7 @@ def test_prompt_resolve_output_spec_requires_dataclass_type() -> None:
     with pytest.raises(PromptValidationError) as exc:
         InvalidOutputPrompt(ns="tests/prompts", key="invalid-output", sections=())
 
-    error = cast(PromptValidationError, exc.value)
+    error = cast("PromptValidationError", exc.value)
     assert error.dataclass_type is str
 
 
@@ -405,7 +405,7 @@ def test_parse_structured_output_rejects_unknown_container() -> None:
         text="",
         structured_output=StructuredOutputConfig(
             dataclass_type=Summary,
-            container=cast(Literal["object", "array"], "invalid"),
+            container=cast("Literal['object', 'array']", "invalid"),
             allow_extra_keys=False,
         ),
     )

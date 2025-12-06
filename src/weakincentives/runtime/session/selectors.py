@@ -14,11 +14,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from ...dbc import pure
 from ...prompt._types import SupportsDataclass
-from .session import Session
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .session import Session
 
 
 @pure

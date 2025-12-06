@@ -37,7 +37,7 @@ from weakincentives.runtime.events import (
 
 def make_prompt_response(prompt_name: str) -> PromptResponse[object]:
     return cast(
-        PromptResponse[object],
+        "PromptResponse[object]",
         PromptResponse(
             prompt_name=prompt_name,
             text="hello",
@@ -242,7 +242,7 @@ class _Payload:
 
 def test_tool_invoked_event_fields() -> None:
     raw_result = ToolResult(message="ok", value=_Payload(value="data"))
-    result = cast(ToolResult[object], raw_result)
+    result = cast("ToolResult[object]", raw_result)
     rendered_output = raw_result.render()
     event = ToolInvoked(
         prompt_name="demo",

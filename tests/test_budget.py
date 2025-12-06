@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import threading
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.budget import (
     Budget,
     BudgetExceededError,
@@ -28,6 +27,9 @@ from weakincentives.budget import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.runtime.events import TokenUsage
+
+if TYPE_CHECKING:
+    from tests.helpers import FrozenUtcNow
 
 # Budget dataclass tests
 
@@ -204,7 +206,7 @@ def test_tracker_check_raises_when_total_exceeded() -> None:
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
 
-    error = cast(BudgetExceededError, exc_info.value)
+    error = cast("BudgetExceededError", exc_info.value)
     assert error.exceeded_dimension == "total_tokens"
     assert error.budget is budget
     assert error.consumed.total_tokens == 600
@@ -220,7 +222,7 @@ def test_tracker_check_raises_when_input_exceeded() -> None:
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
 
-    error = cast(BudgetExceededError, exc_info.value)
+    error = cast("BudgetExceededError", exc_info.value)
     assert error.exceeded_dimension == "input_tokens"
 
 
@@ -234,7 +236,7 @@ def test_tracker_check_raises_when_output_exceeded() -> None:
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
 
-    error = cast(BudgetExceededError, exc_info.value)
+    error = cast("BudgetExceededError", exc_info.value)
     assert error.exceeded_dimension == "output_tokens"
 
 
@@ -254,7 +256,7 @@ def test_tracker_check_raises_when_deadline_expired(
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
 
-    error = cast(BudgetExceededError, exc_info.value)
+    error = cast("BudgetExceededError", exc_info.value)
     assert error.exceeded_dimension == "deadline"
 
 
@@ -394,5 +396,5 @@ def test_budget_with_all_limits(frozen_utcnow: FrozenUtcNow) -> None:
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
 
-    error = cast(BudgetExceededError, exc_info.value)
+    error = cast("BudgetExceededError", exc_info.value)
     assert error.exceeded_dimension == "input_tokens"

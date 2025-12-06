@@ -14,14 +14,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, MutableMapping
 from dataclasses import field, is_dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, override
 
 from ..dataclasses import FrozenDataclass
-from ..deadlines import Deadline
-from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._visibility import SectionVisibility
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .progressive_disclosure import (
@@ -29,14 +26,18 @@ from .progressive_disclosure import (
     compute_current_visibility,
     create_open_sections_handler,
 )
-from .registry import RegistrySnapshot, SectionNode
-from .response_format import ResponseFormatSection
-from .section import Section
-from .structured_output import StructuredOutputConfig
-from .tool import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Callable, Iterator, Mapping, MutableMapping
+
+    from ..deadlines import Deadline
+    from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
     from .overrides import PromptDescriptor, ToolOverride
+    from .registry import RegistrySnapshot, SectionNode
+    from .response_format import ResponseFormatSection
+    from .section import Section
+    from .structured_output import StructuredOutputConfig
+    from .tool import Tool
 
 
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
@@ -146,7 +147,7 @@ class PromptRenderer[OutputT]:
                     "Prompt expects dataclass instances.",
                     dataclass_type=provided_type,
                 )
-            params_type = cast(type[SupportsDataclass], provided_type)
+            params_type = cast("type[SupportsDataclass]", provided_type)
             if params_type in lookup:
                 raise PromptValidationError(
                     "Duplicate params type supplied to prompt.",
@@ -160,7 +161,7 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: PLR0913, PLR0914
+    def render(
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
@@ -244,7 +245,7 @@ class PromptRenderer[OutputT]:
             )
             collected_tools.append(
                 cast(
-                    Tool[SupportsDataclassOrNone, SupportsToolResult],
+                    "Tool[SupportsDataclassOrNone, SupportsToolResult]",
                     open_sections_tool,
                 )
             )
@@ -362,7 +363,7 @@ class PromptRenderer[OutputT]:
             render_override = getattr(node.section, "render_with_template", None)
             if override_body is not None and callable(render_override):
                 override_renderer = cast(
-                    Callable[[str, SupportsDataclass | None, int, str], str],
+                    "Callable[[str, SupportsDataclass | None, int, str], str]",
                     render_override,
                 )
                 rendered = override_renderer(

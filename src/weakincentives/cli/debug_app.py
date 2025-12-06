@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import operator
 import re
 import threading
 import webbrowser
@@ -89,7 +90,7 @@ def _render_markdown_values(value: JSONValue) -> JSONValue:
     if isinstance(value, Mapping):
         if _MARKDOWN_WRAPPER_KEY in value:
             return value
-        mapping_value = cast(Mapping[str, JSONValue], value)
+        mapping_value = cast("Mapping[str, JSONValue]", value)
         normalized: dict[str, JSONValue] = {}
         for key, item in mapping_value.items():
             normalized[str(key)] = _render_markdown_values(item)
@@ -293,7 +294,7 @@ class SnapshotStore:
 
         entries: list[Mapping[str, JSONValue]] = []
         for created_at, candidate in sorted(
-            snapshots, key=lambda entry: entry[0], reverse=True
+            snapshots, key=operator.itemgetter(0), reverse=True
         ):
             created_iso = datetime.fromtimestamp(created_at, tz=UTC).isoformat()
             entries.append(
@@ -572,7 +573,7 @@ class _DebugAppHandlers:
 
         _validate_optional_session_id(session_value)
         _validate_optional_line_number(line_value)
-        return cast(str | None, session_value), cast(int | None, line_value)
+        return cast("str | None", session_value), cast("int | None", line_value)
 
     @staticmethod
     def _parse_switch_payload(
@@ -590,8 +591,8 @@ class _DebugAppHandlers:
 
         return (
             Path(path_value),
-            cast(str | None, session_value),
-            cast(int | None, line_value),
+            cast("str | None", session_value),
+            cast("int | None", line_value),
         )
 
 

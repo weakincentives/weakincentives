@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -34,8 +35,10 @@ from weakincentives.prompt import (
     ToolResult,
     VisibilityExpansionRequired,
 )
-from weakincentives.prompt.errors import SectionPath
 from weakincentives.runtime.session import Session
+
+if TYPE_CHECKING:
+    from weakincentives.prompt.errors import SectionPath
 
 pytest.importorskip("openai")
 

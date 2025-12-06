@@ -18,10 +18,12 @@ import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, is_dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ..serde import dump
-from ._types import SupportsDataclass
+
+if TYPE_CHECKING:
+    from ._types import SupportsDataclass
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,14 +52,14 @@ def render_tool_payload(value: object) -> str:
         return ""
 
     if _is_dataclass_instance(value):
-        return _render_dataclass(cast(SupportsDataclass, value))
+        return _render_dataclass(cast("SupportsDataclass", value))
 
     if isinstance(value, Mapping):
-        typed_mapping = cast(Mapping[Any, object], value)
+        typed_mapping = cast("Mapping[Any, object]", value)
         return _render_mapping(typed_mapping)
 
     if isinstance(value, Sequence) and not isinstance(value, _SEQUENCE_EXCLUSIONS):
-        sequence_items = cast(Sequence[object], value)
+        sequence_items = cast("Sequence[object]", value)
         return _render_sequence(sequence_items)
 
     if isinstance(value, bytes):
@@ -113,13 +115,13 @@ def _normalize_mapping_value(value: object) -> object:
         except TypeError:
             return repr(value)
     if isinstance(value, Mapping):
-        typed_mapping = cast(Mapping[Any, object], value)
+        typed_mapping = cast("Mapping[Any, object]", value)
         return {
             str(key): _normalize_mapping_value(item)
             for key, item in typed_mapping.items()
         }
     if isinstance(value, Sequence) and not isinstance(value, _SEQUENCE_EXCLUSIONS):
-        sequence_values = cast(Sequence[object], value)
+        sequence_values = cast("Sequence[object]", value)
         return [_normalize_mapping_value(item) for item in sequence_values]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value

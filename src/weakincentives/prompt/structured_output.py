@@ -15,15 +15,17 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from typing import Final, Literal, cast
+from typing import TYPE_CHECKING, Final, Literal, cast
 
 from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
 from ..serde.parse import parse as parse_dataclass
-from ..types import JSONValue, ParseableDataclassT
 from ._structured_output_config import StructuredOutputConfig
-from ._types import SupportsDataclass
-from .protocols import RenderedPromptProtocol
+
+if TYPE_CHECKING:
+    from ..types import JSONValue, ParseableDataclassT
+    from ._types import SupportsDataclass
+    from .protocols import RenderedPromptProtocol
 
 __all__ = [
     "ARRAY_WRAPPER_KEY",
@@ -92,7 +94,7 @@ def parse_structured_output[PayloadT](
     except (TypeError, ValueError) as error:
         raise OutputParseError(str(error), dataclass_type=dataclass_type) from error
 
-    return cast(PayloadT, parsed)
+    return cast("PayloadT", parsed)
 
 
 def _extract_json_payload(
@@ -124,7 +126,7 @@ def _extract_json_payload(
             payload, _ = decoder.raw_decode(text, index)
         except json.JSONDecodeError:
             continue
-        return cast(JSONValue, payload)
+        return cast("JSONValue", payload)
 
     raise OutputParseError(
         "No JSON object or array found in assistant message.",
@@ -147,11 +149,11 @@ def parse_dataclass_payload(
     if config.container == "object":
         if not isinstance(payload, Mapping):
             raise TypeError(config.object_error)
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
+        mapping_payload = cast("Mapping[str, JSONValue]", payload)
         return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
 
     if isinstance(payload, Mapping):
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
+        mapping_payload = cast("Mapping[str, JSONValue]", payload)
         if ARRAY_WRAPPER_KEY not in mapping_payload:
             raise TypeError(config.array_error)
         payload = mapping_payload[ARRAY_WRAPPER_KEY]
@@ -159,12 +161,12 @@ def parse_dataclass_payload(
         payload, (str, bytes, bytearray)
     ):
         raise TypeError(config.array_error)
-    sequence_payload = cast(Sequence[JSONValue], payload)
+    sequence_payload = cast("Sequence[JSONValue]", payload)
     parsed_items: list[ParseableDataclassT] = []
     for index, item in enumerate(sequence_payload):
         if not isinstance(item, Mapping):
             raise TypeError(config.array_item_error.format(index=index))
-        mapping_item = cast(Mapping[str, JSONValue], item)
+        mapping_item = cast("Mapping[str, JSONValue]", item)
         parsed_item = parse_dataclass(
             dataclass_type,
             mapping_item,

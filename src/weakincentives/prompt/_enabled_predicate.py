@@ -46,17 +46,17 @@ def normalize_enabled_predicate(
     if enabled is None:
         return None
     if params_type is None and not callable_requires_positional_argument(enabled):
-        zero_arg = cast(Callable[[], bool], enabled)
+        zero_arg = cast("Callable[[], bool]", enabled)
 
         def _without_params(_: SupportsDataclass | None) -> bool:
             return bool(zero_arg())
 
         return _without_params
 
-    coerced = cast(Callable[[SupportsDataclass], bool], enabled)
+    coerced = cast("Callable[[SupportsDataclass], bool]", enabled)
 
     def _with_params(value: SupportsDataclass | None) -> bool:
-        return bool(coerced(cast(SupportsDataclass, value)))
+        return bool(coerced(cast("SupportsDataclass", value)))
 
     return _with_params
 

@@ -99,7 +99,7 @@ class DummyMessage:
         for part in self.to_content_parts():
             model_dump_fn = getattr(part, "model_dump", None)
             if callable(model_dump_fn):
-                normalized.append(cast(Any, model_dump_fn)())
+                normalized.append(cast("Any", model_dump_fn)())
             else:
                 normalized.append(part)
         return {"content": normalized}
@@ -122,7 +122,7 @@ class DummyResponseOutput:
         for part in self.content:
             model_dump_fn = getattr(part, "model_dump", None)
             if callable(model_dump_fn):
-                normalized.append(cast(Any, model_dump_fn)())
+                normalized.append(cast("Any", model_dump_fn)())
             else:
                 normalized.append(part)
         return {"content": normalized}

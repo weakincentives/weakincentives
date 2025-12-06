@@ -95,7 +95,7 @@ def FrozenDataclass(
     }
 
     def decorator(cls: type[T]) -> type[T]:
-        dataclass_cls = cast(Callable[[type[T]], type[T]], dataclass(**options))(cls)
+        dataclass_cls = cast("Callable[[type[T]], type[T]]", dataclass(**options))(cls)
         _attach_helpers(dataclass_cls)
         return dataclass_cls
 
@@ -264,7 +264,7 @@ def _extract_updates(
     cls: type[Any], field_names: list[str], source: object
 ) -> dict[str, object]:
     if isinstance(source, Mapping):
-        typed_source = cast(Mapping[str, object], source)
+        typed_source = cast("Mapping[str, object]", source)
         extra_keys = typed_source.keys() - set(field_names)
         if extra_keys:
             joined = ", ".join(sorted(extra_keys))

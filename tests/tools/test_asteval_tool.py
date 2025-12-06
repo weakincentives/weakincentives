@@ -15,15 +15,12 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
-from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 import weakincentives.tools.asteval as asteval_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.prompt.tool import Tool, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
@@ -42,6 +39,12 @@ from weakincentives.tools import (
     WriteFile,
     WriteFileParams,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from weakincentives.prompt.tool import Tool, ToolResult
 
 
 def _assert_success_message(result: ToolResult[EvalResult]) -> None:
@@ -80,7 +83,7 @@ def _setup_sections() -> tuple[
     session = Session(bus=bus)
     vfs_section = VfsToolsSection(session=session)
     section = AstevalSection(session=session)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
     return session, bus, vfs_section, tool
 
 
@@ -131,7 +134,7 @@ def test_asteval_section_disables_tool_overrides_by_default() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
     section = AstevalSection(session=session)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     assert section.accepts_overrides is False
     assert tool.accepts_overrides is False
@@ -144,7 +147,7 @@ def test_asteval_section_override_flags_opt_in() -> None:
         session=session,
         accepts_overrides=True,
     )
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     assert section.accepts_overrides is True
     assert tool.accepts_overrides is True
@@ -205,7 +208,7 @@ def test_multiline_reads_and_writes() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
-        Tool[WriteFileParams, WriteFile], find_tool(vfs_section, "write_file")
+        "Tool[WriteFileParams, WriteFile]", find_tool(vfs_section, "write_file")
     )
     invoke_tool(
         bus,
@@ -628,7 +631,7 @@ def test_create_mode_rejects_existing_file() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
-        Tool[WriteFileParams, WriteFile], find_tool(vfs_section, "write_file")
+        "Tool[WriteFileParams, WriteFile]", find_tool(vfs_section, "write_file")
     )
     existing_path = VfsPath(("docs", "info.txt"))
     invoke_tool(
@@ -685,7 +688,7 @@ def test_overwrite_updates_existing_file() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
-        Tool[WriteFileParams, WriteFile], find_tool(vfs_section, "write_file")
+        "Tool[WriteFileParams, WriteFile]", find_tool(vfs_section, "write_file")
     )
     path = VfsPath(("docs", "info.txt"))
     invoke_tool(
@@ -754,12 +757,12 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
         allowed_host_roots=(root,),
     )
     list_tool = cast(
-        Tool[ListDirectory, ListDirectoryResult],
+        "Tool[ListDirectory, ListDirectoryResult]",
         find_tool(vfs_section, "ls"),
     )
     invoke_tool(bus, list_tool, ListDirectory(), session=session)
     section = AstevalSection(session=session)
-    tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
+    tool = cast("Tool[EvalParams, EvalResult]", find_tool(section, "evaluate_python"))
 
     result = invoke_tool(
         bus,
@@ -890,7 +893,7 @@ def test_write_text_conflict_with_read_path() -> None:
     session, bus, vfs_section, tool = _setup_sections()
 
     write_tool = cast(
-        Tool[WriteFileParams, WriteFile], find_tool(vfs_section, "write_file")
+        "Tool[WriteFileParams, WriteFile]", find_tool(vfs_section, "write_file")
     )
     path = VfsPath(("docs", "info.txt"))
     invoke_tool(

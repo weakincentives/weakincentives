@@ -14,8 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from ...dbc import pure
 from ...prompt._types import SupportsDataclass
@@ -26,13 +25,16 @@ from ._types import (
     TypedReducer,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 def _resolve_event_value(event: ReducerEvent) -> SupportsDataclass:
     if isinstance(event, ReducerEventWithValue):
         value = event.value
         if value is not None:
             return value
-    return cast(SupportsDataclass, event)
+    return cast("SupportsDataclass", event)
 
 
 @pure
@@ -45,7 +47,7 @@ def append[T: SupportsDataclass](
     """Append the event value if it is not already present."""
 
     del context
-    value = cast(T, _resolve_event_value(event))
+    value = cast("T", _resolve_event_value(event))
     if value in slice_values:
         return slice_values
     return (*slice_values, value)
@@ -61,7 +63,7 @@ def upsert_by[T: SupportsDataclass, K](key_fn: Callable[[T], K]) -> TypedReducer
         context: ReducerContextProtocol,
     ) -> tuple[T, ...]:
         del context
-        value = cast(T, _resolve_event_value(event))
+        value = cast("T", _resolve_event_value(event))
         key = key_fn(value)
         updated: list[T] = []
         replaced = False
@@ -89,7 +91,7 @@ def replace_latest[T: SupportsDataclass](
     """Keep only the most recent event value."""
 
     del context
-    return (cast(T, _resolve_event_value(event)),)
+    return (cast("T", _resolve_event_value(event)),)
 
 
 def replace_latest_by[T: SupportsDataclass, K](
@@ -104,7 +106,7 @@ def replace_latest_by[T: SupportsDataclass, K](
         context: ReducerContextProtocol,
     ) -> tuple[T, ...]:
         del context
-        value = cast(T, _resolve_event_value(event))
+        value = cast("T", _resolve_event_value(event))
         key = key_fn(value)
         filtered = tuple(item for item in slice_values if key_fn(item) != key)
         return (*filtered, value)

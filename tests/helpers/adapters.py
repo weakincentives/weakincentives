@@ -14,23 +14,24 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from weakincentives.adapters.shared import AdapterName
+if TYPE_CHECKING:
+    from weakincentives.adapters.shared import AdapterName
 
-GENERIC_ADAPTER_NAME = cast(AdapterName, "adapter")
+GENERIC_ADAPTER_NAME = cast("AdapterName", "adapter")
 """Adapter name placeholder used in tests that inspect stored events."""
 
-TEST_ADAPTER_NAME = cast(AdapterName, "test")
+TEST_ADAPTER_NAME = cast("AdapterName", "test")
 """Adapter identifier used when simulating provider interactions in tests."""
 
-DUMMY_ADAPTER_NAME = cast(AdapterName, "dummy")
+DUMMY_ADAPTER_NAME = cast("AdapterName", "dummy")
 """Adapter identifier used by dummy conversation runners in tests."""
 
-UNIT_TEST_ADAPTER_NAME = cast(AdapterName, "unit")
+UNIT_TEST_ADAPTER_NAME = cast("AdapterName", "unit")
 """Adapter identifier used in thread-safety tests."""
 
-RECORDING_ADAPTER_NAME = cast(AdapterName, "recording")
+RECORDING_ADAPTER_NAME = cast("AdapterName", "recording")
 """Adapter identifier used by recording stubs in subagent tests."""
 
 __all__ = [

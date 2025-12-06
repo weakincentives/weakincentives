@@ -72,7 +72,7 @@ def disable_dbc() -> None:
 
 
 @contextmanager
-def dbc_enabled(active: bool = True) -> Iterator[None]:
+def dbc_enabled(*, active: bool = True) -> Iterator[None]:
     """Temporarily set the DbC flag inside a ``with`` block."""
 
     global _forced_state
@@ -88,7 +88,7 @@ def _normalize_contract_result(
     result: ContractResult | object,
 ) -> tuple[bool, str | None]:
     if isinstance(result, tuple):
-        sequence_result = cast(Sequence[object], result)
+        sequence_result = cast("Sequence[object]", result)
         if not sequence_result:
             msg = "Contract callables must not return empty tuples"
             raise TypeError(msg)
@@ -221,13 +221,13 @@ def ensure(*predicates: ContractCallable) -> Callable[[Callable[P, R]], Callable
     return decorator
 
 
-def skip_invariant(func: Callable[Q, S]) -> Callable[Q, S]:  # noqa: UP047
+def skip_invariant(func: Callable[Q, S]) -> Callable[Q, S]:
     """Mark a method so invariants are not evaluated around it."""
 
     class _InvariantSkippable(Protocol):
         __dbc_skip_invariant__: bool
 
-    skippable_func = cast(_InvariantSkippable, func)
+    skippable_func = cast("_InvariantSkippable", func)
     skippable_func.__dbc_skip_invariant__ = True
     return func
 
@@ -406,7 +406,7 @@ def _patch(
         setattr(obj, attribute, original)
 
 
-def pure(func: Callable[P, R]) -> Callable[P, R]:  # noqa: UP047
+def pure(func: Callable[P, R]) -> Callable[P, R]:
     """Validate that the wrapped callable behaves like a pure function."""
 
     @wraps(func)

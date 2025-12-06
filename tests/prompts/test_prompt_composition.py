@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import TypeVar, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import pytest
 
@@ -33,7 +33,9 @@ from weakincentives.prompt import (
     Tool,
 )
 from weakincentives.prompt.composition import _merge_tool_param_descriptions
-from weakincentives.prompt.protocols import PromptProtocol
+
+if TYPE_CHECKING:
+    from weakincentives.prompt.protocols import PromptProtocol
 
 ParentProtocolT = TypeVar("ParentProtocolT")
 
@@ -41,7 +43,7 @@ ParentProtocolT = TypeVar("ParentProtocolT")
 def _as_prompt_protocol[ParentProtocolT](
     prompt: PromptTemplate[ParentProtocolT],
 ) -> PromptProtocol[ParentProtocolT]:
-    return cast(PromptProtocol[ParentProtocolT], prompt)
+    return cast("PromptProtocol[ParentProtocolT]", prompt)
 
 
 @dataclass

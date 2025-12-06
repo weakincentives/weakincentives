@@ -17,9 +17,12 @@ from __future__ import annotations
 import os
 import random
 import warnings
+from typing import TYPE_CHECKING
 
 import pytest
-from _pytest.mark.structures import ParameterSet
+
+if TYPE_CHECKING:
+    from _pytest.mark.structures import ParameterSet
 
 _MARKER = "threadstress"
 _DEFAULT_MIN_WORKERS = 1

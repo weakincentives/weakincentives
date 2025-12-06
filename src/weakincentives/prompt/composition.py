@@ -14,21 +14,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from dataclasses import field, replace
 from types import MappingProxyType
-from typing import Any, ClassVar, Generic, Self, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Self, TypeVar, cast, override
 
 from ..dataclasses import FrozenDataclass
 from ..serde import clone as clone_dataclass
-from ._types import SupportsDataclass
-from ._visibility import SectionVisibility
 from .errors import PromptRenderError
 from .markdown import MarkdownSection
 from .prompt import Prompt, PromptTemplate, RenderedPrompt
-from .protocols import PromptProtocol
 from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from ._types import SupportsDataclass
+    from ._visibility import SectionVisibility
+    from .protocols import PromptProtocol
 
 ParentOutputT = TypeVar("ParentOutputT")
 DelegationOutputT = TypeVar("DelegationOutputT")
@@ -76,7 +79,7 @@ class DelegationSummarySection(MarkdownSection[DelegationParams]):
     def clone(self, **kwargs: object) -> Self:
         cls: type[Any] = type(self)
         clone = cls()
-        return cast(Self, clone)
+        return cast("Self", clone)
 
 
 class ParentPromptSection(Section[ParentPromptParams]):
@@ -134,7 +137,7 @@ class ParentPromptSection(Section[ParentPromptParams]):
             tools=self.tools(),
             default_params=cloned_default,
         )
-        return cast(Self, clone)
+        return cast("Self", clone)
 
 
 class RecapSection(Section[RecapParams]):
@@ -171,10 +174,10 @@ class RecapSection(Section[RecapParams]):
     def clone(self, **kwargs: object) -> Self:
         cls: type[Any] = type(self)
         clone = cls()
-        return cast(Self, clone)
+        return cast("Self", clone)
 
 
-class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP046
+class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):
     """Wrap a rendered parent prompt for subagent delegation."""
 
     _parent_output_type: ClassVar[type[Any] | None] = None
@@ -182,7 +185,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
 
     def __class_getitem__(
         cls, item: tuple[type[Any], type[Any]]
-    ) -> type["DelegationPrompt[Any, Any]"]:  # noqa: UP037
+    ) -> type[DelegationPrompt[Any, Any]]:
         parent_output, delegation_output = item
 
         name = f"{cls.__name__}[{parent_output.__name__}, {delegation_output.__name__}]"
@@ -237,7 +240,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
     def _resolve_delegation_output_type(self) -> type[DelegationOutputT]:
         candidate = getattr(type(self), "_delegation_output_type", None)
         if isinstance(candidate, type):
-            return cast(type[DelegationOutputT], candidate)
+            return cast("type[DelegationOutputT]", candidate)
 
         msg = "Specialize DelegationPrompt with an explicit output type"
         raise TypeError(msg)

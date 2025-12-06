@@ -14,9 +14,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,7 +26,6 @@ from weakincentives.prompt import (
     SectionVisibility,
     VisibilityExpansionRequired,
 )
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.progressive_disclosure import (
     OpenSectionsParams,
     build_summary_suffix,
@@ -36,8 +34,13 @@ from weakincentives.prompt.progressive_disclosure import (
     has_summarized_sections,
 )
 from weakincentives.prompt.registry import PromptRegistry
-from weakincentives.prompt.section import Section
 from weakincentives.prompt.tool import ToolContext
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from weakincentives.prompt._types import SupportsDataclass
+    from weakincentives.prompt.section import Section
 
 
 @dataclass
@@ -69,7 +72,7 @@ def _make_registry(
     registry = PromptRegistry()
     for section in sections:
         registry.register_section(
-            cast(Section[SupportsDataclass], section),
+            cast("Section[SupportsDataclass]", section),
             path=(section.key,),
             depth=0,
         )
@@ -247,7 +250,7 @@ def test_open_sections_raises_visibility_expansion_required() -> None:
     with pytest.raises(VisibilityExpansionRequired) as exc_info:
         tool.handler(params, context=_make_tool_context())  # type: ignore[arg-type]
 
-    exc = cast(VisibilityExpansionRequired, exc_info.value)
+    exc = cast("VisibilityExpansionRequired", exc_info.value)
     assert exc.section_keys == ("summarized",)
     assert exc.reason == "Need details"
     assert exc.requested_overrides["summarized",] == SectionVisibility.FULL
@@ -340,7 +343,7 @@ def test_open_sections_nested_key_parsing() -> None:
     )
 
     registry = PromptRegistry()
-    registry.register_sections((cast(Section[SupportsDataclass], parent),))
+    registry.register_sections((cast("Section[SupportsDataclass]", parent),))
     snapshot = registry.snapshot()
     current_visibility = {
         ("parent",): SectionVisibility.FULL,
@@ -360,7 +363,7 @@ def test_open_sections_nested_key_parsing() -> None:
     with pytest.raises(VisibilityExpansionRequired) as exc_info:
         tool.handler(params, context=_make_tool_context())  # type: ignore[arg-type]
 
-    exc = cast(VisibilityExpansionRequired, exc_info.value)
+    exc = cast("VisibilityExpansionRequired", exc_info.value)
     assert ("parent", "child") in exc.requested_overrides
 
 
