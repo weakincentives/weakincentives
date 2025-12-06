@@ -79,49 +79,26 @@ a goal at any time.
 
 ## Spec Index (when to consult)
 
-- **ADAPTERS.md**: Adapter responsibilities and registration rules—before adding
-  or modifying adapters.
-- **ASTEVAL.md**: Asteval tool behavior—when touching expression evaluation or
-  sandboxing.
-- **DATACLASS_SERDE.md**: Dataclass serialization contract—when adding serde
-  helpers or dataclass models.
+- **ADAPTERS.md**: Provider adapters, structured output, and throttling—before
+  adding or modifying adapters.
+- **DATACLASSES.md**: Serde utilities and frozen dataclass patterns—when adding
+  dataclass models or serialization.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
   modules.
-- **DEADLINES.md**: Deadline propagation—when adding timeouts or scheduling
-  logic.
-- **EVENTS.md**: Event model—when emitting or handling runtime events.
-- **LITE_LLM_ADAPTER.md**: Lite LLM adapter rules—before touching lightweight
-  adapter integrations.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
-- **NATIVE_OPENAI_STRUCTURED_OUTPUTS.md**: Native structured outputs for OpenAI
-  models—when implementing or updating OpenAI structured outputs.
-- **OPENAI_RESPONSES_API.md**: OpenAI responses API behaviors—when modifying
-  OpenAI adapter responses.
-- **PLANNING_STRATEGIES.md**: Planning approach inventory—when changing planner
-  logic.
-- **PLANNING_TOOL.md**: Planning tool contract—when editing the planning tool or
-  its prompts.
-- **PODMAN_SANDBOX.md**: Podman-based sandboxing—when integrating or altering
-  sandbox execution.
-- **PROMPTS.md**: Prompt abstraction deep dive—required for prompt system work.
-- **PROMPTS_COMPOSITION.md**: Prompt composition rules—when combining prompt
-  components.
-- **PROMPT_OVERRIDES.md**: Override mechanics—when altering runtime prompt
-  override behavior.
-- **SESSIONS.md**: Session lifecycle and orchestration—when modifying runtime
-  session code.
-- **STRUCTURED_OUTPUT.md**: Structured output handling—when adjusting schema or
-  parser logic.
+- **PROMPTS.md**: Prompt abstraction, structured output, composition, and
+  progressive disclosure—required for prompt system work.
+- **PROMPT_OPTIMIZATION.md**: Override system and optimizer abstraction—when
+  altering prompt overrides or optimization.
+- **SESSIONS.md**: Session lifecycle, events, deadlines, and budgets—when
+  modifying runtime session code.
 - **SUBAGENTS.md**: Sub-agent orchestration—when coordinating nested agents.
 - **THREAD_SAFETY.md**: Thread safety guarantees—when touching concurrency
   helpers or shared state.
-- **THROTTLING.md**: Throttling rules—when adjusting rate
-  limiting or throttling paths.
-- **TOOLS.md**: Tool catalog and contracts—before adding or modifying tools.
-- **VFS_TOOLS.md**: Virtual file system tools—when editing VFS behavior.
-- **WINK_DEBUG.md**: `wink` CLI design—when changing CLI surfaces.
-- **WORKSPACE_DIGEST.md**: Workspace digest mechanism—when updating digest
-  calculations or usage.
+- **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
+  modifying tools.
+- **WORKSPACE.md**: VFS, Podman sandbox, asteval, and workspace digest—when
+  editing workspace tooling.
 
 ## Quick Reference
 

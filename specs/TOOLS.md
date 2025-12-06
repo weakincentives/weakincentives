@@ -1,318 +1,76 @@
 # Tool Runtime Specification
 
-## Introduction
+## Purpose
 
-Large language model runtimes expect prompts to advertise structured "tools" (a.k.a.
-function calls) that can be invoked mid-interaction. The prompt abstraction now allows
-every `Section` to contribute tools directly through a shared interface, eliminating the
-need for a dedicated `ToolsSection`. This keeps instructions and callable affordances
-co-located while reusing the existing section hierarchy for ordering and enablement.
+Large language model runtimes expect prompts to advertise structured "tools"
+that can be invoked mid-interaction. This specification covers the tool
+registration lifecycle, context injection, failure semantics, and the planning
+tool suite.
 
-This combined runtime specification documents the full contract—from how tools register
-against a prompt, to the context objects injected into handlers, through to the failure
-semantics adapters must expose to large language models (LLMs). Treat it as the single
-source of truth for tool affordances.
+## Guiding Principles
 
-## Scope and Rationale
+- **Section-first integration**: Tooling lives within the section hierarchy so
+  enablement and ordering align with rendered instructions.
+- **Single source of truth**: Tool definitions live alongside the sections that
+  document them.
+- **Type-safe tooling**: Dataclass-based params and result payloads keep schemas
+  explicit and validated.
+- **Predictable failure semantics**: Tool failures never abort evaluation; they
+  return structured error results.
 
-The specification covers the end-to-end tool runtime as implemented in
-`src/weakincentives/prompt/` and `src/weakincentives/adapters/`. It explains how
-sections surface schemas to adapters, how the runtime dispatches provider tool calls, and
-how telemetry represents the results. Use it as a reference guide when reviewing
-adapter-specific docs—the provider guides defer to these contracts for schemas, error
-propagation, and event emission.
+## Core Schemas
 
-The runtime focuses on three pillars:
+### Tool
 
-1. **Registration Lifecycle** – how sections declare tools and how prompts validate and
-   expose them.
-1. **Context Injection** – the immutable metadata bundle threaded into every handler
-   invocation.
-1. **Failure Semantics** – the uniform success/failure contract that handlers and
-   adapters honor.
-
-## Goals
-
-- **Section-first integration** – keep tooling within the section hierarchy so enablement
-  and ordering align with rendered instructions.
-- **Single source of truth** – co-locate tool contracts with the prompts that introduce
-  them instead of maintaining ad-hoc registries.
-- **Type-safe tooling** – lean on dataclass-based params and result payloads so schema
-  issues surface before a request reaches an LLM.
-- **Deterministic exposure** – present a stable, machine-readable tool list so adapters
-  negotiate provider payloads without guesswork.
-- **Unified context contract** – describe the immutable metadata handlers expect through
-  `ToolContext` to keep orchestration predictable.
-- **Predictable failure semantics** – document shared success/failure handling so tool
-  adapters never abort evaluation unexpectedly.
-
-## Schema Reference
-
-The runtime exposes three core schemas plus an example helper:
-
-- **`Tool`** – the declaration emitted by sections and the registry entry consumed by
-  adapters. It enforces name and description constraints, validates handler signatures,
-  and persists type arguments for params/result inspection at runtime (defined in
-  `src/weakincentives/prompt/tool.py`).
-- **`ToolResult`** – the structured response container that all handlers return. It
-  carries the human-readable message, typed payload, success flag, and a signal for
-  omitting payloads from provider-visible context while still persisting them for reducers
-  (`src/weakincentives/prompt/tool_result.py`).
-- **`ToolContext`** – the immutable snapshot passed into every handler. It binds the
-  active prompt, rendered prompt (when available), provider adapter, session, event bus,
-  and optional deadline so handlers can issue nested prompts or record telemetry without
-  depending on globals (`src/weakincentives/prompt/tool.py`).
-- **`ToolExample`** – a typed helper—parameterized the same way as `Tool`—that documents a
-  representative invocation for a tool by pairing a single input and rendered output.
-  Each `Tool` carries its own examples so adapters can forward consistent demonstrations
-  without needing a separate section-level registry.
-
-Downstream consumers must treat these schemas as stable: adapter integrations SHOULD read
-their fields rather than duplicating parsing logic, and tooling authors MUST preserve the
-handler signature (`params`, `*, context`) to keep runtime dispatch type-safe.
-
-## Registration Lifecycle
-
-### Registration Goals
-
-- **Section-first integration** – any `Section` can register tools so enablement logic and
-  ordering remain consistent with the rendered prompt.
-- **Single source of truth** – tool definitions live alongside the sections that document
-  them; no out-of-band registry exists.
-- **Typed contracts** – dataclass-based params and result payloads keep schemas explicit
-  and validated before requests reach an LLM.
-- **Deterministic exposure** – rendered prompts surface a stable, machine-readable tuple
-  of tools in declaration order.
-
-### Key Structures
-
-#### `ToolResult`
-
-`ToolResult[PayloadT]` models the data returned to both orchestrators and the LLM:
-
-- `message: str` – short textual reply forwarded to the model.
-- `value: PayloadT | None` – typed payload produced by the handler. Successful executions
-  return the documented dataclass; failures must set this to `None` unless they emit a
-  structured error payload.
-- `success: bool` – indicates whether the handler completed normally. Downstream reducers
-  rely on this flag instead of inspecting `value`.
-- `exclude_value_from_context: bool` – when `True`, adapters omit the payload from the
-  provider-facing tool message while still returning it out-of-band.
-
-##### Result Rendering Protocol
-
-`ResultT` payloads must satisfy `ToolRenderableResult`, a simple protocol that guarantees
-every result can produce a provider-safe string representation:
+`Tool[ParamsT, ResultT]` describes a callable affordance:
 
 ```python
-from typing import Protocol
+@dataclass
+class Tool(Generic[ParamsT, ResultT]):
+    name: str                                    # ^[a-z0-9_-]{1,64}$
+    description: str                             # 1-200 chars
+    handler: ToolHandler[ParamsT, ResultT] | None
+    accepts_overrides: bool = True
+    examples: tuple[ToolExample[ParamsT, ResultT], ...] = ()
+```
 
+Handler signature:
+
+```python
+def handle_tool(
+    params: ParamsT,
+    *,
+    context: ToolContext,
+) -> ToolResult[ResultT]: ...
+```
+
+### ToolResult
+
+`ToolResult[PayloadT]` models the data returned to orchestrators and the LLM:
+
+```python
+@dataclass
+class ToolResult(Generic[PayloadT]):
+    message: str                           # Text forwarded to model
+    value: PayloadT | None = None          # Typed payload
+    success: bool = True                   # Normal vs. failure
+    exclude_value_from_context: bool = False  # Hide from provider
+```
+
+**Result Rendering Protocol:**
+
+```python
 class ToolRenderableResult(Protocol):
     def render(self) -> str: ...
 ```
 
-- `render()` **must** return a string and defaults to serialising the dataclass via
-  `weakincentives.serde.dump(self, exclude_none=True)` and `json.dumps(...)`. Using the
-  shared serde helpers keeps aliases, extras policies, and computed properties aligned with
-  the structured response orchestrators forward to reducers.
-- Tool authors may override `render()` when a friendlier summary helps the LLM reason
-  about the response. For example, a search tool can emit a table-style plaintext view
-  instead of raw JSON.
-- Adapters treat `render()` as the canonical textual body when emitting `role: "tool"`
-  messages, so providing deterministic output avoids confusing deltas between the
-  message and `ToolResult.value`.
-- Instrumentation also records `render()` output; `ToolInvoked` events MUST capture the
-  rendered string alongside the structured payload so reducers and debuggers see identical
-  content to what the provider observed.
+Default implementation serializes via `weakincentives.serde.dump`.
 
-#### `Tool`
+### ToolContext
 
-`Tool[ParamsT, ResultT]` instances describe callable affordances:
-
-- `name: str` – lowercase ASCII letters, digits, underscores, or hyphens (≤64 characters).
-  Names must be unique per rendered prompt; collisions raise `PromptValidationError`.
-- `description: str` – 1–200 character ASCII summary presented to the LLM.
-- `handler: ToolHandler[ParamsT, ResultT] | None` – optional runtime hook that
-  must accept a positional `params` argument **and** a keyword-only
-  `context: ToolContext` parameter. When provided the handler returns a `ToolResult`.
-- `accepts_overrides: bool` – flag that determines whether tooling participates in
-  automatic override pipelines. Tools opt in by default (`True`), and sections can disable
-  overrides on a case-by-case basis when contracts are still stabilizing.
-- `examples: tuple[ToolExample[ParamsT, ResultT], ...]` – optional collection of
-  representative invocations bound directly to the tool. Examples validate against the
-  tool's params/result dataclasses to ensure they reflect the same schema surfaced to
-  the LLM.
-
-Handlers follow the canonical signature:
+Immutable snapshot passed to every handler:
 
 ```python
-from weakincentives.prompt import ToolContext, ToolHandler, ToolResult
-
-def handle_tool(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]:
-    ...
-```
-
-The `ToolHandler` protocol enforces this calling convention at type-check time, ensuring
-implementations always accept the keyword-only `context` parameter and annotate their
-return value with `ToolResult[ResultT]`.
-
-### Section Integration
-
-`Section.__init__` accepts an optional `tools` sequence. Sections normalize, validate, and
-expose that collection via `Section.tools()`. Each `Tool` embeds its own examples, so
-sections no longer need to maintain a parallel example mapping. Because every section
-supports the same interface, authors can:
-
-- Attach tools to existing `MarkdownSection`s without inventing bespoke subclasses.
-- Register tooling on otherwise minimal sections that only emit headings or act as
-  grouping nodes.
-- Allow child sections to contribute additional tooling while parent enablement gates the
-  branch.
-
-### Prompt Rendering
-
-`Prompt` continues to accept an ordered tree of sections. During initialization it walks
-that tree depth-first to validate all contributed tools:
-
-1. Duplicate names trigger `PromptValidationError`.
-1. Tool examples are validated against each tool's declared params/result dataclasses so
-   sections cannot drift from the session's tool registry.
-1. Parameter and result dataclasses reuse existing placeholder validation rules—required
-   fields must be supplied when rendering.
-1. Declaration order is cached so callers can retrieve tools without re-traversing the
-   tree.
-
-`Prompt.render(...)` returns a `RenderedPrompt` containing both the rendered markdown and
-an ordered tuple of `Tool` instances contributed by enabled sections. The rendered object
-also exposes `.tool_param_descriptions`, a mapping of tool name to parameter description
-overrides sourced from the override system.
-
-### Runtime Responsibilities
-
-Sections merely document tools; they never execute handlers. Orchestrators are
-responsible for:
-
-- Creating the appropriate params dataclass instance when an LLM invokes a tool.
-- Injecting the [`ToolContext`](#context-injection) keyword argument.
-- Propagating the resulting `ToolResult` back to both the session reducers and the LLM.
-
-### Example
-
-```python
-from dataclasses import dataclass, field
-
-from weakincentives.prompt import (
-    MarkdownSection,
-    Prompt,
-    Tool,
-    ToolContext,
-    ToolExample,
-    ToolResult,
-)
-
-
-@dataclass
-class LookupParams:
-    entity_id: str = field(metadata={"description": "Global identifier to fetch"})
-    include_related: bool = field(default=False)
-
-
-@dataclass
-class LookupResult:
-    entity_id: str
-    document_url: str
-
-
-def lookup_handler(
-    params: LookupParams, *, context: ToolContext
-) -> ToolResult[LookupResult]:
-    result = LookupResult(entity_id=params.entity_id, document_url="https://example.com")
-    message = f"Fetched entity {result.entity_id}."
-    return ToolResult(message=message, value=result)
-
-
-lookup_tool = Tool[LookupParams, LookupResult](
-    name="lookup_entity",
-    description="Fetch structured information for a given entity id.",
-    handler=lookup_handler,
-    examples=(
-        ToolExample[LookupParams, LookupResult](
-            description="Direct lookup with related entities",
-            input=LookupParams(entity_id="abc-123", include_related=True),
-            output=LookupResult(
-                entity_id="abc-123",
-                document_url="https://example.com/entities/abc-123",
-            ),
-        ),
-    ),
-)
-
-prompt = Prompt(
-    ns="examples/tooling",
-    key="tools_overview",
-    name="tools_overview",
-    sections=[
-        MarkdownSection(
-            title="Guidance",
-            template="Use tools when you need up-to-date context.",
-            tools=[lookup_tool],
-        )
-    ],
-)
-
-rendered = prompt.render()
-markdown = rendered.text
-tools = rendered.tools
-assert tools[0].name == "lookup_entity"
-```
-
-## Runtime Dispatch Flow
-
-Adapters drive tool invocation using a shared dispatcher that handles provider payloads
-and event publication:
-
-1. **Registry lookup** – the adapter resolves the provider-supplied tool name against the
-   rendered prompt's registry, erroring early when the name is missing or the handler is
-   `None`.
-1. **Argument parsing** – tool arguments are decoded from the provider payload and parsed
-   into the typed params dataclass via `weakincentives.serde.parse.parse(..., extra="forbid")`.
-   Validation failures produce a synthetic params object (with raw arguments and error
-   details) and a `ToolResult` marked unsuccessful.
-1. **Deadline check** – when the orchestrator passes a deadline, the dispatcher refuses to
-   invoke the handler once the deadline has elapsed and raises a prompt-level deadline
-   error instead of allowing the handler to run.
-1. **Context construction** – the runtime builds a `ToolContext` using the active prompt,
-   rendered prompt (if available), provider adapter, session, event bus, and deadline
-   before calling the handler.
-1. **Handler execution** – the handler runs with the constructed params/context pair.
-   Unexpected exceptions are caught and converted to `ToolResult(success=False, value=None)`
-   responses with an error message; successful executions log completion.
-1. **Telemetry** – the dispatcher publishes a `ToolInvoked` event that includes the
-   rendered output, dataclass payload (when present), and provider call identifier. Event
-   publication failures trigger session rollback and replace the `ToolResult.message` with
-   a formatted failure summary so downstream reducers see the publish outcome.
-1. **Response assembly** – the adapter returns the `ToolInvoked` event and `ToolResult` to
-   the calling loop, which forwards a provider-friendly tool message to the LLM and decides
-   whether additional tool calls are needed.
-
-## Context Injection
-
-Tool handlers receive an immutable snapshot of the surrounding runtime via `ToolContext`.
-The dataclass surfaces only the objects the orchestrator already maintains while
-executing a tool call.
-
-### Data Model
-
-```python
-from dataclasses import dataclass
-from typing import Any
-
-from weakincentives.adapters.core import ProviderAdapter
-from weakincentives.prompt.prompt import Prompt, RenderedPrompt
-from weakincentives.runtime.events import EventBus
-from weakincentives.runtime.session.protocols import SessionProtocol
-
-
 @dataclass(slots=True, frozen=True)
 class ToolContext:
     prompt: Prompt[Any]
@@ -320,156 +78,252 @@ class ToolContext:
     adapter: ProviderAdapter[Any]
     session: SessionProtocol
     event_bus: EventBus
+    deadline: Deadline | None
 ```
 
-- `prompt` – the prompt instance currently executing. Handlers may inspect the section
-  tree or helper methods when they need to mirror instructions.
-- `rendered_prompt` – the `RenderedPrompt` generated for the outer call. Some adapters
-  render lazily; in that case the value is `None` until rendering completes.
-- `adapter` – the provider adapter orchestrating the outer request. Handlers can reuse it
-  to execute nested prompts while sharing retry, tracing, and serialization behaviour.
-- `session` – the active session instance, ensuring delegated work records against the
-  same reducers.
-- `event_bus` – the telemetry bus used for in-process events. Tools reuse it when
-  publishing events for nested prompts or custom instrumentation.
+### ToolExample
 
-### Construction Flow
+Representative invocation for documentation:
 
-1. The orchestrator renders (or prepares to render) the prompt and determines the active
-   tool call.
-1. Immediately before invoking the handler it builds a `ToolContext`, supplying the
-   prompt, rendered prompt (if available), adapter, session, and event bus.
-1. The handler executes with the `context` keyword argument.
-1. After invocation the context instance is discarded; no references are reused across
-   tool calls.
+```python
+@dataclass(slots=True, frozen=True)
+class ToolExample(Generic[ParamsT, ResultT]):
+    description: str   # <= 200 chars
+    input: ParamsT     # Params dataclass instance
+    output: ResultT    # Result dataclass instance
+```
 
-### Safety and Determinism
+## Registration Lifecycle
 
-- The dataclass is frozen; handlers must not mutate the stored objects.
-- Adapters should continue redacting sensitive provider payloads before attaching them to
-  the prompt or session.
-- Nested prompt calls must publish their events through the shared bus so the session
-  state remains coherent.
+### Section Integration
 
-## Tool Examples
+`Section.__init__` accepts an optional `tools` sequence:
+
+```python
+section = MarkdownSection[Params](
+    title="Guidance",
+    template="Use tools when needed.",
+    key="guidance",
+    tools=[lookup_tool, search_tool],
+)
+```
+
+### Prompt Rendering
+
+`Prompt` walks the section tree depth-first to validate tools:
+
+1. Duplicate names trigger `PromptValidationError`
+1. Examples validated against params/result dataclasses
+1. Declaration order cached for stable retrieval
+
+`RenderedPrompt.tools` contains ordered tuple from enabled sections.
+
+## Runtime Dispatch
+
+Adapters drive tool invocation using a shared dispatcher:
+
+1. **Registry lookup** - Resolve tool name against rendered prompt
+1. **Argument parsing** - Decode via `serde.parse(..., extra="forbid")`
+1. **Deadline check** - Refuse invocation if deadline elapsed
+1. **Context construction** - Build `ToolContext` from active state
+1. **Handler execution** - Run with params/context pair
+1. **Telemetry** - Publish `ToolInvoked` event
+1. **Response assembly** - Return result to calling loop
+
+### Exception Handling
+
+- Unexpected exceptions convert to `ToolResult(success=False, value=None)`
+- Event publication failures trigger session rollback
+- `ToolResult.message` contains error guidance for the LLM
+
+## Planning Tool Suite
+
+The planning tools let background agents maintain a session-scoped todo list.
 
 ### Data Model
 
-`ToolExample[ParamsT, ResultT]` captures a representative invocation for a tool using the
-same type parameters as `Tool`:
-
 ```python
-from dataclasses import dataclass
-from typing import Generic, TypeVar
-
-
-ParamsT = TypeVar("ParamsT")
-ResultT = TypeVar("ResultT")
-
+StepStatus = Literal["pending", "in_progress", "done"]
+PlanStatus = Literal["active", "completed"]
 
 @dataclass(slots=True, frozen=True)
-class ToolExample(Generic[ParamsT, ResultT]):
-    description: str
-    input: ParamsT
-    output: ResultT
+class PlanStep:
+    step_id: int
+    title: str
+    status: StepStatus
+
+@dataclass(slots=True, frozen=True)
+class Plan:
+    objective: str
+    status: PlanStatus
+    steps: tuple[PlanStep, ...] = ()
 ```
 
-- `description` – short human-readable context for the example (≤200 characters) that
-  explains what the example demonstrates.
-- `input` – a concrete params dataclass instance for the tool, validated against the
-  tool's `ParamsT`. This keeps examples aligned with the same schema enforced at runtime.
-- `output` – the structured result dataclass instance produced by the tool, validated as
-  `ResultT`. Renderers call the result payload's `render()` method (via
-  `render_tool_payload`) to convert the example to text, so examples must use the same
-  payload shapes the handler returns.
+### Tools
 
-### Serialization Rules
+| Tool | Purpose |
+|------|---------|
+| `planning_setup_plan` | Create or replace the plan |
+| `planning_add_step` | Append steps to active plan |
+| `planning_update_step` | Modify step title or status |
+| `planning_read_plan` | Retrieve current plan state |
 
-Tools carry their own `examples` tuple. When rendering, sections emit examples immediately
-after the tool's description using a stable, adapter-friendly markdown shape. Inputs are
-serialized with the same serde helpers used for params/result payloads
-(`weakincentives.serde.dump(..., exclude_none=True)`) and rendered as fenced JSON blocks
-to preserve structure. Outputs use each result object's `render()` method (or
-`render_tool_payload`) to mirror the provider-visible tool message and are wrapped in an
-unlabelled fenced block:
+### Tool Parameters
 
-````
-- <tool_name> examples:
-  - description: <short explanation>
-    input:
-      ```json
-      {"param_a": "value"}
-      ```
-    output:
-      ```
-      rendered output string
-      ```
-````
+```python
+@dataclass(slots=True, frozen=True)
+class SetupPlan:
+    objective: str
+    initial_steps: tuple[str, ...] = ()
 
-Rules for serialization:
+@dataclass(slots=True, frozen=True)
+class AddStep:
+    steps: tuple[str, ...]
 
-1. Examples are rendered in the same order they appear in the `ToolExample` sequence.
-1. Each example occupies a single list item with `description`, `input`, and `output` as
-   sibling fields; adapters may parse them by keyword.
-1. Sections **must** omit the examples block when a tool defines no examples and must
-   raise validation errors when example payload dataclasses do not match the tool's
-   params/result types.
-1. Renderers should avoid additional nesting or prose so providers can reliably forward
-   the examples without post-processing.
+@dataclass(slots=True, frozen=True)
+class UpdateStep:
+    step_id: int
+    title: str | None = None
+    status: StepStatus | None = None
+
+@dataclass(slots=True, frozen=True)
+class ReadPlan:
+    pass
+```
+
+### Behavior
+
+- **Plan lifecycle**: `setup_plan` creates or replaces; others require existing
+- **Step IDs**: Incrementing integers (1, 2, 3...); never reused
+- **Auto-completion**: All steps `done` sets plan to `completed`
+- **Validation**: Titles non-empty and \<= 500 chars
+
+### Session Integration
+
+```python
+session = Session(bus=bus)
+section = PlanningToolsSection(session=session)
+# ... after tool calls ...
+plan = select_latest(session, Plan)
+```
+
+## Planning Strategies
+
+Strategies tune the instructional copy for different reasoning styles.
+
+### Strategy Enum
+
+```python
+class PlanningStrategy(Enum):
+    REACT = auto()
+    PLAN_ACT_REFLECT = auto()
+    GOAL_DECOMPOSE_ROUTE_SYNTHESISE = auto()
+```
+
+### Usage
+
+```python
+section = PlanningToolsSection(
+    session=session,
+    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+)
+```
+
+### Strategy Descriptions
+
+**ReAct** (default):
+
+- Alternate between reasoning bursts, tool calls, and observations
+- Capture observations as plan step notes
+
+**Plan -> Act -> Reflect (PAR)**:
+
+- Outline entire plan first
+- Execute steps with reflections after each
+- Append reflections as plan notes
+
+**Goal -> Decompose -> Route -> Synthesize**:
+
+- Restate goal in own words
+- Break into sub-problems before tool routing
+- Synthesize results into cohesive answer
+
+### Rendering Rules
+
+- Same markdown structure across strategies
+- Only mindset paragraphs vary
+- Tool usage references unchanged
+
+## Example Registration
+
+```python
+@dataclass
+class LookupParams:
+    entity_id: str = field(metadata={"description": "ID to fetch"})
+
+@dataclass
+class LookupResult:
+    entity_id: str
+    url: str
+
+def lookup_handler(
+    params: LookupParams,
+    *,
+    context: ToolContext,
+) -> ToolResult[LookupResult]:
+    result = LookupResult(entity_id=params.entity_id, url="https://...")
+    return ToolResult(message=f"Fetched {result.entity_id}", value=result)
+
+lookup_tool = Tool[LookupParams, LookupResult](
+    name="lookup_entity",
+    description="Fetch information for an entity ID.",
+    handler=lookup_handler,
+    examples=(
+        ToolExample(
+            description="Basic lookup",
+            input=LookupParams(entity_id="abc-123"),
+            output=LookupResult(entity_id="abc-123", url="https://..."),
+        ),
+    ),
+)
+
+prompt = Prompt(
+    ns="examples/tooling",
+    key="demo",
+    sections=[
+        MarkdownSection(
+            title="Guidance",
+            key="guidance",
+            template="Use tools for context.",
+            tools=[lookup_tool],
+        ),
+    ],
+)
+```
 
 ## Failure Semantics
 
-Tool execution must never abort the surrounding prompt evaluation. Instead, adapters and
-handlers cooperate through a consistent contract so the LLM can recover gracefully.
-
 ### ToolResult Contract
 
-- `success=True` indicates a normal payload; `success=False` signals any failure.
-- Successful executions return the documented result dataclass via `value`.
-- Failures set `value=None` unless the tool emits an explicit error payload. The
-  `message` string still contains human-readable guidance.
-- Session reducers and telemetry respect `success` when recording outcomes.
+- `success=True`: Normal payload in `value`
+- `success=False`: Error condition; `value=None` unless error payload
 
-### Adapter Behaviour
+### Adapter Behavior
 
-- Wrap all handler exceptions—validation errors and unexpected exceptions alike—and
-  convert them into `ToolResult(success=False, value=None, message="…")` responses.
-- Forward the failure message back to the LLM as a `role: "tool"` message so the model
-  can decide how to proceed.
-- Log or attach the original exception for observability but avoid raising
-  `PromptEvaluationError` for tool-level issues. Short-circuit only when provider
-  communication fails or prompt parsing is impossible.
+- Wrap all exceptions as `ToolResult(success=False)`
+- Forward failure message to LLM via `role: "tool"` message
+- Log original exception for observability
+- Never raise `PromptEvaluationError` for tool-level issues
 
 ### Session and Telemetry
 
-- Session reducers must tolerate `ToolResult.value is None` without dropping events.
-- `ToolInvoked` events continue to fire even when tools fail; reducers MUST include the
-  corresponding `result.render()` output (or `""` when `value is None`) so downstream
-  observers can reconcile telemetry with provider-visible tool messages. Reducers may track separate
-  slices for failures if desired.
-- Consider dedicated failure events in the future, but the `success` flag suffices for the
-  current design.
+- Reducers tolerate `ToolResult.value is None`
+- `ToolInvoked` events fire for all outcomes
+- `success` flag determines slice routing
 
-### Acceptance Checklist
+## Limitations
 
-- Adapters never abort evaluation solely because a tool handler failed.
-- Unit tests assert the `success` semantics and nullable values.
-- Documentation (including this file and adapter specs) references the contract.
-
-## Limitations and Caveats
-
-- **Synchronous handlers** – handlers execute synchronously inside the provider loop.
-  Long-running work should offload to background primitives and return promptly with
-  progress metadata to avoid blocking streaming responses.
-- **Dataclass-only schemas** – params and results must be dataclasses (or dataclass-like
-  objects accepted by `weakincentives.serde.parse.parse`). Arbitrary mappings/TypedDicts are
-  not supported in the registry and will fail validation.
-- **Payload visibility** – setting `exclude_value_from_context=True` hides the structured
-  payload from provider tool messages but not from reducers or logs; avoid using it as a
-  security boundary.
-- **Deadline enforcement** – deadlines are enforced before handler entry. Tools should not
-  assume per-invocation cancellation once started and must cooperate with the orchestrator
-  when time is tight.
-- **Adapter compatibility** – this spec describes the shared dispatcher used today. Provider
-  adapters that bypass it MUST replicate the same parsing, context construction, error
-  wrapping, and telemetry semantics to remain compliant.
+- **Synchronous handlers**: Execute on provider loop thread
+- **Dataclass-only schemas**: No TypedDict or arbitrary mappings
+- **Payload visibility**: `exclude_value_from_context` not a security boundary
+- **Deadline enforcement**: Checked before entry, not per-invocation

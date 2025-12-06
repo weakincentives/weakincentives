@@ -128,18 +128,17 @@ Consult these specs before modifying related code:
 
 | Spec | When to Read |
 |------|--------------|
-| `specs/ADAPTERS.md` | Adding/modifying provider adapters |
+| `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
+| `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
-| `specs/DATACLASS_SERDE.md` | Serde helpers or dataclass models |
-| `specs/EVENTS.md` | Emitting or handling runtime events |
-| `specs/PROMPTS.md` | Prompt system work |
-| `specs/PROMPTS_COMPOSITION.md` | Combining prompt components |
-| `specs/SESSIONS.md` | Session lifecycle and orchestration |
-| `specs/STRUCTURED_OUTPUT.md` | Schema or parser logic |
-| `specs/TOOLS.md` | Adding or modifying tools |
-| `specs/VFS_TOOLS.md` | Virtual filesystem behavior |
-| `specs/PLANNING_TOOL.md` | Planning tool or prompts |
+| `specs/PROMPTS.md` | Prompt system, composition, structured output |
+| `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
+| `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
+| `specs/TOOLS.md` | Adding/modifying tools, planning tools |
+| `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
+| `specs/SUBAGENTS.md` | Sub-agent orchestration |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
+| `specs/LOGGING.md` | Logging surfaces |
 
 Full spec index in `AGENTS.md`.
 
