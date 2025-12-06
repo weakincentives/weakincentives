@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Logging helpers shared by runnable examples."""
+"""Logging helpers shared by runnable demos."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ _LOG_STRING_LIMIT = 256
 
 
 def configure_logging() -> None:
-    """Initialize root logging for interactive examples."""
+    """Initialize root logging for interactive demos."""
 
     logging.basicConfig(
         level=logging.INFO,

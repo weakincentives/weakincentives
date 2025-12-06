@@ -14,10 +14,8 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
-import sys
 import textwrap
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -25,6 +23,7 @@ from pathlib import Path
 from typing import cast
 from uuid import UUID
 
+from demo_utils import attach_logging_subscribers, configure_logging
 from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.core import OptimizationScope
 from weakincentives.adapters.openai import OpenAIAdapter
@@ -58,14 +57,6 @@ from weakincentives.tools import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-SRC_DIR = PROJECT_ROOT / "src"
-
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-examples_module = importlib.import_module("examples")
-attach_logging_subscribers = examples_module.attach_logging_subscribers
-configure_logging = examples_module.configure_logging
 
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
 SNAPSHOT_DIR = PROJECT_ROOT / "snapshots"

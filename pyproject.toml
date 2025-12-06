@@ -76,7 +76,7 @@ local_scheme = "no-local-version"
 packages = ["src/weakincentives"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["src/examples"]
+exclude = ["demo_utils", "src/examples"]
 
 [dependency-groups]
 dev = [

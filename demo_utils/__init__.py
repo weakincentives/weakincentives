@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Common helpers and scaffolding shared across runnable examples."""
+"""Common helpers and scaffolding shared across runnable demos."""
 
 from .logging import attach_logging_subscribers, configure_logging, format_for_log
 
