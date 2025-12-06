@@ -13,9 +13,14 @@
 """Common helpers and scaffolding shared across runnable demos."""
 
 from .logging import attach_logging_subscribers, configure_logging, format_for_log
+from .plan import render_plan_snapshot
+from .session import build_logged_session, resolve_override_tag
 
 __all__ = [
     "attach_logging_subscribers",
+    "build_logged_session",
     "configure_logging",
     "format_for_log",
+    "render_plan_snapshot",
+    "resolve_override_tag",
 ]

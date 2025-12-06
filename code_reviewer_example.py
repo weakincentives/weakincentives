@@ -17,13 +17,16 @@ from __future__ import annotations
 import logging
 import os
 import textwrap
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
-from uuid import UUID
 
-from examples import attach_logging_subscribers, configure_logging
+from examples import (
+    build_logged_session,
+    configure_logging,
+    render_plan_snapshot,
+    resolve_override_tag,
+)
 from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.debug import dump_session as dump_session_tree
@@ -48,11 +51,9 @@ from weakincentives.prompt.overrides import (
 from weakincentives.runtime import (
     EventBus,
     Session,
-    select_latest,
 )
 from weakincentives.tools import (
     HostMount,
-    Plan,
     PlanningStrategy,
     PlanningToolsSection,
     PodmanSandboxConfig,
@@ -191,7 +192,7 @@ class CodeReviewApp:
             print("\n--- Agent Response ---")
             print(answer)
             print("\n--- Plan Snapshot ---")
-            print(_render_plan_snapshot(self.session))
+            print(render_plan_snapshot(self.session))
             print("-" * 23 + "\n")
 
         print("Goodbye.")
@@ -248,7 +249,7 @@ class CodeReviewApp:
     def _create_optimization_session(self) -> Session:
         """Provision a fresh session for optimization runs."""
 
-        return _build_logged_session(parent=self.session)
+        return build_logged_session(parent=self.session)
 
 
 def main() -> None:
@@ -431,9 +432,9 @@ def _create_runtime_context(
     override_tag: str | None = None,
 ) -> RuntimeContext:
     store = overrides_store or LocalPromptOverridesStore()
-    session = _build_logged_session(tags={"app": "code-reviewer"})
+    session = build_logged_session(tags={"app": "code-reviewer"})
     bus = session.event_bus
-    resolved_tag = _resolve_override_tag(override_tag, session_id=session.session_id)
+    resolved_tag = resolve_override_tag(override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV)
     prompt = build_task_prompt(session=session)
     prompt_wrapper = Prompt(prompt, overrides_store=store, overrides_tag=resolved_tag)
     try:
@@ -450,18 +451,6 @@ def _create_runtime_context(
     )
 
 
-def _build_logged_session(
-    *, parent: Session | None = None, tags: Mapping[str, str] | None = None
-) -> Session:
-    session_tags: dict[str, str] = {"app": "code-reviewer"}
-    if tags:
-        session_tags.update(tags)
-
-    session = Session(parent=parent, tags=cast(Mapping[object, object], session_tags))
-    attach_logging_subscribers(session.event_bus)
-    return session
-
-
 def _build_intro(override_tag: str) -> str:
     return textwrap.dedent(
         f"""
@@ -474,21 +463,6 @@ def _build_intro(override_tag: str) -> str:
         Note: Full prompt text and tool calls will be logged to the console for observability.
         """
     ).strip()
-
-
-def _render_plan_snapshot(session: Session) -> str:
-    plan = select_latest(session, Plan)
-    if plan is None:
-        return "No active plan."
-
-    lines = [f"Objective: {plan.objective} (status: {plan.status})"]
-    for step in plan.steps:
-        notes = "; ".join(step.notes) if step.notes else ""
-        suffix = f" — notes: {notes}" if notes else ""
-        if step.details:
-            suffix = f" — details: {step.details}{suffix}"
-        lines.append(f"- {step.step_id} [{step.status}] {step.title}{suffix}")
-    return "\n".join(lines)
 
 
 def _render_response_payload(response: PromptResponse[ReviewResponse]) -> str:
@@ -505,21 +479,6 @@ def _render_response_payload(response: PromptResponse[ReviewResponse]) -> str:
     if response.text:
         return response.text
     return "(no response from assistant)"
-
-
-def _resolve_override_tag(
-    tag: str | None,
-    *,
-    session_id: UUID,
-) -> str:
-    if tag is not None:
-        normalized = tag.strip()
-        if normalized:
-            return normalized
-    env_candidate = os.getenv(PROMPT_OVERRIDES_TAG_ENV, "").strip()
-    if env_candidate:
-        return env_candidate
-    return "latest"
 
 
 if __name__ == "__main__":
