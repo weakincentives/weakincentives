@@ -152,24 +152,141 @@ Anthropic uses a different message structure than OpenAI:
 ```
 src/weakincentives/adapters/
 ├── _names.py           # Add ANTHROPIC_ADAPTER_NAME
+├── config.py           # Add AnthropicClientConfig, AnthropicModelConfig
 ├── anthropic.py        # New adapter implementation
-└── __init__.py         # Export AnthropicAdapter
+└── __init__.py         # Export AnthropicAdapter and config classes
 ```
 
-### Configuration Surfaces
+### Typed Configuration
+
+Following the pattern established by OpenAI and LiteLLM adapters, the Anthropic adapter uses frozen
+dataclass configurations for type-safe instantiation and model parameter control.
+
+**Client Configuration**
+
+```python
+@FrozenDataclass()
+class AnthropicClientConfig:
+    """Configuration for Anthropic client instantiation.
+
+    Attributes:
+        api_key: Anthropic API key. None uses the ANTHROPIC_API_KEY environment variable.
+        base_url: Base URL for API requests. None uses the default Anthropic endpoint.
+        timeout: Request timeout in seconds. None uses the client default.
+        max_retries: Maximum number of retries. None uses the client default.
+    """
+
+    api_key: str | None = None
+    base_url: str | None = None
+    timeout: float | None = None
+    max_retries: int | None = None
+
+    def to_client_kwargs(self) -> dict[str, Any]:
+        """Convert non-None fields to client constructor kwargs."""
+        kwargs: dict[str, Any] = {}
+        if self.api_key is not None:
+            kwargs["api_key"] = self.api_key
+        if self.base_url is not None:
+            kwargs["base_url"] = self.base_url
+        if self.timeout is not None:
+            kwargs["timeout"] = self.timeout
+        if self.max_retries is not None:
+            kwargs["max_retries"] = self.max_retries
+        return kwargs
+```
+
+**Model Configuration**
+
+```python
+@FrozenDataclass()
+class AnthropicModelConfig(LLMConfig):
+    """Anthropic-specific model configuration.
+
+    Extends LLMConfig with parameters specific to Anthropic's API.
+
+    Attributes:
+        top_k: Sample from the top K most likely tokens. None uses the provider default.
+        metadata: Optional metadata to include with the request.
+
+    Notes:
+        Anthropic does not support ``presence_penalty``, ``frequency_penalty``, or ``seed``.
+        If any of these fields are provided, ``AnthropicModelConfig`` raises ``ValueError``
+        so callers fail fast instead of issuing an invalid request.
+    """
+
+    top_k: int | None = None
+    metadata: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        unsupported: dict[str, object | None] = {
+            "seed": self.seed,
+            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty,
+        }
+
+        set_unsupported = [
+            key for key, value in unsupported.items() if value is not None
+        ]
+        if set_unsupported:
+            raise ValueError(
+                "Unsupported Anthropic parameters: "
+                + ", ".join(sorted(set_unsupported))
+                + ". Remove them from AnthropicModelConfig."
+            )
+
+    @override
+    def to_request_params(self) -> dict[str, Any]:
+        """Convert non-None fields to request parameters."""
+        params: dict[str, Any] = {}
+
+        # Supported core fields
+        if self.temperature is not None:
+            params["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            params["max_tokens"] = self.max_tokens
+        if self.top_p is not None:
+            params["top_p"] = self.top_p
+        if self.stop is not None:
+            params["stop_sequences"] = list(self.stop)
+
+        # Anthropic-specific fields
+        if self.top_k is not None:
+            params["top_k"] = self.top_k
+        if self.metadata is not None:
+            params["metadata"] = dict(self.metadata)
+
+        return params
+```
+
+### Adapter Constructor
 
 ```python
 class AnthropicAdapter(ProviderAdapter[Any]):
+    """Adapter that evaluates prompts against Anthropic's Messages API.
+
+    Args:
+        model: Model identifier (e.g., "claude-opus-4-5-20250929").
+        model_config: Typed configuration for model parameters like temperature,
+            max_tokens, etc. When provided, these values are merged into each
+            request payload.
+        tool_choice: Tool selection directive. Defaults to "auto".
+        use_native_structured_output: When True, uses Anthropic's beta structured
+            outputs feature for JSON schema enforcement. Defaults to True.
+        client: Pre-configured Anthropic client instance. Mutually exclusive with
+            client_config.
+        client_config: Typed configuration for client instantiation. Used when
+            client is not provided.
+    """
+
     def __init__(
         self,
         *,
         model: str = "claude-opus-4-5-20250929",
+        model_config: AnthropicModelConfig | None = None,
         tool_choice: ToolChoice = "auto",
         use_native_structured_output: bool = True,
-        max_tokens: int = 8192,
         client: _AnthropicProtocol | None = None,
-        client_factory: _AnthropicClientFactory | None = None,
-        client_kwargs: Mapping[str, object] | None = None,
+        client_config: AnthropicClientConfig | None = None,
     ) -> None:
         ...
 ```
@@ -177,15 +294,47 @@ class AnthropicAdapter(ProviderAdapter[Any]):
 **Parameters:**
 
 - `model`: Model identifier (default: `claude-opus-4-5-20250929`)
+- `model_config`: Typed configuration for model parameters (temperature, max_tokens, top_k, etc.)
 - `tool_choice`: Tool selection strategy (`"auto"`, `"any"`, `"none"`, or specific tool)
 - `use_native_structured_output`: Enable beta structured outputs feature (default: `True`)
-- `max_tokens`: Maximum tokens in response (default: 8192)
 - `client`: Pre-configured Anthropic client instance
-- `client_factory`: Factory function for creating clients
-- `client_kwargs`: Additional kwargs passed to client construction
+- `client_config`: Typed configuration for client instantiation
 
-**Mutual exclusivity:** Reject mixing `client` with `client_factory`/`client_kwargs` to avoid
-ambiguous execution paths.
+**Mutual exclusivity:** Reject providing `client` alongside `client_config` to avoid ambiguous
+execution paths.
+
+**Usage Examples**
+
+```python
+from weakincentives.adapters import AnthropicAdapter
+from weakincentives.adapters.config import AnthropicClientConfig, AnthropicModelConfig
+
+# Configure client and model parameters
+client_config = AnthropicClientConfig(
+    api_key="sk-ant-...",
+    timeout=30.0,
+)
+model_config = AnthropicModelConfig(
+    temperature=0.7,
+    max_tokens=4096,
+    top_k=40,
+)
+
+adapter = AnthropicAdapter(
+    model="claude-opus-4-5-20250929",
+    client_config=client_config,
+    model_config=model_config,
+)
+
+# Or with pre-configured client
+from anthropic import Anthropic
+client = Anthropic(api_key="sk-ant-...")
+adapter = AnthropicAdapter(
+    model="claude-opus-4-5-20250929",
+    client=client,
+    model_config=model_config,  # Model params still apply
+)
+```
 
 ### Adapter Name
 
@@ -216,34 +365,86 @@ class _AnthropicClientFactory(Protocol):
 
 ## Execution Lifecycle
 
+### Evaluate Signature
+
+The adapter implements the standard `ProviderAdapter.evaluate()` signature with full support for
+budgets and visibility overrides:
+
+```python
+@override
+def evaluate(
+    self,
+    prompt: Prompt[OutputT],
+    *,
+    bus: EventBus,
+    session: SessionProtocol,
+    parse_output: bool = True,
+    deadline: Deadline | None = None,
+    visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+    budget: Budget | None = None,
+    budget_tracker: BudgetTracker | None = None,
+) -> PromptResponse[OutputT]:
+    """Evaluate the prompt and return a structured response.
+
+    When ``budget`` is provided and ``budget_tracker`` is not, a new tracker
+    is created. When ``budget_tracker`` is supplied (typically by a parent
+    during subagent dispatch), it is used directly for shared limit enforcement.
+    """
+    ...
+```
+
+**Budget Integration:**
+
+- When `budget` is provided without `budget_tracker`, create a new `BudgetTracker` for this
+  evaluation.
+- When `budget_tracker` is supplied (e.g., from a parent agent), use it directly for shared limit
+  enforcement across subagent calls.
+- Token usage is recorded after each provider response via `budget_tracker.record_cumulative()`.
+- Budget limits are checked after provider responses and tool executions; violations raise
+  `PromptEvaluationError` with `phase="budget"`.
+
+**Visibility Overrides:**
+
+- Pass `visibility_overrides` to `prompt.render()` for progressive disclosure control.
+- Sections can be hidden, collapsed, or expanded based on the override mapping.
+
 ### Evaluate Flow
 
-1. **Validate deadline** - Reject already-expired deadlines before rendering.
+1. **Validate deadline and budget** - Reject already-expired deadlines before rendering. Initialize
+   budget tracker if budget is provided.
 
-2. **Render prompt** - Call `prompt.render()`, optionally disabling output instructions when native
-   structured outputs are enabled.
+2. **Render prompt** - Call `prompt.render(visibility_overrides=...)`, optionally disabling output
+   instructions when native structured outputs are enabled.
 
 3. **Build request payload:**
    - Extract system prompt from rendered text
    - Assemble user messages
    - Convert tools via `tool_to_anthropic_spec()`
    - Build `output_format` when structured output is requested
+   - Merge model config parameters via `model_config.to_request_params()`
 
 4. **Call provider:**
    - Use `client.beta.messages.create()` with the structured outputs beta header
    - Pass `betas=["structured-outputs-2025-11-13"]` when native structured output is enabled
 
-5. **Handle tool calls** - When response contains `tool_use` blocks:
-   - Execute tools via `ToolExecutor`
+5. **Record and check budget** - After each provider response:
+   - Extract token usage from response
+   - Record cumulative usage via `budget_tracker.record_cumulative()`
+   - Check budget limits via `budget_tracker.check()`
+
+6. **Handle tool calls** - When response contains `tool_use` blocks:
+   - Execute tools via `ToolExecutor` (which receives `budget_tracker` in `ToolContext`)
    - Format tool results as Anthropic-style `tool_result` messages
+   - Check budget after tool execution
    - Continue conversation loop
 
-6. **Parse response:**
+7. **Parse response:**
    - Extract text from content blocks
    - When structured output is enabled, parse JSON from response text
    - Fall back to prompt-based parsing when native parsing fails
+   - Final budget check before returning
 
-7. **Publish events** - Emit `PromptRendered`, `ToolInvoked`, and `PromptExecuted` events.
+8. **Publish events** - Emit `PromptRendered`, `ToolInvoked`, and `PromptExecuted` events.
 
 ### Tool Specification Translation
 
@@ -454,8 +655,22 @@ Native structured outputs are currently in public beta. The feature:
 
 ### Token Limits
 
-Claude Opus 4.5 supports up to 200K input tokens and 8K output tokens by default. The adapter
-exposes `max_tokens` as a constructor parameter for customization.
+Claude Opus 4.5 supports up to 200K input tokens and 8K output tokens by default. Configure
+output token limits via `AnthropicModelConfig.max_tokens`.
+
+### Budget Enforcement
+
+The adapter fully integrates with WINK's `Budget` abstraction:
+
+- **Token limits:** `max_total_tokens`, `max_input_tokens`, `max_output_tokens` are enforced
+  cumulatively across all provider calls within an evaluation.
+- **Deadline:** `Budget.deadline` is checked alongside the `deadline` parameter.
+- **Subagent sharing:** When `budget_tracker` is passed (e.g., from a parent prompt), token usage
+  is aggregated across the entire agent tree.
+- **Error phase:** Budget violations raise `PromptEvaluationError` with `phase="budget"`.
+
+Anthropic responses include `usage.input_tokens` and `usage.output_tokens` which the adapter
+extracts and records via `token_usage_from_payload()`.
 
 ## Testing Expectations
 
@@ -465,6 +680,11 @@ exposes `max_tokens` as a constructor parameter for customization.
   `make integration-tests`.
 - **Structured output tests:** Verify both native and fallback parsing paths.
 - **Tool execution tests:** Cover single and multi-turn tool conversations.
+- **Budget tests:** Verify token tracking, cumulative usage across tool calls, and
+  `BudgetExceededError` propagation as `PromptEvaluationError` with `phase="budget"`.
+- **Visibility tests:** Verify `visibility_overrides` are passed through to prompt rendering.
+- **Config tests:** Verify `AnthropicClientConfig` and `AnthropicModelConfig` produce correct
+  request parameters, and that unsupported fields raise `ValueError`.
 - **Error handling tests:** Verify throttle detection, deadline enforcement, and graceful
   degradation when the beta feature is unavailable.
 
@@ -472,17 +692,58 @@ exposes `max_tokens` as a constructor parameter for customization.
 
 ```python
 from weakincentives.adapters import AnthropicAdapter
+from weakincentives.adapters.config import AnthropicClientConfig, AnthropicModelConfig
+from weakincentives.budget import Budget
+from weakincentives.deadlines import Deadline
+from datetime import timedelta
+
+# Basic usage with defaults (Claude Opus 4.5)
+adapter = AnthropicAdapter()
+
+response = adapter.evaluate(
+    prompt,
+    bus=bus,
+    session=session,
+)
+
+# Configured adapter with model parameters
+model_config = AnthropicModelConfig(
+    temperature=0.7,
+    max_tokens=4096,
+    top_k=40,
+)
 
 adapter = AnthropicAdapter(
-    model="claude-opus-4-5-20250929",  # Default
-    use_native_structured_output=True,  # Enable beta feature
-    max_tokens=8192,
+    model="claude-opus-4-5-20250929",
+    model_config=model_config,
+    use_native_structured_output=True,
+)
+
+# Evaluate with budget and deadline constraints
+budget = Budget(
+    deadline=Deadline.after(timedelta(minutes=5)),
+    max_total_tokens=100000,
+    max_output_tokens=8000,
 )
 
 response = adapter.evaluate(
     prompt,
     bus=bus,
     session=session,
+    budget=budget,
+)
+
+# Evaluate with visibility overrides for progressive disclosure
+from weakincentives.prompt import SectionVisibility
+
+response = adapter.evaluate(
+    prompt,
+    bus=bus,
+    session=session,
+    visibility_overrides={
+        ("details",): SectionVisibility.COLLAPSED,
+        ("advanced", "options"): SectionVisibility.HIDDEN,
+    },
 )
 ```
 
