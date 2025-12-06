@@ -46,19 +46,14 @@ class Session:
     @property
     def tags(self) -> Mapping[object, object]: ...
 
-    def register_reducer[T, S](
-        self,
-        data_type: type[T],
-        reducer: TypedReducer[T, S],
-        *,
-        slice_type: type[S] | None = None,
-    ) -> None: ...
-
     def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]: ...
 
-    def snapshot(self) -> Snapshot: ...
+    def query[T](self, slice_type: type[T]) -> QueryBuilder[T]: ...
 
-    def rollback(self, snapshot: Snapshot) -> None: ...
+    def mutate[T](self, slice_type: type[T]) -> MutationBuilder[T]: ...
+    def mutate(self) -> GlobalMutationBuilder: ...
+
+    def snapshot(self) -> Snapshot: ...
 
     def clone(
         self,
@@ -69,11 +64,6 @@ class Session:
         created_at: datetime | None = None,
         tags: Mapping[object, object] | None = None,
     ) -> "Session": ...
-
-    # Additional state management methods
-    def seed_slice[S](self, slice_type: type[S], values: Iterable[S]) -> None: ...
-    def clear_slice[S](self, slice_type: type[S], predicate: Callable[[S], bool] | None = None) -> None: ...
-    def reset(self) -> None: ...
 ```
 
 ### Reducers
@@ -103,6 +93,41 @@ latest_plan = session.query(Plan).latest()
 all_results = session.query(SearchResult).all()
 filtered = session.query(Issue).where(lambda i: i.severity == "high")
 ```
+
+### Mutation API
+
+The `mutate()` method provides a fluent interface for session state mutations:
+
+```python
+# Slice-specific mutations
+session.mutate(Plan).seed(initial_plan)           # Initialize/replace slice
+session.mutate(Plan).clear()                       # Remove all items
+session.mutate(Plan).clear(lambda p: not p.active) # Predicate-based removal
+session.mutate(Plan).dispatch(SetupPlan(...))      # Event-driven mutation
+session.mutate(Plan).append(new_plan)              # Shorthand for dispatch
+session.mutate(Plan).register(SetupPlan, reducer)  # Register reducer
+
+# Session-wide mutations
+session.mutate().reset()               # Clear all slices
+session.mutate().rollback(snapshot)    # Restore from snapshot
+```
+
+**MutationBuilder methods:**
+
+- `seed(values)` - Initialize or replace the slice with provided value(s). Bypasses
+  reducers. Useful for initial state setup or restoration.
+- `clear(predicate=None)` - Remove items from the slice. With a predicate, only
+  matching items are removed. Bypasses reducers.
+- `dispatch(event)` - Dispatch an event to registered reducers. This is the
+  preferred mutation path as it maintains traceability.
+- `append(value)` - Shorthand for dispatching when event type equals slice type.
+  Uses the default `append` reducer.
+- `register(data_type, reducer)` - Register a reducer for events of the given type.
+
+**GlobalMutationBuilder methods:**
+
+- `reset()` - Clear all stored slices while preserving reducer registrations.
+- `rollback(snapshot)` - Restore session slices from the provided snapshot.
 
 ### Session Hierarchy
 
@@ -223,7 +248,7 @@ json_str = snapshot.to_json()
 
 # Restore
 loaded = Snapshot.from_json(json_str)
-session.rollback(loaded)
+session.mutate().rollback(loaded)
 ```
 
 ### Serialization
@@ -383,11 +408,7 @@ bus = InProcessEventBus()
 session = Session(bus=bus)
 
 # Optional: register custom reducers
-session.register_reducer(
-    ResearchSummary,
-    update_metrics_reducer,
-    slice_type=ResearchMetrics,
-)
+session.mutate(ResearchMetrics).register(ResearchSummary, update_metrics_reducer)
 
 # Configure limits
 deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))

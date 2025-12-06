@@ -665,12 +665,10 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             accepts_overrides=config.accepts_overrides,
         )
 
-        session.register_reducer(PodmanWorkspace, replace_latest)
+        session.mutate(PodmanWorkspace).register(PodmanWorkspace, replace_latest)
         self._initialize_vfs_state(session)
-        session.register_reducer(
-            EvalResult,
-            make_eval_result_reducer(),
-            slice_type=VirtualFileSystem,
+        session.mutate(VirtualFileSystem).register(
+            EvalResult, make_eval_result_reducer()
         )
 
         self._vfs_suite = _PodmanVfsSuite(section=self)
@@ -940,17 +938,13 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         return PodmanSandboxSection(session=session, config=self._config)
 
     def _initialize_vfs_state(self, session: Session) -> None:
-        session.register_reducer(VirtualFileSystem, replace_latest)
-        session.seed_slice(VirtualFileSystem, (self._mount_snapshot,))
-        session.register_reducer(
-            WriteFile,
-            vfs_module.make_write_reducer(),
-            slice_type=VirtualFileSystem,
+        session.mutate(VirtualFileSystem).register(VirtualFileSystem, replace_latest)
+        session.mutate(VirtualFileSystem).seed(self._mount_snapshot)
+        session.mutate(VirtualFileSystem).register(
+            WriteFile, vfs_module.make_write_reducer()
         )
-        session.register_reducer(
-            DeleteEntry,
-            vfs_module.make_delete_reducer(),
-            slice_type=VirtualFileSystem,
+        session.mutate(VirtualFileSystem).register(
+            DeleteEntry, vfs_module.make_delete_reducer()
         )
 
     def latest_snapshot(self) -> VirtualFileSystem:
@@ -976,7 +970,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 return self._workspace_handle
             handle = self._create_workspace()
             self._workspace_handle = handle
-            self._session.seed_slice(PodmanWorkspace, (handle.descriptor,))
+            self._session.mutate(PodmanWorkspace).seed(handle.descriptor)
             return handle
 
     def _create_workspace(self) -> _WorkspaceHandle:
@@ -1122,7 +1116,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 descriptor=updated_descriptor,
                 overlay_path=handle.overlay_path,
             )
-            self._session.seed_slice(PodmanWorkspace, (updated_descriptor,))
+            self._session.mutate(PodmanWorkspace).seed(updated_descriptor)
 
     def _teardown_workspace(self) -> None:
         with self._lock:

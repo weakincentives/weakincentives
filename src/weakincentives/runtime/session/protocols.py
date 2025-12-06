@@ -14,14 +14,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from typing import TYPE_CHECKING, Protocol, Self
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Protocol, Self, overload
 
 from ...prompt._types import SupportsDataclass
 from ..events._types import EventBus
 from .snapshots import Snapshot
 
 if TYPE_CHECKING:
+    from .mutation import GlobalMutationBuilder, MutationBuilder
     from .query import QueryBuilder
 
 type SnapshotProtocol = Snapshot
@@ -32,10 +33,6 @@ class SessionProtocol(Protocol):
 
     def snapshot(self) -> SnapshotProtocol: ...
 
-    def rollback(self, snapshot: SnapshotProtocol) -> None: ...
-
-    def reset(self) -> None: ...
-
     @property
     def event_bus(self) -> EventBus: ...
 
@@ -45,17 +42,17 @@ class SessionProtocol(Protocol):
 
     def query[T: SupportsDataclass](self, slice_type: type[T]) -> QueryBuilder[T]: ...
 
-    def seed_slice(
-        self,
-        slice_type: type[SupportsDataclass],
-        values: Iterable[SupportsDataclass],
-    ) -> None: ...
+    @overload
+    def mutate[T: SupportsDataclass](
+        self, slice_type: type[T]
+    ) -> MutationBuilder[T]: ...
 
-    def clear_slice(
-        self,
-        slice_type: type[SupportsDataclass],
-        predicate: Callable[[SupportsDataclass], bool] | None = None,
-    ) -> None: ...
+    @overload
+    def mutate(self) -> GlobalMutationBuilder: ...
+
+    def mutate[T: SupportsDataclass](
+        self, slice_type: type[T] | None = None
+    ) -> MutationBuilder[T] | GlobalMutationBuilder: ...
 
     @property
     def parent(self) -> Self | None: ...

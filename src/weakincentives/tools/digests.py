@@ -54,7 +54,7 @@ def set_workspace_digest(
         for digest in session.query(WorkspaceDigest).all()
         if getattr(digest, "section_key", None) != normalized_key
     )
-    session.seed_slice(WorkspaceDigest, (*existing, entry))
+    session.mutate(WorkspaceDigest).seed((*existing, entry))
     return entry
 
 
@@ -62,9 +62,8 @@ def clear_workspace_digest(session: SessionProtocol, section_key: str) -> None:
     """Remove cached digests for ``section_key``."""
 
     normalized_key = _normalized_key(section_key)
-    session.clear_slice(
-        WorkspaceDigest,
-        predicate=lambda digest: getattr(digest, "section_key", None) == normalized_key,
+    session.mutate(WorkspaceDigest).clear(
+        lambda digest: getattr(digest, "section_key", None) == normalized_key
     )
 
 

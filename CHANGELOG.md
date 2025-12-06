@@ -4,6 +4,20 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Session Runtime
+
+- Added `session.mutate()` fluent API as the counterpart to `session.query()`.
+  This provides a unified interface for all session state mutations:
+  - `session.mutate(T).seed(values)` - Initialize/replace slice values
+  - `session.mutate(T).clear(predicate?)` - Remove items from a slice
+  - `session.mutate(T).dispatch(event)` - Event-driven mutation through reducers
+  - `session.mutate(T).append(value)` - Shorthand for dispatch with default reducer
+  - `session.mutate(T).register(E, reducer)` - Register reducer for event type
+  - `session.mutate().reset()` - Clear all slices
+  - `session.mutate().rollback(snapshot)` - Restore from snapshot
+- Legacy methods (`seed_slice`, `clear_slice`, `reset`, `rollback`, `register_reducer`)
+  remain available but now delegate to the new mutation API internally.
+
 ### Error Handling
 
 - Introduced `WinkError` as the root exception class for all library exceptions,

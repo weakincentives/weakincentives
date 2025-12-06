@@ -237,10 +237,10 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
 
     @staticmethod
     def _initialize_session(session: Session) -> None:
-        session.register_reducer(Plan, replace_latest)
-        session.register_reducer(SetupPlan, _setup_plan_reducer, slice_type=Plan)
-        session.register_reducer(AddStep, _add_step_reducer, slice_type=Plan)
-        session.register_reducer(UpdateStep, _update_step_reducer, slice_type=Plan)
+        session.mutate(Plan).register(Plan, replace_latest)
+        session.mutate(Plan).register(SetupPlan, _setup_plan_reducer)
+        session.mutate(Plan).register(AddStep, _add_step_reducer)
+        session.mutate(Plan).register(UpdateStep, _update_step_reducer)
 
     @override
     def clone(self, **kwargs: object) -> PlanningToolsSection:

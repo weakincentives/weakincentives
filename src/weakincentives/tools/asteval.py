@@ -1016,10 +1016,8 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         accepts_overrides: bool = False,
     ) -> None:
         self._session = session
-        session.register_reducer(
-            EvalResult,
-            _make_eval_result_reducer(),
-            slice_type=VirtualFileSystem,
+        session.mutate(VirtualFileSystem).register(
+            EvalResult, _make_eval_result_reducer()
         )
         tool_suite = _AstevalToolSuite(section=self)
         tool = Tool[EvalParams, EvalResult](

@@ -12,12 +12,14 @@
 
 """Session state container for agent runs."""
 
+from ._mutation_types import MutationProvider
 from ._types import (
     ReducerContextProtocol,
     ReducerEvent,
     ReducerEventWithValue,
     TypedReducer,
 )
+from .mutation import GlobalMutationBuilder, MutationBuilder
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
 from .reducer_context import ReducerContext, build_reducer_context
@@ -31,6 +33,9 @@ from .snapshots import (
 
 __all__ = [
     "DataEvent",
+    "GlobalMutationBuilder",
+    "MutationBuilder",
+    "MutationProvider",
     "QueryBuilder",
     "ReducerContext",
     "ReducerContextProtocol",

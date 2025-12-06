@@ -234,7 +234,7 @@ def test_session_clear_slice_removes_entire_digest_slice() -> None:
     session = Session()
     set_workspace_digest(session, "workspace-digest", "value")
 
-    session.clear_slice(WorkspaceDigest)
+    session.mutate(WorkspaceDigest).clear()
 
     assert latest_workspace_digest(session, "workspace-digest") is None
 

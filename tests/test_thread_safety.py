@@ -193,9 +193,9 @@ def test_session_snapshots_restore_across_threads(
         expected_results = snapshot.slices.get(ExampleResult, ())
 
         restored = Session(bus=InProcessEventBus())
-        restored.seed_slice(ToolInvoked, ())
-        restored.seed_slice(ExampleResult, ())
-        restored.rollback(snapshot)
+        restored.mutate(ToolInvoked).seed(())
+        restored.mutate(ExampleResult).seed(())
+        restored.mutate().rollback(snapshot)
 
         restored_tool_events = restored.query(ToolInvoked).all()
         restored_results = restored.query(ExampleResult).all()
@@ -271,10 +271,10 @@ def test_code_reviewer_session_reset_clears_runtime_state(tmp_path: Path) -> Non
 
     seeded_value = ExampleResult(value=1)
     session = context.session
-    session.seed_slice(ExampleResult, (seeded_value,))
+    session.mutate(ExampleResult).seed((seeded_value,))
 
     assert session.query(ExampleResult).all() == (seeded_value,)
 
-    session.reset()
+    session.mutate().reset()
 
     assert session.query(ExampleResult).all() == ()

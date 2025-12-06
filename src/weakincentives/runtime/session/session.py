@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
 from types import MappingProxyType
-from typing import Any, Concatenate, Final, cast, override
+from typing import Any, Concatenate, Final, cast, overload, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
@@ -31,6 +31,7 @@ from ..logging import StructuredLogger, get_logger
 from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
+from .mutation import GlobalMutationBuilder, MutationBuilder
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
 from .reducers import append
@@ -228,7 +229,7 @@ class Session(SessionProtocol):
 
         for data_type, registrations in reducer_snapshot:
             for registration in registrations:
-                clone.register_reducer(
+                clone.mutation_register_reducer(
                     data_type,
                     registration.reducer,
                     slice_type=registration.slice_type,
@@ -238,27 +239,6 @@ class Session(SessionProtocol):
             clone._state = state_snapshot
 
         return clone
-
-    @_locked_method
-    def register_reducer[S: SupportsDataclass](
-        self,
-        data_type: SessionSliceType,
-        reducer: TypedReducer[S],
-        *,
-        slice_type: type[S] | None = None,
-    ) -> None:
-        """Register a reducer for the provided data type."""
-
-        target_slice_type: SessionSliceType = (
-            data_type if slice_type is None else slice_type
-        )
-        registration = _ReducerRegistration(
-            reducer=cast(TypedReducer[Any], reducer),
-            slice_type=target_slice_type,
-        )
-        bucket = self._reducers.setdefault(data_type, [])
-        bucket.append(registration)
-        _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
 
     @override
     @_locked_method
@@ -280,24 +260,63 @@ class Session(SessionProtocol):
         """
         return QueryBuilder(self, slice_type)
 
+    @overload
+    def mutate[S: SupportsDataclass](
+        self, slice_type: type[S]
+    ) -> MutationBuilder[S]: ...
+
+    @overload
+    def mutate(self) -> GlobalMutationBuilder: ...
+
     @override
+    def mutate[S: SupportsDataclass](
+        self, slice_type: type[S] | None = None
+    ) -> MutationBuilder[S] | GlobalMutationBuilder:
+        """Return a mutation builder for fluent slice mutations.
+
+        Usage::
+
+            # Slice-specific mutations
+            session.mutate(Plan).seed(initial_plan)
+            session.mutate(Plan).clear()
+            session.mutate(Plan).dispatch(SetupPlan(objective="..."))
+            session.mutate(Plan).register(AddStep, add_step_reducer)
+
+            # Session-wide mutations
+            session.mutate().reset()
+            session.mutate().rollback(snapshot)
+
+        """
+        if slice_type is None:
+            return GlobalMutationBuilder(self)
+        return MutationBuilder(self, slice_type)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # MutationProvider implementation (used by MutationBuilder)
+    # ──────────────────────────────────────────────────────────────────────
+
     @_locked_method
-    def seed_slice[S: SupportsDataclass](
+    def mutation_seed_slice[S: SupportsDataclass](
         self, slice_type: type[S], values: Iterable[S]
     ) -> None:
-        """Initialize or replace the stored tuple for the provided type."""
+        """Initialize or replace the stored tuple for the provided type.
 
+        This method implements :class:`MutationProvider` for use by
+        :class:`MutationBuilder`.
+        """
         self._state[slice_type] = tuple(values)
 
-    @override
     @_locked_method
-    def clear_slice[S: SupportsDataclass](
+    def mutation_clear_slice[S: SupportsDataclass](
         self,
         slice_type: type[S],
         predicate: Callable[[S], bool] | None = None,
     ) -> None:
-        """Remove items from the slice, optionally filtering by predicate."""
+        """Remove items from the slice, optionally filtering by predicate.
 
+        This method implements :class:`MutationProvider` for use by
+        :class:`MutationBuilder`.
+        """
         existing = cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
         if not existing:
             return
@@ -307,17 +326,75 @@ class Session(SessionProtocol):
         filtered = tuple(value for value in existing if not predicate(value))
         self._state[slice_type] = filtered
 
-    @override
     @_locked_method
-    def reset(self) -> None:
-        """Clear all stored slices while preserving reducer registrations."""
+    def mutation_reset(self) -> None:
+        """Clear all stored slices while preserving reducer registrations.
 
+        This method implements :class:`MutationProvider` for use by
+        :class:`GlobalMutationBuilder`.
+        """
         slice_types: set[SessionSliceType] = set(self._state)
         for registrations in self._reducers.values():
             for registration in registrations:
                 slice_types.add(registration.slice_type)
-
         self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
+
+    def mutation_rollback(self, snapshot: SnapshotProtocol) -> None:
+        """Restore session slices from the provided snapshot.
+
+        This method implements :class:`MutationProvider` for use by
+        :class:`GlobalMutationBuilder`.
+        """
+        registered_slices = self._registered_slice_types()
+        missing = [
+            slice_type
+            for slice_type in snapshot.slices
+            if slice_type not in registered_slices
+        ]
+        if missing:
+            missing_names = ", ".join(sorted(cls.__qualname__ for cls in missing))
+            msg = f"Slice types not registered: {missing_names}"
+            raise SnapshotRestoreError(msg)
+
+        with self.locked():
+            new_state: dict[SessionSliceType, SessionSlice] = dict(self._state)
+            for slice_type in registered_slices:
+                new_state[slice_type] = snapshot.slices.get(slice_type, EMPTY_SLICE)
+            self._state = new_state
+
+    @_locked_method
+    def mutation_register_reducer[S: SupportsDataclass](
+        self,
+        data_type: SessionSliceType,
+        reducer: TypedReducer[S],
+        *,
+        slice_type: type[S] | None = None,
+    ) -> None:
+        """Register a reducer for the provided data type.
+
+        This method implements :class:`MutationProvider` for use by
+        :class:`MutationBuilder`.
+        """
+        target_slice_type: SessionSliceType = (
+            data_type if slice_type is None else slice_type
+        )
+        registration = _ReducerRegistration(
+            reducer=cast(TypedReducer[Any], reducer),
+            slice_type=target_slice_type,
+        )
+        bucket = self._reducers.setdefault(data_type, [])
+        bucket.append(registration)
+        _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
+
+    def mutation_dispatch_event(
+        self, slice_type: SessionSliceType, event: SupportsDataclass
+    ) -> None:
+        """Dispatch an event to be processed by registered reducers.
+
+        This method implements :class:`MutationProvider` for use by
+        :class:`MutationBuilder`.
+        """
+        self._dispatch_data_event(slice_type, cast(ReducerEvent, event))
 
     @property
     @override
@@ -370,28 +447,6 @@ class Session(SessionProtocol):
             slices=normalized,
             tags=self.tags,
         )
-
-    @override
-    def rollback(self, snapshot: SnapshotProtocol) -> None:
-        """Restore session slices from the provided snapshot."""
-
-        registered_slices = self._registered_slice_types()
-        missing = [
-            slice_type
-            for slice_type in snapshot.slices
-            if slice_type not in registered_slices
-        ]
-        if missing:
-            missing_names = ", ".join(sorted(cls.__qualname__ for cls in missing))
-            msg = f"Slice types not registered: {missing_names}"
-            raise SnapshotRestoreError(msg)
-
-        with self.locked():
-            new_state: dict[SessionSliceType, SessionSlice] = dict(self._state)
-            for slice_type in registered_slices:
-                new_state[slice_type] = snapshot.slices.get(slice_type, EMPTY_SLICE)
-
-            self._state = new_state
 
     def _registered_slice_types(self) -> set[SessionSliceType]:
         with self.locked():
@@ -536,6 +591,8 @@ class Session(SessionProtocol):
 
 __all__ = [
     "DataEvent",
+    "GlobalMutationBuilder",
+    "MutationBuilder",
     "QueryBuilder",
     "Session",
     "TypedReducer",

@@ -640,8 +640,8 @@ def test_adapter_tool_execution_rolls_back_session(
 
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    session.register_reducer(ToolPayload, replace_latest)
-    session.seed_slice(ToolPayload, (ToolPayload(answer="baseline"),))
+    session.mutate(ToolPayload).register(ToolPayload, replace_latest)
+    session.mutate(ToolPayload).seed((ToolPayload(answer="baseline"),))
 
     original_dispatch = session._dispatch_data_event
 

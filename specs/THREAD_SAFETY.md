@@ -57,8 +57,8 @@ to provide thread-based synchronization only.
 ### Session State Store
 
 - `Session` protects `_reducers` and `_state` with a `threading.RLock`. All
-  read/modify/write operations (`register_reducer`, `_dispatch_data_event`,
-  `clone`, `snapshot`, `rollback`, and selectors) acquire the lock.
+  read/modify/write operations (`mutation_register_reducer`, `_dispatch_data_event`,
+  `clone`, `snapshot`, `mutation_rollback`, and selectors) acquire the lock.
 - Copy-on-write patterns take the copy inside the critical section to prevent
   observing partially updated tuples.
 - `_attach_to_bus` uses a flag to ensure handlers are registered only once even

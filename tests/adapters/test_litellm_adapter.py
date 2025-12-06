@@ -498,8 +498,8 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
 
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    session.register_reducer(ToolPayload, replace_latest)
-    session.seed_slice(ToolPayload, (ToolPayload(answer="baseline"),))
+    session.mutate(ToolPayload).register(ToolPayload, replace_latest)
+    session.mutate(ToolPayload).seed((ToolPayload(answer="baseline"),))
 
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
