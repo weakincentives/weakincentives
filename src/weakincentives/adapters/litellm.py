@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
@@ -34,6 +34,7 @@ from ._provider_protocols import (
     ProviderCompletionResponse,
 )
 from ._tool_messages import serialize_tool_message
+from .config import LiteLLMClientConfig, LiteLLMModelConfig
 from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PromptResponse,
@@ -69,10 +70,6 @@ class _LiteLLMModule(Protocol):
     def completion(
         self, *args: object, **kwargs: object
     ) -> ProviderCompletionResponse: ...
-
-
-class _LiteLLMCompletionFactory(Protocol):
-    def __call__(self, **kwargs: object) -> ProviderCompletionCallable: ...
 
 
 LiteLLMCompletion = ProviderCompletionCallable
@@ -202,33 +199,61 @@ logger: StructuredLogger = get_logger(
 
 
 class LiteLLMAdapter(ProviderAdapter[Any]):
-    """Adapter that evaluates prompts via LiteLLM's completion helper."""
+    """Adapter that evaluates prompts via LiteLLM's completion helper.
 
-    def __init__(
+    Args:
+        model: Model identifier in LiteLLM format (e.g., "gpt-4o", "claude-3-sonnet").
+        model_config: Typed configuration for model parameters like temperature,
+            max_tokens, etc. When provided, these values are merged into each
+            request payload.
+        tool_choice: Tool selection directive. Defaults to "auto".
+        completion: Pre-configured LiteLLM completion callable. Mutually exclusive
+            with factory inputs.
+        completion_factory: Callable that returns a LiteLLM completion when
+            invoked. Useful in tests to inject instrumented completions.
+        completion_kwargs: Extra kwargs forwarded to ``completion_factory`` when
+            it is used.
+        completion_config: Typed configuration for completion instantiation. Used
+            when neither ``completion`` nor ``completion_factory`` is provided.
+    """
+
+    def __init__(  # noqa: PLR0913
         self,
         *,
         model: str,
+        model_config: LiteLLMModelConfig | None = None,
         tool_choice: ToolChoice = "auto",
         completion: LiteLLMCompletion | None = None,
-        completion_factory: _LiteLLMCompletionFactory | None = None,
+        completion_factory: Callable[..., LiteLLMCompletion] | None = None,
         completion_kwargs: Mapping[str, object] | None = None,
+        completion_config: LiteLLMClientConfig | None = None,
     ) -> None:
         super().__init__()
         if completion is not None:
-            if completion_factory is not None:
+            if completion_factory is not None or completion_kwargs is not None:
                 raise ValueError(
-                    "completion_factory cannot be provided when an explicit completion is supplied.",
+                    "completion_factory and completion_kwargs cannot be provided when an explicit completion is supplied.",
                 )
-            if completion_kwargs:
+            if completion_config is not None:
                 raise ValueError(
-                    "completion_kwargs cannot be provided when an explicit completion is supplied.",
+                    "completion_config cannot be provided when an explicit completion is supplied.",
                 )
+        elif completion_factory is not None:
+            factory_kwargs: dict[str, object] = {}
+            if completion_config is not None:
+                factory_kwargs.update(completion_config.to_completion_kwargs())
+            if completion_kwargs is not None:
+                factory_kwargs.update(completion_kwargs)
+            completion = completion_factory(**factory_kwargs)
         else:
-            factory = completion_factory or create_litellm_completion
-            completion = factory(**dict(completion_kwargs or {}))
+            completion_params = (
+                completion_config.to_completion_kwargs() if completion_config else {}
+            )
+            completion = create_litellm_completion(**completion_params)
 
         self._completion = completion
         self._model = model
+        self._model_config = model_config
         self._tool_choice: ToolChoice = tool_choice
 
     @override
@@ -279,6 +304,8 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 "model": self._model,
                 "messages": messages,
             }
+            if self._model_config is not None:
+                request_payload.update(self._model_config.to_request_params())
             if tool_specs:
                 request_payload["tools"] = list(tool_specs)
                 if tool_choice_directive is not None:
@@ -339,7 +366,9 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
 
 __all__ = [
     "LiteLLMAdapter",
+    "LiteLLMClientConfig",
     "LiteLLMCompletion",
+    "LiteLLMModelConfig",
     "build_json_schema_response_format",
     "create_litellm_completion",
     "extract_parsed_content",

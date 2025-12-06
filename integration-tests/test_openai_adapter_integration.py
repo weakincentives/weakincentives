@@ -20,6 +20,7 @@ from typing import cast
 
 import pytest
 
+from weakincentives.adapters import OpenAIClientConfig, OpenAIModelConfig
 from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import (
@@ -58,10 +59,33 @@ def openai_model() -> str:
 
 
 @pytest.fixture(scope="module")
+def client_config() -> OpenAIClientConfig:
+    """Build a typed OpenAIClientConfig from environment variables."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    base_url = os.environ.get("OPENAI_BASE_URL")
+
+    return OpenAIClientConfig(
+        api_key=api_key,
+        base_url=base_url,
+    )
+
+
+@pytest.fixture(scope="module")
 def adapter(openai_model: str) -> OpenAIAdapter:
     """Create an OpenAI adapter instance for basic evaluations."""
 
     return OpenAIAdapter(model=openai_model)
+
+
+@pytest.fixture(scope="module")
+def adapter_with_typed_config(
+    openai_model: str, client_config: OpenAIClientConfig
+) -> OpenAIAdapter:
+    """Create an OpenAI adapter using typed configuration objects."""
+    return OpenAIAdapter(
+        model=openai_model,
+        client_config=client_config,
+    )
 
 
 @dataclass(slots=True)
@@ -329,4 +353,98 @@ def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -
         assert isinstance(finding, ReviewFinding)
         assert finding.summary
         assert finding.sentiment
+    _assert_prompt_usage(session)
+
+
+def test_openai_adapter_with_typed_client_config(
+    adapter_with_typed_config: OpenAIAdapter,
+) -> None:
+    """Verify adapter instantiated with OpenAIClientConfig works correctly."""
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="typed config integration tests")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    bus = session.event_bus
+    response = adapter_with_typed_config.evaluate(
+        prompt,
+        parse_output=False,
+        bus=bus,
+        session=session,
+    )
+
+    assert response.prompt_name == "greeting"
+    assert response.text is not None
+    assert response.text.strip()
+    _assert_prompt_usage(session)
+
+
+def test_openai_adapter_with_model_config(
+    openai_model: str, client_config: OpenAIClientConfig
+) -> None:
+    """Verify adapter with OpenAIModelConfig applies model parameters."""
+    model_config = OpenAIModelConfig(
+        temperature=0.3,
+        max_tokens=150,
+    )
+
+    adapter = OpenAIAdapter(
+        model=openai_model,
+        client_config=client_config,
+        model_config=model_config,
+    )
+
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="model config tests")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    bus = session.event_bus
+    response = adapter.evaluate(
+        prompt,
+        parse_output=False,
+        bus=bus,
+        session=session,
+    )
+
+    assert response.prompt_name == "greeting"
+    assert response.text is not None
+    assert response.text.strip()
+    _assert_prompt_usage(session)
+
+
+def test_openai_adapter_with_model_config_structured_output(
+    openai_model: str, client_config: OpenAIClientConfig
+) -> None:
+    """Verify model_config works with structured output parsing."""
+    model_config = OpenAIModelConfig(
+        temperature=0.2,
+        max_tokens=200,
+    )
+
+    adapter = OpenAIAdapter(
+        model=openai_model,
+        client_config=client_config,
+        model_config=model_config,
+    )
+
+    prompt_template = _build_structured_prompt()
+    sample = ReviewParams(
+        text="The typed configuration system provides better IDE support and validation."
+    )
+    prompt = Prompt(prompt_template).bind(sample)
+
+    session = _make_session_with_usage_tracking()
+    bus = session.event_bus
+    response = adapter.evaluate(
+        prompt,
+        bus=bus,
+        session=cast(SessionProtocol, session),
+    )
+
+    assert response.prompt_name == "structured_review"
+    assert response.output is not None
+    assert isinstance(response.output, ReviewAnalysis)
+    assert response.output.summary
+    assert response.output.sentiment
     _assert_prompt_usage(session)

@@ -41,6 +41,7 @@ from ._provider_protocols import (
     ProviderToolCallData,
 )
 from ._tool_messages import serialize_tool_message
+from .config import OpenAIClientConfig, OpenAIModelConfig
 from .core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_RESPONSE,
@@ -570,34 +571,45 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "adapter.o
 
 
 class OpenAIAdapter(ProviderAdapter[Any]):
-    """Adapter that evaluates prompts against OpenAI's Responses API."""
+    """Adapter that evaluates prompts against OpenAI's Responses API.
+
+    Args:
+        model: Model identifier (e.g., "gpt-4o").
+        model_config: Typed configuration for model parameters like temperature,
+            max_tokens, etc. When provided, these values are merged into each
+            request payload.
+        tool_choice: Tool selection directive. Defaults to "auto".
+        use_native_response_format: When True, uses OpenAI's JSON schema response
+            format for structured outputs. Defaults to True.
+        client: Pre-configured OpenAI client instance. Mutually exclusive with
+            client_config.
+        client_config: Typed configuration for client instantiation. Used when
+            client is not provided.
+    """
 
     def __init__(
         self,
         *,
         model: str,
+        model_config: OpenAIModelConfig | None = None,
         tool_choice: ToolChoice = "auto",
         use_native_response_format: bool = True,
         client: _OpenAIProtocol | None = None,
-        client_factory: _OpenAIClientFactory | None = None,
-        client_kwargs: Mapping[str, object] | None = None,
+        client_config: OpenAIClientConfig | None = None,
     ) -> None:
         super().__init__()
         if client is not None:
-            if client_factory is not None:
+            if client_config is not None:
                 raise ValueError(
-                    "client_factory cannot be provided when an explicit client is supplied.",
-                )
-            if client_kwargs:
-                raise ValueError(
-                    "client_kwargs cannot be provided when an explicit client is supplied.",
+                    "client_config cannot be provided when an explicit client is supplied.",
                 )
         else:
-            factory = client_factory or create_openai_client
-            client = factory(**dict(client_kwargs or {}))
+            client_kwargs = client_config.to_client_kwargs() if client_config else {}
+            client = create_openai_client(**client_kwargs)
 
         self._client = client
         self._model = model
+        self._model_config = model_config
         self._tool_choice: ToolChoice = tool_choice
         self._use_native_response_format = use_native_response_format
 
@@ -769,6 +781,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                 "model": self._model,
                 "input": _normalize_input_messages(messages, prompt_name=prompt_name),
             }
+            if self._model_config is not None:
+                request_payload.update(self._model_config.to_request_params())
             if tool_specs:
                 request_payload["tools"] = [
                     _responses_tool_spec(spec, prompt_name=prompt_name)
@@ -816,6 +830,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
 
 __all__ = [
     "OpenAIAdapter",
+    "OpenAIClientConfig",
+    "OpenAIModelConfig",
     "OpenAIProtocol",
     "extract_parsed_content",
     "message_text_content",
