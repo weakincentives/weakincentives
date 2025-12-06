@@ -9,6 +9,7 @@ const state = {
   markdownViews: new Map(),
   expandDepth: 2,
   searchQuery: "",
+  objectFilterQuery: "",
   sliceBuckets: { state: [], event: [] },
   loading: false,
   theme: localStorage.getItem("wink-theme") || "light",
@@ -49,6 +50,7 @@ const elements = {
   expandAll: document.getElementById("expand-all"),
   collapseAll: document.getElementById("collapse-all"),
   itemSearch: document.getElementById("item-search"),
+  objectFilter: document.getElementById("object-filter"),
   loadingOverlay: document.getElementById("loading-overlay"),
   toastContainer: document.getElementById("toast-container"),
   themeToggle: document.getElementById("theme-toggle"),
@@ -151,6 +153,14 @@ function getCommandItems() {
     subtitle: "Show all available shortcuts",
     shortcut: "?",
     action: openShortcuts,
+  });
+  items.push({
+    type: "action",
+    id: "focus-object-filter",
+    title: "Focus Object Filter",
+    subtitle: "Filter properties within JSON items",
+    shortcut: "O",
+    action: () => elements.objectFilter.focus(),
   });
 
   // Slices
@@ -676,7 +686,9 @@ function renderSliceDetail(slice) {
   state.currentItems = slice.items;
   state.markdownViews = new Map();
   state.searchQuery = "";
+  state.objectFilterQuery = "";
   elements.itemSearch.value = "";
+  elements.objectFilter.value = "";
   applyDepth(state.currentItems, state.expandDepth);
 
   const slicePill = document.createElement("span");
@@ -782,6 +794,11 @@ elements.itemSearch.addEventListener("input", () => {
   renderItems(state.currentItems);
 });
 
+elements.objectFilter.addEventListener("input", () => {
+  state.objectFilterQuery = elements.objectFilter.value || "";
+  renderItems(state.currentItems);
+});
+
 document.addEventListener("DOMContentLoaded", async () => {
   setLoading(true);
   try {
@@ -853,6 +870,66 @@ const isPrimitive = (value) =>
 
 const isSimpleArray = (value) =>
   Array.isArray(value) && value.every((item) => isPrimitive(item));
+
+// Check if a key or value matches the object filter query
+function matchesObjectFilter(key, value, query) {
+  if (!query) return true;
+  const lowerQuery = query.toLowerCase();
+
+  // Check if key matches
+  if (key && key.toLowerCase().includes(lowerQuery)) {
+    return true;
+  }
+
+  // Check if primitive value matches
+  if (isPrimitive(value)) {
+    return String(value).toLowerCase().includes(lowerQuery);
+  }
+
+  // For objects and arrays, check if any child matches
+  if (Array.isArray(value)) {
+    return value.some((item, index) => matchesObjectFilter(String(index), item, query));
+  }
+
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value).some(([k, v]) => matchesObjectFilter(k, v, query));
+  }
+
+  return false;
+}
+
+// Filter an object/array to only include matching properties
+function filterObjectByQuery(value, query) {
+  if (!query) return value;
+
+  if (Array.isArray(value)) {
+    // For arrays, filter items that match and recursively filter their contents
+    return value
+      .map((item, index) => {
+        if (matchesObjectFilter(String(index), item, query)) {
+          return filterObjectByQuery(item, query);
+        }
+        return undefined;
+      })
+      .filter((item) => item !== undefined);
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const filtered = {};
+    let hasMatch = false;
+
+    for (const [key, val] of Object.entries(value)) {
+      if (matchesObjectFilter(key, val, query)) {
+        filtered[key] = filterObjectByQuery(val, query);
+        hasMatch = true;
+      }
+    }
+
+    return hasMatch ? filtered : null;
+  }
+
+  return value;
+}
 
 function previewValue(value, max = 24) {
   const raw =
@@ -1246,13 +1323,30 @@ function renderTree(value, path, depth, label) {
 function renderItems(items) {
   elements.jsonViewer.innerHTML = "";
   const filtered = getFilteredItems();
-  const countLabel =
-    state.searchQuery.trim().length > 0
-      ? `${filtered.length} of ${items.length} items`
-      : `${items.length} items`;
-  elements.itemCount.textContent = countLabel;
+
+  // Build count label showing both item search and object filter status
+  const countParts = [];
+  if (state.searchQuery.trim().length > 0) {
+    countParts.push(`${filtered.length} of ${items.length} items`);
+  } else {
+    countParts.push(`${items.length} items`);
+  }
+  if (state.objectFilterQuery.trim().length > 0) {
+    countParts.push(`filtered by "${state.objectFilterQuery}"`);
+  }
+  elements.itemCount.textContent = countParts.join(" · ");
 
   filtered.forEach(({ item, index }) => {
+    // Apply object property filter if set
+    const displayItem = state.objectFilterQuery.trim()
+      ? filterObjectByQuery(item, state.objectFilterQuery)
+      : item;
+
+    // Skip if filter removed all content
+    if (displayItem === null || displayItem === undefined) {
+      return;
+    }
+
     const card = document.createElement("div");
     card.className = "item-card";
 
@@ -1267,7 +1361,7 @@ function renderItems(items) {
 
     const body = document.createElement("div");
     body.className = "item-body tree-root";
-    body.appendChild(renderTree(item, [`item-${index}`], 0, "root"));
+    body.appendChild(renderTree(displayItem, [`item-${index}`], 0, "root"));
     card.appendChild(body);
     elements.jsonViewer.appendChild(card);
   });
@@ -1368,6 +1462,14 @@ document.addEventListener("keydown", (event) => {
       elements.sliceFilter.blur();
       return;
     }
+    if (document.activeElement === elements.objectFilter && elements.objectFilter.value) {
+      event.preventDefault();
+      elements.objectFilter.value = "";
+      state.objectFilterQuery = "";
+      renderItems(state.currentItems);
+      elements.objectFilter.blur();
+      return;
+    }
     return;
   }
 
@@ -1393,6 +1495,13 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "/") {
     event.preventDefault();
     elements.itemSearch.focus();
+    return;
+  }
+
+  // Focus object filter (O)
+  if (event.key === "o" || event.key === "O") {
+    event.preventDefault();
+    elements.objectFilter.focus();
     return;
   }
 
