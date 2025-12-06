@@ -762,3 +762,149 @@ def test_query_where_logs_violate_purity_contract(
 
     with dbc_enabled(), pytest.raises(AssertionError):
         session.query(ExampleOutput).where(predicate)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Mutation API tests
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_mutate_returns_mutation_builder(session_factory: SessionFactory) -> None:
+    from weakincentives.runtime.session import GlobalMutationBuilder, MutationBuilder
+
+    session, _ = session_factory()
+
+    slice_builder = session.mutate(ExampleOutput)
+    global_builder = session.mutate()
+
+    assert isinstance(slice_builder, MutationBuilder)
+    assert isinstance(global_builder, GlobalMutationBuilder)
+
+
+def test_mutate_seed_single_value(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).seed(ExampleOutput(text="seeded"))
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="seeded"),)
+
+
+def test_mutate_seed_iterable_values(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).seed(
+        [
+            ExampleOutput(text="first"),
+            ExampleOutput(text="second"),
+        ]
+    )
+
+    assert session.query(ExampleOutput).all() == (
+        ExampleOutput(text="first"),
+        ExampleOutput(text="second"),
+    )
+
+
+def test_mutate_clear_removes_all_values(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    assert session.query(ExampleOutput).all()
+
+    session.mutate(ExampleOutput).clear()
+
+    assert session.query(ExampleOutput).all() == ()
+
+
+def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="apple")))
+    bus.publish(make_prompt_event(ExampleOutput(text="banana")))
+    bus.publish(make_prompt_event(ExampleOutput(text="apricot")))
+
+    session.mutate(ExampleOutput).clear(lambda x: x.text.startswith("a"))
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="banana"),)
+
+
+def test_mutate_dispatch_triggers_registered_reducer(
+    session_factory: SessionFactory,
+) -> None:
+    session, _ = session_factory()
+
+    @dataclass(slots=True, frozen=True)
+    class SetText:
+        text: str
+
+    def set_text_reducer(
+        slice_values: tuple[ExampleOutput, ...],
+        event: ReducerEvent,
+        *,
+        context: ReducerContextProtocol,
+    ) -> tuple[ExampleOutput, ...]:
+        del context
+        if isinstance(event, ReducerEventWithValue) and isinstance(
+            event.value, SetText
+        ):
+            return (ExampleOutput(text=event.value.text),)
+        if isinstance(event, SetText):
+            return (ExampleOutput(text=event.text),)
+        return slice_values
+
+    session.mutate(ExampleOutput).register(SetText, set_text_reducer)
+    session.mutate(ExampleOutput).dispatch(SetText(text="dispatched"))
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="dispatched"),)
+
+
+def test_mutate_append_uses_default_reducer(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).append(ExampleOutput(text="first"))
+    session.mutate(ExampleOutput).append(ExampleOutput(text="second"))
+
+    assert session.query(ExampleOutput).all() == (
+        ExampleOutput(text="first"),
+        ExampleOutput(text="second"),
+    )
+
+
+def test_mutate_register_adds_reducer(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).register(ExampleOutput, replace_latest)
+
+    session.mutate(ExampleOutput).append(ExampleOutput(text="first"))
+    session.mutate(ExampleOutput).append(ExampleOutput(text="second"))
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="second"),)
+
+
+def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    session.register_reducer(ExampleOutput, append)
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    assert session.query(ExampleOutput).all()
+
+    session.mutate().reset()
+
+    assert session.query(ExampleOutput).all() == ()
+
+
+def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    session.register_reducer(ExampleOutput, append)
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+
+    snapshot = session.snapshot()
+
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    assert session.query(ExampleOutput).latest() == ExampleOutput(text="second")
+
+    session.mutate().rollback(snapshot)
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="first"),)

@@ -15,13 +15,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from typing import TYPE_CHECKING, Protocol, Self
+from typing import TYPE_CHECKING, Protocol, Self, overload
 
 from ...prompt._types import SupportsDataclass
 from ..events._types import EventBus
 from .snapshots import Snapshot
 
 if TYPE_CHECKING:
+    from .mutation import GlobalMutationBuilder, MutationBuilder
     from .query import QueryBuilder
 
 type SnapshotProtocol = Snapshot
@@ -44,6 +45,18 @@ class SessionProtocol(Protocol):
     ) -> tuple[SupportsDataclass, ...]: ...
 
     def query[T: SupportsDataclass](self, slice_type: type[T]) -> QueryBuilder[T]: ...
+
+    @overload
+    def mutate[T: SupportsDataclass](
+        self, slice_type: type[T]
+    ) -> MutationBuilder[T]: ...
+
+    @overload
+    def mutate(self) -> GlobalMutationBuilder: ...
+
+    def mutate[T: SupportsDataclass](
+        self, slice_type: type[T] | None = None
+    ) -> MutationBuilder[T] | GlobalMutationBuilder: ...
 
     def seed_slice(
         self,

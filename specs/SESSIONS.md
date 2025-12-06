@@ -104,6 +104,41 @@ all_results = session.query(SearchResult).all()
 filtered = session.query(Issue).where(lambda i: i.severity == "high")
 ```
 
+### Mutation API
+
+The `mutate()` method provides a fluent interface for session state mutations:
+
+```python
+# Slice-specific mutations
+session.mutate(Plan).seed(initial_plan)           # Initialize/replace slice
+session.mutate(Plan).clear()                       # Remove all items
+session.mutate(Plan).clear(lambda p: not p.active) # Predicate-based removal
+session.mutate(Plan).dispatch(SetupPlan(...))      # Event-driven mutation
+session.mutate(Plan).append(new_plan)              # Shorthand for dispatch
+session.mutate(Plan).register(SetupPlan, reducer)  # Register reducer
+
+# Session-wide mutations
+session.mutate().reset()               # Clear all slices
+session.mutate().rollback(snapshot)    # Restore from snapshot
+```
+
+**MutationBuilder methods:**
+
+- `seed(values)` - Initialize or replace the slice with provided value(s). Bypasses
+  reducers. Useful for initial state setup or restoration.
+- `clear(predicate=None)` - Remove items from the slice. With a predicate, only
+  matching items are removed. Bypasses reducers.
+- `dispatch(event)` - Dispatch an event to registered reducers. This is the
+  preferred mutation path as it maintains traceability.
+- `append(value)` - Shorthand for dispatching when event type equals slice type.
+  Uses the default `append` reducer.
+- `register(data_type, reducer)` - Register a reducer for events of the given type.
+
+**GlobalMutationBuilder methods:**
+
+- `reset()` - Clear all stored slices while preserving reducer registrations.
+- `rollback(snapshot)` - Restore session slices from the provided snapshot.
+
 ### Session Hierarchy
 
 Sessions form a tree for nested orchestration:

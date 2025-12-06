@@ -178,7 +178,6 @@ prompt = Prompt[OutputType](
 
 ```python
 from weakincentives.runtime import Session, InProcessEventBus
-from weakincentives.runtime.session import append
 
 bus = InProcessEventBus()
 session = Session(bus=bus)
@@ -186,8 +185,11 @@ session = Session(bus=bus)
 # Query state
 plan = session.query(Plan).latest()
 
-# Append events (reducers handle state updates)
-session = append(session, my_event)
+# Mutate state (fluent API mirrors query)
+session.mutate(Plan).seed(initial_plan)           # Initialize slice
+session.mutate(Plan).dispatch(AddStep(...))       # Event through reducers
+session.mutate(Plan).register(AddStep, reducer)   # Register reducer
+session.mutate().reset()                          # Clear all slices
 ```
 
 ### Provider Adapter
