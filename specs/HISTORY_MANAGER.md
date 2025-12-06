@@ -54,10 +54,7 @@ requires:
    assistant message requesting a tool call is meaningless without the
    corresponding tool result. Curation must respect these pairings.
 
-4. **Budget awareness**: The primary constraint is typically tokens. Strategies
-   need a way to estimate message sizes and enforce budgets.
-
-5. **Graceful degradation**: When the budget is tight, prefer losing old
+4. **Graceful degradation**: When constraints are tight, prefer losing old
    context over truncating the system message or breaking coherence.
 
 ## Core Interface
@@ -123,9 +120,6 @@ class CurationContext:
     session: SessionProtocol
     """The active session for state queries."""
 
-    token_budget: int | None = None
-    """Optional maximum tokens for the curated history."""
-
     preserve_system: bool = True
     """Whether to always preserve the system message."""
 
@@ -134,42 +128,7 @@ class CurationContext:
 ```
 
 Strategies that only need the message list can ignore the context. Strategies
-that need token budgets or other constraints can use it.
-
-## Token Estimation
-
-Many curation strategies need to estimate message sizes. Rather than coupling
-to a specific tokenizer, the spec defines a simple protocol:
-
-```python
-from typing import Protocol, Any
-
-
-class TokenEstimator(Protocol):
-    """Protocol for estimating token counts."""
-
-    def estimate(self, message: dict[str, Any]) -> int:
-        """Return the estimated token count for a message."""
-        ...
-
-
-class CharacterBasedEstimator:
-    """Simple estimator using character count heuristic."""
-
-    def __init__(self, chars_per_token: float = 4.0) -> None:
-        self._ratio = chars_per_token
-
-    def estimate(self, message: dict[str, Any]) -> int:
-        content = message.get("content", "")
-        if isinstance(content, str):
-            return int(len(content) / self._ratio)
-        # Handle structured content (e.g., tool calls)
-        import json
-        return int(len(json.dumps(message)) / self._ratio)
-```
-
-Callers can provide a precise tokenizer (e.g., `tiktoken` for OpenAI) or use
-the character-based heuristic for simplicity.
+that need other constraints can use it.
 
 ## Built-in Strategies
 
@@ -229,58 +188,7 @@ class SlidingWindowManager:
         return kept
 ```
 
-### 3. TokenBudgetManager
-
-Keeps messages that fit within a token budget, prioritizing recent messages.
-
-```python
-@dataclass(slots=True, frozen=True)
-class TokenBudgetManager:
-    """Keep messages within a token budget, newest first."""
-
-    max_tokens: int
-    """Maximum total tokens for the curated history."""
-
-    estimator: TokenEstimator = field(default_factory=CharacterBasedEstimator)
-    """Token estimator to use."""
-
-    reserve_for_response: int = 0
-    """Tokens to reserve for the model's response."""
-
-    def curate(
-        self,
-        messages: Sequence[dict[str, Any]],
-        *,
-        session: SessionProtocol,
-    ) -> list[dict[str, Any]]:
-        budget = self.max_tokens - self.reserve_for_response
-
-        # Always include system message
-        system = messages[0] if messages[0].get("role") == "system" else None
-        if system:
-            budget -= self.estimator.estimate(system)
-            rest = messages[1:]
-        else:
-            rest = messages
-
-        # Work backwards, adding messages until budget exhausted
-        kept: list[dict[str, Any]] = []
-        for msg in reversed(rest):
-            cost = self.estimator.estimate(msg)
-            if cost <= budget:
-                kept.insert(0, msg)
-                budget -= cost
-            else:
-                break
-
-        kept = _align_to_coherent_boundary(kept)
-
-        if system:
-            return [system] + kept
-        return kept
-```
-
-### 4. ToolResultTruncator
+### 3. ToolResultTruncator
 
 Truncates verbose tool results while preserving structure.
 
@@ -316,7 +224,7 @@ class ToolResultTruncator:
         return msg
 ```
 
-### 5. ComposedManager
+### 4. ComposedManager
 
 Chains multiple managers together.
 
@@ -436,24 +344,21 @@ class HistoryCurated:
     prompt_name: str
     original_count: int
     curated_count: int
-    original_tokens: int | None
-    curated_tokens: int | None
     strategy: str
     session_id: UUID | None
     created_at: datetime
 ```
 
-The event is optional—simple strategies may skip emission, while token-aware
-strategies can report the savings.
+The event is optional—simple strategies may skip emission.
 
 ### Event Emission Pattern
 
 ```python
 @dataclass(slots=True, frozen=True)
-class ObservableTokenBudgetManager:
-    """TokenBudgetManager with event emission."""
+class ObservableSlidingWindowManager:
+    """SlidingWindowManager with event emission."""
 
-    inner: TokenBudgetManager
+    inner: SlidingWindowManager
     bus: EventBus
     prompt_name: str
 
@@ -463,23 +368,13 @@ class ObservableTokenBudgetManager:
         *,
         session: SessionProtocol,
     ) -> list[dict[str, Any]]:
-        original_tokens = sum(
-            self.inner.estimator.estimate(m) for m in messages
-        )
-
         result = self.inner.curate(messages, session=session)
-
-        curated_tokens = sum(
-            self.inner.estimator.estimate(m) for m in result
-        )
 
         self.bus.publish(HistoryCurated(
             prompt_name=self.prompt_name,
             original_count=len(messages),
             curated_count=len(result),
-            original_tokens=original_tokens,
-            curated_tokens=curated_tokens,
-            strategy="token_budget",
+            strategy="sliding_window",
             session_id=getattr(session, "session_id", None),
             created_at=datetime.now(UTC),
         ))
@@ -507,18 +402,18 @@ response = adapter.evaluate(
 )
 ```
 
-### Token Budget with Truncation
+### Sliding Window with Truncation
 
 ```python
 from weakincentives.history import (
     ComposedManager,
-    TokenBudgetManager,
+    SlidingWindowManager,
     ToolResultTruncator,
 )
 
 manager = ComposedManager(managers=(
     ToolResultTruncator(max_length=1000),  # First: truncate verbose results
-    TokenBudgetManager(max_tokens=100_000),  # Then: enforce budget
+    SlidingWindowManager(window_size=50),  # Then: keep recent messages
 ))
 
 response = adapter.evaluate(
@@ -526,22 +421,6 @@ response = adapter.evaluate(
     bus=bus,
     session=session,
     history_manager=manager,
-)
-```
-
-### Provider-Specific Configuration
-
-```python
-# Configure based on model
-model_limits = {
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "claude-3-opus": 200_000,
-}
-
-manager = TokenBudgetManager(
-    max_tokens=model_limits.get(model, 100_000),
-    reserve_for_response=4_000,
 )
 ```
 
@@ -596,12 +475,6 @@ Curating before each provider call:
 
 The original `_messages` list remains intact for debugging and event emission.
 
-### Why Not Automatic Token Limits?
-
-Different providers, models, and even API versions have different limits.
-Automatic detection would require provider-specific logic and could become
-stale. Explicit configuration is more reliable and transparent.
-
 ### Why Composition Over Configuration?
 
 Instead of one manager with many options:
@@ -610,7 +483,6 @@ Instead of one manager with many options:
 # NOT this
 manager = HistoryManager(
     window_size=20,
-    max_tokens=100_000,
     truncate_tools=True,
     ...
 )
@@ -622,7 +494,7 @@ We use composition:
 # This
 manager = ComposedManager(managers=(
     ToolResultTruncator(max_length=1000),
-    TokenBudgetManager(max_tokens=100_000),
+    SlidingWindowManager(window_size=20),
 ))
 ```
 
@@ -635,7 +507,6 @@ src/weakincentives/history/
 ├── __init__.py           # Public exports
 ├── _protocol.py          # HistoryManager protocol
 ├── _context.py           # CurationContext dataclass
-├── _estimators.py        # TokenEstimator protocol and implementations
 ├── _coherence.py         # _align_to_coherent_boundary helper
 ├── _managers.py          # Built-in manager implementations
 └── _events.py            # HistoryCurated event
@@ -646,31 +517,31 @@ src/weakincentives/history/
 - Unit tests for each built-in manager with various message configurations.
 - Tests for semantic coherence: orphaned tool results are removed.
 - Tests for composition: multiple managers chain correctly.
-- Tests for edge cases: empty messages, no system message, budget of zero.
+- Tests for edge cases: empty messages, no system message, window of zero.
 - Integration tests verifying ConversationRunner uses the manager correctly.
-- Property-based tests: curated output never exceeds token budget.
 
 ## Future Extensions
 
 The following are explicitly out of scope for the initial implementation but
 could be added later:
 
-1. **Summarization**: Replace old messages with an LLM-generated summary.
+1. **Token budget manager**: Keep messages that fit within a token budget,
+   prioritizing recent messages. Would require a `TokenEstimator` protocol
+   for counting tokens.
+
+2. **Summarization**: Replace old messages with an LLM-generated summary.
    Would require provider access, similar to `PromptOptimizer`.
 
-2. **Importance scoring**: Use embeddings or heuristics to keep the most
+3. **Importance scoring**: Use embeddings or heuristics to keep the most
    relevant messages regardless of recency.
 
-3. **Streaming curation**: Curate incrementally as messages arrive rather
+4. **Streaming curation**: Curate incrementally as messages arrive rather
    than on each provider call.
 
-4. **Provider-aware managers**: Automatically query provider for limits and
+5. **Provider-aware managers**: Automatically query provider for limits and
    adjust strategies accordingly.
 
 ## Limitations and Caveats
-
-- **Token estimation is approximate**: Character-based estimation is a
-  heuristic. For precise control, callers should provide a real tokenizer.
 
 - **No cross-session continuity**: The manager operates on a single
   conversation's messages. Long-running agents that span sessions need
