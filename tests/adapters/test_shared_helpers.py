@@ -70,7 +70,7 @@ def test_mapping_to_str_dict_rejects_non_string_keys() -> None:
     assert shared._mapping_to_str_dict({1: "value"}) is None
 
 
-def test_run_conversation_requires_message_payload() -> None:
+def test_run_inner_loop_requires_message_payload() -> None:
     rendered = RenderedPrompt(text="system")
     bus = NullEventBus()
 
@@ -114,7 +114,7 @@ def test_run_conversation_requires_message_payload() -> None:
     prompt = Prompt(PromptTemplate(ns="tests", key="example"))
     session = Session(bus=bus)
 
-    conversation_config = shared.ConversationConfig(
+    config = shared.InnerLoopConfig(
         bus=bus,
         session=session,
         tool_choice="auto",
@@ -126,7 +126,7 @@ def test_run_conversation_requires_message_payload() -> None:
         parse_output=False,
     )
 
-    inputs = shared.ConversationInputs[object](
+    inputs = shared.InnerLoopInputs[object](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=adapter,
         prompt=prompt,
@@ -137,4 +137,4 @@ def test_run_conversation_requires_message_payload() -> None:
     )
 
     with pytest.raises(PromptEvaluationError):
-        shared.run_conversation(inputs=inputs, config=conversation_config)
+        shared.run_inner_loop(inputs=inputs, config=config)

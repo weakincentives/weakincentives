@@ -1627,11 +1627,11 @@ def test_openai_adapter_delegates_to_shared_runner(
 
     captured: dict[str, Any] = {}
 
-    def fake_run_conversation(**kwargs: object) -> PromptResponse[StructuredAnswer]:
+    def fake_run_inner_loop(**kwargs: object) -> PromptResponse[StructuredAnswer]:
         captured.update(kwargs)
         return sentinel
 
-    monkeypatch.setattr(module, "run_conversation", fake_run_conversation)
+    monkeypatch.setattr(module, "run_inner_loop", fake_run_inner_loop)
 
     message = DummyMessage(content="hi")
     client = DummyOpenAIClient([DummyResponse([DummyChoice(message)])])
@@ -1642,7 +1642,7 @@ def test_openai_adapter_delegates_to_shared_runner(
 
     assert result is sentinel
     inputs = captured["inputs"]
-    assert isinstance(inputs, module.ConversationInputs)
+    assert isinstance(inputs, module.InnerLoopInputs)
     assert inputs.adapter_name == OPENAI_ADAPTER_NAME
     assert inputs.prompt_name == "shared-runner"
 
@@ -1658,7 +1658,7 @@ def test_openai_adapter_delegates_to_shared_runner(
     )
     expected_text_config = _text_config_from_json_schema(expected_response_format)
     config = captured["config"]
-    assert isinstance(config, module.ConversationConfig)
+    assert isinstance(config, module.InnerLoopConfig)
     assert config.response_format == expected_text_config
     assert config.require_structured_output_text is False
     assert config.serialize_tool_message_fn is module.serialize_tool_message

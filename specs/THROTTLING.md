@@ -74,8 +74,8 @@ matter.
 
 ## Adapter integration map
 
-- **Shared conversation runner**: Insert retry and backoff handling inside
-  `adapters.shared.run_conversation` by wrapping the `call_provider` callable.
+- **Shared inner loop**: Insert retry and backoff handling inside
+  `adapters.shared.run_inner_loop` by wrapping the `call_provider` callable.
   The runner owns the request/response loop for both the OpenAI and LiteLLM
   adapters, so a single throttle policy there keeps behavior consistent while
   preserving the existing `PromptEvaluationError` surface area.
@@ -91,7 +91,7 @@ matter.
     and `_call_provider`. Normalize LiteLLM's `retry_after` hints (when
     present) into the shared `ThrottleError.retry_after` field.
 - **Session/runtime hooks**: propagate throttle metadata into `PromptExecuted`
-  events published by `ConversationRunner` so downstream handlers (e.g., UI or
+  events published by `InnerLoop` so downstream handlers (e.g., UI or
   orchestrators) can present retry guidance without re-inspecting provider
   payloads. Add a structured context field such as `"throttle": {"kind": ...}`
   on the structured logger events in `adapters.shared` so log-based monitors can
@@ -107,13 +107,13 @@ matter.
 - **Throttle policy defaults**: The shared adapter layer exposes a validated
   `ThrottlePolicy` (defaults: 5 attempts, 500 ms base delay, 8 s cap, 30 s total
   delay window) plus `new_throttle_policy` for constructing alternative budgets.
-  `ConversationConfig` carries the policy, and `ConversationRunner` consumes it
+  `InnerLoopConfig` carries the policy, and `InnerLoop` consumes it
   directly.
 - **Typed throttling**: Provider-specific normalizers raise `ThrottleError`
   with a classified `kind`, optional `retry_after`, accumulated `attempts`, and
   `retry_safe` flag. The error subclasses `PromptEvaluationError` and retains
   the provider payload where available.
-- **Retry/backoff loop**: `ConversationRunner._issue_provider_request` wraps the
+- **Retry/backoff loop**: `InnerLoop._issue_provider_request` wraps the
   provider call in a retry loop. It updates the `attempts` count on re-raised
   `ThrottleError`, enforces `max_attempts`, and uses `_jittered_backoff` (full
   jitter, exponential growth capped by `max_delay`, honoring `retry_after` as a

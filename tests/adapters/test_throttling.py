@@ -18,7 +18,7 @@ from typing import Any, cast
 import pytest
 
 from tests.adapters._test_stubs import DummyChoice, DummyMessage, DummyResponse
-from tests.adapters.test_conversation_runner import RecordingBus, build_runner
+from tests.adapters.test_conversation_runner import RecordingBus, build_inner_loop
 from weakincentives.adapters import litellm, openai
 from weakincentives.adapters.core import PROMPT_EVALUATION_PHASE_REQUEST
 from weakincentives.adapters.shared import (
@@ -68,14 +68,14 @@ def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         return response
 
-    runner = build_runner(
+    loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
         bus=bus,
         throttle_policy=new_throttle_policy(max_attempts=5),
     )
 
-    result = runner.run()
+    result = loop.run()
 
     assert calls == 3
     assert delays[0] >= timedelta(seconds=1)
@@ -108,7 +108,7 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
             ),
         )
 
-    runner = build_runner(
+    loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
         bus=bus,
@@ -118,7 +118,7 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
     )
 
     with pytest.raises(ThrottleError) as excinfo:
-        runner.run()
+        loop.run()
 
     error = cast(ThrottleError, excinfo.value)
     assert error.attempts == 1
@@ -169,7 +169,7 @@ def test_runner_raises_on_non_retryable_throttle() -> None:
             details=throttle_details(kind="rate_limit", retry_safe=False),
         )
 
-    runner = build_runner(
+    loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
         bus=bus,
@@ -177,7 +177,7 @@ def test_runner_raises_on_non_retryable_throttle() -> None:
     )
 
     with pytest.raises(ThrottleError):
-        runner.run()
+        loop.run()
 
 
 def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,7 +203,7 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
             ),
         )
 
-    runner = build_runner(
+    loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
         bus=bus,
@@ -213,7 +213,7 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     with pytest.raises(ThrottleError):
-        runner.run()
+        loop.run()
 
 
 def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,18 +243,18 @@ def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None
             ),
         )
 
-    runner = build_runner(
+    loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
         bus=bus,
         throttle_policy=new_throttle_policy(
             max_attempts=3, base_delay=timedelta(seconds=1)
         ),
+        deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=2)),
     )
-    runner.deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=2))
 
     with pytest.raises(ThrottleError) as excinfo:
-        runner.run()
+        loop.run()
 
     assert "Deadline expired" in str(excinfo.value)
 

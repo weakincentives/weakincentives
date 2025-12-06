@@ -52,8 +52,8 @@ from .core import (
 )
 from .shared import (
     OPENAI_ADAPTER_NAME,
-    ConversationConfig,
-    ConversationInputs,
+    InnerLoopConfig,
+    InnerLoopInputs,
     ThrottleError,
     ThrottleKind,
     ToolChoice,
@@ -61,7 +61,7 @@ from .shared import (
     deadline_provider_payload,
     format_publish_failures,
     parse_tool_arguments,
-    run_conversation,
+    run_inner_loop,
     throttle_details,
 )
 
@@ -638,7 +638,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         if effective_tracker is None and budget is not None:
             effective_tracker = BudgetTracker(budget=budget)
 
-        conversation_config = ConversationConfig(
+        config = InnerLoopConfig(
             bus=bus,
             session=session,
             tool_choice=self._tool_choice,
@@ -655,7 +655,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             budget_tracker=effective_tracker,
         )
 
-        inputs = ConversationInputs[OutputT](
+        inputs = InnerLoopInputs[OutputT](
             adapter_name=OPENAI_ADAPTER_NAME,
             adapter=cast("ProviderAdapter[OutputT]", self),
             prompt=prompt,
@@ -665,7 +665,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             initial_messages=[{"role": "system", "content": context.rendered.text}],
         )
 
-        return run_conversation(inputs=inputs, config=conversation_config)
+        return run_inner_loop(inputs=inputs, config=config)
 
     def _setup_evaluation(
         self,

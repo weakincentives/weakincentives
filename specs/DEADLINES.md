@@ -83,10 +83,10 @@ all nested work spawned during that evaluation.
   the adapters raise `PromptEvaluationError` with `phase="request"` before the
   provider is called. When a deadline is provided it replaces
   `RenderedPrompt.deadline` so downstream helpers see the same value.
-- **Conversation runner (`adapters.shared.run_conversation`)** – Picks the
+- **Inner loop (`adapters.shared.run_inner_loop`)** – Picks the
   effective deadline from the explicit argument or the rendered prompt, then
   carries it through each loop iteration.
-- **Pre-flight checks (`ConversationRunner._ensure_deadline_remaining`)** –
+- **Pre-flight checks (`InnerLoop._ensure_deadline_remaining`)** –
   Called before every provider request and during response finalization to
   translate an expired deadline into `PromptEvaluationError` tagged with
   `phase="request"` or `phase="response"` respectively. Provider payloads

@@ -44,8 +44,8 @@ from .core import (
 from .shared import (
     LITELLM_ADAPTER_NAME,
     AdapterRenderOptions,
-    ConversationConfig,
-    ConversationInputs,
+    InnerLoopConfig,
+    InnerLoopInputs,
     ThrottleError,
     ThrottleKind,
     ToolChoice,
@@ -54,7 +54,7 @@ from .shared import (
     format_publish_failures,
     parse_tool_arguments,
     prepare_adapter_conversation,
-    run_conversation,
+    run_inner_loop,
     throttle_details,
 )
 
@@ -334,7 +334,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         if effective_tracker is None and budget is not None:
             effective_tracker = BudgetTracker(budget=budget)
 
-        conversation_config = ConversationConfig(
+        config = InnerLoopConfig(
             bus=bus,
             session=session,
             tool_choice=self._tool_choice,
@@ -351,7 +351,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             budget_tracker=effective_tracker,
         )
 
-        inputs = ConversationInputs[OutputT](
+        inputs = InnerLoopInputs[OutputT](
             adapter_name=LITELLM_ADAPTER_NAME,
             adapter=cast("ProviderAdapter[OutputT]", self),
             prompt=prompt,
@@ -361,7 +361,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             initial_messages=[{"role": "system", "content": rendered.text}],
         )
 
-        return run_conversation(inputs=inputs, config=conversation_config)
+        return run_inner_loop(inputs=inputs, config=config)
 
 
 __all__ = [
