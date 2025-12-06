@@ -8,15 +8,23 @@ tests_dir = "tests"
 exclude = [
     "snapshots",
     "tests/snapshots",
+    "tests/test_code_reviewer_example.py",
     "test-repositories",
     "integration-tests",
     "build",
     "dist",
+    "examples/**",
+    "src/examples/**",
     "src/weakincentives/prompt/**",
     "src/weakincentives/tools/**",
 ]
-also_copy = ["code_reviewer_example.py", "test-repositories", "src/weakincentives"]
-runner = "python -m pytest --strict-config --strict-markers --no-cov --maxfail=1 -q"
+also_copy = [
+    "code_reviewer_example.py",
+    "examples",
+    "test-repositories",
+    "src/weakincentives",
+]
+runner = "python -m pytest --strict-config --strict-markers --no-cov --maxfail=1 -q --ignore=tests/test_code_reviewer_example.py"
 use_coverage = true
 minimum_score = 80.0
 debug = false

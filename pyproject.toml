@@ -72,6 +72,12 @@ tag-pattern = "v(?P<version>.+)"
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/weakincentives"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["examples", "src/examples"]
+
 [dependency-groups]
 dev = [
     "bandit>=1.8.6",
@@ -195,7 +201,12 @@ do_not_mutate = [
     "src/weakincentives/prompt/**",
     "src/weakincentives/tools/**",
 ]
-also_copy = ["code_reviewer_example.py", "test-repositories", "src/weakincentives"]
+also_copy = [
+    "code_reviewer_example.py",
+    "examples",
+    "test-repositories",
+    "src/weakincentives",
+]
 pytest_add_cli_args = [
     "-o",
     "addopts=",
@@ -204,6 +215,7 @@ pytest_add_cli_args = [
     "--no-cov",
     "--maxfail=1",
     "-q",
+    "--ignore=tests/test_code_reviewer_example.py",
 ]
 pytest_add_cli_args_test_selection = [
     "-o",
@@ -213,6 +225,7 @@ pytest_add_cli_args_test_selection = [
     "--no-cov",
     "--maxfail=1",
     "-q",
+    "--ignore=tests/test_code_reviewer_example.py",
 ]
 mutate_only_covered_lines = true
 debug = false
