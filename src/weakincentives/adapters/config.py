@@ -124,8 +124,7 @@ class OpenAIModelConfig(LLMConfig):
         logprobs: Whether to return log probabilities. None uses the provider default.
         top_logprobs: Number of top log probabilities to return (0-20). Requires
             logprobs=True. None uses the provider default.
-        parallel_tool_calls: Whether to allow parallel tool calls. None uses the
-            provider default.
+        parallel_tool_calls: Whether to allow parallel tool calls. Defaults to True.
         store: Whether to store the conversation for fine-tuning. None uses the
             provider default.
         user: Unique identifier for the end-user. None omits the field.
@@ -139,7 +138,7 @@ class OpenAIModelConfig(LLMConfig):
 
     logprobs: bool | None = None
     top_logprobs: int | None = None
-    parallel_tool_calls: bool | None = None
+    parallel_tool_calls: bool | None = True
     store: bool | None = None
     user: str | None = None
 

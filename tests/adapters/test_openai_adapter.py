@@ -1783,6 +1783,36 @@ def test_openai_choice_skips_reasoning_output() -> None:
     assert call.function.name == "search"
 
 
+def test_openai_choice_handles_parallel_tool_calls() -> None:
+    """Verify all function_call items are extracted from output array."""
+    module = cast(Any, _reload_module())
+
+    class ToolOutput:
+        def __init__(self, name: str, call_id: str) -> None:
+            self.name = name
+            self.arguments = '{"location": "Paris"}'
+            self.type = "function_call"
+            self.call_id = call_id
+
+    class Response:
+        def __init__(self) -> None:
+            self.output = (
+                ToolOutput("get_weather", "call_1"),
+                ToolOutput("get_weather", "call_2"),
+                ToolOutput("send_email", "call_3"),
+            )
+
+    choice = module._choice_from_response(Response(), prompt_name="parallel-tools")
+    assert choice.message.tool_calls
+    assert len(choice.message.tool_calls) == 3
+
+    call_ids = [call.id for call in choice.message.tool_calls]
+    assert call_ids == ["call_1", "call_2", "call_3"]
+
+    call_names = [call.function.name for call in choice.message.tool_calls]
+    assert call_names == ["get_weather", "get_weather", "send_email"]
+
+
 def test_openai_choice_raises_when_only_reasoning_output_present() -> None:
     module = cast(Any, _reload_module())
 
