@@ -274,36 +274,6 @@ def _parsed_from_content(parts: Sequence[object]) -> object | None:
     return None
 
 
-def _select_output_with_content(response: object, *, prompt_name: str) -> object:
-    outputs = getattr(response, "output", None)
-    if not isinstance(outputs, Sequence):
-        raise PromptEvaluationError(
-            "Provider response did not include any output.",
-            prompt_name=prompt_name,
-            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-        )
-
-    usable_outputs: list[object] = []
-    for output in cast(Sequence[object], outputs):
-        if getattr(output, "type", None) == "reasoning":
-            continue
-        if _tool_call_from_output(output) is not None:
-            return output
-        content = getattr(output, "content", None)
-        if isinstance(content, Sequence) and content:
-            return output
-        usable_outputs.append(output)
-
-    if usable_outputs:
-        return usable_outputs[0]
-
-    raise PromptEvaluationError(
-        "Provider response did not include any content.",
-        prompt_name=prompt_name,
-        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-    )
-
-
 def _content_from_output(output: object, *, prompt_name: str) -> Sequence[object]:
     content = getattr(output, "content", None)
     if not isinstance(content, Sequence) or not content:
@@ -504,23 +474,80 @@ def _normalize_input_messages(
     return normalized
 
 
+def _extract_all_tool_calls(
+    response: object, *, prompt_name: str
+) -> tuple[list[ProviderToolCallData], object | None, object | None]:
+    """Extract all function_call items from the response output array.
+
+    Returns a tuple of (tool_calls, content_output, fallback_output) where:
+    - tool_calls: List of all function_call items found
+    - content_output: First non-tool-call output with content, or None
+    - fallback_output: First non-reasoning output (for error messages), or None
+    """
+    outputs = getattr(response, "output", None)
+    if not isinstance(outputs, Sequence):
+        raise PromptEvaluationError(
+            "Provider response did not include any output.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+        )
+
+    tool_calls: list[ProviderToolCallData] = []
+    content_output: object | None = None
+    fallback_output: object | None = None
+
+    for output in cast(Sequence[object], outputs):
+        if getattr(output, "type", None) == "reasoning":
+            continue
+
+        # Track first non-reasoning output for fallback error handling
+        if fallback_output is None:
+            fallback_output = output
+
+        tool_call = _tool_call_from_output(output)
+        if tool_call is not None:
+            tool_calls.append(tool_call)
+            continue
+
+        # Track first output with content for text/parsed extraction
+        if content_output is None:
+            content = getattr(output, "content", None)
+            if isinstance(content, Sequence) and content:
+                content_output = output
+
+    return tool_calls, content_output, fallback_output
+
+
 def _choice_from_response(response: object, *, prompt_name: str) -> ProviderChoiceData:
-    output = _select_output_with_content(response, prompt_name=prompt_name)
-    tool_call_output = _tool_call_from_output(output)
-    if tool_call_output is not None:
+    tool_calls, content_output, fallback_output = _extract_all_tool_calls(
+        response, prompt_name=prompt_name
+    )
+
+    if tool_calls:
         message = ProviderMessageData(
             content=(),
-            tool_calls=(tool_call_output,),
+            tool_calls=tuple(tool_calls),
             parsed=None,
         )
         return ProviderChoiceData(message=message)
 
-    content_parts = _content_from_output(output, prompt_name=prompt_name)
-    tool_calls = _tool_calls_from_content(content_parts)
+    if content_output is None:
+        if fallback_output is None:
+            raise PromptEvaluationError(
+                "Provider response did not include any content.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+            )
+        # Use fallback output - will likely fail in _content_from_output
+        # but provides better error context
+        content_output = fallback_output
+
+    content_parts = _content_from_output(content_output, prompt_name=prompt_name)
+    legacy_tool_calls = _tool_calls_from_content(content_parts)
     parsed = _parsed_from_content(content_parts)
     message = ProviderMessageData(
         content=_normalize_content_parts(content_parts),
-        tool_calls=tool_calls or None,
+        tool_calls=tuple(legacy_tool_calls) if legacy_tool_calls else None,
         parsed=parsed,
     )
     return ProviderChoiceData(message=message)

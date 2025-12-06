@@ -98,17 +98,21 @@ def test_openai_client_config_to_client_kwargs_partial() -> None:
 # OpenAIModelConfig tests
 
 
-def test_openai_model_config_to_request_params_all_none() -> None:
+def test_openai_model_config_to_request_params_defaults() -> None:
     config = OpenAIModelConfig()
     params = config.to_request_params()
-    assert params == {}
+    assert params == {"parallel_tool_calls": True}
 
 
 def test_openai_model_config_to_request_params_base_fields() -> None:
     config = OpenAIModelConfig(temperature=0.5, max_tokens=100)
     params = config.to_request_params()
     # Responses API uses max_output_tokens instead of max_tokens
-    assert params == {"temperature": 0.5, "max_output_tokens": 100}
+    assert params == {
+        "temperature": 0.5,
+        "max_output_tokens": 100,
+        "parallel_tool_calls": True,
+    }
 
 
 def test_openai_model_config_to_request_params_openai_specific() -> None:
@@ -144,6 +148,7 @@ def test_openai_model_config_to_request_params_all_set() -> None:
         "max_output_tokens": 200,
         "top_p": 0.9,
         "top_logprobs": 3,
+        "parallel_tool_calls": True,
         "user": "user-456",
     }
 
