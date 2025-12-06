@@ -143,9 +143,9 @@ def test_prompt_render_reducer_prints_full_prompt(
 def test_workspace_digest_section_empty_by_default() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    prompt = build_task_prompt(session=session)
+    template = build_task_prompt(session=session)
 
-    rendered = prompt.render(ReviewTurnParams(request="demo request"))
+    rendered = Prompt(template).bind(ReviewTurnParams(request="demo request")).render()
 
     assert "## 2. Workspace Digest" in rendered.text
     post_section = rendered.text.split("## 2. Workspace Digest", 1)[1]
@@ -159,24 +159,28 @@ def test_workspace_digest_override_applied_when_no_session_digest(
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    prompt = build_task_prompt(session=session)
+    template = build_task_prompt(session=session)
 
     digest_node = next(
         node
-        for node in prompt.sections
+        for node in template.sections
         if node.section.key == "workspace-digest"  # type: ignore[union-attr]
     )
     overrides_store.set_section_override(
-        prompt,
+        template,
         tag="seed",
         path=digest_node.path,
         body="- Override digest",
     )
 
-    rendered = prompt.render(
-        ReviewTurnParams(request="demo request"),
-        overrides_store=overrides_store,
-        tag="seed",
+    rendered = (
+        Prompt(
+            template,
+            overrides_store=overrides_store,
+            overrides_tag="seed",
+        )
+        .bind(ReviewTurnParams(request="demo request"))
+        .render()
     )
     assert "Override digest" in rendered.text
 
@@ -186,25 +190,29 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     session = Session()
-    prompt = build_task_prompt(session=session)
+    template = build_task_prompt(session=session)
     digest_node = next(
         node
-        for node in prompt.sections
+        for node in template.sections
         if node.section.key == "workspace-digest"  # type: ignore[union-attr]
     )
 
     overrides_store.set_section_override(
-        prompt,
+        template,
         tag="seed",
         path=digest_node.path,
         body="- Override digest",
     )
     set_workspace_digest(session, "workspace-digest", "- Session digest")
 
-    rendered = prompt.render(
-        ReviewTurnParams(request="demo request"),
-        overrides_store=overrides_store,
-        tag="seed",
+    rendered = (
+        Prompt(
+            template,
+            overrides_store=overrides_store,
+            overrides_tag="seed",
+        )
+        .bind(ReviewTurnParams(request="demo request"))
+        .render()
     )
     assert "Session digest" in rendered.text
 

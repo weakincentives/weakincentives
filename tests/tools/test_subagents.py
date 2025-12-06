@@ -183,9 +183,11 @@ def _build_parent_prompt(
         key="parent",
         sections=(section,),
     )
-    rendered = prompt.bind(
-        ParentSectionParams(instructions="Document the repo.")
-    ).render()
+    rendered = (
+        Prompt(prompt)
+        .bind(ParentSectionParams(instructions="Document the repo."))
+        .render()
+    )
     if deadline is not None:
         rendered = replace(rendered, deadline=deadline)
     return prompt, rendered

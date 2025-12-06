@@ -128,11 +128,11 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         | tuple[SectionNode[SupportsDataclass], ...]
     ) = ()
     allow_extra_keys: bool = False
-    _renderer: PromptRenderer[OutputT] | None = field(init=False, default=None)
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
     _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
         init=False, default=None
     )
+    _response_section: ResponseFormatSection | None = field(init=False, default=None)
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -230,11 +230,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             )
 
         snapshot = registry.snapshot()
-        renderer: PromptRenderer[Any] = PromptRenderer(
-            registry=snapshot,
-            structured_output=structured_output,
-            response_section=response_section,
-        )
 
         return {
             "ns": stripped_ns,
@@ -243,69 +238,10 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             "inject_output_instructions": inject_val,
             "sections": snapshot.sections,
             "allow_extra_keys": allow_extra,
-            "_renderer": renderer,
             "_snapshot": snapshot,
             "_structured_output": structured_output,
+            "_response_section": response_section,
         }
-
-    def render(
-        self,
-        *params: SupportsDataclass,
-        overrides_store: PromptOverridesStore | None = None,
-        tag: str = "latest",
-        inject_output_instructions: bool | None = None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
-    ) -> RenderedPrompt[OutputT]:
-        """Render the prompt and apply overrides when an overrides store is supplied."""
-
-        overrides: dict[SectionPath, str] | None = None
-        tool_overrides: dict[str, ToolOverride] | None = None
-        descriptor = self.descriptor
-
-        if overrides_store is not None:
-            override = overrides_store.resolve(descriptor=descriptor, tag=tag)
-
-            if override is not None:
-                overrides = {
-                    path: section_override.body
-                    for path, section_override in override.sections.items()
-                }
-                tool_overrides = dict(override.tool_overrides)
-
-        renderer = self._renderer
-        if renderer is None:  # pragma: no cover
-            raise RuntimeError("PromptTemplate._renderer not initialized")
-        param_lookup = renderer.build_param_lookup(params)
-        return renderer.render(
-            param_lookup,
-            overrides,
-            tool_overrides,
-            inject_output_instructions=inject_output_instructions,
-            descriptor=descriptor,
-            visibility_overrides=visibility_overrides,
-        )
-
-    def bind(
-        self,
-        *params: SupportsDataclass,
-        overrides_store: PromptOverridesStore | None = None,
-        tag: str = "latest",
-        inject_output_instructions: bool | None = None,
-    ) -> Prompt[OutputT]:
-        """Return a bound prompt wrapper with the provided parameters."""
-
-        effective_instructions = (
-            inject_output_instructions
-            if inject_output_instructions is not None
-            else self.inject_output_instructions
-        )
-        return Prompt(
-            self,
-            overrides_store=overrides_store,
-            overrides_tag=tag,
-            inject_output_instructions=effective_instructions,
-            params=params,
-        )
 
     @property
     def param_types(self) -> set[type[SupportsDataclass]]:
@@ -372,16 +308,19 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
 
 
 class Prompt(Generic[OutputT]):  # noqa: UP046
-    """Wrap a prompt template with overrides and bound parameters."""
+    """Bind a prompt template with overrides and parameters for rendering.
+
+    Prompt is the only way to render a PromptTemplate. It holds the runtime
+    configuration (overrides store, tag, params) and performs all rendering
+    and override resolution.
+    """
 
     def __init__(
         self,
         template: PromptTemplate[OutputT],
-        *,
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str = "latest",
         inject_output_instructions: bool | None = None,
-        params: Sequence[SupportsDataclass] | None = None,
     ) -> None:
         super().__init__()
         self.template = template
@@ -390,8 +329,13 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         self.name: str | None = template.name
         self.overrides_store = overrides_store
         self.overrides_tag = overrides_tag
-        self.inject_output_instructions = inject_output_instructions
-        self._params: tuple[SupportsDataclass, ...] = tuple(params or ())
+        effective_instructions = (
+            inject_output_instructions
+            if inject_output_instructions is not None
+            else template.inject_output_instructions
+        )
+        self.inject_output_instructions = effective_instructions
+        self._params: tuple[SupportsDataclass, ...] = ()
 
     @property
     def params(self) -> tuple[SupportsDataclass, ...]:
@@ -412,21 +356,41 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
         return self.template.structured_output
 
+    @cached_property
+    def renderer(self) -> PromptRenderer[OutputT]:
+        """Return the prompt renderer, created lazily on first access."""
+        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
+        if snapshot is None:  # pragma: no cover
+            raise RuntimeError("PromptTemplate._snapshot not initialized")
+        return PromptRenderer(
+            registry=snapshot,
+            structured_output=self.template._structured_output,  # pyright: ignore[reportPrivateUsage]
+            response_section=self.template._response_section,  # pyright: ignore[reportPrivateUsage]
+        )
+
     def bind(self, *params: SupportsDataclass) -> Prompt[OutputT]:
         """Mutate this prompt's bound parameters; return self for chaining.
 
         New dataclass instances replace any existing binding of the same
-        dataclass type; otherwise they are appended.
+        dataclass type; otherwise they are appended. Passing multiple params
+        of the same type in a single bind() call is not allowed - validation
+        will raise an error during render().
         """
 
         if not params:
             return self
 
+        # All new params are appended, but if there's already a param of the
+        # same type in existing params, we replace it. Duplicates within the
+        # same bind() call are passed through for validation during render().
         current = list(self._params)
         for candidate in params:
             replaced = False
             for idx, existing in enumerate(current):
-                if type(existing) is type(candidate):
+                # Only replace if the existing param is from a previous bind,
+                # not from the current params list. Check by comparing with
+                # original self._params length.
+                if type(existing) is type(candidate) and idx < len(self._params):
                     current[idx] = candidate
                     replaced = True
                     break
@@ -442,7 +406,11 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         inject_output_instructions: bool | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
-        """Render the underlying template with stored overrides and params."""
+        """Render the prompt with bound parameters and optional overrides.
+
+        Override resolution and rendering are performed here. The template
+        provides only metadata and the registry snapshot for rendering.
+        """
 
         instructions_flag = (
             inject_output_instructions
@@ -450,11 +418,29 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
             else self.inject_output_instructions
         )
         tag = self.overrides_tag if self.overrides_tag else "latest"
-        return self.template.render(
-            *self._params,
-            overrides_store=self.overrides_store,
-            tag=tag,
+
+        overrides: dict[SectionPath, str] | None = None
+        tool_overrides: dict[str, ToolOverride] | None = None
+        descriptor = self.descriptor
+
+        if self.overrides_store is not None:
+            override = self.overrides_store.resolve(descriptor=descriptor, tag=tag)
+
+            if override is not None:
+                overrides = {
+                    path: section_override.body
+                    for path, section_override in override.sections.items()
+                }
+                tool_overrides = dict(override.tool_overrides)
+
+        renderer = self.renderer
+        param_lookup = renderer.build_param_lookup(self._params)
+        return renderer.render(
+            param_lookup,
+            overrides,
+            tool_overrides,
             inject_output_instructions=instructions_flag,
+            descriptor=descriptor,
             visibility_overrides=visibility_overrides,
         )
 

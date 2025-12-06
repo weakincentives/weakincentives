@@ -744,11 +744,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
         has_structured_output = prompt.structured_output is not None
-        inject_instructions = (
-            prompt.inject_output_instructions
-            if prompt.inject_output_instructions is not None
-            else prompt.template.inject_output_instructions
-        )
+        inject_instructions = prompt.inject_output_instructions
         should_disable_instructions = (
             parse_output
             and has_structured_output

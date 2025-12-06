@@ -281,7 +281,7 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
         recap_params = recap or default_recap
         params.append(recap_params)
 
-        rendered = Prompt(self._prompt_template).bind(*tuple(params)).render()
+        rendered = Prompt(self._prompt_template).bind(*params).render()
         parent_deadline = self._rendered_parent.deadline
         if parent_deadline is not None and rendered.deadline is not parent_deadline:
             rendered = replace(rendered, deadline=parent_deadline)

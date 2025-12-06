@@ -19,6 +19,7 @@ import pytest
 
 from weakincentives.prompt import (
     MarkdownSection,
+    Prompt,
     PromptRenderError,
     PromptTemplate,
     PromptValidationError,
@@ -43,14 +44,14 @@ def test_prompt_render_rejects_unregistered_params_type() -> None:
         template="Registered: ${value}",
         key="registered",
     )
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="edge-unregistered",
         sections=[section],
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        prompt.render(UnregisteredParams(value="bad"))
+        Prompt(template).bind(UnregisteredParams(value="bad")).render()
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is UnregisteredParams
@@ -86,14 +87,14 @@ def test_prompt_render_detects_constructor_returning_none() -> None:
         template="Null body",
         key="null",
     )
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="edge-constructor-none",
         sections=[section],
     )
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render()
+        Prompt(template).render()
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("null",)
@@ -106,14 +107,14 @@ def test_prompt_render_detects_constructor_returning_non_dataclass() -> None:
         template="Invalid body",
         key="invalid",
     )
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests.prompts",
         key="edge-constructor-invalid",
         sections=[section],
     )
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render()
+        Prompt(template).render()
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("invalid",)
@@ -148,14 +149,14 @@ class BrokenSection(Section[BrokenParams]):
 
 def test_prompt_render_wraps_prompt_errors_with_context() -> None:
     section = BrokenSection()
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="edge-wrap-error",
         sections=[section],
     )
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(BrokenParams(value="x"))
+        Prompt(template).bind(BrokenParams(value="x")).render()
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("broken",)
@@ -358,14 +359,14 @@ class ContextAwareSection(Section[ContextParams]):
 
 def test_prompt_render_propagates_errors_with_existing_context() -> None:
     section = ContextAwareSection()
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns="tests/prompts",
         key="edge-preserve-context",
         sections=[section],
     )
 
     with pytest.raises(PromptRenderError) as exc:
-        prompt.render(ContextParams(value="x"))
+        Prompt(template).bind(ContextParams(value="x")).render()
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("Provided",)

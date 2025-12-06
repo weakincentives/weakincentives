@@ -73,8 +73,8 @@ fields are included in request payloads.
 
 ### Lifecycle
 
-1. **Render** - Call `prompt.render(params)` to produce a `RenderedPrompt` with
-   markdown text, tools, and structured output metadata.
+1. **Render** - Call `Prompt(template).bind(params).render()` to produce a `RenderedPrompt`
+   with markdown text, tools, and structured output metadata.
 1. **Format** - Convert the rendered prompt into the provider wire format.
 1. **Call** - Issue the provider request with throttle protection and deadline
    checks.

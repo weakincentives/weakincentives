@@ -76,6 +76,7 @@ from weakincentives.adapters import PromptEvaluationError
 from weakincentives.budget import Budget
 from weakincentives.prompt import (
     MarkdownSection,
+    Prompt,
     PromptTemplate,
     SupportsDataclass,
     Tool,
@@ -145,7 +146,7 @@ def _evaluate(
     *params: SupportsDataclass,
     **kwargs: object,
 ) -> PromptResponse[OutputT]:
-    bound_prompt = prompt.bind(*params)
+    bound_prompt = Prompt(prompt).bind(*params)
     return adapter.evaluate(bound_prompt, **kwargs)
 
 
@@ -1162,7 +1163,7 @@ def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None
         ],
     )
 
-    rendered = prompt.render(ToolParams(query="policies"))
+    rendered = Prompt(prompt).bind(ToolParams(query="policies")).render()
 
     payload = {ARRAY_WRAPPER_KEY: [{"answer": "Ready"}]}
 
@@ -1181,7 +1182,7 @@ def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None
 def test_openai_parse_schema_constrained_payload_handles_object_container() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = PromptTemplate[StructuredAnswer](
+    template = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-structured-schema",
         name="structured",
@@ -1194,7 +1195,7 @@ def test_openai_parse_schema_constrained_payload_handles_object_container() -> N
         ],
     )
 
-    rendered = prompt.render(ToolParams(query="policies"))
+    rendered = Prompt(template).bind(ToolParams(query="policies")).render()
 
     parsed = module.parse_schema_constrained_payload({"answer": "Ready"}, rendered)
 
@@ -1209,7 +1210,7 @@ def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt(
 ):
     module = cast(Any, _reload_module())
 
-    prompt = PromptTemplate(
+    template = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-plain",
         name="plain",
@@ -1222,7 +1223,7 @@ def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt(
         ],
     )
 
-    rendered = prompt.render(ToolParams(query="world"))
+    rendered = Prompt(template).bind(ToolParams(query="world")).render()
 
     response_format = module.build_json_schema_response_format(rendered, "plain")
 
@@ -1241,7 +1242,7 @@ def test_openai_parse_schema_constrained_payload_requires_structured_prompt() ->
 def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays() -> None:
     module = cast(Any, _reload_module())
 
-    prompt = PromptTemplate[list[StructuredAnswer]](
+    template = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="openai-structured-schema-array-non-seq",
         name="structured_list",
@@ -1254,7 +1255,7 @@ def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays() -
         ],
     )
 
-    rendered = prompt.render(ToolParams(query="policies"))
+    rendered = Prompt(template).bind(ToolParams(query="policies")).render()
 
     with pytest.raises(TypeError):
         module.parse_schema_constrained_payload("oops", rendered)
@@ -1645,7 +1646,9 @@ def test_openai_adapter_delegates_to_shared_runner(
     assert inputs.adapter_name == OPENAI_ADAPTER_NAME
     assert inputs.prompt_name == "shared-runner"
 
-    expected_rendered = prompt.render(params, inject_output_instructions=False)
+    expected_rendered = (
+        Prompt(prompt).bind(params).render(inject_output_instructions=False)
+    )
     assert inputs.rendered == expected_rendered
     assert inputs.render_inputs == (params,)
     assert inputs.initial_messages == [
@@ -1942,7 +1945,7 @@ def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
     session = Session(bus=bus)
 
     result = adapter.evaluate(
-        prompt.bind(GreetingParams(user="Test")),
+        Prompt(prompt).bind(GreetingParams(user="Test")),
         bus=bus,
         session=session,
         budget=budget,

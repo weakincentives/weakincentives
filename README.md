@@ -232,11 +232,12 @@ if plan:
 Override prompt sections via version-controlled JSON:
 
 ```python
-rendered = review_prompt.render(
-    ...,
+prompt = Prompt(
+    review_template,
     overrides_store=LocalPromptOverridesStore(),
-    tag="assertive-feedback",
-)
+    overrides_tag="assertive-feedback",
+).bind(ReviewParams(...))
+rendered = prompt.render()
 ```
 
 Overrides live in `.weakincentives/prompts/overrides/` and match by namespace,
