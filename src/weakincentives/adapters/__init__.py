@@ -14,8 +14,15 @@
 
 from __future__ import annotations
 
-from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
+from ._names import (
+    ANTHROPIC_ADAPTER_NAME,
+    LITELLM_ADAPTER_NAME,
+    OPENAI_ADAPTER_NAME,
+    AdapterName,
+)
 from .config import (
+    AnthropicClientConfig,
+    AnthropicModelConfig,
     LiteLLMClientConfig,
     LiteLLMModelConfig,
     LLMConfig,
@@ -31,9 +38,12 @@ from .core import (
 from .shared import ThrottleError, ThrottlePolicy, new_throttle_policy
 
 __all__ = [
+    "ANTHROPIC_ADAPTER_NAME",
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
     "AdapterName",
+    "AnthropicClientConfig",
+    "AnthropicModelConfig",
     "LLMConfig",
     "LiteLLMClientConfig",
     "LiteLLMModelConfig",
