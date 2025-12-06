@@ -340,7 +340,6 @@ The UI follows the same three-panel design as `wink debug`:
    - **Rendered Prompt Panel**: Full prompt text with markdown rendering
      - Collapsible panel showing the complete rendered prompt from the snapshot
      - Toggle between rendered markdown view and raw text view
-     - Syntax highlighting for code blocks
      - Read-only display for reference while editing overrides
    - **Sections Panel**: Expandable list of sections
      - Each section shows path, number, override status
