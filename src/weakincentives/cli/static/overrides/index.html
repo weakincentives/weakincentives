@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wink overrides editor</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/overrides/style.css" />
+  </head>
+  <body>
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+      <div class="loading-spinner"></div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Confirmation modal -->
+    <div id="confirm-modal" class="confirm-modal hidden" role="dialog" aria-modal="true">
+      <div class="confirm-modal-backdrop"></div>
+      <div class="confirm-modal-container">
+        <div class="confirm-modal-header">
+          <h2 id="confirm-modal-title">Confirm Action</h2>
+        </div>
+        <div class="confirm-modal-body">
+          <p id="confirm-modal-message">Are you sure?</p>
+        </div>
+        <div class="confirm-modal-footer">
+          <button id="confirm-modal-cancel" class="ghost" type="button">Cancel</button>
+          <button id="confirm-modal-confirm" class="primary danger" type="button">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keyboard shortcuts help overlay -->
+    <div id="shortcuts-overlay" class="shortcuts-overlay hidden" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+      <div class="shortcuts-backdrop"></div>
+      <div class="shortcuts-container">
+        <div class="shortcuts-header">
+          <h2>Keyboard Shortcuts</h2>
+          <button id="shortcuts-close" class="icon-button" type="button" aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="shortcuts-body">
+          <div class="shortcuts-section">
+            <h3>Navigation</h3>
+            <div class="shortcut-row"><kbd>P</kbd><span>Toggle rendered prompt panel</span></div>
+            <div class="shortcut-row"><kbd>M</kbd><span>Toggle markdown/raw view</span></div>
+            <div class="shortcut-row"><kbd>↑</kbd> / <kbd>↓</kbd><span>Navigate prompt list</span></div>
+            <div class="shortcut-row"><kbd>Enter</kbd><span>Select highlighted prompt</span></div>
+          </div>
+          <div class="shortcuts-section">
+            <h3>Actions</h3>
+            <div class="shortcut-row"><kbd>R</kbd><span>Reload snapshot</span></div>
+            <div class="shortcut-row"><kbd>D</kbd><span>Toggle dark mode</span></div>
+            <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>S</kbd><span>Save current edit</span></div>
+          </div>
+          <div class="shortcuts-section">
+            <h3>View</h3>
+            <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
+            <div class="shortcut-row"><kbd>Esc</kbd><span>Close dialogs / Cancel edit</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <header class="top-bar">
+      <div class="heading">
+        <p class="eyebrow">wink overrides</p>
+        <h1>Prompt Override Editor</h1>
+        <p id="snapshot-path" class="muted"></p>
+      </div>
+      <div class="actions">
+        <span id="tag-badge" class="pill pill-primary"></span>
+        <button id="theme-toggle" class="icon-button" type="button" title="Toggle dark mode (D)" aria-label="Toggle dark mode">
+          <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+        <button id="reload-button" class="icon-button" type="button" title="Reload snapshot (R)" aria-label="Reload snapshot">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
+        <div class="keyboard-hints" title="Press ? for all shortcuts">
+          <button id="help-button" class="hint-button" type="button" aria-label="Show keyboard shortcuts">
+            <kbd>?</kbd>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Prompts</h2>
+            <input
+              id="prompt-filter"
+              type="search"
+              placeholder="Filter prompts"
+              autocomplete="off"
+            />
+          </div>
+          <ul id="prompt-list" class="prompt-list"></ul>
+        </div>
+      </aside>
+
+      <section class="content">
+        <!-- Empty state -->
+        <div id="empty-state" class="card empty-state-card">
+          <div class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            <h3>Select a prompt to edit</h3>
+            <p class="muted">Choose a prompt from the sidebar to view and edit its overrides</p>
+          </div>
+        </div>
+
+        <!-- Prompt content -->
+        <div id="prompt-content" class="hidden">
+          <!-- Prompt header card -->
+          <div class="card prompt-header-card">
+            <div class="prompt-header">
+              <div class="prompt-info">
+                <p class="label">Prompt</p>
+                <h2 id="prompt-title"></h2>
+                <p id="prompt-meta" class="muted"></p>
+              </div>
+              <div class="prompt-badges">
+                <span id="seed-badge" class="pill hidden"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rendered prompt panel -->
+          <div id="rendered-panel" class="card collapsible-panel">
+            <div class="panel-toggle" id="rendered-toggle">
+              <div class="panel-toggle-title">
+                <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+                <h3>Rendered Prompt</h3>
+                <span class="pill pill-quiet">Reference</span>
+              </div>
+              <div class="panel-toggle-actions">
+                <button id="raw-toggle" class="ghost small" type="button">Raw</button>
+              </div>
+            </div>
+            <div class="panel-content" id="rendered-content">
+              <div id="rendered-html" class="markdown-rendered"></div>
+              <pre id="rendered-raw" class="markdown-raw hidden"></pre>
+            </div>
+          </div>
+
+          <!-- Sections panel -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Sections</h3>
+              <span id="section-count" class="chip"></span>
+            </div>
+            <div id="sections-container" class="accordion-container"></div>
+          </div>
+
+          <!-- Tools panel -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Tools</h3>
+              <span id="tool-count" class="chip"></span>
+            </div>
+            <div id="tools-container" class="accordion-container"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/overrides/app.js"></script>
+  </body>
+</html>

@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ..runtime.logging import StructuredLogger, configure_logging, get_logger
-from . import debug_app
+from . import debug_app, overrides_app
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -37,6 +37,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "debug":
         return _run_debug(args, logger)
+
+    if args.command == "overrides":
+        return _run_overrides(args, logger)
 
     return 0
 
@@ -87,6 +90,41 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Open the default browser to the UI (disable with --no-open-browser).",
     )
 
+    overrides_parser = subcommands.add_parser(
+        "overrides",
+        help="Start an overrides editor for editing prompt overrides from snapshots.",
+    )
+    _ = overrides_parser.add_argument(
+        "snapshot_path",
+        help="Path to a session snapshot JSONL file or directory containing snapshots.",
+    )
+    _ = overrides_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host interface to bind the server to (default: 127.0.0.1).",
+    )
+    _ = overrides_parser.add_argument(
+        "--port",
+        type=int,
+        default=8001,
+        help="Port to bind the server to (default: 8001).",
+    )
+    _ = overrides_parser.add_argument(
+        "--open-browser",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Open the default browser to the UI (disable with --no-open-browser).",
+    )
+    _ = overrides_parser.add_argument(
+        "--tag",
+        default="latest",
+        help="Override tag to edit (default: latest).",
+    )
+    _ = overrides_parser.add_argument(
+        "--store-root",
+        help="Root path for LocalPromptOverridesStore (auto-detected if not provided).",
+    )
+
     return parser
 
 
@@ -124,6 +162,63 @@ def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
         logger.exception(
             "Debug server failed to start",
             event="wink.debug.server_error",
+            context={"error": repr(error)},
+        )
+        return 3
+
+
+def _run_overrides(args: argparse.Namespace, logger: StructuredLogger) -> int:
+    snapshot_path = Path(args.snapshot_path)
+    store_root = Path(args.store_root) if args.store_root else None
+
+    def _bootstrap_loader(path: Path) -> tuple[overrides_app.LoadedSnapshot, ...]:
+        return overrides_app.load_snapshot(path)
+
+    try:
+        store = overrides_app.OverridesStore(
+            snapshot_path,
+            tag=args.tag,
+            store_root=store_root,
+            loader=_bootstrap_loader,
+            log=logger,
+        )
+    except overrides_app.OverridesEditorError as error:  # pragma: no cover
+        logger.exception(
+            "Snapshot validation failed",
+            event="wink.overrides.snapshot_error",
+            context={"path": str(snapshot_path), "error": str(error)},
+        )
+        return 2
+    except debug_app.SnapshotLoadError as error:  # pragma: no cover
+        logger.exception(
+            "Snapshot validation failed",
+            event="wink.overrides.snapshot_error",
+            context={"path": str(snapshot_path), "error": str(error)},
+        )
+        return 2
+
+    if not store.prompts:
+        logger.error(
+            "No PromptRendered events found in snapshot",
+            event="wink.overrides.no_prompts",
+            context={"path": str(snapshot_path)},
+        )
+        return 4
+
+    app = overrides_app.build_overrides_app(store, log=logger)
+
+    try:
+        return overrides_app.run_overrides_server(
+            app,
+            host=args.host,
+            port=args.port,
+            open_browser=args.open_browser,
+            log=logger,
+        )
+    except Exception as error:  # pragma: no cover - defensive guard
+        logger.exception(
+            "Overrides server failed to start",
+            event="wink.overrides.server_error",
             context={"error": repr(error)},
         )
         return 3
