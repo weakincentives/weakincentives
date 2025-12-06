@@ -25,7 +25,11 @@ OPENAI_ADAPTER_NAME: Final[AdapterName] = "openai"
 LITELLM_ADAPTER_NAME: Final[AdapterName] = "litellm"
 """Canonical label for the LiteLLM adapter."""
 
+ANTHROPIC_ADAPTER_NAME: Final[AdapterName] = "anthropic"
+"""Canonical label for the Anthropic adapter."""
+
 __all__ = [
+    "ANTHROPIC_ADAPTER_NAME",
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
     "AdapterName",

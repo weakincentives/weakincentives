@@ -20,6 +20,8 @@ from typing import Any, override
 from ..dataclasses import FrozenDataclass
 
 __all__ = [
+    "AnthropicClientConfig",
+    "AnthropicModelConfig",
     "LLMConfig",
     "LiteLLMClientConfig",
     "LiteLLMModelConfig",
@@ -251,6 +253,96 @@ class LiteLLMModelConfig(LLMConfig):
             params["n"] = self.n
         if self.user is not None:
             params["user"] = self.user
+        return params
+
+
+@FrozenDataclass()
+class AnthropicClientConfig:
+    """Configuration for Anthropic client instantiation.
+
+    Attributes:
+        api_key: Anthropic API key. None uses the ANTHROPIC_API_KEY environment variable.
+        base_url: Base URL for API requests. None uses the default Anthropic endpoint.
+        timeout: Request timeout in seconds. None uses the client default.
+        max_retries: Maximum number of retries. None uses the client default.
+    """
+
+    api_key: str | None = None
+    base_url: str | None = None
+    timeout: float | None = None
+    max_retries: int | None = None
+
+    def to_client_kwargs(self) -> dict[str, Any]:
+        """Convert non-None fields to client constructor kwargs."""
+        kwargs: dict[str, Any] = {}
+        if self.api_key is not None:
+            kwargs["api_key"] = self.api_key
+        if self.base_url is not None:
+            kwargs["base_url"] = self.base_url
+        if self.timeout is not None:
+            kwargs["timeout"] = self.timeout
+        if self.max_retries is not None:
+            kwargs["max_retries"] = self.max_retries
+        return kwargs
+
+
+@FrozenDataclass()
+class AnthropicModelConfig(LLMConfig):
+    """Anthropic-specific model configuration.
+
+    Extends LLMConfig with parameters specific to Anthropic's API.
+
+    Attributes:
+        top_k: Sample from the top K most likely tokens. None uses the provider default.
+        metadata: Optional metadata to include with the request.
+
+    Notes:
+        Anthropic does not support ``presence_penalty``, ``frequency_penalty``, or ``seed``.
+        If any of these fields are provided, ``AnthropicModelConfig`` raises ``ValueError``
+        so callers fail fast instead of issuing an invalid request.
+    """
+
+    top_k: int | None = None
+    metadata: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        unsupported: dict[str, object | None] = {
+            "seed": self.seed,
+            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty,
+        }
+
+        set_unsupported = [
+            key for key, value in unsupported.items() if value is not None
+        ]
+        if set_unsupported:
+            raise ValueError(
+                "Unsupported Anthropic parameters: "
+                + ", ".join(sorted(set_unsupported))
+                + ". Remove them from AnthropicModelConfig."
+            )
+
+    @override
+    def to_request_params(self) -> dict[str, Any]:
+        """Convert non-None fields to request parameters."""
+        params: dict[str, Any] = {}
+
+        # Supported core fields
+        if self.temperature is not None:
+            params["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            params["max_tokens"] = self.max_tokens
+        if self.top_p is not None:
+            params["top_p"] = self.top_p
+        if self.stop is not None:
+            params["stop_sequences"] = list(self.stop)
+
+        # Anthropic-specific fields
+        if self.top_k is not None:
+            params["top_k"] = self.top_k
+        if self.metadata is not None:
+            params["metadata"] = dict(self.metadata)
+
         return params
 
 

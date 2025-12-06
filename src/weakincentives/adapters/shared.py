@@ -57,7 +57,12 @@ from ..runtime.session.dataclasses import is_dataclass_instance
 from ..serde import parse, schema
 from ..tools.errors import DeadlineExceededError, ToolValidationError
 from ..types import JSONValue
-from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
+from ._names import (
+    ANTHROPIC_ADAPTER_NAME,
+    LITELLM_ADAPTER_NAME,
+    OPENAI_ADAPTER_NAME,
+    AdapterName,
+)
 from ._provider_protocols import (
     ProviderChoice,
     ProviderCompletionCallable,
@@ -86,7 +91,11 @@ logger: StructuredLogger = get_logger(
 )
 
 
-_EXPORTED_ADAPTER_NAMES = (LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME)
+_EXPORTED_ADAPTER_NAMES = (
+    ANTHROPIC_ADAPTER_NAME,
+    LITELLM_ADAPTER_NAME,
+    OPENAI_ADAPTER_NAME,
+)
 _EXPORTED_PROVIDER_PROTOCOLS = (
     ProviderCompletionCallable,
     ProviderCompletionResponse,
@@ -1047,6 +1056,7 @@ __all__ = (  # noqa: RUF022
     "AdapterName",
     "AdapterRenderContext",
     "AdapterRenderOptions",
+    "ANTHROPIC_ADAPTER_NAME",
     "ChoiceSelector",
     "InnerLoop",
     "InnerLoopConfig",
