@@ -190,7 +190,6 @@ class AdapterRenderOptions:
     """Configuration for rendering prompts ahead of provider evaluation."""
 
     parse_output: bool
-    disable_output_instructions: bool
     enable_json_schema: bool
     deadline: Deadline | None
     visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None
@@ -986,12 +985,7 @@ def prepare_adapter_conversation[
             provider_payload=deadline_provider_payload(options.deadline),
         )
 
-    render_inject_output_instructions: bool | None = None
-    if options.disable_output_instructions:
-        render_inject_output_instructions = False
-
     rendered = prompt.render(
-        inject_output_instructions=render_inject_output_instructions,
         visibility_overrides=options.visibility_overrides,
     )
     if options.deadline is not None:

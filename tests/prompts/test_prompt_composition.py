@@ -24,7 +24,6 @@ from weakincentives.prompt import (
     DelegationParams,
     DelegationPrompt,
     MarkdownSection,
-    ParentPromptParams,
     ParentPromptSection,
     Prompt,
     PromptRenderError,
@@ -142,38 +141,6 @@ def test_delegation_prompt_renders_required_sections() -> None:
     assert "- Prioritize areas touched in the latest commits." in text
 
 
-def test_delegation_prompt_with_response_format_instructions() -> None:
-    parent_prompt, _ = _build_parent_prompt()
-    rendered_parent = (
-        Prompt(parent_prompt)
-        .bind(ParentSectionParams(guidance="access patterns"))
-        .render()
-    )
-
-    delegation = DelegationPrompt[ParentResult, DelegationPlan](
-        _as_prompt_protocol(parent_prompt),
-        rendered_parent,
-        include_response_format=True,
-    )
-
-    rendered = delegation.render(
-        DelegationParams(
-            reason="Specialize on filesystem enumeration.",
-            expected_result="Detailed plan for the next commit.",
-            may_delegate_further="no",
-            recap_lines=("Keep notes concise.",),
-        ),
-        parent=ParentPromptParams(body=rendered_parent.text),
-    )
-
-    assert "## 2. Response Format" in rendered.text
-    assert "Return ONLY a single fenced JSON code block." in rendered.text
-    assert "an object" in rendered.text
-    assert rendered.text.index("## 1. Delegation Summary") < rendered.text.index(
-        "## 3. Parent Prompt (Verbatim)"
-    )
-
-
 def test_delegation_prompt_allows_explicit_recap_override() -> None:
     parent_prompt, _ = _build_parent_prompt()
     rendered_parent = (
@@ -207,38 +174,6 @@ def test_delegation_prompt_requires_specialization() -> None:
 
     with pytest.raises(TypeError):
         DelegationPrompt(_as_prompt_protocol(parent_prompt), rendered_parent)
-
-
-def test_delegation_prompt_skips_fallback_when_parent_freeform() -> None:
-    section = MarkdownSection[ParentSectionParams](
-        title="Investigation",
-        key="investigation",
-        template="Focus on ${guidance}.",
-    )
-    prompt = PromptTemplate(
-        ns="tests/prompts",
-        key="parent-freeform",
-        sections=(section,),
-    )
-    rendered_parent = Prompt(prompt).bind(ParentSectionParams(guidance="logs")).render()
-    assert rendered_parent.container is None
-
-    delegation = DelegationPrompt[ParentResult, DelegationPlan](
-        _as_prompt_protocol(prompt),
-        rendered_parent,
-        include_response_format=True,
-    )
-    rendered = delegation.render(
-        DelegationParams(
-            reason="Gather raw observations.",
-            expected_result="A quick log summary.",
-            may_delegate_further="no",
-            recap_lines=("Capture high-level anomalies.",),
-        ),
-        parent=ParentPromptParams(body=rendered_parent.text),
-    )
-
-    assert "Response Format" not in rendered.text
 
 
 def test_parent_prompt_section_requires_params() -> None:

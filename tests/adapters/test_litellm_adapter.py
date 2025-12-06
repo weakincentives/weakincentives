@@ -1757,9 +1757,7 @@ def test_litellm_adapter_delegates_to_shared_runner(
     assert inputs.adapter_name == LITELLM_ADAPTER_NAME
     assert inputs.prompt_name == "shared-runner"
 
-    expected_rendered = (
-        Prompt(prompt).bind(params).render(inject_output_instructions=False)
-    )
+    expected_rendered = Prompt(prompt).bind(params).render()
     assert inputs.rendered == expected_rendered
     assert inputs.render_inputs == (params,)
     assert inputs.initial_messages == [

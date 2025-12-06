@@ -23,10 +23,6 @@ from weakincentives.prompt.composition import (
     ParentPromptSection,
     RecapSection,
 )
-from weakincentives.prompt.response_format import (
-    ResponseFormatParams,
-    ResponseFormatSection,
-)
 from weakincentives.runtime.session import Session
 from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import PlanningStrategy, PlanningToolsSection
@@ -56,17 +52,6 @@ def test_markdown_section_clone_deep_copies_children_and_defaults() -> None:
     assert clone is not section
     assert clone.default_params is not section.default_params
     assert clone.children and clone.children[0] is not child
-
-
-def test_response_format_clone_preserves_params() -> None:
-    params = ResponseFormatParams(article="a", container="object", extra_clause="")
-    section = ResponseFormatSection(params=params)
-
-    clone = section.clone()
-
-    assert clone.default_params is not section.default_params
-    assert clone.default_params is not None
-    assert clone.default_params.container == "object"
 
 
 def test_composition_sections_clone_with_metadata() -> None:
@@ -99,15 +84,6 @@ def test_tool_sections_clone_to_new_sessions() -> None:
     assert planning_clone.session is new_session
     assert asteval_clone.session is new_session
     assert subagents_clone is not subagents
-
-
-def test_response_format_clone_requires_defaults() -> None:
-    params = ResponseFormatParams(article="a", container="object", extra_clause="")
-    section = ResponseFormatSection(params=params)
-    section.default_params = None
-
-    with pytest.raises(ValueError):
-        section.clone()
 
 
 def test_tool_clones_validate_session_and_bus() -> None:

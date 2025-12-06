@@ -151,32 +151,6 @@ def test_prompt_descriptor_hashes_text_sections() -> None:
     assert descriptor.tools == []
 
 
-def test_prompt_descriptor_excludes_response_format_section() -> None:
-    @dataclass
-    class Summary:
-        topic: str
-
-    prompt = PromptTemplate[Summary](
-        ns="tests/versioning",
-        key="versioned-summary",
-        sections=[
-            MarkdownSection[_GreetingParams](
-                title="Task",
-                template="Summarize ${subject} succinctly.",
-                key="task",
-            )
-        ],
-    )
-
-    descriptor = PromptDescriptor.from_prompt(prompt)
-    paths = [section.path for section in descriptor.sections]
-
-    assert ("task",) in paths
-    assert ("response-format",) not in paths
-    assert descriptor.tools == []
-    assert descriptor.ns == "tests/versioning"
-
-
 def test_prompt_descriptor_ignores_non_hash_sections() -> None:
     section = _StaticSection(title="Static", key="static")
     prompt = PromptTemplate(
