@@ -1066,8 +1066,12 @@ __all__ = (  # noqa: RUF022
     "ConversationInputs",
     "ConversationRequest",
     "ConversationRunner",
+    "InnerLoop",
+    "InnerLoopConfig",
+    "InnerLoopInputs",
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
+    "ProviderCall",
     "ProviderChoice",
     "ProviderCompletionCallable",
     "ProviderCompletionResponse",
@@ -1098,6 +1102,7 @@ __all__ = (  # noqa: RUF022
     "parse_tool_arguments",
     "prepare_adapter_conversation",
     "run_conversation",
+    "run_inner_loop",
     "serialize_tool_call",
     "throttle_details",
     "token_usage_from_payload",
@@ -1106,7 +1111,7 @@ __all__ = (  # noqa: RUF022
 )
 
 
-ConversationRequest = Callable[
+ProviderCall = Callable[
     [
         list[dict[str, Any]],
         Sequence[Mapping[str, Any]],
@@ -1117,14 +1122,30 @@ ConversationRequest = Callable[
 ]
 """Callable responsible for invoking the provider with assembled payloads."""
 
+ConversationRequest = ProviderCall
+"""Deprecated alias for ProviderCall. Use ProviderCall instead."""
+
 
 ChoiceSelector = Callable[[object], ProviderChoice]
 """Callable that extracts the relevant choice from a provider response."""
 
 
 @FrozenDataclass()
-class ConversationInputs[OutputT]:
+class InnerLoopInputs[OutputT]:
     """Inputs required to start a conversation with a provider."""
+
+    adapter_name: AdapterName
+    adapter: ProviderAdapter[OutputT]
+    prompt: Prompt[OutputT]
+    prompt_name: str
+    rendered: RenderedPrompt[OutputT]
+    render_inputs: tuple[SupportsDataclass, ...]
+    initial_messages: list[dict[str, Any]]
+
+
+@FrozenDataclass()
+class ConversationInputs[OutputT]:
+    """Deprecated alias for InnerLoopInputs. Use InnerLoopInputs instead."""
 
     adapter_name: AdapterName
     adapter: ProviderAdapter[OutputT]
@@ -1145,15 +1166,15 @@ class ToolMessageSerializer(Protocol):
 
 
 @FrozenDataclass()
-class ConversationConfig:
-    """Configuration and collaborators required to run a conversation."""
+class InnerLoopConfig:
+    """Configuration and collaborators required to run the inner loop."""
 
     bus: EventBus
     session: SessionProtocol
     tool_choice: ToolChoice
     response_format: Mapping[str, Any] | None
     require_structured_output_text: bool
-    call_provider: ConversationRequest
+    call_provider: ProviderCall
     select_choice: ChoiceSelector
     serialize_tool_message_fn: ToolMessageSerializer
     parse_output: bool = True
@@ -1166,10 +1187,33 @@ class ConversationConfig:
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
 
-    def with_defaults(self, rendered: RenderedPrompt[object]) -> ConversationConfig:
+    def with_defaults(self, rendered: RenderedPrompt[object]) -> InnerLoopConfig:
         """Fill in optional settings using rendered prompt metadata."""
 
         return replace(self, deadline=self.deadline or rendered.deadline)
+
+
+@FrozenDataclass()
+class ConversationConfig:
+    """Deprecated alias for InnerLoopConfig. Use InnerLoopConfig instead."""
+
+    bus: EventBus
+    session: SessionProtocol
+    tool_choice: ToolChoice
+    response_format: Mapping[str, Any] | None
+    require_structured_output_text: bool
+    call_provider: ProviderCall
+    select_choice: ChoiceSelector
+    serialize_tool_message_fn: ToolMessageSerializer
+    parse_output: bool = True
+    format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
+        format_publish_failures
+    )
+    parse_arguments: ToolArgumentsParser = parse_tool_arguments
+    logger_override: StructuredLogger | None = None
+    deadline: Deadline | None = None
+    throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
+    budget_tracker: BudgetTracker | None = None
 
 
 @dataclass(slots=True)
@@ -1340,7 +1384,11 @@ class ResponseParser[OutputT]:
 
 @dataclass(slots=True)
 class ConversationRunner[OutputT]:
-    """Coordinate a conversational exchange with a provider."""
+    """Coordinate a conversational exchange with a provider.
+
+    This class delegates to InnerLoop for the actual execution. It is maintained
+    for backward compatibility but new code should use InnerLoop directly.
+    """
 
     adapter_name: AdapterName
     adapter: ProviderAdapter[OutputT]
@@ -1355,7 +1403,7 @@ class ConversationRunner[OutputT]:
     tool_choice: ToolChoice
     response_format: Mapping[str, Any] | None
     require_structured_output_text: bool
-    call_provider: ConversationRequest
+    call_provider: ProviderCall
     select_choice: ChoiceSelector
     serialize_tool_message_fn: ToolMessageSerializer
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
@@ -1366,14 +1414,36 @@ class ConversationRunner[OutputT]:
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
-    _evaluation_id: str = field(init=False)
-    _log: StructuredLogger = field(init=False)
-    _messages: list[dict[str, Any]] = field(init=False)
-    _tool_specs: list[dict[str, Any]] = field(init=False)
-    _provider_payload: dict[str, Any] | None = field(init=False, default=None)
-    _next_tool_choice: ToolChoice = field(init=False)
-    _tool_executor: ToolExecutor = field(init=False)
-    _response_parser: ResponseParser[OutputT] = field(init=False)
+    _inner_loop: InnerLoop[OutputT] = field(init=False)
+
+    def __post_init__(self) -> None:
+        inputs = InnerLoopInputs[OutputT](
+            adapter_name=self.adapter_name,
+            adapter=self.adapter,
+            prompt=self.prompt,
+            prompt_name=self.prompt_name,
+            rendered=self.rendered,
+            render_inputs=self.render_inputs,
+            initial_messages=self.initial_messages,
+        )
+        config = InnerLoopConfig(
+            bus=self.bus,
+            session=self.session,
+            tool_choice=self.tool_choice,
+            response_format=self.response_format,
+            require_structured_output_text=self.require_structured_output_text,
+            call_provider=self.call_provider,
+            select_choice=self.select_choice,
+            serialize_tool_message_fn=self.serialize_tool_message_fn,
+            parse_output=self.parse_output,
+            format_publish_failures=self.format_publish_failures,
+            parse_arguments=self.parse_arguments,
+            logger_override=self.logger_override,
+            deadline=self.deadline,
+            throttle_policy=self.throttle_policy,
+            budget_tracker=self.budget_tracker,
+        )
+        object.__setattr__(self, "_inner_loop", InnerLoop[OutputT](inputs, config))
 
     def _raise_deadline_error(
         self, message: str, *, phase: PromptEvaluationPhase
@@ -1393,51 +1463,148 @@ class ConversationRunner[OutputT]:
         if self.deadline.remaining() <= timedelta(0):
             self._raise_deadline_error(message, phase=phase)
 
+    def run(self) -> PromptResponse[OutputT]:
+        """Execute the conversation loop and return the final response."""
+        return self._inner_loop.run()
+
+
+def run_conversation[
+    OutputT,
+](
+    *,
+    inputs: ConversationInputs[OutputT],
+    config: ConversationConfig,
+) -> PromptResponse[OutputT]:
+    """Execute a conversational exchange with a provider and return the result.
+
+    Deprecated: Use run_inner_loop instead.
+    """
+    inner_inputs = InnerLoopInputs[OutputT](
+        adapter_name=inputs.adapter_name,
+        adapter=inputs.adapter,
+        prompt=inputs.prompt,
+        prompt_name=inputs.prompt_name,
+        rendered=inputs.rendered,
+        render_inputs=inputs.render_inputs,
+        initial_messages=inputs.initial_messages,
+    )
+    inner_config = InnerLoopConfig(
+        bus=config.bus,
+        session=config.session,
+        tool_choice=config.tool_choice,
+        response_format=config.response_format,
+        require_structured_output_text=config.require_structured_output_text,
+        call_provider=config.call_provider,
+        select_choice=config.select_choice,
+        serialize_tool_message_fn=config.serialize_tool_message_fn,
+        parse_output=config.parse_output,
+        format_publish_failures=config.format_publish_failures,
+        parse_arguments=config.parse_arguments,
+        logger_override=config.logger_override,
+        deadline=config.deadline,
+        throttle_policy=config.throttle_policy,
+        budget_tracker=config.budget_tracker,
+    )
+    return run_inner_loop(inputs=inner_inputs, config=inner_config)
+
+
+@dataclass(slots=True)
+class InnerLoop[OutputT]:
+    """Coordinate the inner loop of a conversational exchange with a provider.
+
+    This class orchestrates the conversation lifecycle:
+    1. Prepare initial messages and tool specifications
+    2. Call the provider repeatedly until a final response is produced
+    3. Execute tools as requested by the provider
+    4. Parse and return structured output when configured
+
+    The loop handles throttling, deadline enforcement, and budget tracking.
+    """
+
+    inputs: InnerLoopInputs[OutputT]
+    config: InnerLoopConfig
+    _evaluation_id: str = field(init=False)
+    _log: StructuredLogger = field(init=False)
+    _messages: list[dict[str, Any]] = field(init=False)
+    _tool_specs: list[dict[str, Any]] = field(init=False)
+    _provider_payload: dict[str, Any] | None = field(init=False, default=None)
+    _next_tool_choice: ToolChoice = field(init=False)
+    _tool_executor: ToolExecutor = field(init=False)
+    _response_parser: ResponseParser[OutputT] = field(init=False)
+    _rendered: RenderedPrompt[OutputT] = field(init=False)
+    _deadline: Deadline | None = field(init=False)
+
+    def __post_init__(self) -> None:
+        normalized_config = self.config.with_defaults(self.inputs.rendered)
+        self._deadline = normalized_config.deadline
+        if self._deadline is not None and (
+            self.inputs.rendered.deadline is not self._deadline
+        ):
+            self._rendered = replace(self.inputs.rendered, deadline=self._deadline)
+        else:
+            self._rendered = self.inputs.rendered
+
+    def _raise_deadline_error(
+        self, message: str, *, phase: PromptEvaluationPhase
+    ) -> NoReturn:
+        raise PromptEvaluationError(
+            message,
+            prompt_name=self.inputs.prompt_name,
+            phase=phase,
+            provider_payload=deadline_provider_payload(self._deadline),
+        )
+
+    def _ensure_deadline_remaining(
+        self, message: str, *, phase: PromptEvaluationPhase
+    ) -> None:
+        if self._deadline is None:
+            return
+        if self._deadline.remaining() <= timedelta(0):
+            self._raise_deadline_error(message, phase=phase)
+
     def _record_and_check_budget(self) -> None:
         """Record cumulative token usage and check budget limits."""
-        if self.budget_tracker is None:
+        if self.config.budget_tracker is None:
             return
 
         usage = token_usage_from_payload(self._provider_payload)
         if usage is not None:
-            self.budget_tracker.record_cumulative(self._evaluation_id, usage)
+            self.config.budget_tracker.record_cumulative(self._evaluation_id, usage)
 
         self._check_budget()
 
     def _check_budget(self) -> None:
         """Check budget limits and raise if exceeded."""
-        if self.budget_tracker is None:
+        if self.config.budget_tracker is None:
             return
 
         try:
-            self.budget_tracker.check()
+            self.config.budget_tracker.check()
         except BudgetExceededError as error:
             raise PromptEvaluationError(
                 str(error),
-                prompt_name=self.prompt_name,
+                prompt_name=self.inputs.prompt_name,
                 phase=PROMPT_EVALUATION_PHASE_BUDGET,
                 provider_payload=self._provider_payload,
             ) from error
 
     def run(self) -> PromptResponse[OutputT]:
-        """Execute the conversation loop and return the final response."""
+        """Execute the inner loop and return the final response."""
 
-        self._prepare_payload()
+        self._prepare()
 
         while True:
             response = self._issue_provider_request()
 
             self._provider_payload = extract_payload(response)
-
-            # Record and check budget after provider response
             self._record_and_check_budget()
 
-            choice = self.select_choice(response)
+            choice = self.config.select_choice(response)
             message = getattr(choice, "message", None)
             if message is None:
                 raise PromptEvaluationError(
                     "Provider response did not include a message payload.",
-                    prompt_name=self.prompt_name,
+                    prompt_name=self.inputs.prompt_name,
                     phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                     provider_payload=self._provider_payload,
                 )
@@ -1453,6 +1620,7 @@ class ConversationRunner[OutputT]:
     def _issue_provider_request(self) -> object:
         attempts = 0
         total_delay = timedelta(0)
+        throttle_policy = self.config.throttle_policy
 
         while True:
             attempts += 1
@@ -1462,21 +1630,21 @@ class ConversationRunner[OutputT]:
             )
 
             try:
-                return self.call_provider(
+                return self.config.call_provider(
                     self._messages,
                     self._tool_specs,
                     self._next_tool_choice if self._tool_specs else None,
-                    self.response_format,
+                    self.config.response_format,
                 )
             except ThrottleError as error:
                 attempts = max(error.attempts, attempts)
                 if not error.retry_safe:
                     raise
 
-                if attempts >= self.throttle_policy.max_attempts:
+                if attempts >= throttle_policy.max_attempts:
                     raise ThrottleError(
                         "Throttle retry budget exhausted.",
-                        prompt_name=self.prompt_name,
+                        prompt_name=self.inputs.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
                         details=_details_from_error(
                             error, attempts=attempts, retry_safe=False
@@ -1484,15 +1652,15 @@ class ConversationRunner[OutputT]:
                     ) from error
 
                 delay = _jittered_backoff(
-                    policy=self.throttle_policy,
+                    policy=throttle_policy,
                     attempt=attempts,
                     retry_after=error.retry_after,
                 )
 
-                if self.deadline is not None and self.deadline.remaining() <= delay:
+                if self._deadline is not None and self._deadline.remaining() <= delay:
                     raise ThrottleError(
                         "Deadline expired before retrying after throttling.",
-                        prompt_name=self.prompt_name,
+                        prompt_name=self.inputs.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
                         details=_details_from_error(
                             error, attempts=attempts, retry_safe=False
@@ -1500,10 +1668,10 @@ class ConversationRunner[OutputT]:
                     ) from error
 
                 total_delay += delay
-                if total_delay > self.throttle_policy.max_total_delay:
+                if total_delay > throttle_policy.max_total_delay:
                     raise ThrottleError(
                         "Throttle retry window exceeded configured budget.",
-                        prompt_name=self.prompt_name,
+                        prompt_name=self.inputs.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
                         details=_details_from_error(
                             error, attempts=attempts, retry_safe=False
@@ -1524,64 +1692,69 @@ class ConversationRunner[OutputT]:
                 )
                 _sleep_for(delay)
 
-    def _prepare_payload(self) -> None:
+    def _prepare(self) -> None:
         """Initialize execution state prior to the provider loop."""
 
         self._evaluation_id = str(uuid4())
-        self._messages = list(self.initial_messages)
-        self._log = (self.logger_override or logger).bind(
-            adapter=self.adapter_name,
-            prompt=self.prompt_name,
+        self._messages = list(self.inputs.initial_messages)
+        self._log = (self.config.logger_override or logger).bind(
+            adapter=self.inputs.adapter_name,
+            prompt=self.inputs.prompt_name,
             evaluation_id=self._evaluation_id,
         )
         self._log.info(
             "Prompt execution started.",
             event="prompt_execution_started",
             context={
-                "tool_count": len(self.rendered.tools),
-                "parse_output": self.parse_output,
+                "tool_count": len(self._rendered.tools),
+                "parse_output": self.config.parse_output,
             },
         )
 
-        tools = list(self.rendered.tools)
+        tools = list(self._rendered.tools)
         self._tool_specs = [tool_to_spec(tool) for tool in tools]
         tool_registry = {tool.name: tool for tool in tools}
         self._provider_payload = None
-        self._next_tool_choice = self.tool_choice
+        self._next_tool_choice = self.config.tool_choice
 
         self._tool_executor = ToolExecutor(
-            adapter_name=self.adapter_name,
-            adapter=self.adapter,
-            prompt=self.prompt,
-            prompt_name=self.prompt_name,
-            rendered=self.rendered,
-            bus=self.bus,
-            session=self.session,
+            adapter_name=self.inputs.adapter_name,
+            adapter=self.inputs.adapter,
+            prompt=self.inputs.prompt,
+            prompt_name=self.inputs.prompt_name,
+            rendered=self._rendered,
+            bus=self.config.bus,
+            session=self.config.session,
             tool_registry=tool_registry,
-            serialize_tool_message_fn=self.serialize_tool_message_fn,
-            format_publish_failures=self.format_publish_failures,
-            parse_arguments=self.parse_arguments,
-            logger_override=self.logger_override,
-            deadline=self.deadline,
-            budget_tracker=self.budget_tracker,
+            serialize_tool_message_fn=self.config.serialize_tool_message_fn,
+            format_publish_failures=self.config.format_publish_failures,
+            parse_arguments=self.config.parse_arguments,
+            logger_override=self.config.logger_override,
+            deadline=self._deadline,
+            budget_tracker=self.config.budget_tracker,
         )
         self._response_parser = ResponseParser[OutputT](
-            prompt_name=self.prompt_name,
-            rendered=self.rendered,
-            parse_output=self.parse_output,
-            require_structured_output_text=self.require_structured_output_text,
+            prompt_name=self.inputs.prompt_name,
+            rendered=self._rendered,
+            parse_output=self.config.parse_output,
+            require_structured_output_text=self.config.require_structured_output_text,
         )
 
-        publish_result = self.bus.publish(
+        self._publish_rendered_event()
+
+    def _publish_rendered_event(self) -> None:
+        """Publish the PromptRendered event."""
+
+        publish_result = self.config.bus.publish(
             PromptRendered(
-                prompt_ns=self.prompt.ns,
-                prompt_key=self.prompt.key,
-                prompt_name=self.prompt.name,
-                adapter=self.adapter_name,
-                session_id=getattr(self.session, "session_id", None),
-                render_inputs=self.render_inputs,
-                rendered_prompt=self.rendered.text,
-                descriptor=self.rendered.descriptor,
+                prompt_ns=self.inputs.prompt.ns,
+                prompt_key=self.inputs.prompt.key,
+                prompt_name=self.inputs.prompt.name,
+                adapter=self.inputs.adapter_name,
+                session_id=getattr(self.config.session, "session_id", None),
+                render_inputs=self.inputs.render_inputs,
+                rendered_prompt=self._rendered.text,
+                descriptor=self._rendered.descriptor,
                 created_at=datetime.now(UTC),
                 event_id=uuid4(),
             )
@@ -1627,7 +1800,6 @@ class ConversationRunner[OutputT]:
         )
         self._messages.extend(tool_messages)
 
-        # Check budget after tool execution
         self._check_budget()
 
         if isinstance(self._next_tool_choice, Mapping):
@@ -1643,7 +1815,6 @@ class ConversationRunner[OutputT]:
             phase=PROMPT_EVALUATION_PHASE_RESPONSE,
         )
 
-        # Final budget check before returning
         self._check_budget()
 
         output, text_value = self._response_parser.parse(
@@ -1657,28 +1828,40 @@ class ConversationRunner[OutputT]:
             and tool_message_records[-1][0].success
         ):
             last_result, last_message = tool_message_records[-1]
-            serialized = self.serialize_tool_message_fn(last_result, payload=output)
+            serialized = self.config.serialize_tool_message_fn(
+                last_result, payload=output
+            )
             if "output" in last_message:
                 last_message["output"] = serialized
             else:
                 last_message["content"] = serialized
 
         response_payload = PromptResponse(
-            prompt_name=self.prompt_name,
+            prompt_name=self.inputs.prompt_name,
             text=text_value,
             output=output,
         )
+
+        self._publish_executed_event(response_payload, output)
+
+        return response_payload
+
+    def _publish_executed_event(
+        self, response_payload: PromptResponse[OutputT], output: OutputT | None
+    ) -> None:
+        """Publish the PromptExecuted event."""
+
         usage = token_usage_from_payload(self._provider_payload)
         prompt_value: SupportsDataclass | None = None
         if is_dataclass_instance(output):
             prompt_value = cast(SupportsDataclass, output)  # pyright: ignore[reportUnnecessaryCast]
 
-        publish_result = self.bus.publish(
+        publish_result = self.config.bus.publish(
             PromptExecuted(
-                prompt_name=self.prompt_name,
-                adapter=self.adapter_name,
+                prompt_name=self.inputs.prompt_name,
+                adapter=self.inputs.adapter_name,
                 result=cast(PromptResponse[object], response_payload),
-                session_id=getattr(self.session, "session_id", None),
+                session_id=getattr(self.config.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 usage=usage,
                 value=prompt_value,
@@ -1703,59 +1886,32 @@ class ConversationRunner[OutputT]:
             "Prompt execution completed.",
             event="prompt_execution_succeeded",
             context={
-                "tool_count": len(tool_message_records),
+                "tool_count": len(self._tool_executor.tool_message_records),
                 "has_output": output is not None,
-                "text_length": len(text_value or "") if text_value else 0,
+                "text_length": len(response_payload.text or "")
+                if response_payload.text
+                else 0,
                 "structured_output": self._response_parser.should_parse_structured_output,
                 "handler_count": publish_result.handled_count,
             },
         )
-        return response_payload
 
 
-def run_conversation[
+def run_inner_loop[
     OutputT,
 ](
     *,
-    inputs: ConversationInputs[OutputT],
-    config: ConversationConfig,
+    inputs: InnerLoopInputs[OutputT],
+    config: InnerLoopConfig,
 ) -> PromptResponse[OutputT]:
-    """Execute a conversational exchange with a provider and return the result."""
+    """Execute the inner loop of a conversation with a provider.
 
-    normalized_config = config.with_defaults(inputs.rendered)
-    rendered_with_deadline = inputs.rendered
-    if normalized_config.deadline is not None and (
-        inputs.rendered.deadline is not normalized_config.deadline
-    ):
-        rendered_with_deadline = replace(
-            inputs.rendered, deadline=normalized_config.deadline
-        )
+    This is the primary entry point for running a conversation. It creates
+    an InnerLoop instance and executes it.
+    """
 
-    runner = ConversationRunner[OutputT](
-        adapter_name=inputs.adapter_name,
-        adapter=inputs.adapter,
-        prompt=inputs.prompt,
-        prompt_name=inputs.prompt_name,
-        rendered=rendered_with_deadline,
-        render_inputs=inputs.render_inputs,
-        initial_messages=inputs.initial_messages,
-        parse_output=normalized_config.parse_output,
-        bus=normalized_config.bus,
-        session=normalized_config.session,
-        tool_choice=normalized_config.tool_choice,
-        response_format=normalized_config.response_format,
-        require_structured_output_text=normalized_config.require_structured_output_text,
-        call_provider=normalized_config.call_provider,
-        select_choice=normalized_config.select_choice,
-        serialize_tool_message_fn=normalized_config.serialize_tool_message_fn,
-        format_publish_failures=normalized_config.format_publish_failures,
-        parse_arguments=normalized_config.parse_arguments,
-        logger_override=normalized_config.logger_override,
-        deadline=normalized_config.deadline,
-        throttle_policy=normalized_config.throttle_policy,
-        budget_tracker=normalized_config.budget_tracker,
-    )
-    return runner.run()
+    loop = InnerLoop[OutputT](inputs=inputs, config=config)
+    return loop.run()
 
 
 @dataclass(slots=True)

@@ -25,7 +25,7 @@ runtime reference guide for how prompts become provider calls.
 
 **Rationale for the architecture**
 
-- A single runner (`shared.run_conversation` / `ConversationRunner`) coordinates provider calls, tool dispatch, and
+- A single runner (`shared.run_inner_loop` / `InnerLoop`) coordinates provider calls, tool dispatch, and
   structured output parsing so new adapters inherit identical behavior without reimplementing loops.
 - Provider-specific layers (`openai.py`, `litellm.py`, and future modules) only handle payload translation and choice
   selection, keeping SDK dependencies out of core logic.
@@ -55,7 +55,7 @@ Adapter responsibilities:
 
 - `core.py` – Defines `ProviderAdapter`, `PromptResponse`, and the shared error model. All adapters inherit from this
   layer to guarantee consistent typing and DbC coverage.
-- `shared.py` – Implements `run_conversation` / `ConversationRunner`, tool serialization (`tool_to_spec`), and response
+- `shared.py` – Implements `run_inner_loop` / `InnerLoop`, tool serialization (`tool_to_spec`), and response
   parsing. This is the live execution path for every adapter.
 - `config.py` – Typed configuration dataclasses for adapter instantiation and model parameters (`LLMConfig`,
   `OpenAIClientConfig`, `OpenAIModelConfig`, `LiteLLMClientConfig`, `LiteLLMModelConfig`).
@@ -284,23 +284,23 @@ class OptimizationResult:
 
 ## Execution Lifecycle
 
-All adapters rely on `shared.run_conversation` (implemented through `ConversationRunner`) to coordinate provider calls.
+All adapters rely on `shared.run_inner_loop` (implemented through `InnerLoop`) to coordinate provider calls.
 The lifecycle is identical for LiteLLM, OpenAI, and future adapters:
 
 1. **Render** – Call `prompt.render(*params, overrides_store, tag)` once. When structured output parsing is enabled
    and the prompt supports inline instructions (`inject_output_instructions=True`), adapters may disable those
    instructions when the provider has first-class JSON schema support (OpenAI's `response_format` path). Explicit
    deadlines on `evaluate` override the rendered prompt's deadline via `dataclasses.replace`.
-1. **Publish `PromptRendered`** – `ConversationRunner` emits `PromptRendered` with the namespace, key, optional name,
+1. **Publish `PromptRendered`** – `InnerLoop` emits `PromptRendered` with the namespace, key, optional name,
    adapter label, session id, serialized render inputs, and the full rendered markdown. Subscribers (for example,
    the `Session` reducers in `specs/SESSIONS.md`) now have complete context before the provider request runs.
 1. **Prepare tool payloads** – Every tool from `rendered.tools` is converted to the provider-agnostic JSON schema
    produced by `tool_to_spec`. The adapter keeps a registry keyed by tool name for resolving tool calls.
-1. **Call the provider** – `run_conversation` builds the chat payload (`messages`, `tools`, `tool_choice`,
+1. **Call the provider** – `run_inner_loop` builds the chat payload (`messages`, `tools`, `tool_choice`,
    optional `response_format`) and invokes the provider-specific callable supplied by the concrete adapter. The first
    choice (`first_choice`) becomes authoritative. Failures are wrapped in `PromptEvaluationError` with
    `phase="request"`.
-1. **Handle tool calls** – When the provider responds with `tool_calls`, `ConversationRunner` records an assistant turn
+1. **Handle tool calls** – When the provider responds with `tool_calls`, `InnerLoop` records an assistant turn
    containing the serialized tool calls before executing them via `ToolExecutor`. Each tool invocation produces
    `ToolInvoked` events, textual responses (`serialize_tool_message`), and optional dataclass values. When tool_choice
    was forced to a specific function, the runner automatically reverts to `"auto"` after the first accepted call so the
@@ -344,7 +344,7 @@ returned by `deadline_provider_payload`.
 
 `build_json_schema_response_format` inspects the rendered prompt's `output_type`, container type (`"object"` or
 `"array"`), and `allow_extra_keys` flag to construct a JSON schema payload suitable for providers that support schema
-constrained outputs. `run_conversation` passes this payload to the concrete adapter, which decides whether the provider
+constrained outputs. `run_inner_loop` passes this payload to the concrete adapter, which decides whether the provider
 supports it:
 
 - OpenAI: when `use_native_response_format=True`, adapters disable inline structured-output instructions and pass the
@@ -360,7 +360,7 @@ skips structured parsing entirely and simply returns the assistant text.
 
 ## Deadlines, Sessions, and Overrides
 
-- The `Deadline` passed to `evaluate` (or attached to the rendered prompt) flows into `ConversationRunner`, each
+- The `Deadline` passed to `evaluate` (or attached to the rendered prompt) flows into `InnerLoop`, each
   tool's `ToolContext`, and every error message produced by deadline guards. The runner rejects requests immediately if
   `deadline.remaining()` is already non-positive.
 - `SessionProtocol` provides snapshots, rollbacks, and typed slices. Tool handlers use it for stateful reducers,
@@ -429,7 +429,7 @@ that produced the digest.
    typed config dataclass so tests can inject fakes.
 1. **Render the prompt** – Always call `prompt.render` exactly once, respecting the `override_store`, `tag`, and optional
    instruction toggles when structured output parsing needs provider help.
-1. **Delegate to `run_conversation`** – Supply provider-specific `call_provider` and `select_choice` functions plus any
+1. **Delegate to `run_inner_loop`** – Supply provider-specific `call_provider` and `select_choice` functions plus any
    adapter-specific defaults (`tool_choice`, `response_format`, `require_structured_output_text`). Merge model config
    parameters into the request payload via `config.to_request_params()`. The helper handles logging, deadlines, events,
    tool execution, and structured output.

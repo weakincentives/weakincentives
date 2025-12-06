@@ -250,8 +250,8 @@ def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None
         throttle_policy=new_throttle_policy(
             max_attempts=3, base_delay=timedelta(seconds=1)
         ),
+        deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=2)),
     )
-    runner.deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=2))
 
     with pytest.raises(ThrottleError) as excinfo:
         runner.run()
