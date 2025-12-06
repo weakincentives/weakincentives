@@ -77,12 +77,15 @@ def build_compose_prompt() -> PromptTemplate:
 def test_prompt_integration_renders_expected_markdown() -> None:
     template = build_compose_prompt()
 
-    rendered = Prompt(
-        template,
-        RoutingParams(recipient="Jordan", subject="Q2 sync"),
-        ToneParams(tone="warm"),
-        ContentParams(summary="Top takeaways from yesterday's meeting."),
-    ).render()
+    rendered = (
+        Prompt(template)
+        .bind(
+            RoutingParams(recipient="Jordan", subject="Q2 sync"),
+            ToneParams(tone="warm"),
+            ContentParams(summary="Top takeaways from yesterday's meeting."),
+        )
+        .render()
+    )
 
     assert rendered.text == "\n\n".join(
         [
@@ -96,12 +99,15 @@ def test_prompt_integration_renders_expected_markdown() -> None:
 def test_prompt_integration_handles_disabled_sections() -> None:
     template = build_compose_prompt()
 
-    rendered = Prompt(
-        template,
-        RoutingParams(recipient="Avery"),
-        ToneParams(tone="direct"),
-        ContentParams(summary="   \n"),
-    ).render()
+    rendered = (
+        Prompt(template)
+        .bind(
+            RoutingParams(recipient="Avery"),
+            ToneParams(tone="direct"),
+            ContentParams(summary="   \n"),
+        )
+        .render()
+    )
 
     assert "Content Guidance" not in rendered.text
     assert "Target tone: direct" in rendered.text

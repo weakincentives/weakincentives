@@ -154,7 +154,7 @@ def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:
         sections=[first, second],
     )
 
-    rendered = Prompt(template, DuplicateParams(value="shared")).render()
+    rendered = Prompt(template).bind(DuplicateParams(value="shared")).render()
 
     assert "First: shared" in rendered.text
     assert "Second: shared" in rendered.text
@@ -274,7 +274,7 @@ def test_prompt_descriptor_cached_on_first_access(
     monkeypatch.setattr(PromptDescriptor, "from_prompt", classmethod(_fail))
 
     # Subsequent accesses should use the cached descriptor
-    prompt = Prompt(template, RootParams(title="hello"))
+    prompt = Prompt(template).bind(RootParams(title="hello"))
     rendered = prompt.render()
 
     assert template.descriptor is first_descriptor

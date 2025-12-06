@@ -127,7 +127,7 @@ def _evaluate(
     *params: SupportsDataclass,
     **kwargs: object,
 ) -> PromptResponse[OutputT]:
-    bound_prompt = Prompt(prompt, *params)
+    bound_prompt = Prompt(prompt).bind(*params)
     return adapter.evaluate(bound_prompt, **kwargs)
 
 
@@ -1598,7 +1598,7 @@ def test_litellm_parse_schema_constrained_payload_unwraps_wrapped_array() -> Non
         ],
     )
 
-    rendered = Prompt(prompt, ToolParams(query="policies")).render()
+    rendered = Prompt(prompt).bind(ToolParams(query="policies")).render()
 
     payload = {ARRAY_WRAPPER_KEY: [{"answer": "Ready"}]}
 
@@ -1630,7 +1630,7 @@ def test_litellm_parse_schema_constrained_payload_handles_object_container() -> 
         ],
     )
 
-    rendered = Prompt(template, ToolParams(query="policies")).render()
+    rendered = Prompt(template).bind(ToolParams(query="policies")).render()
 
     parsed = module.parse_schema_constrained_payload({"answer": "Ready"}, rendered)
 
@@ -1658,7 +1658,7 @@ def test_litellm_build_json_schema_response_format_returns_none_for_plain_prompt
         ],
     )
 
-    rendered = Prompt(template, ToolParams(query="world")).render()
+    rendered = Prompt(template).bind(ToolParams(query="world")).render()
 
     response_format = module.build_json_schema_response_format(rendered, "plain")
 
@@ -1690,7 +1690,7 @@ def test_litellm_parse_schema_constrained_payload_rejects_non_sequence_arrays() 
         ],
     )
 
-    rendered = Prompt(template, ToolParams(query="policies")).render()
+    rendered = Prompt(template).bind(ToolParams(query="policies")).render()
 
     with pytest.raises(TypeError):
         module.parse_schema_constrained_payload("oops", rendered)
@@ -1757,7 +1757,9 @@ def test_litellm_adapter_delegates_to_shared_runner(
     assert inputs.adapter_name == LITELLM_ADAPTER_NAME
     assert inputs.prompt_name == "shared-runner"
 
-    expected_rendered = Prompt(prompt, params).render(inject_output_instructions=False)
+    expected_rendered = (
+        Prompt(prompt).bind(params).render(inject_output_instructions=False)
+    )
     assert inputs.rendered == expected_rendered
     assert inputs.render_inputs == (params,)
     assert inputs.initial_messages == [
@@ -1823,7 +1825,7 @@ def test_litellm_adapter_creates_budget_tracker_when_budget_provided() -> None:
     session = Session(bus=bus)
 
     result = adapter.evaluate(
-        Prompt(prompt, GreetingParams(user="Test")),
+        Prompt(prompt).bind(GreetingParams(user="Test")),
         bus=bus,
         session=session,
         budget=budget,

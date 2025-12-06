@@ -274,14 +274,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         """Resolved structured output declaration, when present."""
         return self._structured_output
 
-    @property
-    def renderer(self) -> PromptRenderer[OutputT]:
-        """Return the prompt renderer for this template."""
-        renderer = self._renderer
-        if renderer is None:  # pragma: no cover
-            raise RuntimeError("PromptTemplate._renderer not initialized")
-        return renderer
-
     def find_section(
         self,
         selector: type[Section[SupportsDataclass]]
@@ -331,7 +323,6 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
     def __init__(
         self,
         template: PromptTemplate[OutputT],
-        *params: SupportsDataclass,
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str = "latest",
         inject_output_instructions: bool | None = None,
@@ -349,7 +340,7 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
             else template.inject_output_instructions
         )
         self.inject_output_instructions = effective_instructions
-        self._params: tuple[SupportsDataclass, ...] = params
+        self._params: tuple[SupportsDataclass, ...] = ()
 
     @property
     def params(self) -> tuple[SupportsDataclass, ...]:
@@ -370,21 +361,38 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
         return self.template.structured_output
 
+    @property
+    def renderer(self) -> PromptRenderer[OutputT]:
+        """Return the prompt renderer for this template."""
+        # Prompt requires internal access to PromptTemplate's renderer by design.
+        renderer = self.template._renderer  # pyright: ignore[reportPrivateUsage]
+        if renderer is None:  # pragma: no cover
+            raise RuntimeError("PromptTemplate._renderer not initialized")
+        return renderer
+
     def bind(self, *params: SupportsDataclass) -> Prompt[OutputT]:
         """Mutate this prompt's bound parameters; return self for chaining.
 
         New dataclass instances replace any existing binding of the same
-        dataclass type; otherwise they are appended.
+        dataclass type; otherwise they are appended. Passing multiple params
+        of the same type in a single bind() call is not allowed - validation
+        will raise an error during render().
         """
 
         if not params:
             return self
 
+        # All new params are appended, but if there's already a param of the
+        # same type in existing params, we replace it. Duplicates within the
+        # same bind() call are passed through for validation during render().
         current = list(self._params)
         for candidate in params:
             replaced = False
             for idx, existing in enumerate(current):
-                if type(existing) is type(candidate):
+                # Only replace if the existing param is from a previous bind,
+                # not from the current params list. Check by comparing with
+                # original self._params length.
+                if type(existing) is type(candidate) and idx < len(self._params):
                     current[idx] = candidate
                     replaced = True
                     break
@@ -427,7 +435,7 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
                 }
                 tool_overrides = dict(override.tool_overrides)
 
-        renderer = self.template.renderer
+        renderer = self.renderer
         param_lookup = renderer.build_param_lookup(self._params)
         return renderer.render(
             param_lookup,

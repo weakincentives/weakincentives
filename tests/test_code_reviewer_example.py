@@ -145,7 +145,7 @@ def test_workspace_digest_section_empty_by_default() -> None:
     session = Session(bus=bus)
     template = build_task_prompt(session=session)
 
-    rendered = Prompt(template, ReviewTurnParams(request="demo request")).render()
+    rendered = Prompt(template).bind(ReviewTurnParams(request="demo request")).render()
 
     assert "## 2. Workspace Digest" in rendered.text
     post_section = rendered.text.split("## 2. Workspace Digest", 1)[1]
@@ -173,12 +173,15 @@ def test_workspace_digest_override_applied_when_no_session_digest(
         body="- Override digest",
     )
 
-    rendered = Prompt(
-        template,
-        ReviewTurnParams(request="demo request"),
-        overrides_store=overrides_store,
-        overrides_tag="seed",
-    ).render()
+    rendered = (
+        Prompt(
+            template,
+            overrides_store=overrides_store,
+            overrides_tag="seed",
+        )
+        .bind(ReviewTurnParams(request="demo request"))
+        .render()
+    )
     assert "Override digest" in rendered.text
 
 
@@ -202,12 +205,15 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     )
     set_workspace_digest(session, "workspace-digest", "- Session digest")
 
-    rendered = Prompt(
-        template,
-        ReviewTurnParams(request="demo request"),
-        overrides_store=overrides_store,
-        overrides_tag="seed",
-    ).render()
+    rendered = (
+        Prompt(
+            template,
+            overrides_store=overrides_store,
+            overrides_tag="seed",
+        )
+        .bind(ReviewTurnParams(request="demo request"))
+        .render()
+    )
     assert "Session digest" in rendered.text
 
 

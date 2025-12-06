@@ -97,9 +97,9 @@ def _build_parent_prompt() -> tuple[
 
 def test_delegation_prompt_renders_required_sections() -> None:
     parent_prompt, tool = _build_parent_prompt()
-    rendered_parent = Prompt(
-        parent_prompt, ParentSectionParams(guidance="clues")
-    ).render()
+    rendered_parent = (
+        Prompt(parent_prompt).bind(ParentSectionParams(guidance="clues")).render()
+    )
     parent_with_descriptions = replace(
         rendered_parent,
         _tool_param_descriptions=MappingProxyType(
@@ -144,9 +144,11 @@ def test_delegation_prompt_renders_required_sections() -> None:
 
 def test_delegation_prompt_with_response_format_instructions() -> None:
     parent_prompt, _ = _build_parent_prompt()
-    rendered_parent = Prompt(
-        parent_prompt, ParentSectionParams(guidance="access patterns")
-    ).render()
+    rendered_parent = (
+        Prompt(parent_prompt)
+        .bind(ParentSectionParams(guidance="access patterns"))
+        .render()
+    )
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
         _as_prompt_protocol(parent_prompt),
@@ -174,9 +176,9 @@ def test_delegation_prompt_with_response_format_instructions() -> None:
 
 def test_delegation_prompt_allows_explicit_recap_override() -> None:
     parent_prompt, _ = _build_parent_prompt()
-    rendered_parent = Prompt(
-        parent_prompt, ParentSectionParams(guidance="logs")
-    ).render()
+    rendered_parent = (
+        Prompt(parent_prompt).bind(ParentSectionParams(guidance="logs")).render()
+    )
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
         _as_prompt_protocol(parent_prompt),
@@ -199,9 +201,9 @@ def test_delegation_prompt_allows_explicit_recap_override() -> None:
 
 def test_delegation_prompt_requires_specialization() -> None:
     parent_prompt, _ = _build_parent_prompt()
-    rendered_parent = Prompt(
-        parent_prompt, ParentSectionParams(guidance="clues")
-    ).render()
+    rendered_parent = (
+        Prompt(parent_prompt).bind(ParentSectionParams(guidance="clues")).render()
+    )
 
     with pytest.raises(TypeError):
         DelegationPrompt(_as_prompt_protocol(parent_prompt), rendered_parent)
@@ -218,7 +220,7 @@ def test_delegation_prompt_skips_fallback_when_parent_freeform() -> None:
         key="parent-freeform",
         sections=(section,),
     )
-    rendered_parent = Prompt(prompt, ParentSectionParams(guidance="logs")).render()
+    rendered_parent = Prompt(prompt).bind(ParentSectionParams(guidance="logs")).render()
     assert rendered_parent.container is None
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
@@ -255,9 +257,9 @@ def test_recap_section_requires_params() -> None:
 
 def test_delegation_prompt_empty_recap_uses_placeholder() -> None:
     parent_prompt, _ = _build_parent_prompt()
-    rendered_parent = Prompt(
-        parent_prompt, ParentSectionParams(guidance="signals")
-    ).render()
+    rendered_parent = (
+        Prompt(parent_prompt).bind(ParentSectionParams(guidance="signals")).render()
+    )
 
     delegation = DelegationPrompt[ParentResult, DelegationPlan](
         _as_prompt_protocol(parent_prompt),
@@ -280,9 +282,9 @@ def test_delegation_prompt_empty_recap_uses_placeholder() -> None:
 
 def test_delegation_prompt_inherits_deadline() -> None:
     parent_prompt, _ = _build_parent_prompt()
-    rendered_parent = Prompt(
-        parent_prompt, ParentSectionParams(guidance="signals")
-    ).render()
+    rendered_parent = (
+        Prompt(parent_prompt).bind(ParentSectionParams(guidance="signals")).render()
+    )
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
     rendered_parent_with_deadline = replace(rendered_parent, deadline=deadline)
 

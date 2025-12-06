@@ -51,7 +51,7 @@ def test_prompt_render_rejects_unregistered_params_type() -> None:
     )
 
     with pytest.raises(PromptValidationError) as exc:
-        Prompt(template, UnregisteredParams(value="bad")).render()
+        Prompt(template).bind(UnregisteredParams(value="bad")).render()
 
     error = cast(PromptValidationError, exc.value)
     assert error.dataclass_type is UnregisteredParams
@@ -156,7 +156,7 @@ def test_prompt_render_wraps_prompt_errors_with_context() -> None:
     )
 
     with pytest.raises(PromptRenderError) as exc:
-        Prompt(template, BrokenParams(value="x")).render()
+        Prompt(template).bind(BrokenParams(value="x")).render()
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("broken",)
@@ -366,7 +366,7 @@ def test_prompt_render_propagates_errors_with_existing_context() -> None:
     )
 
     with pytest.raises(PromptRenderError) as exc:
-        Prompt(template, ContextParams(value="x")).render()
+        Prompt(template).bind(ContextParams(value="x")).render()
 
     error = cast(PromptRenderError, exc.value)
     assert error.section_path == ("Provided",)

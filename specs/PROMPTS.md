@@ -39,8 +39,8 @@ template = PromptTemplate[OutputType](
 `Prompt` is a wrapper that binds parameters to a template for rendering:
 
 ```python
-# Create a Prompt with bound parameters
-prompt = Prompt(template, MyParams(field="value"))
+# Create a Prompt and bind parameters
+prompt = Prompt(template).bind(MyParams(field="value"))
 
 # Render the prompt
 rendered = prompt.render()
@@ -283,7 +283,7 @@ class VisibilityExpansionRequired(PromptError):
 
 ```python
 visibility_overrides = {}
-prompt = Prompt(template, *params)
+prompt = Prompt(template).bind(*params)
 
 while True:
     try:
@@ -361,7 +361,7 @@ template = PromptTemplate[TaskResult](
     ],
 )
 
-rendered = Prompt(template, TaskParams(objective="Refactor auth module")).render()
+rendered = Prompt(template).bind(TaskParams(objective="Refactor auth module")).render()
 
 # After adapter evaluation...
 result: TaskResult = parse_structured_output(response_text, rendered)

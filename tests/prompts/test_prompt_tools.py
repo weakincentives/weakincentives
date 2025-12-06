@@ -126,15 +126,17 @@ def test_prompt_tools_depth_first_and_enablement() -> None:
     template, primary_tool, secondary_tool = _build_prompt()
 
     default_tools = (
-        Prompt(template, GuidanceParams(primary_tool="primary_lookup")).render().tools
+        Prompt(template)
+        .bind(GuidanceParams(primary_tool="primary_lookup"))
+        .render()
+        .tools
     )
 
     assert default_tools == (primary_tool, secondary_tool)
 
     disabled_parent = (
-        Prompt(
-            template, GuidanceParams(primary_tool="primary_lookup", allow_tools=False)
-        )
+        Prompt(template)
+        .bind(GuidanceParams(primary_tool="primary_lookup", allow_tools=False))
         .render()
         .tools
     )
@@ -142,8 +144,8 @@ def test_prompt_tools_depth_first_and_enablement() -> None:
     assert disabled_parent == (secondary_tool,)
 
     disabled_secondary = (
-        Prompt(
-            template,
+        Prompt(template)
+        .bind(
             GuidanceParams(primary_tool="primary_lookup"),
             SecondaryToggleParams(enabled=False),
         )

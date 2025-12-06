@@ -130,9 +130,11 @@ def test_prompt_tools_integration_example() -> None:
         sections=[guidance],
     )
 
-    rendered = Prompt(
-        prompt_template, GuidanceParams(primary_tool="lookup_entity")
-    ).render()
+    rendered = (
+        Prompt(prompt_template)
+        .bind(GuidanceParams(primary_tool="lookup_entity"))
+        .render()
+    )
     markdown = rendered.text
 
     assert markdown == (
@@ -247,9 +249,11 @@ def test_prompt_renders_tool_examples_inline() -> None:
         sections=[guidance],
     )
 
-    rendered = Prompt(
-        prompt_template, GuidanceParams(primary_tool="lookup_entity")
-    ).render()
+    rendered = (
+        Prompt(prompt_template)
+        .bind(GuidanceParams(primary_tool="lookup_entity"))
+        .render()
+    )
 
     assert rendered.text == (
         "## 1. Guidance\n\nUse tools when you need up-to-date context. "

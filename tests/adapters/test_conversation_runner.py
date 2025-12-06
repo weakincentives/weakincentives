@@ -174,7 +174,7 @@ def build_inner_loop(
 ) -> InnerLoop[object]:
     """Build an InnerLoop instance using the new API."""
     template = PromptTemplate(ns="tests", key="example")
-    prompt = Prompt(template, *(render_inputs or ()))
+    prompt = Prompt(template).bind(*(render_inputs or ()))
     session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
 
     inputs = InnerLoopInputs[object](

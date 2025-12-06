@@ -234,10 +234,9 @@ Override prompt sections via version-controlled JSON:
 ```python
 prompt = Prompt(
     review_template,
-    ReviewParams(...),
     overrides_store=LocalPromptOverridesStore(),
     overrides_tag="assertive-feedback",
-)
+).bind(ReviewParams(...))
 rendered = prompt.render()
 ```
 

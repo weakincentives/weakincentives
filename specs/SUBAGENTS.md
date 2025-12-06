@@ -152,7 +152,7 @@ daily_update = Prompt[str](
     ),
 )
 
-rendered = Prompt(daily_update, UpdateParams(body="Summarize blockers, then plan execution.")).render()
+rendered = Prompt(daily_update).bind(UpdateParams(body="Summarize blockers, then plan execution.")).render()
 
 params = DispatchSubagentsParams(
     delegations=(
