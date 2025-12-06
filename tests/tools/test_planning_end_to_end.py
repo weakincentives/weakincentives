@@ -22,9 +22,6 @@ from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, select_latest
 from weakincentives.tools import (
     AddStep,
-    ClearPlan,
-    MarkStep,
-    NewPlanStep,
     Plan,
     PlanningToolsSection,
     ReadPlan,
@@ -42,26 +39,21 @@ def test_planning_end_to_end_flow() -> None:
     setup_tool = cast(Tool[SetupPlan, SetupPlan], tools["planning_setup_plan"])
     add_tool = cast(Tool[AddStep, AddStep], tools["planning_add_step"])
     update_tool = cast(Tool[UpdateStep, UpdateStep], tools["planning_update_step"])
-    mark_tool = cast(Tool[MarkStep, MarkStep], tools["planning_mark_step"])
     read_tool = cast(Tool[ReadPlan, Plan], tools["planning_read_plan"])
-    clear_tool = cast(Tool[ClearPlan, ClearPlan], tools["planning_clear_plan"])
 
     invoke_tool(
         bus,
         setup_tool,
         SetupPlan(
             objective="resolve support backlog",
-            initial_steps=(
-                NewPlanStep(title="triage requests"),
-                NewPlanStep(title="categorise follow-ups"),
-            ),
+            initial_steps=("triage requests", "categorise follow-ups"),
         ),
         session=session,
     )
     invoke_tool(
         bus,
         add_tool,
-        AddStep(steps=(NewPlanStep(title="draft update"),)),
+        AddStep(steps=("draft update",)),
         session=session,
     )
 
@@ -76,39 +68,31 @@ def test_planning_end_to_end_flow() -> None:
     invoke_tool(
         bus,
         update_tool,
-        UpdateStep(step_id="S002", title="categorise replies"),
+        UpdateStep(step_id=2, title="categorise replies"),
         session=session,
     )
     invoke_tool(
         bus,
-        mark_tool,
-        MarkStep(step_id="S001", status="done", note="triage complete"),
+        update_tool,
+        UpdateStep(step_id=1, status="done"),
         session=session,
     )
     invoke_tool(
         bus,
-        mark_tool,
-        MarkStep(step_id="S002", status="done"),
+        update_tool,
+        UpdateStep(step_id=2, status="done"),
         session=session,
     )
     invoke_tool(
         bus,
-        mark_tool,
-        MarkStep(step_id="S003", status="done"),
+        update_tool,
+        UpdateStep(step_id=3, status="done"),
         session=session,
     )
 
     plan = select_latest(session, Plan)
     assert plan is not None
     assert plan.status == "completed"
-    assert plan.steps[0].notes == ("triage complete",)
 
     result = invoke_tool(bus, read_tool, ReadPlan(), session=session)
     assert result.message == "Retrieved the current plan with 3 steps."
-
-    invoke_tool(bus, clear_tool, ClearPlan(), session=session)
-
-    plan = select_latest(session, Plan)
-    assert plan is not None
-    assert plan.status == "abandoned"
-    assert plan.steps == ()

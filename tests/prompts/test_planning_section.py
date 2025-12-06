@@ -54,7 +54,6 @@ def test_planning_section_renders_instructions() -> None:
 
     assert "planning_setup_plan" in body
     assert "planning_read_plan" in body
-    assert "Stay brief" in body
     assert "multi-step" in body
 
     section = _make_section()
@@ -63,8 +62,6 @@ def test_planning_section_renders_instructions() -> None:
         "planning_setup_plan",
         "planning_add_step",
         "planning_update_step",
-        "planning_mark_step",
-        "planning_clear_plan",
         "planning_read_plan",
     )
 
@@ -80,7 +77,7 @@ def test_plan_act_reflect_strategy_injects_guidance() -> None:
     body = _render_section(PlanningStrategy.PLAN_ACT_REFLECT)
 
     assert "plan-act-reflect" in body
-    assert "append a brief reflection" in body
+    assert "update the step status" in body
 
 
 def test_goal_decompose_route_synthesise_strategy_injects_guidance() -> None:
