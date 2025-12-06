@@ -133,7 +133,7 @@ def _coerce_union(
         return _apply_constraints(coerced, merged_meta, path)
     if last_error is not None:
         message = str(last_error)
-        if message.startswith(f"{path}:") or message.startswith(f"{path}."):
+        if message.startswith((f"{path}:", f"{path}.")):
             raise last_error
         if isinstance(last_error, TypeError):
             raise TypeError(f"{path}: {message}") from last_error
@@ -351,9 +351,7 @@ def _coerce_mapping(
         return _NOT_HANDLED
     if not isinstance(value, Mapping):
         raise TypeError(f"{path}: expected mapping")
-    key_type, value_type = (
-        get_args(base_type) if get_args(base_type) else (object, object)
-    )
+    key_type, value_type = get_args(base_type) or (object, object)
     mapping_value = cast(Mapping[JSONValue, JSONValue], value)
     result_dict: dict[object, object] = {}
     for key, item in mapping_value.items():

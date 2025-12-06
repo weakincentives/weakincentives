@@ -76,7 +76,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         return "workspace_digest"
 
     @override
-    def optimize(  # noqa: PLR0914 - keeping local clarity for optimization flow
+    def optimize(
         self,
         prompt: Prompt[object],
         *,
@@ -202,7 +202,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             section_key=digest_section.key,
         )
 
-    def _resolve_workspace_section(  # noqa: PLR6301
+    def _resolve_workspace_section(
         self, prompt: Prompt[object], prompt_name: str
     ) -> Section[SupportsDataclass]:
         try:
@@ -214,7 +214,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                 phase=PROMPT_EVALUATION_PHASE_REQUEST,
             ) from error
 
-    def _resolve_tool_sections(  # noqa: PLR6301
+    def _resolve_tool_sections(
         self, prompt: Prompt[object]
     ) -> tuple[Section[SupportsDataclass], ...]:
         sections: list[Section[SupportsDataclass]] = []
@@ -225,12 +225,12 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                 continue
         return tuple(sections)
 
-    def _clone_section(  # noqa: PLR6301
+    def _clone_section(
         self, section: Section[SupportsDataclass], *, session: Session
     ) -> Section[SupportsDataclass]:
         return section.clone(session=session, bus=session.event_bus)
 
-    def _require_workspace_digest_section(  # noqa: PLR6301
+    def _require_workspace_digest_section(
         self, prompt: Prompt[object], *, prompt_name: str
     ) -> WorkspaceDigestSection:
         try:
@@ -243,7 +243,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             ) from error
         return cast(WorkspaceDigestSection, section)
 
-    def _find_section_path(  # noqa: PLR6301
+    def _find_section_path(
         self, prompt: Prompt[object], section_key: str
     ) -> tuple[str, ...]:
         for node in prompt.sections:
@@ -256,7 +256,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
         )
 
-    def _extract_digest(  # noqa: PLR6301
+    def _extract_digest(
         self, *, response: PromptResponse[Any], prompt_name: str
     ) -> str:
         digest: str | None = None

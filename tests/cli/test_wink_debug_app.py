@@ -55,7 +55,7 @@ def _write_snapshot(path: Path, values: list[str]) -> list[str]:
         )
         entries.append(snapshot.to_json())
         session_ids.append(session_id)
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         path.write_text("\n".join(entries))
     return session_ids
 

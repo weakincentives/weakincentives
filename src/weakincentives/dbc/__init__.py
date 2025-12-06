@@ -72,7 +72,7 @@ def disable_dbc() -> None:
 
 
 @contextmanager
-def dbc_enabled(active: bool = True) -> Iterator[None]:
+def dbc_enabled(*, active: bool = True) -> Iterator[None]:
     """Temporarily set the DbC flag inside a ``with`` block."""
 
     global _forced_state

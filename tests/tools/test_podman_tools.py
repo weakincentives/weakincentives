@@ -1396,12 +1396,14 @@ def test_default_exec_runner_invokes_subprocess(
         text: bool | None = None,
         capture_output: bool | None = None,
         timeout: float | None = None,
+        check: bool = False,
     ) -> CompletedProcess[str]:
         recorded["args"] = args
         recorded["input"] = input
         recorded["text"] = text
         recorded["capture_output"] = capture_output
         recorded["timeout"] = timeout
+        recorded["check"] = check
         return CompletedProcess(args, 0, stdout="ok", stderr="err")
 
     monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)

@@ -300,8 +300,7 @@ class Session(SessionProtocol):
 
         slice_types: set[SessionSliceType] = set(self._state)
         for registrations in self._reducers.values():
-            for registration in registrations:
-                slice_types.add(registration.slice_type)
+            slice_types.update(r.slice_type for r in registrations)
 
         self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
 
@@ -383,8 +382,7 @@ class Session(SessionProtocol):
         with self.locked():
             types: set[SessionSliceType] = set(self._state)
             for registrations in self._reducers.values():
-                for registration in registrations:
-                    types.add(registration.slice_type)
+                types.update(r.slice_type for r in registrations)
             return types
 
     def _register_child(self, child: Session) -> None:

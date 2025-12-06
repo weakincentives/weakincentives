@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import operator
 import re
 import threading
 import webbrowser
@@ -140,7 +141,7 @@ def load_snapshot(snapshot_path: Path) -> tuple[LoadedSnapshot, ...]:
         raise SnapshotLoadError(msg)
 
     try:
-        raw_text = snapshot_path.read_text()
+        raw_text = snapshot_path.read_text(encoding="utf-8")
     except OSError as error:  # pragma: no cover - filesystem failures are unlikely
         msg = f"Snapshot file cannot be read: {snapshot_path}"
         raise SnapshotLoadError(msg) from error
@@ -293,7 +294,7 @@ class SnapshotStore:
 
         entries: list[Mapping[str, JSONValue]] = []
         for created_at, candidate in sorted(
-            snapshots, key=lambda entry: entry[0], reverse=True
+            snapshots, key=operator.itemgetter(0), reverse=True
         ):
             created_iso = datetime.fromtimestamp(created_at, tz=UTC).isoformat()
             entries.append(

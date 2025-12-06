@@ -343,8 +343,6 @@ def build_dispatch_subagents_tool(
 class _SubagentsSectionParams:
     """Placeholder params container for the subagents section."""
 
-    pass
-
 
 _DELEGATION_BODY: Final[str] = (
     "Use `dispatch_subagents` to offload work that can proceed in parallel.\n"

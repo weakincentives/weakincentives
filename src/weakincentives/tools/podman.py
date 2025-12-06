@@ -17,6 +17,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import math
+import operator
 import os
 import posixpath
 import re
@@ -189,7 +190,9 @@ class PodmanShellParams:
 
     command: tuple[str, ...]
     cwd: str | None = None
-    env: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
+    env: Mapping[str, str] = field(
+        default_factory=lambda: {}  # noqa: PIE807 - pyright requires type preservation
+    )
     stdin: str | None = None
     timeout_seconds: float = _DEFAULT_TIMEOUT
     capture_output: bool = True
@@ -440,6 +443,7 @@ def _default_exec_runner(
         text=True if text is None else text,
         capture_output=True if capture_output is None else capture_output,
         timeout=timeout,
+        check=False,
     )
     return cast(subprocess.CompletedProcess[str], completed)
 
@@ -625,7 +629,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         self._base_url = base_url
         self._identity = identity_str
         self._base_env = tuple(
-            sorted((config.base_environment or {}).items(), key=lambda item: item[0])
+            sorted((config.base_environment or {}).items(), key=operator.itemgetter(0))
         )
         self._overlay_root = (
             Path(config.cache_dir).expanduser()
@@ -1918,7 +1922,7 @@ class _PodmanShellSuite:
             completed = self._section.run_cli_exec(
                 config=_ExecConfig(
                     command=exec_cmd,
-                    stdin=params.stdin if params.stdin else None,
+                    stdin=params.stdin or None,
                     cwd=cwd,
                     environment=environment,
                     timeout=timeout_seconds,

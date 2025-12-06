@@ -449,7 +449,7 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
             if inject_output_instructions is not None
             else self.inject_output_instructions
         )
-        tag = self.overrides_tag if self.overrides_tag else "latest"
+        tag = self.overrides_tag or "latest"
         return self.template.render(
             *self._params,
             overrides_store=self.overrides_store,

@@ -114,6 +114,13 @@ extend-select = [
     "TRY",
     "PLR",
     "PERF",
+    "PLE",
+    "PLW",
+    "ERA",
+    "FURB",
+    "PIE",
+    "N",
+    "FBT",
 ]
 extend-ignore = ["TRY003"]
 fixable = ["I001", "F401"]
@@ -124,24 +131,47 @@ combine-as-imports = true
 
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
-"tests/**" = ["PLR2004", "PLR0913", "PLR0914"]
+# FBT, PLW, FURB, RUF038 relaxed for test code flexibility.
+"tests/**" = [
+    "PLR2004", "PLR0913", "PLR0914",
+    "FBT001", "FBT002", "FBT003",
+    "PLW0108", "PLW1514", "PLW3201",
+    "FURB156", "FURB189",
+    "RUF038",
+]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
-"src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
+# FBT001: Internal closure uses boolean for default_inject.
+# PLW3201: __pre_init__ is a custom FrozenDataclass hook, not a standard dunder.
+"src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301", "FBT001", "PLW3201"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
 "src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/adapters/openai.py" = ["PLR0913"]
-"src/weakincentives/dbc/__init__.py" = ["PLR0913"]
+# PLW0603: Global state is intentional for DbC enable/disable.
+"src/weakincentives/dbc/__init__.py" = ["PLR0913", "PLW0603"]
 "src/weakincentives/prompt/_enabled_predicate.py" = ["PLR6201"]
 "src/weakincentives/prompt/composition.py" = ["PLR6301"]
 "src/weakincentives/prompt/markdown.py" = ["PLR0913"]
-"src/weakincentives/prompt/rendering.py" = ["PLR6301"]
+"src/weakincentives/prompt/rendering.py" = ["PLR6301", "PLR0913", "PLR0914"]
 "src/weakincentives/prompt/section.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/structured_output.py" = ["PLR0913"]
 "src/weakincentives/prompt/tool_result.py" = ["PLR0911"]
-"src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915"]
-"src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
+# N818: VisibilityExpansionRequired is a control-flow signal, not a conventional error.
+"src/weakincentives/prompt/errors.py" = ["N818"]
+# FURB189: HexDigest subclasses str for validated type with string semantics.
+"src/weakincentives/prompt/overrides/versioning.py" = ["FURB189"]
+# FBT001: Internal serde functions use boolean for exclude_none pattern.
+"src/weakincentives/serde/dump.py" = ["FBT001"]
+"src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "FBT001"]
+"src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004", "FBT001"]
 "src/weakincentives/tools/asteval.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
 "src/weakincentives/tools/planning.py" = ["PLR6301"]
+# FBT001: follow_symlinks matches stdlib Path.iterdir pattern.
+"src/weakincentives/tools/podman.py" = ["FBT001"]
+"src/weakincentives/tools/vfs.py" = ["FBT001"]
+# N802: FrozenDataclass is intentional PascalCase for decorator factory.
+"src/weakincentives/dataclasses/__init__.py" = ["N802"]
+# PLR0914, PLR6301: Optimizer methods need local clarity and instance binding.
+"src/weakincentives/optimizers/workspace_digest.py" = ["PLR0914", "PLR6301"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

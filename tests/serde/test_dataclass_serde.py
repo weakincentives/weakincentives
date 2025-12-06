@@ -253,7 +253,7 @@ class LiteralModel:
 # Use literal bools to exercise coercion and schema branches.
 @dataclass
 class LiteralBoolModel:
-    flag: Literal[True, False]  # noqa: RUF038 - keep literal bools for schema coverage
+    flag: Literal[True, False]
 
 
 @dataclass

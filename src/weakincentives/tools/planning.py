@@ -294,8 +294,6 @@ class ReadPlan:
 class _PlanningSectionParams:
     """Placeholder params container for the planning tools section."""
 
-    pass
-
 
 _ASCII: Final[str] = "ascii"
 _MAX_OBJECTIVE_LENGTH: Final[int] = 240

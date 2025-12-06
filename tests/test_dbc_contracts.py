@@ -138,7 +138,7 @@ def test_invariant_is_inert_when_disabled() -> None:
             self.balance -= amount
 
     counter = Counter()
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         counter.withdraw(5)
     assert counter.balance == -5
 
@@ -156,7 +156,7 @@ def test_pure_detects_mutation() -> None:
 def test_pure_detects_io_calls(tmp_path: pathlib.Path) -> None:
     @pure
     def touch_file(path: pathlib.Path) -> None:
-        path.write_text("hello")
+        path.write_text("hello", encoding="utf-8")
 
     with pytest.raises(AssertionError):
         touch_file(tmp_path / "sample.txt")
@@ -170,7 +170,7 @@ def test_pure_is_inert_when_disabled() -> None:
         values.append(1)
         return values
 
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         assert mutate([]) == [1]
 
     with pytest.raises(AssertionError):
@@ -190,7 +190,7 @@ def test_dbc_activation_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     dbc_module.disable_dbc()
     assert dbc_module.dbc_active() is False
 
-    with dbc_module.dbc_enabled(True):
+    with dbc_module.dbc_enabled(active=True):
         assert dbc_module.dbc_active() is True
     assert dbc_module.dbc_active() is False
 
@@ -247,7 +247,7 @@ def test_ensure_skips_when_inactive() -> None:
     def bump(value: int) -> int:
         return value + 1
 
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         assert bump(4) == 5
 
 

@@ -43,14 +43,14 @@ def _write_snapshot(path: Path, *, created_at: datetime) -> None:
             "session_id": path.stem,
         },
     )
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         path.write_text(snapshot.to_json() + "\n")
 
 
 def test_directory_argument_loads_latest_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with dbc_enabled(False):
+    with dbc_enabled(active=False):
         older = tmp_path / "old.jsonl"
         newer = tmp_path / "new.jsonl"
         now = datetime.now(UTC)

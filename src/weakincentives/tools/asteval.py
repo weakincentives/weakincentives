@@ -259,10 +259,14 @@ class EvalResult:
         lines: list[str] = ["Python evaluation result:"]
         if self.value_repr is not None:
             lines.append(f"Result: {self.value_repr}")
-        lines.append("STDOUT:")
-        lines.append(self.stdout or "<empty>")
-        lines.append("STDERR:")
-        lines.append(self.stderr or "<empty>")
+        lines.extend(
+            [
+                "STDOUT:",
+                self.stdout or "<empty>",
+                "STDERR:",
+                self.stderr or "<empty>",
+            ]
+        )
         if self.reads:
             lines.append("Reads:")
             lines.extend(f"- {read.render()}" for read in self.reads)
@@ -278,8 +282,6 @@ class EvalResult:
 @FrozenDataclass()
 class _AstevalSectionParams:
     """Placeholder params container for the asteval section."""
-
-    pass
 
 
 def _now() -> datetime:
