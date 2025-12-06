@@ -44,14 +44,14 @@ optimizer abstraction for algorithmic prompt transformations.
 @dataclass(slots=True)
 class SectionDescriptor:
     path: tuple[str, ...]
-    content_hash: str
+    content_hash: HexDigest  # SHA-256 hex digest (64 chars)
     number: str
 
 @dataclass(slots=True)
 class ToolDescriptor:
     path: tuple[str, ...]
     name: str
-    contract_hash: str
+    contract_hash: HexDigest  # SHA-256 hex digest (64 chars)
 
 @dataclass(slots=True)
 class PromptDescriptor:
@@ -151,11 +151,23 @@ class PromptOverridesStore(Protocol):
 
     def seed(
         self,
-        prompt: Prompt,
+        prompt: PromptLike,  # Protocol for prompt-like objects
         *,
         tag: str = "latest",
     ) -> PromptOverride: ...
+
+    def set_section_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],
+        body: str,
+    ) -> PromptOverride: ...
 ```
+
+The `descriptor_for_prompt(prompt)` helper function computes and caches
+descriptors on prompt objects for efficient lookup.
 
 ## Optimizer Abstraction
 
@@ -182,6 +194,14 @@ class OptimizationContext:
     overrides_store: PromptOverridesStore | None = None
     overrides_tag: str = "latest"
     optimization_session: Session | None = None
+```
+
+### OptimizerConfig
+
+```python
+@dataclass(slots=True, frozen=True)
+class OptimizerConfig:
+    accepts_overrides: bool = True  # Whether optimizer participates in override system
 ```
 
 ### Base Optimizer
@@ -336,11 +356,14 @@ class InstructionRefiner(BasePromptOptimizer[object, tuple[RefinementResult, ...
 
 ## Events
 
-Optimizers publish to `EventBus`:
+Optimizers define event types for observability:
 
 - `OptimizationStarted` - Captures prompt descriptor and optimizer type
 - `OptimizationCompleted` - Result summary on success
 - `OptimizationFailed` - Error context on exception
+
+Note: Event publishing is available through `OptimizationContext.event_bus` but
+optimizers must explicitly emit events in their implementations.
 
 ## Limitations
 

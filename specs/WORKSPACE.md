@@ -71,6 +71,7 @@ class HostMount:
     include_glob: tuple[str, ...] = ()
     exclude_glob: tuple[str, ...] = ()
     max_bytes: int | None = None
+    follow_symlinks: bool = False
 ```
 
 Mounts hydrate at section construction and appear in prompt guidance.
@@ -82,6 +83,7 @@ session = Session(bus=bus)
 section = VfsToolsSection(
     session=session,
     mounts=(HostMount(host_path="docs/", include_glob=("*.md",)),),
+    allowed_host_roots=("/path/to/project",),  # Required for mount resolution
 )
 
 # Query state
@@ -115,11 +117,11 @@ All VFS tools plus:
 ```python
 @dataclass(slots=True, frozen=True)
 class PodmanShellParams:
-    commands: tuple[str, ...]
+    command: tuple[str, ...]  # Note: singular "command"
     cwd: str | None = None
-    env: dict[str, str] | None = None
+    env: Mapping[str, str] = field(default_factory=dict)
     stdin: str | None = None
-    timeout: int = 30
+    timeout_seconds: float = 30.0  # Note: float, not int
     capture_output: bool = True
 ```
 

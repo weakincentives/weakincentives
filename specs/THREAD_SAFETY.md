@@ -48,34 +48,29 @@ to provide thread-based synchronization only.
 
 ### Event Bus Implementations
 
-- `InProcessEventBus` stores handlers in a mutable `dict[type, list]` without any
-  locking. Concurrent calls to `subscribe` and `publish` can race, and a handler
-  mutating the registry while the bus iterates over it will trigger
-  `RuntimeError` or silently skip subscribers.
+- `InProcessEventBus` protects `_handlers` with a `threading.RLock`. Handler
+  snapshots are taken under the lock before delivery so the lock is not held
+  during handler execution. Both `subscribe` and `unsubscribe` are thread-safe.
 - The test helper `tests.helpers.events.NullEventBus` is effectively stateless
-  and thread-safe today, but a unified interface should still guarantee that
-  all bus implementations are safe to use from multiple threads.
+  and thread-safe today.
 
 ### Session State Store
 
-- `Session` mutates `_reducers` and `_state` dictionaries in response to
-  subscriptions and event delivery with no synchronization. Concurrent publishes
-  can interleave reducer mutations, drop updates, or observe partially-updated
-  tuples.
-- `clone`, `snapshot`, and `rollback` all read or replace the dictionaries
-  without a consistent view of the data; a concurrent reducer can mutate state
-  while the snapshot is being normalized.
-- Reducer registration appends to shared lists, so two threads registering
-  reducers for the same type can overwrite each other’s changes.
+- `Session` protects `_reducers` and `_state` with a `threading.RLock`. All
+  read/modify/write operations (`register_reducer`, `_dispatch_data_event`,
+  `clone`, `snapshot`, `rollback`, and selectors) acquire the lock.
+- Copy-on-write patterns take the copy inside the critical section to prevent
+  observing partially updated tuples.
+- `_attach_to_bus` uses a flag to ensure handlers are registered only once even
+  when called concurrently.
 
 ### Prompt Override Store
 
-- `LocalPromptOverridesStore` caches the repository root in `_root` and writes
-  override files after performing `exists()` checks. There is no locking around
-  the cache mutation or the read-modify-write flow, so concurrent `seed` or
-  `upsert` calls can step on each other, overwrite changes, or raise
-  `FileNotFoundError` after one thread deletes the file another is about to
-  write.
+- `LocalPromptOverridesStore` protects `_root` lazy initialization with a lock
+  so the git root discovery runs only once.
+- Per-file locks serialize `exists`/`unlink`/`rename` flows per override path.
+- Atomic file writes use temporary files (already in place) with locking to
+  prevent concurrent writes from corrupting files.
 
 ### Code Review Example Sessions
 
@@ -137,41 +132,28 @@ to provide thread-based synchronization only.
 1. Example orchestration classes must not corrupt their history buffers or cause
    inconsistent console output when multiple threads publish tool events.
 
-## Recommended Changes
+## Implemented Synchronization
 
 ### Event Bus
 
-- Introduce a `threading.RLock` (or `Lock`) to guard `_handlers` mutations.
-- Take a snapshot of the handler list under the lock before delivering events to
-  avoid holding the lock while handlers run.
-- Ensure `subscribe` is idempotent or document that duplicates are allowed when
-  multiple threads register the same handler.
-- Document that handlers are expected to be fast; no additional thread pool is
-  required to offload delivery.
-- Consider adding `unsubscribe` support while touching the concurrency model so
-  sessions can detach safely.
+- `threading.RLock` guards `_handlers` mutations.
+- Handler snapshots are taken under the lock before delivery to avoid holding
+  the lock while handlers run.
+- Both `subscribe` and `unsubscribe` are supported and thread-safe.
+- Handlers are expected to be fast; no additional thread pool is used.
 
 ### Session
 
-- Protect `_reducers` and `_state` with a re-entrant lock. All read/modify/write
-  operations (`register_reducer`, `_dispatch_data_event`, `clone`, `snapshot`,
-  `rollback`, and selectors) should acquire the lock.
-- Copy-on-write patterns should continue, but take the copy inside the critical
-  section to prevent observing partially updated tuples.
-- Ensure `_attach_to_bus` does not register handlers multiple times when called
-  concurrently; dedupe subscriptions or guard with a flag.
-- Audit reducer defaults to avoid race conditions when lazily importing
-  `append`. Import once at module load or guard the import inside the lock.
+- `threading.RLock` protects `_reducers` and `_state`. All read/modify/write
+  operations acquire the lock.
+- Copy-on-write patterns take the copy inside the critical section.
+- `_attach_to_bus` uses a flag to prevent duplicate handler registration.
 
 ### LocalPromptOverridesStore
 
-- Guard `_root` lazy initialization with a lock so the git root discovery only
-  runs once even when multiple threads resolve overrides simultaneously.
-- Wrap file writes in atomic operations using temporary files (already in place)
-  but add locking to serialize `exists`/`unlink`/`rename` flows per override
-  path.
-- Document that atomic file operations are sufficient; no additional
-  process-level coordination is required for the override store.
+- `_root` lazy initialization is guarded by a lock.
+- Per-file locks serialize file operations per override path.
+- Atomic file writes use temporary files with locking.
 
 ### Code Review Sessions
 

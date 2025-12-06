@@ -73,12 +73,13 @@ Immutable snapshot passed to every handler:
 ```python
 @dataclass(slots=True, frozen=True)
 class ToolContext:
-    prompt: Prompt[Any]
-    rendered_prompt: RenderedPrompt[Any] | None
-    adapter: ProviderAdapter[Any]
+    prompt: PromptProtocol[Any]
+    rendered_prompt: RenderedPromptProtocol[Any] | None
+    adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     event_bus: EventBus
-    deadline: Deadline | None
+    deadline: Deadline | None = None
+    budget_tracker: BudgetTracker | None = None
 ```
 
 ### ToolExample
@@ -202,10 +203,14 @@ class ReadPlan:
 
 ```python
 session = Session(bus=bus)
-section = PlanningToolsSection(session=session)
+section = PlanningToolsSection(session=session, accepts_overrides=False)
 # ... after tool calls ...
 plan = select_latest(session, Plan)
 ```
+
+Note: `PlanningToolsSection` automatically registers reducers for `Plan`,
+`SetupPlan`, `AddStep`, and `UpdateStep` on the provided session. The
+`planning_read_plan` tool returns the `Plan` object (not `ReadPlan`).
 
 ## Planning Strategies
 
@@ -310,10 +315,16 @@ prompt = Prompt(
 
 ### Adapter Behavior
 
-- Wrap all exceptions as `ToolResult(success=False)`
-- Forward failure message to LLM via `role: "tool"` message
-- Log original exception for observability
-- Never raise `PromptEvaluationError` for tool-level issues
+Exception handling is nuanced by exception type:
+
+- `ToolValidationError` → Wrap as `ToolResult(success=False)`
+- `VisibilityExpansionRequired` → Re-raise (not wrapped)
+- `PromptEvaluationError` → Re-raise (not wrapped)
+- `DeadlineExceededError` → Convert to `PromptEvaluationError`
+- Other exceptions → Wrap as `ToolResult(success=False)`
+
+Tool failures forward error messages to the LLM via `role: "tool"` response.
+Original exceptions are logged for observability.
 
 ### Session and Telemetry
 

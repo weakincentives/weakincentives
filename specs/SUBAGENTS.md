@@ -34,7 +34,17 @@ No other sections, knobs, or pre-baked templates are required. The parent prompt
 1. List only the `dispatch_subagents` tool in `tools()`.
 1. Avoid runtime configuration—no static dispatch payloads, flags, or template data.
 
-`SubagentsSection` accepts an optional `isolation_level` argument that defaults to `SubagentIsolationLevel.NO_ISOLATION`. The section instantiates the dispatch tool with a closure that captures the requested isolation mode so every handler invocation enforces the configured behavior.
+`SubagentsSection` accepts optional `isolation_level` and `accepts_overrides`
+arguments. The section instantiates the dispatch tool with a closure that
+captures the requested isolation mode so every handler invocation enforces the
+configured behavior.
+
+```python
+section = SubagentsSection(
+    isolation_level=SubagentIsolationLevel.NO_ISOLATION,  # default
+    accepts_overrides=False,  # default
+)
+```
 
 ## Tool Contract
 
@@ -54,20 +64,26 @@ class SubagentIsolationLevel(Enum):
     FULL_ISOLATION = auto()
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class DispatchSubagentsParams:
     delegations: tuple[DelegationParams, ...]
 
 
-@dataclass(slots=True)
+@FrozenDataclass()
 class SubagentResult:
     output: str
     success: bool
     error: str | None = None
 
+    def render(self) -> str:
+        """Render result for display."""
+        ...
+
 
 def build_dispatch_subagents_tool(
-    *, isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.NO_ISOLATION
+    *,
+    isolation_level: SubagentIsolationLevel = SubagentIsolationLevel.NO_ISOLATION,
+    accepts_overrides: bool = False,
 ) -> Tool[DispatchSubagentsParams, tuple[SubagentResult, ...]]: ...
 
 
@@ -110,7 +126,7 @@ Every tool invocation MUST execute the following steps:
 
 1. **Require the rendered parent prompt**. `context.rendered_prompt` is mandatory. Treat a missing prompt as an orchestrator bug and respond with a failing `ToolResult`.
 1. **Resolve the isolation level**. The section wires the requested `SubagentIsolationLevel` into the tool handler via a closure. In **No Isolation** mode the handler reuses the original `context.session` and event bus so children mutate the exact same objects the parent uses and observers receive child telemetry in real time. When configured for **Full Isolation** (`SubagentIsolationLevel.FULL_ISOLATION`), clone the parent session (`context.session.clone()`) and construct a fresh event bus for each child so no state or telemetry leaks across runs.
-1. **Wrap the child prompt**. Build a `DelegationPrompt` using the rendered parent prompt and the recap lines carried inside `DelegationParams`. Propagate response format metadata and tool descriptions exactly as described in `PROMPTS_COMPOSITION.md`.
+1. **Wrap the child prompt**. Build a `DelegationPrompt` using the rendered parent prompt and the recap lines carried inside `DelegationParams`. Propagate response format metadata and tool descriptions as described in `PROMPTS.md`.
 1. **Run in parallel**. Evaluate each child through `context.adapter.evaluate` using a `ThreadPoolExecutor`. Use `min(len(delegations), default_max_workers)` where `default_max_workers` matches Python's executor default when `None`.
 1. **Collect per-child outcomes**. Successful executions populate `output` and set `success=True`. Exceptions are caught and converted into `success=False` with an error string, without cancelling other children.
 1. **Return a structured result**. On handler-level success, return `ToolResult(value=tuple(results), success=True)`. When preconditions fail (for example, prompt not rendered, cloning unsupported), surface `ToolResult(success=False, value=None, message=...)`.

@@ -29,11 +29,22 @@ class Session:
     def __init__(
         self,
         *,
-        bus: EventBus,
+        bus: EventBus | None = None,  # Creates InProcessEventBus if None
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
+        tags: Mapping[object, object] | None = None,
     ) -> None: ...
+
+    # Properties
+    @property
+    def event_bus(self) -> EventBus: ...
+    @property
+    def parent(self) -> Session | None: ...
+    @property
+    def children(self) -> tuple[Session, ...]: ...
+    @property
+    def tags(self) -> Mapping[object, object]: ...
 
     def register_reducer[T, S](
         self,
@@ -54,7 +65,15 @@ class Session:
         *,
         bus: EventBus,
         parent: Session | None = None,
+        session_id: UUID | None = None,
+        created_at: datetime | None = None,
+        tags: Mapping[object, object] | None = None,
     ) -> "Session": ...
+
+    # Additional state management methods
+    def seed_slice[S](self, slice_type: type[S], values: Iterable[S]) -> None: ...
+    def clear_slice[S](self, slice_type: type[S], predicate: Callable[[S], bool] | None = None) -> None: ...
+    def reset(self) -> None: ...
 ```
 
 ### Reducers
@@ -75,6 +94,7 @@ Built-in reducers:
 - `append` - Default, dedupes by equality
 - `upsert_by(key_fn)` - Replaces items with matching key
 - `replace_latest` - Stores only the most recent value
+- `replace_latest_by(key_fn)` - Like `replace_latest` but keyed
 
 ### Selectors
 
@@ -121,46 +141,52 @@ if not result.ok:
 **PromptRendered** - After render, before provider call:
 
 ```python
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PromptRendered:
-    event_id: UUID
     prompt_ns: str
     prompt_key: str
     prompt_name: str | None
-    adapter: str
+    adapter: AdapterName
     session_id: UUID | None
-    render_inputs: tuple[SupportsDataclass, ...]
+    render_inputs: tuple[Any, ...]
     rendered_prompt: str
     created_at: datetime
+    descriptor: PromptDescriptor | None = None
+    event_id: UUID = field(default_factory=uuid4)
 ```
 
 **PromptExecuted** - After all tools and parsing:
 
 ```python
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class PromptExecuted:
-    event_id: UUID
     prompt_name: str
-    adapter: str
-    result: PromptResponse[Any]
+    adapter: AdapterName
+    result: Any
     session_id: UUID | None
     created_at: datetime
+    usage: TokenUsage | None = None
+    value: Any | None = None
+    event_id: UUID = field(default_factory=uuid4)
 ```
 
 **ToolInvoked** - After each tool handler:
 
 ```python
-@dataclass(slots=True, frozen=True)
+@FrozenDataclass()
 class ToolInvoked:
-    event_id: UUID
     prompt_name: str
-    adapter: str
+    adapter: AdapterName
     name: str
-    params: SupportsDataclass
-    result: ToolResult[Any]
-    call_id: str | None
+    params: Any
+    result: Any
     session_id: UUID | None
     created_at: datetime
+    usage: TokenUsage | None = None
+    value: Any | None = None
+    rendered_output: str = ""
+    call_id: str | None = None
+    event_id: UUID = field(default_factory=uuid4)
 ```
 
 ### Publish Results
@@ -333,11 +359,15 @@ limits.
 ### BudgetExceededError
 
 ```python
-@dataclass(slots=True, frozen=True)
-class BudgetExceededError(RuntimeError):
+BudgetExceededDimension = Literal[
+    "deadline", "total_tokens", "input_tokens", "output_tokens"
+]
+
+@FrozenDataclass()
+class BudgetExceededError(WinkError, RuntimeError):
     budget: Budget
     consumed: TokenUsage
-    exceeded_dimension: str  # "deadline", "total_tokens", etc.
+    exceeded_dimension: BudgetExceededDimension
 ```
 
 Converted to `PromptEvaluationError` with `phase="budget"` by runtime.

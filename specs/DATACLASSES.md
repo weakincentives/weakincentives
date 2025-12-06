@@ -45,7 +45,8 @@ parse(
 - Extras: `ignore` drops, `forbid` raises, `allow` attaches to instance
 - Coercion converts strings to numerics, UUID, paths, enums, datetime, etc.
 - Aliases: `aliases` arg > `field(metadata={"alias": ...})` > `alias_generator`
-- Validation order: normalisers → constraints → `convert`/`transform`
+- Validation order: normalisers → numeric constraints → length → pattern →
+  membership → validators → `convert`/`transform`
 - Error paths use dotted notation: `"address.street"`, `"items[0].price"`
 
 ### dump
@@ -103,12 +104,18 @@ Merge keys from `Annotated[..., {...}]` and `field(metadata=...)`:
 | Key | Description |
 |-----|-------------|
 | `ge`, `gt`, `le`, `lt` | Numeric bounds |
-| `minimum`, `maximum` | Alias for bounds |
+| `minimum`, `maximum` | Alias for `ge`, `le` bounds |
+| `exclusiveMinimum`, `exclusiveMaximum` | Alias for `gt`, `lt` bounds |
 | `min_length`, `max_length` | String/collection length |
-| `pattern` | Regex validation |
+| `minLength`, `maxLength` | Alias for length constraints |
+| `pattern`, `regex` | Regex validation |
 | `strip`, `lower`, `upper` | String normalisers |
-| `validate`, `validators` | Custom validation callables |
-| `convert`, `transform` | Final value transformation |
+| `lowercase`, `uppercase` | Alias for `lower`, `upper` |
+| `in`, `enum` | Membership inclusion validation |
+| `not_in` | Membership exclusion validation |
+| `validate` | Single custom validation callable |
+| `validators` | Iterable of validation callables |
+| `convert`, `transform` | Final value transformation (aliases)
 
 ### Validation Hooks
 
@@ -135,6 +142,7 @@ class User:
 
 - `frozen=True`, `slots=True`
 - `kw_only=False`, `order=False`, `eq=True`, `repr=True`
+- `match_args=True`, `unsafe_hash=False`
 
 ### Pre-Construction Hook
 

@@ -29,26 +29,27 @@ class ProviderAdapter(ABC):
     def evaluate(
         self,
         prompt: Prompt[OutputT],
-        *params: SupportsDataclass,
+        *,
         parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        budget: Budget | None = None,
+        budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]: ...
-
-    def optimize(
-        self,
-        prompt: Prompt[OutputT],
-        *,
-        store_scope: OptimizationScope = OptimizationScope.SESSION,
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str | None = None,
-        session: SessionProtocol,
-        optimization_session: Session | None = None,
-    ) -> OptimizationResult: ...
 ```
+
+**Parameters:**
+
+- `prompt` - The prompt template to evaluate
+- `parse_output` - Whether to parse structured output from response
+- `bus` - Event bus for telemetry
+- `session` - Session for state management
+- `deadline` - Optional wall-clock deadline
+- `visibility_overrides` - Section visibility controls for progressive disclosure
+- `budget` - Optional token/time budget limits
+- `budget_tracker` - Optional shared tracker for budget consumption
 
 ### Configuration
 
@@ -96,6 +97,7 @@ adapter = OpenAIAdapter(
     model="gpt-4o",
     client_config=client_config,
     model_config=model_config,
+    use_native_response_format=True,  # Use provider's JSON schema enforcement
 )
 ```
 
@@ -118,6 +120,15 @@ adapter = OpenAIAdapter(
 | `parallel_tool_calls` | `bool \| None` | Allow parallel tool calls |
 | `store` | `bool \| None` | Store conversation |
 | `user` | `str \| None` | End-user identifier |
+
+**Constructor Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | required | Model identifier |
+| `client_config` | `OpenAIClientConfig \| None` | `None` | Client settings |
+| `model_config` | `OpenAIModelConfig \| None` | `None` | Model parameters |
+| `use_native_response_format` | `bool` | `True` | Use provider JSON schema |
 
 Note: `max_tokens` is renamed to `max_output_tokens` for Responses API. The
 Responses API does not accept `seed`, `stop`, `presence_penalty`, or
@@ -151,6 +162,17 @@ adapter = LiteLLMAdapter(
     model_config=model_config,
 )
 ```
+
+**Constructor Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | required | Model identifier |
+| `completion_config` | `LiteLLMClientConfig \| None` | `None` | Client settings |
+| `model_config` | `LiteLLMModelConfig \| None` | `None` | Model parameters |
+| `completion` | `LiteLLMCompletion \| None` | `None` | Pre-configured completion |
+| `completion_factory` | `Callable \| None` | `None` | Factory for completions |
+| `completion_kwargs` | `Mapping \| None` | `None` | Extra completion kwargs |
 
 **Configuration:**
 
@@ -217,12 +239,26 @@ policy = new_throttle_policy(
 
 ```python
 @dataclass(slots=True)
-class ThrottleError(PromptEvaluationError):
+class ThrottleDetails:
     kind: ThrottleKind  # RATE_LIMIT, QUOTA_EXHAUSTED, TIMEOUT
-    retry_after: float | None
+    retry_after: timedelta | None
     attempts: int
     retry_safe: bool
     provider_payload: dict[str, Any] | None
+
+@dataclass(slots=True)
+class ThrottleError(PromptEvaluationError):
+    details: ThrottleDetails
+
+    # Properties provide access to details fields
+    @property
+    def kind(self) -> ThrottleKind: ...
+    @property
+    def retry_after(self) -> timedelta | None: ...
+    @property
+    def attempts(self) -> int: ...
+    @property
+    def retry_safe(self) -> bool: ...
 ```
 
 ## Inner Loop Architecture
@@ -289,25 +325,34 @@ PromptEvaluationError
 - **Throttle exhaustion** - Raise `ThrottleError` with `retry_safe=False`.
 - **Deadline exceeded** - Raise `DeadlineExceededError` immediately.
 
-## Optimization API
+## Budget Tracking
 
-`ProviderAdapter.optimize(...)` automates workspace digest generation:
-
-1. Locate the prompt's `WorkspaceDigestSection` and workspace section.
-1. Clone both sections with a fresh inner session/bus for isolation.
-1. Compose an optimization prompt with goal/expectations sections and planning
-   tools.
-1. Evaluate and extract the digest from the response.
-1. Store based on scope: session slice or overrides store.
+Adapters integrate with the budget system for token and time limits:
 
 ```python
-@dataclass(slots=True)
-class OptimizationResult:
-    response: PromptResponse[Any]
-    digest: str
-    scope: OptimizationScope
-    section_key: str
+from weakincentives.budget import Budget, BudgetTracker
+
+budget = Budget(
+    deadline=Deadline(expires_at=...),
+    max_total_tokens=10000,
+    max_input_tokens=8000,
+    max_output_tokens=2000,
+)
+
+tracker = BudgetTracker(budget)
+
+response = adapter.evaluate(
+    prompt,
+    bus=bus,
+    session=session,
+    budget=budget,
+    budget_tracker=tracker,
+)
 ```
+
+The adapter records token usage after each provider response and checks limits
+at defined checkpoints. Budget tracking is thread-safe for concurrent subagent
+execution.
 
 ## Telemetry
 

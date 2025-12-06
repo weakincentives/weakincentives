@@ -21,18 +21,29 @@ structured output, prompt wrapping for delegation, and progressive disclosure.
 
 ## Core Components
 
-### Prompt
+### PromptTemplate and Prompt
 
-`Prompt` owns a namespace (`ns`), a required `key`, an optional `name`, and an
-ordered tree of `Section` instances.
+`PromptTemplate` is the configuration blueprint that owns a namespace (`ns`),
+a required `key`, an optional `name`, and an ordered tree of `Section`
+instances:
 
 ```python
-prompt = Prompt[OutputType](
+template = PromptTemplate[OutputType](
     ns="demo",
     key="compose-email",
     name="compose_email",
     sections=[...],
 )
+```
+
+`Prompt` is a wrapper that binds parameters to a template for rendering:
+
+```python
+# Create from template with bound parameters
+prompt = template.bind(MyParams(field="value"))
+
+# Or render directly from template
+rendered = template.render(MyParams(field="value"))
 ```
 
 **Construction Rules:**
@@ -48,16 +59,15 @@ Abstract base with metadata, `is_enabled`, `render`, child handling, and
 override gating.
 
 ```python
-class Section(Generic[ParamsT]):
+class Section(ABC, Generic[ParamsT]):
     title: str
     key: str
-    template: str
     children: tuple[Section, ...] = ()
     tools: tuple[Tool, ...] = ()
     enabled: Callable[[ParamsT], bool] | None = None
     default_params: ParamsT | None = None
     accepts_overrides: bool = True
-    visibility: SectionVisibility | Callable[[ParamsT], SectionVisibility] = FULL
+    visibility: SectionVisibility | Callable[[ParamsT], SectionVisibility] | Callable[[], SectionVisibility] = FULL
 ```
 
 **Key Behaviors:**
@@ -75,6 +85,7 @@ tone_section = MarkdownSection[ToneParams](
     title="Tone",
     key="tone",
     template="Target tone: ${tone}",
+    summary="Tone guidance available.",  # Optional for progressive disclosure
 )
 ```
 
@@ -104,15 +115,24 @@ Missing required fields raise `PromptRenderError`.
 ### RenderedPrompt
 
 ```python
-@dataclass
+@FrozenDataclass()
 class RenderedPrompt(Generic[OutputT]):
     text: str
-    tools: tuple[Tool, ...]
-    tool_param_descriptions: Mapping[str, Mapping[str, str]]
-    output_type: type[OutputT] | None
-    container: Literal["object", "array"] | None
-    allow_extra_keys: bool
-    deadline: Deadline | None
+    structured_output: StructuredOutputConfig | None = None
+    deadline: Deadline | None = None
+    descriptor: PromptDescriptor | None = None
+
+    # Properties derived from structured_output
+    @property
+    def tools(self) -> tuple[Tool, ...]: ...
+    @property
+    def tool_param_descriptions(self) -> Mapping[str, Mapping[str, str]]: ...
+    @property
+    def output_type(self) -> type | None: ...
+    @property
+    def container(self) -> Literal["object", "array"] | None: ...
+    @property
+    def allow_extra_keys(self) -> bool | None: ...
 ```
 
 ## Structured Output
@@ -151,7 +171,7 @@ of the expected schema. Do not add extra keys.
 
 ### Parsing
 
-`parse_structured_output(text, rendered)` validates assistant responses:
+`parse_structured_output(output_text, rendered)` validates assistant responses:
 
 1. **Extract JSON**: Prefer fenced `json` block, else parse entire message,
    else scan for `{...}` or `[...]`
@@ -200,7 +220,8 @@ rendered = delegation.render(
         expected_result="Actionable plan",
         may_delegate_further="no",
     ),
-    ParentPromptParams(body=rendered_parent.text),
+    parent=ParentPromptParams(body=rendered_parent.text),  # Optional, defaults to parent text
+    recap=RecapParams(...),  # Optional recap section
 )
 ```
 
@@ -325,7 +346,7 @@ class TaskResult:
     summary: str
     steps: list[str]
 
-prompt = Prompt[TaskResult](
+template = PromptTemplate[TaskResult](
     ns="agents/assistant",
     key="task-planner",
     sections=[
@@ -337,7 +358,7 @@ prompt = Prompt[TaskResult](
     ],
 )
 
-rendered = prompt.render(TaskParams(objective="Refactor auth module"))
+rendered = template.render(TaskParams(objective="Refactor auth module"))
 
 # After adapter evaluation...
 result: TaskResult = parse_structured_output(response_text, rendered)

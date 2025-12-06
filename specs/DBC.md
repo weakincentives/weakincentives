@@ -125,13 +125,12 @@ internal helpers rather than external entry points.
 
 ## Runtime Behavior
 
-- In production (`PYTEST_CURRENT_TEST` absent and `WEAKINCENTIVES_DBC=0` by
-  default) the decorators return the original callable untouched. The shared
-  `dbc_active()` flag gates every enforcement path so internal code can safely
-  import decorators without impacting runtime.
+- In production (`WEAKINCENTIVES_DBC=0` by default) the decorators return the
+  original callable untouched. The shared `dbc_active()` flag gates every
+  enforcement path so internal code can safely import decorators without
+  impacting runtime.
 - During tests, a pytest plugin activates the flag. The plugin hooks into
-  `pytest_configure` to toggle DbC checks and registers fixtures that expose
-  helper utilities (e.g., capturing return values for `@ensure`).
+  `pytest_configure` and `pytest_unconfigure` to toggle DbC checks.
 - Contract violations raise `AssertionError` with clear messaging. Include the
   decorator type, the callable name, and a formatted argument dump to ease
   debugging.
