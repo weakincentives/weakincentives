@@ -9,7 +9,7 @@ conversations with tool calls.
 
 **The Problem**
 
-During prompt evaluation, `ConversationRunner` accumulates messages:
+During prompt evaluation, `InnerLoop` accumulates messages:
 
 ```
 system → assistant → tool_call → tool_result → assistant → tool_call → ...
@@ -27,7 +27,7 @@ This list is sent in its entirety on every provider call. Problems arise:
 
 - Provide a minimal, composable interface for history curation.
 - Support common strategies without mandating complex configuration.
-- Integrate cleanly with `ConversationRunner` without invasive changes.
+- Integrate cleanly with `InnerLoop` without invasive changes.
 - Preserve semantic coherence (e.g., keep tool call/result pairs together).
 - Remain pure and deterministic, aligned with the library's philosophy.
 - Enable observability through the existing `EventBus` mechanism.
@@ -294,7 +294,7 @@ class ConversationRecorded:
 
 ### Recording Flow
 
-The `ConversationRunner` records entries to the session at two points:
+The `InnerLoop` records entries to the session at two points:
 
 1. **After provider response**: Record the assistant's message (with any
    tool calls).
@@ -302,7 +302,7 @@ The `ConversationRunner` records entries to the session at two points:
 
 ```python
 @dataclass(slots=True)
-class ConversationRunner[OutputT]:
+class InnerLoop[OutputT]:
     # ... existing fields ...
 
     evaluation_id: UUID = field(default_factory=uuid4)
@@ -387,7 +387,7 @@ assistant_entries = select_where(
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     ConversationRunner                          │
+│                          InnerLoop                              │
 │                                                                 │
 │  ┌─────────────┐    ┌──────────────┐    ┌──────────────────┐   │
 │  │  _messages  │───▶│HistoryManager│───▶│ Provider API     │   │
@@ -561,14 +561,13 @@ A more sophisticated implementation might also ensure that assistant messages
 with `tool_calls` have all their results present, but the simple version
 handles the common case.
 
-## Integration with ConversationRunner
+## Integration with InnerLoop
 
-The `HistoryManager` integrates into `ConversationRunner` as an optional
-dependency:
+The `HistoryManager` integrates into `InnerLoop` as an optional dependency:
 
 ```python
 @dataclass(slots=True)
-class ConversationRunner[OutputT]:
+class InnerLoop[OutputT]:
     # ... existing fields ...
 
     history_manager: HistoryManager | None = None
@@ -803,7 +802,7 @@ src/weakincentives/history/
 - Tests for semantic coherence: orphaned tool results are removed.
 - Tests for composition: multiple managers chain correctly.
 - Tests for edge cases: empty messages, no system message, window of zero.
-- Integration tests verifying ConversationRunner uses the manager correctly.
+- Integration tests verifying InnerLoop uses the manager correctly.
 - Tests for ConversationEntry serialization round-trip.
 - Tests verifying session records complete history even when manager curates.
 - Tests for evaluation_id correlation: all entries from one evaluate() share ID.
