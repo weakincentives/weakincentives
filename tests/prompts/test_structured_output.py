@@ -75,6 +75,16 @@ def test_prompt_specialization_exposes_output_metadata() -> None:
     assert rendered.allow_extra_keys is False
 
 
+def test_template_structured_output_property() -> None:
+    template = _build_summary_prompt()
+    prompt = Prompt(template).bind(Guidance(topic="Ada"))
+
+    assert template.structured_output is not None
+    assert template.structured_output.dataclass_type is Summary
+    assert prompt.structured_output is not None
+    assert prompt.structured_output.dataclass_type is Summary
+
+
 def test_prompt_specialization_requires_dataclass() -> None:
     with pytest.raises(PromptValidationError) as exc:
         PromptTemplate[str](ns="tests/prompts", key="invalid-output", sections=[])

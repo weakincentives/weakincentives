@@ -606,8 +606,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             max_tokens, etc. When provided, these values are merged into each
             request payload.
         tool_choice: Tool selection directive. Defaults to "auto".
-        use_native_response_format: When True, uses OpenAI's JSON schema response
-            format for structured outputs. Defaults to True.
         client: Pre-configured OpenAI client instance. Mutually exclusive with
             client_config.
         client_config: Typed configuration for client instantiation. Used when
@@ -620,7 +618,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         model: str,
         model_config: OpenAIModelConfig | None = None,
         tool_choice: ToolChoice = "auto",
-        use_native_response_format: bool = True,
         client: _OpenAIProtocol | None = None,
         client_config: OpenAIClientConfig | None = None,
     ) -> None:
@@ -638,7 +635,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._model = model
         self._model_config = model_config
         self._tool_choice: ToolChoice = tool_choice
-        self._use_native_response_format = use_native_response_format
 
     @override
     def evaluate(
@@ -746,8 +742,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             rendered = replace(rendered, deadline=deadline)
         return rendered
 
+    @staticmethod
     def _build_response_format(
-        self,
         rendered: RenderedPrompt[Any],
         *,
         parse_output: bool,
@@ -758,7 +754,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             and rendered.output_type is not None
             and rendered.container is not None
         )
-        if should_parse_structured_output and self._use_native_response_format:
+        if should_parse_structured_output:
             response_format = cast(
                 Mapping[str, Any],
                 build_json_schema_response_format(rendered, prompt_name),

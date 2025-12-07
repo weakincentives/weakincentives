@@ -97,7 +97,6 @@ adapter = OpenAIAdapter(
     model="gpt-4o",
     client_config=client_config,
     model_config=model_config,
-    use_native_response_format=True,  # Use provider's JSON schema enforcement
 )
 ```
 
@@ -128,23 +127,17 @@ adapter = OpenAIAdapter(
 | `model` | `str` | required | Model identifier |
 | `client_config` | `OpenAIClientConfig \| None` | `None` | Client settings |
 | `model_config` | `OpenAIModelConfig \| None` | `None` | Model parameters |
-| `use_native_response_format` | `bool` | `True` | Use provider JSON schema |
 
 Note: `max_tokens` is renamed to `max_output_tokens` for Responses API. The
 Responses API does not accept `seed`, `stop`, `presence_penalty`, or
 `frequency_penalty`; supplying these raises `ValueError` at construction.
 
-**Structured Output Modes:**
+**Structured Output:**
 
-The adapter supports two structured output paths:
-
-1. **Native JSON Schema** - When `use_native_response_format=True` and the
-   prompt has structured output, the adapter sets `response_format.type = "json_schema"` with the dataclass schema. The provider enforces structure at
-   generation time and returns a `.parsed` payload.
-
-1. **Prompt-based fallback** - When native mode is disabled, the prompt's
-   `ResponseFormatSection` instructs the model to return JSON. The adapter
-   parses and validates the response text.
+When a prompt declares structured output, the adapter uses OpenAI's native
+JSON schema response format. The adapter sets `response_format.type = "json_schema"`
+with the dataclass schema. The provider enforces structure at generation time
+and returns a `.parsed` payload.
 
 ### LiteLLM Adapter
 

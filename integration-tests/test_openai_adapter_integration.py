@@ -291,40 +291,6 @@ def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None
     _assert_prompt_usage(session)
 
 
-def test_openai_adapter_parses_structured_output_without_native_schema(
-    openai_model: str,
-) -> None:
-    prompt_template = _build_structured_prompt()
-    sample = ReviewParams(
-        text=(
-            "Customers praise the simplified dashboards and clearer metrics, "
-            "though a few still flag onboarding friction when importing legacy data."
-        ),
-    )
-    prompt = Prompt(prompt_template).bind(sample)
-
-    custom_adapter = OpenAIAdapter(
-        model=openai_model,
-        use_native_response_format=False,
-    )
-
-    session = _make_session_with_usage_tracking()
-    bus = session.event_bus
-    response = custom_adapter.evaluate(
-        prompt,
-        bus=bus,
-        session=cast(SessionProtocol, session),
-    )
-
-    assert response.prompt_name == "structured_review"
-    assert response.output is not None
-    assert isinstance(response.output, ReviewAnalysis)
-    assert response.output.summary
-    assert response.output.sentiment
-    assert response.text is None
-    _assert_prompt_usage(session)
-
-
 def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -> None:
     prompt_template = _build_structured_list_prompt()
     sample = ReviewParams(
