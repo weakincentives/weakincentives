@@ -114,7 +114,6 @@ def test_run_inner_loop_requires_message_payload() -> None:
     session = Session(bus=bus)
 
     config = shared.InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,

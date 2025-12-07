@@ -88,7 +88,6 @@ def _base_context(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)},
         ),
-        bus=bus,
         session=cast(SessionProtocol, session or Session(bus=bus)),
         prompt_name=cast(str, prompt.name),
         parse_arguments=parse_tool_arguments,

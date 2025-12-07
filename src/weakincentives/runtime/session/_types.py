@@ -17,7 +17,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
 from ...prompt._types import SupportsDataclass
-from ..events._types import EventBus
 
 if TYPE_CHECKING:
     from .protocols import SessionProtocol
@@ -41,7 +40,6 @@ class ReducerContextProtocol(Protocol):
     """Protocol implemented by reducer context objects."""
 
     session: SessionProtocol
-    event_bus: EventBus
 
 
 class TypedReducer(Protocol[S]):

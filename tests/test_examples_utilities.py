@@ -141,7 +141,7 @@ def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
-    invoke_tool(bus, setup_tool, SetupPlan(objective="Test the app"), session=session)
+    invoke_tool(setup_tool, SetupPlan(objective="Test the app"), session=session)
 
     result = render_plan_snapshot(session)
 
@@ -155,7 +155,6 @@ def test_render_plan_snapshot_renders_plan_steps() -> None:
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
     invoke_tool(
-        bus,
         setup_tool,
         SetupPlan(
             objective="Multi-step plan",
@@ -164,13 +163,11 @@ def test_render_plan_snapshot_renders_plan_steps() -> None:
         session=session,
     )
     invoke_tool(
-        bus,
         update_tool,
         UpdateStep(step_id=1, status="done"),
         session=session,
     )
     invoke_tool(
-        bus,
         update_tool,
         UpdateStep(step_id=2, status="in_progress"),
         session=session,
@@ -190,14 +187,12 @@ def test_render_plan_snapshot_renders_completed_plan() -> None:
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
     invoke_tool(
-        bus,
         setup_tool,
         SetupPlan(objective="Finished work", initial_steps=("Complete this",)),
         session=session,
     )
     # Mark step as done to auto-complete the plan
     invoke_tool(
-        bus,
         update_tool,
         UpdateStep(step_id=1, status="done"),
         session=session,
@@ -215,7 +210,6 @@ def test_render_plan_snapshot_renders_plan_without_steps() -> None:
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     invoke_tool(
-        bus,
         setup_tool,
         SetupPlan(objective="Empty plan"),
         session=session,

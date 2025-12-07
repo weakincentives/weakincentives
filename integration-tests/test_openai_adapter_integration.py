@@ -237,8 +237,7 @@ def test_openai_adapter_returns_text(adapter: OpenAIAdapter) -> None:
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
-    response = adapter.evaluate(prompt, bus=bus, session=session)
+    response = adapter.evaluate(prompt, session=session)
 
     assert response.prompt_name == "greeting"
     assert response.text is not None
@@ -258,8 +257,7 @@ def test_openai_adapter_processes_tool_invocation(openai_model: str) -> None:
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
-    response = adapter.evaluate(prompt, bus=bus, session=session)
+    response = adapter.evaluate(prompt, session=session)
 
     assert response.prompt_name == "uppercase_workflow"
     assert response.text is not None and response.text.strip()
@@ -279,8 +277,7 @@ def test_openai_adapter_parses_structured_output(adapter: OpenAIAdapter) -> None
     prompt = Prompt(prompt_template).bind(sample)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
-    response = adapter.evaluate(prompt, bus=bus, session=session)
+    response = adapter.evaluate(prompt, session=session)
 
     assert response.prompt_name == "structured_review"
     assert response.output is not None
@@ -303,10 +300,8 @@ def test_openai_adapter_parses_structured_output_array(adapter: OpenAIAdapter) -
     prompt = Prompt(prompt_template).bind(sample)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -330,10 +325,8 @@ def test_openai_adapter_with_typed_client_config(
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter_with_typed_config.evaluate(
         prompt,
-        bus=bus,
         session=session,
     )
 
@@ -363,10 +356,8 @@ def test_openai_adapter_with_model_config(
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=session,
     )
 
@@ -398,10 +389,8 @@ def test_openai_adapter_with_model_config_structured_output(
     prompt = Prompt(prompt_template).bind(sample)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 

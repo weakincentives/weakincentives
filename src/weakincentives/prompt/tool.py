@@ -57,7 +57,6 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 
 if TYPE_CHECKING:
-    from ..runtime.events._types import EventBus
     from ..runtime.session.protocols import SessionProtocol
     from .protocols import (
         PromptProtocol,
@@ -92,7 +91,6 @@ class ToolContext:
     rendered_prompt: RenderedPromptProtocol[Any] | None
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
-    event_bus: EventBus
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
 
