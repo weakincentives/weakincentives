@@ -39,8 +39,10 @@ and routing logic. WINK collapses all of this into a tree of typed `Section`
 objects:
 
 ```
-Prompt[ReviewResponse]
+PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
+├── WorkspaceDigestSection     ← auto-generated codebase summary
+├── MarkdownSection (reference docs, progressive disclosure)
 ├── PlanningToolsSection       ← contributes plan_*, reflect tools
 │   └── (nested planning docs)
 ├── VfsToolsSection            ← contributes vfs_list_files, vfs_read_file, …
@@ -156,24 +158,28 @@ class ReviewResponse:
 ### 2. Compose the prompt
 
 Prompts assemble from typed sections—guidance, planning tools, filesystem tools,
-and user input:
+and user input. Create a reusable `PromptTemplate`, then bind runtime parameters
+via `Prompt`:
 
 ```python
-from weakincentives import MarkdownSection, Prompt
-from weakincentives.tools.planning import PlanningToolsSection
-from weakincentives.tools.vfs import VfsToolsSection
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.tools import PlanningToolsSection, VfsToolsSection, WorkspaceDigestSection
 
-review_prompt = Prompt[ReviewResponse](
+template = PromptTemplate[ReviewResponse](
     ns="examples/code-review",
     key="code-review-session",
     name="code_review_agent",
     sections=(
         MarkdownSection(...),                          # guidance
+        WorkspaceDigestSection(session=session),       # auto-generated summary
         PlanningToolsSection(session=session),         # planning tools
         VfsToolsSection(session=session, mounts=...),  # sandboxed files
         MarkdownSection[ReviewTurnParams](...),        # user input
     ),
 )
+
+# Bind runtime parameters to create the final prompt
+prompt = Prompt(template).bind(ReviewTurnParams(request="Review main.py"))
 ```
 
 ### 3. Mount files safely
@@ -181,9 +187,17 @@ review_prompt = Prompt[ReviewResponse](
 Give agents file access without host risk:
 
 ```python
-from weakincentives.tools.vfs import HostMount, VfsPath
+from weakincentives.tools import HostMount, VfsPath, VfsToolsSection
 
-mounts = (HostMount(host_path="repo", mount_path=VfsPath(("repo",))),)
+mounts = (
+    HostMount(
+        host_path="repo",
+        mount_path=VfsPath(("repo",)),
+        include_glob=("*.py", "*.md", "*.toml"),  # whitelist patterns
+        exclude_glob=("**/*.pickle",),            # blacklist patterns
+        max_bytes=600_000,                        # size limit
+    ),
+)
 vfs_section = VfsToolsSection(
     session=session,
     mounts=mounts,
@@ -195,22 +209,31 @@ Agents use `vfs_list_files` and `vfs_read_file` inside the sandbox.
 
 ### 4. Run and get typed results
 
+Use `MainLoop` for production agents—it manages sessions, handles tool
+invocations, and supports deadlines:
+
 ```python
-from weakincentives.runtime.session import Session
+from weakincentives.runtime import MainLoop, Session
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.adapters.openai import OpenAIAdapter
 
+class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
+    def __init__(self, adapter, bus):
+        super().__init__(adapter=adapter, bus=bus)
+        self._session = Session(bus=bus)
+        self._template = build_task_prompt(session=self._session)
+
+    def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]:
+        return Prompt(self._template).bind(request)
+
+    def create_session(self) -> Session:
+        return self._session
+
 bus = InProcessEventBus()
-session = Session(bus=bus)
 adapter = OpenAIAdapter(model="gpt-5.1")
+loop = ReviewLoop(adapter, bus)
 
-response = adapter.evaluate(
-    review_prompt,
-    ReviewTurnParams(request="Find bugs in main.py"),
-    bus=bus,
-    session=session,
-)
-
+response = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
 review: ReviewResponse = response.output  # typed, validated
 ```
 
@@ -232,11 +255,13 @@ if plan:
 Override prompt sections via version-controlled JSON:
 
 ```python
+from weakincentives.prompt.overrides import LocalPromptOverridesStore
+
 prompt = Prompt(
-    review_template,
+    template,
     overrides_store=LocalPromptOverridesStore(),
     overrides_tag="assertive-feedback",
-).bind(ReviewParams(...))
+).bind(ReviewTurnParams(request="..."))
 rendered = prompt.render()
 ```
 
