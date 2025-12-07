@@ -73,9 +73,14 @@ The main loop uses typed events for request/response coordination:
 ```python
 @FrozenDataclass()
 class MainLoopRequest(Generic[UserRequestT]):
-    """Event published to trigger main loop execution."""
+    """Event published to trigger main loop execution.
+
+    Request-level budget and deadline override the loop's default configuration.
+    """
 
     request: UserRequestT
+    budget: Budget | None = None
+    deadline: Deadline | None = None
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -99,6 +104,22 @@ class MainLoopFailed:
     session_id: UUID | None
     failed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
+
+### Budget Override Semantics
+
+Request-level constraints take precedence over loop defaults:
+
+| Field | Precedence |
+|-------|------------|
+| `budget` | `MainLoopRequest.budget` > `MainLoopConfig.budget` |
+| `deadline` | `MainLoopRequest.deadline` > `MainLoopConfig.deadline` |
+
+**Key behaviors:**
+
+- When `MainLoopRequest.budget` is set, it replaces `MainLoopConfig.budget`
+- A fresh `BudgetTracker` is created for each request when budget is specified
+- Setting `budget=None` on the request falls back to the loop's default
+- Deadline from the request similarly overrides the configured default
 
 ## Execution Lifecycle
 
@@ -184,8 +205,15 @@ loop = MyMainLoop(adapter=adapter, bus=bus)
 # Subscribe to handle incoming requests
 bus.subscribe(MainLoopRequest[MyRequest], loop.handle_request)
 
-# Trigger execution by publishing
+# Trigger execution by publishing (uses loop defaults)
 result = bus.publish(MainLoopRequest(request=MyRequest(...)))
+
+# Trigger with request-specific budget constraint
+result = bus.publish(MainLoopRequest(
+    request=MyRequest(...),
+    budget=Budget(max_total_tokens=10000),  # Overrides loop default
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=30)),
+))
 
 # Or call directly
 response = loop.execute(MyRequest(...))
@@ -197,7 +225,11 @@ response = loop.execute(MyRequest(...))
 def handle_request(self, event: MainLoopRequest[UserRequestT]) -> None:
     """Event handler for bus-driven execution."""
     try:
-        response = self.execute(event.request)
+        response = self._execute_with_constraints(
+            event.request,
+            budget=event.budget,
+            deadline=event.deadline,
+        )
         self._bus.publish(MainLoopCompleted(
             request_id=event.request_id,
             response=response,
@@ -209,6 +241,28 @@ def handle_request(self, event: MainLoopRequest[UserRequestT]) -> None:
             error=e,
             session_id=getattr(self, '_current_session', None),
         ))
+
+def _execute_with_constraints(
+    self,
+    request: UserRequestT,
+    *,
+    budget: Budget | None = None,
+    deadline: Deadline | None = None,
+) -> PromptResponse[OutputT]:
+    """Execute with request-level constraint overrides."""
+    # Request-level constraints override defaults
+    effective_budget = budget if budget is not None else self._config.budget
+    effective_deadline = deadline if deadline is not None else self._config.deadline
+
+    # Create fresh tracker for this execution
+    budget_tracker = BudgetTracker(effective_budget) if effective_budget else None
+
+    return self._execute_inner(
+        request,
+        budget=effective_budget,
+        budget_tracker=budget_tracker,
+        deadline=effective_deadline,
+    )
 ```
 
 ## Configuration
