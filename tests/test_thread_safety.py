@@ -27,7 +27,6 @@ from uuid import uuid4
 
 import pytest
 
-from code_reviewer_example import _create_runtime_context
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
@@ -262,15 +261,12 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
         assert override.sections == first_sections
 
 
-def test_code_reviewer_session_reset_clears_runtime_state(tmp_path: Path) -> None:
-    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    context = _create_runtime_context(
-        overrides_store=overrides_store,
-        override_tag="reset",
-    )
+def test_session_reset_clears_runtime_state() -> None:
+    """Session reset clears all slices."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
 
     seeded_value = ExampleResult(value=1)
-    session = context.session
     session.mutate(ExampleResult).seed((seeded_value,))
 
     assert session.query(ExampleResult).all() == (seeded_value,)

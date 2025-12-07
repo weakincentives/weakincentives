@@ -18,6 +18,7 @@ import logging
 import os
 import textwrap
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -29,6 +30,7 @@ from examples import (
 )
 from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session as dump_session_tree
 from weakincentives.optimizers import (
     OptimizationContext,
@@ -41,15 +43,15 @@ from weakincentives.prompt import (
     PromptTemplate,
     SectionVisibility,
     SupportsDataclass,
-    VisibilityExpansionRequired,
 )
-from weakincentives.prompt.errors import SectionPath
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
 )
 from weakincentives.runtime import (
     EventBus,
+    MainLoop,
+    MainLoopConfig,
     Session,
 )
 from weakincentives.tools import (
@@ -60,6 +62,7 @@ from weakincentives.tools import (
     PodmanSandboxSection,
     VfsPath,
     VfsToolsSection,
+    WorkspaceDigest,
     WorkspaceDigestSection,
 )
 
@@ -88,6 +91,7 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
     "**/*.bmp",
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
+DEFAULT_DEADLINE_MINUTES = 5
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -132,22 +136,113 @@ class ReferenceParams:
     )
 
 
-@dataclass(slots=True)
-class RuntimeContext:
-    """Holds the prompt, session, and override handles for the REPL."""
+class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
+    """MainLoop implementation for code review with auto-optimization.
 
-    prompt: Prompt[ReviewResponse]
-    session: Session
-    bus: EventBus
-    overrides_store: LocalPromptOverridesStore
-    override_tag: str
-    visibility_overrides: dict[SectionPath, SectionVisibility] = field(
-        default_factory=dict
-    )
+    This loop maintains a persistent session across all execute() calls and
+    automatically runs workspace digest optimization on first use.
+    """
+
+    _session: Session
+    _template: PromptTemplate[ReviewResponse]
+    _overrides_store: LocalPromptOverridesStore
+    _override_tag: str
+
+    def __init__(
+        self,
+        *,
+        adapter: ProviderAdapter[ReviewResponse],
+        bus: EventBus,
+        overrides_store: LocalPromptOverridesStore | None = None,
+        override_tag: str | None = None,
+    ) -> None:
+        config = MainLoopConfig(
+            deadline=Deadline(
+                expires_at=datetime.now(UTC)
+                + timedelta(minutes=DEFAULT_DEADLINE_MINUTES)
+            ),
+        )
+        super().__init__(adapter=adapter, bus=bus, config=config)
+        self._overrides_store = overrides_store or LocalPromptOverridesStore()
+        self._override_tag = resolve_override_tag(
+            override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
+        )
+        # Create persistent session at construction time
+        self._session = build_logged_session(tags={"app": "code-reviewer"})
+        self._template = build_task_prompt(session=self._session)
+        self._seed_overrides()
+
+    def _seed_overrides(self) -> None:
+        """Initialize prompt overrides store."""
+        try:
+            self._overrides_store.seed(self._template, tag=self._override_tag)
+        except PromptOverridesError as exc:  # pragma: no cover
+            raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
+
+    def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]:
+        """Create and bind the review prompt for the given request."""
+        return Prompt(
+            self._template,
+            overrides_store=self._overrides_store,
+            overrides_tag=self._override_tag,
+        ).bind(request)
+
+    def create_session(self) -> Session:
+        """Return the persistent session (reused across all turns)."""
+        return self._session
+
+    def execute(
+        self,
+        request: ReviewTurnParams,
+        *,
+        budget: None = None,
+        deadline: Deadline | None = None,
+    ) -> PromptResponse[ReviewResponse]:
+        """Execute with auto-optimization for workspace digest.
+
+        If no WorkspaceDigest exists in the session, runs optimization first.
+        """
+        if self._session.query(WorkspaceDigest).latest() is None:
+            self._run_optimization()
+        return super().execute(request, budget=budget, deadline=deadline)
+
+    def _run_optimization(self) -> None:
+        """Run workspace digest optimization."""
+        _LOGGER.info("Running workspace digest optimization...")
+        optimization_session = build_logged_session(parent=self._session)
+        context = OptimizationContext(
+            adapter=self._adapter,
+            event_bus=self._bus,
+            overrides_store=self._overrides_store,
+            overrides_tag=self._override_tag,
+            optimization_session=optimization_session,
+        )
+        optimizer = WorkspaceDigestOptimizer(
+            context,
+            store_scope=PersistenceScope.SESSION,
+        )
+        prompt = Prompt(
+            self._template,
+            overrides_store=self._overrides_store,
+            overrides_tag=self._override_tag,
+        )
+        result = optimizer.optimize(prompt, session=self._session)
+        _LOGGER.info("Workspace digest optimization complete.")
+        _LOGGER.debug("Digest: %s", result.digest.strip())
+
+    @property
+    def session(self) -> Session:
+        """Expose session for external inspection."""
+        return self._session
+
+    @property
+    def override_tag(self) -> str:
+        """Expose override tag for display."""
+        return self._override_tag
 
 
 class CodeReviewApp:
-    """Owns adapter lifecycle, prompt overrides, and the REPL loop."""
+    """Owns the REPL loop and user interaction."""
 
     def __init__(
         self,
@@ -156,104 +251,55 @@ class CodeReviewApp:
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
     ) -> None:
-        self.adapter = adapter
-        self.context = _create_runtime_context(
+        bus = _create_bus_with_logging()
+        self._loop = CodeReviewLoop(
+            adapter=adapter,
+            bus=bus,
             overrides_store=overrides_store,
             override_tag=override_tag,
         )
-        self.prompt = self.context.prompt
-        self.session = self.context.session
-        self.bus = self.context.bus
-        self.overrides_store = self.context.overrides_store
-        self.override_tag = self.context.override_tag
-        self.visibility_overrides = self.context.visibility_overrides
 
     def run(self) -> None:
         """Start the interactive review session."""
-
-        print(_build_intro(self.override_tag))
+        print(_build_intro(self._loop.override_tag))
         print("Type a review prompt to begin. (Type 'exit' to quit.)")
+
         while True:
             try:
                 user_prompt = input("Review prompt: ").strip()
             except EOFError:  # pragma: no cover - interactive convenience
                 print()
                 break
-            if not user_prompt:
+
+            if not user_prompt or user_prompt.lower() in {"exit", "quit"}:
                 break
-            command = user_prompt.split(" ", 1)[0]
-            if command.lower() == "optimize":
-                self._handle_optimize_command()
-                continue
-            if user_prompt.lower() in {"exit", "quit"}:
-                break
-            answer = self._evaluate_turn(user_prompt)
+
+            request = ReviewTurnParams(request=user_prompt)
+            response = self._loop.execute(request)
+            answer = _render_response_payload(response)
+
             print("\n--- Agent Response ---")
             print(answer)
             print("\n--- Plan Snapshot ---")
-            print(render_plan_snapshot(self.session))
+            print(render_plan_snapshot(self._loop.session))
             print("-" * 23 + "\n")
 
         print("Goodbye.")
-        dump_session_tree(self.session, SNAPSHOT_DIR)
+        dump_session_tree(self._loop.session, SNAPSHOT_DIR)
 
-    def _evaluate_turn(self, user_prompt: str) -> str:
-        """Evaluate a user prompt with progressive disclosure support.
 
-        When the model requests expanded sections via `open_sections`, this method
-        catches the VisibilityExpansionRequired exception, updates visibility
-        overrides, and retries evaluation with the expanded content.
-        """
-        bound_prompt = self.prompt.bind(ReviewTurnParams(request=user_prompt))
+def _create_bus_with_logging() -> EventBus:
+    """Create an event bus with logging subscribers attached."""
+    from examples.logging import attach_logging_subscribers
+    from weakincentives.runtime.events import InProcessEventBus
 
-        while True:
-            try:
-                response = self.adapter.evaluate(
-                    bound_prompt,
-                    bus=self.bus,
-                    session=self.session,
-                    visibility_overrides=self.visibility_overrides,
-                )
-                return _render_response_payload(response)
-            except VisibilityExpansionRequired as e:
-                # Model requested section expansion - update overrides and retry
-                _LOGGER.info(
-                    "Expanding sections: %s, reason: %s",
-                    ", ".join(e.section_keys),
-                    e.reason,
-                )
-                self.visibility_overrides.update(e.requested_overrides)
-                # Continue loop to retry with expanded visibility
-
-    def _handle_optimize_command(self) -> None:
-        """Runs the optimization prompt and persists workspace digest content."""
-
-        optimization_session = self._create_optimization_session()
-        context = OptimizationContext(
-            adapter=self.adapter,
-            event_bus=self.bus,
-            overrides_store=self.overrides_store,
-            overrides_tag=self.override_tag,
-            optimization_session=optimization_session,
-        )
-        optimizer = WorkspaceDigestOptimizer(
-            context,
-            store_scope=PersistenceScope.SESSION,
-        )
-        result = optimizer.optimize(self.prompt, session=self.session)
-        digest = result.digest.strip()
-        print("\nWorkspace digest persisted for future review turns:\n")
-        print(digest)
-
-    def _create_optimization_session(self) -> Session:
-        """Provision a fresh session for optimization runs."""
-
-        return build_logged_session(parent=self.session)
+    bus = InProcessEventBus()
+    attach_logging_subscribers(bus)
+    return bus
 
 
 def main() -> None:
     """Entry point used by the `weakincentives` CLI harness."""
-
     configure_logging()
     adapter = build_adapter()
     app = CodeReviewApp(adapter)
@@ -262,7 +308,6 @@ def main() -> None:
 
 def build_adapter() -> ProviderAdapter[ReviewResponse]:
     """Build the OpenAI adapter, checking for the required API key."""
-
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
     model = os.getenv("OPENAI_MODEL", "gpt-5.1")
@@ -275,7 +320,6 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
     This prompt demonstrates progressive disclosure: the Reference Documentation
     section starts summarized and can be expanded on demand via `open_sections`.
     """
-
     _ensure_test_repository_available()
     workspace_section = _build_workspace_section(session=session)
     sections = (
@@ -418,31 +462,6 @@ def _build_workspace_section(
     )
 
 
-def _create_runtime_context(
-    *,
-    overrides_store: LocalPromptOverridesStore | None = None,
-    override_tag: str | None = None,
-) -> RuntimeContext:
-    store = overrides_store or LocalPromptOverridesStore()
-    session = build_logged_session(tags={"app": "code-reviewer"})
-    bus = session.event_bus
-    resolved_tag = resolve_override_tag(override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV)
-    prompt = build_task_prompt(session=session)
-    prompt_wrapper = Prompt(prompt, overrides_store=store, overrides_tag=resolved_tag)
-    try:
-        store.seed(prompt, tag=resolved_tag)
-    except PromptOverridesError as exc:  # pragma: no cover - startup validation
-        raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
-
-    return RuntimeContext(
-        prompt=prompt_wrapper,
-        session=session,
-        bus=bus,
-        overrides_store=store,
-        override_tag=resolved_tag,
-    )
-
-
 def _build_intro(override_tag: str) -> str:
     return textwrap.dedent(
         f"""
@@ -450,7 +469,7 @@ def _build_intro(override_tag: str) -> str:
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
         - Tools: Planning and a filesystem workspace (with a Podman shell if available).
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-        - Commands: 'optimize' refreshes the workspace digest, 'exit' quits.
+        - Auto-optimization: Workspace digest generated on first request.
 
         Note: Full prompt text and tool calls will be logged to the console for observability.
         """
