@@ -263,14 +263,12 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         *,
         bus: EventBus,
         session: SessionProtocol,
-        parse_output: bool = True,
         deadline: Deadline | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
         render_options = AdapterRenderOptions(
-            parse_output=parse_output,
             enable_json_schema=True,
             deadline=deadline,
             visibility_overrides=visibility_overrides,
@@ -335,7 +333,6 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             call_provider=_call_provider,
             select_choice=_select_choice,
             serialize_tool_message_fn=serialize_tool_message,
-            parse_output=parse_output,
             format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=logger,

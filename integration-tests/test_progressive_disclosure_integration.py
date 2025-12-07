@@ -210,7 +210,6 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
         try:
             response = adapter.evaluate(
                 prompt,
-                parse_output=False,
                 bus=bus,
                 session=session,
                 visibility_overrides=visibility_overrides,
@@ -285,7 +284,6 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
         try:
             response = adapter.evaluate(
                 prompt,
-                parse_output=False,
                 bus=bus,
                 session=session,
                 visibility_overrides=visibility_overrides,

@@ -142,7 +142,6 @@ def test_inner_loop_raise_deadline_error() -> None:
         call_provider=lambda *_args: SimpleNamespace(choices=[]),
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
-        parse_output=False,
         deadline=deadline,
     )
     loop = shared.InnerLoop[BodyResult](inputs=inputs, config=config)
@@ -179,7 +178,6 @@ def test_inner_loop_detects_expired_deadline(
         call_provider=lambda *_args: SimpleNamespace(choices=[]),
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
-        parse_output=False,
         deadline=deadline,
     )
     loop = shared.InnerLoop[BodyResult](inputs=inputs, config=config)
@@ -304,7 +302,11 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content="done", tool_calls=None)
+                    message=SimpleNamespace(
+                        content=None,
+                        tool_calls=None,
+                        parsed={"message": "done"},
+                    )
                 )
             ]
         )
@@ -321,7 +323,6 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
         call_provider=call_provider,
         select_choice=select_choice,
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
-        parse_output=False,
         format_publish_failures=shared.format_publish_failures,
         parse_arguments=shared.parse_tool_arguments,
         deadline=deadline,

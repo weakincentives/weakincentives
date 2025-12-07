@@ -51,7 +51,6 @@ class ProviderAdapter(ABC):
         self,
         prompt: Prompt[OutputT],
         *,
-        parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,

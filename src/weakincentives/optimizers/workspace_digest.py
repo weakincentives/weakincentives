@@ -165,7 +165,6 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
 
         response = self._context.adapter.evaluate(
             optimization_prompt,
-            parse_output=True,
             bus=inner_session.event_bus,
             session=inner_session,
             deadline=self._context.deadline,

@@ -245,7 +245,6 @@ def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        parse_output=False,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -308,7 +307,6 @@ def test_litellm_adapter_with_typed_client_config(
     bus = session.event_bus
     response = adapter_with_typed_config.evaluate(
         prompt,
-        parse_output=False,
         bus=bus,
         session=cast(SessionProtocol, session),
     )
@@ -342,7 +340,6 @@ def test_litellm_adapter_with_model_config(
     bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        parse_output=False,
         bus=bus,
         session=cast(SessionProtocol, session),
     )

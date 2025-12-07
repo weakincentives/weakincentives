@@ -103,7 +103,6 @@ def test_run_inner_loop_requires_message_payload() -> None:
             self,
             prompt: Prompt[object],
             *,
-            parse_output: bool = True,
             bus: EventBus,
             session: SessionProtocol,
             deadline: Deadline | None = None,
@@ -123,7 +122,6 @@ def test_run_inner_loop_requires_message_payload() -> None:
         call_provider=call_provider,
         select_choice=select_choice,
         serialize_tool_message_fn=serialize_stub,
-        parse_output=False,
     )
 
     inputs = shared.InnerLoopInputs[object](

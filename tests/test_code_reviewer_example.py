@@ -67,12 +67,11 @@ class _RepositoryOptimizationAdapter:
         self,
         prompt: Prompt[SupportsDataclass],
         *,
-        parse_output: bool = True,
         bus: InProcessEventBus | None = None,
         session: Session | None = None,
         deadline: object | None = None,
     ) -> PromptResponse[Any]:
-        del parse_output, deadline
+        del deadline
         self.calls.append(prompt.key)
 
         if "workspace-digest" in prompt.key:

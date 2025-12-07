@@ -189,7 +189,6 @@ class AdapterRenderContext[OutputT]:
 class AdapterRenderOptions:
     """Configuration for rendering prompts ahead of provider evaluation."""
 
-    parse_output: bool
     enable_json_schema: bool
     deadline: Deadline | None
     visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None
@@ -989,7 +988,6 @@ def prepare_adapter_conversation[
     response_format: Mapping[str, Any] | None = None
     if (
         options.enable_json_schema
-        and options.parse_output
         and rendered.output_type is not None
         and rendered.container is not None
     ):
@@ -1145,7 +1143,6 @@ class InnerLoopConfig:
     call_provider: ProviderCall
     select_choice: ChoiceSelector
     serialize_tool_message_fn: ToolMessageSerializer
-    parse_output: bool = True
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
         format_publish_failures
     )
@@ -1264,14 +1261,12 @@ class ResponseParser[OutputT]:
 
     prompt_name: str
     rendered: RenderedPrompt[OutputT]
-    parse_output: bool
     require_structured_output_text: bool
     _should_parse_structured_output: bool = field(init=False)
 
     def __post_init__(self) -> None:
         self._should_parse_structured_output = (
-            self.parse_output
-            and self.rendered.output_type is not None
+            self.rendered.output_type is not None
             and self.rendered.container is not None
         )
 
@@ -1525,7 +1520,6 @@ class InnerLoop[OutputT]:
             event="prompt_execution_started",
             context={
                 "tool_count": len(self._rendered.tools),
-                "parse_output": self.config.parse_output,
             },
         )
 
@@ -1554,7 +1548,6 @@ class InnerLoop[OutputT]:
         self._response_parser = ResponseParser[OutputT](
             prompt_name=self.inputs.prompt_name,
             rendered=self._rendered,
-            parse_output=self.config.parse_output,
             require_structured_output_text=self.config.require_structured_output_text,
         )
 
