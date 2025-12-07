@@ -132,7 +132,7 @@ Features: slice browser with JSON viewer, session selector for multi-entry files
 live reload, raw download. Exit codes: `2` for invalid input, `3` for server
 failures.
 
-![Snapshot Explorer](snapshot_explorer.png)
+![Debug UI](debug_ui.png)
 
 ## Tutorial: Code Review Agent
 
