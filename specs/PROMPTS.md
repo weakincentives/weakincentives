@@ -241,12 +241,93 @@ while True:
 
 ### Summary Suffix
 
-Summarized sections automatically append:
+Summarized sections automatically append a suffix inviting the model to access
+the full content. The suffix varies based on whether the section registers tools:
+
+**Sections with tools:**
 
 ```
 ---
 [This section is summarized. To view full content, call `open_sections` with key "context".]
 ```
+
+**Sections without tools:**
+
+```
+---
+[This section is summarized. Full content is available at `/context/section-key.md`.]
+```
+
+### Auto-Rendering to VFS
+
+When a section subtree renders with `SUMMARY` visibility and does **not**
+register any tools (neither the section itself nor any of its descendants),
+the framework automatically:
+
+1. **Renders the full content** of the section and its children as a markdown
+   file
+2. **Writes it to the VFS** at `/context/{section-key}.md`
+3. **Appends a suffix** directing the model to read from the filesystem
+
+This optimization avoids the `open_sections` round-trip for content-only
+sections. Since no tools need to be collected, there's no need to re-render
+the prompt—the model can access the content directly via `read_file`.
+
+**Requirements:**
+
+- A `VfsToolsSection` must be present in the prompt tree (provides the VFS
+  session context and `read_file` tool)
+- The section must have `visibility=SUMMARY` effective at render time
+- The section subtree must register zero tools
+
+**Nested Sections:**
+
+For sections with children, the entire subtree is rendered into a single
+markdown file. Heading levels are preserved relative to the section root.
+
+```python
+parent = MarkdownSection[Params](
+    title="Reference",
+    key="reference",
+    template="Overview...",
+    summary="Reference documentation available.",
+    visibility=SectionVisibility.SUMMARY,
+    children=[
+        MarkdownSection[Params](
+            title="API Guide",
+            key="api",
+            template="API details...",
+        ),
+        MarkdownSection[Params](
+            title="Examples",
+            key="examples",
+            template="Example code...",
+        ),
+    ],
+)
+# Renders to /context/reference.md with:
+# ## 1. Reference
+# Overview...
+# ### 1.1. API Guide
+# API details...
+# ### 1.2. Examples
+# Example code...
+```
+
+**Interaction with open_sections:**
+
+If a prompt contains both tool-bearing and tool-free summarized sections:
+
+- Tool-bearing sections: `open_sections` is injected, standard suffix applies
+- Tool-free sections: Auto-rendered to VFS, filesystem suffix applies
+
+The two mechanisms coexist. `open_sections` only lists sections that have
+tools to collect.
+
+**File Path Convention:**
+
+- Root sections: `/context/{key}.md`
+- Nested sections: `/context/{parent-key}.{child-key}.md` (dot-separated path)
 
 ## Cloning
 
