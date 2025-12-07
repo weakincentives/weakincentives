@@ -31,7 +31,6 @@ from weakincentives.prompt import (
     ToolContext,
     ToolResult,
 )
-from weakincentives.runtime import select_latest
 from weakincentives.runtime.events import PromptExecuted
 from weakincentives.runtime.session import Session
 
@@ -225,7 +224,7 @@ def _make_session_with_usage_tracking() -> Session:
 
 
 def _assert_prompt_usage(session: Session) -> None:
-    event = select_latest(session, PromptExecuted)
+    event = session.query(PromptExecuted).latest()
     assert event is not None, "Expected a PromptExecuted event."
     usage = event.usage
     assert usage is not None, "Expected token usage to be recorded."

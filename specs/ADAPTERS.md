@@ -186,6 +186,97 @@ adapter = LiteLLMAdapter(
 - Structured outputs always set `require_structured_output_text=True` because
   LiteLLM does not return structured `.parsed` payloads.
 
+### Anthropic Adapter
+
+`AnthropicAdapter` targets the Anthropic Messages API via the official SDK,
+with native support for structured outputs (beta) and tool use.
+
+```python
+from weakincentives.adapters.anthropic import AnthropicAdapter
+from weakincentives.adapters import AnthropicClientConfig, AnthropicModelConfig
+
+client_config = AnthropicClientConfig(api_key="sk-ant-...", timeout=30.0)
+model_config = AnthropicModelConfig(temperature=0.7, max_tokens=4096, top_k=40)
+
+adapter = AnthropicAdapter(
+    model="claude-sonnet-4-20250514",
+    client_config=client_config,
+    model_config=model_config,
+)
+```
+
+**Configuration (AnthropicClientConfig):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `api_key` | `str \| None` | API key (falls back to env) |
+| `base_url` | `str \| None` | Custom API endpoint |
+| `timeout` | `float \| None` | Request timeout seconds |
+| `max_retries` | `int \| None` | SDK-level retries |
+
+**Model Parameters (AnthropicModelConfig):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `top_k` | `int \| None` | Sample from top K tokens |
+| `metadata` | `Mapping[str, str] \| None` | Request metadata |
+
+Note: Anthropic does not support `seed`, `presence_penalty`, or
+`frequency_penalty`; supplying these raises `ValueError` at construction.
+
+**Constructor Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | `str` | `claude-opus-4-5-20250929` | Model identifier |
+| `client_config` | `AnthropicClientConfig \| None` | `None` | Client settings |
+| `model_config` | `AnthropicModelConfig \| None` | `None` | Model parameters |
+| `tool_choice` | `ToolChoice` | `"auto"` | Tool selection directive |
+| `use_native_structured_output` | `bool` | `True` | Use beta structured outputs |
+| `client` | `AnthropicProtocol \| None` | `None` | Pre-configured client |
+
+**Structured Output:**
+
+When `use_native_structured_output=True` and a prompt declares structured
+output, the adapter uses Anthropic's beta structured outputs feature
+(`structured-outputs-2025-11-13`). This guarantees the response matches the
+JSON schema by constraining token generation at inference time.
+
+The adapter passes `output_format={"type": "json_schema", "schema": ...}` and
+disables prompt-level output instructions when native structured output is
+enabled.
+
+**Message Format Normalization:**
+
+The adapter normalizes WINK's message format to Anthropic's API:
+
+- System prompts are extracted and passed as the separate `system` parameter
+- Tool result messages use `tool_result` content blocks under `user` role
+- Assistant messages with tool calls use `tool_use` content blocks
+
+**Tool Choice Translation:**
+
+| WINK ToolChoice | Anthropic Equivalent |
+|-----------------|----------------------|
+| `"auto"` | `{"type": "auto"}` |
+| `{"type": "function", "function": {"name": "x"}}` | `{"type": "tool", "name": "x"}` |
+
+**Throttle Detection:**
+
+The adapter detects and normalizes these error conditions:
+
+| Signal | Detection | ThrottleKind |
+|--------|-----------|--------------|
+| Rate limit | HTTP 429 or "rate" in message | `rate_limit` |
+| API overload | HTTP 529 or "overloaded" in message | `rate_limit` |
+| Timeout | Class name contains "timeout" | `timeout` |
+
+**Constraints and Caveats:**
+
+- Native structured outputs require `anthropic>=0.75.0` and are in public beta.
+- Claude Opus 4.5 supports up to 200K input tokens and 8K output tokens.
+- The adapter requires the optional `anthropic` dependency: `uv sync --extra anthropic`.
+
 ## Rate Limiting and Throttling
 
 Adapters implement reactive throttling to protect upstream services.

@@ -57,6 +57,7 @@ from weakincentives.adapters import PromptEvaluationError
 from weakincentives.budget import Budget
 from weakincentives.prompt import (
     MarkdownSection,
+    Prompt,
     PromptTemplate,
     SupportsDataclass,
     Tool,
@@ -90,7 +91,7 @@ def _evaluate(
     *params: SupportsDataclass,
     **kwargs: object,
 ) -> PromptResponse[OutputT]:
-    bound_prompt = prompt.bind(*params)
+    bound_prompt = Prompt(prompt).bind(*params)
     return adapter.evaluate(bound_prompt, **kwargs)
 
 
@@ -754,7 +755,7 @@ def test_anthropic_adapter_creates_budget_tracker_when_budget_provided() -> None
     session = Session(bus=bus)
 
     result = adapter.evaluate(
-        prompt.bind(GreetingParams(user="Test")),
+        Prompt(prompt).bind(GreetingParams(user="Test")),
         bus=bus,
         session=session,
         budget=budget,
@@ -1333,7 +1334,7 @@ def test_anthropic_build_output_format_returns_none() -> None:
         ],
     )
 
-    rendered = prompt.render(GreetingParams(user="Sam"))
+    rendered = Prompt(prompt).bind(GreetingParams(user="Sam")).render()
     result = module._build_anthropic_output_format(rendered, "test")
 
     assert result is None
@@ -1381,7 +1382,7 @@ def test_anthropic_adapter_with_deadline(
     session = Session(bus=bus)
 
     result = adapter.evaluate(
-        prompt.bind(GreetingParams(user="Sam")),
+        Prompt(prompt).bind(GreetingParams(user="Sam")),
         bus=bus,
         session=session,
         deadline=deadline,
@@ -1429,7 +1430,7 @@ def test_anthropic_adapter_expired_deadline_raises_error(
 
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(
-            prompt.bind(GreetingParams(user="Sam")),
+            Prompt(prompt).bind(GreetingParams(user="Sam")),
             bus=bus,
             session=session,
             deadline=mock_deadline,
