@@ -19,7 +19,6 @@ import pytest
 from examples import build_logged_session, render_plan_snapshot, resolve_override_tag
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.runtime import Session
-from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.tools import PlanningStrategy, PlanningToolsSection
 from weakincentives.tools.planning import SetupPlan, UpdateStep
 
@@ -137,11 +136,10 @@ def test_render_plan_snapshot_returns_no_plan_message_when_empty() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
-    invoke_tool(bus, setup_tool, SetupPlan(objective="Test the app"), session=session)
+    invoke_tool(setup_tool, SetupPlan(objective="Test the app"), session=session)
 
     result = render_plan_snapshot(session)
 
@@ -149,13 +147,11 @@ def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_steps() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
     invoke_tool(
-        bus,
         setup_tool,
         SetupPlan(
             objective="Multi-step plan",
@@ -164,13 +160,11 @@ def test_render_plan_snapshot_renders_plan_steps() -> None:
         session=session,
     )
     invoke_tool(
-        bus,
         update_tool,
         UpdateStep(step_id=1, status="done"),
         session=session,
     )
     invoke_tool(
-        bus,
         update_tool,
         UpdateStep(step_id=2, status="in_progress"),
         session=session,
@@ -184,20 +178,17 @@ def test_render_plan_snapshot_renders_plan_steps() -> None:
 
 
 def test_render_plan_snapshot_renders_completed_plan() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
     invoke_tool(
-        bus,
         setup_tool,
         SetupPlan(objective="Finished work", initial_steps=("Complete this",)),
         session=session,
     )
     # Mark step as done to auto-complete the plan
     invoke_tool(
-        bus,
         update_tool,
         UpdateStep(step_id=1, status="done"),
         session=session,
@@ -210,12 +201,10 @@ def test_render_plan_snapshot_renders_completed_plan() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_without_steps() -> None:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     invoke_tool(
-        bus,
         setup_tool,
         SetupPlan(objective="Empty plan"),
         session=session,

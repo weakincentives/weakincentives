@@ -17,8 +17,11 @@ from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import pytest
 
+from tests.tools.helpers import build_tool_context
 from weakincentives.prompt.errors import PromptValidationError
 from weakincentives.prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 
 @dataclass
@@ -617,3 +620,11 @@ def test_tool_rejects_handler_with_wrong_return_annotation() -> None:
     error = error_info.value
     assert isinstance(error, PromptValidationError)
     assert error.placeholder == "return"
+
+
+def test_tool_context_event_bus_property() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    context = build_tool_context(session)
+
+    assert context.event_bus is bus

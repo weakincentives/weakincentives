@@ -187,7 +187,6 @@ def build_inner_loop(
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        bus=bus,
         session=session_arg,
         tool_choice=tool_choice,
         response_format=response_format,
@@ -274,9 +273,14 @@ class GlobalMutationBuilderStub:
 
 
 class SessionStub(SessionProtocol):
-    def __init__(self) -> None:
+    def __init__(self, bus: RecordingBus | None = None) -> None:
         self.snapshots: list[SnapshotProtocol] = []
         self.rollbacks: list[SnapshotProtocol] = []
+        self._bus = bus or RecordingBus()
+
+    @property
+    def event_bus(self) -> RecordingBus:
+        return self._bus
 
     def snapshot(self) -> SnapshotProtocol:
         snapshot = Snapshot(created_at=datetime.now(UTC))
@@ -435,7 +439,6 @@ def test_run_inner_loop_function() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,
@@ -582,7 +585,7 @@ def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
     bus = RecordingBus(fail_tool=True)
-    session = SessionStub()
+    session = SessionStub(bus=bus)
 
     loop = build_inner_loop(
         rendered=rendered,

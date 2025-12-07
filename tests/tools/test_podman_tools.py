@@ -380,7 +380,7 @@ def test_host_mount_populates_prompt_copy(
 def test_host_mount_materializes_overlay(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     host_root, mount, file_path = _setup_host_mount(tmp_path)
     cache_dir = tmp_path / "cache"
@@ -396,7 +396,7 @@ def test_host_mount_materializes_overlay(
 
     handler(
         PodmanShellParams(command=("true",)),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
     handle = section._workspace_handle
@@ -467,7 +467,7 @@ def test_iter_host_mount_files_handles_file(tmp_path: Path) -> None:
 def test_host_mount_allows_binary_files(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     host_root = tmp_path / "host-root"
     repo = host_root / "sunfish"
@@ -490,7 +490,7 @@ def test_host_mount_allows_binary_files(
 
     handler(
         PodmanShellParams(command=("true",)),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
     handle = section._workspace_handle
@@ -628,7 +628,7 @@ def test_close_stops_and_removes_container(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -638,7 +638,7 @@ def test_close_stops_and_removes_container(
     assert handler is not None
     handler(
         PodmanShellParams(command=("true",)),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     handle = section._workspace_handle
     assert handle is not None
@@ -655,7 +655,7 @@ def test_close_is_idempotent(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -665,7 +665,7 @@ def test_close_is_idempotent(
     assert handler is not None
     handler(
         PodmanShellParams(command=("true",)),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     handle = section._workspace_handle
     assert handle is not None
@@ -693,7 +693,7 @@ def test_close_handles_client_factory_failure(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -703,7 +703,7 @@ def test_close_handles_client_factory_failure(
     assert handler is not None
     handler(
         PodmanShellParams(command=("true",)),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
     def _raise() -> _FakePodmanClient:
@@ -718,7 +718,7 @@ def test_close_handles_missing_container(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -728,7 +728,7 @@ def test_close_handles_missing_container(
     assert handler is not None
     handler(
         PodmanShellParams(command=("true",)),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
     class _BrokenContainers:
@@ -754,7 +754,7 @@ def test_section_auto_resolves_connection(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0, stdout="auto")])
     resolved = podman_module._PodmanConnectionInfo(
@@ -788,7 +788,7 @@ def test_section_auto_resolves_connection(
 
     handler(
         PodmanShellParams(command=("true",)),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
     assert section.connection_name == "auto-conn"
@@ -1042,7 +1042,7 @@ def test_shell_execute_runs_commands_and_stores_workspace(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner(
         [_ExecResponse(exit_code=0, stdout="hello world\n", stderr="")]
@@ -1055,7 +1055,7 @@ def test_shell_execute_runs_commands_and_stores_workspace(
     assert handler is not None
 
     params = PodmanShellParams(command=("echo", "hello world"))
-    result = handler(params, context=build_tool_context(bus, session))
+    result = handler(params, context=build_tool_context(session))
 
     assert isinstance(result.value, PodmanShellResult)
     assert result.value.exit_code == 0
@@ -1073,7 +1073,7 @@ def test_shell_execute_validates_command(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(
         session=session, client=client, cache_dir=tmp_path, runner=_FakeCliRunner()
@@ -1084,14 +1084,14 @@ def test_shell_execute_validates_command(
     params = PodmanShellParams(command=())
 
     with pytest.raises(ToolValidationError):
-        handler(params, context=build_tool_context(bus, session))
+        handler(params, context=build_tool_context(session))
 
 
 def test_shell_execute_merges_environment(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -1102,7 +1102,7 @@ def test_shell_execute_merges_environment(
     assert handler is not None
 
     params = PodmanShellParams(command=("printenv",), env={"custom": "value"})
-    handler(params, context=build_tool_context(bus, session))
+    handler(params, context=build_tool_context(session))
 
     call = " ".join(cli_runner.calls[-1])
     assert "PATH=/usr/bin" in call
@@ -1113,7 +1113,7 @@ def test_shell_execute_respects_capture_flag(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner(
         [_ExecResponse(exit_code=0, stdout="x" * 40_000, stderr="")]
@@ -1126,7 +1126,7 @@ def test_shell_execute_respects_capture_flag(
     assert handler is not None
 
     params = PodmanShellParams(command=("cat",), capture_output=False)
-    result = handler(params, context=build_tool_context(bus, session))
+    result = handler(params, context=build_tool_context(session))
     assert result.value is not None
     value = cast(PodmanShellResult, result.value)
     assert value.stdout == "capture disabled"
@@ -1137,7 +1137,7 @@ def test_shell_execute_captures_output_by_default(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner(
         [_ExecResponse(exit_code=0, stdout="normal output", stderr="")]
@@ -1150,7 +1150,7 @@ def test_shell_execute_captures_output_by_default(
     assert handler is not None
 
     params = PodmanShellParams(command=("echo", "hi"))
-    result = handler(params, context=build_tool_context(bus, session))
+    result = handler(params, context=build_tool_context(session))
     assert result.value is not None
     value = cast(PodmanShellResult, result.value)
     assert value.stdout == "normal output"
@@ -1161,7 +1161,7 @@ def test_shell_execute_normalizes_cwd(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -1172,7 +1172,7 @@ def test_shell_execute_normalizes_cwd(
     assert handler is not None
 
     params = PodmanShellParams(command=("pwd",), cwd="src/docs")
-    handler(params, context=build_tool_context(bus, session))
+    handler(params, context=build_tool_context(session))
 
     call = cli_runner.calls[-1]
     idx = call.index("--workdir")
@@ -1183,7 +1183,7 @@ def test_shell_execute_rejects_non_ascii_stdin(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(
         session=session, client=client, cache_dir=tmp_path, runner=_FakeCliRunner()
@@ -1194,7 +1194,7 @@ def test_shell_execute_rejects_non_ascii_stdin(
 
     params = PodmanShellParams(command=("cat",), stdin="ümlaut")
     with pytest.raises(ToolValidationError):
-        handler(params, context=build_tool_context(bus, session))
+        handler(params, context=build_tool_context(session))
 
 
 def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
@@ -1212,7 +1212,7 @@ def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="session does not match"):
         handler(
             PodmanShellParams(command=("true",)),
-            context=build_tool_context(bus, other_session),
+            context=build_tool_context(other_session),
         )
 
 
@@ -1220,7 +1220,7 @@ def test_shell_execute_cli_fallback(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0, stdout="cli output")])
     section = _make_section(
@@ -1235,7 +1235,7 @@ def test_shell_execute_cli_fallback(
     assert handler is not None
 
     params = PodmanShellParams(command=("echo", "cli"), stdin="payload")
-    result = handler(params, context=build_tool_context(bus, session))
+    result = handler(params, context=build_tool_context(session))
 
     call = cli_runner.calls[-1]
     assert call[:3] == ["podman", "--connection", "podman-machine-default"]
@@ -1249,7 +1249,7 @@ def test_shell_execute_cli_capture_disabled(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner(
         [_ExecResponse(exit_code=0, stdout="cli output", stderr="cli err")]
@@ -1266,7 +1266,7 @@ def test_shell_execute_cli_capture_disabled(
     assert handler is not None
 
     params = PodmanShellParams(command=("echo", "cli"), capture_output=False)
-    result = handler(params, context=build_tool_context(bus, session))
+    result = handler(params, context=build_tool_context(session))
     assert result.value is not None
     value = cast(PodmanShellResult, result.value)
     assert value.stdout == "capture disabled"
@@ -1277,7 +1277,7 @@ def test_shell_execute_cli_timeout(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
 
     def _timeout_runner(
@@ -1304,7 +1304,7 @@ def test_shell_execute_cli_timeout(
     assert handler is not None
 
     params = PodmanShellParams(command=("sleep", "1"))
-    result = handler(params, context=build_tool_context(bus, session))
+    result = handler(params, context=build_tool_context(session))
     assert result.value is not None
     value = cast(PodmanShellResult, result.value)
     assert value.timed_out
@@ -1316,7 +1316,7 @@ def test_shell_execute_cli_missing_binary(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
 
     def _missing_runner(
@@ -1343,7 +1343,7 @@ def test_shell_execute_cli_missing_binary(
     with pytest.raises(ToolValidationError):
         handler(
             PodmanShellParams(command=("true",)),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
@@ -1497,7 +1497,7 @@ def test_workspace_reuse_between_calls(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner(
         [_ExecResponse(exit_code=0), _ExecResponse(exit_code=0)]
@@ -1509,12 +1509,8 @@ def test_workspace_reuse_between_calls(
     handler = tool.handler
     assert handler is not None
 
-    handler(
-        PodmanShellParams(command=("true",)), context=build_tool_context(bus, session)
-    )
-    handler(
-        PodmanShellParams(command=("true",)), context=build_tool_context(bus, session)
-    )
+    handler(PodmanShellParams(command=("true",)), context=build_tool_context(session))
+    handler(PodmanShellParams(command=("true",)), context=build_tool_context(session))
 
     assert len(client.containers._containers) == 1
 
@@ -1534,7 +1530,7 @@ def test_readiness_failure_raises(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     client.containers.set_readiness_exit_code(1)
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
@@ -1545,7 +1541,7 @@ def test_readiness_failure_raises(
     with pytest.raises(ToolValidationError):
         handler(
             PodmanShellParams(command=("true",)),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
@@ -1553,7 +1549,7 @@ def test_shell_execute_truncates_output(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner(
         [
@@ -1572,7 +1568,7 @@ def test_shell_execute_truncates_output(
     assert handler is not None
 
     result = handler(
-        PodmanShellParams(command=("true",)), context=build_tool_context(bus, session)
+        PodmanShellParams(command=("true",)), context=build_tool_context(session)
     )
     assert result.value is not None
     value = cast(PodmanShellResult, result.value)
@@ -1605,7 +1601,7 @@ def test_evaluate_python_runs_script_passthrough(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -1636,7 +1632,7 @@ def test_evaluate_python_runs_script_passthrough(
         raising=False,
     )
 
-    result = invoke_tool(bus, tool, EvalParams(code="print('ok')"), session=session)
+    result = invoke_tool(tool, EvalParams(code="print('ok')"), session=session)
 
     assert result.success
     assert result.message == "Evaluation succeeded (exit code 0)."
@@ -1657,7 +1653,7 @@ def test_evaluate_python_accepts_large_scripts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -1684,7 +1680,7 @@ def test_evaluate_python_accepts_large_scripts(
         raising=False,
     )
 
-    result = invoke_tool(bus, tool, EvalParams(code=code), session=session)
+    result = invoke_tool(tool, EvalParams(code=code), session=session)
 
     assert result.success
     assert captured["script"] == code
@@ -1695,14 +1691,13 @@ def test_evaluate_python_rejects_control_characters(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
     with pytest.raises(ToolValidationError, match="unsupported control characters"):
         invoke_tool(
-            bus,
             tool,
             EvalParams(code="print('ok')\x01"),
             session=session,
@@ -1714,7 +1709,7 @@ def test_evaluate_python_marks_failure_on_nonzero_exit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -1736,7 +1731,7 @@ def test_evaluate_python_marks_failure_on_nonzero_exit(
         raising=False,
     )
 
-    result = invoke_tool(bus, tool, EvalParams(code="fail"), session=session)
+    result = invoke_tool(tool, EvalParams(code="fail"), session=session)
 
     assert not result.success
     assert result.message == "Evaluation failed (exit code 2)."
@@ -1749,7 +1744,7 @@ def test_evaluate_python_reports_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -1771,9 +1766,7 @@ def test_evaluate_python_reports_timeout(
         raising=False,
     )
 
-    result = invoke_tool(
-        bus, tool, EvalParams(code="while True: pass"), session=session
-    )
+    result = invoke_tool(tool, EvalParams(code="while True: pass"), session=session)
 
     assert not result.success
     assert result.message == "Evaluation timed out."
@@ -1786,7 +1779,7 @@ def test_evaluate_python_missing_cli_raises(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -1797,7 +1790,7 @@ def test_evaluate_python_missing_cli_raises(
     monkeypatch.setattr(section, "run_python_script", _fail)
 
     with pytest.raises(ToolValidationError, match="Podman CLI is required"):
-        invoke_tool(bus, tool, EvalParams(code="0"), session=session)
+        invoke_tool(tool, EvalParams(code="0"), session=session)
 
 
 def test_evaluate_python_truncates_streams(
@@ -1805,7 +1798,7 @@ def test_evaluate_python_truncates_streams(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -1832,7 +1825,7 @@ def test_evaluate_python_truncates_streams(
         raising=False,
     )
 
-    result = invoke_tool(bus, tool, EvalParams(code="0"), session=session)
+    result = invoke_tool(tool, EvalParams(code="0"), session=session)
 
     payload = cast(EvalResult, result.value)
     assert payload.stdout.endswith("...")
@@ -1843,7 +1836,7 @@ def test_evaluate_python_rejects_reads_writes_and_globals(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -1857,7 +1850,6 @@ def test_evaluate_python_rejects_reads_writes_and_globals(
 
     with pytest.raises(ToolValidationError, match="reads are not supported"):
         invoke_tool(
-            bus,
             tool,
             EvalParams(code="0", reads=(read,)),
             session=session,
@@ -1865,7 +1857,6 @@ def test_evaluate_python_rejects_reads_writes_and_globals(
 
     with pytest.raises(ToolValidationError, match="writes are not supported"):
         invoke_tool(
-            bus,
             tool,
             EvalParams(code="0", writes=(write,)),
             session=session,
@@ -1873,7 +1864,6 @@ def test_evaluate_python_rejects_reads_writes_and_globals(
 
     with pytest.raises(ToolValidationError, match="globals are not supported"):
         invoke_tool(
-            bus,
             tool,
             EvalParams(code="0", globals={"value": "1"}),
             session=session,
@@ -1883,7 +1873,7 @@ def test_evaluate_python_rejects_reads_writes_and_globals(
 def test_ls_lists_workspace_files(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -1896,7 +1886,7 @@ def test_ls_lists_workspace_files(
     assert handler is not None
     result = handler(
         ListDirectoryParams(path="docs"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     entries = cast(tuple[FileInfo, ...], result.value)
@@ -1906,7 +1896,7 @@ def test_ls_lists_workspace_files(
 def test_read_file_returns_numbered_lines(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -1918,7 +1908,7 @@ def test_read_file_returns_numbered_lines(
     assert handler is not None
     result = handler(
         ReadFileParams(file_path="notes.txt", limit=2),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     read_result = cast(ReadFileResult, result.value)
@@ -1929,7 +1919,7 @@ def test_read_file_returns_numbered_lines(
 def test_write_file_updates_snapshot(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -1943,7 +1933,7 @@ def test_write_file_updates_snapshot(
     assert handler is not None
     result = handler(
         WriteFileParams(file_path="src/app.py", content="print('hi')"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     call = runner.calls[-1]
@@ -2004,7 +1994,7 @@ def test_write_via_container_appends_existing_content(
 def test_edit_file_invokes_cli(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -2026,7 +2016,7 @@ def test_edit_file_invokes_cli(
             new_string="hi",
             replace_all=False,
         ),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     call = runner.calls[-1]
     assert "cp" in call
@@ -2168,7 +2158,7 @@ def test_write_via_container_propagates_read_oserror(
 def test_glob_matches_files(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2181,7 +2171,7 @@ def test_glob_matches_files(
     assert handler is not None
     result = handler(
         GlobParams(pattern="*.py", path="src"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     matches = cast(tuple[GlobMatch, ...], result.value)
@@ -2191,7 +2181,7 @@ def test_glob_matches_files(
 def test_grep_finds_pattern(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2202,7 +2192,7 @@ def test_grep_finds_pattern(
     assert handler is not None
     result = handler(
         GrepParams(pattern="match", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     grep_matches = cast(tuple[GrepMatch, ...], result.value)
@@ -2212,7 +2202,7 @@ def test_grep_finds_pattern(
 def test_rm_executes_cli(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -2229,7 +2219,7 @@ def test_rm_executes_cli(
     assert handler is not None
     handler(
         RemoveParams(path="temp.txt"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     call = runner.calls[-1]
     assert "python3" in call
@@ -2306,7 +2296,7 @@ def test_format_read_message_handles_empty_slice() -> None:
 def test_ls_rejects_file_path(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2319,14 +2309,14 @@ def test_ls_rejects_file_path(
     with pytest.raises(ToolValidationError):
         handler(
             ListDirectoryParams(path="file.txt"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_read_file_missing_path(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "read_file")
@@ -2336,14 +2326,14 @@ def test_read_file_missing_path(
     with pytest.raises(ToolValidationError):
         handler(
             ReadFileParams(file_path="missing.txt"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_read_file_rejects_invalid_encoding(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2356,14 +2346,14 @@ def test_read_file_rejects_invalid_encoding(
     with pytest.raises(ToolValidationError):
         handler(
             ReadFileParams(file_path="binary.bin"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_write_file_rejects_existing_file(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -2382,14 +2372,14 @@ def test_write_file_rejects_existing_file(
     with pytest.raises(ToolValidationError):
         handler(
             WriteFileParams(file_path="file.txt", content="other"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_edit_file_rejects_long_strings(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "edit_file")
@@ -2404,7 +2394,7 @@ def test_edit_file_rejects_long_strings(
                 old_string=long_text,
                 new_string="short",
             ),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
     with pytest.raises(ToolValidationError):
@@ -2414,14 +2404,14 @@ def test_edit_file_rejects_long_strings(
                 old_string="short",
                 new_string=long_text,
             ),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_edit_file_missing_path(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "edit_file")
@@ -2435,14 +2425,14 @@ def test_edit_file_missing_path(
                 old_string="a",
                 new_string="b",
             ),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_edit_file_rejects_invalid_encoding(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -2465,14 +2455,14 @@ def test_edit_file_rejects_invalid_encoding(
                 old_string="a",
                 new_string="b",
             ),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_edit_file_requires_occurrence(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -2495,14 +2485,14 @@ def test_edit_file_requires_occurrence(
                 old_string="missing",
                 new_string="new",
             ),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_edit_file_requires_unique_match(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -2525,14 +2515,14 @@ def test_edit_file_requires_unique_match(
                 old_string="foo",
                 new_string="bar",
             ),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
 def test_edit_file_replace_all_branch(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     runner = _FakeCliRunner([_ExecResponse(exit_code=0)])
     section = _make_section(
@@ -2555,14 +2545,14 @@ def test_edit_file_replace_all_branch(
             new_string="bar",
             replace_all=True,
         ),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
 
 def test_glob_rejects_empty_pattern(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "glob")
@@ -2572,7 +2562,7 @@ def test_glob_rejects_empty_pattern(
     with pytest.raises(ToolValidationError):
         handler(
             GlobParams(pattern="   ", path="/"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
@@ -2581,7 +2571,7 @@ def test_glob_skips_invalid_relative_path(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     outside = section.ensure_workspace().overlay_path.parent / "outside.txt"
@@ -2596,7 +2586,7 @@ def test_glob_skips_invalid_relative_path(
 
     result = handler(
         GlobParams(pattern="*", path="/"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value == ()
 
@@ -2606,7 +2596,7 @@ def test_glob_skips_invalid_composed_path(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2624,7 +2614,7 @@ def test_glob_skips_invalid_composed_path(
 
     result = handler(
         GlobParams(pattern="*", path="/"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value == ()
 
@@ -2634,7 +2624,7 @@ def test_glob_skips_invalid_file_info(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2651,7 +2641,7 @@ def test_glob_skips_invalid_file_info(
 
     result = handler(
         GlobParams(pattern="*", path="/"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value == ()
 
@@ -2661,7 +2651,7 @@ def test_glob_honors_result_limit(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2674,7 +2664,7 @@ def test_glob_honors_result_limit(
 
     result = handler(
         GlobParams(pattern="*.txt", path="/"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     matches = cast(tuple[GlobMatch, ...], result.value)
@@ -2684,7 +2674,7 @@ def test_glob_honors_result_limit(
 def test_grep_rejects_invalid_regex(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "grep")
@@ -2693,7 +2683,7 @@ def test_grep_rejects_invalid_regex(
 
     result = handler(
         GrepParams(pattern="[", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert not result.success
     assert result.value is None
@@ -2703,7 +2693,7 @@ def test_grep_rejects_invalid_regex(
 def test_grep_honors_glob_argument(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2715,7 +2705,7 @@ def test_grep_honors_glob_argument(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob="*.py"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     matches = cast(tuple[GrepMatch, ...], result.value)
@@ -2726,7 +2716,7 @@ def test_grep_honors_glob_argument(
 def test_grep_supports_default_path(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2737,7 +2727,7 @@ def test_grep_supports_default_path(
 
     result = handler(
         GrepParams(pattern="match", path=None, glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
     assert result.value is not None
@@ -2750,7 +2740,7 @@ def test_grep_supports_default_path(
 def test_grep_respects_glob_filter(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2761,7 +2751,7 @@ def test_grep_respects_glob_filter(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob="*.py"),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value == ()
 
@@ -2769,7 +2759,7 @@ def test_grep_respects_glob_filter(
 def test_grep_ignores_blank_glob(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2780,7 +2770,7 @@ def test_grep_ignores_blank_glob(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob="  "),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
     assert result.value is not None
@@ -2795,7 +2785,7 @@ def test_grep_skips_invalid_relative_path(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     outside = section.ensure_workspace().overlay_path.parent / "outside.txt"
@@ -2810,7 +2800,7 @@ def test_grep_skips_invalid_relative_path(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value == ()
 
@@ -2820,7 +2810,7 @@ def test_grep_skips_invalid_composed_path(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2836,7 +2826,7 @@ def test_grep_skips_invalid_composed_path(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value == ()
 
@@ -2846,7 +2836,7 @@ def test_grep_skips_overlay_errors(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2868,7 +2858,7 @@ def test_grep_skips_overlay_errors(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value == ()
 
@@ -2878,7 +2868,7 @@ def test_grep_skips_invalid_file_encoding(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2897,7 +2887,7 @@ def test_grep_skips_invalid_file_encoding(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value == ()
 
@@ -2907,7 +2897,7 @@ def test_grep_handles_oserror(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2931,7 +2921,7 @@ def test_grep_handles_oserror(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     matches = cast(tuple[GrepMatch, ...], result.value)
@@ -2945,7 +2935,7 @@ def test_grep_honors_result_limit(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2958,7 +2948,7 @@ def test_grep_honors_result_limit(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
     assert result.value is not None
     grep_matches = cast(tuple[GrepMatch, ...], result.value)
@@ -2968,7 +2958,7 @@ def test_grep_honors_result_limit(
 def test_grep_skips_binary_and_collects_match(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -2980,7 +2970,7 @@ def test_grep_skips_binary_and_collects_match(
 
     result = handler(
         GrepParams(pattern="match", path="/", glob=None),
-        context=build_tool_context(bus, session),
+        context=build_tool_context(session),
     )
 
     assert result.value is not None
@@ -2999,7 +2989,7 @@ def test_remove_rejects_root_and_missing(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "rm")
@@ -3009,13 +2999,13 @@ def test_remove_rejects_root_and_missing(
     with pytest.raises(ToolValidationError):
         handler(
             RemoveParams(path="/"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
     with pytest.raises(ToolValidationError):
         handler(
             RemoveParams(path="missing.txt"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
     original = vfs_module.normalize_string_path
@@ -3029,7 +3019,7 @@ def test_remove_rejects_root_and_missing(
     with pytest.raises(ToolValidationError):
         handler(
             RemoveParams(path="trigger"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 
@@ -3038,7 +3028,7 @@ def test_remove_handles_cli_errors(
     session_and_bus: tuple[Session, InProcessEventBus],
     tmp_path: Path,
 ) -> None:
-    session, bus = session_and_bus
+    session, _ = session_and_bus
     client = _FakePodmanClient()
     section = _make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -3056,7 +3046,7 @@ def test_remove_handles_cli_errors(
     with pytest.raises(ToolValidationError):
         handler(
             RemoveParams(path="temp.txt"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
     class _Response:
@@ -3069,7 +3059,7 @@ def test_remove_handles_cli_errors(
     with pytest.raises(ToolValidationError):
         handler(
             RemoveParams(path="temp.txt"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
 
 

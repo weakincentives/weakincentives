@@ -49,7 +49,6 @@ from weakincentives.prompt import (
     ToolHandler,
     ToolResult,
 )
-from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.tools import DeadlineExceededError
 
@@ -76,7 +75,6 @@ def _base_context(
     deadline: Deadline | None = None,
     session: SessionProtocol | None = None,
 ) -> ToolExecutionContext:
-    bus = InProcessEventBus()
     prompt_template = _build_prompt(tool)
     prompt = Prompt(prompt_template)
     return ToolExecutionContext(
@@ -88,8 +86,7 @@ def _base_context(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)},
         ),
-        bus=bus,
-        session=cast(SessionProtocol, session or Session(bus=bus)),
+        session=cast(SessionProtocol, session or Session()),
         prompt_name=cast(str, prompt.name),
         parse_arguments=parse_tool_arguments,
         format_publish_failures=format_publish_failures,

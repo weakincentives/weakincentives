@@ -19,7 +19,6 @@ from typing import Any, cast
 import pytest
 
 from tests.helpers.adapters import TEST_ADAPTER_NAME
-from tests.helpers.events import NullEventBus
 from weakincentives.adapters import PromptEvaluationError, shared
 from weakincentives.adapters.core import (
     PromptResponse,
@@ -72,7 +71,6 @@ def test_mapping_to_str_dict_rejects_non_string_keys() -> None:
 
 def test_run_inner_loop_requires_message_payload() -> None:
     rendered = RenderedPrompt(text="system")
-    bus = NullEventBus()
 
     class DummyChoice:
         def __init__(self) -> None:
@@ -112,10 +110,9 @@ def test_run_inner_loop_requires_message_payload() -> None:
 
     adapter = DummyAdapter()
     prompt = Prompt(PromptTemplate(ns="tests", key="example"))
-    session = Session(bus=bus)
+    session = Session()
 
     config = shared.InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,

@@ -84,7 +84,7 @@ class ToolExample[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]
     output: ResultT
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class ToolContext:
     """Immutable container exposing prompt execution state to handlers."""
 
@@ -92,9 +92,13 @@ class ToolContext:
     rendered_prompt: RenderedPromptProtocol[Any] | None
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
-    event_bus: EventBus
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
+
+    @property
+    def event_bus(self) -> EventBus:
+        """Return the event bus from the session."""
+        return self.session.event_bus
 
 
 def _normalize_specialization(item: object) -> tuple[object, object]:

@@ -41,7 +41,11 @@ class ReducerContextProtocol(Protocol):
     """Protocol implemented by reducer context objects."""
 
     session: SessionProtocol
-    event_bus: EventBus
+
+    @property
+    def event_bus(self) -> EventBus:
+        """Return the event bus attached to the session."""
+        ...
 
 
 class TypedReducer(Protocol[S]):

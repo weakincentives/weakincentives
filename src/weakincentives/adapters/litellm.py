@@ -25,7 +25,6 @@ from ..deadlines import Deadline
 from ..prompt._visibility import SectionVisibility
 from ..prompt.errors import SectionPath
 from ..prompt.prompt import Prompt
-from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
 from ._provider_protocols import (
@@ -261,7 +260,6 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         self,
         prompt: Prompt[OutputT],
         *,
-        bus: EventBus,
         session: SessionProtocol,
         parse_output: bool = True,
         deadline: Deadline | None = None,
@@ -327,7 +325,6 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             effective_tracker = BudgetTracker(budget=budget)
 
         config = InnerLoopConfig(
-            bus=bus,
             session=session,
             tool_choice=self._tool_choice,
             response_format=response_format,

@@ -158,7 +158,7 @@ def _evaluate_with_bus(
 ) -> PromptResponse[OutputT]:
     target_bus = bus or NullEventBus()
     session: SessionProtocol = cast(SessionProtocol, Session(bus=target_bus))
-    return _evaluate(adapter, prompt, *params, bus=target_bus, session=session)
+    return _evaluate(adapter, prompt, *params, session=session)
 
 
 def test_create_openai_client_requires_optional_dependency(
@@ -498,7 +498,6 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
             adapter,
             prompt,
             ToolParams(query="policies"),
-            bus=bus,
             session=session,
         )
 
@@ -588,7 +587,6 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
         adapter,
         prompt,
         ToolParams(query="invalid"),
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -680,7 +678,6 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -1437,7 +1434,6 @@ def test_openai_adapter_records_handler_failures() -> None:
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -1960,12 +1956,10 @@ def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     budget = Budget(max_total_tokens=1000)
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
 
     result = adapter.evaluate(
         Prompt(prompt).bind(GreetingParams(user="Test")),
-        bus=bus,
         session=session,
         budget=budget,
     )

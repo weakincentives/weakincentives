@@ -59,7 +59,7 @@ class _DummyAdapter(ProviderAdapter[Any]):
         raise NotImplementedError
 
 
-def build_tool_context(bus: InProcessEventBus, session: SessionProtocol) -> ToolContext:
+def build_tool_context(session: SessionProtocol) -> ToolContext:
     prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
     adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
     return ToolContext(
@@ -67,7 +67,6 @@ def build_tool_context(bus: InProcessEventBus, session: SessionProtocol) -> Tool
         rendered_prompt=None,
         adapter=adapter,
         session=session,
-        event_bus=bus,
     )
 
 
@@ -85,7 +84,6 @@ def find_tool(
 
 
 def invoke_tool(
-    bus: InProcessEventBus,
     tool: Tool[ParamsT, ResultT],
     params: ParamsT,
     *,
@@ -95,7 +93,7 @@ def invoke_tool(
 
     handler = tool.handler
     assert handler is not None
-    result = handler(params, context=build_tool_context(bus, session))
+    result = handler(params, context=build_tool_context(session))
     rendered_output = result.render()
     event = ToolInvoked(
         prompt_name="test",
@@ -108,6 +106,6 @@ def invoke_tool(
         value=cast(SupportsDataclass | None, result.value),
         rendered_output=rendered_output,
     )
-    publish_result = bus.publish(event)
+    publish_result = session.event_bus.publish(event)
     assert publish_result.ok
     return result

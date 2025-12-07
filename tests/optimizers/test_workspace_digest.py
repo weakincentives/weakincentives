@@ -40,7 +40,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesStore,
 )
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.runtime.events import EventBus, ToolInvoked
+from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.tools.digests import (
     WorkspaceDigest,
@@ -143,7 +143,6 @@ class _RecordingAdapter(ProviderAdapter):
         prompt: Prompt[Any],
         *,
         parse_output: bool = True,
-        bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
     ) -> PromptResponse[Any]:
@@ -151,6 +150,7 @@ class _RecordingAdapter(ProviderAdapter):
         prompt_name = prompt.name or prompt.key
         self.rendered_prompts.append(prompt)
         self.sessions.append(session)
+        bus = session.event_bus
         self.buses.append(bus)
 
         if self._emit_tool_event and bus is not None:

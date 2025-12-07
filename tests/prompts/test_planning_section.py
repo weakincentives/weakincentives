@@ -17,7 +17,6 @@ from __future__ import annotations
 import pytest
 
 from weakincentives.prompt import PromptRenderError
-from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 from weakincentives.tools import PlanningStrategy, PlanningToolsSection
 
@@ -27,8 +26,7 @@ def _make_section(
     strategy: PlanningStrategy | None = None,
     accepts_overrides: bool = False,
 ) -> PlanningToolsSection:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     if strategy is None:
         return PlanningToolsSection(
             session=session, accepts_overrides=accepts_overrides

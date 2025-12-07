@@ -144,7 +144,7 @@ def _evaluate_with_bus(
         if session is not None
         else cast(SessionProtocol, Session(bus=target_bus))
     )
-    return _evaluate(adapter, prompt, *params, bus=target_bus, session=target_session)
+    return _evaluate(adapter, prompt, *params, session=target_session)
 
 
 def test_create_litellm_completion_requires_optional_dependency(
@@ -1819,12 +1819,10 @@ def test_litellm_adapter_creates_budget_tracker_when_budget_provided() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion_factory=fake_factory)
 
     budget = Budget(max_total_tokens=1000)
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
 
     result = adapter.evaluate(
         Prompt(prompt).bind(GreetingParams(user="Test")),
-        bus=bus,
         session=session,
         budget=budget,
     )

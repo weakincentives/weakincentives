@@ -23,7 +23,6 @@ from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import BudgetTracker
-    from ..runtime.events._types import EventBus
     from ..runtime.session.protocols import SessionProtocol
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
@@ -131,7 +130,6 @@ class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
         prompt: PromptProtocol[AdapterOutputT],
         *,
         parse_output: bool = True,
-        bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
         budget_tracker: BudgetTracker | None = None,

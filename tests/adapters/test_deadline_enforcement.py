@@ -89,7 +89,6 @@ def _tool_context(
         prompt=prompt,
         rendered_prompt=rendered,
         tool_registry=tool_registry,
-        bus=bus,
         session=session,
         prompt_name=prompt_name,
         parse_arguments=shared.parse_tool_arguments,
@@ -120,8 +119,7 @@ def test_raise_tool_deadline_error() -> None:
 def test_inner_loop_raise_deadline_error() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessEventBus()
-    session: SessionProtocol = Session(bus=bus)
+    session: SessionProtocol = Session()
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     inputs = shared.InnerLoopInputs[BodyResult](
@@ -134,7 +132,6 @@ def test_inner_loop_raise_deadline_error() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = shared.InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,
@@ -155,8 +152,7 @@ def test_inner_loop_detects_expired_deadline(
 ) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessEventBus()
-    session: SessionProtocol = Session(bus=bus)
+    session: SessionProtocol = Session()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
@@ -171,7 +167,6 @@ def test_inner_loop_detects_expired_deadline(
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = shared.InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,
@@ -289,8 +284,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
 def test_run_inner_loop_replaces_rendered_deadline() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     def call_provider(
@@ -313,7 +307,6 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
         return cast(shared.ProviderChoice, response.choices[0])
 
     config = shared.InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,

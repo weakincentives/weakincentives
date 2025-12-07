@@ -225,7 +225,6 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -269,15 +268,13 @@ def test_adapter_tool_context_receives_deadline(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
         deadline=deadline,
     )
@@ -310,8 +307,7 @@ def test_adapter_tool_deadline_exceeded(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
@@ -319,7 +315,6 @@ def test_adapter_tool_deadline_exceeded(
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(
             bound_prompt,
-            bus=bus,
             session=cast(SessionProtocol, session),
             deadline=deadline,
         )
@@ -356,8 +351,7 @@ def test_adapter_deadline_preflight_rejection(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
@@ -368,7 +362,6 @@ def test_adapter_deadline_preflight_rejection(
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(
             bound_prompt,
-            bus=bus,
             session=cast(SessionProtocol, session),
             deadline=deadline,
         )
@@ -416,7 +409,6 @@ def test_adapter_tool_execution_validation_error(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -475,7 +467,6 @@ def test_adapter_tool_execution_rejects_extra_arguments(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -535,7 +526,6 @@ def test_adapter_tool_execution_rejects_type_errors(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -589,7 +579,6 @@ def test_adapter_tool_execution_unexpected_exception(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -668,7 +657,6 @@ def test_adapter_tool_execution_rolls_back_session(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=session,
     )
 
@@ -723,15 +711,13 @@ def test_adapter_tool_visibility_expansion_propagates(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
+    session = Session()
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="docs"))
 
     with pytest.raises(VisibilityExpansionRequired) as exc_info:
         adapter.evaluate(
             bound_prompt,
-            bus=bus,
             session=cast(SessionProtocol, session),
         )
 

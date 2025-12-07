@@ -24,7 +24,6 @@ from ..deadlines import Deadline
 from ..errors import WinkError
 from ..prompt import Prompt, SectionVisibility
 from ..prompt.errors import SectionPath
-from ..runtime.events._types import EventBus
 from ..runtime.session.protocols import SessionProtocol
 
 OutputT = TypeVar("OutputT")
@@ -52,7 +51,6 @@ class ProviderAdapter(ABC):
         prompt: Prompt[OutputT],
         *,
         parse_output: bool = True,
-        bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,

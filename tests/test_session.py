@@ -517,9 +517,9 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
 
 
 def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> None:
-    parent, bus = session_factory()
+    parent, _ = session_factory()
 
-    first_child = Session(bus=bus, parent=parent)
+    first_child = Session(parent=parent)
     parent_snapshot = parent.snapshot()
 
     assert parent_snapshot.parent_id is None
@@ -530,7 +530,7 @@ def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> No
     assert child_snapshot.parent_id == parent.session_id
     assert child_snapshot.children_ids == ()
 
-    second_child = Session(bus=bus, parent=parent)
+    second_child = Session(parent=parent)
 
     parent.mutate().rollback(parent_snapshot)
 
@@ -645,11 +645,10 @@ def test_clone_attaches_to_new_bus_when_provided(
 
 
 def test_session_requires_timezone_aware_created_at() -> None:
-    bus = InProcessEventBus()
     naive_timestamp = datetime.now()
 
     with pytest.raises(ValueError):
-        Session(bus=bus, created_at=naive_timestamp)
+        Session(created_at=naive_timestamp)
 
 
 def test_session_instantiates_default_bus_when_none_provided() -> None:

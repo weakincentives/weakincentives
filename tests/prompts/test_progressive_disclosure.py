@@ -83,7 +83,6 @@ def _make_tool_context() -> ToolContext:
         rendered_prompt=None,
         adapter=MagicMock(),
         session=MagicMock(),
-        event_bus=MagicMock(),
     )
 
 

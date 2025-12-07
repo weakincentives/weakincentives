@@ -14,10 +14,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, override
+
 from ...dataclasses import FrozenDataclass
-from ..events import EventBus
 from ._types import ReducerContextProtocol
 from .protocols import SessionProtocol
+
+if TYPE_CHECKING:
+    from ..events import EventBus
 
 
 @FrozenDataclass()
@@ -25,15 +29,18 @@ class ReducerContext(ReducerContextProtocol):
     """Immutable bundle of runtime services shared with reducers."""
 
     session: SessionProtocol
-    event_bus: EventBus
+
+    @property
+    @override
+    def event_bus(self) -> EventBus:
+        """Return the event bus from the session."""
+        return self.session.event_bus
 
 
-def build_reducer_context(
-    *, session: SessionProtocol, event_bus: EventBus
-) -> ReducerContext:
-    """Return a :class:`ReducerContext` for the provided session and event bus."""
+def build_reducer_context(*, session: SessionProtocol) -> ReducerContext:
+    """Return a :class:`ReducerContext` for the provided session."""
 
-    return ReducerContext(session=session, event_bus=event_bus)
+    return ReducerContext(session=session)
 
 
 __all__ = ["ReducerContext", "build_reducer_context"]
