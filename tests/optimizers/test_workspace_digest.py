@@ -40,7 +40,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesStore,
 )
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.runtime.events import EventBus, ToolInvoked
+from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.tools.digests import (
     WorkspaceDigest,
@@ -134,7 +134,6 @@ class _RecordingAdapter(ProviderAdapter):
         self.mode = mode
         self.rendered_prompts: list[Prompt[Any]] = []
         self.sessions: list[SessionProtocol] = []
-        self.buses: list[Any] = []
         self._emit_tool_event = emit_tool_event
 
     @override
@@ -142,7 +141,6 @@ class _RecordingAdapter(ProviderAdapter):
         self,
         prompt: Prompt[Any],
         *,
-        bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
     ) -> PromptResponse[Any]:
@@ -150,9 +148,8 @@ class _RecordingAdapter(ProviderAdapter):
         prompt_name = prompt.name or prompt.key
         self.rendered_prompts.append(prompt)
         self.sessions.append(session)
-        self.buses.append(bus)
 
-        if self._emit_tool_event and bus is not None:
+        if self._emit_tool_event:
             event = ToolInvoked(
                 prompt_name=prompt_name,
                 adapter=OPENAI_ADAPTER_NAME,
@@ -162,7 +159,7 @@ class _RecordingAdapter(ProviderAdapter):
                 session_id=getattr(session, "session_id", None) if session else None,
                 created_at=datetime.now(UTC),
             )
-            bus.publish(event)
+            session.event_bus.publish(event)
 
         digest_value = f"{self.mode}-digest"
         if self.mode == "dataclass":
@@ -452,7 +449,6 @@ def test_optimize_uses_isolated_session() -> None:
     inner_session = adapter.sessions[0]
     assert isinstance(inner_session, Session)
     assert inner_session is not outer_session
-    assert adapter.buses[0] is inner_session.event_bus
 
 
 def test_optimize_accepts_provided_session() -> None:
@@ -466,7 +462,6 @@ def test_optimize_accepts_provided_session() -> None:
 
     assert adapter.sessions
     assert adapter.sessions[0] is provided_session
-    assert adapter.buses[0] is provided_session.event_bus
 
 
 def test_workspace_digest_result_has_correct_scope() -> None:

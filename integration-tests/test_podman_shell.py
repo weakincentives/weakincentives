@@ -61,7 +61,7 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
         params = PodmanShellParams(
             command=("sh", "-c", "echo 'hello' > test.txt && cat test.txt"),
         )
-        result = handler(params, context=build_tool_context(bus, session))
+        result = handler(params, context=build_tool_context(session))
 
         assert result.success
         assert result.value is not None
@@ -100,11 +100,11 @@ def test_podman_vfs_round_trip(tmp_path: Path) -> None:
 
         write_handler(
             WriteFileParams(file_path="notes.txt", content="hello world"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
         result = read_handler(
             ReadFileParams(file_path="notes.txt"),
-            context=build_tool_context(bus, session),
+            context=build_tool_context(session),
         )
         assert result.success
         assert result.value is not None
@@ -139,7 +139,7 @@ def test_evaluate_python_writes_file(tmp_path: Path) -> None:
         assert eval_handler is not None
 
         params = EvalParams(code="print('integration-ok')")
-        result = eval_handler(params, context=build_tool_context(bus, session))
+        result = eval_handler(params, context=build_tool_context(session))
 
         assert result.success
         payload = cast(EvalResult, result.value)
@@ -185,7 +185,7 @@ def test_podman_container_has_no_network(tmp_path: Path) -> None:
             "sys.exit(1)\n"
         )
         params = PodmanShellParams(command=("python3", "-c", script))
-        result = handler(params, context=build_tool_context(bus, session))
+        result = handler(params, context=build_tool_context(session))
 
         assert result.success
         assert result.value is not None

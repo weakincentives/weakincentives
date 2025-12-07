@@ -46,7 +46,6 @@ from ..prompt.structured_output import (
 )
 from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ..runtime.events import (
-    EventBus,
     HandlerFailure,
     PromptExecuted,
     PromptRendered,
@@ -711,7 +710,6 @@ def tool_execution(
             rendered_prompt=context.rendered_prompt,
             adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
             session=context.session,
-            event_bus=context.bus,
             deadline=context.deadline,
             budget_tracker=context.budget_tracker,
         )
@@ -790,7 +788,7 @@ def _publish_tool_invocation(
         call_id=outcome.call_id,
         event_id=uuid4(),
     )
-    publish_result = context.bus.publish(invocation)
+    publish_result = context.session.event_bus.publish(invocation)
     if not publish_result.ok:
         context.session.mutate().rollback(snapshot)
         outcome.log.warning(
@@ -1135,7 +1133,6 @@ class ToolMessageSerializer(Protocol):
 class InnerLoopConfig:
     """Configuration and collaborators required to run the inner loop."""
 
-    bus: EventBus
     session: SessionProtocol
     tool_choice: ToolChoice
     response_format: Mapping[str, Any] | None
@@ -1167,7 +1164,6 @@ class ToolExecutor:
     prompt: Prompt[Any]
     prompt_name: str
     rendered: RenderedPrompt[Any]
-    bus: EventBus
     session: SessionProtocol
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
     serialize_tool_message_fn: ToolMessageSerializer
@@ -1193,7 +1189,6 @@ class ToolExecutor:
             prompt=self.prompt,
             rendered_prompt=self.rendered,
             tool_registry=self.tool_registry,
-            bus=self.bus,
             session=self.session,
             prompt_name=self.prompt_name,
             parse_arguments=self.parse_arguments,
@@ -1535,7 +1530,6 @@ class InnerLoop[OutputT]:
             prompt=self.inputs.prompt,
             prompt_name=self.inputs.prompt_name,
             rendered=self._rendered,
-            bus=self.config.bus,
             session=self.config.session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=self.config.serialize_tool_message_fn,
@@ -1556,7 +1550,7 @@ class InnerLoop[OutputT]:
     def _publish_rendered_event(self) -> None:
         """Publish the PromptRendered event."""
 
-        publish_result = self.config.bus.publish(
+        publish_result = self.config.session.event_bus.publish(
             PromptRendered(
                 prompt_ns=self.inputs.prompt.ns,
                 prompt_key=self.inputs.prompt.key,
@@ -1667,7 +1661,7 @@ class InnerLoop[OutputT]:
         if is_dataclass_instance(output):
             prompt_value = cast(SupportsDataclass, output)  # pyright: ignore[reportUnnecessaryCast]
 
-        publish_result = self.config.bus.publish(
+        publish_result = self.config.session.event_bus.publish(
             PromptExecuted(
                 prompt_name=self.inputs.prompt_name,
                 adapter=self.inputs.adapter_name,
@@ -1734,7 +1728,6 @@ class ToolExecutionContext:
     prompt: Prompt[Any]
     rendered_prompt: RenderedPrompt[Any] | None
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
-    bus: EventBus
     session: SessionProtocol
     prompt_name: str
     parse_arguments: ToolArgumentsParser

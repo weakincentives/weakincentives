@@ -161,10 +161,9 @@ def build_inner_loop(
     *,
     rendered: RenderedPrompt[object],
     provider: ProviderStub,
-    bus: RecordingBus,
+    session: SessionProtocol,
     tool_choice: ToolChoice = "auto",
     response_format: Mapping[str, Any] | None = None,
-    session: SessionProtocol | None = None,
     render_inputs: tuple[SupportsDataclass, ...] | None = None,
     throttle_policy: ThrottlePolicy | None = None,
     budget_tracker: BudgetTracker | None = None,
@@ -173,7 +172,6 @@ def build_inner_loop(
     """Build an InnerLoop instance using the new API."""
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template).bind(*(render_inputs or ()))
-    session_arg: SessionProtocol = session if session is not None else Session(bus=bus)
 
     inputs = InnerLoopInputs[object](
         adapter_name=DUMMY_ADAPTER_NAME,
@@ -185,8 +183,7 @@ def build_inner_loop(
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        bus=bus,
-        session=session_arg,
+        session=session,
         tool_choice=tool_choice,
         response_format=response_format,
         require_structured_output_text=False,
@@ -271,9 +268,14 @@ class GlobalMutationBuilderStub:
 
 
 class SessionStub(SessionProtocol):
-    def __init__(self) -> None:
+    def __init__(self, *, event_bus: EventBus | None = None) -> None:
         self.snapshots: list[SnapshotProtocol] = []
         self.rollbacks: list[SnapshotProtocol] = []
+        self._event_bus = event_bus or RecordingBus()
+
+    @property
+    def event_bus(self) -> EventBus:
+        return self._event_bus
 
     def snapshot(self) -> SnapshotProtocol:
         snapshot = Snapshot(created_at=datetime.now(UTC))
@@ -293,8 +295,9 @@ def test_inner_loop_success() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
 
-    loop = build_inner_loop(rendered=rendered, provider=provider, bus=bus)
+    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
 
     assert response.text == "Hello"
@@ -314,8 +317,9 @@ def test_inner_loop_includes_usage_in_event() -> None:
     ]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
 
-    loop = build_inner_loop(rendered=rendered, provider=provider, bus=bus)
+    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     _ = loop.run()
 
     prompt_event = cast(PromptExecuted, bus.events[-1])
@@ -330,12 +334,13 @@ def test_inner_loop_publishes_prompt_rendered_event() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
     params = EchoParams(value="hello")
 
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,
-        bus=bus,
+        session=session,
         render_inputs=(params,),
     )
     loop.run()
@@ -373,11 +378,12 @@ def test_inner_loop_parses_structured_output() -> None:
     ]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
 
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,
-        bus=bus,
+        session=session,
     )
     response = loop.run()
 
@@ -396,11 +402,12 @@ def test_inner_loop_records_usage_to_budget_tracker() -> None:
     ]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
     budget = Budget(max_total_tokens=1000)
     tracker = BudgetTracker(budget=budget)
 
     loop = build_inner_loop(
-        rendered=rendered, provider=provider, bus=bus, budget_tracker=tracker
+        rendered=rendered, provider=provider, session=session, budget_tracker=tracker
     )
     loop.run()
 
@@ -416,6 +423,7 @@ def test_run_inner_loop_function() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
 
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template)
@@ -431,7 +439,6 @@ def test_run_inner_loop_function() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,
@@ -458,11 +465,12 @@ def test_inner_loop_raises_on_budget_exceeded() -> None:
     ]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
     budget = Budget(max_total_tokens=500)
     tracker = BudgetTracker(budget=budget)
 
     loop = build_inner_loop(
-        rendered=rendered, provider=provider, bus=bus, budget_tracker=tracker
+        rendered=rendered, provider=provider, session=session, budget_tracker=tracker
     )
 
     with pytest.raises(PromptEvaluationError) as exc_info:
@@ -484,7 +492,8 @@ def test_inner_loop_requires_message_payload() -> None:
 
     provider = ProviderStub([MissingMessageResponse()])
     bus = RecordingBus()
-    loop = build_inner_loop(rendered=rendered, provider=provider, bus=bus)
+    session = Session(bus=bus)
+    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
 
     with pytest.raises(PromptEvaluationError):
         loop.run()
@@ -500,8 +509,9 @@ def test_inner_loop_executes_tool_calls() -> None:
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
     bus = RecordingBus()
+    session = Session(bus=bus)
 
-    loop = build_inner_loop(rendered=rendered, provider=provider, bus=bus)
+    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
 
     assert response.text == "All done"
@@ -515,12 +525,13 @@ def test_inner_loop_continues_on_prompt_rendered_publish_failure() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus(fail_rendered=True)
+    session = Session(bus=bus)
     params = EchoParams(value="blocked")
 
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,
-        bus=bus,
+        session=session,
         render_inputs=(params,),
     )
     response = loop.run()
@@ -537,8 +548,9 @@ def test_inner_loop_raises_on_prompt_publish_failure() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus(fail_prompt=True)
+    session = Session(bus=bus)
 
-    loop = build_inner_loop(rendered=rendered, provider=provider, bus=bus)
+    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
 
     with pytest.raises(ExceptionGroup) as exc_info:
         loop.run()
@@ -558,8 +570,9 @@ def test_inner_loop_formats_tool_publish_failures() -> None:
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
     bus = RecordingBus(fail_tool=True)
+    session = Session(bus=bus)
 
-    loop = build_inner_loop(rendered=rendered, provider=provider, bus=bus)
+    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
 
     assert response.text == "All done"
@@ -577,13 +590,11 @@ def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:
     )
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
-    bus = RecordingBus(fail_tool=True)
-    session = SessionStub()
+    session = SessionStub(event_bus=RecordingBus(fail_tool=True))
 
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,
-        bus=bus,
         session=session,
     )
     response = loop.run()
@@ -600,8 +611,9 @@ def test_inner_loop_includes_prompt_descriptor_in_event() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
 
-    loop = build_inner_loop(rendered=rendered, provider=provider, bus=bus)
+    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     loop.run()
 
     rendered_event = next(
@@ -616,8 +628,9 @@ def test_inner_loop_ensure_deadline_remaining_no_deadline() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
 
-    loop = build_inner_loop(rendered=rendered, provider=provider, bus=bus)
+    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     # This should not raise since there's no deadline
     loop._ensure_deadline_remaining("test", phase=PROMPT_EVALUATION_PHASE_REQUEST)
 
@@ -630,10 +643,11 @@ def test_inner_loop_raise_deadline_error() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     loop = build_inner_loop(
-        rendered=rendered, provider=provider, bus=bus, deadline=deadline
+        rendered=rendered, provider=provider, session=session, deadline=deadline
     )
 
     with pytest.raises(PromptEvaluationError) as exc_info:
@@ -657,9 +671,10 @@ def test_inner_loop_ensure_deadline_remaining_expired(
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     bus = RecordingBus()
+    session = Session(bus=bus)
 
     loop = build_inner_loop(
-        rendered=rendered, provider=provider, bus=bus, deadline=deadline
+        rendered=rendered, provider=provider, session=session, deadline=deadline
     )
 
     # Advance time past the deadline

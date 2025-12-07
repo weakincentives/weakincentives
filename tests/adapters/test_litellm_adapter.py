@@ -90,7 +90,6 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.events import (
-    EventBus,
     HandlerFailure,
     InProcessEventBus,
     PromptExecuted,
@@ -131,20 +130,18 @@ def _evaluate(
     return adapter.evaluate(bound_prompt, **kwargs)
 
 
-def _evaluate_with_bus(
+def _evaluate_with_session(
     adapter: ProviderAdapter[OutputT],
     prompt: PromptTemplate[OutputT],
     *params: SupportsDataclass,
-    bus: EventBus | None = None,
     session: SessionProtocol | None = None,
 ) -> PromptResponse[OutputT]:
-    target_bus = bus or NullEventBus()
     target_session = (
         session
         if session is not None
-        else cast(SessionProtocol, Session(bus=target_bus))
+        else cast(SessionProtocol, Session(bus=NullEventBus()))
     )
-    return _evaluate(adapter, prompt, *params, bus=target_bus, session=target_session)
+    return _evaluate(adapter, prompt, *params, session=target_session)
 
 
 def test_create_litellm_completion_requires_optional_dependency(
@@ -261,7 +258,7 @@ def test_litellm_adapter_constructs_completion_when_not_provided(
         completion_config=LiteLLMClientConfig(api_key="secret-key"),
     )
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
@@ -329,7 +326,7 @@ def test_litellm_adapter_uses_model_config() -> None:
         model_config=LiteLLMModelConfig(temperature=0.5, max_tokens=100),
     )
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
@@ -363,11 +360,10 @@ def test_litellm_adapter_returns_plain_text_response() -> None:
     completion = RecordingCompletion([response])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
-        bus=NullEventBus(),
     )
 
     assert result.prompt_name == "greeting"
@@ -429,11 +425,10 @@ def test_litellm_adapter_executes_tools_and_parses_output() -> None:
     completion = RecordingCompletion([first, second])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=NullEventBus(),
     )
 
     assert result.text is None
@@ -533,11 +528,10 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
     )
 
     with pytest.raises(ExceptionGroup) as exc_info:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
-            bus=bus,
             session=session,
         )
 
@@ -591,11 +585,10 @@ def test_litellm_adapter_uses_parsed_payload_when_available() -> None:
     completion = RecordingCompletion([response])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=NullEventBus(),
     )
 
     assert result.text is None
@@ -630,11 +623,10 @@ def test_litellm_adapter_includes_response_format_for_array_outputs() -> None:
     completion = RecordingCompletion([response])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=NullEventBus(),
     )
 
     assert isinstance(result.output, list)
@@ -696,11 +688,10 @@ def test_litellm_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
         tool_choice=forced_choice,
     )
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=NullEventBus(),
     )
 
     assert result.text == "All done"
@@ -753,11 +744,10 @@ def test_litellm_adapter_handles_tool_call_without_arguments() -> None:
     completion = RecordingCompletion([first, second])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         OptionalParams(),
-        bus=NullEventBus(),
     )
 
     assert result.text == "All done"
@@ -814,6 +804,7 @@ def test_litellm_adapter_surfaces_tool_validation_errors() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
 
     def record(event: object) -> None:
@@ -822,11 +813,11 @@ def test_litellm_adapter_surfaces_tool_validation_errors() -> None:
 
     bus.subscribe(ToolInvoked, record)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="invalid"),
-        bus=bus,
+        session=session,
     )
 
     assert result.text == "Please provide a different query."
@@ -902,6 +893,7 @@ def test_litellm_adapter_surfaces_tool_type_errors() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
 
     def record(event: object) -> None:
@@ -910,11 +902,11 @@ def test_litellm_adapter_surfaces_tool_type_errors() -> None:
 
     bus.subscribe(ToolInvoked, record)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
+        session=session,
     )
 
     assert result.text == "Please adjust the payload."
@@ -966,11 +958,10 @@ def test_litellm_adapter_reads_output_json_content_blocks() -> None:
     completion = RecordingCompletion([response])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=NullEventBus(),
     )
 
     assert result.text is None
@@ -1016,6 +1007,7 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
 
@@ -1029,11 +1021,11 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
 
     bus.subscribe(ToolInvoked, record_tool_event)
     bus.subscribe(PromptExecuted, record_prompt_event)
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
+        session=session,
     )
 
     assert len(tool_events) == 1
@@ -1085,7 +1077,7 @@ def test_litellm_adapter_raises_when_tool_handler_missing() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -1124,7 +1116,7 @@ def test_litellm_adapter_raises_when_tool_not_registered() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -1172,15 +1164,16 @@ def test_litellm_adapter_handles_invalid_tool_params() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
     )
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
+        session=session,
     )
 
     assert result.text == "Try again"
@@ -1243,6 +1236,7 @@ def test_litellm_adapter_records_handler_failures() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
 
     def record(event: object) -> None:
@@ -1251,11 +1245,11 @@ def test_litellm_adapter_records_handler_failures() -> None:
 
     bus.subscribe(ToolInvoked, record)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
+        session=session,
     )
 
     assert result.text == "Please provide a different approach."
@@ -1297,11 +1291,10 @@ def test_litellm_adapter_records_provider_payload_from_mapping() -> None:
     completion = RecordingCompletion([mapping_response])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
-        bus=NullEventBus(),
     )
 
     assert not hasattr(result, "provider_payload")
@@ -1329,11 +1322,10 @@ def test_litellm_adapter_ignores_non_mapping_model_dump() -> None:
     completion = RecordingCompletion([response])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
-        bus=NullEventBus(),
     )
 
     assert not hasattr(result, "provider_payload")
@@ -1361,11 +1353,10 @@ def test_litellm_adapter_handles_response_without_model_dump() -> None:
     completion = RecordingCompletion([response])
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
-        bus=NullEventBus(),
     )
 
     assert not hasattr(result, "provider_payload")
@@ -1410,7 +1401,7 @@ def test_litellm_adapter_rejects_bad_tool_arguments(arguments_json: str) -> None
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -1457,7 +1448,7 @@ def test_litellm_adapter_propagates_parse_errors_for_structured_output() -> None
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -1489,7 +1480,7 @@ def test_litellm_adapter_raises_when_structured_output_missing() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -1523,7 +1514,7 @@ def test_litellm_adapter_raises_on_invalid_parsed_payload() -> None:
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -1749,7 +1740,7 @@ def test_litellm_adapter_delegates_to_shared_runner(
     adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
 
     params = GreetingParams(user="Ari")
-    result = _evaluate_with_bus(adapter, prompt, params)
+    result = _evaluate_with_session(adapter, prompt, params)
 
     assert result is sentinel
     inputs = captured["inputs"]
@@ -1824,7 +1815,6 @@ def test_litellm_adapter_creates_budget_tracker_when_budget_provided() -> None:
 
     result = adapter.evaluate(
         Prompt(prompt).bind(GreetingParams(user="Test")),
-        bus=bus,
         session=session,
         budget=budget,
     )
@@ -1867,7 +1857,7 @@ def test_litellm_adapter_completion_factory_merges_config_and_kwargs(
         completion_kwargs={"timeout": 5},
     )
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Factory"),

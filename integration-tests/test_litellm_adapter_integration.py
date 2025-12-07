@@ -242,10 +242,8 @@ def test_litellm_adapter_returns_text(adapter: LiteLLMAdapter) -> None:
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -262,10 +260,8 @@ def test_litellm_adapter_executes_tools(adapter: LiteLLMAdapter) -> None:
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -280,10 +276,8 @@ def test_litellm_adapter_parses_structured_output(adapter: LiteLLMAdapter) -> No
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -304,10 +298,8 @@ def test_litellm_adapter_with_typed_client_config(
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter_with_typed_config.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -337,10 +329,8 @@ def test_litellm_adapter_with_model_config(
     prompt = Prompt(prompt_template).bind(params)
 
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 

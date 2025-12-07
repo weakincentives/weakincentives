@@ -546,9 +546,8 @@ class Session(SessionProtocol):
                         slice_type=data_type,
                     )
                 ]
-            event_bus = self._bus
 
-        context = build_reducer_context(session=self, event_bus=event_bus)
+        context = build_reducer_context(session=self)
 
         for registration in registrations:
             slice_type = registration.slice_type

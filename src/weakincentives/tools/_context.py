@@ -27,12 +27,6 @@ def ensure_context_uses_session(*, context: ToolContext, session: Session) -> No
             "Ensure the tool is invoked with the bound session."
         )
         raise RuntimeError(message)
-    if context.event_bus is not session.event_bus:
-        message = (
-            "ToolContext event bus does not match the section session bus. "
-            "Ensure the tool is invoked with the bound event bus."
-        )
-        raise RuntimeError(message)
 
 
 __all__ = ["ensure_context_uses_session"]

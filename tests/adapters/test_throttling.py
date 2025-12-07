@@ -31,11 +31,13 @@ from weakincentives.adapters.shared import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.runtime.session import Session
 
 
 def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
     rendered = RenderedPrompt(text="system")
     bus = RecordingBus()
+    session = Session(bus=bus)
     response = DummyResponse([DummyChoice(DummyMessage(content="ok"))])
     delays: list[timedelta] = []
     calls = 0
@@ -71,7 +73,7 @@ def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
-        bus=bus,
+        session=session,
         throttle_policy=new_throttle_policy(max_attempts=5),
     )
 
@@ -87,6 +89,7 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
 ) -> None:
     rendered = RenderedPrompt(text="system")
     bus = RecordingBus()
+    session = Session(bus=bus)
 
     monkeypatch.setattr(
         "weakincentives.adapters.shared._sleep_for", lambda _delay: None
@@ -111,7 +114,7 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
-        bus=bus,
+        session=session,
         throttle_policy=new_throttle_policy(
             max_attempts=2, max_total_delay=timedelta(milliseconds=60)
         ),
@@ -154,6 +157,7 @@ def test_throttle_policy_validation() -> None:
 def test_runner_raises_on_non_retryable_throttle() -> None:
     rendered = RenderedPrompt(text="system")
     bus = RecordingBus()
+    session = Session(bus=bus)
 
     def provider(
         messages: list[dict[str, Any]],
@@ -172,7 +176,7 @@ def test_runner_raises_on_non_retryable_throttle() -> None:
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
-        bus=bus,
+        session=session,
         throttle_policy=new_throttle_policy(max_attempts=2),
     )
 
@@ -183,6 +187,7 @@ def test_runner_raises_on_non_retryable_throttle() -> None:
 def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     rendered = RenderedPrompt(text="system")
     bus = RecordingBus()
+    session = Session(bus=bus)
     monkeypatch.setattr(
         "weakincentives.adapters.shared._sleep_for", lambda _delay: None
     )
@@ -206,7 +211,7 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
-        bus=bus,
+        session=session,
         throttle_policy=new_throttle_policy(
             max_attempts=1, base_delay=timedelta(milliseconds=10)
         ),
@@ -219,6 +224,7 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     rendered = RenderedPrompt(text="system")
     bus = RecordingBus()
+    session = Session(bus=bus)
     monkeypatch.setattr(
         "weakincentives.adapters.shared._sleep_for", lambda _delay: None
     )
@@ -246,7 +252,7 @@ def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,  # type: ignore[arg-type]
-        bus=bus,
+        session=session,
         throttle_policy=new_throttle_policy(
             max_attempts=3, base_delay=timedelta(seconds=1)
         ),

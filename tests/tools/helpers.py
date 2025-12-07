@@ -33,7 +33,7 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
-from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
+from weakincentives.runtime.events import ToolInvoked
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclassOrNone)
 ResultT = TypeVar("ResultT", bound=SupportsToolResult)
@@ -51,14 +51,13 @@ class _DummyAdapter(ProviderAdapter[Any]):
         self,
         prompt: Prompt[Any],
         *,
-        bus: InProcessEventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
     ) -> PromptResponse[Any]:
         raise NotImplementedError
 
 
-def build_tool_context(bus: InProcessEventBus, session: SessionProtocol) -> ToolContext:
+def build_tool_context(session: SessionProtocol) -> ToolContext:
     prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
     adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
     return ToolContext(
@@ -66,7 +65,6 @@ def build_tool_context(bus: InProcessEventBus, session: SessionProtocol) -> Tool
         rendered_prompt=None,
         adapter=adapter,
         session=session,
-        event_bus=bus,
     )
 
 
@@ -84,7 +82,6 @@ def find_tool(
 
 
 def invoke_tool(
-    bus: InProcessEventBus,
     tool: Tool[ParamsT, ResultT],
     params: ParamsT,
     *,
@@ -94,7 +91,7 @@ def invoke_tool(
 
     handler = tool.handler
     assert handler is not None
-    result = handler(params, context=build_tool_context(bus, session))
+    result = handler(params, context=build_tool_context(session))
     rendered_output = result.render()
     event = ToolInvoked(
         prompt_name="test",
@@ -107,6 +104,6 @@ def invoke_tool(
         value=cast(SupportsDataclass | None, result.value),
         rendered_output=rendered_output,
     )
-    publish_result = bus.publish(event)
+    publish_result = session.event_bus.publish(event)
     assert publish_result.ok
     return result

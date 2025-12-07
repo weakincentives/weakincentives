@@ -77,7 +77,6 @@ def _tool_context(
     prompt: Prompt[BodyResult],
     rendered: RenderedPrompt[BodyResult],
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
-    bus: InProcessEventBus,
     session: SessionProtocol,
     prompt_name: str,
     provider_payload: dict[str, Any] | None = None,
@@ -89,7 +88,6 @@ def _tool_context(
         prompt=prompt,
         rendered_prompt=rendered,
         tool_registry=tool_registry,
-        bus=bus,
         session=session,
         prompt_name=prompt_name,
         parse_arguments=shared.parse_tool_arguments,
@@ -134,7 +132,6 @@ def test_inner_loop_raise_deadline_error() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = shared.InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,
@@ -170,7 +167,6 @@ def test_inner_loop_detects_expired_deadline(
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = shared.InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,
@@ -222,7 +218,6 @@ def test_execute_tool_call_raises_when_deadline_expired(
                 prompt=prompt,
                 rendered=rendered,
                 tool_registry=tool_registry,
-                bus=bus,
                 session=session,
                 prompt_name="deadline",
                 deadline=deadline,
@@ -270,7 +265,6 @@ def test_execute_tool_call_publishes_invocation() -> None:
             prompt=prompt,
             rendered=rendered,
             tool_registry=tool_registry,
-            bus=bus,
             session=session,
             prompt_name="publish",
         ),
@@ -315,7 +309,6 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
         return cast(shared.ProviderChoice, response.choices[0])
 
     config = shared.InnerLoopConfig(
-        bus=bus,
         session=session,
         tool_choice="auto",
         response_format=None,

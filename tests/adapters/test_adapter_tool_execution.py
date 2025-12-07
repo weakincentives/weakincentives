@@ -225,7 +225,6 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -277,7 +276,6 @@ def test_adapter_tool_context_receives_deadline(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
         deadline=deadline,
     )
@@ -319,7 +317,6 @@ def test_adapter_tool_deadline_exceeded(
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(
             bound_prompt,
-            bus=bus,
             session=cast(SessionProtocol, session),
             deadline=deadline,
         )
@@ -368,7 +365,6 @@ def test_adapter_deadline_preflight_rejection(
     with pytest.raises(PromptEvaluationError) as excinfo:
         adapter.evaluate(
             bound_prompt,
-            bus=bus,
             session=cast(SessionProtocol, session),
             deadline=deadline,
         )
@@ -416,7 +412,6 @@ def test_adapter_tool_execution_validation_error(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -475,7 +470,6 @@ def test_adapter_tool_execution_rejects_extra_arguments(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -535,7 +529,6 @@ def test_adapter_tool_execution_rejects_type_errors(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -589,7 +582,6 @@ def test_adapter_tool_execution_unexpected_exception(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -668,7 +660,6 @@ def test_adapter_tool_execution_rolls_back_session(
 
     adapter.evaluate(
         bound_prompt,
-        bus=bus,
         session=session,
     )
 
@@ -731,7 +722,6 @@ def test_adapter_tool_visibility_expansion_propagates(
     with pytest.raises(VisibilityExpansionRequired) as exc_info:
         adapter.evaluate(
             bound_prompt,
-            bus=bus,
             session=cast(SessionProtocol, session),
         )
 

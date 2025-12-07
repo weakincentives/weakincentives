@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from ...dataclasses import FrozenDataclass
-from ..events import EventBus
 from ._types import ReducerContextProtocol
 from .protocols import SessionProtocol
 
@@ -25,15 +24,12 @@ class ReducerContext(ReducerContextProtocol):
     """Immutable bundle of runtime services shared with reducers."""
 
     session: SessionProtocol
-    event_bus: EventBus
 
 
-def build_reducer_context(
-    *, session: SessionProtocol, event_bus: EventBus
-) -> ReducerContext:
-    """Return a :class:`ReducerContext` for the provided session and event bus."""
+def build_reducer_context(*, session: SessionProtocol) -> ReducerContext:
+    """Return a :class:`ReducerContext` for the provided session."""
 
-    return ReducerContext(session=session, event_bus=event_bus)
+    return ReducerContext(session=session)
 
 
 __all__ = ["ReducerContext", "build_reducer_context"]

@@ -200,7 +200,6 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
 
     prompt = Prompt(prompt_template).bind(params)
     session = Session()
-    bus = session.event_bus
 
     max_expansions = 5
     expansion_count = 0
@@ -210,7 +209,6 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
         try:
             response = adapter.evaluate(
                 prompt,
-                bus=bus,
                 session=session,
                 visibility_overrides=visibility_overrides,
             )
@@ -273,7 +271,6 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
 
     prompt = Prompt(prompt_template).bind(params)
     session = Session()
-    bus = session.event_bus
 
     max_iterations = 5
     iteration = 0
@@ -284,7 +281,6 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
         try:
             response = adapter.evaluate(
                 prompt,
-                bus=bus,
                 session=session,
                 visibility_overrides=visibility_overrides,
             )
