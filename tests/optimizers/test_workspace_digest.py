@@ -142,12 +142,11 @@ class _RecordingAdapter(ProviderAdapter):
         self,
         prompt: Prompt[Any],
         *,
-        parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
     ) -> PromptResponse[Any]:
-        del parse_output, deadline
+        del deadline
         prompt_name = prompt.name or prompt.key
         self.rendered_prompts.append(prompt)
         self.sessions.append(session)

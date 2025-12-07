@@ -51,7 +51,6 @@ class _DummyAdapter(ProviderAdapter[Any]):
         self,
         prompt: Prompt[Any],
         *,
-        parse_output: bool = True,
         bus: InProcessEventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,

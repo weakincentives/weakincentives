@@ -130,7 +130,6 @@ class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
         self,
         prompt: PromptProtocol[AdapterOutputT],
         *,
-        parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,

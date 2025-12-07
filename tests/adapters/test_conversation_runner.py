@@ -77,7 +77,6 @@ class DummyAdapter(ProviderAdapter[object]):
         self,
         prompt: Prompt[object],
         *,
-        parse_output: bool = True,
         bus: EventBus,
         session: SessionProtocol | None = None,
         deadline: Deadline | None = None,
@@ -164,7 +163,6 @@ def build_inner_loop(
     provider: ProviderStub,
     bus: RecordingBus,
     tool_choice: ToolChoice = "auto",
-    parse_output: bool = False,
     response_format: Mapping[str, Any] | None = None,
     session: SessionProtocol | None = None,
     render_inputs: tuple[SupportsDataclass, ...] | None = None,
@@ -195,7 +193,6 @@ def build_inner_loop(
         call_provider=provider,
         select_choice=lambda response: response.choices[0],
         serialize_tool_message_fn=serialize_tool_message,
-        parse_output=parse_output,
         throttle_policy=throttle_policy or new_throttle_policy(),
         budget_tracker=budget_tracker,
         deadline=deadline,
@@ -381,7 +378,6 @@ def test_inner_loop_parses_structured_output() -> None:
         rendered=rendered,
         provider=provider,
         bus=bus,
-        parse_output=True,
     )
     response = loop.run()
 

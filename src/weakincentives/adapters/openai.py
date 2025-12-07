@@ -606,7 +606,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         *,
         bus: EventBus,
         session: SessionProtocol,
-        parse_output: bool = True,
         deadline: Deadline | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
@@ -614,7 +613,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
     ) -> PromptResponse[OutputT]:
         context = self._setup_evaluation(
             prompt,
-            parse_output=parse_output,
             deadline=deadline,
             visibility_overrides=visibility_overrides,
         )
@@ -633,7 +631,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             call_provider=self._build_provider_invoker(context.prompt_name),
             select_choice=self._build_choice_selector(context.prompt_name),
             serialize_tool_message_fn=serialize_tool_message,
-            parse_output=parse_output,
             format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=self._conversation_logger(),
@@ -657,7 +654,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self,
         prompt: Prompt[OutputT],
         *,
-        parse_output: bool,
         deadline: Deadline | None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> _EvaluationContext[OutputT]:
@@ -671,7 +667,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         )
         response_format = self._build_response_format(
             rendered,
-            parse_output=parse_output,
             prompt_name=prompt_name,
         )
         return _EvaluationContext(
@@ -709,13 +704,10 @@ class OpenAIAdapter(ProviderAdapter[Any]):
     def _build_response_format(
         rendered: RenderedPrompt[Any],
         *,
-        parse_output: bool,
         prompt_name: str,
     ) -> dict[str, Any] | None:
         should_parse_structured_output = (
-            parse_output
-            and rendered.output_type is not None
-            and rendered.container is not None
+            rendered.output_type is not None and rendered.container is not None
         )
         if should_parse_structured_output:
             response_format = cast(

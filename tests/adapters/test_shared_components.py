@@ -262,7 +262,6 @@ def test_response_parser_text_only() -> None:
     parser = ResponseParser[object](
         prompt_name="test",
         rendered=rendered,
-        parse_output=False,
         require_structured_output_text=False,
     )
 
@@ -290,7 +289,6 @@ def test_response_parser_structured_output() -> None:
     parser = ResponseParser[StructuredOutput](
         prompt_name="test",
         rendered=rendered,
-        parse_output=True,
         require_structured_output_text=False,
     )
 
@@ -313,7 +311,6 @@ def test_response_parser_structured_output_failure() -> None:
     parser = ResponseParser[StructuredOutput](
         prompt_name="test",
         rendered=rendered,
-        parse_output=True,
         require_structured_output_text=False,
     )
 
