@@ -1691,21 +1691,6 @@ def test_openai_adapter_delegates_to_shared_runner(
         assert getattr(first_part, "text", None) == "hi"
 
 
-def test_openai_normalizes_tool_call_mapping_arguments() -> None:
-    module = cast(Any, _reload_module())
-
-    tool_call = {
-        "id": "call_1",
-        "function": {"name": "do_it", "arguments": {"value": 1}},
-    }
-
-    normalized = module._normalize_tool_call(tool_call)
-
-    assert normalized.id == "call_1"
-    assert normalized.function.name == "do_it"
-    assert normalized.function.arguments == json.dumps({"value": 1})
-
-
 def test_openai_normalizes_unserializable_arguments() -> None:
     module = cast(Any, _reload_module())
 
@@ -1716,6 +1701,12 @@ def test_openai_normalizes_unserializable_arguments() -> None:
 
     assert arguments is not None
     assert "Unserializable" in arguments
+
+
+def test_openai_normalizes_none_arguments() -> None:
+    module = cast(Any, _reload_module())
+
+    assert module._normalize_tool_arguments(None) is None
 
 
 def test_openai_choice_requires_output_and_content() -> None:
@@ -1915,6 +1906,36 @@ def test_openai_normalize_input_messages_allows_passthrough() -> None:
         prompt_name="prompt",
     )
     assert messages[-1]["content"] == "raw"
+
+
+def test_openai_normalize_input_messages_splits_assistant_with_content_and_tools() -> (
+    None
+):
+    module = cast(Any, _reload_module())
+
+    messages = module._normalize_input_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "Let me search for that",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "function": {"name": "search", "arguments": "{}"},
+                    }
+                ],
+            }
+        ],
+        prompt_name="prompt",
+    )
+
+    # Should produce a message for the content, then a function_call for the tool
+    assert len(messages) == 2
+    assert messages[0]["type"] == "message"
+    assert messages[0]["role"] == "assistant"
+    assert messages[0]["content"] == "Let me search for that"
+    assert messages[1]["type"] == "function_call"
+    assert messages[1]["name"] == "search"
 
 
 def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:

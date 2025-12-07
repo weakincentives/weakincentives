@@ -128,15 +128,66 @@ class DummyResponseOutput:
         return {"content": normalized}
 
 
+@dataclass
+class DummyFunctionCallOutput:
+    """Responses API format for function calls."""
+
+    name: str
+    arguments: str | None
+    call_id: str
+    type: str = "function_call"
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "name": self.name,
+            "arguments": self.arguments or "{}",
+            "call_id": self.call_id,
+        }
+
+
+DummyOutputType = DummyFunctionCallOutput | DummyResponseOutput
+
+
+def _build_output(choices: Sequence[DummyChoice]) -> list[DummyOutputType]:
+    """Build Responses API output from choices.
+
+    Tool calls are emitted as separate function_call items, while content
+    is wrapped in DummyResponseOutput.
+    """
+    output: list[DummyOutputType] = []
+    for choice in choices:
+        message = choice.message
+        # Emit tool calls as separate function_call items
+        if message.tool_calls:
+            output.extend(
+                DummyFunctionCallOutput(
+                    name=tool_call.function.name,
+                    arguments=tool_call.function.arguments or "{}",
+                    call_id=tool_call.id,
+                )
+                for tool_call in message.tool_calls
+            )
+        # Emit content as message output
+        content_parts = message.to_content_parts()
+        # Only add content output if there's actual text content
+        has_text = any(
+            getattr(part, "text", None)
+            for part in content_parts
+            if isinstance(part, DummyContent)
+        )
+        if has_text or not message.tool_calls:
+            output.append(DummyResponseOutput(content_parts))
+    return output
+
+
 class DummyResponse:
     def __init__(
         self, choices: Sequence[DummyChoice], *, usage: dict[str, object] | None = None
     ) -> None:
         self.choices = list(choices)
         self.usage = usage
-        self.output = [
-            DummyResponseOutput(choice.message.to_content_parts()) for choice in choices
-        ]
+        self.output = _build_output(choices)
 
     def model_dump(self) -> dict[str, Any]:
         payload = {"output": [output.model_dump() for output in self.output]}
@@ -149,17 +200,13 @@ class MappingResponse(dict[str, object]):
     def __init__(self, choices: Sequence[DummyChoice]) -> None:
         super().__init__({"meta": "value"})
         self.choices = list(choices)
-        self.output = [
-            DummyResponseOutput(choice.message.to_content_parts()) for choice in choices
-        ]
+        self.output = _build_output(choices)
 
 
 class WeirdResponse:
     def __init__(self, choices: Sequence[DummyChoice]) -> None:
         self.choices = list(choices)
-        self.output = [
-            DummyResponseOutput(choice.message.to_content_parts()) for choice in choices
-        ]
+        self.output = _build_output(choices)
 
     @staticmethod
     def model_dump() -> list[object]:
@@ -169,9 +216,7 @@ class WeirdResponse:
 class SimpleResponse:
     def __init__(self, choices: Sequence[DummyChoice]) -> None:
         self.choices = list(choices)
-        self.output = [
-            DummyResponseOutput(choice.message.to_content_parts()) for choice in choices
-        ]
+        self.output = _build_output(choices)
 
 
 ResponseType = DummyResponse | MappingResponse | WeirdResponse | SimpleResponse

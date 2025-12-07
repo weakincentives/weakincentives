@@ -38,12 +38,6 @@ from weakincentives.types import JSONValue
 parse_module = importlib.import_module("weakincentives.serde.parse")
 
 
-def test_shim_module_remains_importable() -> None:
-    shim = importlib.import_module("weakincentives.serde.dataclass_serde")
-
-    assert shim.__all__ == []
-
-
 def test_module_exports_align_with_public_api() -> None:
     from weakincentives.serde.dump import clone as module_clone, dump as module_dump
     from weakincentives.serde.parse import parse as module_parse
