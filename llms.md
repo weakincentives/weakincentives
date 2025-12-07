@@ -93,7 +93,7 @@ Optional extras enable specific providers or tooling:
     - `parse_structured_output`: Parse a model response into the structured output type declared by the prompt.
   - Modules: `adapters`, `cli`, `deadlines`, `debug`, `optimizers`, `prompt`,
     `runtime`, `serde`, `tools`, `types`.
-- `weakincentives.adapters`: Provider integrations and throttling primitives.
+- `weakincentives.adapters`: Provider integrations, configuration, and throttling primitives.
   - Constants: `LITELLM_ADAPTER_NAME`, `OPENAI_ADAPTER_NAME`.
   - Types:
     - `AdapterName`: Type alias for adapter names.
@@ -103,6 +103,12 @@ Optional extras enable specific providers or tooling:
     - `SessionProtocol`: Protocol describing the session interface required by adapters.
     - `ThrottleError`: Raised when a throttle policy denies a request.
     - `ThrottlePolicy`: Protocol for rate limiting policies.
+  - Configuration:
+    - `LLMConfig`: Base configuration for common LLM parameters (temperature, max_tokens, top_p, etc.).
+    - `OpenAIClientConfig`: Configuration for OpenAI client instantiation (api_key, base_url, timeout).
+    - `OpenAIModelConfig`: OpenAI-specific model configuration extending LLMConfig.
+    - `LiteLLMClientConfig`: Configuration for LiteLLM client instantiation.
+    - `LiteLLMModelConfig`: LiteLLM-specific model configuration extending LLMConfig.
   - Factory: `new_throttle_policy`: Factory for creating throttle policies.
 - `weakincentives.prompt`: Prompt authoring, rendering, and override helpers.
   - Authoring:
@@ -150,7 +156,7 @@ Optional extras enable specific providers or tooling:
     - `PromptRenderError`: Raised when prompt rendering fails.
     - `PromptValidationError`: Raised when prompt validation fails.
     - `VisibilityExpansionRequired`: Raised when model requests expansion of summarized sections.
-- `weakincentives.runtime`: Session and event primitives.
+- `weakincentives.runtime`: Session, event, and orchestration primitives.
   - Logging:
     - `StructuredLogger`: Logger adapter enforcing a minimal structured event schema.
     - `configure_logging`: Configure the root logger with sensible defaults.
@@ -162,7 +168,14 @@ Optional extras enable specific providers or tooling:
     - `PromptExecuted`: Event emitted when a prompt is executed.
     - `PromptRendered`: Event emitted when a prompt is rendered.
     - `PublishResult`: Result of publishing an event.
+    - `TokenUsage`: Token usage data from provider responses.
     - `ToolInvoked`: Event emitted when a tool is invoked.
+  - Main loop orchestration:
+    - `MainLoop`: Abstract base class for standardized agent workflow orchestration.
+    - `MainLoopConfig`: Configuration for default deadline/budget.
+    - `MainLoopRequest`: Event requesting execution with optional constraints.
+    - `MainLoopCompleted`: Success event published via bus.
+    - `MainLoopFailed`: Failure event published via bus.
   - Session ledger:
     - `DataEvent`: Event carrying data.
     - `ReducerContext`: Context for reducers.
@@ -306,6 +319,7 @@ Optional extras enable specific providers or tooling:
 ### Minimal harness setup
 
 ```python
+from dataclasses import dataclass
 from weakincentives import MarkdownSection, Prompt
 from weakincentives.prompt import PromptTemplate
 from weakincentives.adapters.openai import OpenAIAdapter
@@ -321,9 +335,9 @@ template = PromptTemplate[TaskResponse](
     sections=[MarkdownSection(title="Instructions", template="...", key="instructions")],
 )
 
-session = Session()
+session = Session()  # Creates event bus internally (access via session.event_bus)
 adapter = OpenAIAdapter(model="gpt-4o-mini")
-response = adapter.evaluate(Prompt(template), bus=session.event_bus, session=session)
+response = adapter.evaluate(Prompt(template), session=session)
 result: TaskResponse = response.output
 ```
 
@@ -362,10 +376,8 @@ section = MarkdownSection(
 ### Multi-turn with session state
 
 ```python
-from weakincentives.runtime import append
-
-response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
-session = append(session, response.output)  # Store result
+response = adapter.evaluate(prompt, session=session)
+session.mutate(TaskResponse).append(response.output)  # Store result
 later = session.query(TaskResponse).latest()  # Retrieve later
 ```
 
@@ -375,9 +387,9 @@ later = session.query(TaskResponse).latest()  # Retrieve later
 from weakincentives.adapters import PromptEvaluationError
 
 try:
-    response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
+    response = adapter.evaluate(prompt, session=session)
 except PromptEvaluationError as exc:
-    print(exc.phase, exc.prompt_name)  # "request"/"response"/"tool"
+    print(exc.phase, exc.prompt_name)  # "request"/"response"/"tool"/"budget"
 ```
 
 ## Prompt Authoring (`weakincentives.prompt`)
@@ -444,19 +456,42 @@ ToolResult(message="...", value=MyResult(...), success=True, exclude_value_from_
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.adapters.litellm import LiteLLMAdapter
+from weakincentives.adapters import OpenAIModelConfig, OpenAIClientConfig
 
+# Basic usage
 adapter = OpenAIAdapter(model="gpt-4o-mini")  # Native JSON schema by default
-adapter = OpenAIAdapter(model="gpt-4o", client=custom_client)  # Custom client
+
+# With typed configuration
+adapter = OpenAIAdapter(
+    model="gpt-4o",
+    model_config=OpenAIModelConfig(temperature=0.7, max_tokens=4096),
+    client_config=OpenAIClientConfig(timeout=30.0),
+)
+
+# LiteLLM for multi-provider support
 adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")  # Any LiteLLM model
+```
+
+### ProviderAdapter.evaluate() signature
+
+```python
+response = adapter.evaluate(
+    prompt,
+    session=session,
+    deadline=deadline,                           # Optional timeout
+    visibility_overrides=visibility_overrides,   # Progressive disclosure
+    budget=budget,                               # Token/time limits
+    budget_tracker=budget_tracker,               # Shared tracker across evaluations
+)
 ```
 
 ### PromptResponse fields
 
 ```python
-response = adapter.evaluate(prompt, bus=session.event_bus, session=session)
+response = adapter.evaluate(prompt, session=session)
 response.output       # Parsed dataclass
 response.text         # Raw text
-response.usage        # TokenUsage(input_tokens, output_tokens, ...)
+response.prompt_name  # Prompt identifier
 ```
 
 ### Rate limiting
@@ -472,13 +507,16 @@ response = adapter.evaluate(..., throttle=policy)
 - **`Session`**: Immutable event ledger with Redux-like reducers. Feed events in
   with `append(session, event)` or convenience selectors like `replace_latest`
   and `upsert_by`. `Snapshot`/`SnapshotProtocol` provide persistence helpers.
-- **Reducers and query API**: Use `TypedReducer` with `ReducerContext` to manage
-  typed state slices. The `session.query(T)` API provides fluent access to
-  accumulated data: `.all()`, `.latest()`, and `.where(predicate)`.
+- **Query and mutation APIs**: Use `session.query(T)` for reading and
+  `session.mutate(T)` for writing state slices. Both provide fluent APIs.
+- **Reducers**: Use `TypedReducer` with `ReducerContext` to manage typed state
+  slices through event-driven mutations.
 - **Events**: `PromptExecuted` and `ToolInvoked` events capture every model
   exchange. `EventBus`/`InProcessEventBus` publish events to reducers and custom
   observers. `HandlerFailure` and `PublishResult` offer backpressure and error
   reporting controls.
+- **MainLoop**: Abstract orchestrator for agent workflows with automatic
+  visibility expansion handling and budget tracking.
 - **Logging**: `configure_logging()` wires a structured logger; `get_logger`
   retrieves a module-level logger. `StructuredLogger` is a protocol you can
   implement for custom sinks.
@@ -519,12 +557,42 @@ digest = WorkspaceDigestSection(session=session)  # Renders workspace summary
 ### Query API
 
 ```python
-from weakincentives.runtime import append, replace_latest
-
-session = append(session, my_data)
 latest = session.query(MyType).latest()
 all_items = session.query(MyType).all()
 filtered = session.query(MyType).where(lambda x: x.status == "done")
+exists = session.query(MyType).exists()
+```
+
+### Mutation API
+
+```python
+# Initialize or replace slice values (bypasses reducers)
+session.mutate(Plan).seed(initial_plan)
+
+# Append value using default reducer
+session.mutate(Plan).append(new_step)
+
+# Event-driven mutation through reducers
+session.mutate(Plan).dispatch(AddStep(step=new_step))
+
+# Register reducer for custom event types
+session.mutate(Plan).register(AddStep, my_reducer)
+
+# Remove items from a slice
+session.mutate(Plan).clear()                        # Clear all
+session.mutate(Plan).clear(lambda p: p.done)        # Clear matching
+
+# Global operations
+session.mutate().reset()                            # Clear all slices
+session.mutate().rollback(snapshot)                 # Restore from snapshot
+```
+
+### Legacy helpers (still available)
+
+```python
+from weakincentives.runtime import append, replace_latest
+
+session = append(session, my_data)
 session = replace_latest(session, MyType, updated)
 ```
 
@@ -533,23 +601,104 @@ session = replace_latest(session, MyType, updated)
 ```python
 def handler(params, *, context: ToolContext) -> ToolResult:
     plan = context.session.query(Plan).latest()
-    # Tool handlers can't mutate session; adapters record ToolInvoked events
+    # Tool handlers can read session; adapters record ToolInvoked events
 ```
+
+## MainLoop Orchestration
+
+`MainLoop` standardizes agent workflow orchestration: receive request, build
+prompt, evaluate, handle visibility expansion, publish result. Implementations
+define only the domain-specific factories.
+
+### Implementing a MainLoop
+
+```python
+from weakincentives.runtime import MainLoop, MainLoopConfig, Session
+from weakincentives.prompt import Prompt, PromptTemplate
+
+class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
+    def __init__(
+        self, *, adapter: ProviderAdapter[ReviewResult], bus: EventBus
+    ) -> None:
+        super().__init__(
+            adapter=adapter,
+            bus=bus,
+            config=MainLoopConfig(budget=Budget(max_total_tokens=50000)),
+        )
+        self._template = PromptTemplate[ReviewResult](
+            ns="reviews", key="code-review", sections=[...],
+        )
+
+    def create_prompt(self, request: ReviewRequest) -> Prompt[ReviewResult]:
+        return Prompt(self._template).bind(ReviewParams.from_request(request))
+
+    def create_session(self) -> Session:
+        return Session(bus=self._bus, tags={"loop": "code-review"})
+```
+
+### Direct execution
+
+```python
+loop = CodeReviewLoop(adapter=adapter, bus=bus)
+response = loop.execute(ReviewRequest(...))
+```
+
+### Bus-driven execution
+
+```python
+from weakincentives.runtime import MainLoopRequest, MainLoopCompleted, MainLoopFailed
+
+# Subscribe handler
+bus.subscribe(MainLoopRequest, loop.handle_request)
+
+# Handle results
+bus.subscribe(MainLoopCompleted, lambda e: print(f"Done: {e.response}"))
+bus.subscribe(MainLoopFailed, lambda e: print(f"Failed: {e.error}"))
+
+# Submit request with optional per-request constraints
+bus.publish(MainLoopRequest(
+    request=ReviewRequest(...),
+    budget=Budget(max_total_tokens=10000),  # Overrides config default
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+))
+```
+
+### Visibility expansion handling
+
+MainLoop automatically handles `VisibilityExpansionRequired` exceptions by
+accumulating visibility overrides and retrying evaluation. A shared
+`BudgetTracker` enforces limits cumulatively across retries.
 
 ## Event Subscription
 
 ```python
-from weakincentives.runtime import PromptRendered, PromptExecuted, ToolInvoked
+from weakincentives.runtime import PromptRendered, PromptExecuted, ToolInvoked, TokenUsage
 
 session = Session()
+
+# Subscribe to events
 session.event_bus.subscribe(ToolInvoked, lambda e: print(e.name))
 session.event_bus.subscribe(PromptExecuted, lambda e: print(e.usage))
+
+# Unsubscribe handler (returns True if found and removed)
+handler = lambda e: print(e)
+session.event_bus.subscribe(PromptRendered, handler)
+session.event_bus.unsubscribe(PromptRendered, handler)
 ```
 
 ## Session Snapshots
 
-Use `Session.snapshot()` to capture session state for debugging or replay.
-Restore with `Snapshot.from_json(...)` and `session.mutate().rollback(...)`.
+```python
+# Capture session state
+snapshot = session.snapshot()
+
+# Restore from snapshot
+session.mutate().rollback(snapshot)
+
+# Serialize for persistence
+snapshot_json = snapshot.to_json()
+restored = Snapshot.from_json(snapshot_json)
+```
 
 ## Deadlines
 
