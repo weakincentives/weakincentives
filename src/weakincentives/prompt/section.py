@@ -98,6 +98,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         depth: int,
         number: str,
         *,
+        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
         """Produce markdown output for the section at the supplied depth.
@@ -106,6 +107,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             params: The parameters to use when rendering the section template.
             depth: The nesting depth of this section (affects heading level).
             number: The section number prefix (e.g., "1.2.").
+            path: The section path as a tuple of keys (e.g., ("parent", "child")).
             visibility: Optional override for the section's default visibility.
                 When provided, this takes precedence over the section's
                 configured visibility. This allows callers to dynamically

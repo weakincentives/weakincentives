@@ -74,12 +74,13 @@ class MarkdownSection(Section[MarkdownParamsT]):
         depth: int,
         number: str,
         *,
+        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
         effective = self.effective_visibility(override=visibility, params=params)
         if effective == SectionVisibility.SUMMARY and self.summary is not None:
-            return self.render_with_template(self.summary, params, depth, number)
-        return self.render_with_template(self.template, params, depth, number)
+            return self.render_with_template(self.summary, params, depth, number, path)
+        return self.render_with_template(self.template, params, depth, number, path)
 
     def render_with_template(
         self,
@@ -87,10 +88,15 @@ class MarkdownSection(Section[MarkdownParamsT]):
         params: SupportsDataclass | None,
         depth: int,
         number: str,
+        path: tuple[str, ...] = (),
     ) -> str:
         heading_level = "#" * (depth + 2)
         normalized_number = number.rstrip(".")
-        heading = f"{heading_level} {normalized_number}. {self.title.strip()}"
+        path_str = ".".join(path) if path else ""
+        title_with_path = (
+            f"{self.title.strip()} ({path_str})" if path_str else self.title.strip()
+        )
+        heading = f"{heading_level} {normalized_number}. {title_with_path}"
         template = Template(textwrap.dedent(template_text).strip())
         try:
             normalized_params = self._normalize_params(params)

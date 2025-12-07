@@ -348,17 +348,20 @@ class PromptRenderer[OutputT]:
             render_override = getattr(node.section, "render_with_template", None)
             if override_body is not None and callable(render_override):
                 override_renderer = cast(
-                    Callable[[str, SupportsDataclass | None, int, str], str],
+                    Callable[
+                        [str, SupportsDataclass | None, int, str, tuple[str, ...]], str
+                    ],
                     render_override,
                 )
                 rendered = override_renderer(
-                    override_body, section_params, node.depth, node.number
+                    override_body, section_params, node.depth, node.number, node.path
                 )
             else:
                 rendered = node.section.render(
                     section_params,
                     node.depth,
                     node.number,
+                    path=node.path,
                     visibility=visibility_override,
                 )
         except PromptRenderError as error:

@@ -138,9 +138,9 @@ def test_prompt_tools_integration_example() -> None:
     markdown = rendered.text
 
     assert markdown == (
-        "## 1. Guidance\n\nUse tools when you need up-to-date context. "
+        "## 1. Guidance (guidance)\n\nUse tools when you need up-to-date context. "
         "Prefer lookup_entity for critical lookups.\n\n"
-        "### 1.1. Available Tools\n\nInvoke lookup_entity whenever you need fresh entity context."
+        "### 1.1. Available Tools (guidance.available-tools)\n\nInvoke lookup_entity whenever you need fresh entity context."
     )
 
     tools = rendered.tools
@@ -183,7 +183,7 @@ def test_prompt_renders_tool_examples_with_rendered_output() -> None:
     rendered = Prompt(template).render()
 
     assert rendered.text == (
-        "## 1. Available Tools\n\n"
+        "## 1. Available Tools (available-tools)\n\n"
         "Invoke lookup_entity whenever you need fresh entity context.\n\n"
         "Tools:\n"
         "- lookup_entity: Fetch structured information for a given entity id.\n"
@@ -256,9 +256,9 @@ def test_prompt_renders_tool_examples_inline() -> None:
     )
 
     assert rendered.text == (
-        "## 1. Guidance\n\nUse tools when you need up-to-date context. "
+        "## 1. Guidance (guidance)\n\nUse tools when you need up-to-date context. "
         "Prefer lookup_entity for critical lookups.\n\n"
-        "### 1.1. Available Tools\n\n"
+        "### 1.1. Available Tools (guidance.available-tools)\n\n"
         "Invoke lookup_entity whenever you need fresh entity context.\n\n"
         "Tools:\n"
         "- lookup_entity: Fetch structured information for a given entity id.\n"

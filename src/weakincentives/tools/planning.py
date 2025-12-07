@@ -261,6 +261,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         depth: int,
         number: str,
         *,
+        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
         del visibility
@@ -270,7 +271,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
                 dataclass_type=_PlanningSectionParams,
             )
         template = _template_for_strategy(self._strategy)
-        return self.render_with_template(template, params, depth, number)
+        return self.render_with_template(template, params, depth, number, path)
 
     @override
     def original_body_template(self) -> str:
