@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from ..budget import Budget
+from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt._visibility import SectionVisibility
@@ -190,7 +190,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         Creates a session and prompt, then evaluates with the adapter.
         Visibility expansion exceptions are handled automatically by
-        accumulating overrides and retrying.
+        accumulating overrides and retrying. A shared ``BudgetTracker`` is
+        used across retries to enforce budget limits cumulatively.
 
         Args:
             request: The user request to process.
@@ -205,11 +206,32 @@ class MainLoop[UserRequestT, OutputT](ABC):
             (except VisibilityExpansionRequired which is handled internally).
         """
         session = self.create_session()
+        return self._evaluate_loop(session, request, budget=budget, deadline=deadline)
+
+    def _evaluate_loop(
+        self,
+        session: Session,
+        request: UserRequestT,
+        *,
+        budget: Budget | None = None,
+        deadline: Deadline | None = None,
+    ) -> PromptResponse[OutputT]:
+        """Run the evaluation loop with visibility expansion handling.
+
+        Internal helper used by both execute() and handle_request().
+        """
         prompt = self.create_prompt(request)
         visibility_overrides: dict[SectionPath, SectionVisibility] = {}
 
         effective_budget = budget if budget is not None else self._config.budget
         effective_deadline = deadline if deadline is not None else self._config.deadline
+
+        # Create a shared tracker to enforce budget across visibility retries
+        budget_tracker = (
+            BudgetTracker(budget=effective_budget)
+            if effective_budget is not None
+            else None
+        )
 
         while True:
             try:
@@ -218,8 +240,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     bus=self._bus,
                     session=session,
                     visibility_overrides=visibility_overrides,
-                    budget=effective_budget,
                     deadline=effective_deadline,
+                    budget_tracker=budget_tracker,
                 )
             except VisibilityExpansionRequired as e:
                 visibility_overrides.update(e.requested_overrides)
@@ -244,33 +266,13 @@ class MainLoop[UserRequestT, OutputT](ABC):
         try:
             session = self.create_session()
             session_id = session.session_id
-            prompt = self.create_prompt(request_event.request)
-            visibility_overrides: dict[SectionPath, SectionVisibility] = {}
 
-            effective_budget = (
-                request_event.budget
-                if request_event.budget is not None
-                else self._config.budget
+            response = self._evaluate_loop(
+                session,
+                request_event.request,
+                budget=request_event.budget,
+                deadline=request_event.deadline,
             )
-            effective_deadline = (
-                request_event.deadline
-                if request_event.deadline is not None
-                else self._config.deadline
-            )
-
-            while True:
-                try:
-                    response = self._adapter.evaluate(
-                        prompt,
-                        bus=self._bus,
-                        session=session,
-                        visibility_overrides=visibility_overrides,
-                        budget=effective_budget,
-                        deadline=effective_deadline,
-                    )
-                    break
-                except VisibilityExpansionRequired as e:
-                    visibility_overrides.update(e.requested_overrides)
 
             completed = MainLoopCompleted[OutputT](
                 request_id=request_event.request_id,

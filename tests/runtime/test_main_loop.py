@@ -87,7 +87,8 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self._last_visibility_overrides: (
             Mapping[SectionPath, SectionVisibility] | None
         ) = None
-        self._last_budget: Budget | None = None
+        self._last_budget_tracker: BudgetTracker | None = None
+        self._budget_trackers: list[BudgetTracker | None] = []
         self._last_deadline: Deadline | None = None
         self._last_session: SessionProtocol | None = None
 
@@ -102,10 +103,11 @@ class _MockAdapter(ProviderAdapter[_Output]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[_Output]:
-        del prompt, bus, budget_tracker
+        del prompt, bus, budget
         self._call_count += 1
         self._last_visibility_overrides = visibility_overrides
-        self._last_budget = budget
+        self._last_budget_tracker = budget_tracker
+        self._budget_trackers.append(budget_tracker)
         self._last_deadline = deadline
         self._last_session = session
 
@@ -290,7 +292,7 @@ def test_execute_successful_execution() -> None:
 
 
 def test_execute_passes_budget_from_config() -> None:
-    """MainLoop.execute passes config budget to adapter."""
+    """MainLoop.execute creates BudgetTracker with config budget."""
     bus = InProcessEventBus()
     budget = Budget(max_total_tokens=1000)
     config = MainLoopConfig(budget=budget)
@@ -299,7 +301,8 @@ def test_execute_passes_budget_from_config() -> None:
 
     loop.execute(_Request(message="hello"))
 
-    assert adapter._last_budget is budget
+    assert adapter._last_budget_tracker is not None
+    assert adapter._last_budget_tracker.budget is budget
 
 
 def test_execute_passes_deadline_from_config() -> None:
@@ -326,7 +329,8 @@ def test_execute_budget_overrides_config() -> None:
     override_budget = Budget(max_total_tokens=2000)
     loop.execute(_Request(message="hello"), budget=override_budget)
 
-    assert adapter._last_budget is override_budget
+    assert adapter._last_budget_tracker is not None
+    assert adapter._last_budget_tracker.budget is override_budget
 
 
 def test_execute_deadline_overrides_config() -> None:
@@ -446,7 +450,8 @@ def test_handle_request_budget_overrides_config() -> None:
     )
     loop.handle_request(request)
 
-    assert adapter._last_budget is override_budget
+    assert adapter._last_budget_tracker is not None
+    assert adapter._last_budget_tracker.budget is override_budget
 
 
 def test_handle_request_deadline_overrides_config() -> None:
@@ -521,3 +526,38 @@ def test_bus_session_persists_across_visibility_retries() -> None:
     assert adapter._call_count == 2
     # Session should persist (same object used for retries)
     assert loop.session_created is not None
+
+
+def test_same_budget_tracker_used_across_visibility_retries() -> None:
+    """Same BudgetTracker is used across visibility expansion retries."""
+    bus = InProcessEventBus()
+    budget = Budget(max_total_tokens=1000)
+    config = MainLoopConfig(budget=budget)
+    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+        {("section1",): SectionVisibility.FULL},
+        {("section2",): SectionVisibility.FULL},
+    ]
+    adapter = _MockAdapter(visibility_requests=visibility_requests)
+    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
+
+    loop.execute(_Request(message="hello"))
+
+    # Called 3 times: 2 visibility expansions + 1 success
+    assert adapter._call_count == 3
+    # Same BudgetTracker should be used for all calls
+    assert len(adapter._budget_trackers) == 3
+    assert all(t is adapter._budget_trackers[0] for t in adapter._budget_trackers)
+    # And it should have the correct budget
+    assert adapter._budget_trackers[0] is not None
+    assert adapter._budget_trackers[0].budget is budget
+
+
+def test_no_budget_tracker_when_no_budget() -> None:
+    """No BudgetTracker is created when no budget is set."""
+    bus = InProcessEventBus()
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, bus=bus)
+
+    loop.execute(_Request(message="hello"))
+
+    assert adapter._last_budget_tracker is None
