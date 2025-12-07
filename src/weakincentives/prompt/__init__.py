@@ -50,7 +50,7 @@ from .protocols import (
     ProviderAdapterProtocol,
     RenderedPromptProtocol,
 )
-from .rendering import RenderedPrompt
+from .rendering import RenderedPrompt, RenderedSection
 from .section import Section, SectionVisibility
 from .structured_output import (
     OutputParseError,
@@ -80,6 +80,7 @@ __all__ = [
     "ProviderAdapterProtocol",
     "RenderedPrompt",
     "RenderedPromptProtocol",
+    "RenderedSection",
     "Section",
     "SectionDescriptor",
     "SectionNode",

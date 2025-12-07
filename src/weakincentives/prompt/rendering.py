@@ -45,6 +45,38 @@ OutputT_co = TypeVar("OutputT_co", covariant=True)
 
 
 @FrozenDataclass()
+class RenderedSection:
+    """Rendered output for a single prompt section."""
+
+    text: str
+    path: SectionPath
+    _tools: tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...] = field(
+        default_factory=tuple
+    )
+    _tool_param_descriptions: Mapping[str, Mapping[str, str]] = field(
+        default=_EMPTY_TOOL_PARAM_DESCRIPTIONS
+    )
+
+    @override
+    def __str__(self) -> str:  # pragma: no cover - delegated behaviour
+        return self.text
+
+    @property
+    def tools(self) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
+        """Tools contributed by the section and its children."""
+
+        return self._tools
+
+    @property
+    def tool_param_descriptions(
+        self,
+    ) -> Mapping[str, Mapping[str, str]]:
+        """Description patches keyed by tool name."""
+
+        return self._tool_param_descriptions
+
+
+@FrozenDataclass()
 class RenderedPrompt[OutputT_co]:
     """Rendered prompt text paired with structured output metadata."""
 
@@ -254,6 +286,143 @@ class PromptRenderer[OutputT]:
             ),
         )
 
+    def render_section(
+        self,
+        section_path: SectionPath,
+        param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
+        overrides: Mapping[SectionPath, str] | None = None,
+        tool_overrides: Mapping[str, ToolOverride] | None = None,
+        *,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+    ) -> RenderedSection:
+        """Render a single section and its children.
+
+        This method renders a section subtree identified by ``section_path``,
+        producing output identical to extracting that section from a full
+        ``RenderedPrompt``.
+
+        Args:
+            section_path: Path identifying the section to render.
+            param_lookup: Mapping from dataclass types to parameter instances.
+            overrides: Optional section body text overrides.
+            tool_overrides: Optional tool description/parameter overrides.
+            visibility_overrides: Optional visibility overrides for sections.
+
+        Returns:
+            A ``RenderedSection`` containing the rendered text and tools.
+
+        Raises:
+            PromptRenderError: If the section path is not found or rendering fails.
+        """
+        target_node = self._find_section_node(section_path)
+
+        rendered_sections: list[str] = []
+        collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
+        tool_override_lookup = dict(tool_overrides or {})
+        field_description_patches: dict[str, dict[str, str]] = {}
+
+        for node, section_params, effective_visibility in self._iter_subtree_sections(
+            target_node, param_lookup, overrides, visibility_overrides
+        ):
+            rendered = self._render_and_suffix_section(
+                node, section_params, overrides, visibility_overrides
+            )
+            if effective_visibility != SectionVisibility.SUMMARY:
+                self._collect_section_tools(
+                    node.section,
+                    tool_override_lookup,
+                    collected_tools,
+                    field_description_patches,
+                )
+            if rendered:
+                rendered_sections.append(rendered)
+
+        return RenderedSection(
+            text="\n\n".join(rendered_sections),
+            path=section_path,
+            _tools=tuple(collected_tools),
+            _tool_param_descriptions=_freeze_tool_param_descriptions(
+                field_description_patches
+            ),
+        )
+
+    def _find_section_node(
+        self, section_path: SectionPath
+    ) -> SectionNode[SupportsDataclass]:
+        """Find a section node by path, raising if not found."""
+        for node in self._registry.sections:
+            if node.path == section_path:
+                return node
+        raise PromptRenderError("Section not found.", section_path=section_path)
+
+    def _iter_subtree_sections(
+        self,
+        target_node: SectionNode[SupportsDataclass],
+        param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
+        overrides: Mapping[SectionPath, str] | None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None,
+    ) -> Iterator[
+        tuple[
+            SectionNode[SupportsDataclass], SupportsDataclass | None, SectionVisibility
+        ]
+    ]:
+        """Yield sections in a subtree with their params and effective visibility."""
+        visibility_lookup = dict(visibility_overrides or {})
+        summary_skip_depth: int | None = None
+        target_depth = target_node.depth
+        in_section = False
+
+        for node, section_params in self._iter_enabled_sections(dict(param_lookup)):
+            if node is target_node:
+                in_section = True
+            elif not in_section:
+                continue
+            if in_section and node is not target_node and node.depth <= target_depth:
+                break
+            if summary_skip_depth is not None:
+                if node.depth > summary_skip_depth:
+                    continue
+                summary_skip_depth = None
+
+            visibility_override = visibility_lookup.get(node.path)
+            effective = node.section.effective_visibility(
+                visibility_override, section_params
+            )
+            if effective == SectionVisibility.SUMMARY:
+                summary_skip_depth = node.depth
+            yield node, section_params, effective
+
+    def _render_and_suffix_section(
+        self,
+        node: SectionNode[SupportsDataclass],
+        section_params: SupportsDataclass | None,
+        overrides: Mapping[SectionPath, str] | None,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None,
+    ) -> str:
+        """Render a section and append summary suffix if needed."""
+        override_lookup = dict(overrides or {})
+        visibility_lookup = dict(visibility_overrides or {})
+        override_body = (
+            override_lookup.get(node.path)
+            if getattr(node.section, "accepts_overrides", True)
+            else None
+        )
+        visibility_override = visibility_lookup.get(node.path)
+        effective = node.section.effective_visibility(
+            visibility_override, section_params
+        )
+
+        rendered = self._render_section(
+            node, section_params, override_body, visibility_override
+        )
+
+        if effective == SectionVisibility.SUMMARY and node.section.summary and rendered:
+            section_key = ".".join(node.path)
+            child_keys = self._collect_child_keys(node)
+            rendered += build_summary_suffix(section_key, child_keys)
+
+        return rendered
+
     def _collect_child_keys(
         self, parent_node: SectionNode[SupportsDataclass]
     ) -> tuple[str, ...]:
@@ -383,4 +552,4 @@ class PromptRenderer[OutputT]:
         return rendered
 
 
-__all__ = ["PromptRenderer", "RenderedPrompt"]
+__all__ = ["PromptRenderer", "RenderedPrompt", "RenderedSection"]

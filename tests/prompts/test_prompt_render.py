@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -28,6 +29,9 @@ from weakincentives.prompt import (
     PromptValidationError,
     SectionVisibility,
     SupportsDataclass,
+    Tool,
+    ToolContext,
+    ToolResult,
 )
 from weakincentives.prompt.prompt import (
     RenderedPrompt,
@@ -369,3 +373,429 @@ def test_markdown_section_missing_placeholder_raises_prompt_error() -> None:
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.placeholder == "name"
+
+
+# Tests for render_section
+
+
+def test_render_section_returns_single_section() -> None:
+    template = build_prompt()
+
+    rendered = (
+        Prompt(template)
+        .bind(IntroParams(title="hello"), DetailsParams(body="world"))
+        .render_section(("intro",))
+    )
+
+    assert rendered.path == ("intro",)
+    assert rendered.text == "## 1. Intro (intro)\n\nIntro: hello"
+
+
+def test_render_section_matches_full_render_extraction() -> None:
+    template = build_prompt()
+    prompt = Prompt(template).bind(
+        IntroParams(title="hello"),
+        DetailsParams(body="world"),
+    )
+
+    full_rendered = prompt.render()
+    section_rendered = prompt.render_section(("details",))
+
+    # Extract the section text from full render
+    full_sections = full_rendered.text.split("\n\n## ")
+    # Find the details section
+    details_from_full = None
+    for s in full_sections:
+        if s.startswith("2. Details"):
+            details_from_full = "## " + s
+            break
+
+    assert section_rendered.text == details_from_full
+
+
+def test_render_section_nested_includes_children() -> None:
+    template = build_nested_prompt()
+
+    rendered = (
+        Prompt(template)
+        .bind(
+            ParentToggleParams(heading="Main", include_children=True),
+            ChildNestedParams(detail="Child detail"),
+            LeafParams(note="Leaf note"),
+            SummaryParams(summary="Summary"),
+        )
+        .render_section(("parent",))
+    )
+
+    assert rendered.path == ("parent",)
+    assert "Parent: Main" in rendered.text
+    assert "Child detail: Child detail" in rendered.text
+    assert "Leaf: Leaf note" in rendered.text
+    assert "Summary" not in rendered.text
+
+
+def test_render_section_nested_child_only() -> None:
+    template = build_nested_prompt()
+
+    rendered = (
+        Prompt(template)
+        .bind(
+            ParentToggleParams(heading="Main", include_children=True),
+            ChildNestedParams(detail="Child detail"),
+            LeafParams(note="Leaf note"),
+            SummaryParams(summary="Summary"),
+        )
+        .render_section(("parent", "child"))
+    )
+
+    assert rendered.path == ("parent", "child")
+    assert "Parent" not in rendered.text
+    assert "Child detail: Child detail" in rendered.text
+    assert "Leaf: Leaf note" in rendered.text
+
+
+def test_render_section_not_found_raises_error() -> None:
+    template = build_prompt()
+
+    with pytest.raises(PromptRenderError) as exc:
+        Prompt(template).bind(IntroParams(title="hello")).render_section(
+            ("nonexistent",)
+        )
+
+    error = exc.value
+    assert isinstance(error, PromptRenderError)
+    assert error.section_path == ("nonexistent",)
+
+
+def test_render_section_with_visibility_override() -> None:
+    @dataclass
+    class SummaryTestParams:
+        content: str
+
+    section = MarkdownSection[SummaryTestParams](
+        title="Content",
+        key="content",
+        template="Full content: ${content}",
+        summary="Content summary available.",
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="render-section-visibility",
+        sections=[section],
+    )
+
+    # Render with SUMMARY visibility
+    rendered = (
+        Prompt(template)
+        .bind(SummaryTestParams(content="details"))
+        .render_section(
+            ("content",), visibility_overrides={("content",): SectionVisibility.SUMMARY}
+        )
+    )
+
+    assert "Content summary available." in rendered.text
+    assert "Full content:" not in rendered.text
+
+
+def test_render_section_visibility_override_full() -> None:
+    @dataclass
+    class SummaryTestParams:
+        content: str
+
+    section = MarkdownSection[SummaryTestParams](
+        title="Content",
+        key="content",
+        template="Full content: ${content}",
+        summary="Content summary available.",
+        visibility=SectionVisibility.SUMMARY,  # Default to summary
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="render-section-visibility-full",
+        sections=[section],
+    )
+
+    # Render with FULL visibility override
+    rendered = (
+        Prompt(template)
+        .bind(SummaryTestParams(content="details"))
+        .render_section(
+            ("content",), visibility_overrides={("content",): SectionVisibility.FULL}
+        )
+    )
+
+    assert "Full content: details" in rendered.text
+    assert "Content summary available." not in rendered.text
+
+
+@dataclass
+class _RenderSectionToolParams:
+    value: str
+
+
+@dataclass
+class _RenderSectionToolResult:
+    answer: str
+
+
+def _render_section_tool_handler(
+    params: _RenderSectionToolParams, *, context: ToolContext
+) -> ToolResult[_RenderSectionToolResult]:
+    del context
+    return ToolResult(
+        message="ok",
+        value=_RenderSectionToolResult(answer=params.value),
+        success=True,
+    )
+
+
+def test_render_section_collects_tools() -> None:
+    section = MarkdownSection[_RenderSectionToolParams](
+        title="With Tool",
+        key="with-tool",
+        template="Value: ${value}",
+        tools=[
+            Tool[_RenderSectionToolParams, _RenderSectionToolResult](
+                name="my_tool",
+                description="A test tool",
+                handler=_render_section_tool_handler,
+            )
+        ],
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="render-section-tools",
+        sections=[section],
+    )
+
+    rendered = (
+        Prompt(template)
+        .bind(_RenderSectionToolParams(value="test"))
+        .render_section(("with-tool",))
+    )
+
+    assert len(rendered.tools) == 1
+    assert rendered.tools[0].name == "my_tool"
+
+
+def test_render_section_excludes_tools_with_summary_visibility() -> None:
+    section = MarkdownSection[_RenderSectionToolParams](
+        title="With Tool",
+        key="with-tool",
+        template="Full: ${value}",
+        summary="Summary available.",
+        tools=[
+            Tool[_RenderSectionToolParams, _RenderSectionToolResult](
+                name="my_tool_summary",
+                description="A test tool",
+                handler=_render_section_tool_handler,
+            )
+        ],
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="render-section-tools-summary",
+        sections=[section],
+    )
+
+    # Render with SUMMARY visibility - tools should be excluded
+    rendered = (
+        Prompt(template)
+        .bind(_RenderSectionToolParams(value="test"))
+        .render_section(
+            ("with-tool",),
+            visibility_overrides={("with-tool",): SectionVisibility.SUMMARY},
+        )
+    )
+
+    assert len(rendered.tools) == 0
+
+
+def test_rendered_section_str_returns_text() -> None:
+    from weakincentives.prompt import RenderedSection
+
+    rendered = RenderedSection(text="Section output", path=("test",))
+
+    assert str(rendered) == "Section output"
+
+
+def test_rendered_section_tool_param_descriptions() -> None:
+    from weakincentives.prompt import RenderedSection
+
+    descriptions = {"my_tool": {"param1": "Description for param1"}}
+    rendered = RenderedSection(
+        text="Section output",
+        path=("test",),
+        _tool_param_descriptions=descriptions,
+    )
+
+    assert rendered.tool_param_descriptions == descriptions
+
+
+def test_render_section_skips_children_when_parent_has_summary() -> None:
+    """Test that children are skipped when parent section renders with SUMMARY."""
+
+    @dataclass
+    class ParentParams:
+        title: str
+
+    @dataclass
+    class ChildParams:
+        detail: str
+
+    child = MarkdownSection[ChildParams](
+        title="Child",
+        key="child",
+        template="Child detail: ${detail}",
+    )
+
+    parent = MarkdownSection[ParentParams](
+        title="Parent",
+        key="parent",
+        template="Full parent: ${title}",
+        summary="Parent summary.",
+        children=[child],
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="render-section-skip-children",
+        sections=[parent],
+    )
+
+    # Render parent with SUMMARY visibility - children should be skipped
+    rendered = (
+        Prompt(template)
+        .bind(ParentParams(title="Test"), ChildParams(detail="Skipped"))
+        .render_section(
+            ("parent",),
+            visibility_overrides={("parent",): SectionVisibility.SUMMARY},
+        )
+    )
+
+    # Parent summary should be present, but not the child detail
+    assert "Parent summary." in rendered.text
+    assert "Child detail" not in rendered.text
+
+
+def test_render_section_summary_followed_by_sibling() -> None:
+    """Test that sibling sections after a SUMMARY section are rendered."""
+
+    @dataclass
+    class FirstChildParams:
+        first: str
+
+    @dataclass
+    class GrandchildParams:
+        grandchild: str
+
+    @dataclass
+    class SecondChildParams:
+        second: str
+
+    @dataclass
+    class ContainerParams:
+        container: str
+
+    grandchild = MarkdownSection[GrandchildParams](
+        title="Grandchild",
+        key="grandchild",
+        template="Grandchild: ${grandchild}",
+    )
+
+    first_child = MarkdownSection[FirstChildParams](
+        title="First",
+        key="first",
+        template="Full first: ${first}",
+        summary="First summary.",
+        children=[grandchild],
+    )
+
+    second_child = MarkdownSection[SecondChildParams](
+        title="Second",
+        key="second",
+        template="Second: ${second}",
+    )
+
+    container = MarkdownSection[ContainerParams](
+        title="Container",
+        key="container",
+        template="Container: ${container}",
+        children=[first_child, second_child],
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="render-section-summary-sibling",
+        sections=[container],
+    )
+
+    # Render container with first child as SUMMARY - second child should still render
+    rendered = (
+        Prompt(template)
+        .bind(
+            ContainerParams(container="main"),
+            FirstChildParams(first="first"),
+            GrandchildParams(grandchild="grand"),
+            SecondChildParams(second="second"),
+        )
+        .render_section(
+            ("container",),
+            visibility_overrides={("container", "first"): SectionVisibility.SUMMARY},
+        )
+    )
+
+    # First child summary should be present
+    assert "First summary." in rendered.text
+    # Grandchild should be skipped
+    assert "Grandchild" not in rendered.text
+    # Second child should be rendered
+    assert "Second: second" in rendered.text
+
+
+def test_render_section_with_overrides_store(tmp_path: Path) -> None:
+    """Test render_section respects overrides from an overrides store."""
+    from weakincentives.prompt import LocalPromptOverridesStore
+
+    @dataclass
+    class OverrideTestParams:
+        content: str
+
+    section = MarkdownSection[OverrideTestParams](
+        title="Overridable",
+        key="overridable",
+        template="Original: ${content}",
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="render-section-override-store",
+        sections=[section],
+    )
+
+    # Create overrides store with overridden body
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+    prompt = Prompt(template, overrides_store=store).bind(
+        OverrideTestParams(content="test")
+    )
+
+    # First render without overrides
+    rendered_original = prompt.render_section(("overridable",))
+    assert "Original: test" in rendered_original.text
+
+    # Set an override for the section
+    store.set_section_override(
+        prompt,
+        tag="latest",
+        path=("overridable",),
+        body="Overridden: ${content}",
+    )
+
+    # Render with overrides
+    rendered_overridden = prompt.render_section(("overridable",))
+    assert "Overridden: test" in rendered_overridden.text
+    assert "Original" not in rendered_overridden.text

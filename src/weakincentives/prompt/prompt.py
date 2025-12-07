@@ -34,7 +34,7 @@ from ._visibility import SectionVisibility
 from .errors import PromptValidationError, SectionPath
 from .overrides import PromptDescriptor
 from .registry import PromptRegistry, SectionNode
-from .rendering import PromptRenderer, RenderedPrompt
+from .rendering import PromptRenderer, RenderedPrompt, RenderedSection
 from .section import Section
 from .structured_output import StructuredOutputConfig
 
@@ -368,6 +368,56 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
             visibility_overrides=visibility_overrides,
         )
 
+    def render_section(
+        self,
+        section_path: SectionPath,
+        *,
+        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+    ) -> RenderedSection:
+        """Render a single section and its children.
+
+        This method renders a section subtree identified by ``section_path``,
+        producing output identical to extracting that section from a full
+        ``RenderedPrompt``.
+
+        Args:
+            section_path: Path identifying the section to render. Use a tuple
+                of keys like ``("parent", "child")`` for nested sections.
+            visibility_overrides: Optional mapping of section paths to visibility
+                overrides. This controls whether sections render with FULL or
+                SUMMARY visibility.
+
+        Returns:
+            A ``RenderedSection`` containing the rendered text and tools.
+
+        Raises:
+            PromptRenderError: If the section path is not found or rendering fails.
+        """
+        tag = self.overrides_tag if self.overrides_tag else "latest"
+
+        overrides: dict[SectionPath, str] | None = None
+        tool_overrides: dict[str, ToolOverride] | None = None
+
+        if self.overrides_store is not None:
+            override = self.overrides_store.resolve(descriptor=self.descriptor, tag=tag)
+
+            if override is not None:
+                overrides = {
+                    path: section_override.body
+                    for path, section_override in override.sections.items()
+                }
+                tool_overrides = dict(override.tool_overrides)
+
+        renderer = self.renderer
+        param_lookup = renderer.build_param_lookup(self._params)
+        return renderer.render_section(
+            section_path,
+            param_lookup,
+            overrides,
+            tool_overrides,
+            visibility_overrides=visibility_overrides,
+        )
+
     def find_section(
         self,
         selector: type[Section[SupportsDataclass]]
@@ -376,4 +426,10 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         return self.template.find_section(selector)
 
 
-__all__ = ["Prompt", "PromptTemplate", "RenderedPrompt", "SectionNode"]
+__all__ = [
+    "Prompt",
+    "PromptTemplate",
+    "RenderedPrompt",
+    "RenderedSection",
+    "SectionNode",
+]

@@ -79,7 +79,7 @@ Request-level `budget` and `deadline` override config defaults. A fresh
 
 ## Execution
 
-```
+```text
 Request ──▶ Session ──▶ Prompt ──▶ Evaluate ──┬──▶ Result
                                               │
                                               ▼
@@ -89,11 +89,11 @@ Request ──▶ Session ──▶ Prompt ──▶ Evaluate ──┬──▶
 ```
 
 1. Receive `MainLoopRequest` via bus or direct `execute()` call
-2. Create session via `create_session()`
-3. Create prompt via `create_prompt(request)`
-4. Evaluate with adapter
-5. On `VisibilityExpansionRequired`: accumulate overrides, retry step 4
-6. Publish `MainLoopCompleted` or `MainLoopFailed`
+1. Create session via `create_session()`
+1. Create prompt via `create_prompt(request)`
+1. Evaluate with adapter
+1. On `VisibilityExpansionRequired`: accumulate overrides, retry step 4
+1. Publish `MainLoopCompleted` or `MainLoopFailed`
 
 ### Visibility Handling
 
@@ -151,7 +151,9 @@ response = loop.execute(MyRequest(...))
 
 ```python
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
-    def __init__(self, *, adapter: ProviderAdapter[ReviewResult], bus: EventBus) -> None:
+    def __init__(
+        self, *, adapter: ProviderAdapter[ReviewResult], bus: EventBus
+    ) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._template = PromptTemplate[ReviewResult](
             ns="reviews",
@@ -197,7 +199,7 @@ def create_prompt(self, request: Request) -> Prompt[Output]:
 ## Error Handling
 
 | Exception | Behavior |
-|-----------|----------|
+| ----------------------------- | ---------------------------------- |
 | `VisibilityExpansionRequired` | Retry with updated overrides |
 | All others | Publish `MainLoopFailed`, re-raise |
 
