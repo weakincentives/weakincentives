@@ -129,6 +129,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
         response = loop.execute(ReviewRequest(...))
     """
 
+    _adapter: ProviderAdapter[OutputT]
+    _bus: EventBus
+    _config: MainLoopConfig
+
     def __init__(
         self,
         *,
