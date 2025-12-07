@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from . import events, session
+from . import events, main_loop, session
 from .events import (
     EventBus,
     HandlerFailure,
@@ -26,6 +26,13 @@ from .events import (
     ToolInvoked,
 )
 from .logging import StructuredLogger, configure_logging, get_logger
+from .main_loop import (
+    MainLoop,
+    MainLoopCompleted,
+    MainLoopConfig,
+    MainLoopFailed,
+    MainLoopRequest,
+)
 from .session import (
     DataEvent,
     QueryBuilder,
@@ -53,6 +60,11 @@ __all__ = [
     "EventBus",
     "HandlerFailure",
     "InProcessEventBus",
+    "MainLoop",
+    "MainLoopCompleted",
+    "MainLoopConfig",
+    "MainLoopFailed",
+    "MainLoopRequest",
     "PromptExecuted",
     "PromptRendered",
     "PublishResult",
@@ -77,6 +89,7 @@ __all__ = [
     "events",
     "get_logger",
     "iter_sessions_bottom_up",
+    "main_loop",
     "replace_latest",
     "replace_latest_by",
     "session",

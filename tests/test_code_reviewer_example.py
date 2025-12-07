@@ -26,20 +26,19 @@ from pytest import CaptureFixture
 
 import code_reviewer_example as reviewer_example
 from code_reviewer_example import (
-    CodeReviewApp,
+    CodeReviewLoop,
     ReviewResponse,
     ReviewTurnParams,
     build_task_prompt,
 )
+from examples.logging import attach_logging_subscribers
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt, SupportsDataclass
-from weakincentives.prompt.overrides import (
-    LocalPromptOverridesStore,
-    PromptDescriptor,
-)
+from weakincentives.prompt.overrides import LocalPromptOverridesStore
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered
 from weakincentives.runtime.session import Session
 from weakincentives.tools.digests import (
@@ -70,8 +69,11 @@ class _RepositoryOptimizationAdapter:
         bus: InProcessEventBus | None = None,
         session: Session | None = None,
         deadline: object | None = None,
+        visibility_overrides: object | None = None,
+        budget: object | None = None,
+        budget_tracker: object | None = None,
     ) -> PromptResponse[Any]:
-        del deadline
+        del deadline, visibility_overrides, budget, budget_tracker
         self.calls.append(prompt.key)
 
         if "workspace-digest" in prompt.key:
@@ -103,17 +105,40 @@ class _RepositoryOptimizationAdapter:
         )
 
 
+class _RecordingDeadlineAdapter:
+    """Stub adapter that records deadlines passed to evaluate."""
+
+    def __init__(self) -> None:
+        self.deadlines: list[Deadline | None] = []
+
+    def evaluate(
+        self,
+        prompt: Prompt[SupportsDataclass],
+        *,
+        bus: InProcessEventBus | None = None,
+        session: Session | None = None,
+        deadline: Deadline | None = None,
+        visibility_overrides: object | None = None,
+        budget: object | None = None,
+        budget_tracker: object | None = None,
+    ) -> PromptResponse[Any]:
+        del bus, session, visibility_overrides, budget, budget_tracker
+        self.deadlines.append(deadline)
+        return PromptResponse(
+            prompt_name=prompt.name or prompt.key,
+            text="",
+            output=None,
+        )
+
+
 def test_prompt_render_reducer_prints_full_prompt(
     capsys: CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    context = reviewer_example._create_runtime_context(
-        overrides_store=overrides_store,
-        override_tag="prompt-log",
-    )
-    session = context.session
-    bus = context.bus
+    bus = InProcessEventBus()
+    attach_logging_subscribers(bus)
+    session = Session(bus=bus)
 
     event = PromptRendered(
         prompt_ns="example",
@@ -129,6 +154,7 @@ def test_prompt_render_reducer_prints_full_prompt(
 
     publish_result = bus.publish(event)
     assert publish_result.handled_count >= 1
+    del overrides_store  # Not needed for this test
 
     captured = capsys.readouterr()
     assert "Rendered prompt" in captured.out
@@ -218,26 +244,58 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     assert "Session digest" in rendered.text
 
 
-def test_optimize_command_persists_override(tmp_path: Path) -> None:
+def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
+    """Auto-optimization runs when execute() is called without existing digest."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    app = CodeReviewApp(
-        cast(ProviderAdapter[ReviewResponse], adapter),
+    bus = InProcessEventBus()
+    attach_logging_subscribers(bus)
+    loop = CodeReviewLoop(
+        adapter=cast(ProviderAdapter[ReviewResponse], adapter),
+        bus=bus,
         overrides_store=overrides_store,
     )
 
-    assert app.override_tag == "latest"
+    assert loop.override_tag == "latest"
 
-    app._handle_optimize_command()
+    # Execute triggers auto-optimization since no digest exists
+    loop.execute(ReviewTurnParams(request="test request"))
 
-    descriptor = PromptDescriptor.from_prompt(app.prompt)
-    override = overrides_store.resolve(descriptor=descriptor, tag=app.override_tag)
-    assert override is not None
-    placeholder_body = override.sections["workspace-digest",].body
-    assert "Workspace digest unavailable" in placeholder_body
-    session_digest = latest_workspace_digest(app.session, "workspace-digest")
+    # Verify optimization was called (adapter recorded the call)
+    assert any("workspace-digest" in call for call in adapter.calls)
+
+    # Verify digest was persisted to session
+    session_digest = latest_workspace_digest(loop.session, "workspace-digest")
     assert session_digest is not None
     assert session_digest.body == "- Repo instructions from stub"
+
+
+def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
+    """Each execute() call builds a fresh default deadline."""
+
+    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
+    adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
+    bus = InProcessEventBus()
+    loop = CodeReviewLoop(
+        adapter=adapter,
+        bus=bus,
+        overrides_store=overrides_store,
+    )
+
+    set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
+
+    loop.execute(ReviewTurnParams(request="first"))
+    loop.execute(ReviewTurnParams(request="second"))
+
+    assert len(adapter.deadlines) == 2
+    first_deadline, second_deadline = adapter.deadlines
+    assert isinstance(first_deadline, Deadline)
+    assert isinstance(second_deadline, Deadline)
+    assert first_deadline is not second_deadline
+
+    now = datetime.now(UTC)
+    assert first_deadline.expires_at > now
+    assert second_deadline.expires_at > now
 
 
 @pytest.fixture(autouse=True)
