@@ -3,12 +3,12 @@
 This document describes the `code_reviewer_example.py` script that ships with
 the library. The script assembles a full-featured code review agent
 demonstrating prompt composition, progressive disclosure, workspace tools,
-planning, and adapter optimization in one place.
+planning, and the `MainLoop` pattern in one place.
 
 ## Rationale and Scope
 
 - **Purpose**: Canonical end-to-end walkthrough for a review agent exercising
-  prompt templates, overrides, workspace tooling, and optimization hooks.
+  prompt templates, overrides, workspace tooling, and auto-optimization.
 - **Scope**: Focused on the bundled `sunfish` repository fixture under
   `test-repositories/`. Mounts are read-only with a 600 KB payload cap.
 - **Principles**: Declarative prompt assembly, ergonomic overrides (tagged by
@@ -17,36 +17,65 @@ planning, and adapter optimization in one place.
 
 ## Runtime Architecture
 
-`CodeReviewApp` wires together:
+The example uses a two-layer design:
 
-- `ProviderAdapter[ReviewResponse]` for LLM communication
-- `Prompt[ReviewResponse]` wrapping a `PromptTemplate` with overrides
-- `Session` for state management
-- `LocalPromptOverridesStore` for persistent overrides
-- `EventBus` for telemetry
+- `CodeReviewLoop` extends `MainLoop[ReviewTurnParams, ReviewResponse]` for
+  request handling with auto-optimization
+- `CodeReviewApp` owns the interactive REPL and delegates execution to the loop
+
+### CodeReviewLoop
+
+Implements the `MainLoop` protocol with these responsibilities:
+
+- **Persistent Session**: Creates a single `Session` at construction time,
+  reused across all `execute()` calls
+- **Auto-Optimization**: Runs workspace digest optimization automatically on
+  first request if no `WorkspaceDigest` exists in the session
+- **Deadline Management**: Applies a default 5-minute deadline to each request
+- **Prompt Binding**: Creates and binds prompts via `create_prompt()`
+
+```python
+class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
+    def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]: ...
+    def create_session(self) -> Session: ...
+    def execute(self, request: ReviewTurnParams, *, budget=None, deadline=None) -> PromptResponse[ReviewResponse]: ...
+```
+
+### CodeReviewApp
+
+Owns user interaction:
+
+- Creates an `EventBus` with logging subscribers
+- Instantiates `CodeReviewLoop` with the adapter and bus
+- Runs the interactive REPL loop
+- Dumps session state on exit
 
 ### Startup Sequence
 
-1. `_ensure_test_repository_available` verifies `test-repositories/` exists
-1. `build_task_prompt(session=...)` composes the prompt template
-1. `LocalPromptOverridesStore` initializes and seeds overrides
-1. `_resolve_override_tag` selects tag: explicit arg → `CODE_REVIEW_PROMPT_TAG`
-   env → `"latest"`
-1. `CodeReviewApp.run()` starts the REPL loop
+1. `configure_logging()` sets up logging
+1. `build_adapter()` creates the OpenAI adapter (requires `OPENAI_API_KEY`)
+1. `CodeReviewApp` creates the event bus and `CodeReviewLoop`
+1. `CodeReviewLoop.__init__`:
+   - Creates a persistent `Session` via `build_logged_session()`
+   - Builds the `PromptTemplate` via `build_task_prompt()`
+   - Seeds prompt overrides via `_seed_overrides()`
+1. `CodeReviewApp.run()` starts the REPL
 
 ### REPL Loop
 
 Each turn:
 
 1. Reads user input
-1. Handles special commands (`optimize`, `exit`, `quit`)
-1. Binds `ReviewTurnParams(request=...)` to the prompt
-1. Calls `adapter.evaluate()` with visibility overrides
-1. Catches `VisibilityExpansionRequired` for progressive disclosure retries
+1. Handles exit commands (`exit`, `quit`, empty input)
+1. Creates `ReviewTurnParams(request=...)` from user input
+1. Calls `loop.execute()` which:
+   - Auto-optimizes workspace digest if needed (first request only)
+   - Applies default deadline
+   - Delegates to `MainLoop.execute()` for prompt evaluation
 1. Renders response via `_render_response_payload`
-1. Prints plan snapshot via `_render_plan_snapshot`
+1. Prints plan snapshot via `render_plan_snapshot`
 
-On exit, dumps session state to `snapshots/` via `dump_session`.
+On exit, dumps session state to `snapshots/` via `dump_session_tree`.
 
 ## Data Types
 
@@ -92,21 +121,6 @@ class ReferenceParams:
     project_name: str = "sunfish"
 ```
 
-### RuntimeContext
-
-Holds all runtime handles for the REPL.
-
-```python
-@dataclass(slots=True)
-class RuntimeContext:
-    prompt: Prompt[ReviewResponse]
-    session: Session
-    bus: EventBus
-    overrides_store: LocalPromptOverridesStore
-    override_tag: str
-    visibility_overrides: dict[SectionPath, SectionVisibility]
-```
-
 ## Prompt Composition
 
 `build_task_prompt` produces `PromptTemplate[ReviewResponse]` with:
@@ -124,8 +138,8 @@ class RuntimeContext:
 
 1. **Workspace Digest** (`WorkspaceDigestSection`)
 
-   - Cached workspace notes from session or overrides
-   - Populated via `optimize` command
+   - Cached workspace notes from session
+   - Auto-populated on first request via optimization
 
 1. **Reference Documentation** (`MarkdownSection[ReferenceParams]`)
 
@@ -168,11 +182,23 @@ The Reference Documentation section demonstrates progressive disclosure:
 1. Section starts with `visibility=SectionVisibility.SUMMARY`
 1. Model sees only the summary text initially
 1. Model can call `open_sections` tool to expand
-1. `_evaluate_turn` catches `VisibilityExpansionRequired`
-1. Updates `visibility_overrides` and retries evaluation
-1. Full section content becomes visible
+1. `MainLoop` handles `VisibilityExpansionRequired` internally
+1. Full section content becomes visible on retry
 
-## Overrides and Optimization
+## Auto-Optimization
+
+The example automatically optimizes the workspace digest on first use:
+
+1. `CodeReviewLoop.execute()` checks if `WorkspaceDigest` exists in session
+1. If missing, calls `_run_optimization()` before processing the request
+1. Creates a child session via `build_logged_session(parent=...)`
+1. Builds `OptimizationContext` with adapter, bus, store, tag
+1. Runs `WorkspaceDigestOptimizer` with `PersistenceScope.SESSION`
+1. Digest is stored in the session for subsequent requests
+
+This eliminates the need for manual optimization commands.
+
+## Overrides
 
 ### Override Storage
 
@@ -180,35 +206,44 @@ The Reference Documentation section demonstrates progressive disclosure:
 - Scoped by: namespace + prompt key + tag
 - Seeded once at startup via `store.seed(prompt, tag=...)`
 
-### Optimize Command
+### Tag Resolution
 
-The `optimize` REPL command:
+Override tag is resolved in order:
 
-1. Creates a child session via `_create_optimization_session`
-1. Builds `OptimizationContext` with adapter, bus, store, tag
-1. Runs `WorkspaceDigestOptimizer` with `PersistenceScope.SESSION`
-1. Prints the resulting workspace digest
+1. Explicit `override_tag` argument
+1. `CODE_REVIEW_PROMPT_TAG` environment variable
+1. Default: `"latest"`
+
+## Deadlines
+
+Each request has a deadline to prevent runaway execution:
+
+```python
+DEFAULT_DEADLINE_MINUTES = 5
+
+def _default_deadline() -> Deadline:
+    return Deadline(
+        expires_at=datetime.now(UTC) + timedelta(minutes=DEFAULT_DEADLINE_MINUTES)
+    )
+```
+
+Custom deadlines can be passed to `execute()` if needed.
 
 ## Observability
 
 ### Event Subscribers
 
-Attached via `_attach_logging_subscribers(bus)`:
+Attached via `attach_logging_subscribers(bus)` from `examples.logging`:
 
-| Event | Handler | Output |
-|-------|---------|--------|
-| `PromptRendered` | `_print_rendered_prompt` | Full prompt text with label |
-| `ToolInvoked` | `_log_tool_invocation` | Params, result, payload, token usage |
-| `PromptExecuted` | `_log_prompt_executed` | Token usage summary |
-
-### Token Usage Formatting
-
-`_format_usage_for_log` renders `TokenUsage` as:
-`token usage: input=N, output=N, cached=N, total=N`
+| Event | Output |
+|-------|--------|
+| `PromptRendered` | Full prompt text with label |
+| `ToolInvoked` | Params, result, payload, token usage |
+| `PromptExecuted` | Token usage summary |
 
 ### Plan Snapshots
 
-`_render_plan_snapshot` formats the current plan:
+`render_plan_snapshot` formats the current plan:
 
 ```
 Objective: <objective> (status: <status>)
@@ -234,36 +269,34 @@ OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 | Input | Action |
 |-------|--------|
 | Non-empty text | Submit as review request |
-| `optimize` | Refresh workspace digest |
 | `exit` / `quit` / empty | Terminate REPL |
 
 ### Output
 
 - Intro banner with configuration summary
-- `[prompt]` blocks showing rendered prompts
-- `[tool]` blocks showing tool invocations
+- `[prompt]` blocks showing rendered prompts (via logging)
+- `[tool]` blocks showing tool invocations (via logging)
 - `--- Agent Response ---` with formatted output
 - `--- Plan Snapshot ---` with current plan state
 
-## Testing
+## Shared Utilities
 
-Tests in `tests/test_code_reviewer_example.py` cover:
+The example imports several helpers from the `examples` package:
 
-- Prompt rendering and logging
-- Default workspace digest behavior
-- Overrides precedence
-- Optimize command with stub adapter
-- Structured response formatting
-- Progressive disclosure flow
-
-The `_create_runtime_context` helper enables test reuse without booting the
-full REPL.
+| Function | Purpose |
+|----------|---------|
+| `build_logged_session` | Create session with logging tags |
+| `configure_logging` | Set up console logging |
+| `render_plan_snapshot` | Format plan state for display |
+| `resolve_override_tag` | Resolve tag from arg/env/default |
+| `attach_logging_subscribers` | Attach event logging to bus |
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `code_reviewer_example.py` | Main script |
+| `examples/` | Shared example utilities |
 | `test-repositories/sunfish/` | Mounted repository fixture |
 | `snapshots/` | Session dump output directory |
 | `~/.weakincentives/prompts/` | Default overrides storage |
