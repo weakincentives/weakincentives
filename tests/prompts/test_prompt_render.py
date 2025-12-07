@@ -162,9 +162,9 @@ def test_prompt_render_merges_defaults_and_overrides() -> None:
 
     assert rendered.text == "\n\n".join(
         [
-            "## 1. Intro\n\nIntro: hello",
-            "## 2. Details\n\nDetails: world",
-            "## 3. Outro\n\nOutro: bye",
+            "## 1. Intro (intro)\n\nIntro: hello",
+            "## 2. Details (details)\n\nDetails: world",
+            "## 3. Outro (outro)\n\nOutro: bye",
         ]
     )
 
@@ -233,10 +233,10 @@ def test_prompt_render_renders_nested_sections_and_depth() -> None:
 
     assert rendered.text == "\n\n".join(
         [
-            "## 1. Parent\n\nParent: Main Heading",
-            "### 1.1. Child\n\nChild detail: Child detail",
-            "#### 1.1.1. Leaf\n\nLeaf: Deep note",
-            "## 2. Summary\n\nSummary: All done",
+            "## 1. Parent (parent)\n\nParent: Main Heading",
+            "### 1.1. Child (parent.child)\n\nChild detail: Child detail",
+            "#### 1.1.1. Leaf (parent.child.leaf)\n\nLeaf: Deep note",
+            "## 2. Summary (summary)\n\nSummary: All done",
         ]
     )
 
@@ -253,7 +253,7 @@ def test_prompt_render_skips_disabled_parent_and_children() -> None:
         .render()
     )
 
-    assert rendered.text == "## 2. Summary\n\nSummary: Visible"
+    assert rendered.text == "## 2. Summary (summary)\n\nSummary: Visible"
     assert "Parent" not in rendered.text
     assert "Child" not in rendered.text
     assert "Leaf" not in rendered.text
@@ -271,9 +271,10 @@ def test_prompt_render_wraps_template_errors_with_context() -> None:
             depth: int,
             number: str,
             *,
+            path: tuple[str, ...] = (),
             visibility: SectionVisibility | None = None,
         ) -> str:
-            del params, depth, number, visibility
+            del params, depth, number, path, visibility
             raise ValueError(f"boom:{self.title}")
 
     section = ExplodingSection(

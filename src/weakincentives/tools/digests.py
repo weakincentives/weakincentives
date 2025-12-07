@@ -121,11 +121,12 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         depth: int,
         number: str,
         *,
+        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
         del params, visibility
         body = self._resolve_body()
-        return self._render_block(body, depth, number)
+        return self._render_block(body, depth, number, path)
 
     def render_with_template(
         self,
@@ -133,10 +134,11 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         params: SupportsDataclass | None,
         depth: int,
         number: str,
+        path: tuple[str, ...] = (),
     ) -> str:
         del params
         body = self._resolve_body(override_body=template_text)
-        return self._render_block(body, depth, number)
+        return self._render_block(body, depth, number, path)
 
     @override
     def clone(self, **kwargs: object) -> WorkspaceDigestSection:
@@ -164,10 +166,16 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         )
         return self._placeholder
 
-    def _render_block(self, body: str, depth: int, number: str) -> str:
+    def _render_block(
+        self, body: str, depth: int, number: str, path: tuple[str, ...] = ()
+    ) -> str:
         heading_level = "#" * (depth + 2)
         normalized_number = number.rstrip(".")
-        heading = f"{heading_level} {normalized_number}. {self.title.strip()}"
+        path_str = ".".join(path) if path else ""
+        title_with_path = (
+            f"{self.title.strip()} ({path_str})" if path_str else self.title.strip()
+        )
+        heading = f"{heading_level} {normalized_number}. {title_with_path}"
         if body:
             return f"{heading}\n\n{body.strip()}"
         return heading

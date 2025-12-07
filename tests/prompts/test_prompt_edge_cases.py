@@ -136,9 +136,10 @@ class BrokenSection(Section[BrokenParams]):
         depth: int,
         number: str,
         *,
+        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
-        del params, depth, number, visibility
+        del params, depth, number, path, visibility
         raise PromptRenderError("inner", section_path=(self.key,), placeholder="value")
 
     def clone(self, **kwargs: object) -> BrokenSection:
@@ -174,9 +175,10 @@ class InvalidParamsSection(Section[int]):  # type: ignore[arg-type]
         depth: int,
         number: str,
         *,
+        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
-        del params, depth, number, visibility
+        del params, depth, number, path, visibility
         return self.key
 
     def clone(self, **kwargs: object) -> InvalidParamsSection:
@@ -275,9 +277,10 @@ class BareSection(Section[PlaceholderParams]):
         depth: int,
         number: str,
         *,
+        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
-        del params, depth, number, visibility
+        del params, depth, number, path, visibility
         return self.key
 
     def clone(self, **kwargs: object) -> BareSection:
@@ -304,9 +307,9 @@ def test_text_section_returns_heading_when_body_empty() -> None:
         key="heading",
     )
 
-    output = section.render(HeadingOnlyParams(), depth=0, number="1")
+    output = section.render(HeadingOnlyParams(), depth=0, number="1", path=("heading",))
 
-    assert output == "## 1. Heading"
+    assert output == "## 1. Heading (heading)"
 
 
 @dataclass
@@ -340,10 +343,11 @@ class ContextAwareSection(Section[ContextParams]):
         depth: int,
         number: str,
         *,
+        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
         _ = self.title
-        del params, depth, number, visibility
+        del params, depth, number, path, visibility
         raise PromptRenderError(
             "context",
             section_path=("Provided",),
