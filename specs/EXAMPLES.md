@@ -4,14 +4,14 @@
 
 The `TaskExamplesSection` provides trajectory-based examples that demonstrate
 multi-step agent behavior. While `ToolExample` shows single-tool invocations,
-`TaskExample` captures complete sequences: an objective, an ordered list of tool
-calls, and an expected outcome. These examples serve as few-shot demonstrations
-for complex agent workflows.
+`TaskExampleSection` captures complete sequences: an objective, an ordered list
+of tool calls, and an expected outcome. These examples serve as few-shot
+demonstrations for complex agent workflows.
 
 ## Guiding Principles
 
-- **Trajectory-first design**: Examples model complete task executions, not
-  isolated tool calls.
+- **Compositional hierarchy**: `TaskExampleSection` instances are child sections
+  of `TaskExamplesSection`, benefiting from standard section features.
 - **Type-safe at construction**: All validation happens when the prompt template
   is built, not at render time.
 - **Tool coherence**: Each step references a tool by name and must match that
@@ -46,43 +46,61 @@ The `example.description` field describes the reasoning or purpose for this
 specific step within the trajectory (e.g., "Fetch user profile to check
 permissions").
 
-### TaskExample
+### TaskExampleSection
 
-`TaskExample` captures a complete trajectory from objective to outcome:
+`TaskExampleSection` is a `Section` that captures a complete trajectory from
+objective to outcome. As a section, it participates in the standard hierarchy
+and supports all section features (visibility, enabled predicates, cloning).
 
 ```python
-@dataclass(slots=True, frozen=True)
-class TaskExample:
-    """Complete task trajectory demonstrating multi-step agent behavior."""
+class TaskExampleSection(Section[TaskExampleParamsT]):
+    """Section representing a single task trajectory example."""
 
-    objective: str
-    outcome: str
-    steps: tuple[TaskStep[Any, Any], ...]
+    def __init__(
+        self,
+        *,
+        key: str,
+        objective: str,
+        outcome: str,
+        steps: Sequence[TaskStep[Any, Any]],
+        tools: Sequence[Tool[Any, Any]],
+        title: str | None = None,
+        **kwargs: object,
+    ) -> None: ...
 ```
 
-**Fields:**
+**Constructor Arguments:**
 
-| Field | Type | Constraints |
-|-------|------|-------------|
-| `objective` | `str` | 1-500 ASCII characters; the task goal |
-| `outcome` | `str` | 1-500 ASCII characters; the expected result |
-| `steps` | `tuple[TaskStep, ...]` | Non-empty ordered sequence of tool invocations |
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `key` | Yes | Section identifier (e.g., `"example-auth-review"`) |
+| `objective` | Yes | The task goal (1-500 ASCII chars) |
+| `outcome` | Yes | The expected result (1-500 ASCII chars) |
+| `steps` | Yes | Non-empty ordered sequence of `TaskStep` instances |
+| `tools` | Yes | Tools referenced by the steps |
+| `title` | No | Display title; defaults to truncated objective |
+
+**Section Properties:**
+
+- `objective: str` - The task goal
+- `outcome: str` - The expected result
+- `steps: tuple[TaskStep, ...]` - Ordered tool invocation sequence
 
 ### TaskExamplesSection
 
-`TaskExamplesSection` renders task examples with their tool trajectories:
+`TaskExamplesSection` is a container section that renders its
+`TaskExampleSection` children with consistent formatting:
 
 ```python
 class TaskExamplesSection(Section[TaskExamplesParamsT]):
-    """Section that renders multi-step task examples."""
+    """Container section for task example children."""
 
     def __init__(
         self,
         *,
         key: str = "task-examples",
         title: str = "Task Examples",
-        examples: Sequence[TaskExample],
-        tools: Sequence[Tool[Any, Any]],
+        children: Sequence[TaskExampleSection[Any]],
         **kwargs: object,
     ) -> None: ...
 ```
@@ -93,8 +111,62 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
 |----------|----------|-------------|
 | `key` | No | Section identifier (default: `"task-examples"`) |
 | `title` | No | Display title (default: `"Task Examples"`) |
-| `examples` | Yes | One or more `TaskExample` instances |
-| `tools` | Yes | Tools referenced by the examples |
+| `children` | Yes | One or more `TaskExampleSection` instances |
+
+The `children` argument is **required** and must contain only
+`TaskExampleSection` instances. Standard `Section.children` inheritance applies.
+
+## Section Hierarchy
+
+`TaskExampleSection` instances register as children of `TaskExamplesSection`,
+creating a two-level hierarchy:
+
+```
+TaskExamplesSection (parent)
+├── TaskExampleSection (child 1)
+├── TaskExampleSection (child 2)
+└── TaskExampleSection (child N)
+```
+
+This hierarchy enables:
+
+- **Per-example visibility**: Individual examples can be summarized or expanded
+- **Conditional rendering**: Examples can use `enabled` predicates
+- **Section paths**: Examples are addressable via dot notation
+  (e.g., `"task-examples.example-auth-review"`)
+- **Cloning**: Examples clone correctly with session/bus rewiring
+
+### Child Section Registration
+
+When constructing `TaskExamplesSection`, the provided `TaskExampleSection`
+instances are registered as children:
+
+```python
+auth_example = TaskExampleSection(
+    key="auth-review",
+    objective="Review authentication for vulnerabilities",
+    outcome="Identified SQL injection issue",
+    steps=[...],
+    tools=[read_tool, search_tool],
+)
+
+perf_example = TaskExampleSection(
+    key="perf-audit",
+    objective="Audit database queries for N+1 issues",
+    outcome="Found 3 N+1 query patterns",
+    steps=[...],
+    tools=[read_tool, query_tool],
+)
+
+examples_section = TaskExamplesSection(
+    key="examples",
+    title="Workflow Examples",
+    children=[auth_example, perf_example],
+)
+
+# Children are accessible via standard section traversal
+assert examples_section.children == (auth_example, perf_example)
+```
 
 ## Validation Rules
 
@@ -110,17 +182,21 @@ raise `PromptValidationError` immediately.
 
 ```python
 # Valid
-TaskExample(
+TaskExampleSection(
+    key="security-review",
     objective="Review the authentication module for security issues",
     outcome="Identified 3 vulnerabilities with remediation steps",
-    steps=(...),
+    steps=[...],
+    tools=[...],
 )
 
 # Invalid: empty objective
-TaskExample(
+TaskExampleSection(
+    key="bad-example",
     objective="",  # PromptValidationError
     outcome="Done",
-    steps=(...),
+    steps=[...],
+    tools=[...],
 )
 ```
 
@@ -131,10 +207,12 @@ TaskExample(
 
 ```python
 # Invalid: empty steps
-TaskExample(
+TaskExampleSection(
+    key="empty-steps",
     objective="Do something",
     outcome="Done",
-    steps=(),  # PromptValidationError: "steps must not be empty"
+    steps=[],  # PromptValidationError: "steps must not be empty"
+    tools=[...],
 )
 ```
 
@@ -147,30 +225,24 @@ lookup_tool = Tool[LookupParams, LookupResult](name="lookup", ...)
 search_tool = Tool[SearchParams, SearchResult](name="search", ...)
 
 # Valid: tool names match provided tools
-TaskExamplesSection(
-    examples=[
-        TaskExample(
-            objective="Find information",
-            outcome="Found results",
-            steps=(
-                TaskStep(tool_name="lookup", example=...),  # OK
-                TaskStep(tool_name="search", example=...),  # OK
-            ),
-        ),
+TaskExampleSection(
+    key="valid-example",
+    objective="Find information",
+    outcome="Found results",
+    steps=[
+        TaskStep(tool_name="lookup", example=...),  # OK
+        TaskStep(tool_name="search", example=...),  # OK
     ],
     tools=[lookup_tool, search_tool],
 )
 
 # Invalid: unknown tool name
-TaskExamplesSection(
-    examples=[
-        TaskExample(
-            objective="Find information",
-            outcome="Found results",
-            steps=(
-                TaskStep(tool_name="unknown", example=...),  # PromptValidationError
-            ),
-        ),
+TaskExampleSection(
+    key="bad-tool",
+    objective="Find information",
+    outcome="Found results",
+    steps=[
+        TaskStep(tool_name="unknown", example=...),  # PromptValidationError
     ],
     tools=[lookup_tool],
 )
@@ -180,7 +252,7 @@ Error message format:
 ```
 PromptValidationError: Unknown tool "unknown" in task example step 0.
 Available tools: lookup, search.
-Section path: ("task-examples",)
+Section path: ("task-examples", "bad-tool")
 ```
 
 ### Type Coherence
@@ -224,17 +296,40 @@ Error message format:
 ```
 PromptValidationError: Task example step 1 input type mismatch for tool "lookup".
 Expected: LookupParams, got: SearchParams.
-Section path: ("task-examples",)
+Section path: ("task-examples", "example-key")
+```
+
+### Children Type Validation
+
+`TaskExamplesSection` validates that all children are `TaskExampleSection`
+instances:
+
+```python
+# Invalid: wrong child type
+TaskExamplesSection(
+    children=[
+        MarkdownSection(key="wrong", ...),  # PromptValidationError
+    ],
+)
+```
+
+Error message:
+```
+PromptValidationError: TaskExamplesSection children must be TaskExampleSection instances.
+Got: MarkdownSection at index 0.
 ```
 
 ### Duplicate Tool Names
 
-Tools passed to `TaskExamplesSection` must have unique names:
+Tools within a `TaskExampleSection` must have unique names:
 
 ```python
 # Invalid: duplicate tool names
-TaskExamplesSection(
-    examples=[...],
+TaskExampleSection(
+    key="dupe-tools",
+    objective="...",
+    outcome="...",
+    steps=[...],
     tools=[
         Tool(name="lookup", ...),
         Tool(name="lookup", ...),  # PromptValidationError
@@ -246,12 +341,13 @@ TaskExamplesSection(
 
 ### Markdown Structure
 
-Task examples render as numbered examples with nested tool call sequences:
+The container section renders a heading, then delegates to child sections.
+Each `TaskExampleSection` renders its trajectory:
 
 ```markdown
 ## 3. Task Examples
 
-### Example 1: Review authentication module
+### 3.1. Review authentication module
 
 **Objective:** Review the authentication module for security vulnerabilities.
 
@@ -289,17 +385,20 @@ Task examples render as numbered examples with nested tool call sequences:
 
 **Outcome:** Identified SQL injection vulnerability and created issue SEC-123.
 
----
+### 3.2. Audit database queries
 
-### Example 2: ...
+**Objective:** Audit database queries for N+1 issues.
+
+...
 ```
 
 ### Rendering Rules
 
+- Container section renders its title as the parent heading
+- Child sections use standard nested numbering (3.1, 3.2, etc.)
 - Example titles derive from objective (truncated to 60 characters if needed)
 - Steps render in declaration order with 1-based numbering
 - Input/output use fenced code blocks (JSON for input, plain for output)
-- Horizontal rules separate multiple examples
 - Step descriptions appear after the tool name in bold
 
 ## Integration
@@ -311,7 +410,7 @@ from weakincentives.prompt import (
     PromptTemplate,
     MarkdownSection,
     TaskExamplesSection,
-    TaskExample,
+    TaskExampleSection,
     TaskStep,
     Tool,
     ToolExample,
@@ -330,11 +429,12 @@ search_tool = Tool[SearchParams, SearchResult](
     handler=search_handler,
 )
 
-# Define task examples
-review_example = TaskExample(
+# Define task example sections
+review_example = TaskExampleSection(
+    key="security-review",
     objective="Review src/auth.py for security issues",
     outcome="Identified 2 vulnerabilities with severity ratings",
-    steps=(
+    steps=[
         TaskStep(
             tool_name="read_file",
             example=ToolExample(
@@ -351,10 +451,11 @@ review_example = TaskExample(
                 output=SearchResult(matches=[Match(line=42)]),
             ),
         ),
-    ),
+    ],
+    tools=[read_tool, search_tool],
 )
 
-# Build prompt
+# Build prompt with task examples as child sections
 template = PromptTemplate(
     ns="agents/reviewer",
     key="code-review",
@@ -368,8 +469,7 @@ template = PromptTemplate(
         TaskExamplesSection(
             title="Example Workflows",
             key="example-workflows",
-            examples=[review_example],
-            tools=[read_tool, search_tool],
+            children=[review_example],
         ),
     ],
 )
@@ -377,8 +477,9 @@ template = PromptTemplate(
 
 ### Tool Registration
 
-Tools in `TaskExamplesSection` are registered with the prompt alongside tools
-from other sections. The section participates in duplicate name detection:
+Tools in `TaskExampleSection` are registered with the prompt alongside tools
+from other sections. Each child section participates in duplicate name
+detection:
 
 ```python
 # This raises PromptValidationError due to duplicate "read_file"
@@ -394,8 +495,15 @@ template = PromptTemplate(
         ),
         TaskExamplesSection(
             key="examples",
-            examples=[...],
-            tools=[Tool(name="read_file", ...)],  # Duplicate!
+            children=[
+                TaskExampleSection(
+                    key="example-1",
+                    objective="...",
+                    outcome="...",
+                    steps=[...],
+                    tools=[Tool(name="read_file", ...)],  # Duplicate!
+                ),
+            ],
         ),
     ],
 )
@@ -403,19 +511,60 @@ template = PromptTemplate(
 
 ### Progressive Disclosure
 
-`TaskExamplesSection` supports summary visibility:
+Both container and child sections support summary visibility:
 
 ```python
+# Summarize the entire examples section
 TaskExamplesSection(
-    examples=[...],
-    tools=[...],
+    children=[...],
     visibility=SectionVisibility.SUMMARY,
     summary="Example workflows available for review tasks.",
 )
+
+# Summarize individual examples
+TaskExampleSection(
+    key="complex-example",
+    objective="...",
+    outcome="...",
+    steps=[...],
+    tools=[...],
+    visibility=SectionVisibility.SUMMARY,
+    summary="Complex multi-step workflow example.",
+)
 ```
 
-When summarized, the section renders only the summary text with the standard
-expansion hint.
+When a `TaskExampleSection` is summarized, it renders only its summary text.
+When expanded, it renders the full trajectory.
+
+### Conditional Rendering
+
+Individual examples can be conditionally enabled:
+
+```python
+@dataclass
+class ExampleParams:
+    show_advanced: bool = False
+
+advanced_example = TaskExampleSection[ExampleParams](
+    key="advanced-workflow",
+    objective="Complex multi-tool orchestration",
+    outcome="...",
+    steps=[...],
+    tools=[...],
+    enabled=lambda params: params.show_advanced,
+)
+```
+
+### Cloning
+
+Both section types support cloning with session/bus rewiring:
+
+```python
+cloned_examples = examples_section.clone(session=new_session, bus=new_bus)
+
+# Children are recursively cloned
+assert cloned_examples.children[0] is not examples_section.children[0]
+```
 
 ## Error Handling
 
@@ -424,7 +573,7 @@ expansion hint.
 All validation errors raise `PromptValidationError` with:
 
 - `message`: Human-readable description
-- `section_path`: Path to the section (e.g., `("task-examples",)`)
+- `section_path`: Path to the section (e.g., `("task-examples", "example-1")`)
 - `placeholder`: Field name when applicable (e.g., `"objective"`, `"steps"`)
 
 ### Error Scenarios
@@ -440,10 +589,11 @@ All validation errors raise `PromptValidationError` with:
 | Input type mismatch | `"Task example step N input type mismatch for tool \"X\""` |
 | Output type mismatch | `"Task example step N output type mismatch for tool \"X\""` |
 | Duplicate tool name | `"Duplicate tool name: X"` |
+| Wrong child type | `"TaskExamplesSection children must be TaskExampleSection instances"` |
 
 ## Usage Example
 
-Complete example demonstrating a multi-tool workflow:
+Complete example demonstrating a multi-tool workflow with child sections:
 
 ```python
 from dataclasses import dataclass, field
@@ -451,12 +601,10 @@ from weakincentives.prompt import (
     PromptTemplate,
     MarkdownSection,
     TaskExamplesSection,
-    TaskExample,
+    TaskExampleSection,
     TaskStep,
     Tool,
     ToolExample,
-    ToolContext,
-    ToolResult,
 )
 
 # Parameter and result types
@@ -506,11 +654,12 @@ store_tool = Tool[StoreParams, StoreResult](
     handler=store_handler,
 )
 
-# Task example: fetch, parse, and store workflow
-etl_example = TaskExample(
+# Task example sections
+etl_example = TaskExampleSection(
+    key="etl-workflow",
     objective="Fetch API data, parse the JSON response, and store the result",
     outcome="Successfully fetched, parsed, and stored user data",
-    steps=(
+    steps=[
         TaskStep(
             tool_name="fetch_url",
             example=ToolExample(
@@ -535,10 +684,28 @@ etl_example = TaskExample(
                 output=StoreResult(stored=True),
             ),
         ),
-    ),
+    ],
+    tools=[fetch_tool, parse_tool, store_tool],
 )
 
-# Build prompt with task examples
+error_handling_example = TaskExampleSection(
+    key="error-handling",
+    objective="Handle API errors gracefully",
+    outcome="Detected 404 error and logged appropriate message",
+    steps=[
+        TaskStep(
+            tool_name="fetch_url",
+            example=ToolExample(
+                description="Attempt to fetch non-existent resource",
+                input=FetchParams(url="https://api.example.com/users/999"),
+                output=FetchResult(status=404, body='{"error": "Not found"}'),
+            ),
+        ),
+    ],
+    tools=[fetch_tool],
+)
+
+# Build prompt with task examples as child sections
 template = PromptTemplate(
     ns="agents/etl",
     key="data-pipeline",
@@ -552,8 +719,7 @@ template = PromptTemplate(
         TaskExamplesSection(
             title="Workflow Examples",
             key="workflow-examples",
-            examples=[etl_example],
-            tools=[fetch_tool, parse_tool, store_tool],
+            children=[etl_example, error_handling_example],
         ),
     ],
 )
@@ -562,17 +728,21 @@ template = PromptTemplate(
 ## Implementation Checklist
 
 - [ ] `TaskStep` frozen dataclass with `tool_name` and `example` fields
-- [ ] `TaskExample` frozen dataclass with `objective`, `outcome`, and `steps`
-- [ ] `TaskExamplesSection` extending `Section` with validation in `__init__`
+- [ ] `TaskExampleSection` extending `Section` with validation in `__init__`
+- [ ] `TaskExamplesSection` extending `Section` with children validation
 - [ ] Objective/outcome validation (1-500 ASCII chars, non-blank)
 - [ ] Steps non-empty validation
 - [ ] Tool name resolution against provided tools
 - [ ] Type coherence validation reusing `Tool._validate_examples` logic
+- [ ] Children type validation (must be `TaskExampleSection`)
 - [ ] Duplicate tool name detection
-- [ ] Markdown rendering with numbered steps and fenced blocks
-- [ ] Progressive disclosure support (summary visibility)
+- [ ] Markdown rendering with nested section numbering
+- [ ] Progressive disclosure support for both section types
+- [ ] Conditional rendering via `enabled` predicate
+- [ ] `clone()` implementation with recursive child cloning
 - [ ] Integration tests for validation error messages
 - [ ] Unit tests for rendering output format
+- [ ] Unit tests for section hierarchy traversal
 
 ## Limitations
 
@@ -583,3 +753,5 @@ template = PromptTemplate(
   registration is not supported.
 - **No step dependencies**: Steps cannot reference outputs from previous steps
   in their inputs (the example is illustrative, not executable).
+- **Homogeneous children**: `TaskExamplesSection` only accepts
+  `TaskExampleSection` children, not arbitrary section types.
