@@ -7,52 +7,98 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  format-check:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    
     steps:
     - uses: actions/checkout@v5
-    
     - name: Install uv
       uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
-    
     - name: Set up Python
       run: uv python install 3.14
-    
     - name: Install dependencies
       run: uv sync
-    
     - name: Run format check
       run: make format-check
-    
+
+  lint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - name: Set up Python
+      run: uv python install 3.14
+    - name: Install dependencies
+      run: uv sync
     - name: Run linter
       run: make lint
-    
-    - name: Run type checker
-      run: make typecheck
-    
+
+  ty:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - name: Set up Python
+      run: uv python install 3.14
+    - name: Install dependencies
+      run: uv sync --all-extras
+    - name: Run ty
+      run: make ty
+
+  pyright:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - name: Set up Python
+      run: uv python install 3.14
+    - name: Install dependencies
+      run: uv sync --all-extras
+    - name: Run pyright
+      run: make pyright
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - name: Set up Python
+      run: uv python install 3.14
+    - name: Install dependencies
+      run: uv sync --all-extras
     - name: Run tests
       run: make test
 
   mutation:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs: test
-
     steps:
     - uses: actions/checkout@v5
-
     - name: Install uv
       uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
-
     - name: Set up Python
       run: uv python install 3.14
-
     - name: Install dependencies
-      run: uv sync
-
+      run: uv sync --all-extras
     - name: Enforce mutation score gate
       run: make mutation-check
