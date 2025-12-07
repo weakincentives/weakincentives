@@ -919,8 +919,9 @@ def message_text_content(content: object) -> str:
 def extract_parsed_content(message: ProviderMessage) -> object | None:
     """Extract structured payloads surfaced directly by the provider."""
 
-    if message.parsed is not None:
-        return message.parsed
+    parsed = getattr(message, "parsed", None)
+    if parsed is not None:
+        return parsed
 
     content = message.content
     if isinstance(content, Sequence) and not isinstance(
