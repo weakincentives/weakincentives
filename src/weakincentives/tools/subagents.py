@@ -204,7 +204,6 @@ def build_dispatch_subagents_tool(
         delegation_prompt = delegation_prompt_cls(
             context.prompt,
             cast(RenderedPrompt[Any], rendered_parent),
-            include_response_format=rendered_parent.container is not None,
         )
 
         delegations = tuple(params.delegations)

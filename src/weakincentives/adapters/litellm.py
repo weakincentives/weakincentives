@@ -269,16 +269,8 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
-        has_structured_output = prompt.structured_output is not None
-        should_disable_instructions = (
-            parse_output
-            and has_structured_output
-            and getattr(prompt, "inject_output_instructions", False)
-        )
-
         render_options = AdapterRenderOptions(
             parse_output=parse_output,
-            disable_output_instructions=should_disable_instructions,
             enable_json_schema=True,
             deadline=deadline,
             visibility_overrides=visibility_overrides,

@@ -30,7 +30,6 @@ from .progressive_disclosure import (
     create_open_sections_handler,
 )
 from .registry import RegistrySnapshot, SectionNode
-from .response_format import ResponseFormatSection
 from .section import Section
 from .structured_output import StructuredOutputConfig
 from .tool import Tool
@@ -125,12 +124,10 @@ class PromptRenderer[OutputT]:
         *,
         registry: RegistrySnapshot,
         structured_output: StructuredOutputConfig[SupportsDataclass] | None,
-        response_section: ResponseFormatSection | None,
     ) -> None:
         super().__init__()
         self._registry = registry
         self._structured_output = structured_output
-        self._response_section: ResponseFormatSection | None = response_section
 
     def build_param_lookup(
         self, params: tuple[SupportsDataclass, ...]
@@ -160,13 +157,12 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: PLR0913, PLR0914
+    def render(  # noqa: PLR0914
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
         tool_overrides: Mapping[str, ToolOverride] | None = None,
         *,
-        inject_output_instructions: bool | None = None,
         descriptor: PromptDescriptor | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
@@ -179,10 +175,7 @@ class PromptRenderer[OutputT]:
         summary_skip_depth: int | None = None
         has_summarized = False
 
-        for node, section_params in self._iter_enabled_sections(
-            dict(param_lookup),
-            inject_output_instructions=inject_output_instructions,
-        ):
+        for node, section_params in self._iter_enabled_sections(dict(param_lookup)):
             # Skip children of sections rendered with SUMMARY visibility
             if summary_skip_depth is not None:
                 if node.depth > summary_skip_depth:
@@ -317,8 +310,6 @@ class PromptRenderer[OutputT]:
     def _iter_enabled_sections(
         self,
         param_lookup: MutableMapping[type[SupportsDataclass], SupportsDataclass],
-        *,
-        inject_output_instructions: bool | None = None,
     ) -> Iterator[tuple[SectionNode[SupportsDataclass], SupportsDataclass | None]]:
         skip_depth: int | None = None
 
@@ -330,19 +321,14 @@ class PromptRenderer[OutputT]:
 
             section_params = self._registry.resolve_section_params(node, param_lookup)
 
-            if node.section is self._response_section and (
-                inject_output_instructions is not None
-            ):
-                enabled = inject_output_instructions
-            else:
-                try:
-                    enabled = node.section.is_enabled(section_params)
-                except Exception as error:  # pragma: no cover - defensive
-                    raise PromptRenderError(
-                        "Section enabled predicate failed.",
-                        section_path=node.path,
-                        dataclass_type=node.section.param_type,
-                    ) from error
+            try:
+                enabled = node.section.is_enabled(section_params)
+            except Exception as error:  # pragma: no cover - defensive
+                raise PromptRenderError(
+                    "Section enabled predicate failed.",
+                    section_path=node.path,
+                    dataclass_type=node.section.param_type,
+                ) from error
 
             if not enabled:
                 skip_depth = node.depth

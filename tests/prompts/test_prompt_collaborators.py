@@ -124,7 +124,6 @@ def test_renderer_renders_sections_and_tool_overrides() -> None:
     renderer = PromptRenderer(
         registry=snapshot,
         structured_output=None,
-        response_section=None,
     )
 
     params_lookup = renderer.build_param_lookup((_IntroParams(title="Hello"),))
@@ -153,7 +152,6 @@ def test_renderer_rejects_unregistered_param_types() -> None:
     renderer = PromptRenderer(
         registry=snapshot,
         structured_output=None,
-        response_section=None,
     )
 
     @dataclass

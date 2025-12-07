@@ -93,7 +93,6 @@ class PromptTemplateProtocol(Protocol[TemplateOutputT]):
         *params: SupportsDataclass,
         overrides_store: PromptOverridesStore | None = None,
         tag: str = "latest",
-        inject_output_instructions: bool | None = None,
     ) -> RenderedPromptProtocol[TemplateOutputT]: ...
 
 
@@ -103,7 +102,6 @@ class PromptProtocol(Protocol[PromptOutputT]):
     template: PromptTemplateProtocol[PromptOutputT]
     overrides_store: PromptOverridesStore | None
     overrides_tag: str
-    inject_output_instructions: bool | None
 
     ns: str
     key: str

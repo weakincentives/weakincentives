@@ -249,8 +249,6 @@ def test_prompt_template_is_immutable() -> None:
         prompt.ns = "changed"
     with pytest.raises(AttributeError):
         prompt.placeholders = {}  # type: ignore[misc]
-    with pytest.raises(AttributeError):
-        prompt.inject_output_instructions = False
 
 
 def test_prompt_descriptor_cached_on_first_access(

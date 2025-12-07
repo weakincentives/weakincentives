@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, field, is_dataclass
 from functools import cached_property
 from typing import (
@@ -35,7 +35,6 @@ from .errors import PromptValidationError, SectionPath
 from .overrides import PromptDescriptor
 from .registry import PromptRegistry, SectionNode
 from .rendering import PromptRenderer, RenderedPrompt
-from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
 from .structured_output import StructuredOutputConfig
 
@@ -89,23 +88,6 @@ def _resolve_output_spec(
     )
 
 
-def _build_response_format_params(
-    spec: StructuredOutputConfig[SupportsDataclass],
-) -> ResponseFormatParams:
-    """Build response format parameters from structured output config."""
-    container = spec.container
-
-    article: Literal["a", "an"] = (
-        "an" if container.startswith(("a", "e", "i", "o", "u")) else "a"
-    )
-    extra_clause = "." if spec.allow_extra_keys else ". Do not add extra keys."
-    return ResponseFormatParams(
-        article=article,
-        container=container,
-        extra_clause=extra_clause,
-    )
-
-
 @FrozenDataclass(slots=False)
 class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     """Coordinate prompt sections and their parameter bindings.
@@ -121,7 +103,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     ns: str
     key: str
     name: str | None = None
-    inject_output_instructions: bool = True
     # Field accepts Section sequence as input and stores SectionNode tuple
     sections: (
         Sequence[Section[SupportsDataclass]]
@@ -132,7 +113,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
         init=False, default=None
     )
-    _response_section: ResponseFormatSection | None = field(init=False, default=None)
 
     _output_container_spec: ClassVar[Literal["object", "array"] | None] = None
     _output_dataclass_candidate: ClassVar[Any] = None
@@ -170,7 +150,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         | tuple[SectionNode[SupportsDataclass], ...]
         | object
         | None = MISSING,
-        inject_output_instructions: bool | object = MISSING,
         allow_extra_keys: bool | object = MISSING,
     ) -> dict[str, Any]:
         """Normalize inputs and derive internal state before construction."""
@@ -188,11 +167,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             if sections is not MISSING
             else None
         )
-        inject_val = (
-            cast(bool, inject_output_instructions)
-            if inject_output_instructions is not MISSING
-            else True
-        )
         allow_extra = (
             cast(bool, allow_extra_keys) if allow_extra_keys is not MISSING else False
         )
@@ -209,38 +183,16 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         registry.register_sections(sections_tuple)
 
         structured_output = _resolve_output_spec(cls, allow_extra)
-        response_section: ResponseFormatSection | None = None
-        if structured_output is not None:
-            response_params = _build_response_format_params(structured_output)
-
-            # Create a closure that captures inject_val for the enabled callback
-            def make_enabled_callback(
-                default_inject: bool,
-            ) -> Callable[[SupportsDataclass], bool]:
-                return lambda _params: default_inject
-
-            response_section = ResponseFormatSection(
-                params=response_params,
-                enabled=make_enabled_callback(inject_val),
-            )
-            registry.register_section(
-                cast(Section[SupportsDataclass], response_section),
-                path=(response_section.key,),
-                depth=0,
-            )
-
         snapshot = registry.snapshot()
 
         return {
             "ns": stripped_ns,
             "key": stripped_key,
             "name": name_val,
-            "inject_output_instructions": inject_val,
             "sections": snapshot.sections,
             "allow_extra_keys": allow_extra,
             "_snapshot": snapshot,
             "_structured_output": structured_output,
-            "_response_section": response_section,
         }
 
     @property
@@ -294,18 +246,6 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             f"Section matching {candidates!r} not found in prompt {self.ns}:{self.key}."
         )
 
-    def _build_response_format_params(self) -> ResponseFormatParams:
-        """Build response format parameters from structured output config.
-
-        Raises RuntimeError if no structured output is configured.
-        """
-        spec = self._structured_output
-        if spec is None:
-            raise RuntimeError(
-                "Output container missing during response format construction."
-            )
-        return _build_response_format_params(spec)
-
 
 class Prompt(Generic[OutputT]):  # noqa: UP046
     """Bind a prompt template with overrides and parameters for rendering.
@@ -320,7 +260,6 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         template: PromptTemplate[OutputT],
         overrides_store: PromptOverridesStore | None = None,
         overrides_tag: str = "latest",
-        inject_output_instructions: bool | None = None,
     ) -> None:
         super().__init__()
         self.template = template
@@ -329,12 +268,6 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         self.name: str | None = template.name
         self.overrides_store = overrides_store
         self.overrides_tag = overrides_tag
-        effective_instructions = (
-            inject_output_instructions
-            if inject_output_instructions is not None
-            else template.inject_output_instructions
-        )
-        self.inject_output_instructions = effective_instructions
         self._params: tuple[SupportsDataclass, ...] = ()
 
     @property
@@ -365,7 +298,6 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         return PromptRenderer(
             registry=snapshot,
             structured_output=self.template._structured_output,  # pyright: ignore[reportPrivateUsage]
-            response_section=self.template._response_section,  # pyright: ignore[reportPrivateUsage]
         )
 
     def bind(self, *params: SupportsDataclass) -> Prompt[OutputT]:
@@ -403,7 +335,6 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
     def render(
         self,
         *,
-        inject_output_instructions: bool | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt with bound parameters and optional overrides.
@@ -411,12 +342,6 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         Override resolution and rendering are performed here. The template
         provides only metadata and the registry snapshot for rendering.
         """
-
-        instructions_flag = (
-            inject_output_instructions
-            if inject_output_instructions is not None
-            else self.inject_output_instructions
-        )
         tag = self.overrides_tag if self.overrides_tag else "latest"
 
         overrides: dict[SectionPath, str] | None = None
@@ -439,7 +364,6 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
             param_lookup,
             overrides,
             tool_overrides,
-            inject_output_instructions=instructions_flag,
             descriptor=descriptor,
             visibility_overrides=visibility_overrides,
         )

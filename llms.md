@@ -401,7 +401,7 @@ from weakincentives.prompt import PromptTemplate
 
 template = PromptTemplate[OutputType](
     ns="myapp/agents", key="my-agent", name="my-agent",
-    sections=[...], inject_output_instructions=True,
+    sections=[...],
 )
 prompt = Prompt(template).bind(MyParams(value="..."))  # Bind returns self
 ```

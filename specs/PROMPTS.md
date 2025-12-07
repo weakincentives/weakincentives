@@ -156,20 +156,8 @@ prompt = Prompt[Summary](...)
 - `Prompt[list[T]]` - JSON array of objects matching `T`
 - Non-dataclass types raise `PromptValidationError`
 
-### Response Format Section
-
-When structured output is declared and `inject_output_instructions=True`
-(default), the framework appends a `ResponseFormatSection` keyed as
-`response-format`:
-
-```
-## Response Format
-Return ONLY a single fenced JSON code block. Do not include any text
-before or after the block.
-
-The top-level JSON value MUST be an object that matches the fields
-of the expected schema. Do not add extra keys.
-```
+Providers must support native structured outputs (JSON schema response format)
+for structured output to work correctly.
 
 ### Parsing
 
@@ -188,8 +176,7 @@ Failures raise `OutputParseError` with the raw response attached.
 ```python
 prompt = Prompt[Output](
     ...,
-    inject_output_instructions=True,  # Default: append format section
-    allow_extra_keys=False,           # Default: reject unknown keys
+    allow_extra_keys=False,  # Default: reject unknown keys
 )
 ```
 
@@ -201,7 +188,6 @@ execution.
 ### Required Layout
 
 1. `# Delegation Summary`
-1. `## Response Format` (conditional)
 1. `## Parent Prompt (Verbatim)`
 1. `## Recap` (optional)
 
@@ -232,7 +218,6 @@ rendered = delegation.render(
 - Parent prompt is embedded byte-for-byte with markers:
   `<!-- PARENT PROMPT START -->` and `<!-- PARENT PROMPT END -->`
 - Tools from parent are inherited, not redeclared
-- Response format section appears only when adapter needs fallback instructions
 - Truncation is never allowed; abort if size limits prevent embedding
 
 ## Progressive Disclosure

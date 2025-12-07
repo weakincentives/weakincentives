@@ -353,7 +353,6 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
     renderer = PromptRenderer(
         registry=snapshot,
         structured_output=None,
-        response_section=None,
     )
 
     params_lookup = renderer.build_param_lookup((_SectionParams(title="Test"),))
@@ -399,7 +398,6 @@ def test_summary_visibility_skips_child_sections() -> None:
     renderer = PromptRenderer(
         registry=snapshot,
         structured_output=None,
-        response_section=None,
     )
 
     params_lookup = renderer.build_param_lookup(
@@ -456,7 +454,6 @@ def test_summary_visibility_skips_child_tools() -> None:
     renderer = PromptRenderer(
         registry=snapshot,
         structured_output=None,
-        response_section=None,
     )
 
     params_lookup = renderer.build_param_lookup(
@@ -506,7 +503,6 @@ def test_summary_visibility_default_excludes_tools() -> None:
     renderer = PromptRenderer(
         registry=snapshot,
         structured_output=None,
-        response_section=None,
     )
 
     params_lookup = renderer.build_param_lookup((_SectionParams(title="Test"),))
@@ -569,7 +565,6 @@ def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
     renderer = PromptRenderer(
         registry=snapshot,
         structured_output=None,
-        response_section=None,
     )
 
     params_lookup = renderer.build_param_lookup(

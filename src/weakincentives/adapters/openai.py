@@ -606,8 +606,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             max_tokens, etc. When provided, these values are merged into each
             request payload.
         tool_choice: Tool selection directive. Defaults to "auto".
-        use_native_response_format: When True, uses OpenAI's JSON schema response
-            format for structured outputs. Defaults to True.
         client: Pre-configured OpenAI client instance. Mutually exclusive with
             client_config.
         client_config: Typed configuration for client instantiation. Used when
@@ -620,7 +618,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         model: str,
         model_config: OpenAIModelConfig | None = None,
         tool_choice: ToolChoice = "auto",
-        use_native_response_format: bool = True,
         client: _OpenAIProtocol | None = None,
         client_config: OpenAIClientConfig | None = None,
     ) -> None:
@@ -638,7 +635,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._model = model
         self._model_config = model_config
         self._tool_choice: ToolChoice = tool_choice
-        self._use_native_response_format = use_native_response_format
 
     @override
     def evaluate(
@@ -707,7 +703,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._ensure_deadline_not_expired(deadline, prompt_name)
         rendered = self._render_prompt(
             prompt,
-            parse_output=parse_output,
             deadline=deadline,
             visibility_overrides=visibility_overrides,
         )
@@ -735,39 +730,20 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                 provider_payload=deadline_provider_payload(deadline),
             )
 
+    @staticmethod
     def _render_prompt(
-        self,
         prompt: Prompt[OutputT],
         *,
-        parse_output: bool,
         deadline: Deadline | None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> RenderedPrompt[OutputT]:
-        has_structured_output = prompt.structured_output is not None
-        inject_instructions = prompt.inject_output_instructions
-        should_disable_instructions = (
-            parse_output
-            and has_structured_output
-            and self._use_native_response_format
-            and inject_instructions
-        )
-
-        if should_disable_instructions:
-            rendered = prompt.render(
-                inject_output_instructions=False,
-                visibility_overrides=visibility_overrides,
-            )
-        else:
-            rendered = prompt.render(
-                inject_output_instructions=inject_instructions,
-                visibility_overrides=visibility_overrides,
-            )
+        rendered = prompt.render(visibility_overrides=visibility_overrides)
         if deadline is not None:
             rendered = replace(rendered, deadline=deadline)
         return rendered
 
+    @staticmethod
     def _build_response_format(
-        self,
         rendered: RenderedPrompt[Any],
         *,
         parse_output: bool,
@@ -778,7 +754,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             and rendered.output_type is not None
             and rendered.container is not None
         )
-        if should_parse_structured_output and self._use_native_response_format:
+        if should_parse_structured_output:
             response_format = cast(
                 Mapping[str, Any],
                 build_json_schema_response_format(rendered, prompt_name),

@@ -27,7 +27,6 @@ from .errors import PromptRenderError
 from .markdown import MarkdownSection
 from .prompt import Prompt, PromptTemplate, RenderedPrompt
 from .protocols import PromptProtocol
-from .response_format import ResponseFormatParams, ResponseFormatSection
 from .section import Section
 
 ParentOutputT = TypeVar("ParentOutputT")
@@ -200,8 +199,6 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
         | PromptTemplate[ParentOutputT]
         | Prompt[ParentOutputT],
         rendered_parent: RenderedPrompt[ParentOutputT],
-        *,
-        include_response_format: bool = False,
     ) -> None:
         super().__init__()
         self._rendered_parent = rendered_parent
@@ -211,11 +208,6 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
             default_params=ParentPromptParams(body=rendered_parent.text),
         )
         sections: list[Section[SupportsDataclass]] = [summary_section]
-
-        if include_response_format:
-            response_section = self._build_response_format_section(rendered_parent)
-            if response_section is not None:
-                sections.append(response_section)
 
         sections.append(parent_section)
 
@@ -230,7 +222,6 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
             ns=f"{parent_prompt.ns}.delegation",
             key=f"{parent_prompt.key}-wrapper",
             sections=tuple(sections),
-            inject_output_instructions=False,
             allow_extra_keys=bool(rendered_parent.allow_extra_keys),
         )
 
@@ -241,25 +232,6 @@ class DelegationPrompt(Generic[ParentOutputT, DelegationOutputT]):  # noqa: UP04
 
         msg = "Specialize DelegationPrompt with an explicit output type"
         raise TypeError(msg)
-
-    def _build_response_format_section(
-        self,
-        rendered_parent: RenderedPrompt[ParentOutputT],
-    ) -> ResponseFormatSection | None:
-        container = rendered_parent.container
-        if container is None:
-            return None
-
-        article = "an" if container.startswith(tuple("aeiou")) else "a"
-        extra_clause = (
-            "." if rendered_parent.allow_extra_keys else ". Do not add extra keys."
-        )
-
-        return ResponseFormatSection(
-            params=ResponseFormatParams(
-                article=article, container=container, extra_clause=extra_clause
-            )
-        )
 
     @property
     def prompt(self) -> Prompt[DelegationOutputT]:

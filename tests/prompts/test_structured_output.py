@@ -49,7 +49,6 @@ class ResultItem:
 
 def _build_summary_prompt(
     *,
-    inject_output_instructions: bool = True,
     allow_extra_keys: bool = False,
 ) -> PromptTemplate[Summary]:
     task_section = MarkdownSection[Guidance](
@@ -62,12 +61,11 @@ def _build_summary_prompt(
         key="summaries",
         name="summaries",
         sections=[task_section],
-        inject_output_instructions=inject_output_instructions,
         allow_extra_keys=allow_extra_keys,
     )
 
 
-def test_prompt_specialization_appends_response_format_block() -> None:
+def test_prompt_specialization_exposes_output_metadata() -> None:
     prompt = Prompt(_build_summary_prompt()).bind(Guidance(topic="Ada Lovelace"))
 
     rendered = prompt.render()
@@ -75,50 +73,16 @@ def test_prompt_specialization_appends_response_format_block() -> None:
     assert rendered.output_type is Summary
     assert rendered.container == "object"
     assert rendered.allow_extra_keys is False
-    assert rendered.text.endswith(
-        "\n".join(
-            [
-                "## 2. Response Format",
-                "",
-                "Return ONLY a single fenced JSON code block. Do not include any text",
-                "before or after the block.",
-                "",
-                "The top-level JSON value MUST be an object that matches the fields",
-                "of the expected schema. Do not add extra keys.",
-            ]
-        )
-    )
 
 
-def test_prompt_can_disable_response_format_injection() -> None:
-    prompt = Prompt(
-        _build_summary_prompt(inject_output_instructions=False),
-    ).bind(Guidance(topic="Grace Hopper"))
+def test_template_structured_output_property() -> None:
+    template = _build_summary_prompt()
+    prompt = Prompt(template).bind(Guidance(topic="Ada"))
 
-    rendered = prompt.render()
-
-    assert "Response Format" not in rendered.text
-    assert rendered.output_type is Summary
-
-
-def test_prompt_render_can_skip_response_format_temporarily() -> None:
-    prompt = Prompt(_build_summary_prompt()).bind(Guidance(topic="Grace Hopper"))
-
-    rendered = prompt.render(inject_output_instructions=False)
-
-    assert "Response Format" not in rendered.text
-    assert prompt.inject_output_instructions is True
-
-
-def test_prompt_render_can_force_response_format_temporarily() -> None:
-    prompt = Prompt(
-        _build_summary_prompt(inject_output_instructions=False),
-    ).bind(Guidance(topic="Grace Hopper"))
-
-    rendered = prompt.render(inject_output_instructions=True)
-
-    assert "## 2. Response Format" in rendered.text
-    assert prompt.inject_output_instructions is False
+    assert template.structured_output is not None
+    assert template.structured_output.dataclass_type is Summary
+    assert prompt.structured_output is not None
+    assert prompt.structured_output.dataclass_type is Summary
 
 
 def test_prompt_specialization_requires_dataclass() -> None:
@@ -145,7 +109,7 @@ def test_parse_structured_output_handles_json_code_block() -> None:
     prompt = Prompt(_build_summary_prompt()).bind(Guidance(topic="Ada"))
     rendered = prompt.render()
 
-    reply = """All set.\n```json\n{\n  \"title\": \"Ada\",\n  \"views\": \"42\",\n  \"featured\": \"true\"\n}\n```"""
+    reply = """All set.\n```json\n{\n  "title": "Ada",\n  "views": "42",\n  "featured": "true"\n}\n```"""
 
     parsed = parse_structured_output(reply, rendered)
 
@@ -159,7 +123,9 @@ def test_parse_structured_output_rejects_extra_keys_by_default() -> None:
     prompt = Prompt(_build_summary_prompt()).bind(Guidance(topic="Ada"))
     rendered = prompt.render()
 
-    reply = """```json\n{\n  \"title\": \"Ada\",\n  \"views\": 10,\n  \"notes\": \"extra\"\n}\n```"""
+    reply = (
+        """```json\n{\n  "title": "Ada",\n  "views": 10,\n  "notes": "extra"\n}\n```"""
+    )
 
     with pytest.raises(OutputParseError) as exc:
         parse_structured_output(reply, rendered)
@@ -173,7 +139,9 @@ def test_parse_structured_output_allows_extra_keys_when_configured() -> None:
     )
     rendered = prompt.render()
 
-    reply = """```json\n{\n  \"title\": \"Ada\",\n  \"views\": 10,\n  \"notes\": \"extra\"\n}\n```"""
+    reply = (
+        """```json\n{\n  "title": "Ada",\n  "views": 10,\n  "notes": "extra"\n}\n```"""
+    )
 
     parsed = parse_structured_output(reply, rendered)
 
@@ -182,26 +150,12 @@ def test_parse_structured_output_allows_extra_keys_when_configured() -> None:
     assert parsed.views == 10
     assert rendered.allow_extra_keys is True
 
-    assert rendered.text.endswith(
-        "\n".join(
-            [
-                "## 2. Response Format",
-                "",
-                "Return ONLY a single fenced JSON code block. Do not include any text",
-                "before or after the block.",
-                "",
-                "The top-level JSON value MUST be an object that matches the fields",
-                "of the expected schema.",
-            ]
-        )
-    )
-
 
 def test_parse_structured_output_validates_container_type() -> None:
     prompt = Prompt(_build_summary_prompt()).bind(Guidance(topic="Ada"))
     rendered = prompt.render()
 
-    reply = """```json\n[{\n  \"title\": \"Ada\",\n  \"views\": 10\n}]\n```"""
+    reply = """```json\n[{\n  "title": "Ada",\n  "views": 10\n}]\n```"""
 
     with pytest.raises(OutputParseError) as exc:
         parse_structured_output(reply, rendered)
@@ -223,7 +177,7 @@ def test_parse_structured_output_supports_array_container() -> None:
     )
     rendered = Prompt(template).bind(Guidance(topic="Ada")).render()
 
-    reply = """```json\n[{\n  \"title\": \"Ada\",\n  \"score\": \"0.9\"\n}]\n```"""
+    reply = """```json\n[{\n  "title": "Ada",\n  "score": "0.9"\n}]\n```"""
 
     parsed = parse_structured_output(reply, rendered)
 
@@ -231,7 +185,6 @@ def test_parse_structured_output_supports_array_container() -> None:
     assert parsed[0].title == "Ada"
     assert parsed[0].score == pytest.approx(0.9)
     assert rendered.container == "array"
-    assert "an array" in rendered.text
 
 
 def test_parse_structured_output_requires_wrapped_array_key() -> None:
@@ -248,7 +201,7 @@ def test_parse_structured_output_requires_wrapped_array_key() -> None:
     )
     rendered = Prompt(template).bind(Guidance(topic="Ada")).render()
 
-    reply = """```json\n{\n  \"results\": []\n}\n```"""
+    reply = """```json\n{\n  "results": []\n}\n```"""
 
     with pytest.raises(OutputParseError) as exc:
         parse_structured_output(reply, rendered)
@@ -270,7 +223,7 @@ def test_parse_structured_output_requires_wrapped_array_list_value() -> None:
     )
     rendered = Prompt(prompt).bind(Guidance(topic="Ada")).render()
 
-    reply = """```json\n{\n  \"items\": {\"bad\": true}\n}\n```"""
+    reply = """```json\n{\n  "items": {"bad": true}\n}\n```"""
 
     with pytest.raises(OutputParseError) as exc:
         parse_structured_output(reply, rendered)
@@ -333,7 +286,7 @@ def test_parse_structured_output_array_requires_array_container() -> None:
     )
     rendered = Prompt(template).bind(Guidance(topic="Ada")).render()
 
-    reply = """```json\n{\n  \"title\": \"Ada\"\n}\n```"""
+    reply = """```json\n{\n  "title": "Ada"\n}\n```"""
 
     with pytest.raises(OutputParseError) as exc:
         parse_structured_output(reply, rendered)
@@ -353,7 +306,7 @@ def test_parse_structured_output_array_requires_object_items() -> None:
     )
     rendered = Prompt(template).bind(Guidance(topic="Ada")).render()
 
-    reply = """```json\n[\n  \"not an object\"\n]\n```"""
+    reply = """```json\n[\n  "not an object"\n]\n```"""
 
     with pytest.raises(OutputParseError) as exc:
         parse_structured_output(reply, rendered)
@@ -373,7 +326,7 @@ def test_parse_structured_output_array_reports_item_validation_error() -> None:
     )
     rendered = Prompt(template).bind(Guidance(topic="Ada")).render()
 
-    reply = """```json\n[{\n  \"title\": \"Ada\"\n}]\n```"""
+    reply = """```json\n[{\n  "title": "Ada"\n}]\n```"""
 
     with pytest.raises(OutputParseError) as exc:
         parse_structured_output(reply, rendered)
