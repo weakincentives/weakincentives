@@ -6,45 +6,63 @@ This specification describes how to integrate LangGraph into the WINK adapter
 ecosystem. LangGraph is a library for building stateful, multi-actor LLM
 applications modeled as graphs. The adapter bridges WINK's prompt abstraction
 with LangGraph's graph-based execution model, enabling users to leverage
-LangGraph's built-in agent patterns (ReAct, supervisor, swarm) while
-maintaining compatibility with WINK's session management, event bus, and
-tooling infrastructure.
+LangGraph's agent patterns while maintaining compatibility with WINK's session
+management, event bus, and tooling infrastructure.
 
-**Target Version**: LangGraph 0.2.x+ (pre-1.0, with awareness that 1.0 releases
-October 2025)
+**Target Version**: LangGraph 1.0.x (requires Python 3.10+)
+
+**Release Context**: LangGraph 1.0 was released October 2025 as the first stable
+major release in the durable agent framework space. It shipped with zero breaking
+changes from 0.2.x and is production-tested at companies like Uber, LinkedIn,
+and Klarna.
 
 ## Guiding Principles
 
 - **Graph-first execution**: Preserve LangGraph's native graph execution model
   rather than forcing a request/response pattern.
-- **Minimal wrapping**: Delegate to LangGraph's prebuilt components
-  (`create_react_agent`, `ToolNode`) where possible.
+- **Minimal wrapping**: Delegate to LangGraph's `create_agent` and `ToolNode`
+  where possible.
+- **Durable state**: Leverage LangGraph 1.0's built-in persistence and
+  checkpoint recovery.
 - **Session integration**: Map LangGraph checkpointing to WINK session snapshots
   when appropriate.
 - **Tool compatibility**: Translate WINK tools to LangGraph's tool format
   without losing handler semantics.
 
-## LangGraph Overview
+## LangGraph 1.0 Overview
 
 LangGraph models agent workflows using three primitives:
 
 | Primitive | Description |
 |-----------|-------------|
-| **State** | Shared data structure (TypedDict or Pydantic) representing the application snapshot |
+| **State** | Shared data structure (**TypedDict only** in 1.0) representing the application snapshot |
 | **Node** | Function that receives state, performs computation, returns updated state |
 | **Edge** | Function or constant determining which node executes next |
 
 Graphs must be compiled via `.compile()` before execution. Compilation
 validates structure and enables runtime features like checkpointing.
 
+### Key 1.0 Features
+
+- **Durable State**: Agent execution state persists automatically. Server
+  restarts or workflow interruptions resume exactly where they left off.
+- **Built-in Persistence**: Save and resume workflows at any point without
+  custom database logic. Enables multi-day approval processes and background
+  jobs.
+- **Human-in-the-Loop**: First-class API support for pausing execution for
+  human review, modification, or approval.
+- **Middleware System**: Customization hooks for human approval, summarization,
+  PII redaction, and other cross-cutting concerns.
+
 ### Key API Surface
 
 ```python
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import MessagesState, add_messages
-from langgraph.prebuilt import create_react_agent, ToolNode
+from langgraph.prebuilt import ToolNode
+from langchain.agents import create_agent  # New in 1.0
 
-# StateGraph is the primary abstraction
+# StateGraph remains the primary abstraction
 graph = StateGraph(MyState)
 graph.add_node("agent", agent_node)
 graph.add_node("tools", ToolNode(tools))
@@ -54,6 +72,25 @@ graph.add_edge("tools", "agent")
 
 compiled = graph.compile()
 result = compiled.invoke({"messages": [...]})
+```
+
+### State Schema Requirements
+
+**Important**: As of LangGraph 1.0, custom state schemas **must** be `TypedDict`
+types. Pydantic models and dataclasses are no longer supported for state
+definitions.
+
+```python
+from typing import TypedDict, Annotated
+from langgraph.graph.message import add_messages
+
+# Correct: TypedDict
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    custom_field: str
+
+# Incorrect: Pydantic/dataclass no longer supported for state
+# class AgentState(BaseModel): ...  # Will fail
 ```
 
 ### MessagesState
@@ -70,15 +107,18 @@ class AgentState(MessagesState):
 
 The `add_messages` reducer appends new messages rather than replacing.
 
-### Prebuilt Agents
+### Agent Creation (1.0 Pattern)
+
+The `create_react_agent` function from `langgraph.prebuilt` is **deprecated**.
+Use `create_agent` from `langchain.agents`:
 
 ```python
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
-agent = create_react_agent(
-    model="anthropic:claude-3-5-sonnet",
+agent = create_agent(
+    model,
     tools=[my_tool],
-    prompt="System instructions here",
+    system_prompt="System instructions here",
 )
 
 # invoke() for single response
@@ -88,6 +128,18 @@ result = agent.invoke({"messages": [{"role": "user", "content": "..."}]})
 for event in agent.stream({"messages": [...]}):
     print(event)
 ```
+
+### Deprecated Components
+
+| Deprecated (langgraph.prebuilt) | Replacement (langchain.agents) |
+|---------------------------------|--------------------------------|
+| `create_react_agent` | `create_agent` |
+| `AgentState` | `AgentState` |
+| `AgentStatePydantic` | Removed (use TypedDict) |
+| `AgentStateWithStructuredResponse` | `AgentState` |
+| `HumanInterruptConfig` | `middleware.human_in_the_loop.InterruptOnConfig` |
+| `ValidationNode` | Auto-validation via `create_agent` |
+| `MessageGraph` | `StateGraph` with messages key |
 
 ## Adapter Design
 
@@ -99,9 +151,8 @@ for event in agent.stream({"messages": [...]}):
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐   ┌──────────────┐   ┌───────────────────┐    │
 │  │   Prompt    │──▶│  Tool        │──▶│  StateGraph or    │    │
-│  │   Render    │   │  Translation │   │  create_react_    │    │
-│  └─────────────┘   └──────────────┘   │  agent            │    │
-│                                        └───────────────────┘    │
+│  │   Render    │   │  Translation │   │  create_agent     │    │
+│  └─────────────┘   └──────────────┘   └───────────────────┘    │
 │                                                 │               │
 │                                                 ▼               │
 │                                        ┌───────────────────┐    │
@@ -128,11 +179,13 @@ class LangGraphClientConfig:
         recursion_limit: Maximum graph steps before termination. Defaults to 25.
         interrupt_before: Node names to pause before (for human-in-the-loop).
         interrupt_after: Node names to pause after.
+        thread_id: Optional thread identifier for checkpoint persistence.
     """
 
     recursion_limit: int = 25
     interrupt_before: tuple[str, ...] | None = None
     interrupt_after: tuple[str, ...] | None = None
+    thread_id: str | None = None
 
     def to_invoke_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"recursion_limit": self.recursion_limit}
@@ -141,6 +194,12 @@ class LangGraphClientConfig:
         if self.interrupt_after:
             kwargs["interrupt_after"] = list(self.interrupt_after)
         return kwargs
+
+    def to_config(self) -> dict[str, Any]:
+        config: dict[str, Any] = {}
+        if self.thread_id:
+            config["configurable"] = {"thread_id": self.thread_id}
+        return config
 
 
 @FrozenDataclass()
@@ -167,7 +226,7 @@ class LangGraphAdapter(ProviderAdapter[Any]):
 
     This adapter supports two modes:
 
-    1. **Prebuilt mode**: Uses `create_react_agent` for standard ReAct patterns.
+    1. **Agent mode**: Uses `create_agent` for standard agent patterns.
        Suitable for most use cases where WINK prompts map cleanly to agent tasks.
 
     2. **Custom graph mode**: Accepts a pre-compiled StateGraph for advanced
@@ -178,11 +237,15 @@ class LangGraphAdapter(ProviderAdapter[Any]):
             "{provider}:{model}" format expected by LangGraph.
         client_config: Graph execution configuration.
         model_config: Model binding parameters.
-        tool_choice: Tool selection mode. LangGraph always uses "auto" internally
+        tool_choice: Tool selection mode. LangGraph uses "auto" internally
             but this affects how tools are bound.
         graph: Pre-compiled StateGraph. When provided, the adapter delegates
-            directly to this graph instead of using create_react_agent.
+            directly to this graph instead of using create_agent.
         checkpointer: Optional LangGraph checkpointer for state persistence.
+            LangGraph 1.0 includes built-in checkpointers for memory, SQLite,
+            and PostgreSQL.
+        middleware: Optional list of middleware for the agent. Supports
+            human-in-the-loop, summarization, and custom hooks.
     """
 
     def __init__(
@@ -194,6 +257,7 @@ class LangGraphAdapter(ProviderAdapter[Any]):
         tool_choice: ToolChoice = "auto",
         graph: CompiledStateGraph | None = None,
         checkpointer: BaseCheckpointSaver | None = None,
+        middleware: Sequence[Middleware] | None = None,
     ) -> None:
         ...
 
@@ -305,7 +369,7 @@ def bind_wink_tools(
 LangGraph supports structured output via `with_structured_output`:
 
 ```python
-from langchain_core.pydantic_v1 import BaseModel
+from pydantic import BaseModel
 
 class ResponseSchema(BaseModel):
     answer: str
@@ -349,17 +413,19 @@ def parse_langgraph_output(
 
 ## Execution Flow
 
-### Prebuilt Agent Mode
+### Agent Mode (create_agent)
 
 ```python
-def _execute_prebuilt(
+def _execute_agent(
     self,
     rendered: RenderedPrompt[OutputT],
     *,
     session: SessionProtocol,
     deadline: Deadline | None,
 ) -> PromptResponse[OutputT]:
-    """Execute using create_react_agent."""
+    """Execute using create_agent from langchain.agents."""
+
+    from langchain.agents import create_agent
 
     # Build model identifier
     model_id = self._model
@@ -372,28 +438,30 @@ def _execute_prebuilt(
         for tool in rendered.tools
     ]
 
-    # Create agent
-    agent = create_react_agent(
-        model=model_id,
-        tools=langgraph_tools,
-        prompt=rendered.text,  # System prompt
-    )
+    # Create agent with middleware if configured
+    agent_kwargs: dict[str, Any] = {
+        "model": model_id,
+        "tools": langgraph_tools,
+        "system_prompt": rendered.text,
+    }
+    if self._middleware:
+        agent_kwargs["middleware"] = list(self._middleware)
+
+    agent = create_agent(**agent_kwargs)
 
     # Prepare input
-    input_messages = [{"role": "user", "content": rendered.text}]
+    input_messages = {"messages": [{"role": "user", "content": rendered.text}]}
 
-    # Execute with deadline awareness
+    # Build invoke config
     invoke_kwargs = self._client_config.to_invoke_kwargs() if self._client_config else {}
-    if deadline:
-        # LangGraph doesn't have native deadline support
-        # We rely on recursion_limit and check between iterations
-        ...
+    config = self._client_config.to_config() if self._client_config else {}
+
+    # Add checkpointer if configured
+    if self._checkpointer:
+        config["checkpointer"] = self._checkpointer
 
     try:
-        result = agent.invoke(
-            {"messages": input_messages},
-            **invoke_kwargs,
-        )
+        result = agent.invoke(input_messages, config=config, **invoke_kwargs)
     except Exception as error:
         raise self._normalize_error(error)
 
@@ -417,10 +485,11 @@ def _execute_custom_graph(
         "messages": [{"role": "user", "content": rendered.text}],
     }
 
-    result = self._graph.invoke(
-        input_state,
-        config={"configurable": {"thread_id": session.session_id}},
-    )
+    config = self._client_config.to_config() if self._client_config else {}
+    if not config.get("configurable", {}).get("thread_id"):
+        config.setdefault("configurable", {})["thread_id"] = session.session_id
+
+    result = self._graph.invoke(input_state, config=config)
 
     return self._parse_result(result, rendered)
 ```
@@ -597,7 +666,32 @@ class BudgetTrackingCallback(BaseCallbackHandler):
 
 ## Checkpointing and Session State
 
-LangGraph's checkpointing can optionally synchronize with WINK sessions:
+LangGraph 1.0's built-in persistence simplifies checkpoint management:
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.postgres import PostgresSaver
+
+# In-memory (development)
+checkpointer = MemorySaver()
+
+# SQLite (single-node production)
+checkpointer = SqliteSaver.from_conn_string("checkpoints.db")
+
+# PostgreSQL (distributed production)
+checkpointer = PostgresSaver.from_conn_string(DATABASE_URL)
+
+adapter = LangGraphAdapter(
+    model="gpt-4o",
+    checkpointer=checkpointer,
+    client_config=LangGraphClientConfig(thread_id="user-123-session-456"),
+)
+```
+
+### Optional WINK Session Integration
+
+For workflows requiring WINK session-backed persistence:
 
 ```python
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -609,18 +703,42 @@ class SessionCheckpointer(BaseCheckpointSaver):
         self.session = session
 
     def put(self, config: RunnableConfig, checkpoint: Checkpoint) -> None:
-        # Store checkpoint in session
         self.session.mutate(LangGraphCheckpoint).dispatch(
             StoreCheckpoint(checkpoint=checkpoint)
         )
 
     def get(self, config: RunnableConfig) -> Checkpoint | None:
-        # Retrieve from session
         return self.session.query(LangGraphCheckpoint).latest()
 ```
 
-**Note**: This is optional. Most use cases should use LangGraph's built-in
-checkpointers (memory, SQLite, PostgreSQL) rather than coupling to WINK sessions.
+**Recommendation**: Use LangGraph's built-in checkpointers for most use cases.
+WINK session integration is only needed when checkpoint data must live alongside
+other session state.
+
+## Human-in-the-Loop
+
+LangGraph 1.0 provides first-class human-in-the-loop support:
+
+```python
+from langchain.agents.middleware.human_in_the_loop import InterruptOnConfig
+
+adapter = LangGraphAdapter(
+    model="gpt-4o",
+    middleware=[
+        InterruptOnConfig(
+            interrupt_before=["dangerous_action"],
+            interrupt_after=["review_step"],
+        ),
+    ],
+    checkpointer=MemorySaver(),  # Required for resume
+)
+
+# First invocation pauses at interrupt point
+result = adapter.evaluate(prompt, session=session)
+if result.interrupted:
+    # Human reviews and approves
+    result = adapter.resume(session=session, approval=True)
+```
 
 ## Module Structure
 
@@ -634,13 +752,20 @@ src/weakincentives/adapters/
 
 ## Dependencies
 
-The adapter requires `langgraph` as an optional dependency:
+The adapter requires `langgraph` and `langchain` as optional dependencies:
 
 ```toml
 # pyproject.toml
 [project.optional-dependencies]
-langgraph = ["langgraph>=0.2.0,<1.0"]
+langgraph = [
+    "langgraph>=1.0.0,<2.0",
+    "langchain>=1.0.0,<2.0",
+    "langchain-core>=1.0.0,<2.0",
+]
 ```
+
+**Python Version**: LangGraph 1.0 requires Python 3.10+ (Python 3.9 support was
+dropped following its October 2025 end-of-life).
 
 Import guard pattern:
 
@@ -659,7 +784,7 @@ def _load_langgraph() -> ModuleType:
 
 ## Usage Examples
 
-### Basic ReAct Agent
+### Basic Agent
 
 ```python
 from weakincentives.adapters.langgraph import (
@@ -686,12 +811,32 @@ response = adapter.evaluate(
 )
 ```
 
+### With Persistence
+
+```python
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+adapter = LangGraphAdapter(
+    model="gpt-4o",
+    model_config=LangGraphModelConfig(model_provider="openai"),
+    checkpointer=SqliteSaver.from_conn_string("agent_state.db"),
+    client_config=LangGraphClientConfig(
+        thread_id=f"user-{user_id}-session-{session_id}",
+    ),
+)
+```
+
 ### Custom Graph
 
 ```python
+from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
 
-# Define custom graph
+class MyState(TypedDict):
+    messages: Annotated[list, add_messages]
+    research_notes: str
+
 graph = StateGraph(MyState)
 graph.add_node("research", research_node)
 graph.add_node("synthesize", synthesize_node)
@@ -711,17 +856,18 @@ adapter = LangGraphAdapter(
 
 ### Unit Tests
 
-- Mock LangGraph's `create_react_agent` and `StateGraph.invoke`
+- Mock LangGraph's `create_agent` and `StateGraph.invoke`
 - Verify tool translation preserves handler semantics
 - Test structured output parsing for valid and malformed payloads
 - Confirm event publication at each stage
+- Test checkpoint save/restore cycles
 
 ### Integration Tests
 
 ```python
 @pytest.mark.integration
-def test_langgraph_react_agent(openai_api_key: str) -> None:
-    """Verify end-to-end ReAct execution."""
+def test_langgraph_agent(openai_api_key: str) -> None:
+    """Verify end-to-end agent execution."""
 
     adapter = LangGraphAdapter(
         model="gpt-4o-mini",
@@ -757,7 +903,7 @@ Add to `tests/helpers/adapters.py`:
 
 ```python
 class MockLangGraphAgent:
-    """Mock for LangGraph's create_react_agent result."""
+    """Mock for LangGraph's create_agent result."""
 
     def __init__(self, responses: Sequence[dict[str, Any]]) -> None:
         self.responses = list(responses)
@@ -774,18 +920,15 @@ class MockLangGraphAgent:
 1. **Streaming**: The initial implementation uses `invoke()`. Streaming support
    via `stream()` is deferred to a future iteration.
 
-2. **Human-in-the-loop**: `interrupt_before`/`interrupt_after` are exposed in
-   config but require additional orchestration to handle pauses.
-
-3. **Token tracking**: Depends on LangChain callback instrumentation; accuracy
+2. **Token tracking**: Depends on LangChain callback instrumentation; accuracy
    varies by underlying provider.
 
-4. **Deadline enforcement**: LangGraph lacks native deadline support. The
+3. **Deadline enforcement**: LangGraph lacks native deadline support. The
    adapter checks remaining time between graph steps but cannot interrupt
    mid-node execution.
 
-5. **State isolation**: Each `evaluate()` call creates a fresh graph state.
-   Cross-call state persistence requires explicit checkpointer configuration.
+4. **State schema**: LangGraph 1.0 requires TypedDict for state schemas.
+   Pydantic models and dataclasses are not supported.
 
 ## Future Work
 
@@ -793,12 +936,12 @@ class MockLangGraphAgent:
 - Async adapter variant (`AsyncLangGraphAdapter`)
 - Supervisor and swarm patterns
 - LangGraph Cloud integration for remote execution
-- MCP adapter integration when LangGraph 1.0 stabilizes
+- MCP adapter integration
 
 ## References
 
-- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
+- [LangGraph Documentation](https://docs.langchain.com/)
 - [LangGraph GitHub](https://github.com/langchain-ai/langgraph)
-- [LangGraph Graph API](https://docs.langchain.com/oss/python/langgraph/graph-api)
+- [LangGraph v1 Migration Guide](https://docs.langchain.com/oss/python/migrate/langgraph-v1)
+- [LangChain and LangGraph 1.0 Announcement](https://blog.langchain.com/langchain-langgraph-1dot0/)
 - [How to force tool-calling agent to structure output](https://langchain-ai.github.io/langgraph/how-tos/react-agent-structured-output/)
-- [ToolNode Reference](https://langchain-ai.github.io/langgraphjs/reference/classes/langgraph_prebuilt.ToolNode.html)
