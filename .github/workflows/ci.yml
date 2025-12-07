@@ -8,6 +8,7 @@ on:
 
 jobs:
   format-check:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
@@ -23,6 +24,7 @@ jobs:
       run: make format-check
 
   lint:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
@@ -38,6 +40,7 @@ jobs:
       run: make lint
 
   ty:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
@@ -53,6 +56,7 @@ jobs:
       run: make ty
 
   pyright:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
@@ -83,6 +87,7 @@ jobs:
       run: make test
 
   mutation:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     needs: test
     steps:
