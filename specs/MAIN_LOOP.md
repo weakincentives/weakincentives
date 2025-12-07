@@ -125,7 +125,9 @@ Overrides accumulate; session persists across retries; prompt is not recreated.
 
 ```python
 loop = MyMainLoop(adapter=adapter, bus=bus)
-bus.subscribe(MainLoopRequest[MyRequest], loop.handle_request)
+
+# Subscribe to concrete type (generic params are compile-time only)
+bus.subscribe(MainLoopRequest, loop.handle_request)
 
 # With request-specific constraints
 bus.publish(MainLoopRequest(
@@ -133,6 +135,11 @@ bus.publish(MainLoopRequest(
     budget=Budget(max_total_tokens=10000),
 ))
 ```
+
+**Note:** `InProcessEventBus` dispatches by `type(event)`, not generic alias.
+`MainLoopRequest[T]` is for static type checking; at runtime all events are
+`MainLoopRequest`. For multiple loop types on one bus, filter by request type
+in the handler or use separate buses.
 
 ### Direct
 
