@@ -10,6 +10,11 @@ absorbing it.
 This shift changes what it means to build agents. The job isn't orchestration
 anymore—it's context engineering.
 
+Weak Incentives (WINK) is a small framework for building agents as a single,
+structured prompt document—where instructions, tools, and progressive disclosure
+live together—and for running that agent with event-sourced, replayable state.
+It's designed for this new reality.
+
 ## The Great Migration
 
 Consider how agent architectures have evolved:
