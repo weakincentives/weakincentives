@@ -435,7 +435,7 @@ def serialize_tool_call(tool_call: ProviderToolCall) -> dict[str, Any]:
 
     function = tool_call.function
     return {
-        "id": getattr(tool_call, "id", None),
+        "id": tool_call.id,
         "type": "function",
         "function": {
             "name": function.name,
@@ -547,7 +547,7 @@ def _build_tool_logger(
     tool_name: str,
     tool_call: ProviderToolCall,
 ) -> tuple[str | None, StructuredLogger]:
-    call_id = getattr(tool_call, "id", None)
+    call_id = tool_call.id
     bound_log = (context.logger_override or logger).bind(
         adapter=context.adapter_name,
         prompt=context.prompt_name,
@@ -919,22 +919,17 @@ def message_text_content(content: object) -> str:
     return str(content)
 
 
-def extract_parsed_content(message: object) -> object | None:
+def extract_parsed_content(message: ProviderMessage) -> object | None:
     """Extract structured payloads surfaced directly by the provider."""
 
-    parsed = getattr(message, "parsed", None)
-    if parsed is not None:
-        return parsed
+    if message.parsed is not None:
+        return message.parsed
 
-    content = getattr(message, "content", None)
+    content = message.content
     if isinstance(content, Sequence) and not isinstance(
         content, (str, bytes, bytearray)
     ):
-        sequence_content = cast(
-            Sequence[object],
-            content,
-        )
-        for part in sequence_content:
+        for part in content:
             payload = _parsed_payload_from_part(part)
             if payload is not None:
                 return payload
@@ -1230,7 +1225,7 @@ class ToolExecutor:
         execution_context = self._context.with_provider_payload(provider_payload)
 
         for tool_call in tool_calls:
-            tool_name = getattr(tool_call.function, "name", "tool")
+            tool_name = tool_call.function.name
             if self.deadline is not None and self.deadline.remaining() <= timedelta(0):
                 _raise_tool_deadline_error(
                     prompt_name=self.prompt_name,
@@ -1248,7 +1243,7 @@ class ToolExecutor:
 
             tool_message = {
                 "role": "tool",
-                "tool_call_id": getattr(tool_call, "id", None),
+                "tool_call_id": tool_call.id,
                 "content": self.serialize_tool_message_fn(outcome.result),
             }
             messages.append(tool_message)
@@ -1281,10 +1276,10 @@ class ResponseParser[OutputT]:
         )
 
     def parse(
-        self, message: object, provider_payload: dict[str, Any] | None
+        self, message: ProviderMessage, provider_payload: dict[str, Any] | None
     ) -> tuple[OutputT | None, str | None]:
         """Parse the provider message into output and text content."""
-        final_text = message_text_content(getattr(message, "content", None))
+        final_text = message_text_content(message.content)
         output: OutputT | None = None
         text_value: str | None = final_text or None
 
@@ -1424,7 +1419,7 @@ class InnerLoop[OutputT]:
             self._record_and_check_budget()
 
             choice = self.config.select_choice(response)
-            message = getattr(choice, "message", None)
+            message = choice.message
             if message is None:
                 raise PromptEvaluationError(
                     "Provider response did not include a message payload.",
@@ -1433,8 +1428,7 @@ class InnerLoop[OutputT]:
                     provider_payload=self._provider_payload,
                 )
 
-            tool_calls_sequence = getattr(message, "tool_calls", None)
-            tool_calls = list(tool_calls_sequence or [])
+            tool_calls = list(message.tool_calls or [])
 
             if not tool_calls:
                 return self._finalize_response(message)
@@ -1605,7 +1599,7 @@ class InnerLoop[OutputT]:
 
     def _handle_tool_calls(
         self,
-        message: object,
+        message: ProviderMessage,
         tool_calls: Sequence[ProviderToolCall],
     ) -> None:
         """Execute provider tool calls and record emitted messages."""
@@ -1614,7 +1608,7 @@ class InnerLoop[OutputT]:
         self._messages.append(
             {
                 "role": "assistant",
-                "content": getattr(message, "content", None) or "",
+                "content": message.content or "",
                 "tool_calls": assistant_tool_calls,
             }
         )
@@ -1631,7 +1625,7 @@ class InnerLoop[OutputT]:
             if tool_choice_mapping.get("type") == "function":
                 self._next_tool_choice = next_choice
 
-    def _finalize_response(self, message: object) -> PromptResponse[OutputT]:
+    def _finalize_response(self, message: ProviderMessage) -> PromptResponse[OutputT]:
         """Assemble and publish the final prompt response."""
 
         self._ensure_deadline_remaining(

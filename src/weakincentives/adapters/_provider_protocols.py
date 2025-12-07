@@ -44,7 +44,14 @@ class ProviderToolCall(Protocol):
     """Structural Protocol describing a provider tool call payload."""
 
     @property
-    def function(self) -> ProviderFunctionCall: ...
+    def id(self) -> str | None:
+        """Unique identifier for this tool call."""
+        ...
+
+    @property
+    def function(self) -> ProviderFunctionCall:
+        """Function call details."""
+        ...
 
 
 class ProviderMessage(Protocol):
@@ -52,13 +59,16 @@ class ProviderMessage(Protocol):
 
     content: str | Sequence[object] | None
     tool_calls: Sequence[ProviderToolCall] | None
+    parsed: object | None
 
 
 class ProviderChoice(Protocol):
     """Structural Protocol describing a provider choice payload."""
 
     @property
-    def message(self) -> ProviderMessage: ...
+    def message(self) -> ProviderMessage | None:
+        """Message payload, may be None if provider response was incomplete."""
+        ...
 
 
 class ProviderCompletionResponse(Protocol):
@@ -104,4 +114,4 @@ class ProviderMessageData:
 class ProviderChoiceData:
     """Dataclass implementation of ``ProviderChoice``."""
 
-    message: ProviderMessageData
+    message: ProviderMessageData | None = None
