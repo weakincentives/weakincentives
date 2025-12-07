@@ -96,14 +96,13 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self,
         prompt: Prompt[_Output],
         *,
-        bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[_Output]:
-        del prompt, bus, budget
+        del prompt, budget
         self._call_count += 1
         self._last_visibility_overrides = visibility_overrides
         self._last_budget_tracker = budget_tracker

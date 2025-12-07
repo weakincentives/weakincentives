@@ -237,7 +237,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
             try:
                 return self._adapter.evaluate(
                     prompt,
-                    bus=self._bus,
                     session=session,
                     visibility_overrides=visibility_overrides,
                     deadline=effective_deadline,
