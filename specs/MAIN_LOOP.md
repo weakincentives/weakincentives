@@ -89,11 +89,11 @@ Request ──▶ Session ──▶ Prompt ──▶ Evaluate ──┬──▶
 ```
 
 1. Receive `MainLoopRequest` via bus or direct `execute()` call
-2. Create session via `create_session()`
-3. Create prompt via `create_prompt(request)`
-4. Evaluate with adapter
-5. On `VisibilityExpansionRequired`: accumulate overrides, retry step 4
-6. Publish `MainLoopCompleted` or `MainLoopFailed`
+1. Create session via `create_session()`
+1. Create prompt via `create_prompt(request)`
+1. Evaluate with adapter
+1. On `VisibilityExpansionRequired`: accumulate overrides, retry step 4
+1. Publish `MainLoopCompleted` or `MainLoopFailed`
 
 ### Visibility Handling
 
