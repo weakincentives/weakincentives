@@ -1,4 +1,4 @@
-.PHONY: format check test lint typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo all clean
+.PHONY: format check test lint ty pyright typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo all clean
 
 # Format code with ruff
 format:
@@ -36,8 +36,8 @@ pip-audit:
 markdown-check:
 	@uv run python build/run_mdformat.py
 
-# Run type checkers
-typecheck:
+# Run ty type checker
+ty:
 	@uv run --all-extras ty check --error-on-warning -qq \
 		--exclude 'test-repositories/**' --exclude '.git/**' \
 		--exclude '.uv-cache/**' --exclude '.venv/**' --exclude 'dist/**' . || \
@@ -45,9 +45,15 @@ typecheck:
 			uv run --all-extras ty check --error-on-warning \
 			--exclude 'test-repositories/**' --exclude '.git/**' \
 			--exclude '.uv-cache/**' --exclude '.venv/**' --exclude 'dist/**' .)
+
+# Run pyright type checker
+pyright:
 	@uv run --all-extras pyright --project pyproject.toml || \
 		(echo "pyright failed; rerunning with verbose output..." >&2; \
 		uv run --all-extras pyright --project pyproject.toml --verbose)
+
+# Run all type checkers
+typecheck: ty pyright
 
 # Run tests with coverage (100% minimum)
 test:
