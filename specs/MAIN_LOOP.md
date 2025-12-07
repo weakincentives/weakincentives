@@ -201,10 +201,36 @@ def create_prompt(self, request: Request) -> Prompt[Output]:
 | `VisibilityExpansionRequired` | Retry with updated overrides |
 | All others | Publish `MainLoopFailed`, re-raise |
 
+## Code Reviewer Integration
+
+The code reviewer agent uses `MainLoop` with these specifics:
+
+**Session reuse:** A single session is created at loop construction and reused
+across all `execute()` calls. State accumulates across turns.
+
+**Auto-optimization:** The explicit `optimize` command is removed. Before each
+evaluation, the loop checks for `WorkspaceDigest` in session state. If absent,
+optimization runs automatically.
+
+```python
+def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
+    if not self._session.query(WorkspaceDigest).exists():
+        self._run_optimization()
+    # ... proceed with evaluation
+```
+
+**Default deadline:** All requests receive a 5-minute deadline unless overridden
+at the request level.
+
+```python
+config = MainLoopConfig(
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+)
+```
+
 ## Limitations
 
 - Synchronous execution
 - One adapter per loop instance
 - No mid-execution cancellation
-- Fresh session per `execute()` call
 - Events local to process
