@@ -91,7 +91,7 @@ class BudgetExceededError(WinkError, RuntimeError):
 class BudgetTracker:
     """Tracks cumulative TokenUsage per evaluation against a Budget.
 
-    Thread-safe for concurrent subagent execution.
+    Thread-safe for concurrent execution.
     """
 
     budget: Budget

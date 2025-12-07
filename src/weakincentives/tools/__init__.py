@@ -46,13 +46,6 @@ from .planning import (
     StepStatus,
     UpdateStep,
 )
-from .subagents import (
-    DispatchSubagentsParams,
-    SubagentResult,
-    SubagentsSection,
-    build_dispatch_subagents_tool,
-    dispatch_subagents,
-)
 from .vfs import (
     DeleteEntry,
     EditFileParams,
@@ -88,7 +81,6 @@ __all__ = [
     "AstevalSection",
     "DeadlineExceededError",
     "DeleteEntry",
-    "DispatchSubagentsParams",
     "EditFileParams",
     "EvalFileRead",
     "EvalFileWrite",
@@ -120,8 +112,6 @@ __all__ = [
     "RemoveParams",
     "SetupPlan",
     "StepStatus",
-    "SubagentResult",
-    "SubagentsSection",
     "ToolValidationError",
     "UpdateStep",
     "VfsFile",
@@ -132,9 +122,7 @@ __all__ = [
     "WorkspaceDigestSection",
     "WriteFile",
     "WriteFileParams",
-    "build_dispatch_subagents_tool",
     "clear_workspace_digest",
-    "dispatch_subagents",
     "latest_workspace_digest",
     "set_workspace_digest",
 ]

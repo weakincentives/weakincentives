@@ -344,8 +344,7 @@ response = adapter.evaluate(
 ```
 
 The adapter records token usage after each provider response and checks limits
-at defined checkpoints. Budget tracking is thread-safe for concurrent subagent
-execution.
+at defined checkpoints. Budget tracking is thread-safe for concurrent execution.
 
 ## Telemetry
 

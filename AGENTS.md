@@ -94,7 +94,6 @@ a goal at any time.
   altering prompt overrides or optimization.
 - **SESSIONS.md**: Session lifecycle, events, deadlines, and budgets—when
   modifying runtime session code.
-- **SUBAGENTS.md**: Sub-agent orchestration—when coordinating nested agents.
 - **THREAD_SAFETY.md**: Thread safety guarantees—when touching concurrency
   helpers or shared state.
 - **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or

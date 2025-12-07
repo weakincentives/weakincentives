@@ -391,8 +391,8 @@ def evaluate(
     """Evaluate the prompt and return a structured response.
 
     When ``budget`` is provided and ``budget_tracker`` is not, a new tracker
-    is created. When ``budget_tracker`` is supplied (typically by a parent
-    during subagent dispatch), it is used directly for shared limit enforcement.
+    is created. When ``budget_tracker`` is supplied, it is used directly for
+    shared limit enforcement.
     """
     ...
 ```
@@ -674,8 +674,8 @@ The adapter fully integrates with WINK's `Budget` abstraction:
 - **Token limits:** `max_total_tokens`, `max_input_tokens`, `max_output_tokens` are enforced
   cumulatively across all provider calls within an evaluation.
 - **Deadline:** `Budget.deadline` is checked alongside the `deadline` parameter.
-- **Subagent sharing:** When `budget_tracker` is passed (e.g., from a parent prompt), token usage
-  is aggregated across the entire agent tree.
+- **Shared tracking:** When `budget_tracker` is passed, token usage is
+  aggregated across all evaluations sharing the tracker.
 - **Error phase:** Budget violations raise `PromptEvaluationError` with `phase="budget"`.
 
 Anthropic responses include `usage.input_tokens` and `usage.output_tokens` which the adapter

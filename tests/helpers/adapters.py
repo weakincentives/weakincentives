@@ -30,13 +30,9 @@ DUMMY_ADAPTER_NAME = cast(AdapterName, "dummy")
 UNIT_TEST_ADAPTER_NAME = cast(AdapterName, "unit")
 """Adapter identifier used in thread-safety tests."""
 
-RECORDING_ADAPTER_NAME = cast(AdapterName, "recording")
-"""Adapter identifier used by recording stubs in subagent tests."""
-
 __all__ = [
     "DUMMY_ADAPTER_NAME",
     "GENERIC_ADAPTER_NAME",
-    "RECORDING_ADAPTER_NAME",
     "TEST_ADAPTER_NAME",
     "UNIT_TEST_ADAPTER_NAME",
 ]

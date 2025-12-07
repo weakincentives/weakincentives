@@ -5,7 +5,7 @@
 The `Prompt` abstraction centralizes every string template that flows to an LLM
 so the codebase has a single, inspectable source for system prompts and per-turn
 instructions. This specification covers prompt construction, section composition,
-structured output, prompt wrapping for delegation, and progressive disclosure.
+structured output, and progressive disclosure.
 
 ## Guiding Principles
 
@@ -179,46 +179,6 @@ prompt = Prompt[Output](
     allow_extra_keys=False,  # Default: reject unknown keys
 )
 ```
-
-## Prompt Composition
-
-Delegation composes a new prompt that wraps a parent prompt for subagent
-execution.
-
-### Required Layout
-
-1. `# Delegation Summary`
-1. `## Parent Prompt (Verbatim)`
-1. `## Recap` (optional)
-
-### DelegationPrompt
-
-```python
-from weakincentives.prompt.composition import DelegationPrompt, DelegationParams
-
-delegation = DelegationPrompt[ParentOutput, DelegationOutput](
-    parent_prompt,
-    rendered_parent,
-    recap_lines=("Check constraints before planning.",),
-)
-
-rendered = delegation.render(
-    DelegationParams(
-        reason="Investigate filesystem",
-        expected_result="Actionable plan",
-        may_delegate_further="no",
-    ),
-    parent=ParentPromptParams(body=rendered_parent.text),  # Optional, defaults to parent text
-    recap=RecapParams(...),  # Optional recap section
-)
-```
-
-### Composition Rules
-
-- Parent prompt is embedded byte-for-byte with markers:
-  `<!-- PARENT PROMPT START -->` and `<!-- PARENT PROMPT END -->`
-- Tools from parent are inherited, not redeclared
-- Truncation is never allowed; abort if size limits prevent embedding
 
 ## Progressive Disclosure
 

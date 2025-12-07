@@ -58,7 +58,6 @@ from weakincentives.tools import (
     PlanningToolsSection,
     PodmanSandboxConfig,
     PodmanSandboxSection,
-    SubagentsSection,
     VfsPath,
     VfsToolsSection,
     WorkspaceDigestSection,
@@ -283,7 +282,6 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
         _build_review_guidance_section(),
         WorkspaceDigestSection(session=session),
         _build_reference_section(),  # Progressive disclosure section
-        _build_subagents_section(),
         PlanningToolsSection(
             session=session,
             strategy=PlanningStrategy.PLAN_ACT_REFLECT,
@@ -328,8 +326,6 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
               When available, the `shell_execute` command runs short Podman
               commands (no network access). Mounted files are read-only; use
               writes to stage new snapshots.
-            - `dispatch_subagents` lets you delegate parallel scans (e.g., README,
-              docs, build scripts) so you can summarize broader surface area faster.
 
             Respond with JSON containing:
             - summary: One paragraph describing your findings so far.
@@ -340,10 +336,6 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
         default_params=ReviewGuidance(),
         key="code-review-brief",
     )
-
-
-def _build_subagents_section() -> SubagentsSection:
-    return SubagentsSection(accepts_overrides=True)
 
 
 def _build_reference_section() -> MarkdownSection[ReferenceParams]:

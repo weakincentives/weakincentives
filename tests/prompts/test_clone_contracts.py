@@ -17,16 +17,9 @@ from dataclasses import dataclass
 import pytest
 
 from weakincentives.prompt import MarkdownSection
-from weakincentives.prompt.composition import (
-    DelegationSummarySection,
-    ParentPromptParams,
-    ParentPromptSection,
-    RecapSection,
-)
 from weakincentives.runtime.session import Session
 from weakincentives.tools.asteval import AstevalSection
 from weakincentives.tools.planning import PlanningStrategy, PlanningToolsSection
-from weakincentives.tools.subagents import SubagentsSection
 from weakincentives.tools.vfs import VfsToolsSection
 
 
@@ -54,16 +47,6 @@ def test_markdown_section_clone_deep_copies_children_and_defaults() -> None:
     assert clone.children and clone.children[0] is not child
 
 
-def test_composition_sections_clone_with_metadata() -> None:
-    parent = ParentPromptSection(default_params=ParentPromptParams(body="parent"))
-    recap = RecapSection()
-    summary = DelegationSummarySection()
-
-    assert isinstance(parent.clone(), ParentPromptSection)
-    assert isinstance(recap.clone(), RecapSection)
-    assert isinstance(summary.clone(), DelegationSummarySection)
-
-
 def test_tool_sections_clone_to_new_sessions() -> None:
     original_session = Session()
     vfs = VfsToolsSection(session=original_session)
@@ -71,19 +54,16 @@ def test_tool_sections_clone_to_new_sessions() -> None:
         session=original_session, strategy=PlanningStrategy.REACT
     )
     asteval = AstevalSection(session=original_session)
-    subagents = SubagentsSection()
 
     new_session = Session()
 
     vfs_clone = vfs.clone(session=new_session)
     planning_clone = planning.clone(session=new_session)
     asteval_clone = asteval.clone(session=new_session)
-    subagents_clone = subagents.clone()
 
     assert vfs_clone.session is new_session
     assert planning_clone.session is new_session
     assert asteval_clone.session is new_session
-    assert subagents_clone is not subagents
 
 
 def test_tool_clones_validate_session_and_bus() -> None:

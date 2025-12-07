@@ -128,14 +128,7 @@ Optional extras enable specific providers or tooling:
     - `RenderedPromptProtocol`: Protocol for rendered prompts.
     - `ProviderAdapterProtocol`: Protocol for provider adapters.
   - Composition:
-    - `DelegationParams`: Parameters for delegation prompts.
-    - `DelegationPrompt`: Prompt for delegating tasks to sub-agents.
-    - `DelegationSummarySection`: Section for summarizing delegation results.
     - `OpenSectionsParams`: Parameters for progressive disclosure of sections.
-    - `ParentPromptParams`: Parameters for parent prompts.
-    - `ParentPromptSection`: Section for including parent prompt context.
-    - `RecapParams`: Parameters for recap sections.
-    - `RecapSection`: Section for recapping previous turns.
   - Overrides:
     - `LocalPromptOverridesStore`: Store for local prompt overrides.
     - `PromptDescriptor`: Descriptor for a prompt.
@@ -223,19 +216,14 @@ Optional extras enable specific providers or tooling:
     - `UpdateStep`: Update a step in a plan.
   - Sandboxes and VFS:
     - `AstevalSection`: Section for asteval tools.
-    - `DispatchSubagentsParams`: Parameters for dispatching subagents.
     - `HostMount`: Host mount configuration.
-    - `SubagentResult`: Result of a subagent.
-    - `SubagentsSection`: Section for subagents.
     - `VirtualFileSystem`: Virtual file system.
     - `WorkspaceDigest`: Digest of a workspace.
     - `WorkspaceDigestSection`: Section for workspace digest.
     - `VfsFile`: Virtual file system file.
     - `VfsPath`: Virtual file system path.
     - `VfsToolsSection`: Section for VFS tools.
-    - `build_dispatch_subagents_tool`: Build a tool for dispatching subagents.
     - `clear_workspace_digest`: Clear the workspace digest.
-    - `dispatch_subagents`: Dispatch subagents.
     - `latest_workspace_digest`: Get the latest workspace digest.
     - `set_workspace_digest`: Set the workspace digest.
   - File operations:
@@ -447,7 +435,6 @@ ToolResult(message="...", value=MyResult(...), success=True, exclude_value_from_
 ### Additional components
 
 - **`parse_structured_output`**: Parse model response into typed dataclass
-- **Delegation**: `DelegationPrompt`, `DelegationSummarySection`, `ParentPromptSection`
 - **Overrides**: `LocalPromptOverridesStore` for hash-scoped prompt refinements
 
 ## Adapter Layer (`weakincentives.adapters`)
@@ -520,15 +507,6 @@ planning = PlanningToolsSection(session=session, strategy=PlanningStrategy.PLAN_
 ```
 
 Tools: `setup_plan`, `read_plan`, `add_step`, `update_step`, `mark_step`
-
-### SubagentsSection - Parallel delegation
-
-```python
-from weakincentives.tools import SubagentsSection
-subagents = SubagentsSection()
-```
-
-Tools: `dispatch_subagents`
 
 ### WorkspaceDigestSection
 
@@ -686,7 +664,7 @@ wink --help
 
 See `code_reviewer_example.py` in the repository for a complete production
 harness demonstrating all patterns: structured types, tool handlers, built-in
-sections (VFS, Planning, Subagents), event subscription, and prompt overrides.
+sections (VFS, Planning), event subscription, and prompt overrides.
 
 ## Versioning & Stability
 
