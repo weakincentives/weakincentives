@@ -2,10 +2,36 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.13.0 - 2025-12-07
+
+### MainLoop Orchestration
+
+- Added `MainLoop[UserRequestT, OutputT]` abstract orchestrator that standardizes
+  agent workflow execution: receive request, build prompt, evaluate, handle
+  visibility expansion, publish result. Implementations define only the
+  domain-specific factories via `create_prompt()` and `create_session()`.
+- Added event types for request/response routing: `MainLoopRequest[T]`,
+  `MainLoopCompleted[T]`, and `MainLoopFailed`.
+- Added `MainLoopConfig` for configuring default deadline and budget constraints.
+- The MainLoop automatically handles `VisibilityExpansionRequired` exceptions,
+  accumulating visibility overrides and retrying evaluation with a shared
+  `BudgetTracker` across retries.
+
+### Budget Abstraction
+
+- Added `Budget` resource envelope combining time and token limits (`deadline`,
+  `max_total_tokens`, `max_input_tokens`, `max_output_tokens`). At least one
+  limit must be set.
+- Added `BudgetTracker` for thread-safe cumulative token tracking across
+  multiple evaluations against a Budget.
+- Added `BudgetExceededError` exception raised when any budget dimension is
+  breached, with typed `BudgetExceededDimension` indicating which limit was hit.
 
 ### Session Runtime
 
+- Added `session.query(T)` unified selector API that consolidates all session
+  state queries into a fluent interface with `.latest()`, `.where(predicate)`,
+  and `.all()` methods.
 - Added `session.mutate()` fluent API as the counterpart to `session.query()`.
   This provides a unified interface for all session state mutations:
   - `session.mutate(T).seed(values)` - Initialize/replace slice values
@@ -15,8 +41,34 @@ Release highlights for weakincentives.
   - `session.mutate(T).register(E, reducer)` - Register reducer for event type
   - `session.mutate().reset()` - Clear all slices
   - `session.mutate().rollback(snapshot)` - Restore from snapshot
-- Legacy methods (`seed_slice`, `clear_slice`, `reset`, `rollback`, `register_reducer`)
-  remain available but now delegate to the new mutation API internally.
+
+### Prompts & Templates
+
+- Added generic `PromptTemplate[OutputT]` and `Prompt[OutputT]` abstractions that
+  derive structured-output schema (object vs array, allow-extra-keys) and
+  support parameterized binding.
+- `PromptTemplate` is now immutable using `FrozenDataclass` with cached
+  descriptor computation.
+- Sections now include their path in rendered output for traceability.
+- Added `SectionVisibility` enum (`FULL`, `SUMMARY`) with callable visibility
+  selectors that can compute visibility from bound parameters.
+- Added `summary` property to sections for use with `SUMMARY` visibility mode.
+- Removed `parse_output` flag from `PromptTemplate` - parsing is now always
+  performed by adapters.
+- Removed `ResponseFormatSection` requirement - structured output instructions
+  are now handled directly by adapters.
+
+### Adapters
+
+- Renamed `ConversationRunner` to `InnerLoop` with improved abstraction and
+  maintainability.
+- Added typed configuration objects: `LLMConfig`, `OpenAIClientConfig`,
+  `OpenAIModelConfig`, `LiteLLMClientConfig`, `LiteLLMModelConfig`.
+- Enabled parallel tool calls in OpenAI adapter via `parallel_tool_calls`
+  config option.
+- Simplified adapter method signatures to use `session` parameter only,
+  removing separate `bus` parameter since session now owns its event bus.
+- Added native web search tool integration spec for provider-executed tools.
 
 ### Error Handling
 
@@ -24,12 +76,6 @@ Release highlights for weakincentives.
   allowing callers to catch all weakincentives errors with a single handler.
   Existing exceptions now inherit from `WinkError` while maintaining backward
   compatibility with their original base types (`ValueError`, `RuntimeError`).
-
-### Prompts & Templates
-
-- Added generic `PromptTemplate[OutputT]` and `Prompt[OutputT]` abstractions that
-  derive structured-output schema (object vs array, allow-extra-keys) and
-  optionally inject response-format instructions into rendered prompts.
 
 ### Tools
 
@@ -54,6 +100,13 @@ Release highlights for weakincentives.
   `copy()` and `asdict()` helpers, and mapping utilities for immutable dataclass
   patterns. Exported from the package root.
 
+### Wink Debugger
+
+- Polished `wink debug` web interface with enhanced UX including keyboard
+  navigation, improved layout, and better state visualization.
+- Enhanced snapshot viewer with collapsible tree navigation, search filtering,
+  and download capabilities.
+
 ### Tools & Sandboxes
 
 - Podman sandbox containers now start with networking disabled (`network_mode=none`),
@@ -63,11 +116,29 @@ Release highlights for weakincentives.
   composition helpers. This approach is not the right fit from a state and
   context management perspective.
 
+### Documentation & Specs
+
+- Added `MAIN_LOOP.md` spec documenting MainLoop orchestration and visibility
+  override handling.
+- Added `HOSTED_TOOLS.md` spec for provider-executed tools (web search, code
+  interpreter).
+- Added `TASK_SECTION.md` spec for task dataclass patterns in prompts.
+- Added `WINK_OVERRIDES.md` spec documenting the `wink overrides` CLI command.
+- Simplified and consolidated specification documents for clarity.
+
 ### Examples
 
+- Refactored `code_reviewer_example.py` to use the new `MainLoop` abstraction,
+  demonstrating the recommended pattern for agent workflow implementation.
 - Code reviewer REPL now creates a fresh five-minute default deadline per
   request so long-running interactive sessions continue working without manual
   deadline overrides.
+
+### Quality & Infrastructure
+
+- Parallelized CI jobs for faster feedback.
+- Added Vulture for dead code detection.
+- Removed backward compatibility code and import shims.
 
 ## v0.12.0 - 2025-11-30
 
