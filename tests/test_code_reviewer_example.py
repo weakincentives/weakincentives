@@ -35,6 +35,7 @@ from examples.logging import attach_logging_subscribers
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
@@ -97,6 +98,32 @@ class _RepositoryOptimizationAdapter:
                 output=_StubDigestOutput(digest=self.instructions),
             )
 
+        return PromptResponse(
+            prompt_name=prompt.name or prompt.key,
+            text="",
+            output=None,
+        )
+
+
+class _RecordingDeadlineAdapter:
+    """Stub adapter that records deadlines passed to evaluate."""
+
+    def __init__(self) -> None:
+        self.deadlines: list[Deadline | None] = []
+
+    def evaluate(
+        self,
+        prompt: Prompt[SupportsDataclass],
+        *,
+        bus: InProcessEventBus | None = None,
+        session: Session | None = None,
+        deadline: Deadline | None = None,
+        visibility_overrides: object | None = None,
+        budget: object | None = None,
+        budget_tracker: object | None = None,
+    ) -> PromptResponse[Any]:
+        del bus, session, visibility_overrides, budget, budget_tracker
+        self.deadlines.append(deadline)
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,
             text="",
@@ -241,6 +268,34 @@ def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
     session_digest = latest_workspace_digest(loop.session, "workspace-digest")
     assert session_digest is not None
     assert session_digest.body == "- Repo instructions from stub"
+
+
+def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
+    """Each execute() call builds a fresh default deadline."""
+
+    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
+    adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
+    bus = InProcessEventBus()
+    loop = CodeReviewLoop(
+        adapter=adapter,
+        bus=bus,
+        overrides_store=overrides_store,
+    )
+
+    set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
+
+    loop.execute(ReviewTurnParams(request="first"))
+    loop.execute(ReviewTurnParams(request="second"))
+
+    assert len(adapter.deadlines) == 2
+    first_deadline, second_deadline = adapter.deadlines
+    assert isinstance(first_deadline, Deadline)
+    assert isinstance(second_deadline, Deadline)
+    assert first_deadline is not second_deadline
+
+    now = datetime.now(UTC)
+    assert first_deadline.expires_at > now
+    assert second_deadline.expires_at > now
 
 
 @pytest.fixture(autouse=True)

@@ -63,6 +63,12 @@ Release highlights for weakincentives.
   composition helpers. This approach is not the right fit from a state and
   context management perspective.
 
+### Examples
+
+- Code reviewer REPL now creates a fresh five-minute default deadline per
+  request so long-running interactive sessions continue working without manual
+  deadline overrides.
+
 ## v0.12.0 - 2025-11-30
 
 ### Wink Debugger & Snapshots

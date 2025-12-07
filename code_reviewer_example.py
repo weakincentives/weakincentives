@@ -51,7 +51,6 @@ from weakincentives.prompt.overrides import (
 from weakincentives.runtime import (
     EventBus,
     MainLoop,
-    MainLoopConfig,
     Session,
 )
 from weakincentives.tools import (
@@ -93,6 +92,14 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
 SUNFISH_MOUNT_MAX_BYTES = 600_000
 DEFAULT_DEADLINE_MINUTES = 5
 _LOGGER = logging.getLogger(__name__)
+
+
+def _default_deadline() -> Deadline:
+    """Create a fresh default deadline for each request."""
+
+    return Deadline(
+        expires_at=datetime.now(UTC) + timedelta(minutes=DEFAULT_DEADLINE_MINUTES)
+    )
 
 
 @dataclass(slots=True, frozen=True)
@@ -156,13 +163,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
     ) -> None:
-        config = MainLoopConfig(
-            deadline=Deadline(
-                expires_at=datetime.now(UTC)
-                + timedelta(minutes=DEFAULT_DEADLINE_MINUTES)
-            ),
-        )
-        super().__init__(adapter=adapter, bus=bus, config=config)
+        super().__init__(adapter=adapter, bus=bus)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = resolve_override_tag(
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
@@ -204,7 +205,8 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         """
         if self._session.query(WorkspaceDigest).latest() is None:
             self._run_optimization()
-        return super().execute(request, budget=budget, deadline=deadline)
+        effective_deadline = deadline or _default_deadline()
+        return super().execute(request, budget=budget, deadline=effective_deadline)
 
     def _run_optimization(self) -> None:
         """Run workspace digest optimization."""
