@@ -22,23 +22,27 @@ Consider how agent architectures have evolved:
 **2023**: Multi-prompt chains with explicit routing, separate tool registries,
 state machines controlling flow, nested sub-agents for specialized tasks.
 
-**2025**: A single prompt with good context, clear instructions, and the right
-tools. The model handles the rest.
+**2025**: The default architecture is getting flatter. A single prompt with
+good context, clear instructions, and the right tools—plus a smaller layer of
+boring infrastructure for constraints, budgets, and auditability.
 
-Complex nested workflows may still work today, but they won't age well. Every
+Complex nested workflows may still work today, but they age poorly. Every
 clever routing decision you encode is a bet against model improvement. Every
 sub-agent you create is a boundary the model will eventually internalize.
+Orchestration becomes infrastructure, not strategy.
 
-What remains after this migration? Three things:
+What remains after this migration? Four things:
 
 1. **Tools** — external capabilities the model can invoke
 2. **Retrieval** — finding and surfacing relevant context
 3. **Context engineering** — the genuinely new discipline
+4. **Infrastructure** — budgets, deadlines, sandboxing, typed I/O
 
 Tools and retrieval draw on familiar software skills. APIs, databases, search
-indexes—we know how to build these. Context engineering doesn't have clean
-precedents. It's the craft of deciding what's relevant now, what to summarize
-versus preserve, how to structure information so models reason over it well.
+indexes—we know how to build these. Infrastructure is boring by design. But
+context engineering doesn't have clean precedents. It's the craft of deciding
+what's relevant now, what to summarize versus preserve, how to structure
+information so models reason over it well.
 
 ## The Prompt as Agent
 
@@ -48,6 +52,10 @@ one thing, the tool registry does another, and the routing logic adds yet more
 behavior.
 
 What if we inverted this? What if the prompt *was* the agent?
+
+By "prompt" I don't mean a single blob of text. I mean a structured document
+with typed sections, visibility rules, and a tool interface—a hierarchical
+spec that fully describes the agent's capabilities.
 
 ```python
 from dataclasses import dataclass
@@ -92,7 +100,9 @@ capabilities. The `PlanningToolsSection` contributes planning tools *and*
 documentation for using them. The `VfsToolsSection` contributes filesystem
 tools *and* their usage instructions.
 
-The prompt fully determines what the agent can think and do.
+The prompt is the explicit interface: what tools exist, how they're described,
+and what context is available. The runtime still enforces hard boundaries—but
+the prompt is the spec.
 
 ## Co-location Prevents Drift
 
@@ -133,6 +143,13 @@ provides the tools. They're defined together, versioned together, deployed
 together. Documentation can't drift from implementation because they're the
 same object.
 
+Co-location helps, but drift can still happen—tool behavior changes while docs
+remain accurate-but-incomplete, or models hallucinate tool names under pressure.
+WINK validates tool mentions against the live schema at render time and
+auto-generates parameter documentation from type annotations. When the model
+calls a tool that doesn't exist, the error message includes the actual tool
+names available.
+
 ## Dynamic Scoping
 
 Agents need different capabilities in different contexts. Traditional
@@ -164,6 +181,12 @@ reference_docs = MarkdownSection[ReferenceParams](
 This section starts summarized—the model sees only "Documentation available."
 When detailed docs are needed, the model can call `open_sections` to expand it.
 The full content appears; the prompt adapts.
+
+Who decides to expand? The model does—but expanding costs tokens and budget.
+The runtime can enforce maximum expansions per turn and total context limits.
+Section summaries are designed to be decision-useful: enough information to
+know *whether* to expand, not enough to skip it entirely. This is the "weak
+incentives" philosophy in action: make the efficient path the easy path.
 
 Disable a section and its entire subtree—tools included—vanishes:
 
@@ -211,6 +234,25 @@ Every state change flows through pure reducers processing published events.
 Tool calls become events. Prompt evaluations become events. Internal decisions
 become events. The full history is a replayable ledger—not scattered mutations
 in free-form dicts.
+
+State drives prompt behavior. Section enablement is a pure function of session
+state—when the plan changes, sections that depend on plan state automatically
+adjust. Tool handlers read from and write to the session, and those writes
+flow through reducers that other parts of the system can observe:
+
+```python
+# A tool call produces an event
+@dataclass(frozen=True)
+class FileRead:
+    path: str
+    content: str
+
+# The session captures it
+session.mutate(FileRead).append(FileRead(path="main.py", content="..."))
+
+# Other sections can react
+enabled=lambda params: session.query(FileRead).count() > 0
+```
 
 This isn't just architectural purity. It's practical:
 
@@ -299,6 +341,54 @@ reasons:
 These are the concerns that frameworks should handle. Not clever routing.
 Not elaborate chains. The mechanical infrastructure that needs to exist but
 shouldn't require creative solutions for every project.
+
+## Why "Weak Incentives"?
+
+The name captures a design philosophy: make the safe, boring path the easiest
+path.
+
+"Strong incentives" push models toward brittle hacks—hallucinated tool names
+to escape constraints, over-expansion to gather context, elaborate reasoning
+chains to work around missing information. These emerge when the system design
+fights the model's defaults.
+
+"Weak incentives" align the system with good behavior. Capabilities are
+explicit in the prompt, so there's nothing to hallucinate. State is observable,
+so there's no need for elaborate tracking hacks. Context is staged through
+progressive disclosure, so expansion has a natural cost. The runtime enforces
+hard boundaries, so the model doesn't need to self-police.
+
+We don't assume perfect behavior—we make failure cheap, debuggable, and
+contained. When a tool call fails, the error is typed. When the budget runs
+out, the session snapshots cleanly. When context overflows, sections
+summarize gracefully.
+
+## The Boring Parts
+
+Production agents need more than elegant abstractions. Here's how WINK handles
+the unglamorous requirements:
+
+**Security.** Progressive disclosure and tool gating help contain prompt
+injection—untrusted text lands in leaf sections with limited tool access, not
+in sections that control expansion or planning. The VFS sandbox filters file
+access by glob patterns and size limits. Podman integration provides full
+process isolation when available. But defense in depth matters: validate
+inputs, audit tool calls, treat the model as untrusted.
+
+**Testing.** Prompts are deterministic given their inputs—snapshot the rendered
+text and diff it. Sessions serialize to JSON for replay tests. Tool handlers
+have typed signatures that support contract testing. The event stream is a
+complete trace: assert on the sequence, not just the final output.
+
+**Versioning.** Prompts carry content hashes. Override files reference specific
+versions, so a prompt edit doesn't silently invalidate your tuned variants.
+Session snapshots include schema versions for forward compatibility.
+
+**Failure handling.** Budgets enforce token and time limits at checkpoints
+(before provider calls, before tool execution, after responses). Deadlines
+propagate through the tool context. Retry policies live in the adapter, not
+scattered across tool handlers. When limits hit, the session state is
+consistent and serializable.
 
 ## What This Means for You
 
