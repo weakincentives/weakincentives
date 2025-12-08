@@ -63,7 +63,6 @@ class TaskExample(Section[TaskExampleParamsT]):
         objective: str,
         outcome: str,
         steps: Sequence[TaskStep[Any, Any]],
-        tools: Sequence[Tool[Any, Any]],
         title: str | None = None,
         **kwargs: object,
     ) -> None: ...
@@ -77,7 +76,6 @@ class TaskExample(Section[TaskExampleParamsT]):
 | `objective` | Yes | The task goal (1-500 ASCII chars) |
 | `outcome` | Yes | The expected result (1-500 ASCII chars) |
 | `steps` | Yes | Non-empty ordered sequence of `TaskStep` instances |
-| `tools` | Yes | Tools referenced by the steps |
 | `title` | No | Display title; defaults to truncated objective |
 
 **Section Properties:**
@@ -100,7 +98,7 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
         *,
         key: str = "task-examples",
         title: str = "Task Examples",
-        children: Sequence[TaskExample[Any]],
+        examples: Sequence[TaskExample[Any]],
         **kwargs: object,
     ) -> None: ...
 ```
@@ -111,10 +109,10 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
 |----------|----------|-------------|
 | `key` | No | Section identifier (default: `"task-examples"`) |
 | `title` | No | Display title (default: `"Task Examples"`) |
-| `children` | Yes | One or more `TaskExample` instances |
+| `examples` | Yes | One or more `TaskExample` instances |
 
-The `children` argument is **required** and must contain only
-`TaskExample` instances. Standard `Section.children` inheritance applies.
+The `examples` argument is **required** and must contain only
+`TaskExample` instances. These are registered as `Section.children`.
 
 ## Section Hierarchy
 
@@ -147,7 +145,6 @@ auth_example = TaskExample(
     objective="Review authentication for vulnerabilities",
     outcome="Identified SQL injection issue",
     steps=[...],
-    tools=[read_tool, search_tool],
 )
 
 perf_example = TaskExample(
@@ -155,13 +152,12 @@ perf_example = TaskExample(
     objective="Audit database queries for N+1 issues",
     outcome="Found 3 N+1 query patterns",
     steps=[...],
-    tools=[read_tool, query_tool],
 )
 
 examples_section = TaskExamplesSection(
     key="examples",
     title="Workflow Examples",
-    children=[auth_example, perf_example],
+    examples=[auth_example, perf_example],
 )
 
 # Children are accessible via standard section traversal
@@ -187,7 +183,6 @@ TaskExample(
     objective="Review the authentication module for security issues",
     outcome="Identified 3 vulnerabilities with remediation steps",
     steps=[...],
-    tools=[...],
 )
 
 # Invalid: empty objective
@@ -196,7 +191,6 @@ TaskExample(
     objective="",  # PromptValidationError
     outcome="Done",
     steps=[...],
-    tools=[...],
 )
 ```
 
@@ -212,39 +206,56 @@ TaskExample(
     objective="Do something",
     outcome="Done",
     steps=[],  # PromptValidationError: "steps must not be empty"
-    tools=[...],
 )
 ```
 
 ### Tool Name Resolution
 
-Each `TaskStep.tool_name` must reference a tool provided to the section:
+Each `TaskStep.tool_name` must reference a tool registered elsewhere in the
+prompt. Validation occurs during `PromptTemplate` construction by resolving
+tool names against the prompt's complete tool registry:
 
 ```python
 lookup_tool = Tool[LookupParams, LookupResult](name="lookup", ...)
 search_tool = Tool[SearchParams, SearchResult](name="search", ...)
 
-# Valid: tool names match provided tools
-TaskExample(
+# Tools are registered in a separate section
+tools_section = MarkdownSection(
+    key="tools",
+    title="Available Tools",
+    template="Use these tools to complete tasks.",
+    tools=[lookup_tool, search_tool],
+)
+
+# Task examples reference tools by name
+example = TaskExample(
     key="valid-example",
     objective="Find information",
     outcome="Found results",
     steps=[
-        TaskStep(tool_name="lookup", example=...),  # OK
-        TaskStep(tool_name="search", example=...),  # OK
+        TaskStep(tool_name="lookup", example=...),  # Resolved from prompt
+        TaskStep(tool_name="search", example=...),  # Resolved from prompt
     ],
-    tools=[lookup_tool, search_tool],
 )
 
-# Invalid: unknown tool name
-TaskExample(
+# Valid: tool names resolve against prompt's tools
+template = PromptTemplate(
+    ns="test",
+    key="valid",
+    sections=[
+        tools_section,
+        TaskExamplesSection(key="examples", examples=[example]),
+    ],
+)
+
+# Invalid: "unknown" not found in prompt's tool registry
+bad_example = TaskExample(
     key="bad-tool",
     objective="Find information",
     outcome="Found results",
     steps=[
         TaskStep(tool_name="unknown", example=...),  # PromptValidationError
     ],
-    tools=[lookup_tool],
 )
 ```
 
@@ -299,15 +310,15 @@ Expected: LookupParams, got: SearchParams.
 Section path: ("task-examples", "example-key")
 ```
 
-### Children Type Validation
+### Examples Type Validation
 
-`TaskExamplesSection` validates that all children are `TaskExample`
+`TaskExamplesSection` validates that all examples are `TaskExample`
 instances:
 
 ```python
-# Invalid: wrong child type
+# Invalid: wrong example type
 TaskExamplesSection(
-    children=[
+    examples=[
         MarkdownSection(key="wrong", ...),  # PromptValidationError
     ],
 )
@@ -315,27 +326,10 @@ TaskExamplesSection(
 
 Error message:
 ```
-PromptValidationError: TaskExamplesSection children must be TaskExample instances.
+PromptValidationError: TaskExamplesSection examples must be TaskExample instances.
 Got: MarkdownSection at index 0.
 ```
 
-### Duplicate Tool Names
-
-Tools within a `TaskExample` must have unique names:
-
-```python
-# Invalid: duplicate tool names
-TaskExample(
-    key="dupe-tools",
-    objective="...",
-    outcome="...",
-    steps=[...],
-    tools=[
-        Tool(name="lookup", ...),
-        Tool(name="lookup", ...),  # PromptValidationError
-    ],
-)
-```
 
 ## Rendering
 
@@ -452,7 +446,6 @@ review_example = TaskExample(
             ),
         ),
     ],
-    tools=[read_tool, search_tool],
 )
 
 # Build prompt with task examples as child sections
@@ -469,39 +462,40 @@ template = PromptTemplate(
         TaskExamplesSection(
             title="Example Workflows",
             key="example-workflows",
-            children=[review_example],
+            examples=[review_example],
         ),
     ],
 )
 ```
 
-### Tool Registration
+### Tool Resolution
 
-Tools in `TaskExample` are registered with the prompt alongside tools
-from other sections. Each child section participates in duplicate name
-detection:
+`TaskExample` sections reference tools by name. The tools themselves are
+registered in other sections (e.g., `MarkdownSection`). During prompt
+construction, tool names in `TaskStep` instances are resolved against the
+prompt's complete tool registry:
 
 ```python
-# This raises PromptValidationError due to duplicate "read_file"
 template = PromptTemplate(
     ns="test",
-    key="duplicate",
+    key="with-examples",
     sections=[
         MarkdownSection(
             key="tools",
             title="Tools",
-            template="...",
-            tools=[Tool(name="read_file", ...)],
+            template="Use these tools.",
+            tools=[Tool(name="read_file", ...)],  # Tool registered here
         ),
         TaskExamplesSection(
             key="examples",
-            children=[
+            examples=[
                 TaskExample(
                     key="example-1",
                     objective="...",
                     outcome="...",
-                    steps=[...],
-                    tools=[Tool(name="read_file", ...)],  # Duplicate!
+                    steps=[
+                        TaskStep(tool_name="read_file", example=...),  # Resolved
+                    ],
                 ),
             ],
         ),
@@ -516,7 +510,7 @@ Both container and child sections support summary visibility:
 ```python
 # Summarize the entire examples section
 TaskExamplesSection(
-    children=[...],
+    examples=[...],
     visibility=SectionVisibility.SUMMARY,
     summary="Example workflows available for review tasks.",
 )
@@ -527,7 +521,6 @@ TaskExample(
     objective="...",
     outcome="...",
     steps=[...],
-    tools=[...],
     visibility=SectionVisibility.SUMMARY,
     summary="Complex multi-step workflow example.",
 )
@@ -550,7 +543,6 @@ advanced_example = TaskExample[ExampleParams](
     objective="Complex multi-tool orchestration",
     outcome="...",
     steps=[...],
-    tools=[...],
     enabled=lambda params: params.show_advanced,
 )
 ```
@@ -588,8 +580,7 @@ All validation errors raise `PromptValidationError` with:
 | Unknown tool name | `"Unknown tool \"X\" in task example step N"` |
 | Input type mismatch | `"Task example step N input type mismatch for tool \"X\""` |
 | Output type mismatch | `"Task example step N output type mismatch for tool \"X\""` |
-| Duplicate tool name | `"Duplicate tool name: X"` |
-| Wrong child type | `"TaskExamplesSection children must be TaskExample instances"` |
+| Wrong example type | `"TaskExamplesSection examples must be TaskExample instances"` |
 
 ## Usage Example
 
@@ -685,7 +676,6 @@ etl_example = TaskExample(
             ),
         ),
     ],
-    tools=[fetch_tool, parse_tool, store_tool],
 )
 
 error_handling_example = TaskExample(
@@ -702,7 +692,6 @@ error_handling_example = TaskExample(
             ),
         ),
     ],
-    tools=[fetch_tool],
 )
 
 # Build prompt with task examples as child sections
@@ -719,7 +708,7 @@ template = PromptTemplate(
         TaskExamplesSection(
             title="Workflow Examples",
             key="workflow-examples",
-            children=[etl_example, error_handling_example],
+            examples=[etl_example, error_handling_example],
         ),
     ],
 )
@@ -729,13 +718,12 @@ template = PromptTemplate(
 
 - [ ] `TaskStep` frozen dataclass with `tool_name` and `example` fields
 - [ ] `TaskExample` extending `Section` with validation in `__init__`
-- [ ] `TaskExamplesSection` extending `Section` with children validation
+- [ ] `TaskExamplesSection` extending `Section` with examples validation
 - [ ] Objective/outcome validation (1-500 ASCII chars, non-blank)
 - [ ] Steps non-empty validation
-- [ ] Tool name resolution against provided tools
+- [ ] Tool name resolution against prompt's tool registry
 - [ ] Type coherence validation reusing `Tool._validate_examples` logic
-- [ ] Children type validation (must be `TaskExample`)
-- [ ] Duplicate tool name detection
+- [ ] Examples type validation (must be `TaskExample`)
 - [ ] Markdown rendering with nested section numbering
 - [ ] Progressive disclosure support for both section types
 - [ ] Conditional rendering via `enabled` predicate
