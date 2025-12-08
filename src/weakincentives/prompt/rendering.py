@@ -35,6 +35,7 @@ from .structured_output import StructuredOutputConfig
 from .tool import Tool
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ..runtime.session.protocols import SessionProtocol
     from .overrides import PromptDescriptor, ToolOverride
 
 
@@ -157,7 +158,7 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: PLR0914
+    def render(  # noqa: PLR0913, PLR0914
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
@@ -165,6 +166,7 @@ class PromptRenderer[OutputT]:
         *,
         descriptor: PromptDescriptor | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        session: SessionProtocol | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
@@ -175,7 +177,9 @@ class PromptRenderer[OutputT]:
         summary_skip_depth: int | None = None
         has_summarized = False
 
-        for node, section_params in self._iter_enabled_sections(dict(param_lookup)):
+        for node, section_params in self._iter_enabled_sections(
+            dict(param_lookup), session=session
+        ):
             # Skip children of sections rendered with SUMMARY visibility
             if summary_skip_depth is not None:
                 if node.depth > summary_skip_depth:
@@ -189,7 +193,7 @@ class PromptRenderer[OutputT]:
             )
             visibility_override = visibility_override_lookup.get(node.path)
             effective_visibility = node.section.effective_visibility(
-                visibility_override, section_params
+                visibility_override, section_params, session
             )
 
             # When rendering with SUMMARY visibility, skip children
@@ -230,6 +234,7 @@ class PromptRenderer[OutputT]:
                 self._registry,
                 visibility_overrides,
                 param_lookup,
+                session=session,
             )
             open_sections_tool = create_open_sections_handler(
                 registry=self._registry,
@@ -310,6 +315,8 @@ class PromptRenderer[OutputT]:
     def _iter_enabled_sections(
         self,
         param_lookup: MutableMapping[type[SupportsDataclass], SupportsDataclass],
+        *,
+        session: SessionProtocol | None = None,
     ) -> Iterator[tuple[SectionNode[SupportsDataclass], SupportsDataclass | None]]:
         skip_depth: int | None = None
 
@@ -322,7 +329,7 @@ class PromptRenderer[OutputT]:
             section_params = self._registry.resolve_section_params(node, param_lookup)
 
             try:
-                enabled = node.section.is_enabled(section_params)
+                enabled = node.section.is_enabled(section_params, session)
             except Exception as error:  # pragma: no cover - defensive
                 raise PromptRenderError(
                     "Section enabled predicate failed.",

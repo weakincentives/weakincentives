@@ -120,7 +120,11 @@ class PromptProtocol(Protocol[PromptOutputT]):
 
     def bind(self, *params: SupportsDataclass) -> PromptProtocol[PromptOutputT]: ...
 
-    def render(self) -> RenderedPromptProtocol[PromptOutputT]: ...
+    def render(
+        self,
+        *,
+        session: SessionProtocol | None = ...,
+    ) -> RenderedPromptProtocol[PromptOutputT]: ...
 
 
 class ProviderAdapterProtocol(Protocol[AdapterOutputT]):

@@ -191,6 +191,7 @@ class AdapterRenderOptions:
     enable_json_schema: bool
     deadline: Deadline | None
     visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None
+    session: SessionProtocol | None = None
 
 
 @FrozenDataclass()
@@ -980,6 +981,7 @@ def prepare_adapter_conversation[
 
     rendered = prompt.render(
         visibility_overrides=options.visibility_overrides,
+        session=options.session,
     )
     if options.deadline is not None:
         rendered = replace(rendered, deadline=options.deadline)

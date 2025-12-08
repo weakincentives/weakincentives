@@ -174,7 +174,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
             key=self.key,
             default_params=cloned_default,
             children=cloned_children,
-            enabled=self._enabled,
+            enabled=self._original_enabled,
             tools=self.tools(),
             accepts_overrides=self.accepts_overrides,
             summary=self.summary,

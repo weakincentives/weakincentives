@@ -39,6 +39,7 @@ from .section import Section
 from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:
+    from ..runtime.session.protocols import SessionProtocol
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
 
@@ -339,11 +340,16 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         self,
         *,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        session: SessionProtocol | None = None,
     ) -> RenderedPrompt[OutputT]:
         """Render the prompt with bound parameters and optional overrides.
 
         Override resolution and rendering are performed here. The template
         provides only metadata and the registry snapshot for rendering.
+
+        Args:
+            visibility_overrides: Optional visibility overrides for sections.
+            session: Optional session for visibility/enabled predicates.
         """
         tag = self.overrides_tag if self.overrides_tag else "latest"
 
@@ -369,6 +375,7 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
             tool_overrides,
             descriptor=descriptor,
             visibility_overrides=visibility_overrides,
+            session=session,
         )
 
     def find_section(

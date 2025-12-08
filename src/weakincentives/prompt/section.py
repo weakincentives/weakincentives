@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
+    from ..runtime.session.protocols import SessionProtocol
     from .tool import Tool
 
 from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
@@ -78,18 +79,23 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
                 raise TypeError("Section children must be Section instances.")
             normalized_children.append(cast(Section[SupportsDataclass], child))
         self.children = tuple(normalized_children)
-        self._enabled: Callable[[SupportsDataclass | None], bool] | None = (
-            normalize_enabled_predicate(enabled, params_type)
-        )
+        self._original_enabled: EnabledPredicate | None = enabled
+        self._enabled: (
+            Callable[[SupportsDataclass | None, SessionProtocol | None], bool] | None
+        ) = normalize_enabled_predicate(enabled, params_type)
         self._tools = self._normalize_tools(tools)
         self._visibility = normalize_visibility_selector(visibility, params_type)
 
-    def is_enabled(self, params: SupportsDataclass | None) -> bool:
+    def is_enabled(
+        self,
+        params: SupportsDataclass | None,
+        session: SessionProtocol | None = None,
+    ) -> bool:
         """Return True when the section should render for the given params."""
 
         if self._enabled is None:
             return True
-        return bool(self._enabled(params))
+        return bool(self._enabled(params, session))
 
     @abstractmethod
     def render(
@@ -142,6 +148,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         self,
         override: SectionVisibility | None = None,
         params: SupportsDataclass | None = None,
+        session: SessionProtocol | None = None,
     ) -> SectionVisibility:
         """Return the visibility to use for rendering.
 
@@ -149,6 +156,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             override: Optional visibility override. When provided, this takes
                 precedence over the section's configured visibility.
             params: Parameters used to render the section, when available.
+            session: Optional session for visibility selectors that need state.
 
         Returns:
             The effective visibility to use. If an override is provided, it is
@@ -158,7 +166,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         """
         visibility = override
         if visibility is None:
-            visibility = self._visibility(params)
+            visibility = self._visibility(params, session)
         if visibility == SectionVisibility.SUMMARY and self.summary is None:
             return SectionVisibility.FULL
         return visibility

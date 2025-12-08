@@ -33,6 +33,7 @@ from .tool_result import ToolResult
 if TYPE_CHECKING:
     from collections.abc import Mapping, Set
 
+    from ..runtime.session.protocols import SessionProtocol
     from ._types import SupportsDataclass
     from .registry import RegistrySnapshot
 
@@ -184,6 +185,8 @@ def has_summarized_sections(
     registry: RegistrySnapshot,
     visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass] | None = None,
+    *,
+    session: SessionProtocol | None = None,
 ) -> bool:
     """Check if the prompt contains any sections that will render as SUMMARY.
 
@@ -192,6 +195,7 @@ def has_summarized_sections(
         visibility_overrides: Optional visibility overrides applied at render time.
         param_lookup: Optional parameter lookup used to evaluate visibility
             selectors that depend on section parameters.
+        session: Optional session for visibility selectors that need state.
 
     Returns:
         True if at least one section renders with SUMMARY visibility.
@@ -204,6 +208,7 @@ def has_summarized_sections(
         effective = node.section.effective_visibility(
             overrides.get(node.path),
             section_params,
+            session,
         )
         if effective == SectionVisibility.SUMMARY and node.section.summary is not None:
             return True
@@ -215,6 +220,8 @@ def compute_current_visibility(
     registry: RegistrySnapshot,
     visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass] | None = None,
+    *,
+    session: SessionProtocol | None = None,
 ) -> dict[SectionPath, SectionVisibility]:
     """Compute the effective visibility for all sections.
 
@@ -223,6 +230,7 @@ def compute_current_visibility(
         visibility_overrides: Optional visibility overrides.
         param_lookup: Optional parameter lookup used to evaluate visibility
             selectors that depend on section parameters.
+        session: Optional session for visibility selectors that need state.
 
     Returns:
         Mapping from section paths to their effective visibility.
@@ -236,6 +244,7 @@ def compute_current_visibility(
         effective = node.section.effective_visibility(
             overrides.get(node.path),
             section_params,
+            session,
         )
         result[node.path] = effective
 

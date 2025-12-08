@@ -613,6 +613,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             prompt,
             deadline=deadline,
             visibility_overrides=visibility_overrides,
+            session=session,
         )
 
         # Create tracker if budget provided but tracker not supplied
@@ -653,6 +654,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         *,
         deadline: Deadline | None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        session: SessionProtocol | None = None,
     ) -> _EvaluationContext[OutputT]:
         prompt_name = prompt.name or prompt.template.__class__.__name__
         render_inputs = prompt.params
@@ -661,6 +663,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             prompt,
             deadline=deadline,
             visibility_overrides=visibility_overrides,
+            session=session,
         )
         response_format = self._build_response_format(
             rendered,
@@ -691,8 +694,12 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         *,
         deadline: Deadline | None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        session: SessionProtocol | None = None,
     ) -> RenderedPrompt[OutputT]:
-        rendered = prompt.render(visibility_overrides=visibility_overrides)
+        rendered = prompt.render(
+            visibility_overrides=visibility_overrides,
+            session=session,
+        )
         if deadline is not None:
             rendered = replace(rendered, deadline=deadline)
         return rendered
