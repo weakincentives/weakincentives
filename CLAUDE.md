@@ -146,6 +146,9 @@ Consult these specs before modifying related code:
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, metrics |
 | `specs/EXECUTION_STATE.md` | ExecutionState root, transactional tool execution, snapshot/rollback |
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
+| `specs/HOSTED_TOOLS.md` | Provider-executed tools (web search, code interpreter) |
+| `specs/LANGFUSE.md` | Langfuse observability integration |
+| `specs/LANGSMITH.md` | LangSmith integration, telemetry, prompt hub |
 | `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, MainLoop integration |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
 | `specs/PROMPTS.md` | Prompt system, composition, structured output |
