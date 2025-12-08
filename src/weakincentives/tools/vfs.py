@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Final, Literal, cast, override
 
 from ..dataclasses import FrozenDataclass
-from ..prompt import SupportsDataclass, SupportsToolResult
+from ..prompt._types import SupportsDataclass, SupportsToolResult
 from ..prompt.markdown import MarkdownSection
 from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ..runtime.session import (

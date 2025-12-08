@@ -2,6 +2,22 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Prompts & Templates
+
+- Added `TaskHistorySection` for automatic rendering of plan state and visibility
+  transitions. This session-aware section automatically includes at render time:
+  - The current plan (objective, steps, status) from the session
+  - Visibility override state when summarized sections with tools exist
+  - Guidance for providing rationale when calling `open_sections`
+- Added `TaskHistoryContext` dataclass for tracking visibility transitions in
+  the session, with helper functions: `set_task_history_context()`,
+  `record_visibility_transition()`, `latest_task_history_context()`, and
+  `clear_task_history_context()`.
+- Added `SummarizedSectionWithTools` and `VisibilityTransition` dataclasses for
+  structured tracking of progressive disclosure state.
+
 ## v0.13.0 - 2025-12-07
 
 ### MainLoop Orchestration

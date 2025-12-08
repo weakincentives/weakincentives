@@ -58,6 +58,16 @@ from .structured_output import (
     parse_structured_output,
 )
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
+from .task_history import (
+    SummarizedSectionWithTools,
+    TaskHistoryContext,
+    TaskHistorySection,
+    VisibilityTransition,
+    clear_task_history_context,
+    latest_task_history_context,
+    record_visibility_transition,
+    set_task_history_context,
+)
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
@@ -88,11 +98,14 @@ __all__ = [
     "SectionPath",
     "SectionVisibility",
     "StructuredOutputConfig",
+    "SummarizedSectionWithTools",
     "SupportsDataclass",
     "SupportsDataclassOrNone",
     "SupportsToolResult",
     "TaskExample",
     "TaskExamplesSection",
+    "TaskHistoryContext",
+    "TaskHistorySection",
     "TaskStep",
     "Tool",
     "ToolContext",
@@ -103,9 +116,14 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "VisibilityExpansionRequired",
+    "VisibilityTransition",
+    "clear_task_history_context",
     "hash_json",
     "hash_text",
+    "latest_task_history_context",
     "parse_structured_output",
+    "record_visibility_transition",
+    "set_task_history_context",
 ]
 
 
