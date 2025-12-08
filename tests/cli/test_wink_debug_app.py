@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the wink debug FastAPI application."""
+"""Tests for the wink debug static site generator."""
 
 from __future__ import annotations
 
@@ -22,11 +22,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
-from urllib.parse import quote
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from weakincentives.cli import debug_app
 from weakincentives.dbc import dbc_enabled
@@ -129,156 +126,14 @@ def test_load_snapshot_recovers_from_unknown_types(tmp_path: Path) -> None:
     assert unknown_slice.items == ({"value": "one"},)
 
 
-def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
+def test_snapshot_loading_ignores_blank_lines(tmp_path: Path) -> None:
     snapshot_path = tmp_path / "snapshot.jsonl"
-    session_ids = _write_snapshot(snapshot_path, ["a", "b", "c"])
-    logger = debug_app.get_logger("test.api")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
+    session_ids = _write_snapshot(snapshot_path, ["first", "second"])
+    snapshot_path.write_text("\n" + snapshot_path.read_text() + "\n\n")
 
-    meta_response = client.get("/api/meta")
-    assert meta_response.status_code == 200
-    meta = meta_response.json()
-    assert meta["session_id"] == session_ids[0]
-    assert meta["line_number"] == 1
-    assert len(meta["slices"]) == 1
-    assert meta["tags"]["suite"] == "wink-debug"
-    slice_type = meta["slices"][0]["slice_type"]
+    loaded = debug_app.load_snapshot(snapshot_path)
 
-    entries_response = client.get("/api/entries")
-    entries = entries_response.json()
-    assert [entry["session_id"] for entry in entries] == session_ids
-    assert entries[0]["selected"] is True
-
-    select_response = client.post("/api/select", json={"session_id": session_ids[1]})
-    assert select_response.status_code == 200
-    selected_meta = select_response.json()
-    assert selected_meta["session_id"] == session_ids[1]
-
-    detail_response = client.get(f"/api/slices/{quote(slice_type)}")
-    assert detail_response.status_code == 200
-    detail = detail_response.json()
-    first_item = detail["items"][0]
-    assert first_item["value"] == "b"
-    assert first_item["__type__"] == (
-        f"{_ExampleSlice.__module__}:{_ExampleSlice.__qualname__}"
-    )
-
-    raw_response = client.get("/api/raw")
-    assert raw_response.status_code == 200
-    raw = raw_response.json()
-    assert raw["version"] == "1"
-    raw_item = raw["slices"][0]["items"][0]
-    assert raw_item["value"] == "b"
-    assert raw_item["__type__"] == (
-        f"{_ExampleSlice.__module__}:{_ExampleSlice.__qualname__}"
-    )
-
-
-def test_slice_pagination_with_query_params(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={
-            _ExampleSlice: tuple(
-                _ExampleSlice(value) for value in ("zero", "one", "two", "three")
-            )
-        },
-        tags={"session_id": "paginate"},
-    )
-    snapshot_path.write_text(snapshot.to_json())
-
-    logger = debug_app.get_logger("test.pagination")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
-
-    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
-
-    default_items = client.get(f"/api/slices/{quote(slice_type)}").json()["items"]
-    assert [item["value"] for item in default_items] == [
-        "zero",
-        "one",
-        "two",
-        "three",
-    ]
-
-    paginated_items = client.get(
-        f"/api/slices/{quote(slice_type)}", params={"offset": 1, "limit": 2}
-    ).json()["items"]
-
-    assert [item["value"] for item in paginated_items] == ["one", "two"]
-
-
-def test_reload_endpoint_replaces_snapshot(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["one"])
-    logger = debug_app.get_logger("test.reload")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
-
-    updated_session_ids = _write_snapshot(snapshot_path, ["two", "three"])
-
-    reload_response = client.post("/api/reload")
-    assert reload_response.status_code == 200
-    meta = reload_response.json()
-    assert meta["session_id"] == updated_session_ids[0]
-    assert meta["slices"][0]["count"] == 1
-    slice_type = meta["slices"][0]["slice_type"]
-
-    detail = client.get(f"/api/slices/{quote(slice_type)}").json()
-    assert [item["value"] for item in detail["items"]] == ["two"]
-
-    _write_snapshot(snapshot_path, ["invalid"])
-    snapshot_path.write_text("not-json")
-    reload_failed = client.post("/api/reload")
-    assert reload_failed.status_code == 400
-
-    meta_after_failure = client.get("/api/meta").json()
-    assert meta_after_failure["session_id"] == updated_session_ids[0]
-    assert meta_after_failure["slices"][0]["count"] == 1
-
-
-def test_snapshot_listing_and_switch(tmp_path: Path) -> None:
-    snapshot_one = tmp_path / "one.jsonl"
-    snapshot_two = tmp_path / "two.jsonl"
-    _write_snapshot(snapshot_one, ["a"])
-    _write_snapshot(snapshot_two, ["b", "c"])
-
-    now = time.time()
-    time.sleep(0.01)
-    time_one = now
-    time_two = now + 1
-    os.utime(snapshot_one, (time_one, time_one))
-    os.utime(snapshot_two, (time_two, time_two))
-
-    logger = debug_app.get_logger("test.switch")
-    store = debug_app.SnapshotStore(
-        snapshot_one, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
-
-    listing = client.get("/api/snapshots").json()
-    assert listing[0]["name"] == "two.jsonl"
-    assert listing[1]["name"] == "one.jsonl"
-
-    switch_response = client.post("/api/switch", json={"path": str(snapshot_two)})
-    assert switch_response.status_code == 200
-    switched_meta = switch_response.json()
-    assert switched_meta["path"] == str(snapshot_two)
-
-    detail = client.get("/api/meta").json()
-    assert detail["path"] == str(snapshot_two)
-    assert detail["session_id"] == "two-0"
+    assert [entry.meta.session_id for entry in loaded] == session_ids
 
 
 def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
@@ -315,169 +170,6 @@ def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
 
     with pytest.raises(KeyError, match="Unknown slice type: missing"):
         store.slice_items("missing")
-
-
-def test_snapshot_loading_ignores_blank_lines(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    session_ids = _write_snapshot(snapshot_path, ["first", "second"])
-    snapshot_path.write_text("\n" + snapshot_path.read_text() + "\n\n")
-
-    loaded = debug_app.load_snapshot(snapshot_path)
-
-    assert [entry.meta.session_id for entry in loaded] == session_ids
-
-
-def test_api_slice_offset_and_errors(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={
-            _ExampleSlice: (
-                _ExampleSlice("one"),
-                _ExampleSlice("two"),
-                _ExampleSlice("three"),
-            )
-        },
-        tags={"session_id": "multi"},
-    )
-    snapshot_path.write_text(snapshot.to_json())
-    logger = debug_app.get_logger("test.api.slices")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
-
-    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
-    limited = client.get(f"/api/slices/{quote(slice_type)}?offset=1&limit=1").json()
-    assert [item["value"] for item in limited["items"]] == ["two"]
-
-    missing = client.get("/api/slices/unknown")
-    assert missing.status_code == 404
-
-
-def test_api_slice_renders_markdown(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    markdown_text = "# Heading\n\nSome **bold** markdown content."
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={_ExampleSlice: (_ExampleSlice(markdown_text),)},
-        tags={"session_id": "markdown"},
-    )
-    snapshot_path.write_text(snapshot.to_json())
-    logger = debug_app.get_logger("test.api.markdown")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
-
-    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
-    detail = client.get(f"/api/slices/{quote(slice_type)}").json()
-
-    item = detail["items"][0]["value"]
-    assert item["__markdown__"]["text"] == markdown_text
-    assert "<h1" in item["__markdown__"]["html"]
-    assert "<strong>bold</strong>" in item["__markdown__"]["html"]
-
-
-def test_markdown_renderer_handles_nested_values(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    pre_rendered = {"__markdown__": {"text": "keep", "html": "<p>keep</p>\n"}}
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={
-            _ListSlice: (
-                _ListSlice(
-                    {
-                        "content": ["* bullet point with detail", pre_rendered, 7],
-                    }
-                ),
-            )
-        },
-        tags={"session_id": "nested"},
-    )
-    snapshot_path.write_text(snapshot.to_json())
-    logger = debug_app.get_logger("test.api.markdown.nested")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
-
-    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
-    detail = client.get(f"/api/slices/{quote(slice_type)}").json()
-
-    content = detail["items"][0]["value"]["content"]
-    assert content[0]["__markdown__"]["html"].startswith("<ul>")
-    assert content[1] == pre_rendered
-    assert content[2] == 7
-
-
-def test_api_select_errors_and_recover(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["alpha"])
-    logger = debug_app.get_logger("test.api.select")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
-
-    bad_session = client.post("/api/select", json={"session_id": "missing"})
-    assert bad_session.status_code == 400
-
-    bad_line = client.post("/api/select", json={"line_number": 99})
-    assert bad_line.status_code == 400
-
-    by_line = client.post("/api/select", json={"line_number": 1})
-    assert by_line.status_code == 200
-
-    snapshot_path.write_text(
-        "\n".join(
-            Snapshot(
-                created_at=datetime.now(UTC),
-                slices={_ExampleSlice: (_ExampleSlice("beta"),)},
-                tags={"session_id": "beta"},
-            ).to_json()
-            for _ in range(1)
-        )
-    )
-    reload_response = client.post("/api/reload")
-    assert reload_response.status_code == 200
-    assert reload_response.json()["session_id"] == "beta"
-
-
-def test_list_snapshots_skips_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base = tmp_path / "base.jsonl"
-    _write_snapshot(base, ["value"])
-    bad = tmp_path / "bad.jsonl"
-    bad.write_text("invalid")
-
-    original_stat = Path.stat
-
-    def fake_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
-        if path.name == "bad.jsonl":
-            raise OSError("fail")
-        return original_stat(path, follow_symlinks=follow_symlinks)
-
-    monkeypatch.setattr(Path, "stat", fake_stat)
-    monkeypatch.setattr(
-        debug_app.SnapshotStore,
-        "_iter_snapshot_files",
-        staticmethod(lambda root: [base, bad]),
-    )
-
-    store = debug_app.SnapshotStore(
-        base, loader=debug_app.load_snapshot, logger=debug_app.get_logger("test.list")
-    )
-    entries = store.list_snapshots()
-
-    assert [entry["name"] for entry in entries] == ["base.jsonl"]
 
 
 def test_snapshot_store_reload_fallbacks(tmp_path: Path) -> None:
@@ -565,61 +257,364 @@ def test_normalize_path_requires_snapshots(tmp_path: Path) -> None:
     assert str(excinfo.value) == f"No snapshots found under {empty_dir.resolve()}"
 
 
-def test_index_and_error_endpoints(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["a"])
+def test_list_snapshots_skips_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = tmp_path / "base.jsonl"
+    _write_snapshot(base, ["value"])
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text("invalid")
 
-    other_dir = tmp_path / "other"
-    other_dir.mkdir()
-    other_snapshot = other_dir / "other.jsonl"
-    _write_snapshot(other_snapshot, ["b"])
+    original_stat = Path.stat
 
-    logger = debug_app.get_logger("test.routes")
+    def fake_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        if path.name == "bad.jsonl":
+            raise OSError("fail")
+        return original_stat(path, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    monkeypatch.setattr(
+        debug_app.SnapshotStore,
+        "_iter_snapshot_files",
+        staticmethod(lambda root: [base, bad]),
+    )
+
     store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
+        base, loader=debug_app.load_snapshot, logger=debug_app.get_logger("test.list")
     )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
+    entries = store.list_snapshots()
 
-    index_response = client.get("/")
-    assert index_response.status_code == 200
-    assert "<!doctype html>" in index_response.text.lower()
+    assert [entry["name"] for entry in entries] == ["base.jsonl"]
 
-    missing_slice = client.get("/api/slices/missing")
-    assert missing_slice.status_code == 404
-    assert "Unknown slice type: missing" in missing_slice.json()["detail"]
 
-    missing_path = client.post("/api/switch", json={"path": 123})
-    assert missing_path.status_code == 400
-    assert missing_path.json()["detail"] == "path is required"
+# ---------------------------------------------------------------------------
+# SnapshotStore Method Coverage Tests
+# ---------------------------------------------------------------------------
 
-    wrong_root = client.post("/api/switch", json={"path": str(other_snapshot)})
-    assert wrong_root.status_code == 400
-    assert "Snapshot must live under" in wrong_root.json()["detail"]
 
-    bad_switch_session = client.post(
-        "/api/switch", json={"path": str(snapshot_path), "session_id": 123}
+def test_snapshot_store_raw_text_property(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["test"])
+
+    store = debug_app.SnapshotStore(
+        snapshot_path,
+        loader=debug_app.load_snapshot,
+        logger=debug_app.get_logger("test.raw_text"),
     )
-    assert bad_switch_session.status_code == 400
 
-    bad_switch_line = client.post(
-        "/api/switch", json={"path": str(snapshot_path), "line_number": "one"}
+    raw_text = store.raw_text
+    assert "test" in raw_text
+    assert "version" in raw_text
+
+
+def test_snapshot_store_select_returns_meta(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    session_ids = _write_snapshot(snapshot_path, ["one", "two"])
+
+    store = debug_app.SnapshotStore(
+        snapshot_path,
+        loader=debug_app.load_snapshot,
+        logger=debug_app.get_logger("test.select_meta"),
     )
-    assert bad_switch_line.status_code == 400
 
-    missing_selection = client.post("/api/select", json={})
-    assert missing_selection.status_code == 400
-    assert "session_id or line_number is required" in missing_selection.json()["detail"]
+    # Select by session_id
+    meta = store.select(session_id=session_ids[1])
+    assert meta.session_id == session_ids[1]
 
-    bad_line_number = client.post("/api/select", json={"line_number": "one"})
-    assert bad_line_number.status_code == 400
-    assert "line_number must be an integer" in bad_line_number.json()["detail"]
-
-    bad_session = client.post("/api/select", json={"session_id": 123})
-    assert bad_session.status_code == 400
+    # Select by line_number
+    meta = store.select(line_number=1)
+    assert meta.line_number == 1
 
 
-def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_snapshot_store_switch_to_valid_path(tmp_path: Path) -> None:
+    snapshot_one = tmp_path / "one.jsonl"
+    snapshot_two = tmp_path / "two.jsonl"
+    _write_snapshot(snapshot_one, ["first"])
+    _write_snapshot(snapshot_two, ["second"])
+
+    store = debug_app.SnapshotStore(
+        snapshot_one,
+        loader=debug_app.load_snapshot,
+        logger=debug_app.get_logger("test.switch"),
+    )
+
+    _ = store.switch(snapshot_two, session_id=snapshot_two.stem + "-0")
+    assert "second" in store.raw_text
+
+
+def test_snapshot_store_switch_to_directory(tmp_path: Path) -> None:
+    snapshots_dir = tmp_path / "snapshots"
+    snapshots_dir.mkdir()
+
+    snapshot_one = snapshots_dir / "one.jsonl"
+    snapshot_two = snapshots_dir / "two.jsonl"
+    _write_snapshot(snapshot_one, ["first"])
+    _write_snapshot(snapshot_two, ["second"])
+
+    # Set mtime to control ordering
+    now = time.time()
+    os.utime(snapshot_one, (now, now))
+    os.utime(snapshot_two, (now + 1, now + 1))
+
+    store = debug_app.SnapshotStore(
+        snapshot_one,
+        loader=debug_app.load_snapshot,
+        logger=debug_app.get_logger("test.switch_dir"),
+    )
+
+    # Switch to the directory - should pick newest (two.jsonl)
+    _ = store.switch(snapshots_dir)
+    assert store.path == snapshot_two.resolve()
+
+
+def test_snapshot_store_select_no_filters(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["only"])
+
+    store = debug_app.SnapshotStore(
+        snapshot_path,
+        loader=debug_app.load_snapshot,
+        logger=debug_app.get_logger("test.select_none"),
+    )
+
+    # Select with no filters returns index 0
+    meta = store.select()
+    assert meta.line_number == 1  # First entry
+
+
+# ---------------------------------------------------------------------------
+# Markdown Rendering Edge Cases
+# ---------------------------------------------------------------------------
+
+
+def test_render_markdown_values_with_existing_wrapper(tmp_path: Path) -> None:
+    """Test that already-wrapped markdown values are passed through."""
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    # Create a snapshot with a list and nested structure
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={_ListSlice: (_ListSlice(["# Markdown", "plain text"]),)},
+        tags={"session_id": "list_test"},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        logger=debug_app.get_logger("test.markdown_list"),
+    )
+
+    # Verify the list items are processed
+    slices_dir = (
+        output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries" / "1" / "slices"
+    )
+    slice_files = list(slices_dir.glob("*.json"))
+    slice_data = json.loads(slice_files[0].read_text())
+    items = slice_data["items"][0]["value"]
+    assert isinstance(items, list)
+
+
+# ---------------------------------------------------------------------------
+# Static Site Generation Tests
+# ---------------------------------------------------------------------------
+
+
+def test_generate_static_site_creates_output_structure(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["one", "two"])
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        base_path="/",
+        logger=debug_app.get_logger("test.static"),
+    )
+
+    # Check directory structure
+    assert (output_dir / "index.html").exists()
+    assert (output_dir / "static" / "style.css").exists()
+    assert (output_dir / "static" / "app.js").exists()
+    assert (output_dir / "data" / "manifest.json").exists()
+
+    # Check manifest
+    manifest = json.loads((output_dir / "data" / "manifest.json").read_text())
+    assert manifest["version"] == "1"
+    assert len(manifest["snapshots"]) == 1
+    assert manifest["default_snapshot"] == "snapshot.jsonl"
+
+    # Check entries
+    entries_path = output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries.json"
+    assert entries_path.exists()
+    entries = json.loads(entries_path.read_text())
+    assert len(entries) == 2
+
+
+def test_generate_static_site_with_base_path(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["value"])
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        base_path="/reports/",
+        logger=debug_app.get_logger("test.static.basepath"),
+    )
+
+    # Check that base tag is injected
+    index_html = (output_dir / "index.html").read_text()
+    assert '<base href="/reports/">' in index_html
+
+    # Check manifest has base path
+    manifest = json.loads((output_dir / "data" / "manifest.json").read_text())
+    assert manifest["base_path"] == "/reports/"
+
+
+def test_generate_static_site_from_directory(tmp_path: Path) -> None:
+    snapshots_dir = tmp_path / "snapshots"
+    snapshots_dir.mkdir()
+
+    snapshot_one = snapshots_dir / "one.jsonl"
+    snapshot_two = snapshots_dir / "two.jsonl"
+    _write_snapshot(snapshot_one, ["a"])
+    _write_snapshot(snapshot_two, ["b"])
+
+    # Set modification times to control ordering
+    now = time.time()
+    os.utime(snapshot_one, (now, now))
+    os.utime(snapshot_two, (now + 1, now + 1))
+
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshots_dir,
+        output_dir,
+        logger=debug_app.get_logger("test.static.dir"),
+    )
+
+    manifest = json.loads((output_dir / "data" / "manifest.json").read_text())
+    assert len(manifest["snapshots"]) == 2
+    # Most recent first (two.jsonl)
+    assert manifest["snapshots"][0]["file"] == "two.jsonl"
+    assert manifest["default_snapshot"] == "two.jsonl"
+
+
+def test_generate_static_site_writes_slice_data(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["test_value"])
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        logger=debug_app.get_logger("test.static.slices"),
+    )
+
+    # Find slice file
+    slices_dir = (
+        output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries" / "1" / "slices"
+    )
+    slice_files = list(slices_dir.glob("*.json"))
+    assert len(slice_files) == 1
+
+    slice_data = json.loads(slice_files[0].read_text())
+    assert slice_data["items"][0]["value"] == "test_value"
+
+
+def test_generate_static_site_renders_markdown(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    markdown_text = "# Heading\n\nSome **bold** markdown content."
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={_ExampleSlice: (_ExampleSlice(markdown_text),)},
+        tags={"session_id": "markdown"},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        logger=debug_app.get_logger("test.static.markdown"),
+    )
+
+    slices_dir = (
+        output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries" / "1" / "slices"
+    )
+    slice_files = list(slices_dir.glob("*.json"))
+    slice_data = json.loads(slice_files[0].read_text())
+
+    item = slice_data["items"][0]["value"]
+    assert item["__markdown__"]["text"] == markdown_text
+    assert "<h1" in item["__markdown__"]["html"]
+
+
+def test_generate_static_site_writes_raw_json(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["raw_test"])
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        logger=debug_app.get_logger("test.static.raw"),
+    )
+
+    raw_path = (
+        output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries" / "1" / "raw.json"
+    )
+    raw_data = json.loads(raw_path.read_text())
+    assert raw_data["version"] == "1"
+
+
+def test_generate_static_site_skips_invalid_files(tmp_path: Path) -> None:
+    snapshots_dir = tmp_path / "snapshots"
+    snapshots_dir.mkdir()
+
+    valid = snapshots_dir / "valid.jsonl"
+    invalid = snapshots_dir / "invalid.jsonl"
+    _write_snapshot(valid, ["good"])
+    invalid.write_text("not json")
+
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshots_dir,
+        output_dir,
+        logger=debug_app.get_logger("test.static.skip"),
+    )
+
+    manifest = json.loads((output_dir / "data" / "manifest.json").read_text())
+    assert len(manifest["snapshots"]) == 1
+    assert manifest["snapshots"][0]["file"] == "valid.jsonl"
+
+
+def test_generate_static_site_error_on_empty_dir(tmp_path: Path) -> None:
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    output_dir = tmp_path / "output"
+
+    with pytest.raises(debug_app.SnapshotLoadError, match="No snapshot files found"):
+        debug_app.generate_static_site(
+            empty_dir,
+            output_dir,
+            logger=debug_app.get_logger("test.static.empty"),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Debug Server Tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_debug_server_opens_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["test"])
+
     calls: dict[str, object] = {}
 
     class FakeTimer:
@@ -647,29 +642,25 @@ def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(debug_app.webbrowser, "open", fake_webbrowser_open)
 
-    config_calls: dict[str, object] = {}
+    # Mock the TCP server to not actually start
+    class FakeTCPServer:
+        allow_reuse_address = True
 
-    class FakeConfig:
-        def __init__(
-            self, app: object, host: str, port: int, log_config: object
-        ) -> None:
-            config_calls["config"] = {
-                "app": app,
-                "host": host,
-                "port": port,
-                "log_config": log_config,
-            }
+        def __init__(self, address: tuple[str, int], handler: object) -> None:
+            calls["server_address"] = address
+            calls["server_started"] = True
 
-    class FakeServer:
-        def __init__(self, config: FakeConfig) -> None:
-            config_calls["server_config"] = config
+        def __enter__(self) -> FakeTCPServer:
+            return self
 
-        @staticmethod
-        def run() -> None:
-            config_calls["run_called"] = True
+        def __exit__(self, *args: object) -> None:
+            pass
 
-    monkeypatch.setattr(debug_app.uvicorn, "Config", FakeConfig)
-    monkeypatch.setattr(debug_app.uvicorn, "Server", FakeServer)
+        def serve_forever(self) -> None:
+            # Simulate immediate shutdown
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(debug_app.socketserver, "TCPServer", FakeTCPServer)
 
     logger = debug_app.get_logger("test.run")
     infos: list[dict[str, object]] = []
@@ -679,10 +670,8 @@ def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(logger, "info", capture_info)
 
-    app = FastAPI()
-
     exit_code = debug_app.run_debug_server(
-        app=app,
+        snapshot_path,
         host="0.0.0.0",
         port=8123,
         open_browser=True,
@@ -692,11 +681,198 @@ def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None
     assert exit_code == 0
     assert calls["timer_started"] is True
     assert calls["browser_url"] == "http://0.0.0.0:8123/"
-    assert config_calls["config"] == {
-        "app": app,
-        "host": "0.0.0.0",
-        "port": 8123,
-        "log_config": None,
-    }
-    assert config_calls["run_called"] is True
-    assert infos[0]["event"] == "debug.server.start"
+    assert calls["server_address"] == ("0.0.0.0", 8123)
+    # Find the server start event
+    start_events = [i for i in infos if i["event"] == "debug.server.start"]
+    assert len(start_events) >= 1
+
+
+def test_run_debug_server_without_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["test"])
+
+    timer_calls: list[object] = []
+
+    class FakeTimer:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            timer_calls.append((args, kwargs))
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(debug_app.threading, "Timer", FakeTimer)
+
+    class FakeTCPServer:
+        allow_reuse_address = True
+
+        def __init__(self, address: tuple[str, int], handler: object) -> None:
+            pass
+
+        def __enter__(self) -> FakeTCPServer:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def serve_forever(self) -> None:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(debug_app.socketserver, "TCPServer", FakeTCPServer)
+
+    exit_code = debug_app.run_debug_server(
+        snapshot_path,
+        open_browser=False,
+        logger=debug_app.get_logger("test.run.nobrowser"),
+    )
+
+    assert exit_code == 0
+    assert len(timer_calls) == 0  # No timer started without browser
+
+
+def test_reload_handler_regenerates_static_files(tmp_path: Path) -> None:
+    """Test that the HTTP reload handler regenerates static files."""
+    import io
+
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["test"])
+    output_dir = tmp_path / "output"
+
+    # Generate initial static site
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        logger=debug_app.get_logger("test.reload_handler"),
+    )
+
+    # Create a mock request for the reload handler
+    class MockRequestHandler(debug_app._ReloadHandler):
+        def __init__(self) -> None:
+            self.wfile = io.BytesIO()
+            self._headers_buffer: list[bytes] = []
+            self.path = "/api/reload"
+            self.requestline = "POST /api/reload HTTP/1.1"
+
+        def send_response(self, code: int) -> None:
+            self._response_code = code
+
+        def send_header(self, keyword: str, value: str) -> None:
+            self._headers_buffer.append(f"{keyword}: {value}".encode())
+
+        def end_headers(self) -> None:
+            pass
+
+    # Assign class attributes
+    MockRequestHandler.snapshot_path = snapshot_path
+    MockRequestHandler.output_dir = output_dir
+    MockRequestHandler.base_path = "/"
+    MockRequestHandler.logger = debug_app.get_logger("test.reload_handler.mock")
+
+    handler = MockRequestHandler()
+    handler.do_POST()
+
+    # Check response
+    handler.wfile.seek(0)
+    response_body = handler.wfile.read().decode()
+    response = json.loads(response_body)
+    assert response["success"] is True
+
+
+def test_reload_handler_returns_404_for_unknown_paths(tmp_path: Path) -> None:
+    """Test that the HTTP handler returns 404 for non-reload paths."""
+    import io
+
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["test"])
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        logger=debug_app.get_logger("test.404"),
+    )
+
+    class MockRequestHandler(debug_app._ReloadHandler):
+        def __init__(self) -> None:
+            self.wfile = io.BytesIO()
+            self.path = "/api/unknown"
+            self.requestline = "POST /api/unknown HTTP/1.1"
+            self._error_code: int | None = None
+
+        def send_error(self, code: int, message: str) -> None:
+            self._error_code = code
+
+    MockRequestHandler.snapshot_path = snapshot_path
+    MockRequestHandler.output_dir = output_dir
+    MockRequestHandler.base_path = "/"
+    MockRequestHandler.logger = debug_app.get_logger("test.404.mock")
+
+    handler = MockRequestHandler()
+    handler.do_POST()
+
+    assert handler._error_code == 404
+
+
+def test_reload_handler_error_returns_400(tmp_path: Path) -> None:
+    """Test that reload errors return 400 response."""
+    import io
+
+    # Create a valid snapshot initially in a subdirectory
+    snapshots_dir = tmp_path / "snapshots"
+    snapshots_dir.mkdir()
+    snapshot_path = snapshots_dir / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["test"])
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshots_dir,
+        output_dir,
+        logger=debug_app.get_logger("test.reload_error"),
+    )
+
+    # Remove all snapshot files from the directory to cause error on reload
+    for f in snapshots_dir.glob("*.jsonl"):
+        f.unlink()
+
+    class MockRequestHandler(debug_app._ReloadHandler):
+        def __init__(self) -> None:
+            self.wfile = io.BytesIO()
+            self._headers_buffer: list[bytes] = []
+            self.path = "/api/reload"
+            self.requestline = "POST /api/reload HTTP/1.1"
+            self._response_code: int | None = None
+
+        def send_response(self, code: int) -> None:
+            self._response_code = code
+
+        def send_header(self, keyword: str, value: str) -> None:
+            pass
+
+        def end_headers(self) -> None:
+            pass
+
+    MockRequestHandler.snapshot_path = snapshots_dir
+    MockRequestHandler.output_dir = output_dir
+    MockRequestHandler.base_path = "/"
+    MockRequestHandler.logger = debug_app.get_logger("test.reload_error.mock")
+
+    handler = MockRequestHandler()
+    handler.do_POST()
+
+    assert handler._response_code == 400
+    handler.wfile.seek(0)
+    response = json.loads(handler.wfile.read().decode())
+    assert response["success"] is False
+
+
+def test_reload_handler_log_message_suppressed() -> None:
+    """Test that the log_message method suppresses output."""
+
+    class MockHandler(debug_app._ReloadHandler):
+        def __init__(self) -> None:
+            pass
+
+    handler = MockHandler()
+    # This should not raise
+    handler.log_message("test %s", "arg")

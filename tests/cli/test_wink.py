@@ -77,21 +77,16 @@ def test_main_runs_debug_command(
         calls["logger_name"] = name
         return fake_logger
 
-    real_loader = wink.debug_app.load_snapshot
-
-    def fake_load_snapshot(path: Path) -> object:
-        calls["loaded_path"] = path
-        return real_loader(path)
-
-    def fake_build_app(*args: object, **kwargs: object) -> str:
-        calls["app_args"] = {"snapshot": args[0], **kwargs}
-        return "app"
-
     def fake_run_server(
-        app: object, *, host: str, port: int, open_browser: bool, logger: object
+        snapshot_path_arg: Path,
+        *,
+        host: str,
+        port: int,
+        open_browser: bool,
+        logger: object,
     ) -> int:
         calls["run_args"] = {
-            "app": app,
+            "snapshot_path": snapshot_path_arg,
             "host": host,
             "port": port,
             "open_browser": open_browser,
@@ -101,8 +96,6 @@ def test_main_runs_debug_command(
 
     monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-    monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
-    monkeypatch.setattr(wink.debug_app, "build_debug_app", fake_build_app)
     monkeypatch.setattr(wink.debug_app, "run_debug_server", fake_run_server)
 
     exit_code = wink.main(
@@ -123,18 +116,172 @@ def test_main_runs_debug_command(
     assert exit_code == 0
     assert calls["configure"] == {"level": "DEBUG", "json_mode": False}
     assert calls["logger_name"] == "weakincentives.cli.wink"
-    assert calls["loaded_path"] == snapshot_path
-    snapshot_store = calls["app_args"]["snapshot"]
-    assert isinstance(snapshot_store, wink.debug_app.SnapshotStore)
-    assert snapshot_store.meta.path == str(snapshot_path)
-    assert calls["app_args"]["logger"] == fake_logger
     assert calls["run_args"] == {
-        "app": "app",
+        "snapshot_path": snapshot_path,
         "host": "0.0.0.0",
         "port": 9001,
         "open_browser": False,
         "logger": fake_logger,
     }
+
+
+def test_main_runs_static_export_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path)
+    output_dir = tmp_path / "output"
+
+    calls: dict[str, Any] = {}
+
+    def fake_configure_logging(*, level: object, json_mode: object) -> None:
+        calls["configure"] = {"level": level, "json_mode": json_mode}
+
+    class FakeLogger:
+        def __init__(self) -> None:
+            self.logs: list[tuple[str, dict[str, object]]] = []
+
+        def info(
+            self, message: str, *, event: str, context: object | None = None
+        ) -> None:
+            self.logs.append((message, {"event": event, "context": context}))
+
+        def error(
+            self, message: str, *, event: str, context: object | None = None
+        ) -> None:
+            self.logs.append((message, {"event": event, "context": context}))
+
+        def exception(
+            self, message: str, *, event: str, context: object | None = None
+        ) -> None:
+            self.logs.append((message, {"event": event, "context": context}))
+
+    fake_logger = FakeLogger()
+
+    def fake_get_logger(name: str) -> FakeLogger:
+        calls["logger_name"] = name
+        return fake_logger
+
+    def fake_generate_static_site(
+        snapshot_path_arg: Path,
+        output_dir_arg: Path,
+        *,
+        base_path: str,
+        logger: object,
+    ) -> None:
+        calls["generate_args"] = {
+            "snapshot_path": snapshot_path_arg,
+            "output_dir": output_dir_arg,
+            "base_path": base_path,
+            "logger": logger,
+        }
+
+    monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
+    monkeypatch.setattr(wink, "get_logger", fake_get_logger)
+    monkeypatch.setattr(wink.debug_app, "generate_static_site", fake_generate_static_site)
+
+    exit_code = wink.main(
+        [
+            "debug",
+            str(snapshot_path),
+            "--output",
+            str(output_dir),
+            "--base-path",
+            "/reports/",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls["generate_args"]["snapshot_path"] == snapshot_path
+    assert calls["generate_args"]["output_dir"] == output_dir
+    assert calls["generate_args"]["base_path"] == "/reports/"
+    assert calls["generate_args"]["logger"] == fake_logger
+
+
+def test_main_handles_static_export_snapshot_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path)
+    output_dir = tmp_path / "output"
+
+    def fake_configure_logging(*, level: object, json_mode: object) -> None:
+        return None
+
+    class FakeLogger:
+        @staticmethod
+        def error(*_: object, **__: object) -> None:
+            return None
+
+        @staticmethod
+        def exception(*_: object, **__: object) -> None:
+            return None
+
+    def fake_get_logger(name: str) -> FakeLogger:
+        return FakeLogger()
+
+    def fake_generate_static_site(
+        snapshot_path_arg: Path,
+        output_dir_arg: Path,
+        *,
+        base_path: str,
+        logger: object,
+    ) -> None:
+        msg = "Invalid snapshot"
+        raise wink.debug_app.SnapshotLoadError(msg)
+
+    monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
+    monkeypatch.setattr(wink, "get_logger", fake_get_logger)
+    monkeypatch.setattr(wink.debug_app, "generate_static_site", fake_generate_static_site)
+
+    exit_code = wink.main(
+        ["debug", str(snapshot_path), "--output", str(output_dir)]
+    )
+
+    assert exit_code == 2
+
+
+def test_main_handles_static_export_output_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path)
+    output_dir = tmp_path / "output"
+
+    def fake_configure_logging(*, level: object, json_mode: object) -> None:
+        return None
+
+    class FakeLogger:
+        @staticmethod
+        def error(*_: object, **__: object) -> None:
+            return None
+
+        @staticmethod
+        def exception(*_: object, **__: object) -> None:
+            return None
+
+    def fake_get_logger(name: str) -> FakeLogger:
+        return FakeLogger()
+
+    def fake_generate_static_site(
+        snapshot_path_arg: Path,
+        output_dir_arg: Path,
+        *,
+        base_path: str,
+        logger: object,
+    ) -> None:
+        msg = "Permission denied"
+        raise OSError(msg)
+
+    monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
+    monkeypatch.setattr(wink, "get_logger", fake_get_logger)
+    monkeypatch.setattr(wink.debug_app, "generate_static_site", fake_generate_static_site)
+
+    exit_code = wink.main(
+        ["debug", str(snapshot_path), "--output", str(output_dir)]
+    )
+
+    assert exit_code == 4
 
 
 def test_main_handles_invalid_snapshot(
@@ -157,13 +304,20 @@ def test_main_handles_invalid_snapshot(
     def fake_get_logger(name: str) -> FakeLogger:
         return FakeLogger()
 
-    def fake_load_snapshot(path: Path) -> object:
+    def fake_run_server(
+        path: Path,
+        *,
+        host: str,
+        port: int,
+        open_browser: bool,
+        logger: object,
+    ) -> int:
         msg = f"{path} missing"
         raise wink.debug_app.SnapshotLoadError(msg)
 
     monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-    monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
+    monkeypatch.setattr(wink.debug_app, "run_debug_server", fake_run_server)
 
     exit_code = wink.main(["debug", str(snapshot_path)])
 

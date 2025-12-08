@@ -50,6 +50,11 @@ def _write_snapshot(path: Path, *, created_at: datetime) -> None:
 def test_directory_argument_loads_latest_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Test that directory path is passed to run_debug_server.
+
+    The actual directory handling (selecting newest file) is tested
+    in test_wink_debug_app.py::test_generate_static_site_from_directory.
+    """
     with dbc_enabled(False):
         older = tmp_path / "old.jsonl"
         newer = tmp_path / "new.jsonl"
@@ -85,21 +90,16 @@ def test_directory_argument_loads_latest_snapshot(
             calls["logger_name"] = name
             return fake_logger
 
-        real_loader = wink.debug_app.load_snapshot
-
-        def fake_load_snapshot(path: Path) -> object:
-            calls.setdefault("loaded_paths", []).append(path)
-            return real_loader(path)
-
-        def fake_build_app(*args: object, **kwargs: object) -> str:
-            calls["app_args"] = {"snapshot": args[0], **kwargs}
-            return "app"
-
         def fake_run_server(
-            app: object, *, host: str, port: int, open_browser: bool, logger: object
+            snapshot_path: Path,
+            *,
+            host: str,
+            port: int,
+            open_browser: bool,
+            logger: object,
         ) -> int:
             calls["run_args"] = {
-                "app": app,
+                "snapshot_path": snapshot_path,
                 "host": host,
                 "port": port,
                 "open_browser": open_browser,
@@ -109,8 +109,6 @@ def test_directory_argument_loads_latest_snapshot(
 
         monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
         monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-        monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
-        monkeypatch.setattr(wink.debug_app, "build_debug_app", fake_build_app)
         monkeypatch.setattr(wink.debug_app, "run_debug_server", fake_run_server)
 
         exit_code = wink.main(
@@ -122,4 +120,6 @@ def test_directory_argument_loads_latest_snapshot(
         )
 
     assert exit_code == 0
-    assert calls["loaded_paths"][0] == newer.resolve()
+    # Directory path is passed directly to run_debug_server;
+    # directory handling happens inside generate_static_site
+    assert calls["run_args"]["snapshot_path"] == tmp_path

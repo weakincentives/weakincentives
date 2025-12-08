@@ -63,11 +63,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
     debug_parser = subcommands.add_parser(
         "debug",
-        help="Start a debug server that renders a snapshot inspection UI.",
+        help="Inspect session snapshots via a web UI or export as static files.",
     )
     _ = debug_parser.add_argument(
         "snapshot_path",
         help="Path to a session snapshot JSONL file or a directory containing snapshots.",
+    )
+    _ = debug_parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output directory for static export (enables export mode instead of server).",
+    )
+    _ = debug_parser.add_argument(
+        "--base-path",
+        type=str,
+        default="/",
+        help="URL path prefix for static export deployment (default: /).",
     )
     _ = debug_parser.add_argument(
         "--host",
@@ -93,13 +105,40 @@ def _build_parser() -> argparse.ArgumentParser:
 def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
     snapshot_path = Path(args.snapshot_path)
 
-    def _bootstrap_loader(path: Path) -> tuple[debug_app.LoadedSnapshot, ...]:
-        return debug_app.load_snapshot(path)
+    # Static export mode: generate files and exit
+    if args.output is not None:
+        output_dir = Path(args.output)
+        try:
+            debug_app.generate_static_site(
+                snapshot_path,
+                output_dir,
+                base_path=args.base_path,
+                logger=logger,
+            )
+        except debug_app.SnapshotLoadError as error:
+            logger.exception(
+                "Snapshot validation failed",
+                event="wink.debug.snapshot_error",
+                context={"path": str(snapshot_path), "error": str(error)},
+            )
+            return 2
+        except OSError as error:
+            logger.exception(
+                "Output directory error",
+                event="wink.debug.output_error",
+                context={"output": str(output_dir), "error": str(error)},
+            )
+            return 4
+        else:
+            return 0
 
+    # Server mode (default): generate to temp dir and serve
     try:
-        store = debug_app.SnapshotStore(
+        return debug_app.run_debug_server(
             snapshot_path,
-            loader=_bootstrap_loader,
+            host=args.host,
+            port=args.port,
+            open_browser=args.open_browser,
             logger=logger,
         )
     except debug_app.SnapshotLoadError as error:
@@ -109,17 +148,6 @@ def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
             context={"path": str(snapshot_path), "error": str(error)},
         )
         return 2
-
-    app = debug_app.build_debug_app(store, logger=logger)
-
-    try:
-        return debug_app.run_debug_server(
-            app,
-            host=args.host,
-            port=args.port,
-            open_browser=args.open_browser,
-            logger=logger,
-        )
     except Exception as error:  # pragma: no cover - defensive guard
         logger.exception(
             "Debug server failed to start",

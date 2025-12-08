@@ -1,4 +1,13 @@
+// State management for wink debug viewer
+// Works with both server mode (temp directory) and static export
+
 const state = {
+  // Manifest data (from data/manifest.json)
+  manifest: null,
+  // Current selection
+  currentFile: null,
+  currentEntry: null,
+  // Legacy state (kept for compatibility)
   meta: null,
   selectedSlice: null,
   snapshots: [],
@@ -72,6 +81,36 @@ const elements = {
   // Layout element for sidebar toggle
   layout: document.querySelector(".layout"),
 };
+
+// --- URL Hash Navigation ---
+
+function parseHash() {
+  const hash = window.location.hash.slice(1);
+  const params = new URLSearchParams(hash);
+  return {
+    file: params.get("file"),
+    entry: params.get("entry") ? parseInt(params.get("entry"), 10) : null,
+    slice: params.get("slice"),
+  };
+}
+
+function updateHash(file, entry, slice) {
+  const params = new URLSearchParams();
+  if (file) params.set("file", file);
+  if (entry !== null && entry !== undefined) params.set("entry", String(entry));
+  if (slice) params.set("slice", slice);
+  const newHash = params.toString();
+  if (window.location.hash.slice(1) !== newHash) {
+    window.location.hash = newHash;
+  }
+}
+
+function getDataPath(file, entry, ...rest) {
+  const encodedFile = encodeURIComponent(file);
+  const basePath = `data/snapshots/${encodedFile}/entries/${entry}`;
+  if (rest.length === 0) return basePath;
+  return `${basePath}/${rest.join("/")}`;
+}
 
 // --- Theme Management ---
 
@@ -180,20 +219,14 @@ function getCommandItems() {
     });
   });
 
-  // Sessions
+  // Sessions (from all entries across all files)
   state.entries.forEach((entry) => {
     items.push({
       type: "session",
-      id: `session:${entry.session_id}`,
+      id: `session:${entry.file}:${entry.line_number}`,
       title: entry.session_id,
-      subtitle: `Line ${entry.line_number} · ${entry.created_at || ""}`,
-      action: () => {
-        if (state.meta && state.meta.path === entry.path) {
-          selectEntry(entry.session_id);
-        } else {
-          switchSnapshot(entry.path, entry.session_id);
-        }
-      },
+      subtitle: `${entry.file} · Line ${entry.line_number}`,
+      action: () => navigateTo(entry.file, entry.line_number),
     });
   });
 
@@ -497,7 +530,7 @@ function showToast(message, type = "default") {
   }, 2500);
 }
 
-// --- API Fetching ---
+// --- Data Fetching (Static JSON) ---
 
 async function fetchJSON(url, options) {
   const response = await fetch(url, options);
@@ -517,8 +550,10 @@ async function fetchWithLoading(url, options) {
   }
 }
 
+// --- Rendering ---
+
 function renderMeta(meta) {
-  elements.path.textContent = meta.path;
+  elements.path.textContent = `${state.currentFile} (line ${state.currentEntry})`;
   elements.created.textContent = meta.created_at;
   elements.version.textContent = meta.version;
   elements.count.textContent = `${meta.slices.length} slices`;
@@ -557,35 +592,42 @@ function renderSessionTree() {
     return;
   }
 
+  // Group entries by file
   const grouped = new Map();
   state.entries.forEach((entry) => {
-    const bucket = grouped.get(entry.path) || [];
+    const file = entry.file;
+    const bucket = grouped.get(file) || [];
     bucket.push(entry);
-    grouped.set(entry.path, bucket);
+    grouped.set(file, bucket);
   });
 
-  grouped.forEach((entries, path) => {
+  grouped.forEach((entries, file) => {
     entries.sort((a, b) => (a.line_number || 0) - (b.line_number || 0));
     const group = document.createElement("div");
-    group.className =
-      "session-group" + (state.meta && state.meta.path === path ? " active" : "");
+    group.className = "session-group" + (state.currentFile === file ? " active" : "");
 
     const header = document.createElement("div");
     header.className = "session-group-header";
-    header.textContent = path.split("/").pop() || path;
+    header.textContent = file;
 
     const badge = document.createElement("span");
     badge.className = "pill";
     badge.textContent = `${entries.length} session${entries.length === 1 ? "" : "s"}`;
     header.appendChild(badge);
-    header.addEventListener("click", () => switchSnapshot(path));
+    header.addEventListener("click", () => {
+      const firstEntry = entries[0];
+      if (firstEntry) {
+        navigateTo(file, firstEntry.line_number);
+      }
+    });
 
     const list = document.createElement("div");
     list.className = "session-items";
 
     entries.forEach((entry) => {
+      const isSelected = state.currentFile === file && state.currentEntry === entry.line_number;
       const item = document.createElement("div");
-      item.className = "session-item" + (entry.selected ? " active" : "");
+      item.className = "session-item" + (isSelected ? " active" : "");
 
       const title = document.createElement("div");
       title.className = "session-item-title";
@@ -600,13 +642,7 @@ function renderSessionTree() {
 
       item.appendChild(title);
       item.appendChild(meta);
-      item.addEventListener("click", () => {
-        if (state.meta && state.meta.path === entry.path) {
-          selectEntry(entry.session_id);
-        } else {
-          switchSnapshot(entry.path, entry.session_id);
-        }
-      });
+      item.addEventListener("click", () => navigateTo(file, entry.line_number));
 
       list.appendChild(item);
     });
@@ -617,13 +653,14 @@ function renderSessionTree() {
   });
 }
 
-async function isEventSlice(entry) {
-  if (!entry.count) {
-    return false;
-  }
+async function classifySliceAsEvent(sliceType) {
+  // For static mode, we need to fetch slice data to classify
+  if (!state.currentFile || !state.currentEntry) return false;
+
   try {
-    const encoded = encodeURIComponent(entry.slice_type);
-    const detail = await fetchJSON(`/api/slices/${encoded}?limit=1`);
+    const encodedSlice = encodeURIComponent(sliceType);
+    const slicePath = getDataPath(state.currentFile, state.currentEntry, "slices", `${encodedSlice}.json`);
+    const detail = await fetchJSON(slicePath);
     const sample = detail.items[0];
     if (sample && typeof sample === "object") {
       const hasEventId = Object.prototype.hasOwnProperty.call(sample, "event_id");
@@ -631,16 +668,20 @@ async function isEventSlice(entry) {
       return hasEventId && hasCreatedAt;
     }
   } catch (error) {
-    console.warn("Failed to classify slice", entry.slice_type, error);
+    console.warn("Failed to classify slice", sliceType, error);
   }
   return false;
 }
 
-async function bucketSlices(entries) {
+async function bucketSlices(slices) {
   const buckets = { state: [], event: [] };
   await Promise.all(
-    entries.map(async (entry) => {
-      const isEvent = await isEventSlice(entry);
+    slices.map(async (entry) => {
+      if (!entry.count) {
+        buckets.state.push(entry);
+        return;
+      }
+      const isEvent = await classifySliceAsEvent(entry.slice_type);
       buckets[isEvent ? "event" : "state"].push(entry);
     })
   );
@@ -732,34 +773,50 @@ function renderSliceDetail(slice) {
 }
 
 async function selectSlice(sliceType) {
+  if (!state.currentFile || !state.currentEntry) return;
+
   state.selectedSlice = sliceType;
   renderSliceList();
-  const encoded = encodeURIComponent(sliceType);
+
+  // Update URL hash with slice
+  updateHash(state.currentFile, state.currentEntry, sliceType);
+
+  const encodedSlice = encodeURIComponent(sliceType);
+  const slicePath = getDataPath(state.currentFile, state.currentEntry, "slices", `${encodedSlice}.json`);
+
   try {
-    const detail = await fetchJSON(`/api/slices/${encoded}`);
+    const detail = await fetchJSON(slicePath);
     renderSliceDetail(detail);
   } catch (error) {
     elements.jsonViewer.textContent = error.message;
   }
 }
 
-async function refreshMeta() {
-  const meta = await fetchJSON("/api/meta");
+async function loadCurrentEntry() {
+  if (!state.currentFile || !state.currentEntry) return;
+
+  // Load meta.json for current entry
+  const metaPath = getDataPath(state.currentFile, state.currentEntry, "meta.json");
+  const meta = await fetchJSON(metaPath);
   state.meta = meta;
+
+  // Bucket slices
   state.sliceBuckets = await bucketSlices(meta.slices);
+
   renderMeta(meta);
   renderSliceList();
-  if (!state.selectedSlice && meta.slices.length > 0) {
-    await selectSlice(meta.slices[0].slice_type);
-  } else if (state.selectedSlice) {
-    const exists = meta.slices.some(
-      (entry) => entry.slice_type === state.selectedSlice
-    );
+  renderSessionTree();
+
+  // Select first slice or previously selected
+  if (state.selectedSlice) {
+    const exists = meta.slices.some((s) => s.slice_type === state.selectedSlice);
     if (exists) {
       await selectSlice(state.selectedSlice);
-    } else if (meta.slices.length > 0) {
-      await selectSlice(meta.slices[0].slice_type);
+      return;
     }
+  }
+  if (meta.slices.length > 0) {
+    await selectSlice(meta.slices[0].slice_type);
   }
 }
 
@@ -783,12 +840,15 @@ elements.copy.addEventListener("click", async () => {
 async function reloadSnapshot() {
   elements.reload.classList.add("spinning");
   try {
+    // Try to call /api/reload (works in server mode, fails gracefully in static)
     await fetchJSON("/api/reload", { method: "POST" });
-    await refreshMeta();
-    await refreshEntries();
+    // Reload manifest and current entry
+    await loadManifest();
+    await loadCurrentEntry();
     showToast("Snapshot reloaded", "success");
   } catch (error) {
-    showToast(`Reload failed: ${error.message}`, "error");
+    // In static export mode, reload just doesn't work
+    showToast("Reload not available in static export", "default");
   } finally {
     elements.reload.classList.remove("spinning");
   }
@@ -825,19 +885,121 @@ elements.objectFilter.addEventListener("input", () => {
   renderItems(state.currentItems);
 });
 
+// --- Navigation ---
+
+async function navigateTo(file, entry, slice = null) {
+  state.currentFile = file;
+  state.currentEntry = entry;
+  if (slice) state.selectedSlice = slice;
+
+  updateHash(file, entry, slice || state.selectedSlice);
+  await loadCurrentEntry();
+}
+
+async function loadManifest() {
+  const manifest = await fetchJSON("data/manifest.json");
+  state.manifest = manifest;
+
+  // Build entries list from all snapshots
+  state.entries = [];
+  state.snapshots = [];
+
+  for (const snapshot of manifest.snapshots) {
+    state.snapshots.push({
+      file: snapshot.file,
+      path: snapshot.path,
+      entry_count: snapshot.entry_count,
+    });
+
+    // Load entries for this snapshot
+    const entriesPath = `data/${snapshot.path}/entries.json`;
+    try {
+      const entries = await fetchJSON(entriesPath);
+      state.entries.push(...entries);
+    } catch (error) {
+      console.warn(`Failed to load entries for ${snapshot.file}:`, error);
+    }
+  }
+
+  // Update snapshot select dropdown
+  elements.snapshotSelect.innerHTML = "";
+  state.snapshots.forEach((snapshot) => {
+    const option = document.createElement("option");
+    option.value = snapshot.file;
+    option.textContent = `${snapshot.file} (${snapshot.entry_count} entries)`;
+    elements.snapshotSelect.appendChild(option);
+  });
+
+  if (state.currentFile) {
+    elements.snapshotSelect.value = state.currentFile;
+  }
+}
+
+async function handleHashChange() {
+  const { file, entry, slice } = parseHash();
+
+  if (file && entry) {
+    state.currentFile = file;
+    state.currentEntry = entry;
+    if (slice) state.selectedSlice = slice;
+    await loadCurrentEntry();
+    elements.snapshotSelect.value = file;
+  }
+}
+
+// --- Initialization ---
+
 document.addEventListener("DOMContentLoaded", async () => {
   setLoading(true);
   try {
-    await refreshMeta();
-    await refreshEntries();
-    await refreshSnapshots();
+    // Load manifest first
+    await loadManifest();
+
+    // Check URL hash for initial navigation
+    const { file, entry, slice } = parseHash();
+
+    if (file && entry) {
+      // Navigate to URL-specified location
+      state.currentFile = file;
+      state.currentEntry = entry;
+      if (slice) state.selectedSlice = slice;
+    } else if (state.manifest && state.manifest.default_snapshot && state.manifest.default_entry) {
+      // Use manifest defaults
+      state.currentFile = state.manifest.default_snapshot;
+      state.currentEntry = state.manifest.default_entry;
+      updateHash(state.currentFile, state.currentEntry, null);
+    }
+
+    if (state.currentFile && state.currentEntry) {
+      await loadCurrentEntry();
+      elements.snapshotSelect.value = state.currentFile;
+    }
+
   } catch (error) {
     showToast(`Load failed: ${error.message}`, "error");
-    elements.jsonViewer.textContent = error.message;
+    console.error("Failed to load:", error);
   } finally {
     setLoading(false);
   }
 });
+
+// Listen for hash changes (back/forward navigation)
+window.addEventListener("hashchange", handleHashChange);
+
+// Snapshot select change handler
+elements.snapshotSelect.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target && target.value) {
+    const file = target.value;
+    // Find first entry in this file
+    const fileEntries = state.entries.filter((e) => e.file === file);
+    if (fileEntries.length > 0) {
+      navigateTo(file, fileEntries[0].line_number);
+    }
+  }
+});
+
+// --- Tree Rendering Utilities ---
 
 const isObject = (value) => typeof value === "object" && value !== null;
 
@@ -1422,71 +1584,7 @@ function renderItems(items) {
   });
 }
 
-async function refreshEntries() {
-  const entries = await fetchJSON("/api/entries");
-  state.entries = entries;
-
-  renderSessionTree();
-}
-
-async function refreshSnapshots() {
-  const snapshots = await fetchJSON("/api/snapshots");
-  state.snapshots = snapshots;
-  elements.snapshotSelect.innerHTML = "";
-
-  snapshots.forEach((entry) => {
-    const option = document.createElement("option");
-    option.value = entry.path;
-    option.textContent = `${entry.name} (${entry.created_at})`;
-    elements.snapshotSelect.appendChild(option);
-  });
-
-  if (state.meta) {
-    elements.snapshotSelect.value = state.meta.path;
-  }
-}
-
-async function selectEntry(sessionId) {
-  try {
-    await fetchJSON("/api/select", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ session_id: sessionId }),
-    });
-    await refreshMeta();
-    await refreshEntries();
-  } catch (error) {
-    alert(`Select failed: ${error.message}`);
-  }
-}
-
-async function switchSnapshot(path, sessionId) {
-  try {
-    await fetchJSON("/api/switch", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(
-        sessionId ? { path, session_id: sessionId } : { path }
-      ),
-    });
-    await refreshMeta();
-    await refreshEntries();
-    await refreshSnapshots();
-  } catch (error) {
-    alert(`Switch failed: ${error.message}`);
-  }
-}
-
-elements.snapshotSelect.addEventListener("change", (event) => {
-  const target = event.target;
-  if (target && target.value) {
-    switchSnapshot(target.value);
-  }
-});
+// --- Keyboard Shortcuts ---
 
 document.addEventListener("keydown", (event) => {
   // Handle Escape key globally (works even in inputs for closing dialogs)
@@ -1633,8 +1731,8 @@ document.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
 
-  const current = elements.snapshotSelect.value;
-  const index = state.snapshots.findIndex((entry) => entry.path === current);
+  const current = state.currentFile;
+  const index = state.snapshots.findIndex((entry) => entry.file === current);
   if (index === -1) {
     return;
   }
@@ -1646,9 +1744,13 @@ document.addEventListener("keydown", (event) => {
 
   if (nextIndex !== index) {
     const next = state.snapshots[nextIndex];
-    elements.snapshotSelect.value = next.path;
-    switchSnapshot(next.path);
-    elements.snapshotSelect.classList.add("active-switch");
-    setTimeout(() => elements.snapshotSelect.classList.remove("active-switch"), 200);
+    // Find first entry in next file
+    const fileEntries = state.entries.filter((e) => e.file === next.file);
+    if (fileEntries.length > 0) {
+      navigateTo(next.file, fileEntries[0].line_number);
+      elements.snapshotSelect.value = next.file;
+      elements.snapshotSelect.classList.add("active-switch");
+      setTimeout(() => elements.snapshotSelect.classList.remove("active-switch"), 200);
+    }
   }
 });
