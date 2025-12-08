@@ -578,12 +578,363 @@ The integration uses structured logging consistent with `specs/LOGGING.md`:
 | `langfuse_flush_completed` | DEBUG | `event_count` |
 | `langfuse_shutdown` | INFO | `pending_events` |
 
+## Prompt Override Store
+
+Langfuse provides prompt management capabilities that can serve as a backend for
+WINK's prompt override system. The `LangfusePromptOverridesStore` implements the
+`PromptOverridesStore` protocol, enabling centralized prompt versioning and
+collaboration through Langfuse's web UI.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Application                              │
+│  ┌─────────────┐    ┌───────────────────────────┐               │
+│  │   Adapter   │───▶│ LangfusePromptOverridesStore │             │
+│  └─────────────┘    └───────────────────────────┘               │
+│                                   │                              │
+│                                   ▼                              │
+│                        ┌─────────────────────┐                  │
+│                        │  Langfuse Client    │                  │
+│                        │  (Prompt API)       │                  │
+│                        └─────────────────────┘                  │
+└─────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                         ┌─────────────────────┐
+                         │  Langfuse Prompts   │
+                         │  (Version Control)  │
+                         └─────────────────────┘
+```
+
+### Naming Convention
+
+Langfuse prompts are identified by name and version. The store maps WINK
+identifiers to Langfuse prompt names:
+
+| WINK Identifier | Langfuse Prompt Name |
+|-----------------|----------------------|
+| `ns="demo", key="welcome"` | `demo/welcome` |
+| `ns="webapp/agents", key="code-review"` | `webapp/agents/code-review` |
+| `tag="stable"` | Version label `stable` |
+| `tag="latest"` | Production version (default) |
+
+### LangfusePromptOverridesStore
+
+```python
+class LangfusePromptOverridesStore(PromptOverridesStore):
+    """Fetch and manage prompt overrides via Langfuse's prompt management API."""
+
+    def __init__(
+        self,
+        config: LangfuseConfig | None = None,
+        *,
+        client: Langfuse | None = None,
+        cache_ttl_seconds: float = 60.0,
+        fallback_store: PromptOverridesStore | None = None,
+    ) -> None:
+        """Initialize the Langfuse prompt store.
+
+        Args:
+            config: Langfuse configuration. Loads from environment if None.
+            client: Pre-configured Langfuse client for testing.
+            cache_ttl_seconds: How long to cache resolved prompts locally.
+            fallback_store: Optional local store to use when Langfuse unavailable.
+        """
+        ...
+
+    def resolve(
+        self,
+        descriptor: PromptDescriptor,
+        tag: str = "latest",
+    ) -> PromptOverride | None:
+        """Fetch a prompt override from Langfuse.
+
+        Maps the descriptor to a Langfuse prompt name and fetches the
+        specified version. Returns None if the prompt doesn't exist in
+        Langfuse.
+        """
+        ...
+
+    def upsert(
+        self,
+        descriptor: PromptDescriptor,
+        override: PromptOverride,
+    ) -> PromptOverride:
+        """Create or update a prompt in Langfuse.
+
+        Pushes the override content to Langfuse as a new prompt version.
+        The tag becomes the version label.
+        """
+        ...
+
+    def delete(
+        self,
+        *,
+        ns: str,
+        prompt_key: str,
+        tag: str,
+    ) -> None:
+        """Delete is not supported for Langfuse prompts.
+
+        Raises PromptOverridesError. Use Langfuse UI to archive prompts.
+        """
+        ...
+
+    def seed(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+    ) -> PromptOverride:
+        """Create an initial prompt version in Langfuse from WINK prompt."""
+        ...
+
+    def set_section_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],
+        body: str,
+    ) -> PromptOverride:
+        """Update a specific section in the Langfuse prompt."""
+        ...
+```
+
+### Langfuse Prompt Format
+
+Prompts stored in Langfuse use a structured JSON format compatible with WINK's
+override system:
+
+```json
+{
+  "wink_version": 1,
+  "sections": {
+    "system": {
+      "expected_hash": "abc123...",
+      "body": "You are a helpful assistant."
+    },
+    "instructions": {
+      "expected_hash": "def456...",
+      "body": "Follow these guidelines..."
+    }
+  },
+  "tools": {
+    "search": {
+      "expected_contract_hash": "789abc...",
+      "description": "Search the knowledge base.",
+      "param_descriptions": {
+        "query": "The search query string"
+      }
+    }
+  }
+}
+```
+
+When fetching from Langfuse, the store parses this JSON structure and constructs
+a `PromptOverride` instance. Non-JSON prompts (plain text) are treated as a
+single section override for the root section.
+
+### Caching
+
+The store implements local caching to reduce API calls:
+
+```python
+@FrozenDataclass()
+class CachedOverride:
+    """Cached prompt override with expiration."""
+
+    override: PromptOverride | None
+    fetched_at: datetime
+    ttl_seconds: float
+
+    @property
+    def expired(self) -> bool:
+        elapsed = datetime.now(UTC) - self.fetched_at
+        return elapsed.total_seconds() > self.ttl_seconds
+```
+
+- Cache entries expire after `cache_ttl_seconds` (default: 60s)
+- Cache is invalidated on `upsert()` calls
+- Thread-safe cache access via `threading.RLock`
+- Cache bypass available via `resolve(..., bypass_cache=True)`
+
+### Fallback Behavior
+
+When Langfuse is unavailable (network errors, timeouts), the store can fall back
+to a local store:
+
+```python
+store = LangfusePromptOverridesStore(
+    fallback_store=LocalPromptOverridesStore(),
+)
+
+# If Langfuse API fails, uses local .weakincentives/prompts/overrides/
+override = store.resolve(descriptor, tag="stable")
+```
+
+Fallback behavior:
+
+| Scenario | Behavior |
+|----------|----------|
+| Langfuse returns prompt | Use Langfuse version |
+| Langfuse returns 404 | Return `None` (no fallback) |
+| Langfuse network error | Try fallback store if configured |
+| Langfuse timeout | Try fallback store if configured |
+| No fallback configured | Log warning, return `None` |
+
+### Hash Validation
+
+The store validates content hashes when resolving overrides:
+
+```python
+def _validate_section_hash(
+    self,
+    section_path: tuple[str, ...],
+    override: SectionOverride,
+    descriptor: PromptDescriptor,
+) -> bool:
+    """Check if the override hash matches the current prompt descriptor."""
+
+    for section_desc in descriptor.sections:
+        if section_desc.path == section_path:
+            if override.expected_hash != section_desc.content_hash:
+                self._logger.warning(
+                    "Section hash mismatch; override skipped.",
+                    event="langfuse_hash_mismatch",
+                    context={
+                        "section_path": section_path,
+                        "expected": override.expected_hash,
+                        "actual": section_desc.content_hash,
+                    },
+                )
+                return False
+            return True
+    return False
+```
+
+When the source prompt changes and hashes no longer match, the override is
+skipped and a warning is logged. This prevents stale overrides from being
+applied to modified prompts.
+
+### Usage Examples
+
+#### Basic Override Resolution
+
+```python
+from weakincentives.integrations.langfuse import LangfusePromptOverridesStore
+
+store = LangfusePromptOverridesStore()
+
+response = adapter.evaluate(
+    prompt,
+    bus=bus,
+    session=session,
+    overrides_store=store,
+    overrides_tag="stable",
+)
+```
+
+#### With Local Fallback
+
+```python
+from weakincentives.prompt.overrides import LocalPromptOverridesStore
+from weakincentives.integrations.langfuse import LangfusePromptOverridesStore
+
+local_store = LocalPromptOverridesStore()
+langfuse_store = LangfusePromptOverridesStore(
+    fallback_store=local_store,
+    cache_ttl_seconds=300.0,  # 5 minute cache
+)
+
+# Uses Langfuse when available, local files as backup
+response = adapter.evaluate(
+    prompt,
+    bus=bus,
+    session=session,
+    overrides_store=langfuse_store,
+)
+```
+
+#### Seeding Prompts to Langfuse
+
+```python
+# Push current prompt content to Langfuse for editing
+store = LangfusePromptOverridesStore()
+override = store.seed(prompt, tag="v1.0")
+
+# Now editable in Langfuse UI at: demo/welcome (version v1.0)
+```
+
+#### Updating Sections Programmatically
+
+```python
+# Update a specific section
+store.set_section_override(
+    prompt,
+    tag="experiment-1",
+    path=("system",),
+    body="You are an expert code reviewer.",
+)
+```
+
+### Sync with Optimizer
+
+The `LangfusePromptOverridesStore` integrates with WINK's optimizer system:
+
+```python
+from weakincentives.optimizers import OptimizationContext, WorkspaceDigestOptimizer
+
+context = OptimizationContext(
+    adapter=adapter,
+    event_bus=bus,
+    overrides_store=LangfusePromptOverridesStore(),
+    overrides_tag="optimized",
+)
+
+optimizer = WorkspaceDigestOptimizer(context)
+result = optimizer.optimize(prompt, session=session)
+
+# Workspace digest persisted to Langfuse under tag "optimized"
+```
+
+### Environment Variables
+
+Additional variables for the prompt store:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LANGFUSE_PROMPT_CACHE_TTL` | `60` | Cache TTL in seconds |
+| `LANGFUSE_PROMPT_FALLBACK` | `"false"` | Enable local fallback (`"true"/"false"`) |
+
+### Logging
+
+| Event | Level | Context Fields |
+|-------|-------|----------------|
+| `langfuse_prompt_resolved` | INFO | `prompt_name`, `tag`, `section_count` |
+| `langfuse_prompt_cached` | DEBUG | `prompt_name`, `tag`, `ttl` |
+| `langfuse_prompt_cache_hit` | DEBUG | `prompt_name`, `tag` |
+| `langfuse_prompt_upserted` | INFO | `prompt_name`, `tag`, `version_id` |
+| `langfuse_prompt_fallback` | WARNING | `prompt_name`, `tag`, `reason` |
+| `langfuse_hash_mismatch` | WARNING | `section_path`, `expected`, `actual` |
+
+### Limitations
+
+- **No delete support**: Langfuse prompts cannot be deleted via API; use the
+  Langfuse UI to archive prompts.
+- **Version immutability**: Once a version is created in Langfuse, its content
+  cannot be modified. Use a new version/tag instead.
+- **No atomic multi-section updates**: Each `set_section_override` creates a new
+  version. For bulk updates, use `upsert` with a complete `PromptOverride`.
+- **Rate limiting**: Langfuse API calls are subject to rate limits. Use caching
+  and batch operations where possible.
+
 ## Limitations
 
 - **Async not supported**: The integration is synchronous-only, matching WINK's
   threading model. Async adapters would require a separate implementation.
-- **No prompt management**: This integration focuses on observability. Langfuse
-  prompt versioning integration is out of scope.
 - **Single generation per evaluation**: Multi-turn conversations within a single
   `evaluate()` call create one generation with multiple tool spans. Each retry
   in the inner loop is not separately tracked.
@@ -594,14 +945,13 @@ The integration uses structured logging consistent with `specs/LOGGING.md`:
 
 ## Future Considerations
 
-- **Langfuse Prompt Management**: Pull prompt templates from Langfuse and use
-  them in WINK prompts. This would require a `LangfusePromptStore` that
-  implements a prompt override interface.
 - **Evaluation Integration**: Send structured outputs to Langfuse for automated
   evaluation pipelines.
 - **Dataset Generation**: Capture prompt/response pairs for fine-tuning datasets.
 - **Cost Tracking**: Add model pricing configuration to compute costs from token
   usage.
+- **Bidirectional Sync**: Automatically push local override changes to Langfuse
+  and pull Langfuse changes to local files.
 
 ## Dependencies
 
