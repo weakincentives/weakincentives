@@ -5,16 +5,17 @@
 The `wink debug` command provides tools for inspecting session snapshot files.
 It supports two modes:
 
-1. **Static site generation** (default): Produces a set of static files that can
-   be published to any web server with an arbitrary path prefix
-2. **Development server**: Runs a local server for interactive debugging with
-   live reload support
+1. **Server mode** (default): Launches a local server that generates static
+   files to a temporary directory and serves them for interactive debugging
+2. **Static export**: Produces a set of static files to a user-specified
+   directory that can be published to any web server with an arbitrary path
+   prefix
 
 ## CLI Contract
 
 ```
+wink debug <snapshot_path> [--host HOST] [--port PORT] [--open-browser]
 wink debug <snapshot_path> --output <dir> [--base-path PATH]
-wink debug <snapshot_path> --serve [--host HOST] [--port PORT] [--open-browser]
 ```
 
 ### Common Arguments
@@ -23,21 +24,20 @@ wink debug <snapshot_path> --serve [--host HOST] [--port PORT] [--open-browser]
 |----------|----------|---------|-------------|
 | `snapshot_path` | Yes | - | Path to a JSONL snapshot file or directory containing snapshots |
 
-### Static Generation Arguments
+### Server Mode Arguments (Default)
 
 | Argument | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `--output` | Yes | - | Output directory for static files |
-| `--base-path` | No | `/` | URL path prefix for deployment (e.g., `/reports/` or `/debug/session-123/`) |
-
-### Server Mode Arguments
-
-| Argument | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `--serve` | Yes | - | Enable development server mode |
 | `--host` | No | `127.0.0.1` | Host interface to bind the server |
 | `--port` | No | `8000` | Port to bind the server |
 | `--open-browser` | No | `True` | Open the default browser automatically |
+
+### Static Export Arguments
+
+| Argument | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `--output` | No | - | Output directory for static files (enables static export mode) |
+| `--base-path` | No | `/` | URL path prefix for deployment (e.g., `/reports/` or `/debug/session-123/`) |
 
 ### Global Options
 
@@ -57,18 +57,55 @@ The CLI inherits global options from the `wink` command:
 | `3` | Server failed to start (server mode only) |
 | `4` | Output directory error (static mode only) |
 
-## Static Site Generation
+## Server Mode (Default)
+
+Server mode generates static files to a temporary directory and serves them
+via a local HTTP server. This provides an interactive debugging experience
+with the same static file structure used for export.
 
 ### Usage Examples
 
 ```bash
-# Generate static site from a snapshot file
+# Start debug server (default behavior)
+wink debug session.jsonl
+
+# Custom host and port
+wink debug session.jsonl --host 0.0.0.0 --port 3000
+
+# Without auto-opening browser
+wink debug session.jsonl --no-open-browser
+
+# From a directory of snapshots
+wink debug ./snapshots/
+```
+
+### Server Behavior
+
+1. Generates static files to a temporary directory
+2. Starts an HTTP server to serve those files
+3. Opens the browser automatically (unless `--no-open-browser`)
+4. Watches for changes and regenerates on reload (via UI reload button)
+5. Cleans up the temporary directory on exit
+
+The temporary directory uses the same structure as static export, allowing
+the JavaScript application to work identically in both modes.
+
+## Static Export
+
+When `--output` is specified, the command generates static files to the
+given directory and exits. The output can be published to any static file
+server.
+
+### Usage Examples
+
+```bash
+# Export static site from a snapshot file
 wink debug session.jsonl --output ./site
 
-# Generate with custom base path for deployment at /reports/
+# Export with custom base path for deployment at /reports/
 wink debug session.jsonl --output ./site --base-path /reports/
 
-# Generate from a directory of snapshots
+# Export from a directory of snapshots
 wink debug ./snapshots/ --output ./site
 ```
 
@@ -172,146 +209,40 @@ Slice types are similarly URL-encoded:
 - `mymodule.Plan` → `mymodule.Plan`
 - `mymodule.Plan<T>` → `mymodule.Plan%3CT%3E`
 
-## Development Server Mode
+## API Routes (Server Mode)
 
-Server mode provides a live development experience with dynamic data loading
-and reload capabilities.
-
-### Usage Examples
-
-```bash
-# Start development server
-wink debug session.jsonl --serve
-
-# Custom host and port
-wink debug session.jsonl --serve --host 0.0.0.0 --port 3000
-
-# Without auto-opening browser
-wink debug session.jsonl --serve --no-open-browser
-```
-
-### API Routes (Server Mode Only)
-
-These routes are only available in server mode:
+In server mode, the server primarily serves static files. One API route
+provides reload functionality:
 
 #### `GET /`
 
-Returns the HTML index page for the web UI.
+Serves `index.html` from the generated static files.
 
-#### `GET /api/meta`
+#### `GET /static/*`
 
-Returns metadata for the currently selected snapshot entry.
+Serves static assets (CSS, JavaScript).
 
-```json
-{
-  "version": "1",
-  "created_at": "2024-01-15T10:30:00+00:00",
-  "path": "/path/to/snapshot.jsonl",
-  "session_id": "abc123",
-  "line_number": 1,
-  "tags": {"session_id": "abc123", "custom_tag": "value"},
-  "validation_error": null,
-  "slices": [
-    {"slice_type": "mymodule.Plan", "item_type": "mymodule.Plan", "count": 3}
-  ]
-}
-```
+#### `GET /data/*`
 
-#### `GET /api/entries`
-
-Lists all snapshot entries in the current file.
-
-```json
-[
-  {
-    "session_id": "abc123",
-    "name": "abc123 (line 1)",
-    "path": "/path/to/snapshot.jsonl",
-    "line_number": 1,
-    "created_at": "2024-01-15T10:30:00+00:00",
-    "tags": {"session_id": "abc123"},
-    "selected": true
-  }
-]
-```
-
-#### `GET /api/slices/{encoded_slice_type}`
-
-Returns items from a specific slice. The `encoded_slice_type` must be
-URL-encoded (e.g., `mymodule.Plan` → `mymodule.Plan`).
-
-Query parameters:
-
-- `offset` (int, >= 0): Skip this many items
-- `limit` (int, >= 0, optional): Return at most this many items
-
-```json
-{
-  "slice_type": "mymodule.Plan",
-  "item_type": "mymodule.Plan",
-  "items": [
-    {"field": "value", "__markdown__": {"text": "# Header", "html": "<h1>Header</h1>"}}
-  ]
-}
-```
-
-#### `GET /api/raw`
-
-Returns the raw JSON payload of the current snapshot entry without any
-transformation.
+Serves generated JSON data files.
 
 #### `POST /api/reload`
 
-Reloads the current snapshot file from disk. If the previously selected
-`session_id` still exists, it remains selected; otherwise, the first entry
-is selected.
+Regenerates all static files from the source snapshot files. This allows
+refreshing the view when snapshot files change on disk.
 
-Returns the updated metadata (same format as `/api/meta`).
-
-#### `GET /api/snapshots`
-
-Lists all snapshot files in the root directory, sorted by modification time
-(newest first).
-
-```json
-[
-  {
-    "path": "/path/to/snapshot.jsonl",
-    "name": "snapshot.jsonl",
-    "created_at": "2024-01-15T10:30:00+00:00"
-  }
-]
-```
-
-#### `POST /api/select`
-
-Selects a different entry within the current snapshot file.
-
-Request body (one of):
-
-```json
-{"session_id": "abc123"}
-{"line_number": 1}
-```
-
-Returns the updated metadata.
-
-#### `POST /api/switch`
-
-Switches to a different snapshot file. The file must be under the same root
-directory established at startup.
-
-Request body:
+Returns:
 
 ```json
 {
-  "path": "/path/to/other-snapshot.jsonl",
-  "session_id": "optional-session-id",
-  "line_number": null
+  "success": true,
+  "generated_at": "2024-01-15T10:30:00+00:00"
 }
 ```
 
-Returns the updated metadata.
+All other navigation (selecting entries, switching snapshots, viewing slices)
+is handled client-side by the JavaScript application loading the appropriate
+JSON files from `data/`.
 
 ## Snapshot Loading
 
@@ -320,14 +251,14 @@ Returns the updated metadata.
 When `snapshot_path` is a directory:
 
 1. Glob for `*.jsonl` and `*.json` files
-1. Sort by modification time (newest first)
-1. Load all files (static mode) or the most recent file (server mode)
-1. Use the directory as the root for snapshot switching
+2. Sort by modification time (newest first)
+3. Load all files found
+4. Use the directory as the root for discovering snapshots
 
 When `snapshot_path` is a file:
 
 1. Load the specified file directly
-1. Use the parent directory as the root for snapshot switching
+2. Use the parent directory as the root for discovering other snapshots
 
 ### JSONL Format
 
@@ -407,34 +338,31 @@ class SliceSummary:
     count: int
 ```
 
-### SnapshotStore (Server Mode)
+### SnapshotStore
 
-Thread-safe in-memory store for loaded snapshots with support for:
+Manages snapshot loading and static file generation:
 
-- Loading entries from a snapshot file
-- Selecting entries by `session_id` or `line_number`
-- Reloading the current file from disk
-- Switching to a different file within the root directory
-- Listing available snapshot files
+- Loading entries from snapshot files
+- Iterating over all snapshots in a directory
+- Generating static JSON files for each entry
+- Re-generating files on reload request
 
 ## Static Assets
 
-The web UI is served from `src/weakincentives/cli/static/`:
+The web UI source files are in `src/weakincentives/cli/static/`:
 
 | File | Purpose |
 |------|---------|
 | `index.html` | Main HTML page |
 | `style.css` | Stylesheet |
-| `app.js` | Client-side JavaScript (supports both static and server modes) |
+| `app.js` | Client-side JavaScript |
 
-In server mode, static files are mounted at `/static/`.
+These files are copied to the output directory (or temporary directory in
+server mode) along with the generated `data/` directory.
 
-In static mode, files are copied to the output directory preserving structure.
+## Client-Side Navigation
 
-## Client-Side Navigation (Static Mode)
-
-In static mode, navigation is handled entirely client-side using URL hash
-fragments:
+All navigation is handled client-side using URL hash fragments:
 
 ```
 index.html#file=session.jsonl&entry=1
@@ -453,49 +381,44 @@ This approach ensures:
 - All links are shareable and bookmarkable
 - Browser back/forward navigation works correctly
 - No server-side routing required
+- Identical behavior in server mode and static export
 
 ## Logging
 
 | Event | Level | Context |
 |-------|-------|---------|
 | `wink.debug.snapshot_error` | WARNING | `path`, `line_number`, `error` |
-| `debug.build.start` | INFO | `output`, `base_path` |
-| `debug.build.snapshot` | INFO | `file`, `entry_count` |
-| `debug.build.complete` | INFO | `output`, `file_count` |
-| `debug.server.start` | INFO | `url` |
-| `debug.server.reload` | INFO | `path` |
-| `debug.server.reload_failed` | WARNING | `path`, `error` |
-| `debug.server.switch` | INFO | `path` |
+| `debug.generate.start` | INFO | `output`, `base_path` |
+| `debug.generate.snapshot` | INFO | `file`, `entry_count` |
+| `debug.generate.complete` | INFO | `output`, `file_count` |
+| `debug.server.start` | INFO | `url`, `temp_dir` |
+| `debug.server.reload` | INFO | `temp_dir` |
 | `debug.server.error` | ERROR | `url`, `error` |
 | `debug.server.browser` | WARNING | `url`, `error` |
 
 ## Implementation Notes
 
-### Static Generation
+### Static File Generation
 
-- Uses the same snapshot loading logic as server mode
 - Pre-renders all Markdown at generation time
 - Writes atomic JSON files with proper encoding
 - Generates deterministic output (same input → same output)
+- Uses markdown-it for Markdown rendering
 
 ### Server Mode
 
-- Uses FastAPI for the HTTP server
-- Uses uvicorn as the ASGI server
-- Uses markdown-it for Markdown rendering
+- Generates static files to a temporary directory on startup
+- Uses a simple HTTP server (e.g., `http.server` or similar) to serve files
+- Provides `/api/reload` endpoint to regenerate files
 - Browser opening uses a 0.2-second timer to avoid blocking server startup
-- Snapshot path validation restricts file switching to the initial root directory
+- Temporary directory is cleaned up on exit
 
-### JavaScript Mode Detection
+### Unified JavaScript
 
-The client-side JavaScript detects which mode it's running in:
+The JavaScript application works identically in both modes:
 
-```javascript
-// Check if running in static mode by looking for manifest
-const isStaticMode = await fetch('data/manifest.json')
-  .then(() => true)
-  .catch(() => false);
-```
-
-In static mode, it loads data from JSON files. In server mode, it uses the
-API endpoints.
+1. Loads `data/manifest.json` to discover available data
+2. Uses URL hash for all navigation state
+3. Fetches JSON files from `data/` as needed
+4. Calls `/api/reload` for the reload button (server mode only; gracefully
+   fails in static export)
