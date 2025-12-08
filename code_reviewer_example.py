@@ -211,8 +211,21 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         if self._session.query(WorkspaceDigest).latest() is None:
             self._run_optimization()
         effective_deadline = deadline or _default_deadline()
+        return super().execute(request, budget=budget, deadline=effective_deadline)
 
-        # Override the evaluation loop to capture visibility transitions
+    def _evaluate_loop(
+        self,
+        session: Session,
+        request: ReviewTurnParams,
+        *,
+        budget: None = None,
+        deadline: Deadline | None = None,
+    ) -> PromptResponse[ReviewResponse]:
+        """Evaluation loop that records visibility transitions.
+
+        Extends the parent implementation to capture section expansion
+        rationale in the session's task history context.
+        """
         prompt = self.create_prompt(request)
         visibility_overrides: dict[tuple[str, ...], SectionVisibility] = {}
 
@@ -220,15 +233,15 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             try:
                 return self._adapter.evaluate(
                     prompt,
-                    session=self._session,
+                    session=session,
                     visibility_overrides=visibility_overrides,
-                    deadline=effective_deadline,
+                    deadline=deadline,
                 )
             except VisibilityExpansionRequired as e:
-                # Record the transition with the model's rationale
+                # Record each transition with the model's rationale
                 for section_path in e.requested_overrides:
                     record_visibility_transition(
-                        self._session,
+                        session,
                         section_path=section_path,
                         reason=e.reason,
                     )
