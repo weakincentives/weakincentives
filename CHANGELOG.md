@@ -2,6 +2,15 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Session Runtime
+
+- Added `session.transaction()` context manager for batching multiple mutations
+  into a single atomic update. All mutations within the block share a single
+  lock acquisition, and state is automatically rolled back if an exception
+  occurs.
+
 ## v0.13.0 - 2025-12-07
 
 ### MainLoop Orchestration

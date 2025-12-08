@@ -173,6 +173,31 @@ session.mutate().rollback(snapshot)    # Restore from snapshot
 - `reset()` - Clear all stored slices while preserving reducer registrations.
 - `rollback(snapshot)` - Restore session slices from the provided snapshot.
 
+### Transaction Context
+
+The `transaction()` context manager batches multiple mutations into a single
+atomic update, avoiding multiple lock acquisitions and providing automatic
+rollback on error:
+
+```python
+with session.transaction():
+    session.mutate(Plan).clear()
+    session.mutate(Plan).seed(new_plans)
+```
+
+**Behavior:**
+
+- All mutations within the block share a single lock acquisition
+- If any exception occurs, state is rolled back to the pre-transaction snapshot
+- On successful completion, all mutations are committed atomically
+- Nested transactions are supported (using reentrant lock semantics)
+
+**Use cases:**
+
+- Clearing and re-seeding a slice atomically
+- Updating multiple related slices together
+- Ensuring consistency when mutations depend on each other
+
 ### Session Hierarchy
 
 Sessions form a tree for nested orchestration:

@@ -206,6 +206,29 @@ class Session(SessionProtocol):
         with self._lock:
             yield
 
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Batch multiple mutations into a single atomic update.
+
+        All mutations within the transaction block share a single lock
+        acquisition. If an exception occurs, state is rolled back to the
+        pre-transaction snapshot.
+
+        Usage::
+
+            with session.transaction():
+                session.mutate(Plan).clear()
+                session.mutate(Plan).seed(new_plans)
+
+        """
+        with self.locked():
+            snapshot = dict(self._state)
+            try:
+                yield
+            except Exception:
+                self._state = snapshot
+                raise
+
     def clone(
         self,
         *,

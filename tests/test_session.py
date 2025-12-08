@@ -1161,3 +1161,100 @@ def test_subscription_repr(session_factory: SessionFactory) -> None:
     assert "Subscription" in result
     assert "subscription_id" in result
     assert str(subscription.subscription_id) in result
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Transaction API tests
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_transaction_commits_on_success(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).seed(ExampleOutput(text="initial"))
+
+    with session.transaction():
+        session.mutate(ExampleOutput).clear()
+        session.mutate(ExampleOutput).seed(ExampleOutput(text="replaced"))
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="replaced"),)
+
+
+def test_transaction_rolls_back_on_exception(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).seed(ExampleOutput(text="initial"))
+
+    with pytest.raises(ValueError), session.transaction():
+        session.mutate(ExampleOutput).clear()
+        session.mutate(ExampleOutput).seed(ExampleOutput(text="replaced"))
+        raise ValueError("simulated error")
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="initial"),)
+
+
+def test_transaction_batches_multiple_mutations(
+    session_factory: SessionFactory,
+) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).seed(
+        [ExampleOutput(text="first"), ExampleOutput(text="second")]
+    )
+    session.mutate(ExamplePayload).seed(ExamplePayload(value=1))
+
+    with session.transaction():
+        session.mutate(ExampleOutput).clear()
+        session.mutate(ExamplePayload).clear()
+        session.mutate(ExampleOutput).seed(ExampleOutput(text="new"))
+        session.mutate(ExamplePayload).seed(ExamplePayload(value=2))
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="new"),)
+    assert session.query(ExamplePayload).all() == (ExamplePayload(value=2),)
+
+
+def test_transaction_rollback_restores_multiple_slices(
+    session_factory: SessionFactory,
+) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).seed(ExampleOutput(text="initial"))
+    session.mutate(ExamplePayload).seed(ExamplePayload(value=1))
+
+    with pytest.raises(RuntimeError), session.transaction():
+        session.mutate(ExampleOutput).clear()
+        session.mutate(ExamplePayload).clear()
+        raise RuntimeError("simulated error")
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="initial"),)
+    assert session.query(ExamplePayload).all() == (ExamplePayload(value=1),)
+
+
+def test_transaction_nested_transactions(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).seed(ExampleOutput(text="initial"))
+
+    with session.transaction():
+        session.mutate(ExampleOutput).seed(ExampleOutput(text="outer"))
+        with session.transaction():
+            session.mutate(ExampleOutput).seed(ExampleOutput(text="inner"))
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="inner"),)
+
+
+def test_transaction_nested_rollback_preserves_outer_snapshot(
+    session_factory: SessionFactory,
+) -> None:
+    session, _ = session_factory()
+
+    session.mutate(ExampleOutput).seed(ExampleOutput(text="initial"))
+
+    with pytest.raises(RuntimeError), session.transaction():
+        session.mutate(ExampleOutput).seed(ExampleOutput(text="outer"))
+        with pytest.raises(ValueError), session.transaction():
+            session.mutate(ExampleOutput).seed(ExampleOutput(text="inner"))
+            raise ValueError("inner error")
+        raise RuntimeError("outer error")
+
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="initial"),)
