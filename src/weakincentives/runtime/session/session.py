@@ -92,15 +92,21 @@ _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
 EMPTY_SLICE: SessionSlice = ()
 
 
-def _append_event(
+def _append_raw(
     slice_values: tuple[SupportsDataclass, ...],
     event: ReducerEvent,
     *,
     context: ReducerContextProtocol,
 ) -> tuple[SupportsDataclass, ...]:
+    """Append event without deduplication (for event log slices).
+
+    Unlike :func:`reducers.append`, this function always appends the event
+    even if an equivalent value already exists. This is intentional for
+    event log slices (ToolInvoked, PromptExecuted) where every event must
+    be recorded.
+    """
     del context
-    appended = cast(SupportsDataclass, event)
-    return (*slice_values, appended)
+    return (*slice_values, cast(SupportsDataclass, event))
 
 
 @dataclass(slots=True)
@@ -537,7 +543,7 @@ class Session(SessionProtocol):
             if not registrations:
                 default_reducer: TypedReducer[Any]
                 if data_type in {_TOOL_INVOKED_TYPE, _PROMPT_EXECUTED_TYPE}:
-                    default_reducer = cast(TypedReducer[Any], _append_event)
+                    default_reducer = cast(TypedReducer[Any], _append_raw)
                 else:
                     default_reducer = cast(TypedReducer[Any], append)
                 registrations = [
