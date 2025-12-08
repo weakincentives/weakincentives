@@ -474,11 +474,14 @@ class PromptRegistry:
 
         self._tool_name_registry[tool.name] = path
 
-    def snapshot(self) -> RegistrySnapshot:
+    def snapshot(
+        self,
+        structured_output_type: type[SupportsDataclass] | None = None,
+    ) -> RegistrySnapshot:
         """Return an immutable snapshot of the registered sections."""
 
         # Validate task examples after all sections are registered
-        self._validate_task_examples()
+        self._validate_task_examples(structured_output_type)
 
         params_registry: dict[
             type[SupportsDataclass], tuple[SectionNode[SupportsDataclass], ...]
@@ -502,7 +505,10 @@ class PromptRegistry:
             tool_name_registry=tool_name_registry,
         )
 
-    def _validate_task_examples(self) -> None:
+    def _validate_task_examples(
+        self,
+        structured_output_type: type[SupportsDataclass] | None = None,
+    ) -> None:
         """Validate task example tool references and type coherence."""
         # Import here to avoid circular imports
         from .task_examples import TaskExample
@@ -525,6 +531,46 @@ class PromptRegistry:
                 task_example,
                 node.path,
                 tool_instances,
+            )
+            PromptRegistry._validate_task_example_outcome(
+                task_example,
+                node.path,
+                structured_output_type,
+            )
+
+    @staticmethod
+    def _validate_task_example_outcome(
+        task_example: object,
+        path: SectionPath,
+        structured_output_type: type[SupportsDataclass] | None,
+    ) -> None:
+        """Validate that task example outcome matches prompt's output type."""
+        outcome = getattr(task_example, "outcome", None)
+
+        if structured_output_type is None:
+            # Prompt has no structured output - outcome must be a string
+            if not isinstance(outcome, str):
+                msg = (
+                    f"Task example outcome must be a string when prompt has no "
+                    f"structured output. Got: {type(outcome).__name__}."
+                )
+                raise PromptValidationError(
+                    msg,
+                    section_path=path,
+                    placeholder="outcome",
+                )
+        elif type(outcome) is not structured_output_type:
+            # Prompt has structured output - outcome must be instance of that type
+            expected = structured_output_type.__name__
+            actual = type(outcome).__name__
+            msg = (
+                f"Task example outcome type mismatch. "
+                f"Expected: {expected}, got: {actual}."
+            )
+            raise PromptValidationError(
+                msg,
+                section_path=path,
+                placeholder="outcome",
             )
 
     def _validate_task_example_steps(

@@ -68,6 +68,14 @@ class ReportResult:
     issue_id: str
 
 
+@dataclass(slots=True, frozen=True)
+class AnalysisOutput:
+    """Structured output type for testing typed outcomes."""
+
+    summary: str
+    issues_found: int
+
+
 def read_handler(params: ReadParams, *, context: ToolContext) -> ToolResult[ReadResult]:
     del context
     return ToolResult(
@@ -258,46 +266,6 @@ class TestTaskExample:
             )
 
         assert "objective must be <= 500 characters" in str(exc.value)
-
-    def test_taskexample_validates_empty_outcome(self) -> None:
-        with pytest.raises(PromptValidationError) as exc:
-            TaskExample(
-                key="bad",
-                objective="Valid objective",
-                outcome="",
-                steps=[
-                    TaskStep(
-                        tool_name="test",
-                        example=ToolExample(
-                            description="Step",
-                            input=ReadParams(path="x"),
-                            output=ReadResult(content="y"),
-                        ),
-                    ),
-                ],
-            )
-
-        assert "outcome must not be empty" in str(exc.value)
-
-    def test_taskexample_validates_outcome_too_long(self) -> None:
-        with pytest.raises(PromptValidationError) as exc:
-            TaskExample(
-                key="bad",
-                objective="Valid",
-                outcome="A" * 501,
-                steps=[
-                    TaskStep(
-                        tool_name="test",
-                        example=ToolExample(
-                            description="Step",
-                            input=ReadParams(path="x"),
-                            output=ReadResult(content="y"),
-                        ),
-                    ),
-                ],
-            )
-
-        assert "outcome must be <= 500 characters" in str(exc.value)
 
     def test_taskexample_validates_non_ascii_objective(self) -> None:
         with pytest.raises(PromptValidationError) as exc:
@@ -612,6 +580,30 @@ class TestTaskExampleRendering:
         assert '{"path": "src/auth.py"}' in rendered
         assert '{"content": "def authenticate(): ..."}' in rendered
         assert "**Outcome:** Found 2 vulnerabilities" in rendered
+
+    def test_taskexample_render_dataclass_outcome(self) -> None:
+        """Test that dataclass outcomes render as JSON."""
+        example = TaskExample(
+            key="dataclass-outcome",
+            objective="Test dataclass outcome rendering",
+            outcome=AnalysisOutput(summary="Test complete", issues_found=5),
+            steps=[
+                TaskStep(
+                    tool_name="read_file",
+                    example=ToolExample(
+                        description="Read the file",
+                        input=ReadParams(path="src/main.py"),
+                        output=ReadResult(content="content"),
+                    ),
+                ),
+            ],
+        )
+
+        rendered = example.render(None, depth=0, number="1")
+
+        assert "**Outcome:**" in rendered
+        assert '"summary": "Test complete"' in rendered
+        assert '"issues_found": 5' in rendered
 
     def test_taskexample_render_multiple_steps(self) -> None:
         example = TaskExample(
@@ -995,6 +987,198 @@ class TestTaskExamplesIntegration:
 
         rendered = Prompt(template).render()
         assert "Test" in rendered.text
+
+    def test_prompt_string_outcome_for_unstructured_output(
+        self,
+        read_tool: Tool[ReadParams, ReadResult],
+    ) -> None:
+        """String outcome is valid for prompts without structured output."""
+        tools_section = MarkdownSection(
+            key="tools",
+            title="Tools",
+            template="Tools:",
+            tools=[read_tool],
+        )
+
+        example = TaskExample(
+            key="string-outcome",
+            objective="Test string outcome",
+            outcome="Task completed successfully",
+            steps=[
+                TaskStep(
+                    tool_name="read_file",
+                    example=ToolExample(
+                        description="Read file",
+                        input=ReadParams(path="test.py"),
+                        output=ReadResult(content="content"),
+                    ),
+                ),
+            ],
+        )
+
+        # Should succeed - string outcome for unstructured prompt
+        template = PromptTemplate(
+            ns="test",
+            key="string-outcome-test",
+            sections=[tools_section, TaskExamplesSection(examples=[example])],
+        )
+
+        rendered = Prompt(template).render()
+        assert "Task completed successfully" in rendered.text
+
+    def test_prompt_dataclass_outcome_for_unstructured_output_fails(
+        self,
+        read_tool: Tool[ReadParams, ReadResult],
+    ) -> None:
+        """Dataclass outcome is invalid for prompts without structured output."""
+        tools_section = MarkdownSection(
+            key="tools",
+            title="Tools",
+            template="Tools:",
+            tools=[read_tool],
+        )
+
+        example = TaskExample(
+            key="bad-outcome",
+            objective="Test bad outcome",
+            outcome=AnalysisOutput(summary="test", issues_found=0),
+            steps=[
+                TaskStep(
+                    tool_name="read_file",
+                    example=ToolExample(
+                        description="Read file",
+                        input=ReadParams(path="test.py"),
+                        output=ReadResult(content="content"),
+                    ),
+                ),
+            ],
+        )
+
+        with pytest.raises(PromptValidationError) as exc:
+            PromptTemplate(
+                ns="test",
+                key="bad-outcome-test",
+                sections=[tools_section, TaskExamplesSection(examples=[example])],
+            )
+
+        assert "outcome must be a string" in str(exc.value)
+        assert "no structured output" in str(exc.value)
+
+    def test_prompt_dataclass_outcome_for_structured_output(
+        self,
+        read_tool: Tool[ReadParams, ReadResult],
+    ) -> None:
+        """Dataclass outcome matching output type is valid for structured prompts."""
+        tools_section = MarkdownSection(
+            key="tools",
+            title="Tools",
+            template="Tools:",
+            tools=[read_tool],
+        )
+
+        example = TaskExample(
+            key="typed-outcome",
+            objective="Test typed outcome",
+            outcome=AnalysisOutput(summary="Analysis complete", issues_found=3),
+            steps=[
+                TaskStep(
+                    tool_name="read_file",
+                    example=ToolExample(
+                        description="Read file",
+                        input=ReadParams(path="test.py"),
+                        output=ReadResult(content="content"),
+                    ),
+                ),
+            ],
+        )
+
+        # Should succeed - dataclass outcome matches prompt output type
+        template = PromptTemplate[AnalysisOutput](
+            ns="test",
+            key="typed-outcome-test",
+            sections=[tools_section, TaskExamplesSection(examples=[example])],
+        )
+
+        rendered = Prompt(template).render()
+        assert "Analysis complete" in rendered.text
+        assert '"issues_found": 3' in rendered.text
+
+    def test_prompt_string_outcome_for_structured_output_fails(
+        self,
+        read_tool: Tool[ReadParams, ReadResult],
+    ) -> None:
+        """String outcome is invalid for prompts with structured output."""
+        tools_section = MarkdownSection(
+            key="tools",
+            title="Tools",
+            template="Tools:",
+            tools=[read_tool],
+        )
+
+        example = TaskExample(
+            key="bad-string-outcome",
+            objective="Test bad string outcome",
+            outcome="This should be AnalysisOutput",
+            steps=[
+                TaskStep(
+                    tool_name="read_file",
+                    example=ToolExample(
+                        description="Read file",
+                        input=ReadParams(path="test.py"),
+                        output=ReadResult(content="content"),
+                    ),
+                ),
+            ],
+        )
+
+        with pytest.raises(PromptValidationError) as exc:
+            PromptTemplate[AnalysisOutput](
+                ns="test",
+                key="bad-string-outcome-test",
+                sections=[tools_section, TaskExamplesSection(examples=[example])],
+            )
+
+        assert "outcome type mismatch" in str(exc.value)
+        assert "AnalysisOutput" in str(exc.value)
+
+    def test_prompt_wrong_dataclass_outcome_fails(
+        self,
+        read_tool: Tool[ReadParams, ReadResult],
+    ) -> None:
+        """Wrong dataclass type for outcome fails validation."""
+        tools_section = MarkdownSection(
+            key="tools",
+            title="Tools",
+            template="Tools:",
+            tools=[read_tool],
+        )
+
+        example = TaskExample(
+            key="wrong-type-outcome",
+            objective="Test wrong type outcome",
+            outcome=ReadResult(content="wrong type"),  # Should be AnalysisOutput
+            steps=[
+                TaskStep(
+                    tool_name="read_file",
+                    example=ToolExample(
+                        description="Read file",
+                        input=ReadParams(path="test.py"),
+                        output=ReadResult(content="content"),
+                    ),
+                ),
+            ],
+        )
+
+        with pytest.raises(PromptValidationError) as exc:
+            PromptTemplate[AnalysisOutput](
+                ns="test",
+                key="wrong-type-outcome-test",
+                sections=[tools_section, TaskExamplesSection(examples=[example])],
+            )
+
+        assert "outcome type mismatch" in str(exc.value)
+        assert "AnalysisOutput" in str(exc.value)
+        assert "ReadResult" in str(exc.value)
 
 
 @dataclass(slots=True, frozen=True)

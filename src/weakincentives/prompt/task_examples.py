@@ -30,8 +30,6 @@ from .tool import ToolExample
 
 _OBJECTIVE_MIN_LENGTH: Final = 1
 _OBJECTIVE_MAX_LENGTH: Final = 500
-_OUTCOME_MIN_LENGTH: Final = 1
-_OUTCOME_MAX_LENGTH: Final = 500
 _TITLE_TRUNCATE_LENGTH: Final = 60
 
 _TOOL_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9_-]{1,64}$")
@@ -42,6 +40,9 @@ TaskExampleParamsT = TypeVar(
 TaskExamplesParamsT = TypeVar(
     "TaskExamplesParamsT", bound=SupportsDataclass, covariant=True
 )
+
+# Outcome type - either string (for unstructured prompts) or a dataclass
+OutcomeT = TypeVar("OutcomeT", bound="str | SupportsDataclass", covariant=True)
 
 
 @dataclass(slots=True, frozen=True)
@@ -112,15 +113,30 @@ def _render_step_value(value: SupportsDataclass | None) -> str:
     return json.dumps(serialized, ensure_ascii=False)
 
 
+def _render_outcome(outcome: str | SupportsDataclass) -> str:
+    """Render outcome as string or JSON for dataclass types."""
+    if isinstance(outcome, str):
+        return outcome
+    serialized = dump(outcome, exclude_none=True)
+    return json.dumps(serialized, ensure_ascii=False)
+
+
 class TaskExample(Section[TaskExampleParamsT]):
-    """Section representing a single task trajectory example."""
+    """Section representing a single task trajectory example.
+
+    The outcome type must match the PromptTemplate's output type:
+    - For prompts with structured output (PromptTemplate[OutputType]), outcome must be OutputType
+    - For prompts without structured output, outcome must be a string
+    """
+
+    outcome: str | SupportsDataclass
 
     def __init__(  # noqa: PLR0913
         self,
         *,
         key: str,
         objective: str,
-        outcome: str,
+        outcome: str | SupportsDataclass,
         steps: Sequence[TaskStep[Any, Any]],
         title: str | None = None,
         default_params: TaskExampleParamsT | None = None,
@@ -135,15 +151,6 @@ class TaskExample(Section[TaskExampleParamsT]):
             field_name="objective",
             min_length=_OBJECTIVE_MIN_LENGTH,
             max_length=_OBJECTIVE_MAX_LENGTH,
-            section_path=(key,),
-        )
-
-        # Validate outcome
-        validated_outcome = _validate_ascii_text(
-            outcome,
-            field_name="outcome",
-            min_length=_OUTCOME_MIN_LENGTH,
-            max_length=_OUTCOME_MAX_LENGTH,
             section_path=(key,),
         )
 
@@ -170,7 +177,7 @@ class TaskExample(Section[TaskExampleParamsT]):
             validated_steps.append(step)
 
         self.objective = validated_objective
-        self.outcome = validated_outcome
+        self.outcome = outcome
         self.steps: tuple[TaskStep[Any, Any], ...] = tuple(validated_steps)
 
         # Derive title from objective if not provided
@@ -241,7 +248,7 @@ class TaskExample(Section[TaskExampleParamsT]):
             lines.append("     ```")
             lines.append("")
 
-        lines.append(f"**Outcome:** {self.outcome}")
+        lines.append(f"**Outcome:** {_render_outcome(self.outcome)}")
 
         return "\n".join(lines)
 
