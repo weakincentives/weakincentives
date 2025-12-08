@@ -76,7 +76,7 @@ This ensures DSPy operations get:
 import dspy
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.runtime import Session, InProcessEventBus
-from weakincentives.dspy import WeakIncentivesLM
+from weakincentives.optimizers.dspy import WeakIncentivesLM
 
 adapter = OpenAIAdapter(model="gpt-4o")
 bus = InProcessEventBus()
@@ -149,16 +149,126 @@ def persist_to_overrides(
         )
 ```
 
-## Example: BootstrapFewShot Optimization
+## BootstrapFewShotOptimizer
 
-Using the building blocks to run DSPy's BootstrapFewShot:
+A `BasePromptOptimizer` implementation that wraps DSPy's BootstrapFewShot:
+
+```python
+@dataclass(slots=True, frozen=True)
+class BootstrapFewShotResult:
+    """Result from bootstrap few-shot optimization."""
+    optimized_sections: dict[tuple[str, ...], str]
+    demos_count: int
+
+
+class BootstrapFewShotOptimizer(BasePromptOptimizer[object, BootstrapFewShotResult]):
+    """
+    Generate few-shot demonstrations using DSPy's BootstrapFewShot.
+
+    Wraps DSPy optimization in the weakincentives optimizer protocol,
+    handling LM configuration, event emission, and override persistence.
+    """
+
+    def __init__(
+        self,
+        context: OptimizationContext,
+        *,
+        trainset: Sequence[dspy.Example],
+        metric: Callable[[dspy.Example, dspy.Prediction], bool | float],
+        max_bootstrapped_demos: int = 4,
+        max_labeled_demos: int = 16,
+    ) -> None:
+        super().__init__(context)
+        self._trainset = trainset
+        self._metric = metric
+        self._max_bootstrapped_demos = max_bootstrapped_demos
+        self._max_labeled_demos = max_labeled_demos
+
+    @property
+    def _optimizer_scope(self) -> str:
+        return "dspy.bootstrap_few_shot"
+
+    def optimize(
+        self,
+        prompt: Prompt[object],
+        *,
+        session: SessionProtocol,
+    ) -> BootstrapFewShotResult:
+        # Configure DSPy to use our adapter
+        lm = WeakIncentivesLM(
+            self._context.adapter,
+            self._context.event_bus,
+            session,
+        )
+        dspy.configure(lm=lm)
+
+        # Convert prompt to DSPy module
+        module = prompt_to_module(prompt)
+
+        # Run DSPy optimization
+        optimizer = dspy.BootstrapFewShot(
+            metric=self._metric,
+            max_bootstrapped_demos=self._max_bootstrapped_demos,
+            max_labeled_demos=self._max_labeled_demos,
+        )
+        optimized = optimizer.compile(module, trainset=self._trainset)
+
+        # Extract optimized sections
+        sections = extract_optimized_sections(prompt, optimized)
+
+        # Persist if store is configured
+        if self._context.overrides_store is not None:
+            persist_to_overrides(
+                prompt,
+                sections,
+                self._context.overrides_store,
+                tag=self._context.overrides_tag,
+            )
+
+        return BootstrapFewShotResult(
+            optimized_sections=sections,
+            demos_count=len(optimized.demos) if hasattr(optimized, "demos") else 0,
+        )
+```
+
+**Usage:**
+
+```python
+from weakincentives.optimizers import OptimizationContext
+from weakincentives.optimizers.dspy import BootstrapFewShotOptimizer
+
+context = OptimizationContext(
+    adapter=adapter,
+    event_bus=bus,
+    overrides_store=store,
+    overrides_tag="bootstrap-v1",
+)
+
+trainset = [
+    dspy.Example(question="What is 2+2?", answer="4").with_inputs("question"),
+    dspy.Example(question="Capital of France?", answer="Paris").with_inputs("question"),
+]
+
+optimizer = BootstrapFewShotOptimizer(
+    context,
+    trainset=trainset,
+    metric=lambda ex, pred: ex.answer == pred.answer,
+)
+
+result = optimizer.optimize(my_prompt, session=session)
+print(f"Generated {result.demos_count} demonstrations")
+```
+
+## Low-Level Usage
+
+For more control, use the building blocks directly:
 
 ```python
 import dspy
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 from weakincentives.runtime import Session, InProcessEventBus
-from weakincentives.dspy import (
+from weakincentives.optimizers.dspy import (
     WeakIncentivesLM,
     prompt_to_module,
     extract_optimized_sections,
@@ -224,11 +334,12 @@ def llm_judge(example, prediction) -> float:
 ## File Layout
 
 ```
-src/weakincentives/dspy/
-├── __init__.py          # Public exports
-├── _lm.py               # WeakIncentivesLM
-├── _bridge.py           # prompt_to_module, extract_optimized_sections
-└── _persist.py          # persist_to_overrides
+src/weakincentives/optimizers/dspy/
+├── __init__.py              # Public exports
+├── _lm.py                   # WeakIncentivesLM
+├── _bridge.py               # prompt_to_module, extract_optimized_sections
+├── _persist.py              # persist_to_overrides
+└── _bootstrap_few_shot.py   # BootstrapFewShotOptimizer
 ```
 
 ## Constraints
