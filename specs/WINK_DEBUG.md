@@ -7,7 +7,7 @@ It supports two modes:
 
 1. **Server mode** (default): Launches a local server that generates static
    files to a temporary directory and serves them for interactive debugging
-2. **Static export**: Produces a set of static files to a user-specified
+1. **Static export**: Produces a set of static files to a user-specified
    directory that can be published to any web server with an arbitrary path
    prefix
 
@@ -21,13 +21,13 @@ wink debug <snapshot_path> --output <dir> [--base-path PATH]
 ### Common Arguments
 
 | Argument | Required | Default | Description |
-|----------|----------|---------|-------------|
+| --------------- | -------- | ------- | --------------------------------------------------------------- |
 | `snapshot_path` | Yes | - | Path to a JSONL snapshot file or directory containing snapshots |
 
 ### Server Mode Arguments (Default)
 
 | Argument | Required | Default | Description |
-|----------|----------|---------|-------------|
+| ---------------- | -------- | ----------- | -------------------------------------- |
 | `--host` | No | `127.0.0.1` | Host interface to bind the server |
 | `--port` | No | `8000` | Port to bind the server |
 | `--open-browser` | No | `True` | Open the default browser automatically |
@@ -35,7 +35,7 @@ wink debug <snapshot_path> --output <dir> [--base-path PATH]
 ### Static Export Arguments
 
 | Argument | Required | Default | Description |
-|----------|----------|---------|-------------|
+| ------------- | -------- | ------- | --------------------------------------------------------------------------- |
 | `--output` | No | - | Output directory for static files (enables static export mode) |
 | `--base-path` | No | `/` | URL path prefix for deployment (e.g., `/reports/` or `/debug/session-123/`) |
 
@@ -44,14 +44,14 @@ wink debug <snapshot_path> --output <dir> [--base-path PATH]
 The CLI inherits global options from the `wink` command:
 
 | Option | Default | Description |
-|--------|---------|-------------|
+| ------------- | ------- | ------------------------------------------------------------------ |
 | `--log-level` | `None` | Override log level (CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET) |
 | `--json-logs` | `True` | Emit structured JSON logs (disable with `--no-json-logs`) |
 
 ### Exit Codes
 
 | Code | Meaning |
-|------|---------|
+| ---- | ---------------------------------------------------------------- |
 | `0` | Success (static generation completed or server stopped normally) |
 | `2` | Snapshot validation failed |
 | `3` | Server failed to start (server mode only) |
@@ -82,10 +82,10 @@ wink debug ./snapshots/
 ### Server Behavior
 
 1. Generates static files to a temporary directory
-2. Starts an HTTP server to serve those files
-3. Opens the browser automatically (unless `--no-open-browser`)
-4. Watches for changes and regenerates on reload (via UI reload button)
-5. Cleans up the temporary directory on exit
+1. Starts an HTTP server to serve those files
+1. Opens the browser automatically (unless `--no-open-browser`)
+1. Watches for changes and regenerates on reload (via UI reload button)
+1. Cleans up the temporary directory on exit
 
 The temporary directory uses the same structure as static export, allowing
 the JavaScript application to work identically in both modes.
@@ -163,10 +163,10 @@ output/
   "file": "session.jsonl",
   "session_id": "abc123",
   "line_number": 1,
-  "tags": {"session_id": "abc123", "custom_tag": "value"},
+  "tags": { "session_id": "abc123", "custom_tag": "value" },
   "validation_error": null,
   "slices": [
-    {"slice_type": "mymodule.Plan", "item_type": "mymodule.Plan", "count": 3}
+    { "slice_type": "mymodule.Plan", "item_type": "mymodule.Plan", "count": 3 }
   ]
 }
 ```
@@ -180,7 +180,10 @@ output/
   "slice_type": "mymodule.Plan",
   "item_type": "mymodule.Plan",
   "items": [
-    {"field": "value", "__markdown__": {"text": "# Header", "html": "<h1>Header</h1>"}}
+    {
+      "field": "value",
+      "__markdown__": { "text": "# Header", "html": "<h1>Header</h1>" }
+    }
   ]
 }
 ```
@@ -191,8 +194,8 @@ The `--base-path` argument controls how URLs are constructed in the generated
 site:
 
 1. The `<base href="{base_path}">` tag is injected into `index.html`
-2. All data fetches use paths relative to the base
-3. Navigation uses URL hash fragments: `#file=session.jsonl&entry=1`
+1. All data fetches use paths relative to the base
+1. Navigation uses URL hash fragments: `#file=session.jsonl&entry=1`
 
 This allows the static site to be deployed at any path prefix without
 modifying the generated files.
@@ -251,14 +254,14 @@ JSON files from `data/`.
 When `snapshot_path` is a directory:
 
 1. Glob for `*.jsonl` and `*.json` files
-2. Sort by modification time (newest first)
-3. Load all files found
-4. Use the directory as the root for discovering snapshots
+1. Sort by modification time (newest first)
+1. Load all files found
+1. Use the directory as the root for discovering snapshots
 
 When `snapshot_path` is a file:
 
 1. Load the specified file directly
-2. Use the parent directory as the root for discovering other snapshots
+1. Use the parent directory as the root for discovering other snapshots
 
 ### JSONL Format
 
@@ -352,7 +355,7 @@ Manages snapshot loading and static file generation:
 The web UI source files are in `src/weakincentives/cli/static/`:
 
 | File | Purpose |
-|------|---------|
+| ------------ | ---------------------- |
 | `index.html` | Main HTML page |
 | `style.css` | Stylesheet |
 | `app.js` | Client-side JavaScript |
@@ -372,9 +375,9 @@ index.html#file=session.jsonl&entry=2&slice=mymodule.Plan
 The JavaScript application:
 
 1. Reads the manifest to discover available snapshots and entries
-2. Parses the URL hash to determine current selection
-3. Fetches the appropriate JSON files from `data/`
-4. Updates the hash when the user navigates
+1. Parses the URL hash to determine current selection
+1. Fetches the appropriate JSON files from `data/`
+1. Updates the hash when the user navigates
 
 This approach ensures:
 
@@ -386,7 +389,7 @@ This approach ensures:
 ## Logging
 
 | Event | Level | Context |
-|-------|-------|---------|
+| --------------------------- | ------- | ------------------------------ |
 | `wink.debug.snapshot_error` | WARNING | `path`, `line_number`, `error` |
 | `debug.generate.start` | INFO | `output`, `base_path` |
 | `debug.generate.snapshot` | INFO | `file`, `entry_count` |
@@ -418,7 +421,7 @@ This approach ensures:
 The JavaScript application works identically in both modes:
 
 1. Loads `data/manifest.json` to discover available data
-2. Uses URL hash for all navigation state
-3. Fetches JSON files from `data/` as needed
-4. Calls `/api/reload` for the reload button (server mode only; gracefully
+1. Uses URL hash for all navigation state
+1. Fetches JSON files from `data/` as needed
+1. Calls `/api/reload` for the reload button (server mode only; gracefully
    fails in static export)

@@ -178,7 +178,9 @@ def test_main_runs_static_export_command(
 
     monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-    monkeypatch.setattr(wink.debug_app, "generate_static_site", fake_generate_static_site)
+    monkeypatch.setattr(
+        wink.debug_app, "generate_static_site", fake_generate_static_site
+    )
 
     exit_code = wink.main(
         [
@@ -232,11 +234,11 @@ def test_main_handles_static_export_snapshot_error(
 
     monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-    monkeypatch.setattr(wink.debug_app, "generate_static_site", fake_generate_static_site)
-
-    exit_code = wink.main(
-        ["debug", str(snapshot_path), "--output", str(output_dir)]
+    monkeypatch.setattr(
+        wink.debug_app, "generate_static_site", fake_generate_static_site
     )
+
+    exit_code = wink.main(["debug", str(snapshot_path), "--output", str(output_dir)])
 
     assert exit_code == 2
 
@@ -275,11 +277,11 @@ def test_main_handles_static_export_output_error(
 
     monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-    monkeypatch.setattr(wink.debug_app, "generate_static_site", fake_generate_static_site)
-
-    exit_code = wink.main(
-        ["debug", str(snapshot_path), "--output", str(output_dir)]
+    monkeypatch.setattr(
+        wink.debug_app, "generate_static_site", fake_generate_static_site
     )
+
+    exit_code = wink.main(["debug", str(snapshot_path), "--output", str(output_dir)])
 
     assert exit_code == 4
 

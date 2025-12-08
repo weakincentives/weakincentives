@@ -40,6 +40,17 @@ class _ListSlice:
     value: object
 
 
+@dataclass(slots=True, frozen=True)
+class _MixedSlice:
+    """Slice with various value types for testing markdown rendering edge cases."""
+
+    string_value: str
+    int_value: int
+    bool_value: bool
+    none_value: None
+    dict_value: dict[str, object]
+
+
 def _write_snapshot(path: Path, values: list[str]) -> list[str]:
     session_ids: list[str] = []
     entries: list[str] = []
@@ -173,18 +184,35 @@ def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
 
 
 def test_snapshot_store_reload_fallbacks(tmp_path: Path) -> None:
+    """Test that reload falls back to index 0 when session_id no longer exists."""
     snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["original"])
+    # Create a snapshot with a specific session_id
+    original_session_id = "unique-session-12345"
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={_ExampleSlice: (_ExampleSlice("original"),)},
+        tags={"session_id": original_session_id},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+
     store = debug_app.SnapshotStore(
         snapshot_path,
         loader=debug_app.load_snapshot,
         logger=debug_app.get_logger("test.reload_fallback"),
     )
 
-    _write_snapshot(snapshot_path, ["replacement"])
+    # Now write a completely different snapshot with a different session_id
+    new_snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={_ExampleSlice: (_ExampleSlice("replacement"),)},
+        tags={"session_id": "different-session-67890"},
+    )
+    snapshot_path.write_text(new_snapshot.to_json())
+
+    # Reload - the old session_id won't exist, so it should fall back to index 0
     meta = store.reload()
 
-    assert meta.session_id.endswith("0")
+    assert meta.session_id == "different-session-67890"
 
 
 def test_snapshot_store_select_errors(tmp_path: Path) -> None:
@@ -407,12 +435,116 @@ def test_render_markdown_values_with_existing_wrapper(tmp_path: Path) -> None:
 
     # Verify the list items are processed
     slices_dir = (
-        output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries" / "1" / "slices"
+        output_dir
+        / "data"
+        / "snapshots"
+        / "snapshot.jsonl"
+        / "entries"
+        / "1"
+        / "slices"
     )
     slice_files = list(slices_dir.glob("*.json"))
     slice_data = json.loads(slice_files[0].read_text())
     items = slice_data["items"][0]["value"]
     assert isinstance(items, list)
+
+
+def test_render_markdown_values_with_primitives(tmp_path: Path) -> None:
+    """Test that primitive values (int, bool, None) are passed through unchanged."""
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    # Create a snapshot with various primitive types
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={
+            _MixedSlice: (
+                _MixedSlice(
+                    string_value="hello",
+                    int_value=42,
+                    bool_value=True,
+                    none_value=None,
+                    dict_value={"nested": "value"},
+                ),
+            )
+        },
+        tags={"session_id": "primitives_test"},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        logger=debug_app.get_logger("test.markdown_primitives"),
+    )
+
+    # Verify primitive values are preserved
+    slices_dir = (
+        output_dir
+        / "data"
+        / "snapshots"
+        / "snapshot.jsonl"
+        / "entries"
+        / "1"
+        / "slices"
+    )
+    slice_files = list(slices_dir.glob("*.json"))
+    slice_data = json.loads(slice_files[0].read_text())
+    item = slice_data["items"][0]
+
+    # Primitive values should be unchanged
+    assert item["int_value"] == 42
+    assert item["bool_value"] is True
+    assert item["none_value"] is None
+    assert item["dict_value"] == {"nested": "value"}
+
+
+def test_render_markdown_values_with_existing_markdown_wrapper(tmp_path: Path) -> None:
+    """Test that already-wrapped markdown mappings are passed through unchanged."""
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    # Create a snapshot with a dict that has __markdown__ key
+    # (simulates pre-rendered markdown)
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={
+            _MixedSlice: (
+                _MixedSlice(
+                    string_value="normal",
+                    int_value=1,
+                    bool_value=False,
+                    none_value=None,
+                    dict_value={
+                        "__markdown__": {"text": "# Already wrapped", "html": "<h1>"},
+                    },
+                ),
+            )
+        },
+        tags={"session_id": "markdown_wrapper_test"},
+    )
+    snapshot_path.write_text(snapshot.to_json())
+    output_dir = tmp_path / "output"
+
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        logger=debug_app.get_logger("test.markdown_wrapper"),
+    )
+
+    # Verify the __markdown__ dict is preserved as-is
+    slices_dir = (
+        output_dir
+        / "data"
+        / "snapshots"
+        / "snapshot.jsonl"
+        / "entries"
+        / "1"
+        / "slices"
+    )
+    slice_files = list(slices_dir.glob("*.json"))
+    slice_data = json.loads(slice_files[0].read_text())
+    item = slice_data["items"][0]
+
+    # The __markdown__ dict should be passed through unchanged
+    assert item["dict_value"]["__markdown__"]["text"] == "# Already wrapped"
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +604,25 @@ def test_generate_static_site_with_base_path(tmp_path: Path) -> None:
     assert manifest["base_path"] == "/reports/"
 
 
+def test_generate_static_site_base_path_without_trailing_slash(tmp_path: Path) -> None:
+    """Test that base_path without trailing slash gets normalized."""
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    _write_snapshot(snapshot_path, ["value"])
+    output_dir = tmp_path / "output"
+
+    # base_path without trailing slash
+    debug_app.generate_static_site(
+        snapshot_path,
+        output_dir,
+        base_path="/app",  # No trailing slash
+        logger=debug_app.get_logger("test.static.basepath.noslash"),
+    )
+
+    # Check that base tag is injected with trailing slash added
+    index_html = (output_dir / "index.html").read_text()
+    assert '<base href="/app/">' in index_html
+
+
 def test_generate_static_site_from_directory(tmp_path: Path) -> None:
     snapshots_dir = tmp_path / "snapshots"
     snapshots_dir.mkdir()
@@ -514,7 +665,13 @@ def test_generate_static_site_writes_slice_data(tmp_path: Path) -> None:
 
     # Find slice file
     slices_dir = (
-        output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries" / "1" / "slices"
+        output_dir
+        / "data"
+        / "snapshots"
+        / "snapshot.jsonl"
+        / "entries"
+        / "1"
+        / "slices"
     )
     slice_files = list(slices_dir.glob("*.json"))
     assert len(slice_files) == 1
@@ -541,7 +698,13 @@ def test_generate_static_site_renders_markdown(tmp_path: Path) -> None:
     )
 
     slices_dir = (
-        output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries" / "1" / "slices"
+        output_dir
+        / "data"
+        / "snapshots"
+        / "snapshot.jsonl"
+        / "entries"
+        / "1"
+        / "slices"
     )
     slice_files = list(slices_dir.glob("*.json"))
     slice_data = json.loads(slice_files[0].read_text())
@@ -563,7 +726,13 @@ def test_generate_static_site_writes_raw_json(tmp_path: Path) -> None:
     )
 
     raw_path = (
-        output_dir / "data" / "snapshots" / "snapshot.jsonl" / "entries" / "1" / "raw.json"
+        output_dir
+        / "data"
+        / "snapshots"
+        / "snapshot.jsonl"
+        / "entries"
+        / "1"
+        / "raw.json"
     )
     raw_data = json.loads(raw_path.read_text())
     assert raw_data["version"] == "1"

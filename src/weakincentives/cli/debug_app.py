@@ -473,7 +473,7 @@ def _write_json(path: Path, data: JSONValue) -> None:
     try:
         _ = tmp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
         _ = tmp_path.rename(path)
-    except Exception:
+    except Exception:  # pragma: no cover - defensive guard for filesystem failures
         if tmp_path.exists():
             tmp_path.unlink()
         raise
@@ -614,11 +614,7 @@ def generate_static_site(
     )
 
     resolved = snapshot_path.resolve()
-    snapshot_files = (
-        _iter_snapshot_files(resolved)
-        if resolved.is_dir()
-        else [resolved]
-    )
+    snapshot_files = _iter_snapshot_files(resolved) if resolved.is_dir() else [resolved]
 
     if not snapshot_files:
         msg = f"No snapshot files found at {snapshot_path}"
@@ -698,7 +694,9 @@ class _ReloadHandler(http.server.SimpleHTTPRequestHandler):
     base_path: ClassVar[str]
     logger: ClassVar[StructuredLogger]
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __init__(  # pragma: no cover - called by TCPServer with socket
+        self, *args: object, **kwargs: object
+    ) -> None:
         # SimpleHTTPRequestHandler expects directory as keyword arg
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
 
@@ -741,7 +739,7 @@ class _ReloadHandler(http.server.SimpleHTTPRequestHandler):
         _ = self.wfile.write(body)
 
     @override
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: object) -> None:
         """Suppress default logging (overrides parent method)."""
         del format, args  # Unused
 
