@@ -560,7 +560,6 @@ def test_generate_static_site_creates_output_structure(tmp_path: Path) -> None:
     debug_app.generate_static_site(
         snapshot_path,
         output_dir,
-        base_path="/",
         logger=debug_app.get_logger("test.static"),
     )
 
@@ -581,46 +580,6 @@ def test_generate_static_site_creates_output_structure(tmp_path: Path) -> None:
     assert entries_path.exists()
     entries = json.loads(entries_path.read_text())
     assert len(entries) == 2
-
-
-def test_generate_static_site_with_base_path(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["value"])
-    output_dir = tmp_path / "output"
-
-    debug_app.generate_static_site(
-        snapshot_path,
-        output_dir,
-        base_path="/reports/",
-        logger=debug_app.get_logger("test.static.basepath"),
-    )
-
-    # Check that base tag is injected
-    index_html = (output_dir / "index.html").read_text()
-    assert '<base href="/reports/">' in index_html
-
-    # Check manifest has base path
-    manifest = json.loads((output_dir / "data" / "manifest.json").read_text())
-    assert manifest["base_path"] == "/reports/"
-
-
-def test_generate_static_site_base_path_without_trailing_slash(tmp_path: Path) -> None:
-    """Test that base_path without trailing slash gets normalized."""
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["value"])
-    output_dir = tmp_path / "output"
-
-    # base_path without trailing slash
-    debug_app.generate_static_site(
-        snapshot_path,
-        output_dir,
-        base_path="/app",  # No trailing slash
-        logger=debug_app.get_logger("test.static.basepath.noslash"),
-    )
-
-    # Check that base tag is injected with trailing slash added
-    index_html = (output_dir / "index.html").read_text()
-    assert '<base href="/app/">' in index_html
 
 
 def test_generate_static_site_from_directory(tmp_path: Path) -> None:
@@ -935,7 +894,6 @@ def test_reload_handler_regenerates_static_files(tmp_path: Path) -> None:
     # Assign class attributes
     MockRequestHandler.snapshot_path = snapshot_path
     MockRequestHandler.output_dir = output_dir
-    MockRequestHandler.base_path = "/"
     MockRequestHandler.logger = debug_app.get_logger("test.reload_handler.mock")
 
     handler = MockRequestHandler()
@@ -974,7 +932,6 @@ def test_reload_handler_returns_404_for_unknown_paths(tmp_path: Path) -> None:
 
     MockRequestHandler.snapshot_path = snapshot_path
     MockRequestHandler.output_dir = output_dir
-    MockRequestHandler.base_path = "/"
     MockRequestHandler.logger = debug_app.get_logger("test.404.mock")
 
     handler = MockRequestHandler()
@@ -1023,7 +980,6 @@ def test_reload_handler_error_returns_400(tmp_path: Path) -> None:
 
     MockRequestHandler.snapshot_path = snapshots_dir
     MockRequestHandler.output_dir = output_dir
-    MockRequestHandler.base_path = "/"
     MockRequestHandler.logger = debug_app.get_logger("test.reload_error.mock")
 
     handler = MockRequestHandler()

@@ -15,7 +15,7 @@ It supports two modes:
 
 ```
 wink debug <snapshot_path> [--host HOST] [--port PORT] [--open-browser]
-wink debug <snapshot_path> --output <dir> [--base-path PATH]
+wink debug <snapshot_path> --output <dir>
 ```
 
 ### Common Arguments
@@ -35,9 +35,8 @@ wink debug <snapshot_path> --output <dir> [--base-path PATH]
 ### Static Export Arguments
 
 | Argument | Required | Default | Description |
-| ------------- | -------- | ------- | --------------------------------------------------------------------------- |
+| ---------- | -------- | ------- | ---------------------------------------------------------- |
 | `--output` | No | - | Output directory for static files (enables static export mode) |
-| `--base-path` | No | `/` | URL path prefix for deployment (e.g., `/reports/` or `/debug/session-123/`) |
 
 ### Global Options
 
@@ -102,18 +101,18 @@ server.
 # Export static site from a snapshot file
 wink debug session.jsonl --output ./site
 
-# Export with custom base path for deployment at /reports/
-wink debug session.jsonl --output ./site --base-path /reports/
-
 # Export from a directory of snapshots
 wink debug ./snapshots/ --output ./site
 ```
+
+The generated site uses relative paths, allowing deployment at any URL path
+without configuration. Simply copy the output directory to your web server.
 
 ### Output Structure
 
 ```
 output/
-├── index.html                          # Main page with embedded base path
+├── index.html                          # Main page
 ├── static/
 │   ├── style.css                       # Stylesheet
 │   └── app.js                          # Client-side JavaScript
@@ -138,7 +137,6 @@ output/
 {
   "version": "1",
   "generated_at": "2024-01-15T10:30:00+00:00",
-  "base_path": "/reports/",
   "snapshots": [
     {
       "file": "session.jsonl",
@@ -187,18 +185,6 @@ output/
   ]
 }
 ```
-
-### Base Path Handling
-
-The `--base-path` argument controls how URLs are constructed in the generated
-site:
-
-1. The `<base href="{base_path}">` tag is injected into `index.html`
-1. All data fetches use paths relative to the base
-1. Navigation uses URL hash fragments: `#file=session.jsonl&entry=1`
-
-This allows the static site to be deployed at any path prefix without
-modifying the generated files.
 
 ### Filename Encoding
 

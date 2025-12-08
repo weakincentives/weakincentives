@@ -488,7 +488,7 @@ class _SnapshotResult:
     default_entry: int | None
 
 
-def _setup_output_dirs(output_dir: Path, base_path: str) -> Path:
+def _setup_output_dirs(output_dir: Path) -> Path:
     """Set up output directory structure and copy static assets."""
     output_dir.mkdir(parents=True, exist_ok=True)
     static_out = output_dir / "static"
@@ -497,12 +497,16 @@ def _setup_output_dirs(output_dir: Path, base_path: str) -> Path:
     data_out.mkdir(exist_ok=True)
 
     source_static = Path(str(files(__package__).joinpath("static")))
-    for asset in ("style.css", "app.js"):
+    for asset in ("style.css", "app.js", "index.html"):
         src = source_static / asset
         if src.exists():
-            _ = shutil.copy2(src, static_out / asset)
+            _ = shutil.copy2(
+                src,
+                static_out.parent / asset
+                if asset == "index.html"
+                else static_out / asset,
+            )
 
-    _write_index_html(output_dir, source_static, base_path)
     return data_out
 
 
@@ -594,7 +598,6 @@ def generate_static_site(
     snapshot_path: Path,
     output_dir: Path,
     *,
-    base_path: str = "/",
     logger: StructuredLogger | None = None,
 ) -> None:
     """Generate a static site from snapshot files.
@@ -602,7 +605,6 @@ def generate_static_site(
     Args:
         snapshot_path: Path to a JSONL snapshot file or directory.
         output_dir: Directory to write static files to.
-        base_path: URL path prefix for deployment.
         logger: Optional logger for progress messages.
     """
     log = logger or get_logger(__name__)
@@ -610,7 +612,7 @@ def generate_static_site(
     log.info(
         "Starting static site generation",
         event="debug.generate.start",
-        context={"output": str(output_dir), "base_path": base_path},
+        context={"output": str(output_dir)},
     )
 
     resolved = snapshot_path.resolve()
@@ -620,7 +622,7 @@ def generate_static_site(
         msg = f"No snapshot files found at {snapshot_path}"
         raise SnapshotLoadError(msg)
 
-    data_out = _setup_output_dirs(output_dir, base_path)
+    data_out = _setup_output_dirs(output_dir)
 
     manifest_snapshots: list[Mapping[str, JSONValue]] = []
     default_snapshot: str | None = None
@@ -641,7 +643,6 @@ def generate_static_site(
     manifest: Mapping[str, JSONValue] = {
         "version": "1",
         "generated_at": datetime.now(tz=UTC).isoformat(),
-        "base_path": base_path,
         "snapshots": manifest_snapshots,
         "default_snapshot": default_snapshot,
         "default_entry": default_entry,
@@ -653,23 +654,6 @@ def generate_static_site(
         event="debug.generate.complete",
         context={"output": str(output_dir), "file_count": len(manifest_snapshots)},
     )
-
-
-def _write_index_html(output_dir: Path, source_static: Path, base_path: str) -> None:
-    """Write index.html with base path injected."""
-    source_html = source_static / "index.html"
-    html_content = source_html.read_text()
-
-    # Ensure base_path ends with /
-    if not base_path.endswith("/"):
-        base_path += "/"
-
-    # Inject base tag after <head> for non-root deployments
-    if base_path != "/" and "<base" not in html_content:
-        base_tag = f'<base href="{base_path}">'
-        html_content = html_content.replace("<head>", f"<head>\n    {base_tag}", 1)
-
-    _ = (output_dir / "index.html").write_text(html_content)
 
 
 def _iter_snapshot_files(root: Path) -> list[Path]:
@@ -691,7 +675,6 @@ class _ReloadHandler(http.server.SimpleHTTPRequestHandler):
     # Class variables set before handler instantiation
     snapshot_path: ClassVar[Path]
     output_dir: ClassVar[Path]
-    base_path: ClassVar[str]
     logger: ClassVar[StructuredLogger]
 
     def __init__(  # pragma: no cover - called by TCPServer with socket
@@ -713,7 +696,6 @@ class _ReloadHandler(http.server.SimpleHTTPRequestHandler):
             generate_static_site(
                 self.snapshot_path,
                 self.output_dir,
-                base_path=self.base_path,
                 logger=self.logger,
             )
             self.logger.info(
@@ -774,7 +756,6 @@ def run_debug_server(
         generate_static_site(
             snapshot_path,
             temp_dir,
-            base_path="/",
             logger=log,
         )
 
@@ -793,7 +774,6 @@ def run_debug_server(
         # Attach config to class (accessed via self.__class__)
         handler_class.func.snapshot_path = snapshot_path  # type: ignore[attr-defined]
         handler_class.func.output_dir = temp_dir  # type: ignore[attr-defined]
-        handler_class.func.base_path = "/"  # type: ignore[attr-defined]
         handler_class.func.logger = log  # type: ignore[attr-defined]
 
         if open_browser:

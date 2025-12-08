@@ -76,12 +76,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output directory for static export (enables export mode instead of server).",
     )
     _ = debug_parser.add_argument(
-        "--base-path",
-        type=str,
-        default="/",
-        help="URL path prefix for static export deployment (default: /).",
-    )
-    _ = debug_parser.add_argument(
         "--host",
         default="127.0.0.1",
         help="Host interface to bind the debug server to (default: 127.0.0.1).",
@@ -112,7 +106,6 @@ def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
             debug_app.generate_static_site(
                 snapshot_path,
                 output_dir,
-                base_path=args.base_path,
                 logger=logger,
             )
         except debug_app.SnapshotLoadError as error:

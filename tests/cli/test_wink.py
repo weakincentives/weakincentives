@@ -166,13 +166,11 @@ def test_main_runs_static_export_command(
         snapshot_path_arg: Path,
         output_dir_arg: Path,
         *,
-        base_path: str,
         logger: object,
     ) -> None:
         calls["generate_args"] = {
             "snapshot_path": snapshot_path_arg,
             "output_dir": output_dir_arg,
-            "base_path": base_path,
             "logger": logger,
         }
 
@@ -188,15 +186,12 @@ def test_main_runs_static_export_command(
             str(snapshot_path),
             "--output",
             str(output_dir),
-            "--base-path",
-            "/reports/",
         ]
     )
 
     assert exit_code == 0
     assert calls["generate_args"]["snapshot_path"] == snapshot_path
     assert calls["generate_args"]["output_dir"] == output_dir
-    assert calls["generate_args"]["base_path"] == "/reports/"
     assert calls["generate_args"]["logger"] == fake_logger
 
 
@@ -226,7 +221,6 @@ def test_main_handles_static_export_snapshot_error(
         snapshot_path_arg: Path,
         output_dir_arg: Path,
         *,
-        base_path: str,
         logger: object,
     ) -> None:
         msg = "Invalid snapshot"
@@ -269,7 +263,6 @@ def test_main_handles_static_export_output_error(
         snapshot_path_arg: Path,
         output_dir_arg: Path,
         *,
-        base_path: str,
         logger: object,
     ) -> None:
         msg = "Permission denied"
