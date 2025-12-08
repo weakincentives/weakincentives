@@ -585,46 +585,103 @@ WINK's prompt override system. The `LangfusePromptOverridesStore` implements the
 `PromptOverridesStore` protocol, enabling centralized prompt versioning and
 collaboration through Langfuse's web UI.
 
+### Design Philosophy
+
+Each WINK **Section** and **Tool** maps to an individual Langfuse prompt. This
+granular approach provides:
+
+- **Independent versioning**: Update a single section without touching others
+- **Flexible composition**: Mix different versions across sections and tools
+- **Clear ownership**: Each prompt in Langfuse has a single purpose
+- **Better collaboration**: Team members can work on different sections
+
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Application                              │
-│  ┌─────────────┐    ┌───────────────────────────┐               │
-│  │   Adapter   │───▶│ LangfusePromptOverridesStore │             │
-│  └─────────────┘    └───────────────────────────┘               │
-│                                   │                              │
-│                                   ▼                              │
-│                        ┌─────────────────────┐                  │
-│                        │  Langfuse Client    │                  │
-│                        │  (Prompt API)       │                  │
-│                        └─────────────────────┘                  │
-└─────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                         ┌─────────────────────┐
-                         │  Langfuse Prompts   │
-                         │  (Version Control)  │
-                         └─────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                           WINK Prompt                                │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+│  │   Section    │  │   Section    │  │    Tool      │              │
+│  │   "system"   │  │ "instructions"│ │   "search"   │              │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘              │
+└─────────┼─────────────────┼─────────────────┼──────────────────────┘
+          │                 │                 │
+          ▼                 ▼                 ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ Langfuse Prompt │ │ Langfuse Prompt │ │ Langfuse Prompt │
+│ demo/welcome/   │ │ demo/welcome/   │ │ demo/welcome/   │
+│ section/system  │ │ section/        │ │ tool/search     │
+│                 │ │ instructions    │ │                 │
+│ v: stable       │ │ v: stable       │ │ v: stable       │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
 ```
 
 ### Naming Convention
 
-Langfuse prompts are identified by name and version. The store maps WINK
-identifiers to Langfuse prompt names:
+Each WINK component maps to a Langfuse prompt name using a hierarchical scheme:
+
+**Section Prompts:**
 
 | WINK Identifier | Langfuse Prompt Name |
 |-----------------|----------------------|
-| `ns="demo", key="welcome"` | `demo/welcome` |
-| `ns="webapp/agents", key="code-review"` | `webapp/agents/code-review` |
-| `tag="stable"` | Version label `stable` |
-| `tag="latest"` | Production version (default) |
+| `ns="demo", key="welcome", path=("system",)` | `demo/welcome/section/system` |
+| `ns="demo", key="welcome", path=("context", "user")` | `demo/welcome/section/context/user` |
+| `ns="agents", key="reviewer", path=("instructions",)` | `agents/reviewer/section/instructions` |
+
+**Tool Prompts:**
+
+| WINK Identifier | Langfuse Prompt Name |
+|-----------------|----------------------|
+| `ns="demo", key="welcome", tool="search"` | `demo/welcome/tool/search` |
+| `ns="agents", key="reviewer", tool="read_file"` | `agents/reviewer/tool/read_file` |
+
+**Version Labels:**
+
+| WINK Tag | Langfuse Version |
+|----------|------------------|
+| `tag="latest"` | Production (default) |
+| `tag="stable"` | Label `stable` |
+| `tag="v1.0"` | Label `v1.0` |
+| `tag="experiment-1"` | Label `experiment-1` |
+
+### Langfuse Prompt Content
+
+**Section prompts** store plain text body content:
+
+```
+You are a helpful assistant specializing in code review.
+
+Focus on:
+- Security vulnerabilities
+- Performance issues
+- Code clarity
+```
+
+The prompt content directly replaces the section's rendered body when applied.
+
+**Tool prompts** store JSON with description and parameter annotations:
+
+```json
+{
+  "wink_tool_version": 1,
+  "expected_contract_hash": "abc123...",
+  "description": "Search the codebase for files matching a pattern.",
+  "param_descriptions": {
+    "query": "Glob pattern to match files (e.g., '**/*.py')",
+    "max_results": "Maximum number of results to return"
+  }
+}
+```
 
 ### LangfusePromptOverridesStore
 
 ```python
 class LangfusePromptOverridesStore(PromptOverridesStore):
-    """Fetch and manage prompt overrides via Langfuse's prompt management API."""
+    """Fetch and manage prompt overrides via Langfuse's prompt management API.
+
+    Each WINK section and tool maps to an individual Langfuse prompt,
+    enabling granular version control and independent editing.
+    """
 
     def __init__(
         self,
@@ -649,11 +706,11 @@ class LangfusePromptOverridesStore(PromptOverridesStore):
         descriptor: PromptDescriptor,
         tag: str = "latest",
     ) -> PromptOverride | None:
-        """Fetch a prompt override from Langfuse.
+        """Fetch prompt overrides from Langfuse.
 
-        Maps the descriptor to a Langfuse prompt name and fetches the
-        specified version. Returns None if the prompt doesn't exist in
-        Langfuse.
+        Queries Langfuse for each section and tool in the descriptor,
+        assembling a PromptOverride from individually versioned prompts.
+        Missing prompts are skipped (partial overrides supported).
         """
         ...
 
@@ -662,10 +719,10 @@ class LangfusePromptOverridesStore(PromptOverridesStore):
         descriptor: PromptDescriptor,
         override: PromptOverride,
     ) -> PromptOverride:
-        """Create or update a prompt in Langfuse.
+        """Create or update prompts in Langfuse.
 
-        Pushes the override content to Langfuse as a new prompt version.
-        The tag becomes the version label.
+        Pushes each section and tool override as a separate Langfuse
+        prompt version. The tag becomes the version label for all.
         """
         ...
 
@@ -688,7 +745,11 @@ class LangfusePromptOverridesStore(PromptOverridesStore):
         *,
         tag: str = "latest",
     ) -> PromptOverride:
-        """Create an initial prompt version in Langfuse from WINK prompt."""
+        """Create initial prompt versions in Langfuse from WINK prompt.
+
+        Creates one Langfuse prompt per section and tool, enabling
+        immediate editing in the Langfuse UI.
+        """
         ...
 
     def set_section_override(
@@ -699,54 +760,129 @@ class LangfusePromptOverridesStore(PromptOverridesStore):
         path: tuple[str, ...],
         body: str,
     ) -> PromptOverride:
-        """Update a specific section in the Langfuse prompt."""
+        """Update a specific section's Langfuse prompt."""
+        ...
+
+    # Additional methods for granular control
+
+    def set_tool_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        tool_name: str,
+        description: str | None = None,
+        param_descriptions: dict[str, str] | None = None,
+    ) -> PromptOverride:
+        """Update a specific tool's Langfuse prompt."""
+        ...
+
+    def resolve_section(
+        self,
+        *,
+        ns: str,
+        prompt_key: str,
+        path: tuple[str, ...],
+        tag: str = "latest",
+    ) -> SectionOverride | None:
+        """Fetch a single section override from Langfuse."""
+        ...
+
+    def resolve_tool(
+        self,
+        *,
+        ns: str,
+        prompt_key: str,
+        tool_name: str,
+        tag: str = "latest",
+    ) -> ToolOverride | None:
+        """Fetch a single tool override from Langfuse."""
         ...
 ```
 
-### Langfuse Prompt Format
+### Resolution Process
 
-Prompts stored in Langfuse use a structured JSON format compatible with WINK's
-override system:
+When `resolve()` is called, the store:
 
-```json
-{
-  "wink_version": 1,
-  "sections": {
-    "system": {
-      "expected_hash": "abc123...",
-      "body": "You are a helpful assistant."
-    },
-    "instructions": {
-      "expected_hash": "def456...",
-      "body": "Follow these guidelines..."
-    }
-  },
-  "tools": {
-    "search": {
-      "expected_contract_hash": "789abc...",
-      "description": "Search the knowledge base.",
-      "param_descriptions": {
-        "query": "The search query string"
-      }
-    }
-  }
-}
+1. **Enumerate components**: Extract section paths and tool names from descriptor
+2. **Build prompt names**: Convert each to a Langfuse prompt name
+3. **Batch fetch**: Query Langfuse for all prompts (with caching)
+4. **Validate hashes**: Check `expected_hash` against descriptor
+5. **Assemble override**: Combine valid overrides into `PromptOverride`
+
+```python
+def resolve(
+    self,
+    descriptor: PromptDescriptor,
+    tag: str = "latest",
+) -> PromptOverride | None:
+    sections: dict[tuple[str, ...], SectionOverride] = {}
+    tools: dict[str, ToolOverride] = {}
+
+    # Resolve each section independently
+    for section_desc in descriptor.sections:
+        prompt_name = self._section_prompt_name(
+            descriptor.ns, descriptor.key, section_desc.path
+        )
+        content = self._fetch_prompt(prompt_name, tag)
+        if content is not None:
+            override = self._parse_section_content(content, section_desc)
+            if override is not None:
+                sections[section_desc.path] = override
+
+    # Resolve each tool independently
+    for tool_desc in descriptor.tools:
+        prompt_name = self._tool_prompt_name(
+            descriptor.ns, descriptor.key, tool_desc.name
+        )
+        content = self._fetch_prompt(prompt_name, tag)
+        if content is not None:
+            override = self._parse_tool_content(content, tool_desc)
+            if override is not None:
+                tools[tool_desc.name] = override
+
+    if not sections and not tools:
+        return None
+
+    return PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag=tag,
+        sections=sections,
+        tool_overrides=tools,
+    )
 ```
 
-When fetching from Langfuse, the store parses this JSON structure and constructs
-a `PromptOverride` instance. Non-JSON prompts (plain text) are treated as a
-single section override for the root section.
+### Partial Overrides
+
+The granular model supports partial overrides naturally:
+
+```python
+# Only the "system" section exists in Langfuse
+# Other sections use their original WINK definitions
+
+store = LangfusePromptOverridesStore()
+override = store.resolve(descriptor, tag="stable")
+
+# override.sections = {("system",): SectionOverride(...)}
+# override.tool_overrides = {}  # No tool overrides in Langfuse
+```
+
+This allows incremental adoption—teams can start by overriding a single section
+without migrating the entire prompt to Langfuse.
 
 ### Caching
 
-The store implements local caching to reduce API calls:
+The store caches individual prompt fetches to reduce API calls:
 
 ```python
 @FrozenDataclass()
-class CachedOverride:
-    """Cached prompt override with expiration."""
+class CachedPrompt:
+    """Cached Langfuse prompt content with expiration."""
 
-    override: PromptOverride | None
+    prompt_name: str
+    tag: str
+    content: str | None  # None means "not found" is cached
     fetched_at: datetime
     ttl_seconds: float
 
@@ -756,68 +892,66 @@ class CachedOverride:
         return elapsed.total_seconds() > self.ttl_seconds
 ```
 
-- Cache entries expire after `cache_ttl_seconds` (default: 60s)
-- Cache is invalidated on `upsert()` calls
-- Thread-safe cache access via `threading.RLock`
-- Cache bypass available via `resolve(..., bypass_cache=True)`
+Cache behavior:
+
+- **Per-prompt caching**: Each section/tool prompt cached independently
+- **Negative caching**: "Not found" results cached to avoid repeated 404s
+- **TTL expiration**: Default 60 seconds, configurable
+- **Invalidation**: `upsert()` and `set_section_override()` clear relevant entries
+- **Thread-safe**: `threading.RLock` protects cache access
+
+### Hash Validation
+
+Each override includes an expected hash that must match the descriptor:
+
+```python
+def _parse_section_content(
+    self,
+    content: str,
+    section_desc: SectionDescriptor,
+) -> SectionOverride | None:
+    # Section prompts are plain text; hash is stored in prompt metadata
+    metadata = self._get_prompt_metadata(content)
+    expected_hash = metadata.get("expected_hash")
+
+    if expected_hash != section_desc.content_hash:
+        self._logger.warning(
+            "Section hash mismatch; override skipped.",
+            event="langfuse_hash_mismatch",
+            context={
+                "section_path": section_desc.path,
+                "langfuse_hash": expected_hash,
+                "descriptor_hash": section_desc.content_hash,
+            },
+        )
+        return None
+
+    return SectionOverride(
+        expected_hash=section_desc.content_hash,
+        body=content,
+    )
+```
+
+When the source WINK prompt changes, hash mismatches prevent stale overrides
+from being applied. The Langfuse prompt must be updated to match the new hash.
 
 ### Fallback Behavior
 
-When Langfuse is unavailable (network errors, timeouts), the store can fall back
-to a local store:
+When Langfuse is unavailable, the store can fall back to a local store:
 
 ```python
 store = LangfusePromptOverridesStore(
     fallback_store=LocalPromptOverridesStore(),
 )
-
-# If Langfuse API fails, uses local .weakincentives/prompts/overrides/
-override = store.resolve(descriptor, tag="stable")
 ```
-
-Fallback behavior:
 
 | Scenario | Behavior |
 |----------|----------|
-| Langfuse returns prompt | Use Langfuse version |
-| Langfuse returns 404 | Return `None` (no fallback) |
-| Langfuse network error | Try fallback store if configured |
-| Langfuse timeout | Try fallback store if configured |
-| No fallback configured | Log warning, return `None` |
-
-### Hash Validation
-
-The store validates content hashes when resolving overrides:
-
-```python
-def _validate_section_hash(
-    self,
-    section_path: tuple[str, ...],
-    override: SectionOverride,
-    descriptor: PromptDescriptor,
-) -> bool:
-    """Check if the override hash matches the current prompt descriptor."""
-
-    for section_desc in descriptor.sections:
-        if section_desc.path == section_path:
-            if override.expected_hash != section_desc.content_hash:
-                self._logger.warning(
-                    "Section hash mismatch; override skipped.",
-                    event="langfuse_hash_mismatch",
-                    context={
-                        "section_path": section_path,
-                        "expected": override.expected_hash,
-                        "actual": section_desc.content_hash,
-                    },
-                )
-                return False
-            return True
-    return False
-```
-
-When the source prompt changes and hashes no longer match, the override is
-skipped and a warning is logged. This prevents stale overrides from being
-applied to modified prompts.
+| All prompts fetched successfully | Use Langfuse versions |
+| Some prompts return 404 | Partial override (no fallback for missing) |
+| Network error on any fetch | Fall back to local store entirely |
+| Timeout on any fetch | Fall back to local store entirely |
+| No fallback configured | Log warning, return partial/None |
 
 ### Usage Examples
 
@@ -837,16 +971,87 @@ response = adapter.evaluate(
 )
 ```
 
+#### Seeding All Sections and Tools
+
+```python
+# Push all sections and tools to Langfuse for editing
+store = LangfusePromptOverridesStore()
+override = store.seed(prompt, tag="v1.0")
+
+# Creates in Langfuse:
+#   demo/welcome/section/system (v1.0)
+#   demo/welcome/section/instructions (v1.0)
+#   demo/welcome/tool/search (v1.0)
+#   demo/welcome/tool/read_file (v1.0)
+```
+
+#### Updating a Single Section
+
+```python
+# Update only the system section
+store.set_section_override(
+    prompt,
+    tag="experiment-1",
+    path=("system",),
+    body="You are an expert security auditor.",
+)
+
+# Only demo/welcome/section/system gets a new version
+# Other sections remain at their current versions
+```
+
+#### Updating a Tool Description
+
+```python
+# Update the search tool's description
+store.set_tool_override(
+    prompt,
+    tag="v2.0",
+    tool_name="search",
+    description="Search the codebase using semantic similarity.",
+    param_descriptions={
+        "query": "Natural language description of what to find",
+    },
+)
+```
+
+#### Mixed Version Resolution
+
+```python
+# Different sections can use different version labels
+# by resolving individually and composing
+
+system_override = store.resolve_section(
+    ns="demo", prompt_key="welcome",
+    path=("system",), tag="stable"
+)
+
+instructions_override = store.resolve_section(
+    ns="demo", prompt_key="welcome",
+    path=("instructions",), tag="experiment-1"
+)
+
+# Combine into a custom PromptOverride
+override = PromptOverride(
+    ns="demo",
+    prompt_key="welcome",
+    tag="mixed",
+    sections={
+        ("system",): system_override,
+        ("instructions",): instructions_override,
+    },
+)
+```
+
 #### With Local Fallback
 
 ```python
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 from weakincentives.integrations.langfuse import LangfusePromptOverridesStore
 
-local_store = LocalPromptOverridesStore()
 langfuse_store = LangfusePromptOverridesStore(
-    fallback_store=local_store,
-    cache_ttl_seconds=300.0,  # 5 minute cache
+    fallback_store=LocalPromptOverridesStore(),
+    cache_ttl_seconds=300.0,
 )
 
 # Uses Langfuse when available, local files as backup
@@ -858,31 +1063,9 @@ response = adapter.evaluate(
 )
 ```
 
-#### Seeding Prompts to Langfuse
-
-```python
-# Push current prompt content to Langfuse for editing
-store = LangfusePromptOverridesStore()
-override = store.seed(prompt, tag="v1.0")
-
-# Now editable in Langfuse UI at: demo/welcome (version v1.0)
-```
-
-#### Updating Sections Programmatically
-
-```python
-# Update a specific section
-store.set_section_override(
-    prompt,
-    tag="experiment-1",
-    path=("system",),
-    body="You are an expert code reviewer.",
-)
-```
-
 ### Sync with Optimizer
 
-The `LangfusePromptOverridesStore` integrates with WINK's optimizer system:
+The store integrates with WINK's optimizer system:
 
 ```python
 from weakincentives.optimizers import OptimizationContext, WorkspaceDigestOptimizer
@@ -897,39 +1080,64 @@ context = OptimizationContext(
 optimizer = WorkspaceDigestOptimizer(context)
 result = optimizer.optimize(prompt, session=session)
 
-# Workspace digest persisted to Langfuse under tag "optimized"
+# Workspace digest persisted to Langfuse as:
+#   {ns}/{key}/section/workspace_digest (optimized)
 ```
 
-### Environment Variables
+### Langfuse Prompt Metadata
 
-Additional variables for the prompt store:
+Section prompts store hash metadata using Langfuse's config field:
+
+```python
+# When creating a section prompt in Langfuse
+langfuse.create_prompt(
+    name="demo/welcome/section/system",
+    prompt="You are a helpful assistant.",
+    config={
+        "wink_type": "section",
+        "expected_hash": "abc123...",
+        "section_path": ["system"],
+    },
+    labels=["stable"],
+)
+```
+
+Tool prompts embed metadata in the JSON content itself for self-containment.
+
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LANGFUSE_PROMPT_CACHE_TTL` | `60` | Cache TTL in seconds |
-| `LANGFUSE_PROMPT_FALLBACK` | `"false"` | Enable local fallback (`"true"/"false"`) |
+| `LANGFUSE_PROMPT_FALLBACK` | `"false"` | Enable local fallback |
+| `LANGFUSE_PROMPT_BATCH_SIZE` | `10` | Max concurrent prompt fetches |
 
 ### Logging
 
 | Event | Level | Context Fields |
 |-------|-------|----------------|
-| `langfuse_prompt_resolved` | INFO | `prompt_name`, `tag`, `section_count` |
-| `langfuse_prompt_cached` | DEBUG | `prompt_name`, `tag`, `ttl` |
-| `langfuse_prompt_cache_hit` | DEBUG | `prompt_name`, `tag` |
-| `langfuse_prompt_upserted` | INFO | `prompt_name`, `tag`, `version_id` |
-| `langfuse_prompt_fallback` | WARNING | `prompt_name`, `tag`, `reason` |
-| `langfuse_hash_mismatch` | WARNING | `section_path`, `expected`, `actual` |
+| `langfuse_section_resolved` | DEBUG | `prompt_name`, `tag`, `path` |
+| `langfuse_tool_resolved` | DEBUG | `prompt_name`, `tag`, `tool_name` |
+| `langfuse_prompt_not_found` | DEBUG | `prompt_name`, `tag` |
+| `langfuse_override_assembled` | INFO | `ns`, `key`, `section_count`, `tool_count` |
+| `langfuse_prompt_upserted` | INFO | `prompt_name`, `tag` |
+| `langfuse_prompt_seeded` | INFO | `ns`, `key`, `prompt_count` |
+| `langfuse_cache_hit` | DEBUG | `prompt_name`, `tag` |
+| `langfuse_fallback_triggered` | WARNING | `reason`, `fallback_store` |
+| `langfuse_hash_mismatch` | WARNING | `prompt_name`, `expected`, `actual` |
 
 ### Limitations
 
 - **No delete support**: Langfuse prompts cannot be deleted via API; use the
   Langfuse UI to archive prompts.
-- **Version immutability**: Once a version is created in Langfuse, its content
-  cannot be modified. Use a new version/tag instead.
-- **No atomic multi-section updates**: Each `set_section_override` creates a new
-  version. For bulk updates, use `upsert` with a complete `PromptOverride`.
-- **Rate limiting**: Langfuse API calls are subject to rate limits. Use caching
-  and batch operations where possible.
+- **Version immutability**: Once a version is created, its content cannot be
+  modified. Create a new version instead.
+- **API rate limits**: Many sections/tools means many API calls. Use caching
+  and consider batch fetching for large prompts.
+- **No cross-prompt transactions**: Section updates are independent; there's no
+  atomic "update all sections" operation.
+- **Hash drift**: When source prompts change, all Langfuse overrides must be
+  re-seeded with new hashes.
 
 ## Limitations
 
