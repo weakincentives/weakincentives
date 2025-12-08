@@ -86,6 +86,34 @@ Built-in reducers:
 - `replace_latest` - Stores only the most recent value
 - `replace_latest_by(key_fn)` - Like `replace_latest` but keyed
 
+### SimpleReducer
+
+For reducers that don't need access to the `ReducerContext`, use the simplified
+signature:
+
+```python
+type SimpleReducer[T] = Callable[[tuple[T, ...], ReducerEvent], tuple[T, ...]]
+```
+
+Convert a `SimpleReducer` to a `TypedReducer` using `as_typed_reducer`:
+
+```python
+from weakincentives.runtime.session import as_typed_reducer, SimpleReducer
+
+def my_reducer(
+    slice_values: tuple[MyItem, ...],
+    event: ReducerEvent,
+) -> tuple[MyItem, ...]:
+    value = cast(MyItem, event)
+    return (*slice_values, value)
+
+# Register with session
+session.mutate(MyItem).register(MyItem, as_typed_reducer(my_reducer))
+```
+
+This pattern eliminates boilerplate for stateless reducers that don't require
+session context.
+
 ### Query API
 
 ```python

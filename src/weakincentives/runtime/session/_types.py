@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
 from ...prompt._types import SupportsDataclass
@@ -54,9 +55,20 @@ class TypedReducer(Protocol[S]):
     ) -> tuple[S, ...]: ...
 
 
+type SimpleReducer[T: SupportsDataclass] = Callable[
+    [tuple[T, ...], ReducerEvent], tuple[T, ...]
+]
+"""Callable type for reducers that do not require context.
+
+Use :func:`.as_typed_reducer` to convert a :data:`SimpleReducer` into a
+:class:`TypedReducer` when registering with a session.
+"""
+
+
 __all__ = [
     "ReducerContextProtocol",
     "ReducerEvent",
     "ReducerEventWithValue",
+    "SimpleReducer",
     "TypedReducer",
 ]

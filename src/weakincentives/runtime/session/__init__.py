@@ -17,13 +17,20 @@ from ._types import (
     ReducerContextProtocol,
     ReducerEvent,
     ReducerEventWithValue,
+    SimpleReducer,
     TypedReducer,
 )
 from .mutation import GlobalMutationBuilder, MutationBuilder
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
 from .reducer_context import ReducerContext, build_reducer_context
-from .reducers import append, replace_latest, replace_latest_by, upsert_by
+from .reducers import (
+    append,
+    as_typed_reducer,
+    replace_latest,
+    replace_latest_by,
+    upsert_by,
+)
 from .session import DataEvent, Session, iter_sessions_bottom_up
 from .snapshots import (
     Snapshot,
@@ -43,12 +50,14 @@ __all__ = [
     "ReducerEventWithValue",
     "Session",
     "SessionProtocol",
+    "SimpleReducer",
     "Snapshot",
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
     "TypedReducer",
     "append",
+    "as_typed_reducer",
     "build_reducer_context",
     "iter_sessions_bottom_up",
     "replace_latest",

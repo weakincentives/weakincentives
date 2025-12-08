@@ -13,11 +13,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 from weakincentives.runtime.events import EventBus
 from weakincentives.runtime.session import Session
-from weakincentives.runtime.session._types import ReducerContextProtocol
-from weakincentives.runtime.session.reducers import replace_latest_by
+from weakincentives.runtime.session._types import (
+    ReducerContextProtocol,
+    ReducerEvent,
+    SimpleReducer,
+)
+from weakincentives.runtime.session.reducers import as_typed_reducer, replace_latest_by
 
 
 @dataclass(slots=True)
@@ -53,3 +58,63 @@ def test_replace_latest_by_replaces_matching_entry() -> None:
     assert updated[-1].key == "a"
     assert updated[-1].value == "updated"
     assert any(item.value == "second" for item in updated)
+
+
+def test_as_typed_reducer_wraps_simple_reducer() -> None:
+    """Verify as_typed_reducer converts a SimpleReducer to TypedReducer."""
+
+    def simple_reducer(
+        slice_values: tuple[_Sample, ...],
+        event: ReducerEvent,
+    ) -> tuple[_Sample, ...]:
+        value = cast(_Sample, event)
+        return (*slice_values, value)
+
+    typed_reducer = as_typed_reducer(simple_reducer)
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+    initial = (_Sample("a", "first"),)
+    new_item = _Sample("b", "second")
+
+    result = typed_reducer(initial, new_item, context=context)
+
+    assert len(result) == 2
+    assert result[0] == initial[0]
+    assert result[1] == new_item
+
+
+def test_as_typed_reducer_ignores_context() -> None:
+    """Verify the context is not passed to the underlying simple reducer."""
+    context_was_used = False
+
+    def simple_reducer(
+        slice_values: tuple[_Sample, ...],
+        event: ReducerEvent,
+    ) -> tuple[_Sample, ...]:
+        # This should never see the context
+        return slice_values
+
+    typed_reducer = as_typed_reducer(simple_reducer)
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+
+    # The simple reducer should be called without error
+    result = typed_reducer((), _Sample("a", "first"), context=context)
+    assert result == ()
+    assert not context_was_used
+
+
+def test_simple_reducer_type_annotation() -> None:
+    """Verify SimpleReducer type alias works correctly."""
+
+    def my_reducer(
+        slice_values: tuple[_Sample, ...],
+        event: ReducerEvent,
+    ) -> tuple[_Sample, ...]:
+        value = cast(_Sample, event)
+        return (*slice_values, value)
+
+    # Type checking: this should satisfy SimpleReducer[_Sample]
+    reducer: SimpleReducer[_Sample] = my_reducer
+    result = reducer((), _Sample("key", "value"))
+    assert len(result) == 1

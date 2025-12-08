@@ -29,12 +29,12 @@ from ...prompt._types import SupportsDataclass
 from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ._slice_types import SessionSlice, SessionSliceType
-from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
+from ._types import ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
 from .mutation import GlobalMutationBuilder, MutationBuilder
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
-from .reducers import append
+from .reducers import append, as_typed_reducer
 from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -92,15 +92,15 @@ _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
 EMPTY_SLICE: SessionSlice = ()
 
 
-def _append_event(
+def _append_event_impl(
     slice_values: tuple[SupportsDataclass, ...],
     event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
 ) -> tuple[SupportsDataclass, ...]:
-    del context
     appended = cast(SupportsDataclass, event)
     return (*slice_values, appended)
+
+
+_append_event = as_typed_reducer(_append_event_impl)
 
 
 @dataclass(slots=True)
