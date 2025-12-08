@@ -192,9 +192,20 @@ pip install weakincentives[asteval]
 
 `WorkspaceDigestSection` captures task-agnostic repository summaries.
 
+### Digest Versions
+
+The optimizer produces two digest versions:
+
+- **summary**: A concise overview (1-3 paragraphs) with essential commands and
+  key insights. Rendered when an override exists to save prompt tokens.
+- **body**: A detailed version with full repository context, directory
+  structure, tooling specifics, and caveats. Rendered when no override exists.
+
 ### Resolution Order
 
 1. **Session snapshot** - `latest_workspace_digest(session, key)`
+   - If override exists: renders `summary`
+   - If no override: renders `body` (falls back to `summary` if empty)
 1. **Override fallback** - From `PromptOverridesStore`
 1. **Placeholder** - Default text with warning log
 
@@ -239,8 +250,9 @@ Specific to the workspace digest optimizer:
 @dataclass(slots=True, frozen=True)
 class WorkspaceDigestResult:
     response: PromptResponse[object]
-    digest: str
-    scope: OptimizationScope
+    summary: str   # Concise overview
+    digest: str    # Detailed version
+    scope: PersistenceScope
     section_key: str
 ```
 

@@ -51,6 +51,7 @@ from weakincentives.tools.digests import (
 class _StubDigestOutput:
     """Stub output for optimization prompt."""
 
+    summary: str
     digest: str
 
 
@@ -95,7 +96,9 @@ class _RepositoryOptimizationAdapter:
             return PromptResponse(
                 prompt_name=prompt.name or prompt.key,
                 text=self.instructions,
-                output=_StubDigestOutput(digest=self.instructions),
+                output=_StubDigestOutput(
+                    summary=self.instructions, digest=self.instructions
+                ),
             )
 
         return PromptResponse(
@@ -230,7 +233,9 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
         path=digest_node.path,
         body="- Override digest",
     )
-    set_workspace_digest(session, "workspace-digest", "- Session digest")
+    set_workspace_digest(
+        session, "workspace-digest", "- Session digest", "- Session digest long"
+    )
 
     rendered = (
         Prompt(
@@ -267,7 +272,8 @@ def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
     # Verify digest was persisted to session
     session_digest = latest_workspace_digest(loop.session, "workspace-digest")
     assert session_digest is not None
-    assert session_digest.body == "- Repo instructions from stub"
+    # The adapter returns a stub that's used for both summary and body_long
+    assert session_digest.summary == "- Repo instructions from stub"
 
 
 def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
@@ -282,7 +288,9 @@ def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
         overrides_store=overrides_store,
     )
 
-    set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
+    set_workspace_digest(
+        loop.session, "workspace-digest", "- existing digest", "- existing digest long"
+    )
 
     loop.execute(ReviewTurnParams(request="first"))
     loop.execute(ReviewTurnParams(request="second"))
@@ -313,7 +321,7 @@ def test_dump_session_logs_success(
 ) -> None:
     caplog.set_level(logging.INFO, logger="weakincentives.debug")
     session = Session()
-    set_workspace_digest(session, "workspace-digest", "body")
+    set_workspace_digest(session, "workspace-digest", "body", "body-long")
 
     snapshot_path = dump_session(session, _redirect_snapshots)
 

@@ -71,7 +71,7 @@ def test_workspace_digest_section_in_descriptor() -> None:
 
     assert section.original_body_template() == section._placeholder
     assert ("workspace-digest",) in {entry.path for entry in descriptor.sections}
-    assert WorkspaceDigest(section_key="a", body="b").section_key == "a"
+    assert WorkspaceDigest(section_key="a", summary="b", body="c").section_key == "a"
     with pytest.raises(TypeError):
         section.clone()
     clone = section.clone(session=Session())

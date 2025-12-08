@@ -48,7 +48,11 @@ from ._results import PersistenceScope, WorkspaceDigestResult
 class _OptimizationResponse:
     """Structured response emitted by the workspace digest optimization prompt."""
 
+    summary: str
+    """A concise summary of the workspace (1-3 paragraphs)."""
+
     digest: str
+    """A detailed workspace digest with full context."""
 
 
 class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult]):
@@ -130,7 +134,13 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                         Explore README/docs/workflow files first. Capture build/test commands,
                         dependency managers, and watchouts. Keep the digest task agnostic.
                         Capture command exec tools (asteval, Podman exec) plus env caps/
-                        versions/libs. Keep it dense.
+                        versions/libs.
+
+                        Produce two versions:
+                        - **summary**: A concise summary (1-3 paragraphs) with essential commands
+                          and key insights. This is shown when space is limited.
+                        - **digest**: A detailed version with full repository context,
+                          directory structure, tooling specifics, and caveats. Keep it dense.
                         """
                     ).strip(),
                     key="optimization-expectations",
@@ -169,10 +179,12 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             deadline=self._context.deadline,
         )
 
-        digest = self._extract_digest(response=response, prompt_name=prompt_name)
+        summary, digest = self._extract_digests(
+            response=response, prompt_name=prompt_name
+        )
 
         if self._store_scope is PersistenceScope.SESSION:
-            _ = set_workspace_digest(outer_session, digest_section.key, digest)
+            _ = set_workspace_digest(outer_session, digest_section.key, summary, digest)
 
         if self._store_scope is PersistenceScope.GLOBAL:
             global_store = effective_store
@@ -184,6 +196,8 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                     prompt_name=prompt_name,
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 )
+            # Store the digest in the override store; summary is used
+            # when rendering with the override.
             section_path = self._find_section_path(prompt, digest_section.key)
             _ = global_store.set_section_override(
                 cast(PromptLike, prompt),
@@ -195,6 +209,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
 
         return WorkspaceDigestResult(
             response=cast(PromptResponse[object], response),
+            summary=summary,
             digest=digest,
             scope=self._store_scope,
             section_key=digest_section.key,
@@ -254,25 +269,32 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
         )
 
-    def _extract_digest(  # noqa: PLR6301
+    def _extract_digests(  # noqa: PLR6301
         self, *, response: PromptResponse[Any], prompt_name: str
-    ) -> str:
-        digest: str | None = None
-        if isinstance(response.output, str):
-            digest = response.output
-        elif response.output is not None:
-            candidate = getattr(response.output, "digest", None)
-            if isinstance(candidate, str):
-                digest = candidate
-        if digest is None and response.text:
-            digest = response.text
-        if digest is None:
+    ) -> tuple[str, str]:
+        """Extract both summary and digest from the structured response.
+
+        Returns:
+            A tuple of (summary, digest).
+        """
+        if response.output is None:
             raise PromptEvaluationError(
-                "Optimization did not return digest content.",
+                "Optimization did not return structured output.",
                 prompt_name=prompt_name,
                 phase=PROMPT_EVALUATION_PHASE_RESPONSE,
             )
-        return digest.strip()
+
+        summary = getattr(response.output, "summary", None)
+        digest = getattr(response.output, "digest", None)
+
+        if not isinstance(summary, str) or not isinstance(digest, str):
+            raise PromptEvaluationError(
+                "Optimization output missing summary or digest fields.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+            )
+
+        return summary.strip(), digest.strip()
 
 
 __all__ = ["WorkspaceDigestOptimizer"]

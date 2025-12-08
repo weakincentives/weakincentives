@@ -28,9 +28,15 @@ from ..runtime.session.protocols import SessionProtocol
 
 @FrozenDataclass()
 class WorkspaceDigest(SupportsDataclass):
-    """Digest entry persisted within a :class:`Session` slice."""
+    """Digest entry persisted within a :class:`Session` slice.
+
+    The digest has two versions:
+    - ``summary``: A concise overview for use when overrides are active.
+    - ``body``: A detailed version for full context when no override exists.
+    """
 
     section_key: str
+    summary: str
     body: str
 
 
@@ -43,12 +49,26 @@ def _normalized_key(section_key: str) -> str:
 def set_workspace_digest(
     session: SessionProtocol,
     section_key: str,
+    summary: str,
     body: str,
 ) -> WorkspaceDigest:
-    """Persist the workspace digest for ``section_key``."""
+    """Persist the workspace digest for ``section_key``.
 
+    Args:
+        session: The session to store the digest in.
+        section_key: The key identifying which digest section this belongs to.
+        summary: A concise overview rendered when overrides are active.
+        body: A detailed version rendered when no override exists.
+
+    Returns:
+        The persisted WorkspaceDigest entry.
+    """
     normalized_key = _normalized_key(section_key)
-    entry = WorkspaceDigest(section_key=normalized_key, body=body.strip())
+    entry = WorkspaceDigest(
+        section_key=normalized_key,
+        summary=summary.strip(),
+        body=body.strip(),
+    )
     existing = tuple(
         digest
         for digest in session.query(WorkspaceDigest).all()
@@ -155,10 +175,22 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
 
     def _resolve_body(self, override_body: str | None = None) -> str:
         digest = latest_workspace_digest(self._session, self.key)
-        if digest is not None and digest.body.strip():
-            return digest.body.strip()
-        if override_body is not None and override_body.strip():
-            return textwrap.dedent(override_body).strip()
+        has_override = override_body is not None and override_body.strip()
+
+        if digest is not None:
+            # When an override exists, render the summary for brevity.
+            # Otherwise, render the full body for complete context.
+            if has_override:
+                if digest.summary.strip():
+                    return digest.summary.strip()
+            elif digest.body.strip():
+                return digest.body.strip()
+            # Fall back to summary if body is empty
+            if digest.summary.strip():
+                return digest.summary.strip()
+
+        if has_override:
+            return textwrap.dedent(override_body).strip()  # type: ignore[arg-type]
         _LOGGER.warning(
             "Workspace digest missing; returning placeholder.",
             event="workspace_digest_missing",

@@ -53,6 +53,7 @@ from weakincentives.tools.vfs import VfsToolsSection
 
 @dataclass(slots=True, frozen=True)
 class _FakeOptimizationOutput:
+    summary: str
     digest: str
 
 
@@ -161,16 +162,19 @@ class _RecordingAdapter(ProviderAdapter):
             )
             session.event_bus.publish(event)
 
+        summary_value = f"{self.mode}-summary"
         digest_value = f"{self.mode}-digest"
         if self.mode == "dataclass":
-            output: Any = _FakeOptimizationOutput(digest=digest_value)
+            output: Any = _FakeOptimizationOutput(
+                summary=summary_value, digest=digest_value
+            )
             text: str | None = None
         elif self.mode == "string":
-            output = digest_value
+            output = summary_value
             text = None
         elif self.mode == "text":
             output = None
-            text = digest_value
+            text = summary_value
         else:
             output = None
             text = None
@@ -221,43 +225,33 @@ def test_optimize_persists_digest_from_output() -> None:
     result = optimizer.optimize(prompt, session=session)
 
     latest = latest_workspace_digest(session, "workspace-digest")
+    assert result.summary == "dataclass-summary"
     assert result.digest == "dataclass-digest"
     assert latest is not None
+    assert getattr(latest, "summary", None) == "dataclass-summary"
     assert getattr(latest, "body", None) == "dataclass-digest"
 
 
 def test_session_clear_slice_removes_entire_digest_slice() -> None:
     session = Session()
-    set_workspace_digest(session, "workspace-digest", "value")
+    set_workspace_digest(session, "workspace-digest", "value-summary", "value-long")
 
     session.mutate(WorkspaceDigest).clear()
 
     assert latest_workspace_digest(session, "workspace-digest") is None
 
 
-def test_optimize_handles_string_output() -> None:
+def test_optimize_requires_structured_output() -> None:
     adapter = _RecordingAdapter(mode="string")
     optimizer = _create_optimizer(adapter)
     prompt = Prompt(_build_prompt())
     session = Session()
 
-    result = optimizer.optimize(prompt, session=session)
-
-    assert result.digest == "string-digest"
-
-
-def test_optimize_falls_back_to_text() -> None:
-    adapter = _RecordingAdapter(mode="text")
-    optimizer = _create_optimizer(adapter)
-    prompt = Prompt(_build_prompt())
-    session = Session()
-
-    result = optimizer.optimize(prompt, session=session)
-
-    assert result.digest == "text-digest"
+    with pytest.raises(PromptEvaluationError):
+        optimizer.optimize(prompt, session=session)
 
 
-def test_optimize_requires_digest_content() -> None:
+def test_optimize_requires_output_not_none() -> None:
     adapter = _RecordingAdapter(mode="none")
     optimizer = _create_optimizer(adapter)
     prompt = Prompt(_build_prompt())
@@ -290,6 +284,7 @@ def test_optimize_updates_global_overrides() -> None:
     assert recorded_prompt is prompt
     assert tag == "tag"
     assert path[-1] == "workspace-digest"
+    # The digest is stored in the override store
     assert body == result.digest
     assert latest_workspace_digest(session, "workspace-digest") is None
 
@@ -305,7 +300,7 @@ def test_optimize_global_scope_clears_existing_session_digest() -> None:
     )
     prompt = Prompt(_build_prompt())
     session = Session()
-    _ = set_workspace_digest(session, "workspace-digest", "stale")
+    _ = set_workspace_digest(session, "workspace-digest", "stale", "stale-long")
 
     _ = optimizer.optimize(prompt, session=session)
 
@@ -336,14 +331,15 @@ def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
     )
     prompt = Prompt(_build_prompt())
     session = Session()
-    _ = set_workspace_digest(session, "workspace-digest", "existing")
+    _ = set_workspace_digest(session, "workspace-digest", "existing", "existing-long")
 
     with pytest.raises(PromptEvaluationError):
         optimizer.optimize(prompt, session=session)
 
     latest = latest_workspace_digest(session, "workspace-digest")
     assert latest is not None
-    assert getattr(latest, "body", None) == "existing"
+    assert getattr(latest, "summary", None) == "existing"
+    assert getattr(latest, "body", None) == "existing-long"
 
 
 def test_optimize_seeds_internal_prompt_overrides() -> None:
@@ -479,3 +475,28 @@ def test_workspace_digest_result_has_correct_scope() -> None:
 def test_optimizer_config_defaults() -> None:
     config = OptimizerConfig()
     assert config.accepts_overrides is True
+
+
+def test_workspace_digest_section_renders_summary_when_override_exists() -> None:
+    """When an override exists, the section renders the summary."""
+    session = Session()
+    section = WorkspaceDigestSection(session=session)
+    set_workspace_digest(session, "workspace-digest", "short summary", "long details")
+
+    # Without override: renders body_long
+    body_without_override = section._resolve_body()
+    assert body_without_override == "long details"
+
+    # With override: renders summary
+    body_with_override = section._resolve_body(override_body="override content")
+    assert body_with_override == "short summary"
+
+
+def test_workspace_digest_section_falls_back_to_summary_when_body_empty() -> None:
+    """When body is empty, falls back to summary."""
+    session = Session()
+    section = WorkspaceDigestSection(session=session)
+    set_workspace_digest(session, "workspace-digest", "summary only", "")
+
+    body = section._resolve_body()
+    assert body == "summary only"

@@ -54,8 +54,11 @@ class WorkspaceDigestResult:
     response: PromptResponse[object]
     """The provider response from the optimization prompt."""
 
+    summary: str
+    """A concise overview of the workspace digest."""
+
     digest: str
-    """The extracted workspace digest text."""
+    """The detailed workspace digest text."""
 
     scope: PersistenceScope
     """Where the digest was persisted."""

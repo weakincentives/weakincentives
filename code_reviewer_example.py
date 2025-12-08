@@ -230,7 +230,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         )
         result = optimizer.optimize(prompt, session=self._session)
         _LOGGER.info("Workspace digest optimization complete.")
-        _LOGGER.debug("Digest: %s", result.digest.strip())
+        _LOGGER.debug("Digest summary: %s", result.summary.strip())
 
     @property
     def session(self) -> Session:
