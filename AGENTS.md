@@ -87,6 +87,8 @@ a goal at any time.
   modules.
 - **HOSTED_TOOLS.md**: Provider-executed tools (web search, code interpreter)—
   when integrating provider-side capabilities.
+- **LANGFUSE.md**: Langfuse observability integration—when adding LLM tracing
+  and analytics.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.
