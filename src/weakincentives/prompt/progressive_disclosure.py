@@ -17,16 +17,21 @@ of prompt content. When a prompt contains sections rendered with SUMMARY visibil
 the framework automatically registers this builtin tool so the model can request
 expanded views of summarized content.
 
-See specs/PROGRESSIVE_DISCLOSURE.md for the complete specification.
+For sections that don't register tools, the framework can optionally auto-render
+their full content to the VFS at ``/context/{section-key}.md``, avoiding the
+``open_sections`` round-trip.
+
+See specs/PROMPTS.md for the complete specification.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol, runtime_checkable
 
 from ._visibility import SectionVisibility
 from .errors import PromptValidationError, SectionPath, VisibilityExpansionRequired
+from .section import Section
 from .tool import Tool, ToolContext
 from .tool_result import ToolResult
 
@@ -35,6 +40,25 @@ if TYPE_CHECKING:
 
     from ._types import SupportsDataclass
     from .registry import RegistrySnapshot
+
+
+@runtime_checkable
+class WorkspaceSection(Protocol):
+    """Protocol for sections that provide a workspace session.
+
+    Both ``VfsToolsSection`` and ``PodmanSandboxSection`` implement this protocol,
+    allowing the rendering system to detect and use the session for auto-rendering
+    summarized content to the filesystem.
+    """
+
+    @property
+    def session(self) -> Any:  # noqa: ANN401
+        """Return the session bound to this workspace section.
+
+        Returns a ``weakincentives.runtime.Session`` instance. We use ``Any``
+        as the return type to avoid circular imports between prompt and runtime.
+        """
+        ...
 
 
 @dataclass(slots=True, frozen=True)
@@ -242,11 +266,78 @@ def compute_current_visibility(
     return result
 
 
+def section_subtree_has_tools(
+    section: Section[SupportsDataclass],
+) -> bool:
+    """Check if a section or any of its descendants register tools.
+
+    Args:
+        section: The root section to check.
+
+    Returns:
+        True if the section or any descendant has tools registered.
+    """
+    if section.tools():
+        return True
+    return any(section_subtree_has_tools(child) for child in section.children)
+
+
+def compute_vfs_context_path(section_path: SectionPath) -> str:
+    """Compute the VFS path for auto-rendered section content.
+
+    Args:
+        section_path: The section path tuple (e.g., ("parent", "child")).
+
+    Returns:
+        The VFS path string (e.g., "/context/parent.child.md").
+    """
+    key = ".".join(section_path)
+    return f"/context/{key}.md"
+
+
+def build_vfs_summary_suffix(section_path: SectionPath) -> str:
+    """Build the instruction suffix for sections auto-rendered to VFS.
+
+    Args:
+        section_path: The section path tuple.
+
+    Returns:
+        Formatted instruction text directing the model to the VFS.
+    """
+    vfs_path = compute_vfs_context_path(section_path)
+    return f"\n\n---\n[This section is summarized. Full content is available at `{vfs_path}`.]"
+
+
+def find_workspace_section(
+    registry: RegistrySnapshot,
+) -> WorkspaceSection | None:
+    """Find a workspace section in the registry.
+
+    Searches for a section implementing the ``WorkspaceSection`` protocol
+    (e.g., ``VfsToolsSection`` or ``PodmanSandboxSection``).
+
+    Args:
+        registry: The prompt's section registry snapshot.
+
+    Returns:
+        The first workspace section found, or None if none exists.
+    """
+    for node in registry.sections:
+        if isinstance(node.section, WorkspaceSection):
+            return node.section
+    return None
+
+
 __all__ = [
     "OpenSectionsParams",
     "VisibilityExpansionRequired",
+    "WorkspaceSection",
     "build_summary_suffix",
+    "build_vfs_summary_suffix",
     "compute_current_visibility",
+    "compute_vfs_context_path",
     "create_open_sections_handler",
+    "find_workspace_section",
     "has_summarized_sections",
+    "section_subtree_has_tools",
 ]

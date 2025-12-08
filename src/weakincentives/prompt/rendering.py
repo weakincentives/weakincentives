@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportImportCycles=false
+
 """Rendering helpers for :mod:`weakincentives.prompt`."""
 
 from __future__ import annotations
@@ -26,8 +28,12 @@ from ._visibility import SectionVisibility
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .progressive_disclosure import (
     build_summary_suffix,
+    build_vfs_summary_suffix,
     compute_current_visibility,
+    compute_vfs_context_path,
     create_open_sections_handler,
+    find_workspace_section,
+    section_subtree_has_tools,
 )
 from .registry import RegistrySnapshot, SectionNode
 from .section import Section
@@ -157,7 +163,7 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: PLR0914
+    def render(  # noqa: PLR0914, C901
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
@@ -173,7 +179,10 @@ class PromptRenderer[OutputT]:
         visibility_override_lookup = dict(visibility_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
         summary_skip_depth: int | None = None
-        has_summarized = False
+        has_summarized_with_tools = False
+
+        # Find workspace section for auto-rendering tool-free summarized content
+        workspace_section = find_workspace_section(self._registry)
 
         for node, section_params in self._iter_enabled_sections(dict(param_lookup)):
             # Skip children of sections rendered with SUMMARY visibility
@@ -195,7 +204,6 @@ class PromptRenderer[OutputT]:
             # When rendering with SUMMARY visibility, skip children
             if effective_visibility == SectionVisibility.SUMMARY:
                 summary_skip_depth = node.depth
-                has_summarized = True
 
             rendered = self._render_section(
                 node, section_params, override_body, visibility_override
@@ -207,10 +215,29 @@ class PromptRenderer[OutputT]:
                 and node.section.summary is not None
                 and rendered
             ):
-                section_key = ".".join(node.path)
-                child_keys = self._collect_child_keys(node)
-                suffix = build_summary_suffix(section_key, child_keys)
-                rendered += suffix
+                subtree_has_tools = section_subtree_has_tools(node.section)
+
+                if subtree_has_tools:
+                    # Section has tools - use open_sections suffix
+                    has_summarized_with_tools = True
+                    section_key = ".".join(node.path)
+                    child_keys = self._collect_child_keys(node)
+                    suffix = build_summary_suffix(section_key, child_keys)
+                    rendered += suffix
+                elif workspace_section is not None:
+                    # Section has no tools and workspace available - auto-render to VFS
+                    self._auto_render_to_vfs(
+                        node, section_params, workspace_section, dict(param_lookup)
+                    )
+                    suffix = build_vfs_summary_suffix(node.path)
+                    rendered += suffix
+                else:
+                    # No workspace section - fall back to open_sections
+                    has_summarized_with_tools = True
+                    section_key = ".".join(node.path)
+                    child_keys = self._collect_child_keys(node)
+                    suffix = build_summary_suffix(section_key, child_keys)
+                    rendered += suffix
 
             # Don't collect tools when rendering with SUMMARY visibility
             if effective_visibility != SectionVisibility.SUMMARY:
@@ -224,8 +251,8 @@ class PromptRenderer[OutputT]:
             if rendered:
                 rendered_sections.append(rendered)
 
-        # Inject open_sections tool when there are summarized sections
-        if has_summarized:
+        # Inject open_sections tool only when there are summarized sections with tools
+        if has_summarized_with_tools:
             current_visibility = compute_current_visibility(
                 self._registry,
                 visibility_overrides,
@@ -381,6 +408,183 @@ class PromptRenderer[OutputT]:
             ) from error
 
         return rendered
+
+    def _auto_render_to_vfs(
+        self,
+        node: SectionNode[SupportsDataclass],
+        section_params: SupportsDataclass | None,
+        workspace_section: object,
+        param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+    ) -> None:
+        """Render a section subtree to the VFS as a context file.
+
+        Args:
+            node: The section node being rendered with SUMMARY visibility.
+            section_params: Parameters for the section.
+            workspace_section: The workspace section providing VFS access.
+            param_lookup: Parameter lookup for resolving child section params.
+        """
+        from ..tools.vfs import VfsPath, VirtualFileSystem
+
+        # Render the full content of the section subtree
+        full_content = self._render_section_subtree(node, section_params, param_lookup)
+
+        # Compute the VFS path
+        vfs_path_str = compute_vfs_context_path(node.path)
+        # Remove leading slash and split into segments
+        path_segments = tuple(vfs_path_str.lstrip("/").split("/"))
+        vfs_path = VfsPath(segments=path_segments)
+
+        # Access the session from the workspace section
+        session = getattr(workspace_section, "session", None)
+        if session is None:
+            return
+
+        # Get the current VFS state and create a new file entry directly
+        from datetime import UTC, datetime
+
+        from ..tools.vfs import VfsFile
+
+        vfs_snapshot = session.query(VirtualFileSystem).latest()
+        current_files = list(vfs_snapshot.files) if vfs_snapshot else []
+
+        # Check if file already exists and remove it (for overwrite)
+        current_files = [f for f in current_files if f.path.segments != path_segments]
+
+        # Create new file entry
+        now = datetime.now(UTC)
+        size_bytes = len(full_content.encode("utf-8"))
+        new_file = VfsFile(
+            path=vfs_path,
+            content=full_content,
+            encoding="utf-8",
+            size_bytes=size_bytes,
+            version=1,
+            created_at=now,
+            updated_at=now,
+        )
+        current_files.append(new_file)
+
+        # Update VFS state directly using seed
+        new_vfs = VirtualFileSystem(files=tuple(current_files))
+        session.mutate(VirtualFileSystem).seed(new_vfs)
+
+    def _render_section_subtree(
+        self,
+        node: SectionNode[SupportsDataclass],
+        section_params: SupportsDataclass | None,
+        param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+    ) -> str:
+        """Render a section and all its children as full content.
+
+        Args:
+            node: The root section node to render.
+            section_params: Parameters for the root section.
+            param_lookup: Parameter lookup for resolving child section params.
+
+        Returns:
+            The rendered markdown content including all children.
+        """
+        parts: list[str] = []
+
+        # Render the root section with FULL visibility
+        root_rendered = node.section.render(
+            section_params,
+            node.depth,
+            node.number,
+            path=node.path,
+            visibility=SectionVisibility.FULL,
+        )
+        if root_rendered:
+            parts.append(root_rendered)
+
+        # Render all children recursively
+        self._render_children_recursive(
+            node.section, node.depth, node.number, node.path, param_lookup, parts
+        )
+
+        return "\n\n".join(parts)
+
+    def _render_children_recursive(  # noqa: PLR0913, PLR0917
+        self,
+        section: Section[SupportsDataclass],
+        parent_depth: int,
+        parent_number: str,
+        parent_path: SectionPath,
+        param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+        parts: list[str],
+    ) -> None:
+        """Recursively render children of a section.
+
+        Args:
+            section: The parent section.
+            parent_depth: The depth of the parent section.
+            parent_number: The section number of the parent.
+            parent_path: The path of the parent section.
+            param_lookup: Parameter lookup for resolving params.
+            parts: List to append rendered content to.
+        """
+        for idx, child in enumerate(section.children, start=1):
+            child_depth = parent_depth + 1
+            child_number = f"{parent_number}.{idx}"
+            child_path = (*parent_path, child.key)
+
+            # Resolve params for the child section
+            child_params = self._resolve_child_params(child, param_lookup)
+
+            # Check if child is enabled
+            if not child.is_enabled(child_params):
+                continue
+
+            # Render the child with FULL visibility
+            child_rendered = child.render(
+                child_params,
+                child_depth,
+                child_number,
+                path=child_path,
+                visibility=SectionVisibility.FULL,
+            )
+            if child_rendered:
+                parts.append(child_rendered)
+
+            # Recurse into grandchildren
+            self._render_children_recursive(
+                child, child_depth, child_number, child_path, param_lookup, parts
+            )
+
+    def _resolve_child_params(
+        self,
+        section: Section[SupportsDataclass],
+        param_lookup: dict[type[SupportsDataclass], SupportsDataclass],
+    ) -> SupportsDataclass | None:
+        """Resolve parameters for a child section.
+
+        Args:
+            section: The section to resolve parameters for.
+            param_lookup: Parameter lookup mapping.
+
+        Returns:
+            The resolved parameters or None if the section has no params type.
+        """
+        params_type = section.param_type
+        if params_type is None:
+            return None
+
+        # Try to find in param_lookup
+        params = param_lookup.get(params_type)
+        if params is not None:
+            return params
+
+        # Try default_params
+        if section.default_params is not None:
+            return section.default_params
+
+        # Try to construct with no args
+        try:
+            constructor = cast(Callable[[], SupportsDataclass | None], params_type)
+            return constructor()
+        except TypeError:  # pragma: no cover - defensive; registry fails first
+            return None
 
 
 __all__ = ["PromptRenderer", "RenderedPrompt"]

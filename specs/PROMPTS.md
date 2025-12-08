@@ -266,8 +266,8 @@ the framework automatically:
 
 1. **Renders the full content** of the section and its children as a markdown
    file
-2. **Writes it to the VFS** at `/context/{section-key}.md`
-3. **Appends a suffix** directing the model to read from the filesystem
+1. **Writes it to the VFS** at `/context/{section-key}.md`
+1. **Appends a suffix** directing the model to read from the filesystem
 
 This optimization avoids the `open_sections` round-trip for content-only
 sections. Since no tools need to be collected, there's no need to re-render

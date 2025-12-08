@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportImportCycles=false
+
 """Prompt authoring primitives exposed by :mod:`weakincentives.prompt`."""
 
 from __future__ import annotations

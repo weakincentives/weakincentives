@@ -369,3 +369,465 @@ def test_markdown_section_missing_placeholder_raises_prompt_error() -> None:
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.placeholder == "name"
+
+
+# Tests for auto-rendering tool-free SUMMARY sections to VFS
+
+
+@dataclass
+class _RefParams:
+    topic: str = "default"
+
+
+def test_summary_section_without_tools_auto_renders_to_vfs() -> None:
+    """Section with SUMMARY visibility and no tools is auto-rendered to VFS."""
+    from weakincentives.runtime import InProcessEventBus, Session
+    from weakincentives.tools.vfs import VfsToolsSection, VirtualFileSystem
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    vfs_section = VfsToolsSection(session=session)
+
+    reference_section = MarkdownSection[_RefParams](
+        title="Reference",
+        template="Full reference content about ${topic}.",
+        key="reference",
+        summary="Reference docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="testing"),
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="vfs-test",
+        sections=[reference_section, vfs_section],
+    )
+
+    rendered = Prompt(prompt).render()
+
+    # Check that VFS suffix is used instead of open_sections
+    assert "/context/reference.md" in rendered.text
+    assert "open_sections" not in rendered.text
+
+    # Check that content was written to VFS
+    vfs_snapshot = session.query(VirtualFileSystem).latest()
+    assert vfs_snapshot is not None
+    file_paths = [f.path.segments for f in vfs_snapshot.files]
+    assert ("context", "reference.md") in file_paths
+
+    # Verify the file content
+    context_file = next(
+        f for f in vfs_snapshot.files if f.path.segments == ("context", "reference.md")
+    )
+    assert "Full reference content about testing" in context_file.content
+
+
+def test_summary_section_with_tools_uses_open_sections() -> None:
+    """Section with SUMMARY visibility and tools uses open_sections."""
+    from weakincentives.prompt import Tool
+    from weakincentives.runtime import InProcessEventBus, Session
+    from weakincentives.tools.vfs import VfsToolsSection
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    vfs_section = VfsToolsSection(session=session)
+
+    @dataclass
+    class _ToolParams:
+        value: str = "test"
+
+    @dataclass
+    class _ToolResult:
+        result: str = ""
+
+    tool = Tool[_ToolParams, _ToolResult](
+        name="ref_tool",
+        description="Reference tool",
+        handler=None,
+    )
+
+    reference_section = MarkdownSection[_RefParams](
+        title="Reference",
+        template="Full reference with tool: ${topic}.",
+        key="reference",
+        summary="Reference docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="testing"),
+        tools=(tool,),
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="tools-test",
+        sections=[reference_section, vfs_section],
+    )
+
+    rendered = Prompt(prompt).render()
+
+    # Check that open_sections suffix is used
+    assert "open_sections" in rendered.text
+    assert "/context/reference.md" not in rendered.text
+
+    # Verify open_sections tool is in the rendered tools
+    tool_names = [t.name for t in rendered.tools]
+    assert "open_sections" in tool_names
+
+
+def test_summary_section_without_workspace_falls_back_to_open_sections() -> None:
+    """Section with SUMMARY visibility falls back to open_sections without workspace."""
+    reference_section = MarkdownSection[_RefParams](
+        title="Reference",
+        template="Full reference: ${topic}.",
+        key="reference",
+        summary="Reference docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="testing"),
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="no-vfs-test",
+        sections=[reference_section],
+    )
+
+    rendered = Prompt(prompt).render()
+
+    # Check that open_sections suffix is used
+    assert "open_sections" in rendered.text
+    assert "/context/reference.md" not in rendered.text
+
+
+def test_summary_section_with_children_renders_full_subtree_to_vfs() -> None:
+    """Section with children renders entire subtree to VFS."""
+    from weakincentives.runtime import InProcessEventBus, Session
+    from weakincentives.tools.vfs import VfsToolsSection, VirtualFileSystem
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    vfs_section = VfsToolsSection(session=session)
+
+    child_section = MarkdownSection[_RefParams](
+        title="Child",
+        template="Child content: ${topic}.",
+        key="child",
+        default_params=_RefParams(topic="child-topic"),
+    )
+
+    parent_section = MarkdownSection[_RefParams](
+        title="Parent",
+        template="Parent content: ${topic}.",
+        key="parent",
+        summary="Parent docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="parent-topic"),
+        children=[child_section],
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="subtree-test",
+        sections=[parent_section, vfs_section],
+    )
+
+    rendered = Prompt(prompt).render()
+
+    # Check VFS suffix is used
+    assert "/context/parent.md" in rendered.text
+
+    # Check that content was written to VFS
+    vfs_snapshot = session.query(VirtualFileSystem).latest()
+    assert vfs_snapshot is not None
+
+    # Find the context file
+    context_file = next(
+        (f for f in vfs_snapshot.files if f.path.segments == ("context", "parent.md")),
+        None,
+    )
+    assert context_file is not None
+
+    # Verify both parent and child content are in the file
+    assert "Parent content: parent-topic" in context_file.content
+    assert "Child content: child-topic" in context_file.content
+
+
+def test_summary_section_with_disabled_child_skips_child_in_vfs() -> None:
+    """Disabled child sections are skipped when rendering to VFS."""
+    from weakincentives.runtime import InProcessEventBus, Session
+    from weakincentives.tools.vfs import VfsToolsSection, VirtualFileSystem
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    vfs_section = VfsToolsSection(session=session)
+
+    # Child section that is disabled
+    disabled_child = MarkdownSection[_RefParams](
+        title="Disabled Child",
+        template="Disabled content: ${topic}.",
+        key="disabled-child",
+        default_params=_RefParams(topic="disabled"),
+        enabled=lambda _: False,
+    )
+
+    # Enabled child section
+    enabled_child = MarkdownSection[_RefParams](
+        title="Enabled Child",
+        template="Enabled content: ${topic}.",
+        key="enabled-child",
+        default_params=_RefParams(topic="enabled"),
+    )
+
+    parent_section = MarkdownSection[_RefParams](
+        title="Parent",
+        template="Parent content: ${topic}.",
+        key="parent",
+        summary="Parent docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="parent-topic"),
+        children=[disabled_child, enabled_child],
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="disabled-child-test",
+        sections=[parent_section, vfs_section],
+    )
+
+    rendered = Prompt(prompt).render()
+
+    # Check VFS suffix is used
+    assert "/context/parent.md" in rendered.text
+
+    # Check that content was written to VFS
+    vfs_snapshot = session.query(VirtualFileSystem).latest()
+    assert vfs_snapshot is not None
+
+    # Find the context file
+    context_file = next(
+        (f for f in vfs_snapshot.files if f.path.segments == ("context", "parent.md")),
+        None,
+    )
+    assert context_file is not None
+
+    # Verify parent and enabled child content are in the file
+    assert "Parent content: parent-topic" in context_file.content
+    assert "Enabled content: enabled" in context_file.content
+    # Disabled child should NOT be in the file
+    assert "Disabled content" not in context_file.content
+
+
+def test_summary_section_with_parameterless_child() -> None:
+    """Child sections without params type are rendered correctly."""
+    from weakincentives.runtime import InProcessEventBus, Session
+    from weakincentives.tools.vfs import VfsToolsSection, VirtualFileSystem
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    vfs_section = VfsToolsSection(session=session)
+
+    # Child section without params
+    static_child = MarkdownSection(
+        title="Static Child",
+        template="Static content without params.",
+        key="static-child",
+    )
+
+    parent_section = MarkdownSection[_RefParams](
+        title="Parent",
+        template="Parent content: ${topic}.",
+        key="parent",
+        summary="Parent docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="parent-topic"),
+        children=[static_child],
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="parameterless-child-test",
+        sections=[parent_section, vfs_section],
+    )
+
+    rendered = Prompt(prompt).render()
+
+    # Check VFS suffix is used
+    assert "/context/parent.md" in rendered.text
+
+    # Check that content was written to VFS
+    vfs_snapshot = session.query(VirtualFileSystem).latest()
+    assert vfs_snapshot is not None
+
+    # Find the context file
+    context_file = next(
+        (f for f in vfs_snapshot.files if f.path.segments == ("context", "parent.md")),
+        None,
+    )
+    assert context_file is not None
+
+    # Verify both parent and static child content are in the file
+    assert "Parent content: parent-topic" in context_file.content
+    assert "Static content without params" in context_file.content
+
+
+def test_summary_section_child_uses_params_from_lookup() -> None:
+    """Child sections use params from lookup when available."""
+    from weakincentives.runtime import InProcessEventBus, Session
+    from weakincentives.tools.vfs import VfsToolsSection, VirtualFileSystem
+
+    @dataclass
+    class _ChildParams:
+        value: str
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    vfs_section = VfsToolsSection(session=session)
+
+    child_section = MarkdownSection[_ChildParams](
+        title="Child",
+        template="Child value: ${value}.",
+        key="child",
+    )
+
+    parent_section = MarkdownSection[_RefParams](
+        title="Parent",
+        template="Parent content: ${topic}.",
+        key="parent",
+        summary="Parent docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="parent-topic"),
+        children=[child_section],
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="params-lookup-test",
+        sections=[parent_section, vfs_section],
+    )
+
+    Prompt(prompt).bind(_ChildParams(value="from-lookup")).render()
+
+    # Check that content was written to VFS
+    vfs_snapshot = session.query(VirtualFileSystem).latest()
+    assert vfs_snapshot is not None
+
+    # Find the context file
+    context_file = next(
+        (f for f in vfs_snapshot.files if f.path.segments == ("context", "parent.md")),
+        None,
+    )
+    assert context_file is not None
+
+    # Verify child used params from lookup
+    assert "Child value: from-lookup" in context_file.content
+
+
+def test_summary_section_with_child_constructable_without_args() -> None:
+    """Child sections whose params can be constructed without args work correctly."""
+    from weakincentives.runtime import InProcessEventBus, Session
+    from weakincentives.tools.vfs import VfsToolsSection, VirtualFileSystem
+
+    @dataclass
+    class _DefaultableParams:
+        value: str = "default-value"
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    vfs_section = VfsToolsSection(session=session)
+
+    # Child section with params that have defaults
+    child_section = MarkdownSection[_DefaultableParams](
+        title="Child",
+        template="Child value: ${value}.",
+        key="child",
+    )
+
+    parent_section = MarkdownSection[_RefParams](
+        title="Parent",
+        template="Parent content: ${topic}.",
+        key="parent",
+        summary="Parent docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="parent-topic"),
+        children=[child_section],
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="constructable-params-test",
+        sections=[parent_section, vfs_section],
+    )
+
+    rendered = Prompt(prompt).render()
+
+    # Check VFS suffix is used
+    assert "/context/parent.md" in rendered.text
+
+    # Check that content was written to VFS
+    vfs_snapshot = session.query(VirtualFileSystem).latest()
+    assert vfs_snapshot is not None
+
+    # Find the context file
+    context_file = next(
+        (f for f in vfs_snapshot.files if f.path.segments == ("context", "parent.md")),
+        None,
+    )
+    assert context_file is not None
+
+    # Verify child was rendered with default params
+    assert "Child value: default-value" in context_file.content
+
+
+class _MockWorkspaceWithNullSession:
+    """Mock workspace section that returns None for session."""
+
+    @property
+    def session(self) -> None:
+        return None
+
+
+def test_auto_render_skipped_when_session_is_none() -> None:
+    """Auto-rendering is skipped when workspace section's session is None."""
+    from weakincentives.prompt.progressive_disclosure import WorkspaceSection
+    from weakincentives.prompt.registry import SectionNode
+    from weakincentives.prompt.rendering import PromptRenderer
+
+    # Create mock workspace that matches protocol but returns None session
+    mock = _MockWorkspaceWithNullSession()
+    # The mock matches WorkspaceSection protocol due to having 'session' property
+    assert isinstance(mock, WorkspaceSection)
+
+    # Create a simple section node for testing
+    section = MarkdownSection[_RefParams](
+        title="Test",
+        template="Test: ${topic}.",
+        key="test",
+        summary="Test docs available.",
+        visibility=SectionVisibility.SUMMARY,
+        default_params=_RefParams(topic="test-topic"),
+    )
+
+    # Test that _auto_render_to_vfs handles None session gracefully
+    prompt = PromptTemplate(
+        ns="tests/auto-render",
+        key="null-session-test",
+        sections=[section],
+    )
+    assert prompt._snapshot is not None  # Type narrowing
+    renderer = PromptRenderer(
+        registry=prompt._snapshot,
+        structured_output=None,
+    )
+
+    # Create a minimal node
+    node = cast(
+        SectionNode[SupportsDataclass],
+        SectionNode(section=section, path=("test",), depth=0, number="1"),
+    )
+
+    # This should return early without error when session is None
+    renderer._auto_render_to_vfs(
+        node,
+        _RefParams(topic="test-topic"),
+        mock,  # workspace with None session
+        {},
+    )
+    # If we get here without error, the None session check worked
