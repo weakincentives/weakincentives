@@ -37,9 +37,11 @@ from weakincentives.runtime.session import (
     ReducerEvent,
     ReducerEventWithValue,
     Session,
+    SliceObserver,
     Snapshot,
     SnapshotRestoreError,
     SnapshotSerializationError,
+    Subscription,
     append,
     replace_latest,
     upsert_by,
@@ -909,3 +911,253 @@ def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> N
     session.mutate().rollback(snapshot)
 
     assert session.query(ExampleOutput).all() == (ExampleOutput(text="first"),)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Observer API tests
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_observe_returns_subscription(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    def observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        pass
+
+    subscription = session.observe(ExampleOutput, observer)
+
+    assert isinstance(subscription, Subscription)
+
+
+def test_observer_called_on_state_change(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    calls: list[tuple[tuple[ExampleOutput, ...], tuple[ExampleOutput, ...]]] = []
+
+    def observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        calls.append((old, new))
+
+    session.observe(ExampleOutput, observer)
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+
+    assert len(calls) == 1
+    assert calls[0] == ((), (ExampleOutput(text="first"),))
+
+
+def test_observer_receives_correct_old_and_new_values(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    calls: list[tuple[tuple[ExampleOutput, ...], tuple[ExampleOutput, ...]]] = []
+
+    def observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        calls.append((old, new))
+
+    session.observe(ExampleOutput, observer)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+
+    assert len(calls) == 2
+    assert calls[0] == ((), (ExampleOutput(text="first"),))
+    assert calls[1] == (
+        (ExampleOutput(text="first"),),
+        (ExampleOutput(text="first"), ExampleOutput(text="second")),
+    )
+
+
+def test_multiple_observers_all_called(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    first_calls: list[tuple[ExampleOutput, ...]] = []
+    second_calls: list[tuple[ExampleOutput, ...]] = []
+
+    def first_observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        first_calls.append(new)
+
+    def second_observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        second_calls.append(new)
+
+    session.observe(ExampleOutput, first_observer)
+    session.observe(ExampleOutput, second_observer)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="value")))
+
+    assert first_calls == [(ExampleOutput(text="value"),)]
+    assert second_calls == [(ExampleOutput(text="value"),)]
+
+
+def test_subscription_unsubscribe_removes_observer(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    calls: list[tuple[ExampleOutput, ...]] = []
+
+    def observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        calls.append(new)
+
+    subscription = session.observe(ExampleOutput, observer)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    assert len(calls) == 1
+
+    result = subscription.unsubscribe()
+    assert result is True
+
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    assert len(calls) == 1  # Observer not called after unsubscribe
+
+
+def test_subscription_unsubscribe_returns_false_when_already_unsubscribed(
+    session_factory: SessionFactory,
+) -> None:
+    session, _ = session_factory()
+
+    def observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        pass
+
+    subscription = session.observe(ExampleOutput, observer)
+
+    first_result = subscription.unsubscribe()
+    second_result = subscription.unsubscribe()
+
+    assert first_result is True
+    assert second_result is False
+
+
+def test_observer_exception_does_not_break_other_observers(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    calls: list[str] = []
+
+    def failing_observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        raise RuntimeError("Observer failed")
+
+    def working_observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        calls.append("called")
+
+    session.observe(ExampleOutput, failing_observer)
+    session.observe(ExampleOutput, working_observer)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="value")))
+
+    assert calls == ["called"]
+    assert session.query(ExampleOutput).all() == (ExampleOutput(text="value"),)
+
+
+def test_observer_not_called_when_state_unchanged(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    calls: list[tuple[ExampleOutput, ...]] = []
+
+    def observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        calls.append(new)
+
+    session.observe(ExampleOutput, observer)
+
+    # First publish adds the item
+    bus.publish(make_prompt_event(ExampleOutput(text="value")))
+    assert len(calls) == 1
+
+    # Second publish of same value - default append dedupes, so no change
+    bus.publish(make_prompt_event(ExampleOutput(text="value")))
+    assert len(calls) == 1  # Observer not called since state didn't change
+
+
+def test_observer_works_with_custom_reducer(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    calls: list[tuple[tuple[ExampleOutput, ...], tuple[ExampleOutput, ...]]] = []
+
+    def observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        calls.append((old, new))
+
+    session.mutate(ExampleOutput).register(ExampleOutput, replace_latest)
+    session.observe(ExampleOutput, observer)
+
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+
+    assert len(calls) == 2
+    assert calls[0] == ((), (ExampleOutput(text="first"),))
+    assert calls[1] == (
+        (ExampleOutput(text="first"),),
+        (ExampleOutput(text="second"),),
+    )
+
+
+def test_observer_called_for_tool_invoked_slice(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    calls: list[tuple[ExamplePayload, ...]] = []
+
+    def observer(
+        old: tuple[ExamplePayload, ...], new: tuple[ExamplePayload, ...]
+    ) -> None:
+        calls.append(new)
+
+    session.observe(ExamplePayload, observer)
+
+    bus.publish(make_tool_event(42))
+
+    assert len(calls) == 1
+    assert calls[0] == (ExamplePayload(value=42),)
+
+
+def test_observer_type_compatibility() -> None:
+    """Verify SliceObserver type alias works correctly."""
+
+    def typed_observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        pass
+
+    observer: SliceObserver[ExampleOutput] = typed_observer
+    assert callable(observer)
+
+
+def test_subscription_repr(session_factory: SessionFactory) -> None:
+    session, _ = session_factory()
+
+    def observer(
+        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
+    ) -> None:
+        pass
+
+    subscription = session.observe(ExampleOutput, observer)
+
+    result = repr(subscription)
+
+    assert "Subscription" in result
+    assert "subscription_id" in result
+    assert str(subscription.subscription_id) in result

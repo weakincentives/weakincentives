@@ -53,6 +53,8 @@ class Session:
     def mutate[T](self, slice_type: type[T]) -> MutationBuilder[T]: ...
     def mutate(self) -> GlobalMutationBuilder: ...
 
+    def observe[T](self, slice_type: type[T], observer: SliceObserver[T]) -> Subscription: ...
+
     def snapshot(self) -> Snapshot: ...
 
     def clone(
@@ -93,6 +95,48 @@ latest_plan = session.query(Plan).latest()
 all_results = session.query(SearchResult).all()
 filtered = session.query(Issue).where(lambda i: i.severity == "high")
 ```
+
+### Observer API
+
+Observers enable reactive programming by notifying callbacks when slices change:
+
+```python
+def on_plan_change(old: tuple[Plan, ...], new: tuple[Plan, ...]) -> None:
+    print(f"Plan changed: {len(old)} -> {len(new)} items")
+
+subscription = session.observe(Plan, on_plan_change)
+
+# Later, to stop observing:
+subscription.unsubscribe()
+```
+
+**SliceObserver signature:**
+
+```python
+type SliceObserver[T] = Callable[[tuple[T, ...], tuple[T, ...]], None]
+```
+
+The observer receives `(old_values, new_values)` after each state update where the
+slice actually changed.
+
+**Subscription handle:**
+
+```python
+@dataclass
+class Subscription:
+    subscription_id: UUID
+
+    def unsubscribe(self) -> bool:
+        """Remove the observer. Returns True if successfully unsubscribed."""
+```
+
+**Observer behavior:**
+
+- Observers are called synchronously after reducer execution
+- Multiple observers for the same slice are called in registration order
+- Observer exceptions are logged and isolated (do not affect other observers)
+- Observers are only called when state actually changes (not on no-op updates)
+- Observers are not copied during `session.clone()`
 
 ### Mutation API
 
@@ -399,6 +443,13 @@ session = Session(bus=bus)
 # Optional: register custom reducers
 session.mutate(ResearchMetrics).register(ResearchSummary, update_metrics_reducer)
 
+# Optional: observe state changes
+def on_metrics_change(old: tuple[ResearchMetrics, ...], new: tuple[ResearchMetrics, ...]) -> None:
+    if new:
+        print(f"Metrics updated: {new[-1]}")
+
+subscription = session.observe(ResearchMetrics, on_metrics_change)
+
 # Configure limits
 deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
 budget = Budget(deadline=deadline, max_total_tokens=50000)
@@ -420,12 +471,17 @@ all_metrics = session.query(ResearchMetrics).all()
 # Snapshot for persistence
 snapshot = session.snapshot()
 json_str = snapshot.to_json()
+
+# Cleanup observers when done
+subscription.unsubscribe()
 ```
 
 ## Limitations
 
 - **Synchronous reducers**: Run on publisher thread; keep them lightweight
+- **Synchronous observers**: Run after reducers on same thread; keep them lightweight
 - **Dataclass focus**: Non-dataclass payloads only populate generic slices
 - **No implicit eviction**: State grows; use `replace_latest` when needed
 - **No mid-request cancellation**: Limits checked at checkpoints only
 - **Clock synchronization**: Deadlines require synchronized UTC clocks
+- **Observers not cloned**: `session.clone()` does not copy observer registrations
