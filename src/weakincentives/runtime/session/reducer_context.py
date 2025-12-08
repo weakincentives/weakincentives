@@ -15,18 +15,17 @@
 from __future__ import annotations
 
 from ...dataclasses import FrozenDataclass
-from ._types import ReducerContextProtocol
-from .protocols import SessionProtocol
+from ._mutation_types import ReducerContextProtocol, ReducerSessionProtocol
 
 
 @FrozenDataclass()
 class ReducerContext(ReducerContextProtocol):
     """Immutable bundle of runtime services shared with reducers."""
 
-    session: SessionProtocol
+    session: ReducerSessionProtocol
 
 
-def build_reducer_context(*, session: SessionProtocol) -> ReducerContext:
+def build_reducer_context(*, session: ReducerSessionProtocol) -> ReducerContext:
     """Return a :class:`ReducerContext` for the provided session."""
 
     return ReducerContext(session=session)

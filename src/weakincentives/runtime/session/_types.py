@@ -10,53 +10,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared typing helpers for session reducers."""
+"""Shared typing helpers for session reducers.
+
+Re-exports types from :mod:`_mutation_types` for backward compatibility.
+The canonical definitions now live in :mod:`_mutation_types` to avoid
+import cycles.
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
-
-from ...prompt._types import SupportsDataclass
-
-if TYPE_CHECKING:
-    from .protocols import SessionProtocol
-
-
-@runtime_checkable
-class ReducerEventWithValue(Protocol):
-    """Structural type satisfied by events exposing payloads via ``value``."""
-
-    @property
-    def value(self) -> SupportsDataclass | None: ...
-
-
-ReducerEvent = SupportsDataclass | ReducerEventWithValue
-
-
-S = TypeVar("S", bound=SupportsDataclass)
-
-
-class ReducerContextProtocol(Protocol):
-    """Protocol implemented by reducer context objects."""
-
-    session: SessionProtocol
-
-
-class TypedReducer(Protocol[S]):
-    """Protocol for reducer callables maintained by :class:`Session`."""
-
-    def __call__(
-        self,
-        slice_values: tuple[S, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[S, ...]: ...
-
+from ._mutation_types import (
+    ReducerContextProtocol,
+    ReducerEvent,
+    ReducerEventWithValue,
+    ReducerSessionProtocol,
+    TypedReducer,
+)
 
 __all__ = [
     "ReducerContextProtocol",
     "ReducerEvent",
     "ReducerEventWithValue",
+    "ReducerSessionProtocol",
     "TypedReducer",
 ]

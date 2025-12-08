@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from ...prompt._types import SupportsDataclass
-from ._mutation_types import MutationProvider
+from ._mutation_types import MutationProvider, TypedReducer
 
 if TYPE_CHECKING:
     from .snapshots import Snapshot
@@ -108,7 +108,7 @@ class MutationBuilder[T: SupportsDataclass]:
     def register(
         self,
         data_type: type[SupportsDataclass],
-        reducer: Any,  # TypedReducer[T] - avoiding import cycle  # noqa: ANN401
+        reducer: TypedReducer[T],
     ) -> None:
         """Register a reducer for events of the given type.
 
