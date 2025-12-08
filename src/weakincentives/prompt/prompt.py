@@ -183,7 +183,10 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         registry.register_sections(sections_tuple)
 
         structured_output = _resolve_output_spec(cls, allow_extra)
-        snapshot = registry.snapshot()
+        structured_output_type = (
+            structured_output.dataclass_type if structured_output is not None else None
+        )
+        snapshot = registry.snapshot(structured_output_type=structured_output_type)
 
         return {
             "ns": stripped_ns,

@@ -260,6 +260,7 @@ bad_example = TaskExample(
 ```
 
 Error message format:
+
 ```
 PromptValidationError: Unknown tool "unknown" in task example step 0.
 Available tools: lookup, search.
@@ -304,6 +305,7 @@ TaskStep(
 ```
 
 Error message format:
+
 ```
 PromptValidationError: Task example step 1 input type mismatch for tool "lookup".
 Expected: LookupParams, got: SearchParams.
@@ -325,11 +327,11 @@ TaskExamplesSection(
 ```
 
 Error message:
+
 ```
 PromptValidationError: TaskExamplesSection examples must be TaskExample instances.
 Got: MarkdownSection at index 0.
 ```
-
 
 ## Rendering
 
@@ -338,7 +340,7 @@ Got: MarkdownSection at index 0.
 The container section renders a heading, then delegates to child sections.
 Each `TaskExample` renders its trajectory:
 
-```markdown
+````markdown
 ## 3. Task Examples
 
 ### 3.1. Review authentication module
@@ -384,7 +386,7 @@ Each `TaskExample` renders its trajectory:
 **Objective:** Audit database queries for N+1 issues.
 
 ...
-```
+````
 
 ### Rendering Rules
 

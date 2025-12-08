@@ -57,6 +57,7 @@ from .structured_output import (
     StructuredOutputConfig,
     parse_structured_output,
 )
+from .task_examples import TaskExample, TaskExamplesSection, TaskStep
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
@@ -90,6 +91,9 @@ __all__ = [
     "SupportsDataclass",
     "SupportsDataclassOrNone",
     "SupportsToolResult",
+    "TaskExample",
+    "TaskExamplesSection",
+    "TaskStep",
     "Tool",
     "ToolContext",
     "ToolDescriptor",
