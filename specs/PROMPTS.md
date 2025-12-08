@@ -275,8 +275,8 @@ the prompt—the model can access the content directly via `read_file`.
 
 **Requirements:**
 
-- A `VfsToolsSection` must be present in the prompt tree (provides the VFS
-  session context and `read_file` tool)
+- A `VfsToolsSection` or `PodmanSandboxSection` must be present in the prompt
+  tree (provides the filesystem session context and `read_file` tool)
 - The section must have `visibility=SUMMARY` effective at render time
 - The section subtree must register zero tools
 
