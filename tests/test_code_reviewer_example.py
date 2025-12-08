@@ -172,8 +172,8 @@ def test_workspace_digest_section_empty_by_default() -> None:
 
     rendered = Prompt(template).bind(ReviewTurnParams(request="demo request")).render()
 
-    assert "## 2. Workspace Digest (workspace-digest)" in rendered.text
-    post_section = rendered.text.split("## 2. Workspace Digest (workspace-digest)", 1)[
+    assert "## 3. Workspace Digest (workspace-digest)" in rendered.text
+    post_section = rendered.text.split("## 3. Workspace Digest (workspace-digest)", 1)[
         1
     ]
     section_body = post_section.split("\n## ", 1)[0]

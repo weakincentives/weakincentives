@@ -42,7 +42,12 @@ from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
     SectionVisibility,
+    SummarizedSectionWithTools,
     SupportsDataclass,
+    TaskHistorySection,
+    VisibilityExpansionRequired,
+    record_visibility_transition,
+    set_task_history_context,
 )
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -206,7 +211,33 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         if self._session.query(WorkspaceDigest).latest() is None:
             self._run_optimization()
         effective_deadline = deadline or _default_deadline()
-        return super().execute(request, budget=budget, deadline=effective_deadline)
+
+        # Override the evaluation loop to capture visibility transitions
+        prompt = self.create_prompt(request)
+        visibility_overrides: dict[tuple[str, ...], SectionVisibility] = {}
+
+        while True:
+            try:
+                return self._adapter.evaluate(
+                    prompt,
+                    session=self._session,
+                    visibility_overrides=visibility_overrides,
+                    deadline=effective_deadline,
+                )
+            except VisibilityExpansionRequired as e:
+                # Record the transition with the model's rationale
+                for section_path in e.requested_overrides:
+                    record_visibility_transition(
+                        self._session,
+                        section_path=section_path,
+                        reason=e.reason,
+                    )
+                    _LOGGER.info(
+                        "Section expanded: %s (reason: %s)",
+                        ".".join(section_path),
+                        e.reason,
+                    )
+                visibility_overrides.update(e.requested_overrides)
 
     def _run_optimization(self) -> None:
         """Run workspace digest optimization."""
@@ -321,11 +352,31 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
 
     This prompt demonstrates progressive disclosure: the Reference Documentation
     section starts summarized and can be expanded on demand via `open_sections`.
+
+    The TaskHistorySection tracks plan state and visibility transitions,
+    providing guidance for providing rationale when expanding sections.
     """
     _ensure_test_repository_available()
     workspace_section = _build_workspace_section(session=session)
+    task_history_section = TaskHistorySection(session=session)
+
+    # Initialize task history context with information about summarized sections
+    # that have tools attached (directly or via children)
+    set_task_history_context(
+        session,
+        sections_with_tools=(
+            SummarizedSectionWithTools(
+                section_path=("reference-docs",),
+                section_title="Reference Documentation",
+                tool_names=(),  # No direct tools, but tracked for visibility
+                is_currently_summarized=True,
+            ),
+        ),
+    )
+
     sections = (
         _build_review_guidance_section(),
+        task_history_section,  # Shows plan state and visibility transitions
         WorkspaceDigestSection(session=session),
         _build_reference_section(),  # Progressive disclosure section
         PlanningToolsSection(
