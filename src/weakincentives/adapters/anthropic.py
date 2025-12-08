@@ -34,7 +34,6 @@ from ..prompt.errors import SectionPath
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
 from ..prompt.tool import Tool
-from ..runtime.events import EventBus
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import schema
 from . import shared as _shared
@@ -533,9 +532,7 @@ class AnthropicAdapter(ProviderAdapter[Any]):
         self,
         prompt: Prompt[OutputT],
         *,
-        bus: EventBus,
         session: SessionProtocol,
-        parse_output: bool = True,
         deadline: Deadline | None = None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
@@ -543,7 +540,6 @@ class AnthropicAdapter(ProviderAdapter[Any]):
     ) -> PromptResponse[OutputT]:
         context = self._setup_evaluation(
             prompt,
-            parse_output=parse_output,
             deadline=deadline,
             visibility_overrides=visibility_overrides,
         )
@@ -554,7 +550,6 @@ class AnthropicAdapter(ProviderAdapter[Any]):
             effective_tracker = BudgetTracker(budget=budget)
 
         config = InnerLoopConfig(
-            bus=bus,
             session=session,
             tool_choice=self._tool_choice,
             response_format=context.response_format,
@@ -562,7 +557,6 @@ class AnthropicAdapter(ProviderAdapter[Any]):
             call_provider=self._build_provider_invoker(context.prompt_name),
             select_choice=self._build_choice_selector(context.prompt_name),
             serialize_tool_message_fn=serialize_tool_message,
-            parse_output=parse_output,
             format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=self._conversation_logger(),
@@ -586,7 +580,6 @@ class AnthropicAdapter(ProviderAdapter[Any]):
         self,
         prompt: Prompt[OutputT],
         *,
-        parse_output: bool,
         deadline: Deadline | None,
         visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     ) -> _EvaluationContext[OutputT]:
@@ -600,7 +593,6 @@ class AnthropicAdapter(ProviderAdapter[Any]):
         )
         response_format = self._build_response_format(
             rendered,
-            parse_output=parse_output,
             prompt_name=prompt_name,
         )
         return _EvaluationContext(
@@ -638,13 +630,10 @@ class AnthropicAdapter(ProviderAdapter[Any]):
         self,
         rendered: RenderedPrompt[Any],
         *,
-        parse_output: bool,
         prompt_name: str,
     ) -> dict[str, Any] | None:
         should_parse_structured_output = (
-            parse_output
-            and rendered.output_type is not None
-            and rendered.container is not None
+            rendered.output_type is not None and rendered.container is not None
         )
         if should_parse_structured_output and self._use_native_structured_output:
             return _build_anthropic_output_format(rendered, prompt_name)

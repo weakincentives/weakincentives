@@ -35,7 +35,6 @@ from weakincentives.runtime.events import PromptExecuted
 from weakincentives.runtime.session import Session
 
 pytest.importorskip("anthropic")
-
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
@@ -44,7 +43,6 @@ pytestmark = [
     ),
     pytest.mark.timeout(30),
 ]
-
 _MODEL_ENV_VAR = "ANTHROPIC_TEST_MODEL"
 _DEFAULT_MODEL = "claude-sonnet-4-20250514"
 _PROMPT_NS = "integration/anthropic"
@@ -53,7 +51,6 @@ _PROMPT_NS = "integration/anthropic"
 @pytest.fixture(scope="module")
 def anthropic_model() -> str:
     """Return the model name used for integration tests."""
-
     return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
 
 
@@ -62,7 +59,6 @@ def client_config() -> AnthropicClientConfig:
     """Build a typed AnthropicClientConfig from environment variables."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     base_url = os.environ.get("ANTHROPIC_BASE_URL")
-
     return AnthropicClientConfig(
         api_key=api_key,
         base_url=base_url,
@@ -72,7 +68,6 @@ def client_config() -> AnthropicClientConfig:
 @pytest.fixture(scope="module")
 def adapter(anthropic_model: str) -> AnthropicAdapter:
     """Create an Anthropic adapter instance for basic evaluations."""
-
     return AnthropicAdapter(model=anthropic_model)
 
 
@@ -235,11 +230,8 @@ def test_anthropic_adapter_returns_text(adapter: AnthropicAdapter) -> None:
     prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="integration tests")
     prompt = Prompt(prompt_template).bind(params)
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
-    response = adapter.evaluate(prompt, parse_output=False, bus=bus, session=session)
-
+    response = adapter.evaluate(prompt, session=session)
     assert response.prompt_name == "greeting"
     assert response.text is not None
     assert response.text.strip()
@@ -254,13 +246,9 @@ def test_anthropic_adapter_processes_tool_invocation(anthropic_model: str) -> No
         model=anthropic_model,
         tool_choice={"type": "function", "function": {"name": tool.name}},
     )
-
     prompt = Prompt(prompt_template).bind(params)
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
-    response = adapter.evaluate(prompt, parse_output=False, bus=bus, session=session)
-
+    response = adapter.evaluate(prompt, session=session)
     assert response.prompt_name == "uppercase_workflow"
     assert response.text is not None and response.text.strip()
     assert params.text.upper() in response.text
@@ -275,13 +263,9 @@ def test_anthropic_adapter_parses_structured_output(adapter: AnthropicAdapter) -
             " Early adopters report smoother setup, though some mention learning curves."
         ),
     )
-
     prompt = Prompt(prompt_template).bind(sample)
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
-    response = adapter.evaluate(prompt, bus=bus, session=session)
-
+    response = adapter.evaluate(prompt, session=session)
     assert response.prompt_name == "structured_review"
     assert response.output is not None
     assert isinstance(response.output, ReviewAnalysis)
@@ -302,20 +286,15 @@ def test_anthropic_adapter_parses_structured_output_without_native_schema(
         ),
     )
     prompt = Prompt(prompt_template).bind(sample)
-
     custom_adapter = AnthropicAdapter(
         model=anthropic_model,
         use_native_structured_output=False,
     )
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = custom_adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
-
     assert response.prompt_name == "structured_review"
     assert response.output is not None
     assert isinstance(response.output, ReviewAnalysis)
@@ -335,17 +314,12 @@ def test_anthropic_adapter_parses_structured_output_array(
             "but some testers highlight occasional slow responses from the support channel."
         ),
     )
-
     prompt = Prompt(prompt_template).bind(sample)
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
-
     assert response.prompt_name == "structured_review_list"
     assert response.output is not None
     assert isinstance(response.output, list)
@@ -364,16 +338,11 @@ def test_anthropic_adapter_with_typed_client_config(
     prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="typed config integration tests")
     prompt = Prompt(prompt_template).bind(params)
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter_with_typed_config.evaluate(
         prompt,
-        parse_output=False,
-        bus=bus,
         session=session,
     )
-
     assert response.prompt_name == "greeting"
     assert response.text is not None
     assert response.text.strip()
@@ -388,26 +357,19 @@ def test_anthropic_adapter_with_model_config(
         temperature=0.3,
         max_tokens=150,
     )
-
     adapter = AnthropicAdapter(
         model=anthropic_model,
         client_config=client_config,
         model_config=model_config,
     )
-
     prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="model config tests")
     prompt = Prompt(prompt_template).bind(params)
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        parse_output=False,
-        bus=bus,
         session=session,
     )
-
     assert response.prompt_name == "greeting"
     assert response.text is not None
     assert response.text.strip()
@@ -422,27 +384,21 @@ def test_anthropic_adapter_with_model_config_structured_output(
         temperature=0.2,
         max_tokens=200,
     )
-
     adapter = AnthropicAdapter(
         model=anthropic_model,
         client_config=client_config,
         model_config=model_config,
     )
-
     prompt_template = _build_structured_prompt()
     sample = ReviewParams(
         text="The typed configuration system provides better IDE support and validation."
     )
     prompt = Prompt(prompt_template).bind(sample)
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
-
     assert response.prompt_name == "structured_review"
     assert response.output is not None
     assert isinstance(response.output, ReviewAnalysis)
@@ -460,26 +416,19 @@ def test_anthropic_adapter_with_top_k_parameter(
         top_k=40,
         max_tokens=100,
     )
-
     adapter = AnthropicAdapter(
         model=anthropic_model,
         client_config=client_config,
         model_config=model_config,
     )
-
     prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="top_k parameter tests")
     prompt = Prompt(prompt_template).bind(params)
-
     session = _make_session_with_usage_tracking()
-    bus = session.event_bus
     response = adapter.evaluate(
         prompt,
-        parse_output=False,
-        bus=bus,
         session=session,
     )
-
     assert response.prompt_name == "greeting"
     assert response.text is not None
     assert response.text.strip()

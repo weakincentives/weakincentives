@@ -66,7 +66,6 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.runtime.events import (
-    EventBus,
     InProcessEventBus,
     PromptExecuted,
     ToolInvoked,
@@ -95,15 +94,18 @@ def _evaluate(
     return adapter.evaluate(bound_prompt, **kwargs)
 
 
-def _evaluate_with_bus(
+def _evaluate_with_session(
     adapter: ProviderAdapter[OutputT],
     prompt: PromptTemplate[OutputT],
     *params: SupportsDataclass,
-    bus: EventBus | None = None,
+    session: SessionProtocol | None = None,
 ) -> PromptResponse[OutputT]:
-    target_bus = bus or NullEventBus()
-    session: SessionProtocol = cast(SessionProtocol, Session(bus=target_bus))
-    return _evaluate(adapter, prompt, *params, bus=target_bus, session=session)
+    target_session = (
+        session
+        if session is not None
+        else cast(SessionProtocol, Session(bus=NullEventBus()))
+    )
+    return _evaluate(adapter, prompt, *params, session=target_session)
 
 
 # Anthropic-specific test stubs
@@ -246,7 +248,7 @@ def test_anthropic_adapter_constructs_client_when_not_provided(
         client_config=AnthropicClientConfig(api_key="secret-key"),
     )
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
@@ -293,7 +295,7 @@ def test_anthropic_adapter_uses_model_config() -> None:
         model_config=AnthropicModelConfig(temperature=0.5, max_tokens=100, top_k=40),
     )
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
@@ -327,7 +329,7 @@ def test_anthropic_adapter_returns_plain_text_response() -> None:
     client = DummyAnthropicClient([response])
     adapter = module.AnthropicAdapter(model="claude-test", client=client)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
@@ -391,15 +393,16 @@ def test_anthropic_adapter_executes_tools_and_parses_output() -> None:
     adapter = module.AnthropicAdapter(model="claude-test", client=client)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
     )
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
+        session=session,
     )
 
     assert result.text is None
@@ -473,7 +476,6 @@ def test_anthropic_adapter_surfaces_tool_validation_errors() -> None:
         adapter,
         prompt,
         ToolParams(query="invalid"),
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
@@ -521,7 +523,7 @@ def test_anthropic_adapter_raises_when_tool_handler_missing() -> None:
     adapter = module.AnthropicAdapter(model="claude-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -573,15 +575,16 @@ def test_anthropic_adapter_handles_tool_call_without_arguments() -> None:
     adapter = module.AnthropicAdapter(model="claude-test", client=client)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
     )
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         OptionalParams(),
-        bus=bus,
+        session=session,
     )
 
     assert result.text == "All done"
@@ -629,6 +632,7 @@ def test_anthropic_adapter_emits_events_during_evaluation() -> None:
     adapter = module.AnthropicAdapter(model="claude-test", client=client)
 
     bus = InProcessEventBus()
+    session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
 
@@ -642,11 +646,11 @@ def test_anthropic_adapter_emits_events_during_evaluation() -> None:
 
     bus.subscribe(ToolInvoked, record_tool_event)
     bus.subscribe(PromptExecuted, record_prompt_event)
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
+        session=session,
     )
 
     assert len(tool_events) == 1
@@ -684,7 +688,7 @@ def test_anthropic_adapter_raises_on_invalid_parsed_payload() -> None:
     adapter = module.AnthropicAdapter(model="claude-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -720,7 +724,7 @@ def test_anthropic_adapter_raises_for_unknown_tool() -> None:
     adapter = module.AnthropicAdapter(model="claude-test", client=client)
 
     with pytest.raises(PromptEvaluationError) as err:
-        _evaluate_with_bus(
+        _evaluate_with_session(
             adapter,
             prompt,
             ToolParams(query="policies"),
@@ -756,7 +760,6 @@ def test_anthropic_adapter_creates_budget_tracker_when_budget_provided() -> None
 
     result = adapter.evaluate(
         Prompt(prompt).bind(GreetingParams(user="Test")),
-        bus=bus,
         session=session,
         budget=budget,
     )
@@ -911,7 +914,7 @@ def test_anthropic_adapter_uses_default_model() -> None:
     client = DummyAnthropicClient([response])
     adapter = module.AnthropicAdapter(client=client)  # No model specified
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         GreetingParams(user="Sam"),
@@ -944,7 +947,7 @@ def test_anthropic_adapter_includes_structured_output_beta() -> None:
     client = DummyAnthropicClient([response])
     adapter = module.AnthropicAdapter(model="claude-test", client=client)
 
-    result = _evaluate_with_bus(
+    result = _evaluate_with_session(
         adapter,
         prompt,
         ToolParams(query="test"),
@@ -1383,7 +1386,6 @@ def test_anthropic_adapter_with_deadline(
 
     result = adapter.evaluate(
         Prompt(prompt).bind(GreetingParams(user="Sam")),
-        bus=bus,
         session=session,
         deadline=deadline,
     )
@@ -1431,7 +1433,6 @@ def test_anthropic_adapter_expired_deadline_raises_error(
     with pytest.raises(PromptEvaluationError) as err:
         adapter.evaluate(
             Prompt(prompt).bind(GreetingParams(user="Sam")),
-            bus=bus,
             session=session,
             deadline=mock_deadline,
         )
@@ -1496,7 +1497,6 @@ def test_anthropic_adapter_handles_handler_failures() -> None:
         adapter,
         prompt,
         ToolParams(query="policies"),
-        bus=bus,
         session=cast(SessionProtocol, session),
     )
 
