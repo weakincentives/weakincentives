@@ -49,6 +49,31 @@ logger: StructuredLogger = get_logger(__name__, context={"component": "session"}
 type DataEvent = PromptExecuted | PromptRendered | ToolInvoked
 
 
+def _extract_payload(event: ToolInvoked | PromptExecuted) -> SupportsDataclass | None:
+    """Extract the primary dataclass payload from an event.
+
+    Checks ``event.value`` first, then falls back to extracting from the result:
+    - For :class:`ToolInvoked`: ``event.result.value``
+    - For :class:`PromptExecuted`: ``event.result.output``
+
+    Returns ``None`` if no dataclass payload is found.
+    """
+    if event.value is not None:
+        return event.value
+
+    if isinstance(event, ToolInvoked):
+        result_value = getattr(event.result, "value", None)
+        if is_dataclass_instance(result_value):
+            return result_value
+
+    if isinstance(event, PromptExecuted):
+        output = event.result.output
+        if is_dataclass_instance(output):
+            return output
+
+    return None
+
+
 SESSION_ID_BYTE_LENGTH: Final[int] = 16
 
 
@@ -476,10 +501,10 @@ class Session(SessionProtocol):
         self._handle_prompt_rendered(start_event)
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
-        normalized_event = event
-        payload = event.value if event.value is not None else event.result.value
-        if event.value is None and is_dataclass_instance(payload):
-            normalized_event = replace(event, value=payload)
+        payload = _extract_payload(event)
+        normalized_event = (
+            replace(event, value=payload) if event.value is None and payload else event
+        )
 
         self._dispatch_data_event(
             _TOOL_INVOKED_TYPE,
@@ -494,10 +519,10 @@ class Session(SessionProtocol):
             )
 
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
-        normalized_event = event
-        output = event.result.output
-        if event.value is None and is_dataclass_instance(output):
-            normalized_event = replace(event, value=output)
+        payload = _extract_payload(event)
+        normalized_event = (
+            replace(event, value=payload) if event.value is None and payload else event
+        )
 
         self._dispatch_data_event(
             _PROMPT_EXECUTED_TYPE,
@@ -512,6 +537,7 @@ class Session(SessionProtocol):
             )
             return
 
+        output = event.result.output
         if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
             for item in cast(Iterable[object], output):
                 if is_dataclass_instance(item):
