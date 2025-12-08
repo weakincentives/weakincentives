@@ -477,6 +477,9 @@ class PromptRegistry:
     def snapshot(self) -> RegistrySnapshot:
         """Return an immutable snapshot of the registered sections."""
 
+        # Validate task examples after all sections are registered
+        self._validate_task_examples()
+
         params_registry: dict[
             type[SupportsDataclass], tuple[SectionNode[SupportsDataclass], ...]
         ] = {
@@ -498,6 +501,180 @@ class PromptRegistry:
             placeholders=placeholders,
             tool_name_registry=tool_name_registry,
         )
+
+    def _validate_task_examples(self) -> None:
+        """Validate task example tool references and type coherence."""
+        # Import here to avoid circular imports
+        from .task_examples import TaskExample
+
+        # Build a map from tool name to Tool instance
+        tool_instances: dict[
+            str, Tool[SupportsDataclassOrNone, SupportsToolResult]
+        ] = {}
+        for node in self._section_nodes:
+            for tool in node.section.tools():
+                tool_instances[tool.name] = tool
+
+        # Find all TaskExample sections and validate their steps
+        for node in self._section_nodes:
+            if not isinstance(node.section, TaskExample):
+                continue
+
+            task_example = cast(TaskExample[Any], node.section)
+            self._validate_task_example_steps(
+                task_example,
+                node.path,
+                tool_instances,
+            )
+
+    def _validate_task_example_steps(
+        self,
+        task_example: object,
+        path: SectionPath,
+        tool_instances: dict[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+    ) -> None:
+        """Validate steps in a task example."""
+        available_tools = sorted(self._tool_name_registry.keys())
+        steps = getattr(task_example, "steps", ())
+
+        for step_idx, step in enumerate(steps):
+            tool_name = getattr(step, "tool_name", "")
+
+            # Check tool name exists
+            if tool_name not in self._tool_name_registry:
+                available_str = (
+                    ", ".join(available_tools) if available_tools else "none"
+                )
+                msg = (
+                    f'Unknown tool "{tool_name}" in task example step {step_idx}. '
+                    f"Available tools: {available_str}."
+                )
+                raise PromptValidationError(
+                    msg,
+                    section_path=path,
+                    placeholder="steps",
+                )
+
+            # Validate type coherence
+            tool = tool_instances.get(tool_name)
+            if tool is not None:
+                PromptRegistry._validate_step_type_coherence(
+                    step,
+                    step_idx,
+                    tool,
+                    path,
+                )
+
+    @staticmethod
+    def _validate_step_type_coherence(
+        step: object,
+        step_idx: int,
+        tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+        path: SectionPath,
+    ) -> None:
+        """Validate that step example types match the tool's types."""
+        example = getattr(step, "example", None)
+        tool_name = getattr(step, "tool_name", "unknown")
+
+        _validate_step_input_type(example, step_idx, tool_name, tool.params_type, path)
+        _validate_step_output_type(
+            example, step_idx, tool_name, tool.result_type, tool.result_container, path
+        )
+
+
+def _validate_step_input_type(
+    example: object,
+    step_idx: int,
+    tool_name: str,
+    expected_type: type[SupportsDataclass] | type[None],
+    path: SectionPath,
+) -> None:
+    """Validate step input matches expected params type."""
+    example_input = getattr(example, "input", None)
+
+    if expected_type is type(None):  # pragma: no cover
+        if example_input is not None:
+            msg = (
+                f'Task example step {step_idx} input type mismatch for tool "{tool_name}". '
+                f"Expected: None, got: {type(example_input).__name__}."
+            )
+            raise PromptValidationError(msg, section_path=path, placeholder="steps")
+        return
+
+    if example_input is None:
+        msg = (
+            f'Task example step {step_idx} input type mismatch for tool "{tool_name}". '
+            f"Expected: {expected_type.__name__}, got: None."
+        )
+        raise PromptValidationError(msg, section_path=path, placeholder="steps")
+    if type(example_input) is not expected_type:
+        msg = (
+            f'Task example step {step_idx} input type mismatch for tool "{tool_name}". '
+            f"Expected: {expected_type.__name__}, got: {type(example_input).__name__}."
+        )
+        raise PromptValidationError(msg, section_path=path, placeholder="steps")
+
+
+def _validate_step_output_type(  # noqa: PLR0913, PLR0917
+    example: object,
+    step_idx: int,
+    tool_name: str,
+    expected_type: type[SupportsDataclass] | type[None],
+    container: str,
+    path: SectionPath,
+) -> None:
+    """Validate step output matches expected result type."""
+    example_output = getattr(example, "output", None)
+
+    if expected_type is type(None):  # pragma: no cover
+        if example_output is not None:
+            msg = (
+                f'Task example step {step_idx} output type mismatch for tool "{tool_name}". '
+                f"Expected: None, got: {type(example_output).__name__}."
+            )
+            raise PromptValidationError(msg, section_path=path, placeholder="steps")
+        return
+
+    if container == "array":  # pragma: no cover
+        _validate_array_output(example_output, step_idx, tool_name, expected_type, path)
+        return
+
+    if example_output is None:
+        msg = (
+            f'Task example step {step_idx} output type mismatch for tool "{tool_name}". '
+            f"Expected: {expected_type.__name__}, got: None."
+        )
+        raise PromptValidationError(msg, section_path=path, placeholder="steps")
+    if type(example_output) is not expected_type:
+        msg = (
+            f'Task example step {step_idx} output type mismatch for tool "{tool_name}". '
+            f"Expected: {expected_type.__name__}, got: {type(example_output).__name__}."
+        )
+        raise PromptValidationError(msg, section_path=path, placeholder="steps")
+
+
+def _validate_array_output(
+    output: object,
+    step_idx: int,
+    tool_name: str,
+    element_type: type[SupportsDataclass],
+    path: SectionPath,
+) -> None:
+    """Validate array output contains correct element types."""
+    if not isinstance(output, Sequence) or isinstance(output, (str, bytes, bytearray)):
+        msg = (
+            f'Task example step {step_idx} output type mismatch for tool "{tool_name}". '
+            f"Expected: sequence of {element_type.__name__}, got: {type(output).__name__}."
+        )
+        raise PromptValidationError(msg, section_path=path, placeholder="steps")
+    for item in cast(Sequence[object], output):
+        if type(item) is not element_type:
+            msg = (
+                f'Task example step {step_idx} output type mismatch for tool "{tool_name}". '
+                f"Expected: sequence of {element_type.__name__}, "
+                f"got item of type: {type(item).__name__}."
+            )
+            raise PromptValidationError(msg, section_path=path, placeholder="steps")
 
 
 def clone_dataclass(instance: SupportsDataclass) -> SupportsDataclass:
