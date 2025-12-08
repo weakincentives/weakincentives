@@ -20,6 +20,12 @@ from ._types import (
     TypedReducer,
 )
 from .mutation import GlobalMutationBuilder, MutationBuilder
+from .narrowing import (
+    as_dataclass_type,
+    as_slice_type,
+    extract_event_value,
+    is_dataclass_type,
+)
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
 from .reducer_context import ReducerContext, build_reducer_context
@@ -49,7 +55,11 @@ __all__ = [
     "SnapshotSerializationError",
     "TypedReducer",
     "append",
+    "as_dataclass_type",
+    "as_slice_type",
     "build_reducer_context",
+    "extract_event_value",
+    "is_dataclass_type",
     "iter_sessions_bottom_up",
     "replace_latest",
     "replace_latest_by",

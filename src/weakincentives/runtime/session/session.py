@@ -32,6 +32,7 @@ from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
 from .mutation import GlobalMutationBuilder, MutationBuilder
+from .narrowing import as_dataclass_type, as_slice_type
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
 from .reducers import append
@@ -81,13 +82,9 @@ def _locked_method[SessionT: "Session", **P, R](
     return wrapper
 
 
-_PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
-    type[SupportsDataclass], PromptRendered
-)
-_TOOL_INVOKED_TYPE: type[SupportsDataclass] = cast(type[SupportsDataclass], ToolInvoked)
-_PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
-    type[SupportsDataclass], PromptExecuted
-)
+_PROMPT_RENDERED_TYPE: type[SupportsDataclass] = as_dataclass_type(PromptRendered)
+_TOOL_INVOKED_TYPE: type[SupportsDataclass] = as_dataclass_type(ToolInvoked)
+_PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = as_dataclass_type(PromptExecuted)
 
 EMPTY_SLICE: SessionSlice = ()
 
@@ -99,8 +96,7 @@ def _append_event(
     context: ReducerContextProtocol,
 ) -> tuple[SupportsDataclass, ...]:
     del context
-    appended = cast(SupportsDataclass, event)
-    return (*slice_values, appended)
+    return (*slice_values, event)  # type: ignore[misc]
 
 
 @dataclass(slots=True)
@@ -394,7 +390,7 @@ class Session(SessionProtocol):
         This method implements :class:`MutationProvider` for use by
         :class:`MutationBuilder`.
         """
-        self._dispatch_data_event(slice_type, cast(ReducerEvent, event))
+        self._dispatch_data_event(slice_type, event)
 
     @property
     @override
@@ -481,17 +477,13 @@ class Session(SessionProtocol):
         if event.value is None and is_dataclass_instance(payload):
             normalized_event = replace(event, value=payload)
 
-        self._dispatch_data_event(
-            _TOOL_INVOKED_TYPE,
-            cast(ReducerEvent, normalized_event),
-        )
+        self._dispatch_data_event(_TOOL_INVOKED_TYPE, normalized_event)
 
-        if normalized_event.value is not None:
-            value_type = cast(SessionSliceType, type(normalized_event.value))
-            self._dispatch_data_event(
-                value_type,
-                cast(ReducerEvent, normalized_event),
-            )
+        if normalized_event.value is not None and is_dataclass_instance(
+            normalized_event.value
+        ):
+            value_type = as_slice_type(type(normalized_event.value))
+            self._dispatch_data_event(value_type, normalized_event)
 
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
         normalized_event = event
@@ -499,33 +491,23 @@ class Session(SessionProtocol):
         if event.value is None and is_dataclass_instance(output):
             normalized_event = replace(event, value=output)
 
-        self._dispatch_data_event(
-            _PROMPT_EXECUTED_TYPE,
-            cast(ReducerEvent, normalized_event),
-        )
+        self._dispatch_data_event(_PROMPT_EXECUTED_TYPE, normalized_event)
 
-        if normalized_event.value is not None:
-            value_type = cast(SessionSliceType, type(normalized_event.value))
-            self._dispatch_data_event(
-                value_type,
-                cast(ReducerEvent, normalized_event),
-            )
+        if normalized_event.value is not None and is_dataclass_instance(
+            normalized_event.value
+        ):
+            value_type = as_slice_type(type(normalized_event.value))
+            self._dispatch_data_event(value_type, normalized_event)
             return
 
         if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
             for item in cast(Iterable[object], output):
                 if is_dataclass_instance(item):
                     enriched_event = replace(normalized_event, value=item)
-                    self._dispatch_data_event(
-                        type(item),
-                        cast(ReducerEvent, enriched_event),
-                    )
+                    self._dispatch_data_event(type(item), enriched_event)
 
     def _handle_prompt_rendered(self, event: PromptRendered) -> None:
-        self._dispatch_data_event(
-            _PROMPT_RENDERED_TYPE,
-            cast(ReducerEvent, event),
-        )
+        self._dispatch_data_event(_PROMPT_RENDERED_TYPE, event)
 
     def _dispatch_data_event(
         self, data_type: SessionSliceType, event: ReducerEvent

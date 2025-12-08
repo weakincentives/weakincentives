@@ -35,9 +35,9 @@ from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
-    ReducerEventWithValue,
     Session,
     TypedReducer,
+    extract_event_value,
 )
 from ._context import ensure_context_uses_session
 from .errors import ToolValidationError
@@ -963,11 +963,7 @@ def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
     ) -> tuple[VirtualFileSystem, ...]:
         del context
         previous = slice_values[-1] if slice_values else VirtualFileSystem()
-        if not isinstance(event, ReducerEventWithValue):  # pragma: no cover - defensive
-            msg = "Eval result reducer requires an event with a value payload."
-            raise TypeError(msg)
-
-        value = cast(EvalResult, event.value)
+        value = extract_event_value(event, EvalResult)
         if not value.writes:
             return (previous,)
         snapshot = _apply_writes(previous, value.writes)
