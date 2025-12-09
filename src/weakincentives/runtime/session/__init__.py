@@ -13,6 +13,7 @@
 """Session state container for agent runs."""
 
 from ._mutation_types import MutationProvider
+from ._observer_types import SliceObserver, Subscription
 from ._types import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -43,10 +44,12 @@ __all__ = [
     "ReducerEventWithValue",
     "Session",
     "SessionProtocol",
+    "SliceObserver",
     "Snapshot",
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
+    "Subscription",
     "TypedReducer",
     "append",
     "build_reducer_context",

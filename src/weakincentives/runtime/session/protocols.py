@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Protocol, Self, overload
 
 from ...prompt._types import SupportsDataclass
 from ..events._types import EventBus
+from ._observer_types import SliceObserver, Subscription
 from .snapshots import Snapshot
 
 if TYPE_CHECKING:
@@ -53,6 +54,12 @@ class SessionProtocol(Protocol):
     def mutate[T: SupportsDataclass](
         self, slice_type: type[T] | None = None
     ) -> MutationBuilder[T] | GlobalMutationBuilder: ...
+
+    def observe[T: SupportsDataclass](
+        self,
+        slice_type: type[T],
+        observer: SliceObserver[T],
+    ) -> Subscription: ...
 
     @property
     def parent(self) -> Self | None: ...

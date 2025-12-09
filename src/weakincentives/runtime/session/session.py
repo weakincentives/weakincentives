@@ -28,6 +28,7 @@ from ...dbc import invariant
 from ...prompt._types import SupportsDataclass
 from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
 from ..logging import StructuredLogger, get_logger
+from ._observer_types import SliceObserver, Subscription
 from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
@@ -109,6 +110,12 @@ class _ReducerRegistration:
     slice_type: SessionSliceType
 
 
+@dataclass(slots=True)
+class _ObserverRegistration:
+    observer: SliceObserver[Any]
+    subscription: Subscription
+
+
 def _session_id_is_well_formed(session: Session) -> bool:
     return len(session.session_id.bytes) == SESSION_ID_BYTE_LENGTH
 
@@ -180,6 +187,7 @@ class Session(SessionProtocol):
             self._bus = bus
 
         self._reducers: dict[SessionSliceType, list[_ReducerRegistration]] = {}
+        self._observers: dict[SessionSliceType, list[_ObserverRegistration]] = {}
         self._state: dict[SessionSliceType, SessionSlice] = {}
         self._lock = RLock()
         self._parent = parent
@@ -290,6 +298,54 @@ class Session(SessionProtocol):
         if slice_type is None:
             return GlobalMutationBuilder(self)
         return MutationBuilder(self, slice_type)
+
+    @override
+    def observe[S: SupportsDataclass](
+        self,
+        slice_type: type[S],
+        observer: SliceObserver[S],
+    ) -> Subscription:
+        """Register an observer called when the slice changes.
+
+        The observer receives ``(old_values, new_values)`` after each state
+        update. Returns a :class:`Subscription` handle that can be used to
+        unsubscribe.
+
+        Usage::
+
+            def on_plan_change(old: tuple[Plan, ...], new: tuple[Plan, ...]) -> None:
+                print(f"Plan changed: {len(old)} -> {len(new)} items")
+
+            subscription = session.observe(Plan, on_plan_change)
+
+            # Later, to stop observing:
+            subscription.unsubscribe()
+
+        """
+        subscription_id = uuid4()
+
+        def unsubscribe() -> None:
+            with self.locked():
+                registrations = self._observers.get(slice_type, [])
+                self._observers[slice_type] = [
+                    reg
+                    for reg in registrations
+                    if reg.subscription.subscription_id != subscription_id
+                ]
+
+        subscription = Subscription(
+            unsubscribe_fn=unsubscribe, subscription_id=subscription_id
+        )
+
+        registration = _ObserverRegistration(
+            observer=cast(SliceObserver[Any], observer),
+            subscription=subscription,
+        )
+        with self.locked():
+            bucket = self._observers.setdefault(slice_type, [])
+            bucket.append(registration)
+
+        return subscription
 
     # ──────────────────────────────────────────────────────────────────────
     # MutationProvider implementation (used by MutationBuilder)
@@ -549,6 +605,9 @@ class Session(SessionProtocol):
 
         context = build_reducer_context(session=self)
 
+        # Track state changes for observer notification
+        state_changes: dict[SessionSliceType, tuple[SessionSlice, SessionSlice]] = {}
+
         for registration in registrations:
             slice_type = registration.slice_type
             while True:
@@ -575,7 +634,39 @@ class Session(SessionProtocol):
                     current = self._state.get(slice_type, EMPTY_SLICE)
                     if current is previous or current == normalized:
                         self._state[slice_type] = normalized
+                        # Track change if state actually changed
+                        if previous != normalized:
+                            state_changes[slice_type] = (previous, normalized)
                         break
+
+        # Notify observers of state changes
+        self._notify_observers(state_changes)
+
+    def _notify_observers(
+        self, state_changes: dict[SessionSliceType, tuple[SessionSlice, SessionSlice]]
+    ) -> None:
+        """Call registered observers for slices that changed."""
+        for slice_type, (old_values, new_values) in state_changes.items():
+            with self.locked():
+                observer_registrations = list(self._observers.get(slice_type, ()))
+
+            for registration in observer_registrations:
+                try:
+                    registration.observer(old_values, new_values)
+                except Exception:
+                    observer_name = getattr(
+                        registration.observer,
+                        "__qualname__",
+                        repr(registration.observer),
+                    )
+                    logger.exception(
+                        "Observer invocation failed.",
+                        event="session_observer_failed",
+                        context={
+                            "observer": observer_name,
+                            "slice_type": slice_type.__qualname__,
+                        },
+                    )
 
     def _attach_to_bus(self, bus: EventBus) -> None:
         with self.locked():
@@ -594,5 +685,7 @@ __all__ = [
     "MutationBuilder",
     "QueryBuilder",
     "Session",
+    "SliceObserver",
+    "Subscription",
     "TypedReducer",
 ]
