@@ -108,6 +108,27 @@ wink debug ./snapshots/ --output ./site
 The generated site uses relative paths, allowing deployment at any URL path
 without configuration. Simply copy the output directory to your web server.
 
+### Viewing Requirements
+
+The generated site must be served via HTTP/HTTPS. Opening `index.html` directly
+via `file://` protocol will not work due to browser security restrictions that
+block `fetch()` requests from local files.
+
+**For CI artifacts**: Most CI platforms (GitHub Actions, GitLab CI, Jenkins)
+serve artifacts via HTTP, so the viewer works automatically when accessed
+through the artifact browser.
+
+**For local viewing**: Start a local server in the output directory:
+
+```bash
+cd ./site
+python -m http.server 8000
+# Then open http://localhost:8000
+```
+
+If opened via `file://`, the viewer displays a helpful message explaining
+how to serve the files correctly.
+
 ### Output Structure
 
 ```

@@ -949,7 +949,27 @@ async function handleHashChange() {
 
 // --- Initialization ---
 
+// Check for file:// protocol which doesn't support fetch
+function isFileProtocol() {
+  return window.location.protocol === "file:";
+}
+
+function showFileProtocolWarning() {
+  const overlay = document.getElementById("file-protocol-warning");
+  if (overlay) {
+    overlay.classList.remove("hidden");
+  }
+  // Hide loading overlay since we're not going to load
+  setLoading(false);
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
+  // Check for file:// protocol first
+  if (isFileProtocol()) {
+    showFileProtocolWarning();
+    return;
+  }
+
   setLoading(true);
   try {
     // Load manifest first

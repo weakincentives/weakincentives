@@ -12,6 +12,31 @@
       <div class="loading-spinner"></div>
     </div>
 
+    <!-- File protocol warning -->
+    <div id="file-protocol-warning" class="file-protocol-warning hidden">
+      <div class="file-protocol-content">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <h2>Cannot load via file://</h2>
+        <p>
+          This snapshot viewer needs to be served via HTTP due to browser security restrictions.
+          Opening the HTML file directly won't work.
+        </p>
+        <div class="file-protocol-solutions">
+          <h3>Quick fix: start a local server</h3>
+          <p>Navigate to the artifact directory and run:</p>
+          <pre><code>python -m http.server 8000</code></pre>
+          <p>Then open <a href="http://localhost:8000">http://localhost:8000</a></p>
+        </div>
+        <div class="file-protocol-note">
+          <p><strong>Note:</strong> When viewing as a CI artifact, use your CI platform's artifact browser which serves files via HTTP.</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast container -->
     <div id="toast-container" class="toast-container"></div>
 

@@ -1759,3 +1759,109 @@ select:focus-visible {
   border: none;
   padding: 0;
 }
+
+/* File Protocol Warning */
+.file-protocol-warning {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: var(--color-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.file-protocol-warning.hidden {
+  display: none;
+}
+
+.file-protocol-content {
+  max-width: 560px;
+  text-align: center;
+  padding: 48px;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--color-border);
+}
+
+.file-protocol-content svg {
+  color: var(--color-warning);
+  margin-bottom: 16px;
+}
+
+.file-protocol-content h2 {
+  margin: 0 0 12px 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.file-protocol-content > p {
+  color: var(--color-text-muted);
+  margin: 0 0 24px 0;
+  line-height: 1.6;
+}
+
+.file-protocol-solutions {
+  text-align: left;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.file-protocol-solutions h3 {
+  margin: 0 0 12px 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+
+.file-protocol-solutions p {
+  margin: 0 0 8px 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.file-protocol-solutions pre {
+  margin: 12px 0;
+  padding: 12px 16px;
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+
+.file-protocol-solutions code {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  color: var(--color-primary);
+}
+
+.file-protocol-solutions a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.file-protocol-solutions a:hover {
+  text-decoration: underline;
+}
+
+.file-protocol-note {
+  text-align: left;
+  padding: 16px;
+  background: var(--color-primary-subtle);
+  border-radius: var(--radius-md);
+}
+
+.file-protocol-note p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.file-protocol-note strong {
+  color: var(--color-primary-text);
+}
