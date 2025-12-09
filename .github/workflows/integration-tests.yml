@@ -8,11 +8,11 @@ jobs:
   integration-tests:
     # Only run on PR comments, not issue comments
     # Only run when the comment contains the trigger phrase
-    # Only allow the repository owner to trigger
+    # Only allow andreisavu to trigger
     if: |
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '/run-integration-tests') &&
-      github.event.comment.author_association == 'OWNER'
+      github.event.comment.user.login == 'andreisavu'
     runs-on: ubuntu-latest
     steps:
       - name: Add reaction to comment
