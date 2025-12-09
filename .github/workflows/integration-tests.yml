@@ -12,7 +12,7 @@ jobs:
     if: |
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '/run-integration-tests') &&
-      github.event.comment.user.login == github.repository_owner
+      github.event.comment.author_association == 'OWNER'
     runs-on: ubuntu-latest
     steps:
       - name: Add reaction to comment
