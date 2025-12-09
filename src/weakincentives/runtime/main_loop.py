@@ -151,6 +151,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         self._adapter = adapter
         self._bus = bus
         self._config = config if config is not None else MainLoopConfig()
+        bus.subscribe(MainLoopRequest, self.handle_request)
 
     @abstractmethod
     def create_prompt(self, request: UserRequestT) -> Prompt[OutputT]:
@@ -185,7 +186,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         *,
         budget: Budget | None = None,
         deadline: Deadline | None = None,
-    ) -> PromptResponse[OutputT]:
+    ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute the main loop for a request.
 
         Creates a session and prompt, then evaluates with the adapter.
@@ -199,34 +200,19 @@ class MainLoop[UserRequestT, OutputT](ABC):
             deadline: Optional deadline override (takes precedence over config).
 
         Returns:
-            The prompt response from evaluation.
+            A tuple of (response, session) from evaluation.
 
         Raises:
             Any exception from prompt creation, session creation, or evaluation
             (except VisibilityExpansionRequired which is handled internally).
         """
         session = self.create_session()
-        return self._evaluate_loop(session, request, budget=budget, deadline=deadline)
-
-    def _evaluate_loop(
-        self,
-        session: Session,
-        request: UserRequestT,
-        *,
-        budget: Budget | None = None,
-        deadline: Deadline | None = None,
-    ) -> PromptResponse[OutputT]:
-        """Run the evaluation loop with visibility expansion handling.
-
-        Internal helper used by both execute() and handle_request().
-        """
         prompt = self.create_prompt(request)
         visibility_overrides: dict[SectionPath, SectionVisibility] = {}
 
         effective_budget = budget if budget is not None else self._config.budget
         effective_deadline = deadline if deadline is not None else self._config.deadline
 
-        # Create a shared tracker to enforce budget across visibility retries
         budget_tracker = (
             BudgetTracker(budget=effective_budget)
             if effective_budget is not None
@@ -235,7 +221,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         while True:
             try:
-                return self._adapter.evaluate(
+                response = self._adapter.evaluate(
                     prompt,
                     session=session,
                     visibility_overrides=visibility_overrides,
@@ -244,6 +230,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 )
             except VisibilityExpansionRequired as e:
                 visibility_overrides.update(e.requested_overrides)
+            else:
+                return response, session
 
     def handle_request(self, event: object) -> None:
         """Handle a MainLoopRequest event from the bus.
@@ -260,14 +248,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 compatibility with ``EventHandler`` signature).
         """
         request_event: MainLoopRequest[UserRequestT] = event  # type: ignore[assignment]
-        session_id: UUID | None = None
 
         try:
-            session = self.create_session()
-            session_id = session.session_id
-
-            response = self._evaluate_loop(
-                session,
+            response, session = self.execute(
                 request_event.request,
                 budget=request_event.budget,
                 deadline=request_event.deadline,
@@ -276,7 +259,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             completed = MainLoopCompleted[OutputT](
                 request_id=request_event.request_id,
                 response=response,
-                session_id=session_id,
+                session_id=session.session_id,
             )
             _ = self._bus.publish(completed)
 
@@ -284,7 +267,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             failed = MainLoopFailed(
                 request_id=request_event.request_id,
                 error=exc,
-                session_id=session_id,
+                session_id=self.create_session().session_id,
             )
             _ = self._bus.publish(failed)
             raise

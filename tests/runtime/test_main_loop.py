@@ -283,11 +283,12 @@ def test_execute_successful_execution() -> None:
     adapter = _MockAdapter()
     loop = _TestLoop(adapter=adapter, bus=bus)
 
-    response = loop.execute(_Request(message="hello"))
+    response, session = loop.execute(_Request(message="hello"))
 
     assert response.output == _Output(result="success")
     assert adapter._call_count == 1
     assert loop.session_created is not None
+    assert session is loop.session_created
 
 
 def test_execute_passes_budget_from_config() -> None:
@@ -356,7 +357,7 @@ def test_execute_handles_visibility_expansion() -> None:
     adapter = _MockAdapter(visibility_requests=visibility_requests)
     loop = _TestLoop(adapter=adapter, bus=bus)
 
-    response = loop.execute(_Request(message="hello"))
+    response, _ = loop.execute(_Request(message="hello"))
 
     assert response.output == _Output(result="success")
     # Called 3 times: 2 visibility expansions + 1 success
@@ -498,10 +499,9 @@ def test_bus_subscribe_and_publish_workflow() -> None:
     """MainLoop works with bus-driven subscribe/publish pattern."""
     bus = InProcessEventBus()
     adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus)
+    _TestLoop(adapter=adapter, bus=bus)  # Auto-subscribes handle_request
 
     completed_events: list[MainLoopCompleted[_Output]] = []
-    bus.subscribe(MainLoopRequest, loop.handle_request)
     bus.subscribe(MainLoopCompleted, lambda e: completed_events.append(e))
     request = MainLoopRequest(request=_Request(message="hello"))
     bus.publish(request)

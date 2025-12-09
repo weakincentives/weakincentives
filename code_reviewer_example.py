@@ -51,6 +51,8 @@ from weakincentives.prompt.overrides import (
 from weakincentives.runtime import (
     EventBus,
     MainLoop,
+    MainLoopCompleted,
+    MainLoopRequest,
     Session,
 )
 from weakincentives.tools import (
@@ -198,7 +200,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         *,
         budget: None = None,
         deadline: Deadline | None = None,
-    ) -> PromptResponse[ReviewResponse]:
+    ) -> tuple[PromptResponse[ReviewResponse], Session]:
         """Execute with auto-optimization for workspace digest.
 
         If no WorkspaceDigest exists in the session, runs optimization first.
@@ -246,6 +248,9 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 class CodeReviewApp:
     """Owns the REPL loop and user interaction."""
 
+    _bus: EventBus
+    _loop: CodeReviewLoop
+
     def __init__(
         self,
         adapter: ProviderAdapter[ReviewResponse],
@@ -254,12 +259,25 @@ class CodeReviewApp:
         override_tag: str | None = None,
     ) -> None:
         bus = _create_bus_with_logging()
+        self._bus = bus
         self._loop = CodeReviewLoop(
             adapter=adapter,
             bus=bus,
             overrides_store=overrides_store,
             override_tag=override_tag,
         )
+        bus.subscribe(MainLoopCompleted, self._on_loop_completed)
+
+    def _on_loop_completed(self, event: object) -> None:
+        """Handle completed response from event bus."""
+        completed: MainLoopCompleted[ReviewResponse] = event  # type: ignore[assignment]
+        answer = _render_response_payload(completed.response)
+
+        print("\n--- Agent Response ---")
+        print(answer)
+        print("\n--- Plan Snapshot ---")
+        print(render_plan_snapshot(self._loop.session))
+        print("-" * 23 + "\n")
 
     def run(self) -> None:
         """Start the interactive review session."""
@@ -277,14 +295,11 @@ class CodeReviewApp:
                 break
 
             request = ReviewTurnParams(request=user_prompt)
-            response = self._loop.execute(request)
-            answer = _render_response_payload(response)
-
-            print("\n--- Agent Response ---")
-            print(answer)
-            print("\n--- Plan Snapshot ---")
-            print(render_plan_snapshot(self._loop.session))
-            print("-" * 23 + "\n")
+            request_event = MainLoopRequest(
+                request=request,
+                deadline=_default_deadline(),
+            )
+            self._bus.publish(request_event)
 
         print("Goodbye.")
         dump_session_tree(self._loop.session, SNAPSHOT_DIR)
