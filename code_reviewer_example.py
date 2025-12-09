@@ -38,15 +38,13 @@ from weakincentives.optimizers import (
     WorkspaceDigestOptimizer,
 )
 from weakincentives.prompt import (
+    ChecklistItem,
+    ChecklistSection,
     MarkdownSection,
     Prompt,
     PromptTemplate,
     SectionVisibility,
     SupportsDataclass,
-    build_api_checklist,
-    build_performance_checklist,
-    build_security_checklist,
-    build_test_checklist,
 )
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -349,10 +347,10 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
         WorkspaceDigestSection(session=session),
         _build_reference_section(),  # Progressive disclosure section
         # Domain-specific review checklists (progressive disclosure)
-        build_security_checklist(),
-        build_performance_checklist(),
-        build_api_checklist(),
-        build_test_checklist(),
+        _build_security_checklist(),
+        _build_performance_checklist(),
+        _build_api_checklist(),
+        _build_test_checklist(),
         PlanningToolsSection(
             session=session,
             strategy=PlanningStrategy.PLAN_ACT_REFLECT,
@@ -442,6 +440,537 @@ def _build_reference_section() -> MarkdownSection[ReferenceParams]:
         summary="Documentation for ${project_name} is available. Request expansion if needed.",
         default_params=ReferenceParams(),
         key="reference-docs",
+        visibility=SectionVisibility.SUMMARY,
+    )
+
+
+# =============================================================================
+# Domain-Specific Review Checklists
+# =============================================================================
+
+
+def _build_security_checklist() -> ChecklistSection:
+    """Build a security review checklist based on OWASP Top 10."""
+    items = [
+        # Injection
+        ChecklistItem(
+            "Verify parameterized queries for all database operations",
+            category="Injection Prevention",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Check for command injection in shell/system calls",
+            category="Injection Prevention",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Validate LDAP/XPath/NoSQL query construction",
+            category="Injection Prevention",
+            severity="high",
+        ),
+        # Authentication
+        ChecklistItem(
+            "Ensure password hashing uses bcrypt/argon2 with proper cost",
+            category="Authentication",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Verify multi-factor authentication for sensitive operations",
+            category="Authentication",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check session token generation uses cryptographically secure randomness",
+            category="Authentication",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Validate session timeout and invalidation on logout",
+            category="Authentication",
+            severity="medium",
+        ),
+        # Data Exposure
+        ChecklistItem(
+            "Confirm sensitive data encrypted at rest (AES-256 or equivalent)",
+            category="Data Protection",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Verify TLS 1.2+ for all data in transit",
+            category="Data Protection",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Check for accidental logging of sensitive data (PII, credentials)",
+            category="Data Protection",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Validate secrets management (no hardcoded credentials)",
+            category="Data Protection",
+            severity="critical",
+        ),
+        # Access Control
+        ChecklistItem(
+            "Verify authorization checks on all protected endpoints",
+            category="Access Control",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Check for IDOR vulnerabilities in resource access",
+            category="Access Control",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Validate principle of least privilege in role assignments",
+            category="Access Control",
+            severity="medium",
+        ),
+        # Security Misconfiguration
+        ChecklistItem(
+            "Ensure security headers present (CSP, X-Frame-Options, etc.)",
+            category="Security Configuration",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check for exposed debug endpoints or verbose error messages",
+            category="Security Configuration",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Verify default credentials changed and unnecessary features disabled",
+            category="Security Configuration",
+            severity="medium",
+        ),
+        # XSS
+        ChecklistItem(
+            "Validate output encoding for all user-controlled content",
+            category="XSS Prevention",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Check for DOM-based XSS in client-side JavaScript",
+            category="XSS Prevention",
+            severity="high",
+        ),
+        # Deserialization
+        ChecklistItem(
+            "Avoid deserializing untrusted data or use safe alternatives",
+            category="Deserialization",
+            severity="critical",
+        ),
+        # Logging & Monitoring
+        ChecklistItem(
+            "Ensure security events are logged (auth failures, access denials)",
+            category="Logging & Monitoring",
+            severity="medium",
+        ),
+    ]
+
+    return ChecklistSection(
+        title="Security Review Checklist",
+        key="checklist.security",
+        domain="security",
+        items=items,
+        preamble=textwrap.dedent(
+            """
+            Review the code against these security criteria based on OWASP Top 10.
+            Mark items as verified or flag concerns for follow-up.
+            """
+        ).strip(),
+        visibility=SectionVisibility.SUMMARY,
+    )
+
+
+def _build_performance_checklist() -> ChecklistSection:
+    """Build a performance review checklist."""
+    items = [
+        # Database Performance
+        ChecklistItem(
+            "Check for N+1 query patterns in ORM usage",
+            category="Database Queries",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Verify indexes exist for frequent query predicates",
+            category="Database Queries",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Review query plans for expensive operations (full scans, sorts)",
+            category="Database Queries",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check for unbounded queries (missing LIMIT clauses)",
+            category="Database Queries",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Validate connection pooling configuration",
+            category="Database Queries",
+            severity="medium",
+        ),
+        # Memory Management
+        ChecklistItem(
+            "Check for memory leaks in long-running processes",
+            category="Memory Management",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Verify large collections are processed in batches/streams",
+            category="Memory Management",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check for circular references preventing garbage collection",
+            category="Memory Management",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Review buffer sizes for I/O operations",
+            category="Memory Management",
+            severity="medium",
+        ),
+        # Caching
+        ChecklistItem(
+            "Identify cacheable operations (expensive computations, remote calls)",
+            category="Caching",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Verify cache invalidation strategy is correct",
+            category="Caching",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check cache TTLs align with data freshness requirements",
+            category="Caching",
+            severity="medium",
+        ),
+        # Concurrency
+        ChecklistItem(
+            "Verify thread-safe access to shared mutable state",
+            category="Concurrency",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Check for deadlock potential in lock ordering",
+            category="Concurrency",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Review async/await patterns for blocking operations",
+            category="Concurrency",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Validate thread pool sizing for workload characteristics",
+            category="Concurrency",
+            severity="medium",
+        ),
+        # Network & I/O
+        ChecklistItem(
+            "Check for appropriate timeouts on external calls",
+            category="Network & I/O",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Verify retry logic with exponential backoff",
+            category="Network & I/O",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Review payload sizes for API calls (compression, pagination)",
+            category="Network & I/O",
+            severity="medium",
+        ),
+        # Algorithms
+        ChecklistItem(
+            "Verify algorithm complexity is appropriate for data scale",
+            category="Algorithms",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check for unnecessary object allocations in hot paths",
+            category="Algorithms",
+            severity="medium",
+        ),
+    ]
+
+    return ChecklistSection(
+        title="Performance Review Checklist",
+        key="checklist.performance",
+        domain="performance",
+        items=items,
+        preamble=textwrap.dedent(
+            """
+            Review the code for performance concerns. Focus on database access patterns,
+            memory usage, caching opportunities, and concurrency correctness.
+            """
+        ).strip(),
+        visibility=SectionVisibility.SUMMARY,
+    )
+
+
+def _build_api_checklist() -> ChecklistSection:
+    """Build an API review checklist."""
+    items = [
+        # Breaking Changes
+        ChecklistItem(
+            "Check for removed or renamed endpoints",
+            category="Breaking Changes",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Verify no required fields added to request schemas",
+            category="Breaking Changes",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Check for changed response field types or removal",
+            category="Breaking Changes",
+            severity="critical",
+        ),
+        ChecklistItem(
+            "Validate HTTP method changes maintain semantics",
+            category="Breaking Changes",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Review changes to authentication/authorization requirements",
+            category="Breaking Changes",
+            severity="critical",
+        ),
+        # Versioning
+        ChecklistItem(
+            "Verify API version is incremented for breaking changes",
+            category="Versioning",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check deprecated endpoints have sunset timeline",
+            category="Versioning",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Validate version negotiation works correctly",
+            category="Versioning",
+            severity="medium",
+        ),
+        # Request/Response Design
+        ChecklistItem(
+            "Verify RESTful conventions (resource naming, HTTP verbs)",
+            category="API Design",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Check for consistent naming conventions (camelCase/snake_case)",
+            category="API Design",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Validate pagination for list endpoints",
+            category="API Design",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Review response envelope structure consistency",
+            category="API Design",
+            severity="medium",
+        ),
+        # Error Handling
+        ChecklistItem(
+            "Verify appropriate HTTP status codes for error conditions",
+            category="Error Handling",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check error response includes actionable details",
+            category="Error Handling",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Validate rate limit responses include retry-after",
+            category="Error Handling",
+            severity="medium",
+        ),
+        # Documentation
+        ChecklistItem(
+            "Verify OpenAPI/Swagger spec updated for changes",
+            category="Documentation",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check request/response examples are accurate",
+            category="Documentation",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Validate changelog entry for API changes",
+            category="Documentation",
+            severity="medium",
+        ),
+        # Security (API-specific)
+        ChecklistItem(
+            "Verify input validation on all request parameters",
+            category="API Security",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check for rate limiting on public endpoints",
+            category="API Security",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Validate CORS configuration is appropriate",
+            category="API Security",
+            severity="medium",
+        ),
+    ]
+
+    return ChecklistSection(
+        title="API Review Checklist",
+        key="checklist.api",
+        domain="API",
+        items=items,
+        preamble=textwrap.dedent(
+            """
+            Review API changes for backward compatibility, versioning correctness,
+            and documentation completeness. Pay special attention to breaking changes.
+            """
+        ).strip(),
+        visibility=SectionVisibility.SUMMARY,
+    )
+
+
+def _build_test_checklist() -> ChecklistSection:
+    """Build a test review checklist."""
+    items = [
+        # Edge Cases
+        ChecklistItem(
+            "Verify null/None input handling is tested",
+            category="Edge Cases",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check empty collection edge cases covered",
+            category="Edge Cases",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Validate boundary values tested (min, max, overflow)",
+            category="Edge Cases",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Test concurrent access scenarios if applicable",
+            category="Edge Cases",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Verify error/exception paths are tested",
+            category="Edge Cases",
+            severity="high",
+        ),
+        # Mocking Patterns
+        ChecklistItem(
+            "Check mocks verify interaction contracts",
+            category="Mocking",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Verify external dependencies are isolated",
+            category="Mocking",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Avoid over-mocking (testing implementation vs behavior)",
+            category="Mocking",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Check mock return values match real implementation contracts",
+            category="Mocking",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Verify time-dependent tests use controlled clocks",
+            category="Mocking",
+            severity="medium",
+        ),
+        # Test Structure
+        ChecklistItem(
+            "Verify test names describe behavior being tested",
+            category="Test Quality",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Check tests follow Arrange-Act-Assert pattern",
+            category="Test Quality",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Validate tests are independent and repeatable",
+            category="Test Quality",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Review test data setup for clarity and maintainability",
+            category="Test Quality",
+            severity="medium",
+        ),
+        # Coverage
+        ChecklistItem(
+            "Verify new code has corresponding tests",
+            category="Coverage",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Check branch coverage for conditional logic",
+            category="Coverage",
+            severity="high",
+        ),
+        ChecklistItem(
+            "Validate integration tests for cross-component flows",
+            category="Coverage",
+            severity="medium",
+        ),
+        # Assertions
+        ChecklistItem(
+            "Verify assertions are specific (not just 'not null')",
+            category="Assertions",
+            severity="medium",
+        ),
+        ChecklistItem(
+            "Check for appropriate use of assertion messages",
+            category="Assertions",
+            severity="low",
+        ),
+        ChecklistItem(
+            "Validate exception assertions check type and message",
+            category="Assertions",
+            severity="medium",
+        ),
+        # Performance Tests
+        ChecklistItem(
+            "Check performance-critical paths have benchmarks",
+            category="Performance Testing",
+            severity="low",
+        ),
+    ]
+
+    return ChecklistSection(
+        title="Test Review Checklist",
+        key="checklist.test",
+        domain="testing",
+        items=items,
+        preamble=textwrap.dedent(
+            """
+            Review tests for completeness, quality, and correctness. Ensure edge cases
+            are covered and mocking patterns follow best practices.
+            """
+        ).strip(),
         visibility=SectionVisibility.SUMMARY,
     )
 
