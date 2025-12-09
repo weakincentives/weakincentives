@@ -43,6 +43,10 @@ from weakincentives.prompt import (
     PromptTemplate,
     SectionVisibility,
     SupportsDataclass,
+    build_api_checklist,
+    build_performance_checklist,
+    build_security_checklist,
+    build_test_checklist,
 )
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -335,7 +339,8 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
     """Builds the main prompt template for the code review agent.
 
     This prompt demonstrates progressive disclosure: the Reference Documentation
-    section starts summarized and can be expanded on demand via `open_sections`.
+    section and domain-specific checklists start summarized and can be expanded
+    on demand via `open_sections`.
     """
     _ensure_test_repository_available()
     workspace_section = _build_workspace_section(session=session)
@@ -343,6 +348,11 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
         _build_review_guidance_section(),
         WorkspaceDigestSection(session=session),
         _build_reference_section(),  # Progressive disclosure section
+        # Domain-specific review checklists (progressive disclosure)
+        build_security_checklist(),
+        build_performance_checklist(),
+        build_api_checklist(),
+        build_test_checklist(),
         PlanningToolsSection(
             session=session,
             strategy=PlanningStrategy.PLAN_ACT_REFLECT,
@@ -485,6 +495,7 @@ def _build_intro(override_tag: str) -> str:
         Launching example code reviewer agent.
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
         - Tools: Planning and a filesystem workspace (with a Podman shell if available).
+        - Checklists: Security, Performance, API, and Test review checklists (expand on demand).
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
         - Auto-optimization: Workspace digest generated on first request.
 

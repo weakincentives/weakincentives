@@ -20,6 +20,15 @@ from ._types import (
     SupportsToolResult,
     ToolRenderableResult,
 )
+from .checklist import (
+    ChecklistItem,
+    ChecklistParams,
+    ChecklistSection,
+    build_api_checklist,
+    build_performance_checklist,
+    build_security_checklist,
+    build_test_checklist,
+)
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -62,6 +71,9 @@ from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
+    "ChecklistItem",
+    "ChecklistParams",
+    "ChecklistSection",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",
@@ -103,6 +115,10 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "VisibilityExpansionRequired",
+    "build_api_checklist",
+    "build_performance_checklist",
+    "build_security_checklist",
+    "build_test_checklist",
     "hash_json",
     "hash_text",
     "parse_structured_output",
