@@ -43,8 +43,8 @@ history required to resume provider conversations.
   translate on resume.
 - **Incremental capture**: Each message appends immediately; per-tool-call
   granularity.
-- **Standalone items**: Each message is an independent slice item, not nested
-  in a container.
+- **Standalone items**: Each message is an independent slice item, not nested in
+  a container.
 - **Backward compatible**: Existing code paths continue to work; resume is
   opt-in.
 
@@ -98,7 +98,7 @@ class InnerMessage:
 **Field semantics:**
 
 | Field | Purpose |
-|-------|---------|
+| --------------- | -------------------------------------------------------------------- |
 | `evaluation_id` | Groups messages from a single `evaluate()` call |
 | `sequence` | Strict ordering within evaluation; system=0, then incrementing |
 | `turn` | Provider round-trip number; increments after each assistant response |
@@ -454,9 +454,9 @@ class ProviderAdapter(ABC):
 When `resume=True`:
 
 1. **Query existing messages** from session
-2. **Find pending tool calls** that need re-execution
-3. **Reconstruct provider messages** from completed conversation
-4. **Continue from interruption point**
+1. **Find pending tool calls** that need re-execution
+1. **Reconstruct provider messages** from completed conversation
+1. **Continue from interruption point**
 
 ```python
 def evaluate(
@@ -626,9 +626,9 @@ idempotency requirements are reduced since completed tools are tracked.
 1. **Session-tracked completion**: The `ToolCallRecord.status` field tracks
    whether a tool completed. On resume, only pending tools re-execute.
 
-2. **Natural idempotency**: Read-only tools (search, fetch) are safe by default.
+1. **Natural idempotency**: Read-only tools (search, fetch) are safe by default.
 
-3. **Idempotency keys**: For extra safety, mutating tools can use `call_id`:
+1. **Idempotency keys**: For extra safety, mutating tools can use `call_id`:
 
    ```python
    def write_file_handler(
@@ -657,7 +657,7 @@ class ToolContext:
 ### Resume Errors
 
 | Error | Cause | Resolution |
-|-------|-------|------------|
+| ---------------------- | ---------------------- | ---------------------- |
 | `ConversationNotFound` | No messages in session | Start fresh evaluation |
 | `PromptMismatch` | Prompt ns/key changed | Clear and restart |
 | `SnapshotRestoreError` | Corrupted snapshot | Clear and restart |
@@ -667,8 +667,8 @@ class ToolContext:
 With per-tool-call recording:
 
 1. Crash after tool A completes → tool A result in session
-2. Resume detects tool B pending → only tool B re-executes
-3. Tool A result already in provider messages → no duplicate execution
+1. Resume detects tool B pending → only tool B re-executes
+1. Tool A result already in provider messages → no duplicate execution
 
 ## Usage Example
 
@@ -771,7 +771,7 @@ enable_inner_message_recording(session)
 ## File Locations
 
 | Component | Location |
-|-----------|----------|
+| -------------------- | ---------------------------------------------- |
 | Data model | `src/weakincentives/runtime/inner_messages.py` |
 | Reducer | `src/weakincentives/runtime/inner_messages.py` |
 | Session integration | `src/weakincentives/runtime/session/` |

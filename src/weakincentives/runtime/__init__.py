@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from . import events, main_loop, session
+from . import events, inner_messages, main_loop, session
 from .events import (
     EventBus,
     HandlerFailure,
@@ -24,6 +24,15 @@ from .events import (
     PublishResult,
     TokenUsage,
     ToolInvoked,
+)
+from .inner_messages import (
+    InnerMessage,
+    ToolCallRecord,
+    enable_inner_message_recording,
+    get_inner_messages,
+    get_latest_evaluation_id,
+    get_pending_tool_calls,
+    inner_message_append,
 )
 from .logging import StructuredLogger, configure_logging, get_logger
 from .main_loop import (
@@ -60,6 +69,7 @@ __all__ = [
     "EventBus",
     "HandlerFailure",
     "InProcessEventBus",
+    "InnerMessage",
     "MainLoop",
     "MainLoopCompleted",
     "MainLoopConfig",
@@ -81,13 +91,20 @@ __all__ = [
     "SnapshotSerializationError",
     "StructuredLogger",
     "TokenUsage",
+    "ToolCallRecord",
     "ToolInvoked",
     "TypedReducer",
     "append",
     "build_reducer_context",
     "configure_logging",
+    "enable_inner_message_recording",
     "events",
+    "get_inner_messages",
+    "get_latest_evaluation_id",
     "get_logger",
+    "get_pending_tool_calls",
+    "inner_message_append",
+    "inner_messages",
     "iter_sessions_bottom_up",
     "main_loop",
     "replace_latest",

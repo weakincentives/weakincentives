@@ -67,9 +67,9 @@ class UnsafeLocalSandboxConfig:
 
 1. **Directory Creation** - Session-specific directory under `tempfile.gettempdir()`
    or configured `workspace_root`
-2. **Mount Hydration** - Copy host mounts into workspace (same as Podman)
-3. **Tool Execution** - All operations target the workspace directory
-4. **Teardown** - Directory removed recursively on section close or garbage
+1. **Mount Hydration** - Copy host mounts into workspace (same as Podman)
+1. **Tool Execution** - All operations target the workspace directory
+1. **Teardown** - Directory removed recursively on section close or garbage
    collection
 
 ### Directory Structure
@@ -275,10 +275,10 @@ prompt = Prompt(
 When using `UnsafeLocalSandboxSection`, ensure:
 
 1. **Container runtime**: Run the agent inside Docker, Podman, or similar
-2. **Read-only root**: Mount host filesystem read-only where possible
-3. **Network policies**: Apply container-level network restrictions
-4. **User namespaces**: Run as non-root user with limited capabilities
-5. **Seccomp/AppArmor**: Apply security profiles to the container
+1. **Read-only root**: Mount host filesystem read-only where possible
+1. **Network policies**: Apply container-level network restrictions
+1. **User namespaces**: Run as non-root user with limited capabilities
+1. **Seccomp/AppArmor**: Apply security profiles to the container
 
 ### Example Docker Configuration
 
