@@ -2,11 +2,11 @@
 
 ## Purpose
 
-The Unsafe Local Sandbox provides the same tool surface as `PodmanSandboxSection`
-but operates directly on the local filesystem using a temporary directory. This
-section is intended for environments where the agent already runs inside an
-isolated container (e.g., Docker, Kubernetes pod, or Podman), eliminating the
-need for nested container orchestration.
+The Unsafe Local Sandbox provides the same tool surface as
+`PodmanSandboxSection` but operates directly on the local filesystem using a
+temporary directory. This section is intended for environments where the agent
+already runs inside an isolated container (e.g., Docker, Kubernetes pod, or
+Podman), eliminating the need for nested container orchestration.
 
 ## Guiding Principles
 
@@ -14,8 +14,8 @@ need for nested container orchestration.
   so prompts can swap between sandbox backends without modification.
 - **Zero nested isolation**: Relies on external container isolation; does not
   spawn subprocesses in sandboxed environments.
-- **Ephemeral workspace**: All files live in a session-scoped temporary directory
-  that is cleaned up on section close.
+- **Ephemeral workspace**: All files live in a session-scoped temporary
+  directory that is cleaned up on section close.
 - **Explicit opt-in**: The "unsafe" prefix signals that host-level isolation is
   the caller's responsibility.
 
@@ -65,11 +65,11 @@ class UnsafeLocalSandboxConfig:
 
 ## Workspace Lifecycle
 
-1. **Directory Creation** - Session-specific directory under `tempfile.gettempdir()`
-   or configured `workspace_root`
-2. **Mount Hydration** - Copy host mounts into workspace (same as Podman)
-3. **Tool Execution** - All operations target the workspace directory
-4. **Teardown** - Directory removed recursively on section close or garbage
+1. **Directory Creation** - Session-specific directory under
+   `tempfile.gettempdir()` or configured `workspace_root`
+1. **Mount Hydration** - Copy host mounts into workspace (same as Podman)
+1. **Tool Execution** - All operations target the workspace directory
+1. **Teardown** - Directory removed recursively on section close or garbage
    collection
 
 ### Directory Structure
@@ -86,30 +86,25 @@ class UnsafeLocalSandboxConfig:
 
 `UnsafeLocalSandboxSection` exposes the same tools as `PodmanSandboxSection`:
 
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `ls` | `path: str` | List directory entries |
-| `read_file` | `file_path`, `offset`, `limit` | Read file with pagination |
-| `write_file` | `file_path`, `content` | Create new file |
-| `edit_file` | `file_path`, `old_string`, `new_string`, `replace_all` | String replacement |
-| `glob` | `pattern`, `path` | Match files by pattern |
-| `grep` | `pattern`, `path`, `glob` | Regex search |
-| `rm` | `path` | Remove file or directory |
-| `shell_execute` | `command`, `cwd`, `env`, `stdin`, `timeout_seconds` | Run command locally |
-| `evaluate_python` | `code` | Execute Python via `python3 -c` |
+| Tool | Parameters | Description | |------|------------|-------------| | `ls` |
+`path: str` | List directory entries | | `read_file` | `file_path`, `offset`,
+`limit` | Read file with pagination | | `write_file` | `file_path`, `content` |
+Create new file | | `edit_file` | `file_path`, `old_string`, `new_string`,
+`replace_all` | String replacement | | `glob` | `pattern`, `path` | Match files
+by pattern | | `grep` | `pattern`, `path`, `glob` | Regex search | | `rm` |
+`path` | Remove file or directory | | `shell_execute` | `command`, `cwd`, `env`,
+`stdin`, `timeout_seconds` | Run command locally | | `evaluate_python` | `code`
+| Execute Python via `python3 -c` |
 
 ### Tool Behavior Differences
 
 While the API is identical, implementation details differ:
 
-| Aspect | Podman | Unsafe Local |
-|--------|--------|--------------|
-| Execution | `podman exec` | `subprocess.run` |
-| Isolation | Container namespace | None (host process) |
-| Resource limits | cgroups (1 CPU, 1 GiB) | None |
-| Network | Disabled | Host network |
-| User | nobody (65534:65534) | Current process user |
-| Timeout | Container-enforced | `subprocess` timeout |
+| Aspect | Podman | Unsafe Local | |--------|--------|--------------| |
+Execution | `podman exec` | `subprocess.run` | | Isolation | Container namespace
+| None (host process) | | Resource limits | cgroups (1 CPU, 1 GiB) | None | |
+Network | Disabled | Host network | | User | nobody (65534:65534) | Current
+process user | | Timeout | Container-enforced | `subprocess` timeout |
 
 ### Shell Execution
 
@@ -169,8 +164,8 @@ class HostMount:
     follow_symlinks: bool = False
 ```
 
-Files are copied (not symlinked) into the workspace at section construction.
-The workspace directory must be within the allowed host roots.
+Files are copied (not symlinked) into the workspace at section construction. The
+workspace directory must be within the allowed host roots.
 
 ## Session Integration
 
@@ -265,8 +260,8 @@ prompt = Prompt(
 ### What This Section Does NOT Provide
 
 - **Process isolation**: Commands run as the current user with full host access
-- **Filesystem isolation**: Only workspace paths are validated; escape is possible
-  via symlinks or `..` in executed commands
+- **Filesystem isolation**: Only workspace paths are validated; escape is
+  possible via symlinks or `..` in executed commands
 - **Network isolation**: Full host network access
 - **Resource limits**: No CPU, memory, or disk quotas
 
@@ -275,10 +270,10 @@ prompt = Prompt(
 When using `UnsafeLocalSandboxSection`, ensure:
 
 1. **Container runtime**: Run the agent inside Docker, Podman, or similar
-2. **Read-only root**: Mount host filesystem read-only where possible
-3. **Network policies**: Apply container-level network restrictions
-4. **User namespaces**: Run as non-root user with limited capabilities
-5. **Seccomp/AppArmor**: Apply security profiles to the container
+1. **Read-only root**: Mount host filesystem read-only where possible
+1. **Network policies**: Apply container-level network restrictions
+1. **User namespaces**: Run as non-root user with limited capabilities
+1. **Seccomp/AppArmor**: Apply security profiles to the container
 
 ### Example Docker Configuration
 
@@ -311,22 +306,17 @@ docker run --rm \
 
 ### Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `WEAKINCENTIVES_WORKSPACE_ROOT` | Override temporary directory location |
-| `WEAKINCENTIVES_SHELL_TIMEOUT` | Default shell timeout (seconds) |
+| Variable | Description | |----------|-------------| |
+`WEAKINCENTIVES_WORKSPACE_ROOT` | Override temporary directory location | |
+`WEAKINCENTIVES_SHELL_TIMEOUT` | Default shell timeout (seconds) |
 
 ### Limits
 
-| Limit | Value | Configurable |
-|-------|-------|--------------|
-| Content per write | 48,000 chars | No |
-| Path depth | 16 segments | No |
-| Segment length | 80 chars | No |
-| Command length | 4,096 chars | No |
-| Shell timeout | 1-120 seconds | Yes (per-call) |
-| Eval timeout | 5 seconds | No |
-| Output truncation | 32 KiB | No |
+| Limit | Value | Configurable | |-------|-------|--------------| | Content per
+write | 48,000 chars | No | | Path depth | 16 segments | No | | Segment length |
+80 chars | No | | Command length | 4,096 chars | No | | Shell timeout | 1-120
+seconds | Yes (per-call) | | Eval timeout | 5 seconds | No | | Output truncation
+| 32 KiB | No |
 
 ## Error Handling
 
@@ -361,13 +351,12 @@ Non-zero exit codes do not raise exceptions; callers inspect `exit_code` and
 
 | Feature | VfsToolsSection | PodmanSandboxSection | UnsafeLocalSandboxSection |
 |---------|-----------------|----------------------|---------------------------|
-| Storage | In-memory | Container overlay | Local temp directory |
-| Shell access | No | Yes | Yes |
-| Python eval | No (use AstevalSection) | Yes (python3 -c) | Yes (python3 -c) |
-| Isolation | N/A | Container | None (external) |
-| Dependencies | None | podman-py | None |
-| Startup time | Instant | Container pull/start | Instant |
-| Host mounts | Copy to memory | Copy to overlay | Copy to temp |
+| Storage | In-memory | Container overlay | Local temp directory | | Shell
+access | No | Yes | Yes | | Python eval | No (use AstevalSection) | Yes (python3
+-c) | Yes (python3 -c) | | Isolation | N/A | Container | None (external) | |
+Dependencies | None | podman-py | None | | Startup time | Instant | Container
+pull/start | Instant | | Host mounts | Copy to memory | Copy to overlay | Copy
+to temp |
 
 ## Migration Guide
 
