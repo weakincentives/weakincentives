@@ -137,6 +137,7 @@ Consult these specs before modifying related code:
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
+| `specs/UNSAFE_LOCAL_SANDBOX.md` | Local sandbox for containerized environments |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/LOGGING.md` | Logging surfaces |
