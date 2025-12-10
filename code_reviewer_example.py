@@ -55,6 +55,7 @@ from weakincentives.runtime import (
     MainLoopCompleted,
     MainLoopRequest,
     Session,
+    ToolInvoked,
     enable_inner_message_recording,
 )
 from weakincentives.runtime.session import Snapshot
@@ -277,6 +278,13 @@ class CodeReviewApp:
             resume_snapshot=resume_snapshot,
         )
         bus.subscribe(MainLoopCompleted, self._on_loop_completed)
+        bus.subscribe(ToolInvoked, self._on_tool_invoked)
+
+    def _on_tool_invoked(self, event: object) -> None:
+        """Snapshot the session after every tool call for resumability."""
+        tool_event: ToolInvoked = event  # type: ignore[assignment]
+        _LOGGER.debug("Tool invoked: %s, saving session snapshot.", tool_event.name)
+        dump_session_tree(self._loop.session, SNAPSHOT_DIR)
 
     def _on_loop_completed(self, event: object) -> None:
         """Handle completed response from event bus."""
