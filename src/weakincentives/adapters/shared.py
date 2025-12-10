@@ -52,6 +52,7 @@ from ..runtime.events import (
     TokenUsage,
     ToolInvoked,
 )
+from ..runtime.inner_messages import InnerMessage, ToolCallRecord
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.dataclasses import is_dataclass_instance
 from ..serde import parse, schema
@@ -1204,6 +1205,11 @@ class ToolExecutor:
         self,
         tool_calls: Sequence[ProviderToolCall],
         provider_payload: dict[str, Any] | None,
+        record_message_fn: Callable[
+            ...,
+            InnerMessage,
+        ]
+        | None = None,
     ) -> tuple[list[dict[str, Any]], ToolChoice]:
         """Execute tool calls and return resulting messages and next tool choice."""
         messages: list[dict[str, Any]] = []
@@ -1234,13 +1240,23 @@ class ToolExecutor:
                     outcome=outcome,
                 )
 
+            tool_content = self.serialize_tool_message_fn(outcome.result)
             tool_message = {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
-                "content": self.serialize_tool_message_fn(outcome.result),
+                "content": tool_content,
             }
             messages.append(tool_message)
             self._tool_message_records.append((outcome.result, tool_message))
+
+            # Record tool result to session
+            if record_message_fn is not None:
+                _ = record_message_fn(
+                    role="tool",
+                    content=tool_content,
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_name,
+                )
 
         return messages, next_tool_choice
 
@@ -1343,6 +1359,8 @@ class InnerLoop[OutputT]:
     _response_parser: ResponseParser[OutputT] = field(init=False)
     _rendered: RenderedPrompt[OutputT] = field(init=False)
     _deadline: Deadline | None = field(init=False)
+    _sequence: int = field(init=False, default=0)
+    _turn: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
         normalized_config = self.config.with_defaults(self.inputs.rendered)
@@ -1397,6 +1415,47 @@ class InnerLoop[OutputT]:
                 phase=PROMPT_EVALUATION_PHASE_BUDGET,
                 provider_payload=self._provider_payload,
             ) from error
+
+    def _record_message(
+        self,
+        role: Literal["system", "assistant", "user", "tool"],
+        content: str,
+        *,
+        tool_calls: tuple[ToolCallRecord, ...] = (),
+        tool_call_id: str | None = None,
+        tool_name: str | None = None,
+    ) -> InnerMessage:
+        """Record a message to the session and return it.
+
+        Recording is best-effort - exceptions are logged but do not interrupt
+        the main evaluation flow.
+        """
+        message = InnerMessage(
+            role=role,
+            content=content,
+            evaluation_id=self._evaluation_id,
+            sequence=self._sequence,
+            turn=self._turn,
+            tool_calls=tool_calls,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            prompt_ns=self.inputs.prompt.ns,
+            prompt_key=self.inputs.prompt.key,
+        )
+        self._sequence += 1
+        try:
+            self.config.session.mutate(InnerMessage).dispatch(message)
+        except Exception:
+            self._log.warning(
+                "Failed to record inner message.",
+                event="inner_message_record_failed",
+                context={
+                    "role": role,
+                    "sequence": self._sequence - 1,
+                    "turn": self._turn,
+                },
+            )
+        return message
 
     def run(self) -> PromptResponse[OutputT]:
         """Execute the inner loop and return the final response."""
@@ -1505,6 +1564,8 @@ class InnerLoop[OutputT]:
         """Initialize execution state prior to the provider loop."""
 
         self._evaluation_id = str(uuid4())
+        self._sequence = 0
+        self._turn = 0
         self._messages = list(self.inputs.initial_messages)
         self._log = (self.config.logger_override or logger).bind(
             adapter=self.inputs.adapter_name,
@@ -1518,6 +1579,9 @@ class InnerLoop[OutputT]:
                 "tool_count": len(self._rendered.tools),
             },
         )
+
+        # Record system message
+        _ = self._record_message(role="system", content=self._rendered.text)
 
         tools = list(self._rendered.tools)
         self._tool_specs = [tool_to_spec(tool) for tool in tools]
@@ -1592,6 +1656,26 @@ class InnerLoop[OutputT]:
     ) -> None:
         """Execute provider tool calls and record emitted messages."""
 
+        self._turn += 1
+
+        # Create tool call records for inner message
+        tool_call_records = tuple(
+            ToolCallRecord(
+                call_id=tc.id or "",
+                name=tc.function.name,
+                arguments=tc.function.arguments or "",
+                status="pending",
+            )
+            for tc in tool_calls
+        )
+
+        # Record assistant message with tool calls
+        _ = self._record_message(
+            role="assistant",
+            content=message_text_content(message.content),
+            tool_calls=tool_call_records,
+        )
+
         assistant_tool_calls = [serialize_tool_call(call) for call in tool_calls]
         self._messages.append(
             {
@@ -1602,7 +1686,9 @@ class InnerLoop[OutputT]:
         )
 
         tool_messages, next_choice = self._tool_executor.execute(
-            tool_calls, self._provider_payload
+            tool_calls,
+            self._provider_payload,
+            record_message_fn=self._record_message,
         )
         self._messages.extend(tool_messages)
 
@@ -1615,6 +1701,13 @@ class InnerLoop[OutputT]:
 
     def _finalize_response(self, message: ProviderMessage) -> PromptResponse[OutputT]:
         """Assemble and publish the final prompt response."""
+
+        # Record the final assistant message (no tool calls)
+        self._turn += 1
+        _ = self._record_message(
+            role="assistant",
+            content=message_text_content(message.content),
+        )
 
         self._ensure_deadline_remaining(
             "Deadline expired while finalizing provider response.",
