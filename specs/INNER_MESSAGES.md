@@ -1,11 +1,11 @@
-# Conversation State Specification
+# Inner Messages Specification
 
 ## Purpose
 
 Enable session snapshots to capture full conversation history, allowing prompt
 evaluations to resume after process restarts. This specification covers the
-`ConversationMessage` dataclass stored as standalone session slice items, the
-`conversation_append` reducer, and the resume flow for adapters.
+`InnerMessage` dataclass stored as standalone session slice items, the
+`inner_message_append` reducer, and the resume flow for adapters.
 
 ## Problem Statement
 
@@ -65,14 +65,14 @@ class ToolCallRecord:
     status: Literal["pending", "completed", "failed"] = "pending"
 ```
 
-### ConversationMessage
+### InnerMessage
 
 Provider-neutral representation of a single message, stored as standalone slice
 items:
 
 ```python
 @FrozenDataclass()
-class ConversationMessage:
+class InnerMessage:
     """A single message in a conversation, stored as a session slice item."""
 
     role: Literal["system", "assistant", "user", "tool"]
@@ -126,17 +126,17 @@ class ConversationMessage:
 
 ## Reducer
 
-### conversation_append
+### inner_message_append
 
 Custom reducer that maintains message ordering within an evaluation:
 
 ```python
-def conversation_append(
-    slice_values: tuple[ConversationMessage, ...],
-    event: ConversationMessage,
+def inner_message_append(
+    slice_values: tuple[InnerMessage, ...],
+    event: InnerMessage,
     *,
     context: ReducerContext,
-) -> tuple[ConversationMessage, ...]:
+) -> tuple[InnerMessage, ...]:
     """Append message maintaining sequence order within evaluation.
 
     Messages are ordered by (evaluation_id, sequence). Messages from different
@@ -169,14 +169,14 @@ def conversation_append(
 ### Reducer Registration
 
 ```python
-from weakincentives.runtime.conversation import (
-    ConversationMessage,
-    conversation_append,
+from weakincentives.runtime.inner_messages import (
+    InnerMessage,
+    inner_message_append,
 )
 
-session.mutate(ConversationMessage).register(
-    ConversationMessage,
-    conversation_append,
+session.mutate(InnerMessage).register(
+    InnerMessage,
+    inner_message_append,
 )
 ```
 
@@ -199,9 +199,9 @@ class InnerLoop:
         tool_calls: tuple[ToolCallRecord, ...] = (),
         tool_call_id: str | None = None,
         tool_name: str | None = None,
-    ) -> ConversationMessage:
+    ) -> InnerMessage:
         """Record a message to the session and return it."""
-        message = ConversationMessage(
+        message = InnerMessage(
             role=role,
             content=content,
             evaluation_id=self._evaluation_id,
@@ -214,7 +214,7 @@ class InnerLoop:
             prompt_key=self.inputs.prompt.key,
         )
         self._sequence += 1
-        self.config.session.mutate(ConversationMessage).append(message)
+        self.config.session.mutate(InnerMessage).append(message)
         return message
 ```
 
@@ -296,7 +296,7 @@ When a tool completes, update its status in the originating assistant message:
 ```python
 def _mark_tool_completed(self, call_id: str) -> None:
     """Update tool call status to completed in the assistant message."""
-    messages = self.config.session.select_all(ConversationMessage)
+    messages = self.config.session.select_all(InnerMessage)
 
     for msg in reversed(messages):
         if msg.evaluation_id != self._evaluation_id:
@@ -314,7 +314,7 @@ def _mark_tool_completed(self, call_id: str) -> None:
                 updated_msg = replace(msg, tool_calls=updated_calls)
 
                 # Replace in session using upsert
-                self.config.session.mutate(ConversationMessage).dispatch(updated_msg)
+                self.config.session.mutate(InnerMessage).dispatch(updated_msg)
                 return
 ```
 
@@ -332,10 +332,10 @@ def _mark_tool_completed(self, call_id: str) -> None:
 │       │                                                                     │
 │       ├──► _messages (working copy for provider calls)                      │
 │       │                                                                     │
-│       └──► Per-message: session.mutate(ConversationMessage).append(...)     │
+│       └──► Per-message: session.mutate(InnerMessage).append(...)     │
 │                   │                                                         │
 │                   ▼                                                         │
-│            ConversationMessage slice (N items)                              │
+│            InnerMessage slice (N items)                              │
 │                   │                                                         │
 │                   ▼                                                         │
 │            Snapshot includes all messages  ◄── Per-tool granularity        │
@@ -351,12 +351,12 @@ Messages serialize as individual slice items:
 snapshot = session.snapshot()
 json_str = snapshot.to_json()
 
-# ConversationMessage items appear individually:
+# InnerMessage items appear individually:
 # {
 #   "slices": [
 #     {
-#       "slice_type": "weakincentives.runtime.conversation:ConversationMessage",
-#       "item_type": "weakincentives.runtime.conversation:ConversationMessage",
+#       "slice_type": "weakincentives.runtime.inner_messages:InnerMessage",
+#       "item_type": "weakincentives.runtime.inner_messages:InnerMessage",
 #       "items": [
 #         {"role": "system", "sequence": 0, "content": "...", ...},
 #         {"role": "assistant", "sequence": 1, "content": "...", ...},
@@ -375,12 +375,12 @@ json_str = snapshot.to_json()
 Retrieve messages for an evaluation:
 
 ```python
-def get_conversation(
+def get_inner_messages(
     session: Session,
     evaluation_id: str | None = None,
-) -> tuple[ConversationMessage, ...]:
+) -> tuple[InnerMessage, ...]:
     """Get conversation messages, optionally filtered by evaluation."""
-    messages = session.select_all(ConversationMessage)
+    messages = session.select_all(InnerMessage)
 
     if evaluation_id is not None:
         messages = tuple(m for m in messages if m.evaluation_id == evaluation_id)
@@ -390,7 +390,7 @@ def get_conversation(
 
 def get_latest_evaluation_id(session: Session) -> str | None:
     """Get the evaluation_id of the most recent conversation."""
-    messages = session.select_all(ConversationMessage)
+    messages = session.select_all(InnerMessage)
     if not messages:
         return None
 
@@ -413,7 +413,7 @@ def get_pending_tool_calls(
     evaluation_id: str,
 ) -> tuple[ToolCallRecord, ...]:
     """Get tool calls that haven't completed."""
-    messages = get_conversation(session, evaluation_id)
+    messages = get_inner_messages(session, evaluation_id)
 
     # Find all tool_call_ids that have results
     completed_ids = {
@@ -481,7 +481,7 @@ def _resume_evaluation(
     if evaluation_id is None:
         raise ValueError("No conversation to resume")
 
-    messages = get_conversation(session, evaluation_id)
+    messages = get_inner_messages(session, evaluation_id)
     pending = get_pending_tool_calls(session, evaluation_id)
 
     # Validate prompt identity
@@ -512,9 +512,9 @@ Convert slice items to provider message format:
 ```python
 def _messages_to_provider_format(
     self,
-    messages: tuple[ConversationMessage, ...],
+    messages: tuple[InnerMessage, ...],
 ) -> list[dict[str, Any]]:
-    """Convert ConversationMessage items to provider format."""
+    """Convert InnerMessage items to provider format."""
     result: list[dict[str, Any]] = []
 
     for msg in messages:
@@ -612,9 +612,9 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         session = self.create_session()
 
         # Enable conversation recording
-        session.mutate(ConversationMessage).register(
-            ConversationMessage,
-            conversation_append,
+        session.mutate(InnerMessage).register(
+            InnerMessage,
+            inner_message_append,
         )
 
         # Set up checkpoint observer
@@ -630,13 +630,13 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
 
             # Save checkpoint on each message
             def on_message_change(
-                old: tuple[ConversationMessage, ...],
-                new: tuple[ConversationMessage, ...],
+                old: tuple[InnerMessage, ...],
+                new: tuple[InnerMessage, ...],
             ) -> None:
                 if len(new) > len(old):
                     self._checkpoint_handler.save(request, session.snapshot())
 
-            session.observe(ConversationMessage, on_message_change)
+            session.observe(InnerMessage, on_message_change)
 
         response = self._adapter.evaluate(
             self.create_prompt(request),
@@ -733,17 +733,17 @@ With per-tool-call recording:
 
 ```python
 from weakincentives.runtime.session import Session, Snapshot
-from weakincentives.runtime.conversation import (
-    ConversationMessage,
-    conversation_append,
-    get_conversation,
+from weakincentives.runtime.inner_messages import (
+    InnerMessage,
+    inner_message_append,
+    get_inner_messages,
 )
 
 # Setup session with recording
 session = Session(bus=InProcessEventBus())
-session.mutate(ConversationMessage).register(
-    ConversationMessage,
-    conversation_append,
+session.mutate(InnerMessage).register(
+    InnerMessage,
+    inner_message_append,
 )
 
 # Save checkpoint after each message
@@ -751,7 +751,7 @@ def save_on_change(old, new):
     if len(new) > len(old):
         Path("/tmp/checkpoint.json").write_text(session.snapshot().to_json())
 
-session.observe(ConversationMessage, save_on_change)
+session.observe(InnerMessage, save_on_change)
 
 # Run evaluation
 response = adapter.evaluate(prompt, session=session)
@@ -764,9 +764,9 @@ response = adapter.evaluate(prompt, session=session)
 snapshot = Snapshot.from_json(Path("/tmp/checkpoint.json").read_text())
 
 session = Session(bus=InProcessEventBus())
-session.mutate(ConversationMessage).register(
-    ConversationMessage,
-    conversation_append,
+session.mutate(InnerMessage).register(
+    InnerMessage,
+    inner_message_append,
 )
 session.mutate().rollback(snapshot)
 
@@ -778,13 +778,13 @@ response = adapter.evaluate(prompt, session=session, resume=True)
 
 ```python
 # Get all messages
-messages = session.select_all(ConversationMessage)
+messages = session.select_all(InnerMessage)
 
 # Get messages for specific evaluation
-from weakincentives.runtime.conversation import get_conversation, get_latest_evaluation_id
+from weakincentives.runtime.inner_messages import get_inner_messages, get_latest_evaluation_id
 
 eval_id = get_latest_evaluation_id(session)
-conversation = get_conversation(session, eval_id)
+conversation = get_inner_messages(session, eval_id)
 
 for msg in conversation:
     print(f"[{msg.sequence}] {msg.role}: {msg.content[:50]}...")
@@ -800,20 +800,20 @@ registration. Adapters that don't use `resume=True` behave identically.
 ### Enabling Recording
 
 ```python
-from weakincentives.runtime.conversation import (
-    ConversationMessage,
-    conversation_append,
-    enable_conversation_recording,
+from weakincentives.runtime.inner_messages import (
+    InnerMessage,
+    inner_message_append,
+    enable_inner_message_recording,
 )
 
 # Option 1: Manual registration
-session.mutate(ConversationMessage).register(
-    ConversationMessage,
-    conversation_append,
+session.mutate(InnerMessage).register(
+    InnerMessage,
+    inner_message_append,
 )
 
 # Option 2: Convenience function
-enable_conversation_recording(session)
+enable_inner_message_recording(session)
 ```
 
 ## Limitations
@@ -829,8 +829,8 @@ enable_conversation_recording(session)
 
 | Component | Location |
 |-----------|----------|
-| Data model | `src/weakincentives/runtime/conversation.py` |
-| Reducer | `src/weakincentives/runtime/conversation.py` |
+| Data model | `src/weakincentives/runtime/inner_messages.py` |
+| Reducer | `src/weakincentives/runtime/inner_messages.py` |
 | Session integration | `src/weakincentives/runtime/session/` |
 | Adapter changes | `src/weakincentives/adapters/shared.py` |
 | MainLoop integration | `src/weakincentives/runtime/main_loop.py` |
