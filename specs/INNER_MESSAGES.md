@@ -594,84 +594,27 @@ def _resume_from_pending_tools(
 
 ## MainLoop Integration
 
-### Checkpoint Strategy
-
-`MainLoop` implements automatic checkpointing via session observers:
+`MainLoop` enables message recording by registering the reducer:
 
 ```python
 class MainLoop(ABC, Generic[UserRequestT, OutputT]):
-    def __init__(
-        self,
-        *,
-        checkpoint_handler: CheckpointHandler | None = None,
-        **kwargs,
-    ) -> None:
-        self._checkpoint_handler = checkpoint_handler
-
     def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
         session = self.create_session()
 
-        # Enable conversation recording
+        # Enable message recording
         session.mutate(InnerMessage).register(
             InnerMessage,
             inner_message_append,
         )
 
-        # Set up checkpoint observer
-        if self._checkpoint_handler:
-            checkpoint = self._checkpoint_handler.load(request)
-            if checkpoint:
-                session.mutate().rollback(checkpoint.snapshot)
-                return self._adapter.evaluate(
-                    self.create_prompt(request),
-                    session=session,
-                    resume=True,
-                )
-
-            # Save checkpoint on each message
-            def on_message_change(
-                old: tuple[InnerMessage, ...],
-                new: tuple[InnerMessage, ...],
-            ) -> None:
-                if len(new) > len(old):
-                    self._checkpoint_handler.save(request, session.snapshot())
-
-            session.observe(InnerMessage, on_message_change)
-
-        response = self._adapter.evaluate(
+        return self._adapter.evaluate(
             self.create_prompt(request),
             session=session,
         )
-
-        # Clear checkpoint on success
-        if self._checkpoint_handler:
-            self._checkpoint_handler.clear(request)
-
-        return response
 ```
 
-### CheckpointHandler Protocol
-
-```python
-class CheckpointHandler(Protocol):
-    def load(self, request: UserRequestT) -> Checkpoint | None:
-        """Load checkpoint for request, if exists."""
-        ...
-
-    def save(self, request: UserRequestT, snapshot: Snapshot) -> None:
-        """Persist checkpoint after each message."""
-        ...
-
-    def clear(self, request: UserRequestT) -> None:
-        """Remove checkpoint after successful completion."""
-        ...
-
-
-@FrozenDataclass()
-class Checkpoint:
-    snapshot: Snapshot
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-```
+Checkpoint persistence is the caller's responsibility. See Usage Example for
+patterns.
 
 ## Tool Idempotency
 
