@@ -76,6 +76,12 @@ PodmanShellParams: Any
 PodmanShellResult: Any
 PodmanWorkspace: Any
 
+LocalShellParams: Any
+LocalShellResult: Any
+UnsafeLocalSandboxConfig: Any
+UnsafeLocalSandboxSection: Any
+UnsafeLocalWorkspace: Any
+
 __all__ = [
     "AddStep",
     "AstevalSection",
@@ -95,6 +101,8 @@ __all__ = [
     "ListDirectory",
     "ListDirectoryParams",
     "ListDirectoryResult",
+    "LocalShellParams",
+    "LocalShellResult",
     "Plan",
     "PlanStatus",
     "PlanStep",
@@ -113,6 +121,9 @@ __all__ = [
     "SetupPlan",
     "StepStatus",
     "ToolValidationError",
+    "UnsafeLocalSandboxConfig",
+    "UnsafeLocalSandboxSection",
+    "UnsafeLocalWorkspace",
     "UpdateStep",
     "VfsFile",
     "VfsPath",
@@ -134,12 +145,24 @@ _PODMAN_EXPORTS = {
     "PodmanSandboxSection",
     "PodmanWorkspace",
 }
+_UNSAFE_LOCAL_EXPORTS = {
+    "LocalShellParams",
+    "LocalShellResult",
+    "UnsafeLocalSandboxConfig",
+    "UnsafeLocalSandboxSection",
+    "UnsafeLocalWorkspace",
+}
 _TOOLS_PACKAGE = __name__
 
 
 def __getattr__(name: str) -> object:
     if name in _PODMAN_EXPORTS:
         module = import_module(f"{_TOOLS_PACKAGE}.podman")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    if name in _UNSAFE_LOCAL_EXPORTS:
+        module = import_module(f"{_TOOLS_PACKAGE}.unsafe_local")
         value = getattr(module, name)
         globals()[name] = value
         return value

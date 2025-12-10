@@ -67,9 +67,9 @@ class UnsafeLocalSandboxConfig:
 
 1. **Directory Creation** - Session-specific directory under `tempfile.gettempdir()`
    or configured `workspace_root`
-2. **Mount Hydration** - Copy host mounts into workspace (same as Podman)
-3. **Tool Execution** - All operations target the workspace directory
-4. **Teardown** - Directory removed recursively on section close or garbage
+1. **Mount Hydration** - Copy host mounts into workspace (same as Podman)
+1. **Tool Execution** - All operations target the workspace directory
+1. **Teardown** - Directory removed recursively on section close or garbage
    collection
 
 ### Directory Structure
@@ -87,7 +87,7 @@ class UnsafeLocalSandboxConfig:
 `UnsafeLocalSandboxSection` exposes the same tools as `PodmanSandboxSection`:
 
 | Tool | Parameters | Description |
-|------|------------|-------------|
+| ----------------- | ------------------------------------------------------ | ------------------------------- |
 | `ls` | `path: str` | List directory entries |
 | `read_file` | `file_path`, `offset`, `limit` | Read file with pagination |
 | `write_file` | `file_path`, `content` | Create new file |
@@ -103,7 +103,7 @@ class UnsafeLocalSandboxConfig:
 While the API is identical, implementation details differ:
 
 | Aspect | Podman | Unsafe Local |
-|--------|--------|--------------|
+| --------------- | ---------------------- | -------------------- |
 | Execution | `podman exec` | `subprocess.run` |
 | Isolation | Container namespace | None (host process) |
 | Resource limits | cgroups (1 CPU, 1 GiB) | None |
@@ -275,10 +275,10 @@ prompt = Prompt(
 When using `UnsafeLocalSandboxSection`, ensure:
 
 1. **Container runtime**: Run the agent inside Docker, Podman, or similar
-2. **Read-only root**: Mount host filesystem read-only where possible
-3. **Network policies**: Apply container-level network restrictions
-4. **User namespaces**: Run as non-root user with limited capabilities
-5. **Seccomp/AppArmor**: Apply security profiles to the container
+1. **Read-only root**: Mount host filesystem read-only where possible
+1. **Network policies**: Apply container-level network restrictions
+1. **User namespaces**: Run as non-root user with limited capabilities
+1. **Seccomp/AppArmor**: Apply security profiles to the container
 
 ### Example Docker Configuration
 
@@ -312,14 +312,14 @@ docker run --rm \
 ### Environment Variables
 
 | Variable | Description |
-|----------|-------------|
+| ------------------------------- | ------------------------------------- |
 | `WEAKINCENTIVES_WORKSPACE_ROOT` | Override temporary directory location |
 | `WEAKINCENTIVES_SHELL_TIMEOUT` | Default shell timeout (seconds) |
 
 ### Limits
 
 | Limit | Value | Configurable |
-|-------|-------|--------------|
+| ----------------- | ------------- | -------------- |
 | Content per write | 48,000 chars | No |
 | Path depth | 16 segments | No |
 | Segment length | 80 chars | No |
@@ -360,7 +360,7 @@ Non-zero exit codes do not raise exceptions; callers inspect `exit_code` and
 ## Comparison with Other Sections
 
 | Feature | VfsToolsSection | PodmanSandboxSection | UnsafeLocalSandboxSection |
-|---------|-----------------|----------------------|---------------------------|
+| ------------ | ----------------------- | -------------------- | ------------------------- |
 | Storage | In-memory | Container overlay | Local temp directory |
 | Shell access | No | Yes | Yes |
 | Python eval | No (use AstevalSection) | Yes (python3 -c) | Yes (python3 -c) |
