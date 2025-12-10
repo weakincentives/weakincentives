@@ -4,8 +4,8 @@
 
 Enable session snapshots to capture full conversation history, allowing prompt
 evaluations to resume after process restarts. This specification covers the
-`ConversationTurn` dataclass, session integration, snapshot serialization, and
-the resume flow for adapters.
+`ConversationMessage` dataclass stored as standalone session slice items, the
+`conversation_append` reducer, and the resume flow for adapters.
 
 ## Problem Statement
 
@@ -41,29 +41,14 @@ history required to resume provider conversations.
   including messages.
 - **Provider-agnostic messages**: Stored format is provider-neutral; adapters
   translate on resume.
-- **Incremental capture**: Each turn appends to session state; no bulk rewrites.
+- **Incremental capture**: Each message appends immediately; per-tool-call
+  granularity.
+- **Standalone items**: Each message is an independent slice item, not nested
+  in a container.
 - **Backward compatible**: Existing code paths continue to work; resume is
   opt-in.
 
 ## Core Data Model
-
-### ConversationMessage
-
-Provider-neutral representation of a single message:
-
-```python
-@FrozenDataclass()
-class ConversationMessage:
-    """A single message in a conversation."""
-
-    role: Literal["system", "assistant", "user", "tool"]
-    content: str
-    tool_calls: tuple[ToolCallRecord, ...] = ()
-    tool_call_id: str | None = None
-    name: str | None = None  # Tool name for role="tool"
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    message_id: UUID = field(default_factory=uuid4)
-```
 
 ### ToolCallRecord
 
@@ -77,78 +62,260 @@ class ToolCallRecord:
     call_id: str
     name: str
     arguments: str  # JSON-encoded arguments
+    status: Literal["pending", "completed", "failed"] = "pending"
 ```
 
-### ConversationTurn
+### ConversationMessage
 
-Groups a provider response with any resulting tool messages:
+Provider-neutral representation of a single message, stored as standalone slice
+items:
 
 ```python
 @FrozenDataclass()
-class ConversationTurn:
-    """A single turn in the conversation: assistant response + tool results."""
+class ConversationMessage:
+    """A single message in a conversation, stored as a session slice item."""
 
-    turn_number: int
-    assistant_message: ConversationMessage
-    tool_messages: tuple[ConversationMessage, ...] = ()
-    provider_payload: Mapping[str, JSONValue] | None = None
-    evaluation_id: str = field(default_factory=lambda: str(uuid4()))
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-```
+    role: Literal["system", "assistant", "user", "tool"]
+    content: str
 
-### ConversationState
-
-Top-level container stored as a session slice:
-
-```python
-@FrozenDataclass()
-class ConversationState:
-    """Complete conversation history for an evaluation."""
-
+    # Ordering fields
     evaluation_id: str
-    prompt_ns: str
-    prompt_key: str
-    system_message: ConversationMessage
-    turns: tuple[ConversationTurn, ...] = ()
+    sequence: int  # Global sequence within evaluation, starts at 0
+
+    # Tool-related fields
+    tool_calls: tuple[ToolCallRecord, ...] = ()
+    tool_call_id: str | None = None  # For role="tool", references the call
+    tool_name: str | None = None  # For role="tool"
+
+    # Metadata
+    turn: int = 0  # Provider round-trip number
+    prompt_ns: str = ""
+    prompt_key: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    state_id: UUID = field(default_factory=uuid4)
+    message_id: UUID = field(default_factory=uuid4)
+```
+
+**Field semantics:**
+
+| Field | Purpose |
+|-------|---------|
+| `evaluation_id` | Groups messages from a single `evaluate()` call |
+| `sequence` | Strict ordering within evaluation; system=0, then incrementing |
+| `turn` | Provider round-trip number; increments after each assistant response |
+| `tool_call_id` | Links tool result to its originating call |
+| `tool_calls` | For assistant messages, pending tool invocations |
+
+### Sequence Numbering
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│ sequence=0   │ role=system    │ turn=0  │ System prompt                    │
+├────────────────────────────────────────────────────────────────────────────┤
+│ sequence=1   │ role=assistant │ turn=1  │ "I'll search for that"           │
+│              │                │         │ tool_calls=[{call_id="c1",...}]  │
+├────────────────────────────────────────────────────────────────────────────┤
+│ sequence=2   │ role=tool      │ turn=1  │ tool_call_id="c1"                │
+│              │                │         │ Result from first tool           │
+├────────────────────────────────────────────────────────────────────────────┤
+│ sequence=3   │ role=tool      │ turn=1  │ tool_call_id="c2"                │
+│              │                │         │ Result from second tool          │
+├────────────────────────────────────────────────────────────────────────────┤
+│ sequence=4   │ role=assistant │ turn=2  │ Final response, no tool_calls    │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Reducer
+
+### conversation_append
+
+Custom reducer that maintains message ordering within an evaluation:
+
+```python
+def conversation_append(
+    slice_values: tuple[ConversationMessage, ...],
+    event: ConversationMessage,
+    *,
+    context: ReducerContext,
+) -> tuple[ConversationMessage, ...]:
+    """Append message maintaining sequence order within evaluation.
+
+    Messages are ordered by (evaluation_id, sequence). Messages from different
+    evaluations are kept separate but ordered by their first message's timestamp.
+    Duplicate messages (same message_id) are ignored.
+    """
+    # Deduplicate by message_id
+    existing_ids = {msg.message_id for msg in slice_values}
+    if event.message_id in existing_ids:
+        return slice_values
+
+    # Find insertion point maintaining order
+    result = list(slice_values)
+    insert_idx = len(result)
+
+    for i, msg in enumerate(result):
+        if msg.evaluation_id == event.evaluation_id:
+            if msg.sequence > event.sequence:
+                insert_idx = i
+                break
+        elif msg.evaluation_id > event.evaluation_id:
+            # Different evaluation, maintain evaluation order
+            insert_idx = i
+            break
+
+    result.insert(insert_idx, event)
+    return tuple(result)
+```
+
+### Reducer Registration
+
+```python
+from weakincentives.runtime.conversation import (
+    ConversationMessage,
+    conversation_append,
+)
+
+session.mutate(ConversationMessage).register(
+    ConversationMessage,
+    conversation_append,
+)
 ```
 
 ## Session Integration
 
-### Slice Registration
+### Recording Messages
 
-`ConversationState` is stored as a session slice using `replace_latest`:
+The `InnerLoop` records each message immediately after creation:
 
 ```python
-from weakincentives.runtime.session import replace_latest
+class InnerLoop:
+    _sequence: int = 0
+    _turn: int = 0
 
-session.mutate(ConversationState).register(ConversationState, replace_latest)
+    def _record_message(
+        self,
+        role: Literal["system", "assistant", "user", "tool"],
+        content: str,
+        *,
+        tool_calls: tuple[ToolCallRecord, ...] = (),
+        tool_call_id: str | None = None,
+        tool_name: str | None = None,
+    ) -> ConversationMessage:
+        """Record a message to the session and return it."""
+        message = ConversationMessage(
+            role=role,
+            content=content,
+            evaluation_id=self._evaluation_id,
+            sequence=self._sequence,
+            turn=self._turn,
+            tool_calls=tool_calls,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            prompt_ns=self.inputs.prompt.ns,
+            prompt_key=self.inputs.prompt.key,
+        )
+        self._sequence += 1
+        self.config.session.mutate(ConversationMessage).append(message)
+        return message
 ```
 
-This ensures only the current conversation is retained per evaluation.
+### System Message Recording
 
-### Turn Recording
-
-The `InnerLoop` records each turn after tool execution completes:
+During `_prepare()`:
 
 ```python
-def _record_turn(self, assistant_msg: ProviderMessage, tool_results: list[dict]) -> None:
-    turn = ConversationTurn(
-        turn_number=len(self._conversation_state.turns) + 1,
-        assistant_message=self._to_conversation_message(assistant_msg),
-        tool_messages=tuple(
-            self._to_conversation_message(msg) for msg in tool_results
-        ),
-        provider_payload=self._provider_payload,
-        evaluation_id=self._evaluation_id,
+def _prepare(self) -> None:
+    self._evaluation_id = str(uuid4())
+    self._sequence = 0
+    self._turn = 0
+
+    # Record system message immediately
+    self._record_message(
+        role="system",
+        content=self._rendered.text,
     )
 
-    updated_state = replace(
-        self._conversation_state,
-        turns=(*self._conversation_state.turns, turn),
+    # ... rest of preparation ...
+```
+
+### Assistant Message Recording
+
+After receiving provider response:
+
+```python
+def _handle_assistant_response(self, message: ProviderMessage) -> None:
+    self._turn += 1
+
+    tool_call_records = tuple(
+        ToolCallRecord(
+            call_id=tc.id,
+            name=tc.function.name,
+            arguments=tc.function.arguments,
+            status="pending",
+        )
+        for tc in (message.tool_calls or [])
     )
-    self.config.session.mutate(ConversationState).seed(updated_state)
+
+    self._record_message(
+        role="assistant",
+        content=message.content or "",
+        tool_calls=tool_call_records,
+    )
+```
+
+### Tool Result Recording
+
+After **each** tool execution (not batched):
+
+```python
+def _execute_tool_and_record(
+    self,
+    tool_call: ProviderToolCall,
+) -> dict[str, Any]:
+    """Execute a single tool and record result immediately."""
+
+    result = self._invoke_handler(tool_call)
+
+    # Record to session immediately after execution
+    self._record_message(
+        role="tool",
+        content=self._serialize_result(result),
+        tool_call_id=tool_call.id,
+        tool_name=tool_call.function.name,
+    )
+
+    # Update tool call status in the assistant message
+    self._mark_tool_completed(tool_call.id)
+
+    return self._format_tool_message(tool_call.id, result)
+```
+
+### Updating Tool Call Status
+
+When a tool completes, update its status in the originating assistant message:
+
+```python
+def _mark_tool_completed(self, call_id: str) -> None:
+    """Update tool call status to completed in the assistant message."""
+    messages = self.config.session.select_all(ConversationMessage)
+
+    for msg in reversed(messages):
+        if msg.evaluation_id != self._evaluation_id:
+            continue
+        if msg.role != "assistant":
+            continue
+
+        for tc in msg.tool_calls:
+            if tc.call_id == call_id:
+                # Create updated message with completed status
+                updated_calls = tuple(
+                    replace(t, status="completed") if t.call_id == call_id else t
+                    for t in msg.tool_calls
+                )
+                updated_msg = replace(msg, tool_calls=updated_calls)
+
+                # Replace in session using upsert
+                self.config.session.mutate(ConversationMessage).dispatch(updated_msg)
+                return
 ```
 
 ### State Flow
@@ -165,45 +332,110 @@ def _record_turn(self, assistant_msg: ProviderMessage, tool_results: list[dict])
 │       │                                                                     │
 │       ├──► _messages (working copy for provider calls)                      │
 │       │                                                                     │
-│       └──► Session.mutate(ConversationState).seed(...)                      │
+│       └──► Per-message: session.mutate(ConversationMessage).append(...)     │
 │                   │                                                         │
 │                   ▼                                                         │
-│            ConversationState slice  ◄── Included in snapshot               │
+│            ConversationMessage slice (N items)                              │
+│                   │                                                         │
+│                   ▼                                                         │
+│            Snapshot includes all messages  ◄── Per-tool granularity        │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Snapshot Serialization
 
-`ConversationState` serializes naturally via the existing snapshot mechanism:
+Messages serialize as individual slice items:
 
 ```python
 snapshot = session.snapshot()
 json_str = snapshot.to_json()
 
-# ConversationState appears in slices:
+# ConversationMessage items appear individually:
 # {
 #   "slices": [
 #     {
-#       "slice_type": "weakincentives.runtime.conversation:ConversationState",
-#       "item_type": "weakincentives.runtime.conversation:ConversationState",
-#       "items": [{ ... serialized state ... }]
+#       "slice_type": "weakincentives.runtime.conversation:ConversationMessage",
+#       "item_type": "weakincentives.runtime.conversation:ConversationMessage",
+#       "items": [
+#         {"role": "system", "sequence": 0, "content": "...", ...},
+#         {"role": "assistant", "sequence": 1, "content": "...", ...},
+#         {"role": "tool", "sequence": 2, "tool_call_id": "c1", ...},
+#         ...
+#       ]
 #     }
 #   ]
 # }
 ```
 
-### Serialization Considerations
-
-- `provider_payload` contains arbitrary provider data; stored as `JSONValue`
-- `tool_calls` arguments remain JSON-encoded strings to preserve fidelity
-- All timestamps are timezone-aware ISO 8601
-
 ## Resume Flow
+
+### Querying Conversation State
+
+Retrieve messages for an evaluation:
+
+```python
+def get_conversation(
+    session: Session,
+    evaluation_id: str | None = None,
+) -> tuple[ConversationMessage, ...]:
+    """Get conversation messages, optionally filtered by evaluation."""
+    messages = session.select_all(ConversationMessage)
+
+    if evaluation_id is not None:
+        messages = tuple(m for m in messages if m.evaluation_id == evaluation_id)
+
+    return tuple(sorted(messages, key=lambda m: (m.evaluation_id, m.sequence)))
+
+
+def get_latest_evaluation_id(session: Session) -> str | None:
+    """Get the evaluation_id of the most recent conversation."""
+    messages = session.select_all(ConversationMessage)
+    if not messages:
+        return None
+
+    # Find latest by created_at of system message
+    system_messages = [m for m in messages if m.role == "system"]
+    if not system_messages:
+        return None
+
+    latest = max(system_messages, key=lambda m: m.created_at)
+    return latest.evaluation_id
+```
+
+### Detecting Incomplete Tool Calls
+
+Find tool calls that started but didn't complete:
+
+```python
+def get_pending_tool_calls(
+    session: Session,
+    evaluation_id: str,
+) -> tuple[ToolCallRecord, ...]:
+    """Get tool calls that haven't completed."""
+    messages = get_conversation(session, evaluation_id)
+
+    # Find all tool_call_ids that have results
+    completed_ids = {
+        m.tool_call_id
+        for m in messages
+        if m.role == "tool" and m.tool_call_id
+    }
+
+    # Find pending from assistant messages
+    pending: list[ToolCallRecord] = []
+    for msg in messages:
+        if msg.role == "assistant":
+            for tc in msg.tool_calls:
+                if tc.call_id not in completed_ids:
+                    pending.append(tc)
+
+    return tuple(pending)
+```
 
 ### Adapter Interface
 
-Adapters gain an optional `resume` parameter:
+Adapters gain a `resume` parameter:
 
 ```python
 class ProviderAdapter(ABC):
@@ -213,95 +445,158 @@ class ProviderAdapter(ABC):
         prompt: Prompt[OutputT],
         *,
         # ... existing parameters ...
-        resume_from: ConversationState | None = None,  # NEW
+        resume: bool = False,  # NEW: resume from session state
     ) -> PromptResponse[OutputT]: ...
 ```
 
 ### Resume Behavior
 
-When `resume_from` is provided:
+When `resume=True`:
 
-1. **Skip rendering** if prompt matches `resume_from.prompt_ns` and
-   `resume_from.prompt_key`
-2. **Reconstruct messages** from `ConversationState.turns`
-3. **Continue from last turn** by issuing the next provider request
+1. **Query existing messages** from session
+2. **Find pending tool calls** that need re-execution
+3. **Reconstruct provider messages** from completed conversation
+4. **Continue from interruption point**
 
 ```python
 def evaluate(
     self,
     prompt: Prompt[OutputT],
     *,
-    resume_from: ConversationState | None = None,
+    session: SessionProtocol,
+    resume: bool = False,
     **kwargs,
 ) -> PromptResponse[OutputT]:
-    if resume_from is not None:
-        return self._resume_evaluation(prompt, resume_from, **kwargs)
-    return self._fresh_evaluation(prompt, **kwargs)
+    if resume:
+        return self._resume_evaluation(prompt, session, **kwargs)
+    return self._fresh_evaluation(prompt, session, **kwargs)
 
 def _resume_evaluation(
     self,
     prompt: Prompt[OutputT],
-    state: ConversationState,
+    session: SessionProtocol,
     **kwargs,
 ) -> PromptResponse[OutputT]:
+    evaluation_id = get_latest_evaluation_id(session)
+    if evaluation_id is None:
+        raise ValueError("No conversation to resume")
+
+    messages = get_conversation(session, evaluation_id)
+    pending = get_pending_tool_calls(session, evaluation_id)
+
     # Validate prompt identity
-    if (prompt.ns, prompt.key) != (state.prompt_ns, state.prompt_key):
+    system_msg = next((m for m in messages if m.role == "system"), None)
+    if system_msg and (prompt.ns, prompt.key) != (system_msg.prompt_ns, system_msg.prompt_key):
         raise ValueError("Cannot resume with mismatched prompt")
 
-    # Reconstruct message list
-    messages = self._state_to_messages(state)
+    # Reconstruct provider message list
+    provider_messages = self._messages_to_provider_format(messages)
 
-    # Create InnerLoop with reconstructed messages
-    inputs = InnerLoopInputs[OutputT](
-        # ... other fields ...
-        initial_messages=messages,
-    )
-    # ... continue execution ...
+    # Determine resume point
+    if pending:
+        # Resume mid-turn: re-execute pending tools
+        return self._resume_from_pending_tools(
+            prompt, session, provider_messages, pending, evaluation_id, **kwargs
+        )
+    else:
+        # Resume after complete turn: continue conversation
+        return self._resume_from_complete_turn(
+            prompt, session, provider_messages, evaluation_id, **kwargs
+        )
 ```
 
 ### Message Reconstruction
 
-Convert `ConversationState` back to provider message format:
+Convert slice items to provider message format:
 
 ```python
-def _state_to_messages(self, state: ConversationState) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": state.system_message.content}
-    ]
+def _messages_to_provider_format(
+    self,
+    messages: tuple[ConversationMessage, ...],
+) -> list[dict[str, Any]]:
+    """Convert ConversationMessage items to provider format."""
+    result: list[dict[str, Any]] = []
 
-    for turn in state.turns:
-        # Assistant message
-        assistant_msg: dict[str, Any] = {
-            "role": "assistant",
-            "content": turn.assistant_message.content,
-        }
-        if turn.assistant_message.tool_calls:
-            assistant_msg["tool_calls"] = [
-                {
-                    "id": tc.call_id,
-                    "type": "function",
-                    "function": {"name": tc.name, "arguments": tc.arguments},
-                }
-                for tc in turn.assistant_message.tool_calls
-            ]
-        messages.append(assistant_msg)
+    for msg in messages:
+        if msg.role == "system":
+            result.append({"role": "system", "content": msg.content})
 
-        # Tool result messages
-        for tool_msg in turn.tool_messages:
-            messages.append({
+        elif msg.role == "assistant":
+            assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": msg.content,
+            }
+            if msg.tool_calls:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": tc.call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": tc.arguments,
+                        },
+                    }
+                    for tc in msg.tool_calls
+                    if tc.status == "completed"  # Only include completed
+                ]
+            result.append(assistant_msg)
+
+        elif msg.role == "tool":
+            result.append({
                 "role": "tool",
-                "tool_call_id": tool_msg.tool_call_id,
-                "content": tool_msg.content,
+                "tool_call_id": msg.tool_call_id,
+                "content": msg.content,
             })
 
-    return messages
+        elif msg.role == "user":
+            result.append({"role": "user", "content": msg.content})
+
+    return result
+```
+
+### Resuming from Pending Tools
+
+When interrupted mid-tool-execution:
+
+```python
+def _resume_from_pending_tools(
+    self,
+    prompt: Prompt[OutputT],
+    session: SessionProtocol,
+    provider_messages: list[dict[str, Any]],
+    pending: tuple[ToolCallRecord, ...],
+    evaluation_id: str,
+    **kwargs,
+) -> PromptResponse[OutputT]:
+    """Resume by executing remaining tool calls."""
+
+    # Create inner loop with existing messages
+    # The loop will detect pending tools and execute them
+    # Completed tools are already in the message history
+
+    inputs = InnerLoopInputs[OutputT](
+        # ... other fields ...
+        initial_messages=provider_messages,
+    )
+
+    inner_loop = InnerLoop(inputs=inputs, config=config)
+    inner_loop._evaluation_id = evaluation_id
+    inner_loop._sequence = max(m.sequence for m in messages) + 1
+    inner_loop._turn = max(m.turn for m in messages)
+
+    # Execute pending tools
+    for tc in pending:
+        inner_loop._execute_tool_and_record(tc)
+
+    # Continue with provider
+    return inner_loop.run()
 ```
 
 ## MainLoop Integration
 
 ### Checkpoint Strategy
 
-`MainLoop` can implement automatic checkpointing:
+`MainLoop` implements automatic checkpointing via session observers:
 
 ```python
 class MainLoop(ABC, Generic[UserRequestT, OutputT]):
@@ -312,26 +607,47 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         **kwargs,
     ) -> None:
         self._checkpoint_handler = checkpoint_handler
-        # ...
 
     def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
         session = self.create_session()
 
-        # Check for existing checkpoint
+        # Enable conversation recording
+        session.mutate(ConversationMessage).register(
+            ConversationMessage,
+            conversation_append,
+        )
+
+        # Set up checkpoint observer
         if self._checkpoint_handler:
             checkpoint = self._checkpoint_handler.load(request)
             if checkpoint:
                 session.mutate().rollback(checkpoint.snapshot)
-                state = session.query(ConversationState).latest()
                 return self._adapter.evaluate(
                     self.create_prompt(request),
-                    resume_from=state,
                     session=session,
-                    # ...
+                    resume=True,
                 )
 
-        # Fresh execution with checkpointing
-        # ...
+            # Save checkpoint on each message
+            def on_message_change(
+                old: tuple[ConversationMessage, ...],
+                new: tuple[ConversationMessage, ...],
+            ) -> None:
+                if len(new) > len(old):
+                    self._checkpoint_handler.save(request, session.snapshot())
+
+            session.observe(ConversationMessage, on_message_change)
+
+        response = self._adapter.evaluate(
+            self.create_prompt(request),
+            session=session,
+        )
+
+        # Clear checkpoint on success
+        if self._checkpoint_handler:
+            self._checkpoint_handler.clear(request)
+
+        return response
 ```
 
 ### CheckpointHandler Protocol
@@ -343,23 +659,33 @@ class CheckpointHandler(Protocol):
         ...
 
     def save(self, request: UserRequestT, snapshot: Snapshot) -> None:
-        """Persist checkpoint after each turn."""
+        """Persist checkpoint after each message."""
         ...
 
     def clear(self, request: UserRequestT) -> None:
         """Remove checkpoint after successful completion."""
         ...
+
+
+@FrozenDataclass()
+class Checkpoint:
+    snapshot: Snapshot
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
 
 ## Tool Idempotency
 
-Resume safety depends on tool idempotency. Tools must handle re-execution:
+Resume safety depends on tool idempotency. With per-tool-call recording,
+idempotency requirements are reduced since completed tools are tracked.
 
 ### Idempotency Patterns
 
-1. **Natural idempotency**: Read-only tools (search, fetch) are safe by default
+1. **Session-tracked completion**: The `ToolCallRecord.status` field tracks
+   whether a tool completed. On resume, only pending tools re-execute.
 
-2. **Idempotency keys**: Mutating tools use `call_id` for deduplication:
+2. **Natural idempotency**: Read-only tools (search, fetch) are safe by default.
+
+3. **Idempotency keys**: For extra safety, mutating tools can use `call_id`:
 
    ```python
    def write_file_handler(
@@ -373,15 +699,13 @@ Resume safety depends on tool idempotency. Tools must handle re-execution:
        # ... execute and cache ...
    ```
 
-3. **Compensation**: Some tools may need undo logic if partial execution occurred
-
 ### ToolContext Enhancement
 
 ```python
 @FrozenDataclass()
 class ToolContext:
     # ... existing fields ...
-    call_id: str  # Already present, used for idempotency
+    call_id: str  # Already present
     is_resume: bool = False  # NEW: indicates resumed execution
 ```
 
@@ -391,18 +715,17 @@ class ToolContext:
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| `ConversationStateMismatch` | Prompt changed since checkpoint | Clear checkpoint, restart |
-| `SnapshotRestoreError` | Corrupted or incompatible snapshot | Clear checkpoint, restart |
-| `ToolIdempotencyError` | Tool cannot safely re-execute | Manual intervention |
+| `ConversationNotFound` | No messages in session | Start fresh evaluation |
+| `PromptMismatch` | Prompt ns/key changed | Clear and restart |
+| `SnapshotRestoreError` | Corrupted snapshot | Clear and restart |
 
-### Partial Turn Recovery
+### Partial Execution Recovery
 
-If a turn partially completed (some tools ran, others didn't):
+With per-tool-call recording:
 
-1. Snapshot captures state before the incomplete turn
-2. On resume, the entire turn re-executes
-3. Completed tools return cached results via idempotency
-4. Incomplete tools execute normally
+1. Crash after tool A completes → tool A result in session
+2. Resume detects tool B pending → only tool B re-executes
+3. Tool A result already in provider messages → no duplicate execution
 
 ## Usage Example
 
@@ -410,104 +733,104 @@ If a turn partially completed (some tools ran, others didn't):
 
 ```python
 from weakincentives.runtime.session import Session, Snapshot
-from weakincentives.runtime.conversation import ConversationState
+from weakincentives.runtime.conversation import (
+    ConversationMessage,
+    conversation_append,
+    get_conversation,
+)
 
-# Save checkpoint
-def save_checkpoint(session: Session, path: str) -> None:
-    snapshot = session.snapshot()
-    Path(path).write_text(snapshot.to_json())
+# Setup session with recording
+session = Session(bus=InProcessEventBus())
+session.mutate(ConversationMessage).register(
+    ConversationMessage,
+    conversation_append,
+)
 
-# Resume from checkpoint
-def resume_evaluation(
-    adapter: ProviderAdapter[OutputT],
-    prompt: Prompt[OutputT],
-    checkpoint_path: str,
-) -> PromptResponse[OutputT]:
-    snapshot = Snapshot.from_json(Path(checkpoint_path).read_text())
+# Save checkpoint after each message
+def save_on_change(old, new):
+    if len(new) > len(old):
+        Path("/tmp/checkpoint.json").write_text(session.snapshot().to_json())
 
-    session = Session(bus=InProcessEventBus())
-    session.mutate().rollback(snapshot)
+session.observe(ConversationMessage, save_on_change)
 
-    state = session.query(ConversationState).latest()
-    if state is None:
-        raise ValueError("No conversation state in checkpoint")
-
-    return adapter.evaluate(
-        prompt,
-        session=session,
-        resume_from=state,
-    )
+# Run evaluation
+response = adapter.evaluate(prompt, session=session)
 ```
 
-### With MainLoop
+### Resume from Checkpoint
 
 ```python
-class FileCheckpointHandler:
-    def __init__(self, checkpoint_dir: Path) -> None:
-        self._dir = checkpoint_dir
+# Load checkpoint
+snapshot = Snapshot.from_json(Path("/tmp/checkpoint.json").read_text())
 
-    def load(self, request: ReviewRequest) -> Checkpoint | None:
-        path = self._dir / f"{request.id}.json"
-        if path.exists():
-            snapshot = Snapshot.from_json(path.read_text())
-            return Checkpoint(snapshot=snapshot)
-        return None
-
-    def save(self, request: ReviewRequest, snapshot: Snapshot) -> None:
-        path = self._dir / f"{request.id}.json"
-        path.write_text(snapshot.to_json())
-
-    def clear(self, request: ReviewRequest) -> None:
-        path = self._dir / f"{request.id}.json"
-        path.unlink(missing_ok=True)
-
-
-loop = CodeReviewLoop(
-    adapter=adapter,
-    bus=bus,
-    checkpoint_handler=FileCheckpointHandler(Path("/tmp/checkpoints")),
+session = Session(bus=InProcessEventBus())
+session.mutate(ConversationMessage).register(
+    ConversationMessage,
+    conversation_append,
 )
+session.mutate().rollback(snapshot)
+
+# Resume - will detect pending tools and continue
+response = adapter.evaluate(prompt, session=session, resume=True)
+```
+
+### Inspecting Conversation
+
+```python
+# Get all messages
+messages = session.select_all(ConversationMessage)
+
+# Get messages for specific evaluation
+from weakincentives.runtime.conversation import get_conversation, get_latest_evaluation_id
+
+eval_id = get_latest_evaluation_id(session)
+conversation = get_conversation(session, eval_id)
+
+for msg in conversation:
+    print(f"[{msg.sequence}] {msg.role}: {msg.content[:50]}...")
 ```
 
 ## Migration
 
 ### Existing Code
 
-Existing code continues to work unchanged. `ConversationState` recording is
-additive; adapters that don't use `resume_from` behave identically.
+Existing code works unchanged. Conversation recording is opt-in via reducer
+registration. Adapters that don't use `resume=True` behave identically.
 
-### Opt-In Recording
-
-To enable conversation recording without checkpointing:
+### Enabling Recording
 
 ```python
-from weakincentives.runtime.conversation import enable_conversation_recording
+from weakincentives.runtime.conversation import (
+    ConversationMessage,
+    conversation_append,
+    enable_conversation_recording,
+)
 
-session = Session(bus=bus)
-enable_conversation_recording(session)  # Registers reducer
+# Option 1: Manual registration
+session.mutate(ConversationMessage).register(
+    ConversationMessage,
+    conversation_append,
+)
 
-response = adapter.evaluate(prompt, session=session)
-
-# Conversation is now in session
-state = session.query(ConversationState).latest()
+# Option 2: Convenience function
+enable_conversation_recording(session)
 ```
 
 ## Limitations
 
 - **Provider compatibility**: Resume assumes provider accepts reconstructed
   message history; some providers may have session affinity
-- **Token drift**: Reconstructed prompts may tokenize differently than originals
-- **No mid-tool resume**: Recovery granularity is per-turn, not per-tool within
-  a turn
+- **Token drift**: Reconstructed prompts may tokenize differently
+- **Storage overhead**: Each message is a separate slice item
 - **Manual checkpoint persistence**: Library provides serialization; storage is
   caller's responsibility
-- **Tool result size**: Large tool outputs increase snapshot size
 
 ## File Locations
 
 | Component | Location |
 |-----------|----------|
 | Data model | `src/weakincentives/runtime/conversation.py` |
+| Reducer | `src/weakincentives/runtime/conversation.py` |
 | Session integration | `src/weakincentives/runtime/session/` |
 | Adapter changes | `src/weakincentives/adapters/shared.py` |
 | MainLoop integration | `src/weakincentives/runtime/main_loop.py` |
