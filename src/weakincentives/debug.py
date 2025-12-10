@@ -52,12 +52,17 @@ def dump_session(root_session: Session, target: str | Path) -> Path | None:
         payload = "\n".join(snapshots) + "\n"
         _ = target_path.write_text(payload, encoding="utf-8")
         logger.info(
-            "Session snapshots persisted.",
+            "Session snapshot saved to: %s",
+            target_path,
             extra={
                 "session_id": str(root_session.session_id),
                 "snapshot_path": str(target_path),
                 "snapshot_count": len(snapshots),
             },
+        )
+        logger.info(
+            "To resume this session, run with: --resume %s",
+            target_path,
         )
         return target_path
 

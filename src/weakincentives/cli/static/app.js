@@ -626,9 +626,8 @@ async function isEventSlice(entry) {
     const detail = await fetchJSON(`/api/slices/${encoded}?limit=1`);
     const sample = detail.items[0];
     if (sample && typeof sample === "object") {
-      const hasEventId = Object.prototype.hasOwnProperty.call(sample, "event_id");
       const hasCreatedAt = Object.prototype.hasOwnProperty.call(sample, "created_at");
-      return hasEventId && hasCreatedAt;
+      return hasCreatedAt;
     }
   } catch (error) {
     console.warn("Failed to classify slice", entry.slice_type, error);

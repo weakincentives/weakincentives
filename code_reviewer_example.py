@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import textwrap
@@ -54,7 +55,9 @@ from weakincentives.runtime import (
     MainLoopCompleted,
     MainLoopRequest,
     Session,
+    enable_inner_message_recording,
 )
+from weakincentives.runtime.session import Snapshot
 from weakincentives.tools import (
     HostMount,
     PlanningStrategy,
@@ -164,6 +167,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         bus: EventBus,
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
+        resume_snapshot: Snapshot | None = None,
     ) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
@@ -172,6 +176,10 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         )
         # Create persistent session at construction time
         self._session = build_logged_session(tags={"app": "code-reviewer"})
+        enable_inner_message_recording(self._session)
+        if resume_snapshot is not None:
+            self._session.mutate().rollback(resume_snapshot)
+            _LOGGER.info("Session restored from snapshot.")
         self._template = build_task_prompt(session=self._session)
         self._seed_overrides()
 
@@ -257,6 +265,7 @@ class CodeReviewApp:
         *,
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
+        resume_snapshot: Snapshot | None = None,
     ) -> None:
         bus = _create_bus_with_logging()
         self._bus = bus
@@ -265,6 +274,7 @@ class CodeReviewApp:
             bus=bus,
             overrides_store=overrides_store,
             override_tag=override_tag,
+            resume_snapshot=resume_snapshot,
         )
         bus.subscribe(MainLoopCompleted, self._on_loop_completed)
 
@@ -315,11 +325,54 @@ def _create_bus_with_logging() -> EventBus:
     return bus
 
 
+def _load_snapshot_from_file(path: Path) -> Snapshot:
+    """Load the first snapshot from a JSONL file."""
+    if not path.exists():
+        raise SystemExit(f"Snapshot file not found: {path}")
+
+    try:
+        content = path.read_text()
+    except OSError as error:
+        raise SystemExit(f"Cannot read snapshot file: {error}") from error
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            return Snapshot.from_json(stripped)
+        except Exception as error:
+            raise SystemExit(f"Invalid snapshot format: {error}") from error
+
+    raise SystemExit(f"No valid snapshots found in: {path}")
+
+
+def _parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Interactive code review agent example."
+    )
+    parser.add_argument(
+        "--resume",
+        type=Path,
+        metavar="PATH",
+        help="Resume from a previously saved snapshot file (.jsonl)",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
     """Entry point used by the `weakincentives` CLI harness."""
+    args = _parse_args()
     configure_logging()
+
+    resume_snapshot: Snapshot | None = None
+    if args.resume:
+        resume_snapshot = _load_snapshot_from_file(args.resume)
+        _LOGGER.info("Resuming from snapshot: %s", args.resume)
+
     adapter = build_adapter()
-    app = CodeReviewApp(adapter)
+    app = CodeReviewApp(adapter, resume_snapshot=resume_snapshot)
     app.run()
 
 

@@ -327,7 +327,8 @@ def test_dump_session_logs_success(
         if getattr(rec, "session_id", None) == str(session.session_id)
     )
     assert record.levelno == logging.INFO
-    assert "Session snapshots persisted" in record.getMessage()
+    assert "Session snapshot saved to:" in record.getMessage()
+    assert str(snapshot_path) in record.getMessage()
     assert record.snapshot_path == str(snapshot_path)
     assert record.snapshot_count == 1
 
