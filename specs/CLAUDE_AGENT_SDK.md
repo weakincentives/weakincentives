@@ -4,108 +4,289 @@
 
 The Claude Agent SDK adapter enables weakincentives prompts to leverage Claude's
 full agentic capabilities through the official `claude-agent-sdk` Python package.
-Unlike other adapters that use the shared `InnerLoop` for tool dispatch, this
-adapter delegates tool execution entirely to the SDK, preserving Claude Code's
-native tool handling, permission model, and multi-turn reasoning.
+This adapter uses the SDK's Hook system to synchronize state bidirectionally
+between the SDK's internal execution and the weakincentives Session, preserving
+the event-driven architecture while delegating tool execution to Claude Code.
 
 ## Guiding Principles
 
-- **Full SDK power**: Embrace the SDK's agentic loop rather than wrapping it in
-  weakincentives abstractions. The SDK handles tool execution, retries, and
-  conversation state.
-- **Dynamic tool bridging**: Translate weakincentives `Tool` definitions to SDK
-  MCP tools at runtime, enabling native execution with full type safety.
-- **Structured output via tools**: Use a dedicated `respond` tool pattern for
-  typed outputs, since the SDK lacks native JSON schema enforcement.
-- **Observable integration**: Publish weakincentives events at key boundaries
-  while respecting that internal SDK operations are opaque.
-- **Graceful async bridging**: Handle the SDK's async-only API without blocking
-  event loops or breaking nested execution.
+- **Hook-driven state synchronization**: Use SDK hooks to bridge between Claude's
+  agentic execution and weakincentives Session state, publishing events and
+  enforcing constraints at tool boundaries.
+- **Session as source of truth**: The weakincentives Session remains the canonical
+  state store; hooks read from and write to it during SDK execution.
+- **Native structured output**: Leverage the SDK's `output_format` JSON schema
+  support rather than tool-based workarounds.
+- **Full SDK power**: Embrace `ClaudeSDKClient` for hooks, custom tools, interrupts,
+  and multi-turn conversations.
+- **Bidirectional flow**: Session state influences SDK behavior (via PreToolUse),
+  and SDK results update Session state (via PostToolUse).
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      ClaudeAgentSDKAdapter                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│  evaluate()                                                             │
-│    │                                                                    │
-│    ├── Render prompt → RenderedPrompt                                   │
-│    │                                                                    │
-│    ├── Build system prompt from rendered sections                       │
-│    │                                                                    │
-│    ├── Create ephemeral MCP server from Tool definitions                │
-│    │     └── Each Tool[ParamsT, ResultT] → @tool decorated handler      │
-│    │                                                                    │
-│    ├── If structured output requested:                                  │
-│    │     └── Add `respond` tool with output schema                      │
-│    │                                                                    │
-│    ├── Invoke SDK (query or ClaudeSDKClient)                            │
-│    │     └── SDK manages full agentic loop internally                   │
-│    │                                                                    │
-│    ├── Collect ResultMessage with usage/cost                            │
-│    │                                                                    │
-│    └── Return PromptResponse[OutputT]                                   │
-└─────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        ClaudeAgentSDKAdapter                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────┐    ┌──────────────────────────────────────────────────┐   │
+│  │  Prompt     │    │              ClaudeSDKClient                     │   │
+│  │  Rendering  │───▶│  ┌────────────────────────────────────────────┐  │   │
+│  └─────────────┘    │  │           SDK Agentic Loop                 │  │   │
+│                     │  │                                            │  │   │
+│  ┌─────────────┐    │  │  ┌──────────┐    ┌──────────┐             │  │   │
+│  │  Session    │◀───┼──┼──│PreToolUse│───▶│Tool Exec │             │  │   │
+│  │  (State)    │    │  │  │  Hook    │    │ (Native) │             │  │   │
+│  │             │───▶│  │  └──────────┘    └────┬─────┘             │  │   │
+│  │  - Events   │    │  │        ▲              │                   │  │   │
+│  │  - Budget   │    │  │        │              ▼                   │  │   │
+│  │  - Deadline │    │  │  ┌─────┴────┐   ┌──────────┐              │  │   │
+│  │  - Slices   │    │  │  │ Session  │◀──│PostTool  │              │  │   │
+│  └─────────────┘    │  │  │  Sync    │   │Use Hook  │              │  │   │
+│                     │  │  └──────────┘   └──────────┘              │  │   │
+│                     │  │                                            │  │   │
+│                     │  └────────────────────────────────────────────┘  │   │
+│                     └──────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Output: PromptResponse[OutputT] with structured output + events published  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Difference from Other Adapters:**
+## SDK API Selection
 
-| Aspect | OpenAI/LiteLLM | Claude Agent SDK |
-|--------|----------------|------------------|
-| Tool loop | `InnerLoop` in weakincentives | SDK internal loop |
-| Tool execution | `ToolExecutor` | SDK via MCP bridge |
-| Multi-turn | Explicit message threading | SDK session state |
-| Streaming | Not exposed | `AsyncIterator[Message]` |
-| Structured output | JSON schema response format | `respond` tool pattern |
+The adapter exclusively uses `ClaudeSDKClient` (not `query()`) because only the
+client supports hooks and custom tools:
 
-## SDK Fundamentals
+| Feature | `query()` | `ClaudeSDKClient` |
+|---------|-----------|-------------------|
+| Hooks | ❌ | ✅ |
+| Custom Tools | ❌ | ✅ |
+| Interrupts | ❌ | ✅ |
+| Multi-turn | ❌ | ✅ |
+| State Control | ❌ | ✅ |
 
-### Installation
+## Hook Integration Architecture
 
-```bash
-pip install claude-agent-sdk
+### Hook Event Flow
+
+```
+User Prompt
+    │
+    ▼
+┌───────────────────┐
+│ UserPromptSubmit  │──▶ Inject session context into prompt
+│ Hook              │    Query session slices for state
+└───────────────────┘
+    │
+    ▼
+┌───────────────────┐
+│ PreToolUse Hook   │──▶ Check deadline/budget
+│                   │    Query session for tool permissions
+│                   │    Modify tool input from session state
+│                   │    Block if constraints violated
+└───────────────────┘
+    │
+    ▼
+┌───────────────────┐
+│ Tool Execution    │    (SDK handles natively)
+│ (Claude Code)     │
+└───────────────────┘
+    │
+    ▼
+┌───────────────────┐
+│ PostToolUse Hook  │──▶ Publish ToolInvoked event
+│                   │    Update session state
+│                   │    Record tool result for context
+└───────────────────┘
+    │
+    ▼
+┌───────────────────┐
+│ Stop Hook         │──▶ Finalize budget tracking
+│                   │    Publish PromptExecuted event
+└───────────────────┘
 ```
 
-Requires Claude Code CLI installed on the system.
+### Hook Implementations
 
-### Core APIs
+#### PreToolUse Hook
 
-The SDK provides two interaction patterns:
-
-**Stateless (`query`)**: Fresh session per call, returns `AsyncIterator[Message]`.
+Enforces constraints and injects session state before tool execution:
 
 ```python
-async for message in query("prompt", options=options):
-    ...
+async def pre_tool_use_hook(
+    input_data: dict[str, Any],
+    tool_use_id: str | None,
+    context: HookContext,
+) -> dict[str, Any]:
+    """Intercept tool calls to enforce constraints and inject state."""
+
+    tool_name = input_data.get("tool_name", "")
+    tool_input = input_data.get("tool_input", {})
+
+    # 1. Check deadline
+    if adapter._deadline and adapter._deadline.is_expired():
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Deadline exceeded",
+            }
+        }
+
+    # 2. Check budget
+    if adapter._budget_tracker:
+        remaining = adapter._budget_tracker.remaining()
+        if remaining.total_tokens <= 0:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Token budget exhausted",
+                }
+            }
+
+    # 3. Query session state for tool-specific behavior
+    #    Example: inject workspace paths from session
+    if tool_name in ("Read", "Write", "Edit"):
+        workspace = session.query(Workspace).latest()
+        if workspace and workspace.root:
+            # Ensure paths are relative to workspace
+            if "file_path" in tool_input:
+                tool_input["file_path"] = _resolve_workspace_path(
+                    tool_input["file_path"],
+                    workspace.root,
+                )
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "updatedInput": tool_input,
+                    }
+                }
+
+    # 4. Check session-based tool permissions
+    permissions = session.query(ToolPermissions).latest()
+    if permissions and tool_name in permissions.blocked:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": f"Tool {tool_name} blocked by session policy",
+            }
+        }
+
+    return {}  # Allow tool execution
 ```
 
-**Stateful (`ClaudeSDKClient`)**: Maintains conversation across multiple exchanges.
+#### PostToolUse Hook
+
+Records tool execution to session and updates state:
 
 ```python
-async with ClaudeSDKClient(options) as client:
-    await client.query("first")
-    async for msg in client.receive_response():
-        ...
-    await client.query("follow-up")  # Remembers context
+async def post_tool_use_hook(
+    input_data: dict[str, Any],
+    tool_use_id: str | None,
+    context: HookContext,
+) -> dict[str, Any]:
+    """Capture tool results and publish to session."""
+
+    tool_name = input_data.get("tool_name", "")
+    tool_input = input_data.get("tool_input", {})
+    tool_output = input_data.get("tool_output", {})
+    tool_error = input_data.get("tool_error")
+
+    # 1. Publish ToolInvoked event to session bus
+    event = ToolInvoked(
+        tool_name=tool_name,
+        params=tool_input,
+        result=ToolResult(
+            message=_extract_message(tool_output),
+            value=tool_output,
+            success=tool_error is None,
+        ),
+        success=tool_error is None,
+        tool_use_id=tool_use_id,
+    )
+    session.bus.publish(event)
+
+    # 2. Update session state based on tool results
+    #    Example: track files modified
+    if tool_name in ("Write", "Edit") and tool_error is None:
+        file_path = tool_input.get("file_path", "")
+        session.mutate(ModifiedFiles).dispatch(
+            FileModified(path=file_path, tool=tool_name)
+        )
+
+    # 3. Update plan progress if planning tools used
+    if tool_name == "TodoWrite":
+        todos = tool_input.get("todos", [])
+        session.mutate(Plan).dispatch(PlanUpdated(todos=todos))
+
+    return {}
 ```
 
-### Message Types
+#### UserPromptSubmit Hook
+
+Injects session context into prompts:
 
 ```python
-UserMessage       # User input
-AssistantMessage  # Claude response with content blocks
-SystemMessage     # System metadata
-ResultMessage     # Final result with duration, cost, usage, session_id
+async def user_prompt_submit_hook(
+    input_data: dict[str, Any],
+    tool_use_id: str | None,
+    context: HookContext,
+) -> dict[str, Any]:
+    """Augment user prompts with session context."""
+
+    original_prompt = input_data.get("prompt", "")
+
+    # Query session for context to inject
+    context_parts = []
+
+    # Inject current plan state
+    plan = session.query(Plan).latest()
+    if plan and plan.steps:
+        in_progress = [s for s in plan.steps if s.status == "in_progress"]
+        if in_progress:
+            context_parts.append(
+                f"Current task: {in_progress[0].description}"
+            )
+
+    # Inject workspace context
+    workspace = session.query(Workspace).latest()
+    if workspace:
+        context_parts.append(f"Working directory: {workspace.root}")
+
+    if context_parts:
+        context_prefix = "\n".join(f"[Context] {c}" for c in context_parts)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "updatedPrompt": f"{context_prefix}\n\n{original_prompt}",
+            }
+        }
+
+    return {}
 ```
 
-### Content Blocks
+#### Stop Hook
+
+Finalizes execution and publishes completion event:
 
 ```python
-TextBlock         # Text responses
-ThinkingBlock     # Internal reasoning (when available)
-ToolUseBlock      # Tool invocation requests
-ToolResultBlock   # Tool execution results
+async def stop_hook(
+    input_data: dict[str, Any],
+    tool_use_id: str | None,
+    context: HookContext,
+) -> dict[str, Any]:
+    """Handle execution completion."""
+
+    stop_reason = input_data.get("stopReason", "end_turn")
+
+    # Record final state
+    adapter._stop_reason = stop_reason
+
+    # Publish completion event will happen in evaluate() after collecting ResultMessage
+
+    return {}
 ```
 
 ## Configuration
@@ -123,6 +304,8 @@ class ClaudeAgentSDKClientConfig:
     env: Mapping[str, str] | None = None
     setting_sources: tuple[SettingSource, ...] = ()
     sandbox: SandboxSettings | None = None
+    max_turns: int | None = None
+    include_partial_messages: bool = False
 
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
@@ -139,6 +322,8 @@ SettingSource = Literal["user", "project", "local"]
 | `env` | `None` | Environment variables passed to SDK |
 | `setting_sources` | `()` | Config file sources (empty = isolated) |
 | `sandbox` | `None` | Sandboxing configuration |
+| `max_turns` | `None` | Maximum conversation turns |
+| `include_partial_messages` | `False` | Include streaming partial messages |
 
 ### ClaudeAgentSDKModelConfig
 
@@ -150,9 +335,6 @@ class ClaudeAgentSDKModelConfig(LLMConfig):
     model: str = "claude-sonnet-4-5-20250929"
 ```
 
-Inherits `temperature`, `max_tokens`, `top_p` from `LLMConfig`. Note that SDK
-support for these parameters may vary.
-
 ### SandboxSettings
 
 ```python
@@ -160,9 +342,67 @@ support for these parameters may vary.
 class SandboxSettings:
     """Sandboxing configuration for SDK execution."""
 
-    exclude_commands: tuple[str, ...] = ()
+    enabled: bool = False
+    auto_allow_bash_if_sandboxed: bool = False
+    excluded_commands: tuple[str, ...] = ()
+    allow_unsandboxed_commands: bool = False
+    network: SandboxNetworkConfig | None = None
+
+
+@FrozenDataclass()
+class SandboxNetworkConfig:
+    """Network-specific sandbox configuration."""
+
     allow_local_binding: bool = False
-    allow_unix_sockets: bool = False
+    allow_unix_sockets: tuple[str, ...] = ()
+```
+
+## Structured Output
+
+The SDK natively supports JSON schema validation via `output_format`:
+
+```python
+class OutputFormat(TypedDict):
+    type: Literal["json_schema"]
+    schema: dict[str, Any]
+```
+
+The adapter automatically generates this from the prompt's output type:
+
+```python
+def _build_output_format(
+    self,
+    output_type: type[OutputT],
+) -> OutputFormat | None:
+    """Generate SDK output format from prompt output type."""
+
+    if output_type is type(None):
+        return None
+
+    return {
+        "type": "json_schema",
+        "schema": schema(output_type, mode="serialization"),
+    }
+```
+
+### Extracting Structured Output
+
+```python
+def _extract_structured_output(
+    self,
+    result_message: ResultMessage,
+    output_type: type[OutputT],
+) -> OutputT | None:
+    """Parse structured output from SDK result."""
+
+    if result_message.result is None:
+        return None
+
+    try:
+        raw = json.loads(result_message.result)
+        return parse(output_type, raw, extra="ignore")
+    except (json.JSONDecodeError, ValidationError):
+        return None
 ```
 
 ## Adapter Implementation
@@ -171,7 +411,7 @@ class SandboxSettings:
 
 ```python
 class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
-    """Adapter leveraging Claude Agent SDK's full agentic capabilities."""
+    """Adapter using Claude Agent SDK with hook-based state synchronization."""
 
     def __init__(
         self,
@@ -179,7 +419,8 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         model: str = "claude-sonnet-4-5-20250929",
         client_config: ClaudeAgentSDKClientConfig | None = None,
         model_config: ClaudeAgentSDKModelConfig | None = None,
-        stateful: bool = False,
+        allowed_tools: tuple[str, ...] | None = None,
+        disallowed_tools: tuple[str, ...] = (),
     ) -> None:
         """Initialize the Claude Agent SDK adapter.
 
@@ -187,7 +428,8 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             model: Claude model identifier.
             client_config: SDK client configuration.
             model_config: Model parameter configuration.
-            stateful: Use ClaudeSDKClient for multi-turn (default: query).
+            allowed_tools: Tools Claude can use (None = all available).
+            disallowed_tools: Tools to explicitly block.
         """
 ```
 
@@ -204,229 +446,282 @@ def evaluate(
     budget: Budget | None = None,
     budget_tracker: BudgetTracker | None = None,
 ) -> PromptResponse[OutputT]:
-    """Evaluate the prompt using Claude Agent SDK.
+    """Evaluate prompt using Claude Agent SDK with hook-based state sync."""
 
-    Unlike other adapters, this bypasses InnerLoop entirely. The SDK
-    manages its own agentic loop, executing tools via an ephemeral
-    MCP server bridge.
-    """
+    return asyncio.run(
+        self._evaluate_async(
+            prompt,
+            session=session,
+            deadline=deadline,
+            visibility_overrides=visibility_overrides,
+            budget=budget,
+            budget_tracker=budget_tracker,
+        )
+    )
 ```
 
-**Execution Flow:**
+### Async Implementation
 
-1. Render prompt with visibility overrides
-2. Build system prompt from rendered markdown
-3. Create MCP tool bridge from `RenderedPrompt.tools`
-4. Add `respond` tool if structured output declared
-5. Configure `ClaudeAgentOptions`
-6. Execute via `query()` or `ClaudeSDKClient`
-7. Collect response and extract structured output
-8. Publish `PromptExecuted` event
-9. Return `PromptResponse[OutputT]`
+```python
+async def _evaluate_async(
+    self,
+    prompt: Prompt[OutputT],
+    *,
+    session: SessionProtocol,
+    deadline: Deadline | None = None,
+    visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+    budget: Budget | None = None,
+    budget_tracker: BudgetTracker | None = None,
+) -> PromptResponse[OutputT]:
+    """Async implementation with full hook integration."""
 
-## Tool Bridging
+    # Store references for hook access
+    self._session = session
+    self._deadline = deadline
+    self._budget_tracker = budget_tracker or (
+        BudgetTracker(budget) if budget else None
+    )
 
-### MCP Server Bridge
+    # 1. Render prompt
+    rendered = prompt.render(
+        visibility_overrides=visibility_overrides,
+    )
 
-The adapter dynamically creates an MCP server exposing weakincentives tools:
+    # 2. Publish PromptRendered event
+    session.bus.publish(PromptRendered(
+        namespace=prompt.ns,
+        key=prompt.key,
+        adapter_name=self.name,
+        text=rendered.text,
+        tools=rendered.tools,
+    ))
+
+    # 3. Build hook configuration
+    hooks = self._build_hooks(session)
+
+    # 4. Build MCP server for weakincentives tools (if any)
+    mcp_servers = {}
+    allowed_tools = list(self._allowed_tools or [])
+
+    if rendered.tools:
+        mcp_config = self._create_mcp_bridge(rendered.tools, session)
+        mcp_servers["wink"] = mcp_config
+        allowed_tools.extend(
+            f"mcp__wink__{tool.name}" for tool in rendered.tools
+        )
+
+    # 5. Build output format for structured output
+    output_format = self._build_output_format(prompt.output_type)
+
+    # 6. Configure SDK options
+    options = ClaudeAgentOptions(
+        system_prompt=rendered.text,
+        model=self._model,
+        permission_mode=self._client_config.permission_mode,
+        cwd=self._client_config.cwd,
+        add_dirs=list(self._client_config.add_dirs),
+        env=dict(self._client_config.env or {}),
+        setting_sources=list(self._client_config.setting_sources),
+        sandbox=self._sandbox_to_dict(self._client_config.sandbox),
+        max_turns=self._client_config.max_turns,
+        allowed_tools=allowed_tools,
+        disallowed_tools=list(self._disallowed_tools),
+        mcp_servers=mcp_servers,
+        hooks=hooks,
+        output_format=output_format,
+    )
+
+    # 7. Execute via ClaudeSDKClient
+    messages: list[Message] = []
+    result_message: ResultMessage | None = None
+
+    async with ClaudeSDKClient(options=options) as client:
+        # Initial prompt is empty since system_prompt contains rendered content
+        # User prompt comes from any dynamic input
+        user_prompt = self._extract_user_prompt(prompt)
+        await client.query(user_prompt)
+
+        async for message in client.receive_response():
+            messages.append(message)
+            if isinstance(message, ResultMessage):
+                result_message = message
+
+    # 8. Process result
+    if result_message is None:
+        raise PromptEvaluationError(
+            message="No result message received from SDK",
+            prompt_name=prompt.name,
+            phase="response",
+        )
+
+    # 9. Update budget tracker from usage
+    if self._budget_tracker and result_message.usage:
+        self._budget_tracker.record(
+            input_tokens=result_message.usage.get("input_tokens", 0),
+            output_tokens=result_message.usage.get("output_tokens", 0),
+        )
+
+    # 10. Extract structured output
+    output = self._extract_structured_output(
+        result_message,
+        prompt.output_type,
+    )
+
+    # 11. Extract text response
+    text = self._extract_text_response(messages)
+
+    # 12. Publish PromptExecuted event
+    session.bus.publish(PromptExecuted(
+        namespace=prompt.ns,
+        key=prompt.key,
+        adapter_name=self.name,
+        text=text,
+        output=output,
+        duration_ms=result_message.duration_ms,
+        input_tokens=result_message.usage.get("input_tokens") if result_message.usage else None,
+        output_tokens=result_message.usage.get("output_tokens") if result_message.usage else None,
+        total_cost_usd=result_message.total_cost_usd,
+        session_id=result_message.session_id,
+    ))
+
+    return PromptResponse(
+        prompt_name=prompt.name,
+        text=text,
+        output=output,
+    )
+```
+
+### Building Hooks
+
+```python
+def _build_hooks(
+    self,
+    session: SessionProtocol,
+) -> dict[HookEvent, list[HookMatcher]]:
+    """Construct hook configuration for state synchronization."""
+
+    return {
+        "PreToolUse": [
+            HookMatcher(
+                hooks=[
+                    self._make_pre_tool_use_hook(session),
+                ],
+                timeout=30.0,
+            ),
+        ],
+        "PostToolUse": [
+            HookMatcher(
+                hooks=[
+                    self._make_post_tool_use_hook(session),
+                ],
+                timeout=30.0,
+            ),
+        ],
+        "UserPromptSubmit": [
+            HookMatcher(
+                hooks=[
+                    self._make_user_prompt_submit_hook(session),
+                ],
+                timeout=10.0,
+            ),
+        ],
+        "Stop": [
+            HookMatcher(
+                hooks=[
+                    self._make_stop_hook(session),
+                ],
+                timeout=10.0,
+            ),
+        ],
+    }
+```
+
+## Custom Tool Bridging
+
+For weakincentives tools that need to execute locally (not via Claude Code),
+the adapter creates an MCP server bridge:
 
 ```python
 def _create_mcp_bridge(
     self,
     tools: tuple[Tool[Any, Any], ...],
-    context: ToolContext,
-) -> MCPServerConfig:
-    """Create ephemeral MCP server from weakincentives tools."""
+    session: SessionProtocol,
+) -> McpSdkServerConfig:
+    """Create MCP server exposing weakincentives tools."""
 
-    server = create_sdk_mcp_server()
+    sdk_tools = []
 
     for tool in tools:
-        handler = self._wrap_tool_handler(tool, context)
-        server.register(
-            name=tool.name,
-            description=tool.description,
-            schema=self._tool_to_input_schema(tool),
-            handler=handler,
+        if tool.handler is None:
+            continue  # Skip tools without handlers
+
+        sdk_tool = self._wrap_tool(tool, session)
+        sdk_tools.append(sdk_tool)
+
+    return create_sdk_mcp_server(
+        name="wink",
+        version="1.0.0",
+        tools=sdk_tools,
+    )
+
+
+def _wrap_tool(
+    self,
+    tool: Tool[ParamsT, ResultT],
+    session: SessionProtocol,
+) -> SdkMcpTool[Any]:
+    """Wrap a weakincentives tool as an SDK MCP tool."""
+
+    input_schema = (
+        schema(tool.params_type, mode="serialization")
+        if tool.params_type is not type(None)
+        else {}
+    )
+
+    @sdk_tool(tool.name, tool.description, input_schema)
+    async def handler(args: dict[str, Any]) -> dict[str, Any]:
+        # Parse arguments
+        if tool.params_type is type(None):
+            params = None
+        else:
+            params = parse(tool.params_type, args, extra="forbid")
+
+        # Build context
+        context = ToolContext(
+            prompt=self._current_prompt,
+            rendered_prompt=self._current_rendered,
+            adapter=self,
+            session=session,
+            deadline=self._deadline,
+            budget_tracker=self._budget_tracker,
         )
 
-    return server.config
+        # Execute handler
+        try:
+            result = tool.handler(params, context=context)
+            return {
+                "content": [{"type": "text", "text": result.message}],
+                "isError": not result.success,
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error: {e}"}],
+                "isError": True,
+            }
+
+    return handler
 ```
 
-### Handler Wrapping
+## Stateful Conversations
 
-Each weakincentives tool handler is wrapped to match SDK expectations:
-
-```python
-def _wrap_tool_handler(
-    self,
-    tool: Tool[ParamsT, ResultT],
-    context: ToolContext,
-) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
-    """Wrap weakincentives tool handler for SDK execution."""
-
-    async def sdk_handler(args: dict[str, Any]) -> dict[str, Any]:
-        # Parse arguments to dataclass
-        params = parse(tool.params_type, args, extra="forbid")
-
-        # Execute original handler
-        result = tool.handler(params, context=context)
-
-        # Publish ToolInvoked event
-        session.bus.publish(ToolInvoked(
-            tool_name=tool.name,
-            params=args,
-            result=result,
-            success=result.success,
-        ))
-
-        # Format for SDK
-        return {
-            "content": [{"type": "text", "text": result.message}],
-            "isError": not result.success,
-        }
-
-    return sdk_handler
-```
-
-### Input Schema Generation
-
-```python
-def _tool_to_input_schema(
-    self,
-    tool: Tool[ParamsT, ResultT],
-) -> dict[str, Any]:
-    """Convert weakincentives tool params to SDK input schema."""
-
-    if tool.params_type is type(None):
-        return {}
-
-    return schema(tool.params_type, mode="serialization")
-```
-
-### Tool Naming Convention
-
-SDK tools registered via MCP use the naming pattern `mcp__<server>__<tool>`.
-The adapter configures `allowed_tools` accordingly:
-
-```python
-mcp_tool_names = [f"mcp__wink__{tool.name}" for tool in tools]
-options = ClaudeAgentOptions(
-    allowed_tools=mcp_tool_names + ["respond"],
-    mcp_servers={"wink": mcp_bridge},
-)
-```
-
-## Structured Output
-
-### The `respond` Tool Pattern
-
-Since the SDK lacks native JSON schema enforcement, structured outputs use a
-dedicated tool that the model must call to provide its final answer:
-
-```python
-def _create_respond_tool(
-    self,
-    output_type: type[OutputT],
-) -> ToolDefinition:
-    """Create respond tool for structured output."""
-
-    output_schema = schema(output_type, mode="serialization")
-
-    return ToolDefinition(
-        name="respond",
-        description="Provide your final structured response. You MUST use this tool to answer.",
-        input_schema=output_schema,
-    )
-```
-
-### System Prompt Augmentation
-
-When structured output is declared, the system prompt includes explicit
-instructions:
-
-```python
-STRUCTURED_OUTPUT_INSTRUCTION = """
-## Response Format
-
-You MUST provide your final answer by calling the `respond` tool with a JSON
-object matching the required schema. Do not provide your answer as plain text.
-
-Required output schema:
-```json
-{schema}
-```
-"""
-```
-
-### Output Extraction
-
-```python
-def _extract_structured_output(
-    self,
-    messages: list[Message],
-    output_type: type[OutputT],
-) -> OutputT | None:
-    """Extract structured output from respond tool call."""
-
-    for message in reversed(messages):
-        if not isinstance(message, AssistantMessage):
-            continue
-        for block in message.content:
-            if isinstance(block, ToolUseBlock) and block.name == "respond":
-                return parse(output_type, block.input, extra="ignore")
-
-    return None
-```
-
-## Async/Sync Bridge
-
-### Primary Strategy
-
-The adapter uses `asyncio.run()` for synchronous execution:
-
-```python
-def evaluate(self, prompt, *, session, **kwargs) -> PromptResponse[OutputT]:
-    return asyncio.run(self._evaluate_async(prompt, session=session, **kwargs))
-```
-
-### Nested Event Loop Handling
-
-For environments with existing event loops (e.g., Jupyter), the adapter
-detects and handles appropriately:
-
-```python
-def evaluate(self, prompt, *, session, **kwargs) -> PromptResponse[OutputT]:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop - safe to use asyncio.run()
-        return asyncio.run(self._evaluate_async(...))
-
-    # Running loop exists - use nest_asyncio or thread delegation
-    if _NEST_ASYNCIO_AVAILABLE:
-        import nest_asyncio
-        nest_asyncio.apply()
-        return asyncio.run(self._evaluate_async(...))
-
-    # Fallback: run in thread pool
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        future = pool.submit(asyncio.run, self._evaluate_async(...))
-        return future.result()
-```
-
-## Stateful Sessions
-
-### ClaudeSDKClient Mode
-
-When `stateful=True`, the adapter maintains conversation context:
+The adapter supports multi-turn conversations with persistent session state:
 
 ```python
 class ClaudeAgentSDKAdapter:
     def __init__(self, *, stateful: bool = False, ...):
         self._stateful = stateful
         self._client: ClaudeSDKClient | None = None
-        self._session_id: str | None = None
+        self._conversation_session_id: str | None = None
 
     async def _evaluate_async(self, prompt, *, session, **kwargs):
         if self._stateful:
@@ -434,32 +729,35 @@ class ClaudeAgentSDKAdapter:
         return await self._evaluate_stateless(prompt, session=session, **kwargs)
 
     async def _evaluate_stateful(self, prompt, *, session, **kwargs):
-        if self._client is None:
-            self._client = ClaudeSDKClient(self._build_options())
-            await self._client.__aenter__()
+        """Maintain conversation across multiple evaluate() calls."""
 
+        if self._client is None:
+            options = self._build_options(prompt, session, **kwargs)
+            self._client = ClaudeSDKClient(options=options)
+            await self._client.connect()
+
+        user_prompt = self._extract_user_prompt(prompt)
         await self._client.query(user_prompt)
+
         messages = []
         async for msg in self._client.receive_response():
             messages.append(msg)
             if isinstance(msg, ResultMessage):
-                self._session_id = msg.session_id
-        ...
-```
+                self._conversation_session_id = msg.session_id
 
-### Session Lifecycle
+        return self._build_response(prompt, messages, session)
 
-```python
-def reset_session(self) -> None:
-    """Reset the stateful session, starting fresh."""
-    if self._client is not None:
-        asyncio.run(self._client.__aexit__(None, None, None))
-        self._client = None
-        self._session_id = None
+    def reset_conversation(self) -> None:
+        """Reset stateful conversation, starting fresh."""
+        if self._client is not None:
+            asyncio.run(self._client.disconnect())
+            self._client = None
+            self._conversation_session_id = None
 
-def fork_session(self) -> str | None:
-    """Fork current session for branching conversations."""
-    return self._session_id
+    async def interrupt(self) -> None:
+        """Interrupt current SDK execution."""
+        if self._client is not None:
+            await self._client.interrupt()
 ```
 
 ## Error Handling
@@ -476,7 +774,7 @@ def _normalize_sdk_error(
 
     if isinstance(error, CLINotFoundError):
         return PromptEvaluationError(
-            message="Claude Code CLI not found. Install with: npm install -g @anthropic/claude-code",
+            message="Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code",
             prompt_name=prompt_name,
             phase="request",
         )
@@ -500,7 +798,10 @@ def _normalize_sdk_error(
             message=f"Claude Code process failed: {error.stderr}",
             prompt_name=prompt_name,
             phase="request",
-            provider_payload={"exit_code": error.exit_code, "stderr": error.stderr},
+            provider_payload={
+                "exit_code": error.exit_code,
+                "stderr": error.stderr,
+            },
         )
 
     if isinstance(error, CLIJSONDecodeError):
@@ -517,55 +818,49 @@ def _normalize_sdk_error(
     )
 ```
 
-### Tool Execution Errors
+### Hook Error Handling
 
-Tool failures within the SDK are handled natively. The MCP bridge returns
-error results that Claude can reason about:
+Hooks should not raise exceptions; errors are returned as hook responses:
 
 ```python
-async def sdk_handler(args: dict[str, Any]) -> dict[str, Any]:
+async def safe_hook_wrapper(
+    hook_fn: HookCallback,
+    input_data: dict[str, Any],
+    tool_use_id: str | None,
+    context: HookContext,
+) -> dict[str, Any]:
+    """Wrap hook to catch exceptions and convert to responses."""
     try:
-        params = parse(tool.params_type, args, extra="forbid")
-        result = tool.handler(params, context=context)
-    except ValidationError as e:
+        return await hook_fn(input_data, tool_use_id, context)
+    except DeadlineExceededError:
         return {
-            "content": [{"type": "text", "text": f"Invalid parameters: {e}"}],
-            "isError": True,
+            "hookSpecificOutput": {
+                "hookEventName": input_data.get("hookEventName", "PreToolUse"),
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Deadline exceeded",
+            }
+        }
+    except BudgetExhaustedError:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": input_data.get("hookEventName", "PreToolUse"),
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Budget exhausted",
+            }
         }
     except Exception as e:
-        return {
-            "content": [{"type": "text", "text": f"Tool error: {e}"}],
-            "isError": True,
-        }
-    ...
+        logger.exception("Hook error", extra={"error": str(e)})
+        return {}  # Allow execution to continue
 ```
 
 ## Budget and Deadline Integration
 
-### Budget Tracking
-
-The SDK's `ResultMessage` provides usage and cost information:
-
-```python
-async def _evaluate_async(self, prompt, *, session, budget_tracker, **kwargs):
-    ...
-    for msg in messages:
-        if isinstance(msg, ResultMessage):
-            if budget_tracker and msg.usage:
-                budget_tracker.record(
-                    input_tokens=msg.usage.input_tokens,
-                    output_tokens=msg.usage.output_tokens,
-                )
-            usage = msg.usage
-            cost = msg.total_cost
-    ...
-```
-
 ### Deadline Enforcement
 
-Deadlines are checked before SDK invocation. The SDK itself does not support
-mid-execution cancellation, so deadline violations during execution raise
-after completion:
+Deadlines are enforced at two points:
+
+1. **Before SDK invocation**: Fail fast if already expired
+2. **In PreToolUse hook**: Block tools if deadline exceeded during execution
 
 ```python
 async def _evaluate_async(self, prompt, *, deadline, **kwargs):
@@ -574,53 +869,86 @@ async def _evaluate_async(self, prompt, *, deadline, **kwargs):
             message="Deadline expired before SDK invocation",
             prompt_name=prompt.name,
         )
+    # ... execution continues with hook-based enforcement
+```
 
-    # SDK execution (no cancellation support)
-    messages = await self._invoke_sdk(...)
+### Budget Tracking
 
-    if deadline and deadline.is_expired():
-        raise DeadlineExceededError(
-            message="Deadline expired during SDK execution",
-            prompt_name=prompt.name,
-        )
+Budget is tracked from `ResultMessage.usage` and enforced via PreToolUse:
+
+```python
+# In PostToolUse hook or after ResultMessage
+if result_message.usage:
+    budget_tracker.record(
+        input_tokens=result_message.usage.get("input_tokens", 0),
+        output_tokens=result_message.usage.get("output_tokens", 0),
+    )
+
+# In PreToolUse hook
+if budget_tracker.remaining().total_tokens <= 0:
+    return {"hookSpecificOutput": {"permissionDecision": "deny", ...}}
 ```
 
 ## Telemetry
 
 ### Events Published
 
-| Event | When | Payload |
-|-------|------|---------|
-| `PromptRendered` | After prompt render | Text, tools, metadata |
-| `ToolInvoked` | Each tool execution | Name, params, result |
-| `PromptExecuted` | After SDK completion | Response, tokens, timing |
+| Event | When | Source |
+|-------|------|--------|
+| `PromptRendered` | After prompt render | `evaluate()` |
+| `ToolInvoked` | Each tool execution | `PostToolUse` hook |
+| `PromptExecuted` | After SDK completion | `evaluate()` |
+
+### Extended Event Data
+
+`PromptExecuted` includes SDK-specific fields:
+
+```python
+@dataclass
+class PromptExecuted:
+    # Standard fields
+    namespace: str
+    key: str
+    adapter_name: str
+    text: str | None
+    output: Any
+
+    # SDK-specific fields
+    duration_ms: int
+    duration_api_ms: int | None
+    input_tokens: int | None
+    output_tokens: int | None
+    total_cost_usd: float | None
+    session_id: str
+    num_turns: int
+```
 
 ### Logging
 
 ```python
-# SDK invocation
 logger.info(
-    "claude_agent_sdk.invoke",
+    "claude_agent_sdk.evaluate.start",
     extra={
-        "event": "sdk.invoke.start",
+        "event": "sdk.evaluate.start",
         "prompt_name": prompt.name,
         "model": self._model,
         "stateful": self._stateful,
-        "tool_count": len(tools),
+        "tool_count": len(rendered.tools),
+        "has_structured_output": output_format is not None,
     },
 )
 
-# SDK completion
 logger.info(
-    "claude_agent_sdk.complete",
+    "claude_agent_sdk.evaluate.complete",
     extra={
-        "event": "sdk.invoke.complete",
+        "event": "sdk.evaluate.complete",
         "prompt_name": prompt.name,
-        "duration_ms": result.duration_ms,
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_cost": cost,
-        "session_id": session_id,
+        "duration_ms": result_message.duration_ms,
+        "input_tokens": result_message.usage.get("input_tokens") if result_message.usage else None,
+        "output_tokens": result_message.usage.get("output_tokens") if result_message.usage else None,
+        "total_cost_usd": result_message.total_cost_usd,
+        "session_id": result_message.session_id,
+        "num_turns": result_message.num_turns,
     },
 )
 ```
@@ -633,95 +961,142 @@ src/weakincentives/adapters/
 │   ├── __init__.py           # Public exports
 │   ├── adapter.py            # ClaudeAgentSDKAdapter
 │   ├── config.py             # Configuration dataclasses
+│   ├── _hooks.py             # Hook implementations
 │   ├── _bridge.py            # MCP tool bridge
-│   ├── _respond_tool.py      # Structured output tool
 │   ├── _async_utils.py       # Async/sync bridging
 │   └── _errors.py            # Error normalization
 ```
 
 ## Usage Examples
 
-### Basic Evaluation
+### Basic Evaluation with Session State
 
 ```python
 from weakincentives import Prompt, MarkdownSection
+from weakincentives.runtime import Session, InProcessEventBus
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
 )
 
+# Setup session
+bus = InProcessEventBus()
+session = Session(bus=bus)
+
+# Configure adapter
 adapter = ClaudeAgentSDKAdapter(
     model="claude-sonnet-4-5-20250929",
     client_config=ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+        permission_mode="acceptEdits",
+        cwd="/home/user/project",
     ),
 )
 
-prompt = Prompt[Answer](
-    ns="demo",
-    key="basic",
+# Define prompt
+prompt = Prompt[CodeReview](
+    ns="review",
+    key="code",
     sections=[
         MarkdownSection(
             title="Task",
             key="task",
-            template="Answer: $question",
+            template="Review the code in $file_path",
         ),
     ],
 )
 
+# Evaluate - hooks sync state to session automatically
 response = adapter.evaluate(prompt, session=session)
-print(response.output)
+
+# Session now contains all tool invocation events
+for event in session.events():
+    if isinstance(event, ToolInvoked):
+        print(f"Tool used: {event.tool_name}")
 ```
 
-### With Tools
+### With Custom Tools and Session Slices
 
 ```python
 from weakincentives import Tool, ToolResult, ToolContext
+from weakincentives.runtime import Session
 
+# Define session slice for tracking
 @dataclass(slots=True, frozen=True)
-class SearchParams:
-    query: str
+class AnalysisState:
+    files_analyzed: tuple[str, ...] = ()
+    issues_found: int = 0
 
-@dataclass(slots=True, frozen=True)
-class SearchResult:
-    title: str
-    url: str
-
-def search_handler(
-    params: SearchParams,
-    *,
-    context: ToolContext,
-) -> ToolResult[SearchResult]:
-    # Implementation
-    return ToolResult(
-        message=f"Found result for: {params.query}",
-        value=SearchResult(title="Example", url="https://example.com"),
-    )
-
-search_tool = Tool[SearchParams, SearchResult](
-    name="search",
-    description="Search for information",
-    handler=search_handler,
+# Register reducer
+session.mutate(AnalysisState).register(
+    FileAnalyzed,
+    lambda state, event: AnalysisState(
+        files_analyzed=(*state.files_analyzed, event.path),
+        issues_found=state.issues_found + event.issues,
+    ),
 )
 
-prompt = Prompt[Answer](
-    ns="demo",
-    key="with-tools",
+# Define tool that reads session state
+@dataclass(slots=True, frozen=True)
+class AnalyzeParams:
+    file_path: str
+
+def analyze_handler(
+    params: AnalyzeParams,
+    *,
+    context: ToolContext,
+) -> ToolResult[None]:
+    # Query session state
+    state = context.session.query(AnalysisState).latest()
+    if params.file_path in state.files_analyzed:
+        return ToolResult(
+            message=f"Already analyzed: {params.file_path}",
+            value=None,
+            success=True,
+        )
+
+    # Perform analysis...
+    issues = do_analysis(params.file_path)
+
+    # Update session state
+    context.session.mutate(AnalysisState).dispatch(
+        FileAnalyzed(path=params.file_path, issues=len(issues))
+    )
+
+    return ToolResult(
+        message=f"Found {len(issues)} issues",
+        value=None,
+        success=True,
+    )
+
+analyze_tool = Tool[AnalyzeParams, None](
+    name="analyze",
+    description="Analyze a source file for issues",
+    handler=analyze_handler,
+)
+
+# Tool is bridged to SDK and state flows through session
+prompt = Prompt[AnalysisReport](
+    ns="analysis",
+    key="codebase",
     sections=[
         MarkdownSection(
             title="Task",
             key="task",
-            template="Research: $topic",
-            tools=(search_tool,),
+            template="Analyze all Python files in the project",
+            tools=(analyze_tool,),
         ),
     ],
 )
 
-# Tools are bridged to SDK via MCP and executed natively
 response = adapter.evaluate(prompt, session=session)
+
+# Query final state
+final_state = session.query(AnalysisState).latest()
+print(f"Analyzed {len(final_state.files_analyzed)} files")
+print(f"Found {final_state.issues_found} total issues")
 ```
 
-### Stateful Conversations
+### Stateful Multi-turn Conversation
 
 ```python
 adapter = ClaudeAgentSDKAdapter(
@@ -730,66 +1105,85 @@ adapter = ClaudeAgentSDKAdapter(
 )
 
 # First turn
-response1 = adapter.evaluate(prompt1, session=session)
+response1 = adapter.evaluate(
+    design_prompt.bind(feature="user authentication"),
+    session=session,
+)
 
-# Second turn - Claude remembers context
-response2 = adapter.evaluate(prompt2, session=session)
+# Second turn - Claude remembers the design discussion
+response2 = adapter.evaluate(
+    implementation_prompt,  # References "the design we discussed"
+    session=session,
+)
 
-# Reset when needed
-adapter.reset_session()
+# Third turn - continues implementation
+response3 = adapter.evaluate(
+    test_prompt,  # "Write tests for the code you just wrote"
+    session=session,
+)
+
+# Reset when starting new task
+adapter.reset_conversation()
 ```
 
-### Workspace Access
+### With Deadline and Budget
 
 ```python
-config = ClaudeAgentSDKClientConfig(
-    cwd="/path/to/project",
-    add_dirs=("/path/to/libs", "/path/to/data"),
-    permission_mode="acceptEdits",
-)
+from weakincentives.deadlines import Deadline
+from weakincentives.budget import Budget, BudgetTracker
+from datetime import timedelta
 
-adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-5-20250929",
-    client_config=config,
-)
+deadline = Deadline.from_now(timedelta(minutes=5))
+budget = Budget(max_total_tokens=50000)
+tracker = BudgetTracker(budget)
 
-# Claude can read/write files in configured directories
-response = adapter.evaluate(code_review_prompt, session=session)
+try:
+    response = adapter.evaluate(
+        prompt,
+        session=session,
+        deadline=deadline,
+        budget=budget,
+        budget_tracker=tracker,
+    )
+except DeadlineExceededError:
+    print("Task took too long")
+except BudgetExhaustedError:
+    print("Used too many tokens")
+
+# Check remaining budget
+remaining = tracker.remaining()
+print(f"Tokens remaining: {remaining.total_tokens}")
 ```
 
 ## Limitations
 
-- **CLI dependency**: Requires Claude Code CLI installed on the system
-- **No streaming in evaluate()**: Results collected after completion; streaming
-  requires direct SDK usage
-- **Deadline granularity**: Cannot cancel mid-execution; deadlines checked at
-  boundaries
-- **Structured output reliability**: Tool-based pattern less strict than JSON
-  schema enforcement
-- **Platform support**: SDK availability may vary by platform
+- **CLI dependency**: Requires Claude Code CLI (`@anthropic-ai/claude-code`)
+- **Async overhead**: `asyncio.run()` creates new event loop per call
+- **Hook latency**: Each tool call incurs hook overhead
+- **No streaming in evaluate()**: Results collected after completion
+- **Session hooks not supported**: `SessionStart`, `SessionEnd`, `Notification`
+  hooks are not available in the Python SDK
 
 ## Testing
 
 ### Unit Tests
 
-- Mock SDK responses for message type coverage
-- Test MCP bridge tool registration
-- Verify structured output extraction
+- Mock `ClaudeSDKClient` to test hook wiring
+- Verify state synchronization flows
 - Test error normalization for all exception types
-- Validate async/sync bridge behavior
+- Validate structured output extraction
 
 ### Integration Tests
 
 - Require Claude Code CLI installation
-- Test full tool round-trip via MCP bridge
-- Verify stateful session continuity
-- Test budget tracking accuracy
-- Validate event publication
+- Test full hook→session event flow
+- Verify multi-turn conversation state
+- Test budget enforcement via hooks
 
 ### Fixtures
 
 - `tests/fixtures/claude_agent_sdk/` contains sample message sequences
-- `tests/helpers/claude_agent_sdk.py` provides mock client
+- `tests/helpers/claude_agent_sdk.py` provides mock client and hooks
 
 ## Dependencies
 
@@ -797,15 +1191,5 @@ response = adapter.evaluate(code_review_prompt, session=session)
 [project.optional-dependencies]
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.0",
-]
-```
-
-Optional for async loop handling:
-
-```toml
-[project.optional-dependencies]
-claude-agent-sdk-jupyter = [
-    "claude-agent-sdk>=0.1.0",
-    "nest-asyncio>=1.5.0",
 ]
 ```
