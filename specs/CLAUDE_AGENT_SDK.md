@@ -967,7 +967,7 @@ async def safe_hook_wrapper(
 Deadlines are enforced at two points:
 
 1. **Before SDK invocation**: Fail fast if already expired
-2. **In PreToolUse hook**: Block tools if deadline exceeded during execution
+1. **In PreToolUse hook**: Block tools if deadline exceeded during execution
 
 ```python
 async def _evaluate_async(self, prompt, *, deadline, **kwargs):

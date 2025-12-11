@@ -15,6 +15,14 @@
 from __future__ import annotations
 
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
+from .claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    ClaudeAgentSDKModelConfig,
+    ClaudeAgentWorkspace,
+    SandboxNetworkConfig,
+    SandboxSettings,
+)
 from .config import (
     LiteLLMClientConfig,
     LiteLLMModelConfig,
@@ -30,18 +38,25 @@ from .core import (
 )
 from .shared import ThrottleError, ThrottlePolicy, new_throttle_policy
 
+# ruff: noqa: RUF022
 __all__ = [
-    "LITELLM_ADAPTER_NAME",
-    "OPENAI_ADAPTER_NAME",
     "AdapterName",
+    "ClaudeAgentSDKAdapter",
+    "ClaudeAgentSDKClientConfig",
+    "ClaudeAgentSDKModelConfig",
+    "ClaudeAgentWorkspace",
+    "LITELLM_ADAPTER_NAME",
     "LLMConfig",
     "LiteLLMClientConfig",
     "LiteLLMModelConfig",
+    "OPENAI_ADAPTER_NAME",
     "OpenAIClientConfig",
     "OpenAIModelConfig",
     "PromptEvaluationError",
     "PromptResponse",
     "ProviderAdapter",
+    "SandboxNetworkConfig",
+    "SandboxSettings",
     "SessionProtocol",
     "ThrottleError",
     "ThrottlePolicy",
