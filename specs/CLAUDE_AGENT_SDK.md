@@ -1175,54 +1175,6 @@ def _wrap_tool(
     return handler
 ```
 
-## Stateful Conversations
-
-The adapter supports multi-turn conversations with persistent session state:
-
-```python
-class ClaudeAgentSDKAdapter:
-    def __init__(self, *, stateful: bool = False, ...):
-        self._stateful = stateful
-        self._client: ClaudeSDKClient | None = None
-        self._conversation_session_id: str | None = None
-
-    async def _evaluate_async(self, prompt, *, session, **kwargs):
-        if self._stateful:
-            return await self._evaluate_stateful(prompt, session=session, **kwargs)
-        return await self._evaluate_stateless(prompt, session=session, **kwargs)
-
-    async def _evaluate_stateful(self, prompt, *, session, **kwargs):
-        """Maintain conversation across multiple evaluate() calls."""
-
-        if self._client is None:
-            options = self._build_options(prompt, session, **kwargs)
-            self._client = ClaudeSDKClient(options=options)
-            await self._client.connect()
-
-        user_prompt = self._extract_user_prompt(prompt)
-        await self._client.query(user_prompt)
-
-        messages = []
-        async for msg in self._client.receive_response():
-            messages.append(msg)
-            if isinstance(msg, ResultMessage):
-                self._conversation_session_id = msg.session_id
-
-        return self._build_response(prompt, messages, session)
-
-    def reset_conversation(self) -> None:
-        """Reset stateful conversation, starting fresh."""
-        if self._client is not None:
-            asyncio.run(self._client.disconnect())
-            self._client = None
-            self._conversation_session_id = None
-
-    async def interrupt(self) -> None:
-        """Interrupt current SDK execution."""
-        if self._client is not None:
-            await self._client.interrupt()
-```
-
 ## Error Handling
 
 ### SDK Exception Mapping
@@ -1559,36 +1511,6 @@ response = adapter.evaluate(prompt, session=session)
 final_state = session.query(AnalysisState).latest()
 print(f"Analyzed {len(final_state.files_analyzed)} files")
 print(f"Found {final_state.issues_found} total issues")
-```
-
-### Stateful Multi-turn Conversation
-
-```python
-adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-5-20250929",
-    stateful=True,
-)
-
-# First turn
-response1 = adapter.evaluate(
-    design_prompt.bind(feature="user authentication"),
-    session=session,
-)
-
-# Second turn - Claude remembers the design discussion
-response2 = adapter.evaluate(
-    implementation_prompt,  # References "the design we discussed"
-    session=session,
-)
-
-# Third turn - continues implementation
-response3 = adapter.evaluate(
-    test_prompt,  # "Write tests for the code you just wrote"
-    session=session,
-)
-
-# Reset when starting new task
-adapter.reset_conversation()
 ```
 
 ### With Deadline and Budget
