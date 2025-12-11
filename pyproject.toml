@@ -51,6 +51,9 @@ litellm = [
 podman = [
     "podman>=5.6.0",
 ]
+claude-agent-sdk = [
+    "claude-agent-sdk>=0.1.15",
+]
 wink = [
     "fastapi>=0.115.0",
     "markdown-it-py[linkify]>=4.0.0",
@@ -149,6 +152,9 @@ combine-as-imports = true
 "src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
 "src/weakincentives/tools/asteval.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
 "src/weakincentives/tools/planning.py" = ["PLR6301"]
+# Claude Agent SDK adapter requires async hooks for SDK interface
+"src/weakincentives/adapters/claude_agent_sdk/_hooks.py" = ["RUF029"]
+"src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["C901"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -234,7 +240,7 @@ debug = false
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "litellm", "mcp", "openai", "pyyaml"]
+DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "pyyaml"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

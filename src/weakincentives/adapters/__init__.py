@@ -14,7 +14,12 @@
 
 from __future__ import annotations
 
-from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
+from ._names import (
+    CLAUDE_AGENT_SDK_ADAPTER_NAME,
+    LITELLM_ADAPTER_NAME,
+    OPENAI_ADAPTER_NAME,
+    AdapterName,
+)
 from .config import (
     LiteLLMClientConfig,
     LiteLLMModelConfig,
@@ -31,6 +36,7 @@ from .core import (
 from .shared import ThrottleError, ThrottlePolicy, new_throttle_policy
 
 __all__ = [
+    "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
     "AdapterName",
