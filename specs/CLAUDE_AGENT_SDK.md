@@ -1,5 +1,7 @@
 # Claude Agent SDK Adapter Specification
 
+> **SDK Version**: This specification targets `claude-agent-sdk>=0.1.15`.
+
 ## Purpose
 
 The Claude Agent SDK adapter enables weakincentives prompts to leverage Claude's
@@ -871,23 +873,31 @@ def _build_output_format(
 
 ### Extracting Structured Output
 
+The SDK provides structured output via the `structured_output` attribute on
+`ResultMessage` when `output_format` is configured:
+
 ```python
 def _extract_structured_output(
     self,
-    result_message: ResultMessage,
+    messages: list[Message],
     output_type: type[OutputT],
 ) -> OutputT | None:
     """Parse structured output from SDK result."""
 
-    if result_message.result is None:
-        return None
+    # Find the ResultMessage with structured_output
+    for message in reversed(messages):
+        if isinstance(message, ResultMessage):
+            structured = getattr(message, "structured_output", None)
+            if structured is not None:
+                # Already parsed by SDK, validate against our type
+                return parse(output_type, structured, extra="ignore")
 
-    try:
-        raw = json.loads(result_message.result)
-        return parse(output_type, raw, extra="ignore")
-    except (json.JSONDecodeError, ValidationError):
-        return None
+    return None
 ```
+
+**Note**: When `output_format` is configured and the agent cannot produce valid
+output matching the schema, the SDK returns an error result with
+`subtype: 'error_max_structured_output_retries'`.
 
 ## Adapter Implementation
 
@@ -1047,7 +1057,7 @@ async def _evaluate_async(
 
     # 10. Extract structured output
     output = self._extract_structured_output(
-        result_message,
+        messages,
         prompt.output_type,
     )
 
@@ -1676,6 +1686,6 @@ print(f"Tokens remaining: {remaining.total_tokens}")
 ```toml
 [project.optional-dependencies]
 claude-agent-sdk = [
-    "claude-agent-sdk>=0.1.0",
+    "claude-agent-sdk>=0.1.15",
 ]
 ```
