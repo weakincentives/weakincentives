@@ -25,7 +25,11 @@ OPENAI_ADAPTER_NAME: Final[AdapterName] = "openai"
 LITELLM_ADAPTER_NAME: Final[AdapterName] = "litellm"
 """Canonical label for the LiteLLM adapter."""
 
+CLAUDE_AGENT_SDK_ADAPTER_NAME: Final[AdapterName] = "claude_agent_sdk"
+"""Canonical label for the Claude Agent SDK adapter."""
+
 __all__ = [
+    "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
     "AdapterName",
