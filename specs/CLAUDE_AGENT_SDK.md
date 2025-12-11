@@ -395,12 +395,13 @@ API while materializing files to disk for native SDK tool access.
 │         │                                    │                              │
 │         ▼                                    ▼                              │
 │  ┌─────────────────┐         ┌─────────────────────────────────────────┐   │
-│  │ VirtualFileSystem│◀────────│      PostToolUse Hook Sync             │   │
-│  │ (Session State)  │  sync   │      - Write → VFS update              │   │
-│  │                  │         │      - Edit  → VFS update              │   │
-│  │ Immutable        │         │      - Bash (file creation) → VFS      │   │
-│  │ snapshots        │         │                                         │   │
-│  └─────────────────┘         └─────────────────────────────────────────┘   │
+│  │ VirtualFileSystem│◀────────│      sync_workspace_to_vfs()           │   │
+│  │ (Session State)  │ on-     │      (Optional post-execution sync)    │   │
+│  │                  │ demand  │                                         │   │
+│  │ Immutable        │         │      SDK operates directly on temp_dir  │   │
+│  │ snapshots        │         │      VFS sync only when explicitly      │   │
+│  └─────────────────┘         │      requested                          │   │
+│                              └─────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -628,70 +629,25 @@ async def _evaluate_async(self, prompt, *, session, **kwargs):
         )
 ```
 
-#### PostToolUse Sync
+#### On-Demand VFS Sync
 
-The `PostToolUse` hook synchronizes SDK file operations back to VFS state:
+The SDK operates directly on `temp_dir`. VFS sync is **not** performed during tool
+execution—instead, call `sync_workspace_to_vfs()` after SDK execution completes
+if you need the final state reflected in the session's `VirtualFileSystem` slice:
 
 ```python
-async def post_tool_use_hook(
-    input_data: dict[str, Any],
-    tool_use_id: str | None,
-    context: HookContext,
-) -> dict[str, Any]:
-    """Sync SDK file operations to VFS state."""
-
-    tool_name = input_data.get("tool_name", "")
-    tool_input = input_data.get("tool_input", {})
-    tool_error = input_data.get("tool_error")
-
-    if tool_error is not None:
-        return {}
-
-    workspace = session.query(ClaudeAgentWorkspace).latest()
-    if workspace is None:
-        return {}
-
-    # Sync Write operations
-    if tool_name == "Write":
-        file_path = tool_input.get("file_path", "")
-        content = tool_input.get("content", "")
-
-        vfs_path = _resolve_to_vfs_path(file_path, workspace.temp_dir)
-        if vfs_path:
-            session.mutate(VirtualFileSystem).dispatch(
-                WriteFile(path=vfs_path, content=content, mode="overwrite")
-            )
-
-    # Sync Edit operations
-    elif tool_name == "Edit":
-        file_path = tool_input.get("file_path", "")
-        vfs_path = _resolve_to_vfs_path(file_path, workspace.temp_dir)
-
-        if vfs_path:
-            # Read updated content from disk
-            full_path = workspace.temp_dir / vfs_path.as_posix()
-            if full_path.exists():
-                content = full_path.read_text(encoding="utf-8")
-                session.mutate(VirtualFileSystem).dispatch(
-                    WriteFile(path=vfs_path, content=content, mode="overwrite")
-                )
-
-    # Sync Bash file creation (heuristic)
-    elif tool_name == "Bash":
-        # Scan for new/modified files after bash execution
-        await _sync_workspace_changes(session, workspace)
-
-    return {}
-
-
-async def _sync_workspace_changes(
+def sync_workspace_to_vfs(
     session: SessionProtocol,
     workspace: ClaudeAgentWorkspace,
-) -> None:
-    """Scan temp directory for changes and update VFS."""
+) -> int:
+    """Sync temp directory state to VFS after SDK execution.
 
+    Returns:
+        Number of files synced (new or modified).
+    """
     current_vfs = session.query(VirtualFileSystem).latest()
-    known_paths = {f.path for f in current_vfs.files}
+    known_files = {f.path: f for f in current_vfs.files}
+    synced = 0
 
     for path in workspace.temp_dir.rglob("*"):
         if not path.is_file():
@@ -705,19 +661,25 @@ async def _sync_workspace_changes(
         except UnicodeDecodeError:
             continue  # Skip binary files
 
-        if vfs_path in known_paths:
-            # Check if modified
-            existing = _find_file(current_vfs.files, vfs_path)
-            if existing and existing.content != content:
-                session.mutate(VirtualFileSystem).dispatch(
-                    WriteFile(path=vfs_path, content=content, mode="overwrite")
-                )
-        else:
+        existing = known_files.get(vfs_path)
+        if existing is None:
             # New file
             session.mutate(VirtualFileSystem).dispatch(
                 WriteFile(path=vfs_path, content=content, mode="create")
             )
+            synced += 1
+        elif existing.content != content:
+            # Modified file
+            session.mutate(VirtualFileSystem).dispatch(
+                WriteFile(path=vfs_path, content=content, mode="overwrite")
+            )
+            synced += 1
+
+    return synced
 ```
+
+This approach avoids per-tool-call overhead and lets callers decide when (or if)
+they need VFS state synchronized.
 
 ### Cleanup
 
@@ -748,7 +710,9 @@ from weakincentives.runtime import Session, InProcessEventBus
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentWorkspaceSection,
+    ClaudeAgentWorkspace,
     HostMount,
+    sync_workspace_to_vfs,
 )
 from weakincentives.tools.vfs import VfsPath
 
@@ -793,7 +757,12 @@ prompt = Prompt[RefactorResult](
 adapter = ClaudeAgentSDKAdapter(model="claude-sonnet-4-5-20250929")
 response = adapter.evaluate(prompt, session=session)
 
-# VFS state reflects all SDK modifications
+# Optionally sync temp directory changes to VFS (on-demand, not automatic)
+workspace = session.query(ClaudeAgentWorkspace).latest()
+synced_count = sync_workspace_to_vfs(session, workspace)
+print(f"Synced {synced_count} modified files to VFS")
+
+# Now VFS state reflects SDK modifications
 vfs = session.query(VirtualFileSystem).latest()
 for file in vfs.files:
     print(f"{file.path.as_posix()}: {file.size_bytes} bytes (v{file.version})")
