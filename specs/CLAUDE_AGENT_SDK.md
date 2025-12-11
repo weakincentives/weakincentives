@@ -357,6 +357,490 @@ class SandboxNetworkConfig:
     allow_unix_sockets: tuple[str, ...] = ()
 ```
 
+## ClaudeAgentWorkspace
+
+The `ClaudeAgentWorkspace` provides a VFS-compatible abstraction over a temporary
+directory where the Claude Agent SDK operates. It mirrors the `VfsToolsSection`
+API while materializing files to disk for native SDK tool access.
+
+### Design Principles
+
+- **VFS API compatibility**: Same `HostMount` configuration as `VfsToolsSection`
+- **Temporary isolation**: All operations occur in a session-scoped temp directory
+- **Automatic materialization**: Host mounts are copied to temp folder at construction
+- **Bidirectional sync**: Changes made by SDK tools sync back to session state
+- **Deterministic cleanup**: Temp directory removed on workspace finalization
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         ClaudeAgentWorkspace                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────┐         ┌─────────────────────────────────────────┐   │
+│  │   HostMount     │         │         Temporary Directory             │   │
+│  │   Config        │────────▶│         /tmp/wink-sdk-XXXXXX/           │   │
+│  │                 │  copy   │                                         │   │
+│  │  - host_path    │         │  ├── src/                               │   │
+│  │  - mount_path   │         │  │   └── main.py     (from host)        │   │
+│  │  - include_glob │         │  ├── tests/                             │   │
+│  │  - exclude_glob │         │  │   └── test_main.py (from host)       │   │
+│  │  - max_bytes    │         │  └── output/         (SDK-created)      │   │
+│  └─────────────────┘         │                                         │   │
+│                              └─────────────────────────────────────────┘   │
+│         │                                    │                              │
+│         │                                    │                              │
+│         ▼                                    ▼                              │
+│  ┌─────────────────┐         ┌─────────────────────────────────────────┐   │
+│  │ VirtualFileSystem│◀────────│      PostToolUse Hook Sync             │   │
+│  │ (Session State)  │  sync   │      - Write → VFS update              │   │
+│  │                  │         │      - Edit  → VFS update              │   │
+│  │ Immutable        │         │      - Bash (file creation) → VFS      │   │
+│  │ snapshots        │         │                                         │   │
+│  └─────────────────┘         └─────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Model
+
+```python
+@FrozenDataclass()
+class ClaudeAgentWorkspace:
+    """Workspace state for Claude Agent SDK execution."""
+
+    temp_dir: Path
+    mount_previews: tuple[HostMountPreview, ...]
+    vfs_snapshot: VirtualFileSystem
+    created_at: datetime
+    session_id: str | None = None
+
+
+@FrozenDataclass()
+class HostMount:
+    """Configuration for mounting host files into the workspace."""
+
+    host_path: str
+    mount_path: VfsPath | None = None
+    include_glob: tuple[str, ...] = ()
+    exclude_glob: tuple[str, ...] = ()
+    max_bytes: int | None = None
+    follow_symlinks: bool = False
+
+
+@FrozenDataclass()
+class HostMountPreview:
+    """Summary of a materialized host mount."""
+
+    host_path: str
+    resolved_host: Path
+    mount_path: VfsPath
+    entries: tuple[str, ...]
+    is_directory: bool
+    bytes_copied: int
+```
+
+### Workspace Lifecycle
+
+#### Construction
+
+```python
+class ClaudeAgentWorkspaceSection(Section[EmptyParams]):
+    """Section that manages a temporary workspace for SDK execution."""
+
+    def __init__(
+        self,
+        *,
+        session: SessionProtocol,
+        mounts: Sequence[HostMount] = (),
+        allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
+        temp_dir_prefix: str = "wink-sdk-",
+        cleanup_on_finalize: bool = True,
+    ) -> None:
+        """Initialize workspace with host mounts.
+
+        Args:
+            session: Session for state management.
+            mounts: Host paths to copy into temp directory.
+            allowed_host_roots: Security boundary for host path resolution.
+            temp_dir_prefix: Prefix for temporary directory name.
+            cleanup_on_finalize: Remove temp dir when section finalizes.
+        """
+```
+
+#### Materialization
+
+```python
+def _materialize_workspace(
+    self,
+    mounts: Sequence[HostMount],
+    allowed_roots: Sequence[Path],
+) -> ClaudeAgentWorkspace:
+    """Create temp directory and copy host files."""
+
+    # 1. Create temp directory
+    temp_dir = Path(tempfile.mkdtemp(prefix=self._temp_dir_prefix))
+
+    # 2. Process each mount
+    previews = []
+    vfs_files = []
+
+    for mount in mounts:
+        # Resolve and validate host path
+        resolved = _resolve_mount_path(mount.host_path, allowed_roots)
+
+        # Determine target path in temp dir
+        mount_path = mount.mount_path or VfsPath.from_string(mount.host_path)
+        target = temp_dir / mount_path.as_posix()
+
+        # Copy files with glob filtering
+        copied_files, preview = _copy_mount_to_temp(
+            source=resolved,
+            target=target,
+            mount=mount,
+        )
+
+        previews.append(preview)
+        vfs_files.extend(copied_files)
+
+    # 3. Create initial VFS snapshot
+    vfs = VirtualFileSystem(files=tuple(sorted(vfs_files, key=lambda f: f.path.segments)))
+
+    # 4. Seed session state
+    self._session.mutate(VirtualFileSystem).seed(vfs)
+
+    return ClaudeAgentWorkspace(
+        temp_dir=temp_dir,
+        mount_previews=tuple(previews),
+        vfs_snapshot=vfs,
+        created_at=_now(),
+    )
+```
+
+#### File Copying
+
+```python
+def _copy_mount_to_temp(
+    source: Path,
+    target: Path,
+    mount: HostMount,
+) -> tuple[list[VfsFile], HostMountPreview]:
+    """Copy files from host to temp directory with filtering."""
+
+    copied_files = []
+    entries = []
+    bytes_copied = 0
+
+    if source.is_file():
+        # Single file mount
+        target.parent.mkdir(parents=True, exist_ok=True)
+        content = source.read_text(encoding="utf-8")
+        target.write_text(content, encoding="utf-8")
+
+        vfs_path = VfsPath.from_path(target.relative_to(target.parent.parent))
+        copied_files.append(VfsFile(
+            path=vfs_path,
+            content=content,
+            encoding="utf-8",
+            size_bytes=len(content.encode("utf-8")),
+            version=1,
+            created_at=_now(),
+            updated_at=_now(),
+        ))
+        bytes_copied = len(content.encode("utf-8"))
+        entries.append(source.name)
+
+    else:
+        # Directory mount with glob filtering
+        for root, dirs, files in source.walk(follow_symlinks=mount.follow_symlinks):
+            rel_root = root.relative_to(source)
+
+            for file_name in files:
+                rel_path = rel_root / file_name
+
+                # Apply glob filters
+                if not _matches_globs(str(rel_path), mount.include_glob, mount.exclude_glob):
+                    continue
+
+                # Check byte budget
+                file_path = root / file_name
+                content = file_path.read_text(encoding="utf-8")
+                file_bytes = len(content.encode("utf-8"))
+
+                if mount.max_bytes and bytes_copied + file_bytes > mount.max_bytes:
+                    raise WorkspaceBudgetExceededError(
+                        f"Mount exceeds byte budget: {bytes_copied + file_bytes} > {mount.max_bytes}"
+                    )
+
+                # Copy to temp
+                dest = target / rel_path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(content, encoding="utf-8")
+
+                # Track in VFS
+                vfs_path = VfsPath(tuple((target.name, *rel_path.parts)))
+                copied_files.append(VfsFile(
+                    path=vfs_path,
+                    content=content,
+                    encoding="utf-8",
+                    size_bytes=file_bytes,
+                    version=1,
+                    created_at=_now(),
+                    updated_at=_now(),
+                ))
+
+                bytes_copied += file_bytes
+                entries.append(str(rel_path))
+
+    return copied_files, HostMountPreview(
+        host_path=mount.host_path,
+        resolved_host=source,
+        mount_path=VfsPath.from_path(target.relative_to(target.parent)),
+        entries=tuple(entries[:20]),  # Preview limit
+        is_directory=source.is_dir(),
+        bytes_copied=bytes_copied,
+    )
+```
+
+### SDK Integration
+
+#### Adapter Configuration
+
+When a `ClaudeAgentWorkspaceSection` is present, the adapter configures the SDK
+to use the temp directory:
+
+```python
+async def _evaluate_async(self, prompt, *, session, **kwargs):
+    # ...
+
+    # Check for workspace section
+    workspace = session.query(ClaudeAgentWorkspace).latest()
+
+    if workspace:
+        # Configure SDK to operate in temp directory
+        options = ClaudeAgentOptions(
+            cwd=str(workspace.temp_dir),
+            add_dirs=[str(workspace.temp_dir)],
+            # ... other options
+        )
+```
+
+#### PostToolUse Sync
+
+The `PostToolUse` hook synchronizes SDK file operations back to VFS state:
+
+```python
+async def post_tool_use_hook(
+    input_data: dict[str, Any],
+    tool_use_id: str | None,
+    context: HookContext,
+) -> dict[str, Any]:
+    """Sync SDK file operations to VFS state."""
+
+    tool_name = input_data.get("tool_name", "")
+    tool_input = input_data.get("tool_input", {})
+    tool_error = input_data.get("tool_error")
+
+    if tool_error is not None:
+        return {}
+
+    workspace = session.query(ClaudeAgentWorkspace).latest()
+    if workspace is None:
+        return {}
+
+    # Sync Write operations
+    if tool_name == "Write":
+        file_path = tool_input.get("file_path", "")
+        content = tool_input.get("content", "")
+
+        vfs_path = _resolve_to_vfs_path(file_path, workspace.temp_dir)
+        if vfs_path:
+            session.mutate(VirtualFileSystem).dispatch(
+                WriteFile(path=vfs_path, content=content, mode="overwrite")
+            )
+
+    # Sync Edit operations
+    elif tool_name == "Edit":
+        file_path = tool_input.get("file_path", "")
+        vfs_path = _resolve_to_vfs_path(file_path, workspace.temp_dir)
+
+        if vfs_path:
+            # Read updated content from disk
+            full_path = workspace.temp_dir / vfs_path.as_posix()
+            if full_path.exists():
+                content = full_path.read_text(encoding="utf-8")
+                session.mutate(VirtualFileSystem).dispatch(
+                    WriteFile(path=vfs_path, content=content, mode="overwrite")
+                )
+
+    # Sync Bash file creation (heuristic)
+    elif tool_name == "Bash":
+        # Scan for new/modified files after bash execution
+        await _sync_workspace_changes(session, workspace)
+
+    return {}
+
+
+async def _sync_workspace_changes(
+    session: SessionProtocol,
+    workspace: ClaudeAgentWorkspace,
+) -> None:
+    """Scan temp directory for changes and update VFS."""
+
+    current_vfs = session.query(VirtualFileSystem).latest()
+    known_paths = {f.path for f in current_vfs.files}
+
+    for path in workspace.temp_dir.rglob("*"):
+        if not path.is_file():
+            continue
+
+        rel_path = path.relative_to(workspace.temp_dir)
+        vfs_path = VfsPath(rel_path.parts)
+
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue  # Skip binary files
+
+        if vfs_path in known_paths:
+            # Check if modified
+            existing = _find_file(current_vfs.files, vfs_path)
+            if existing and existing.content != content:
+                session.mutate(VirtualFileSystem).dispatch(
+                    WriteFile(path=vfs_path, content=content, mode="overwrite")
+                )
+        else:
+            # New file
+            session.mutate(VirtualFileSystem).dispatch(
+                WriteFile(path=vfs_path, content=content, mode="create")
+            )
+```
+
+### Cleanup
+
+```python
+class ClaudeAgentWorkspaceSection:
+    def __init__(self, ...):
+        # ...
+        if cleanup_on_finalize:
+            weakref.finalize(self, self._cleanup, self._workspace.temp_dir)
+
+    @staticmethod
+    def _cleanup(temp_dir: Path) -> None:
+        """Remove temporary directory on finalization."""
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def cleanup(self) -> None:
+        """Explicitly remove temporary directory."""
+        if self._workspace and self._workspace.temp_dir.exists():
+            shutil.rmtree(self._workspace.temp_dir, ignore_errors=True)
+```
+
+### Usage Example
+
+```python
+from weakincentives import Prompt, MarkdownSection
+from weakincentives.runtime import Session, InProcessEventBus
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentWorkspaceSection,
+    HostMount,
+)
+from weakincentives.tools.vfs import VfsPath
+
+# Setup session
+bus = InProcessEventBus()
+session = Session(bus=bus)
+
+# Create workspace with host mounts
+workspace_section = ClaudeAgentWorkspaceSection(
+    session=session,
+    mounts=(
+        HostMount(
+            host_path="src",
+            mount_path=VfsPath(("project", "src")),
+            include_glob=("*.py",),
+            max_bytes=1_000_000,  # 1 MB budget
+        ),
+        HostMount(
+            host_path="tests",
+            mount_path=VfsPath(("project", "tests")),
+            include_glob=("test_*.py",),
+        ),
+    ),
+    allowed_host_roots=("/home/user/myproject",),
+)
+
+# Define prompt using workspace
+prompt = Prompt[RefactorResult](
+    ns="refactor",
+    key="codebase",
+    sections=[
+        workspace_section,
+        MarkdownSection(
+            title="Task",
+            key="task",
+            template="Refactor the code in project/src to improve readability",
+        ),
+    ],
+)
+
+# Adapter uses workspace temp_dir as cwd
+adapter = ClaudeAgentSDKAdapter(model="claude-sonnet-4-5-20250929")
+response = adapter.evaluate(prompt, session=session)
+
+# VFS state reflects all SDK modifications
+vfs = session.query(VirtualFileSystem).latest()
+for file in vfs.files:
+    print(f"{file.path.as_posix()}: {file.size_bytes} bytes (v{file.version})")
+
+# Cleanup when done (or let finalizer handle it)
+workspace_section.cleanup()
+```
+
+### Extracting Results
+
+After SDK execution, modified files can be extracted from the workspace:
+
+```python
+def extract_modified_files(
+    session: SessionProtocol,
+    workspace: ClaudeAgentWorkspace,
+) -> dict[str, str]:
+    """Get all files modified during SDK execution."""
+
+    vfs = session.query(VirtualFileSystem).latest()
+    modified = {}
+
+    for file in vfs.files:
+        # Check if file was modified (version > 1) or created by SDK
+        if file.version > 1 or file.path not in workspace.vfs_snapshot.files:
+            modified[file.path.as_posix()] = file.content
+
+    return modified
+
+
+def write_back_to_host(
+    session: SessionProtocol,
+    workspace: ClaudeAgentWorkspace,
+    target_dir: Path,
+) -> list[Path]:
+    """Write modified files back to host filesystem."""
+
+    modified = extract_modified_files(session, workspace)
+    written = []
+
+    for rel_path, content in modified.items():
+        dest = target_dir / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        written.append(dest)
+
+    return written
+```
+
 ## Structured Output
 
 The SDK natively supports JSON schema validation via `output_format`:
@@ -961,8 +1445,10 @@ src/weakincentives/adapters/
 │   ├── __init__.py           # Public exports
 │   ├── adapter.py            # ClaudeAgentSDKAdapter
 │   ├── config.py             # Configuration dataclasses
+│   ├── workspace.py          # ClaudeAgentWorkspaceSection
 │   ├── _hooks.py             # Hook implementations
 │   ├── _bridge.py            # MCP tool bridge
+│   ├── _workspace_sync.py    # VFS sync utilities
 │   ├── _async_utils.py       # Async/sync bridging
 │   └── _errors.py            # Error normalization
 ```
