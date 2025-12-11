@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import textwrap
@@ -56,6 +57,7 @@ from weakincentives.runtime import (
     Session,
 )
 from weakincentives.tools import (
+    AstevalSection,
     HostMount,
     PlanningStrategy,
     PlanningToolsSection,
@@ -156,6 +158,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     _template: PromptTemplate[ReviewResponse]
     _overrides_store: LocalPromptOverridesStore
     _override_tag: str
+    _use_podman: bool
 
     def __init__(
         self,
@@ -164,15 +167,17 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         bus: EventBus,
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
+        use_podman: bool = False,
     ) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = resolve_override_tag(
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
         )
+        self._use_podman = use_podman
         # Create persistent session at construction time
         self._session = build_logged_session(tags={"app": "code-reviewer"})
-        self._template = build_task_prompt(session=self._session)
+        self._template = build_task_prompt(session=self._session, use_podman=use_podman)
         self._seed_overrides()
 
     def _seed_overrides(self) -> None:
@@ -244,6 +249,11 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         """Expose override tag for display."""
         return self._override_tag
 
+    @property
+    def use_podman(self) -> bool:
+        """Expose workspace mode for display."""
+        return self._use_podman
+
 
 class CodeReviewApp:
     """Owns the REPL loop and user interaction."""
@@ -257,6 +267,7 @@ class CodeReviewApp:
         *,
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
+        use_podman: bool = False,
     ) -> None:
         bus = _create_bus_with_logging()
         self._bus = bus
@@ -265,6 +276,7 @@ class CodeReviewApp:
             bus=bus,
             overrides_store=overrides_store,
             override_tag=override_tag,
+            use_podman=use_podman,
         )
         bus.subscribe(MainLoopCompleted, self._on_loop_completed)
 
@@ -281,7 +293,7 @@ class CodeReviewApp:
 
     def run(self) -> None:
         """Start the interactive review session."""
-        print(_build_intro(self._loop.override_tag))
+        print(_build_intro(self._loop.override_tag, use_podman=self._loop.use_podman))
         print("Type a review prompt to begin. (Type 'exit' to quit.)")
 
         while True:
@@ -315,11 +327,25 @@ def _create_bus_with_logging() -> EventBus:
     return bus
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Interactive code review agent example."
+    )
+    parser.add_argument(
+        "--podman",
+        action="store_true",
+        help="Use Podman sandbox instead of VFS + Asteval (requires Podman connection).",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
     """Entry point used by the `weakincentives` CLI harness."""
+    args = parse_args()
     configure_logging()
     adapter = build_adapter()
-    app = CodeReviewApp(adapter)
+    app = CodeReviewApp(adapter, use_podman=args.podman)
     app.run()
 
 
@@ -331,14 +357,18 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
-def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
+def build_task_prompt(
+    *, session: Session, use_podman: bool = False
+) -> PromptTemplate[ReviewResponse]:
     """Builds the main prompt template for the code review agent.
 
     This prompt demonstrates progressive disclosure: the Reference Documentation
     section starts summarized and can be expanded on demand via `open_sections`.
     """
     _ensure_test_repository_available()
-    workspace_section = _build_workspace_section(session=session)
+    workspace_sections = _build_workspace_section(
+        session=session, use_podman=use_podman
+    )
     sections = (
         _build_review_guidance_section(),
         WorkspaceDigestSection(session=session),
@@ -348,7 +378,7 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
             strategy=PlanningStrategy.PLAN_ACT_REFLECT,
             accepts_overrides=True,
         ),
-        workspace_section,
+        *workspace_sections,
         MarkdownSection[ReviewTurnParams](
             title="Review Request",
             template="${request}",
@@ -451,40 +481,57 @@ def _sunfish_mounts() -> tuple[HostMount, ...]:
 def _build_workspace_section(
     *,
     session: Session,
-) -> MarkdownSection[SupportsDataclass]:
+    use_podman: bool = False,
+) -> tuple[MarkdownSection[SupportsDataclass], ...]:
+    """Build workspace sections based on the selected sandbox mode.
+
+    By default, returns VFS + Asteval sections. When ``use_podman`` is True,
+    attempts to use the Podman sandbox (falling back to VFS+Asteval if unavailable).
+    """
     mounts = _sunfish_mounts()
     allowed_roots = (TEST_REPOSITORIES_ROOT,)
-    connection = PodmanSandboxSection.resolve_connection()
-    if connection is None:
-        _LOGGER.info(
-            "Podman connection unavailable; falling back to VFS tools for the code reviewer example."
-        )
-        return VfsToolsSection(
+
+    if use_podman:
+        connection = PodmanSandboxSection.resolve_connection()
+        if connection is None:
+            _LOGGER.warning(
+                "Podman requested but connection unavailable; "
+                "falling back to VFS + Asteval."
+            )
+        else:
+            return (
+                PodmanSandboxSection(
+                    session=session,
+                    config=PodmanSandboxConfig(
+                        mounts=mounts,
+                        allowed_host_roots=allowed_roots,
+                        base_url=connection.get("base_url"),
+                        identity=connection.get("identity"),
+                        connection_name=connection.get("connection_name"),
+                        accepts_overrides=True,
+                    ),
+                ),
+            )
+
+    # Default: VFS + Asteval
+    return (
+        VfsToolsSection(
             session=session,
             mounts=mounts,
             allowed_host_roots=allowed_roots,
             accepts_overrides=True,
-        )
-
-    return PodmanSandboxSection(
-        session=session,
-        config=PodmanSandboxConfig(
-            mounts=mounts,
-            allowed_host_roots=allowed_roots,
-            base_url=connection.get("base_url"),
-            identity=connection.get("identity"),
-            connection_name=connection.get("connection_name"),
-            accepts_overrides=True,
         ),
+        AstevalSection(session=session, accepts_overrides=True),
     )
 
 
-def _build_intro(override_tag: str) -> str:
+def _build_intro(override_tag: str, *, use_podman: bool) -> str:
+    workspace_mode = "Podman sandbox" if use_podman else "VFS + Asteval"
     return textwrap.dedent(
         f"""
         Launching example code reviewer agent.
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
-        - Tools: Planning and a filesystem workspace (with a Podman shell if available).
+        - Workspace: {workspace_mode} (use --podman flag to enable Podman sandbox).
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
         - Auto-optimization: Workspace digest generated on first request.
 
