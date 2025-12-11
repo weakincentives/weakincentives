@@ -147,7 +147,7 @@ SettingSource = Literal["user", "project", "local"]
 class ClaudeAgentSDKModelConfig(LLMConfig):
     """Model-level configuration for Claude Agent SDK."""
 
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-5-20250929"
 ```
 
 Inherits `temperature`, `max_tokens`, `top_p` from `LLMConfig`. Note that SDK
@@ -176,7 +176,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
     def __init__(
         self,
         *,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-5-20250929",
         client_config: ClaudeAgentSDKClientConfig | None = None,
         model_config: ClaudeAgentSDKModelConfig | None = None,
         stateful: bool = False,
@@ -651,7 +651,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 
 adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-20250514",
+    model="claude-sonnet-4-5-20250929",
     client_config=ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
     ),
@@ -725,7 +725,7 @@ response = adapter.evaluate(prompt, session=session)
 
 ```python
 adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-20250514",
+    model="claude-sonnet-4-5-20250929",
     stateful=True,
 )
 
@@ -749,7 +749,7 @@ config = ClaudeAgentSDKClientConfig(
 )
 
 adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-20250514",
+    model="claude-sonnet-4-5-20250929",
     client_config=config,
 )
 
