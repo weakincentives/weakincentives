@@ -635,37 +635,6 @@ for path in workspace.temp_dir.rglob("*"):
 cleanup_workspace(workspace)
 ```
 
-### Extracting Results
-
-After SDK execution, files can be copied from the workspace back to the host:
-
-```python
-def copy_results_to_host(
-    workspace: ClaudeAgentWorkspace,
-    target_dir: Path,
-    *,
-    include_glob: str = "**/*",
-) -> list[Path]:
-    """Copy files from workspace back to host filesystem."""
-    import fnmatch
-
-    written = []
-    for path in workspace.temp_dir.rglob("*"):
-        if not path.is_file():
-            continue
-
-        rel_path = path.relative_to(workspace.temp_dir)
-        if not fnmatch.fnmatch(str(rel_path), include_glob):
-            continue
-
-        dest = target_dir / rel_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, dest)
-        written.append(dest)
-
-    return written
-```
-
 ## Structured Output
 
 The SDK natively supports JSON schema validation via `output_format`:
