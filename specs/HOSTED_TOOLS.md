@@ -4,31 +4,33 @@
 
 Hosted tools are provider-executed capabilities that run server-side rather than
 locally. Unlike user-defined tools with handlers, hosted tools delegate execution
-to the LLM provider and receive structured results. This specification covers the
-core abstraction, adapter-specific implementations, and integration patterns.
+to the LLM provider and receive structured results. This specification covers how
+hosted tools extend the core Tool interface, adapter-specific implementations,
+and integration patterns.
 
 ## Guiding Principles
 
-- **Minimal core abstraction**: The core library defines only the container type;
-  configuration and output types live in adapters.
+- **Unified tool interface**: Hosted tools extend the core `Tool` type rather than
+  introducing a separate abstraction; they flow through the existing `tools` tuple.
 - **No lowest common denominator**: Different providers have different capabilities;
   users import adapter-specific types explicitly.
 - **Codec-based extensibility**: Adapters register codecs that own serialization,
   output parsing, and type definitions.
-- **Section-first integration**: Hosted tools attach to sections like user-defined
-  tools, respecting visibility and enablement rules.
+- **Section-first integration**: Hosted tools use the existing `tools` parameter
+  on sections, respecting visibility and enablement rules.
 
 ## Core Abstraction
 
-### HostedTool
+### Extended Tool Interface
 
-`HostedTool[ConfigT]` is the only core type—a minimal container for provider-
-specific configurations:
+Hosted tools are regular `Tool` instances with a `hosted` configuration field.
+When `hosted` is set, the adapter delegates execution to the provider instead of
+invoking a local handler:
 
 ```python
 @dataclass(slots=True, frozen=True)
-class HostedTool(Generic[ConfigT]):
-    """A tool executed by the provider rather than locally.
+class HostedToolConfig(Generic[ConfigT]):
+    """Configuration for a provider-executed tool.
 
     ConfigT is a provider-specific configuration type defined in the adapter
     layer. Users import the appropriate config type from the adapter they
@@ -36,52 +38,67 @@ class HostedTool(Generic[ConfigT]):
     """
 
     kind: str           # Codec lookup key (e.g., "web_search")
-    name: str           # Registry key, unique within prompt
-    description: str    # Documentation (1-200 ASCII chars)
     config: ConfigT     # Provider-specific configuration
+```
+
+The `Tool` class gains an optional `hosted` field:
+
+```python
+@dataclass(slots=True)
+class Tool[ParamsT, ResultT]:
+    name: str
+    description: str
+    handler: ToolHandler[ParamsT, ResultT] | None
+    examples: tuple[ToolExample[ParamsT, ResultT], ...] = ()
+    accepts_overrides: bool = True
+    hosted: HostedToolConfig[Any] | None = None  # Provider-executed tool config
 ```
 
 **Construction Rules:**
 
-- `kind` identifies which codec handles this tool
-- `name` follows the same constraints as `Tool.name`: `^[a-z0-9_-]{1,64}$`
+- When `hosted` is `None`, the tool is a standard user-defined tool
+- When `hosted` is set, `kind` identifies which codec handles this tool
+- `name` follows the same constraints: `^[a-z0-9_-]{1,64}$`
 - `description` must be 1-200 ASCII characters
-- `config` is opaque to the core—adapters define and validate config types
+- `hosted.config` is opaque to the core—adapters define and validate config types
 
-**Key Difference from Tool:**
+**Hosted vs. User-Defined Tools:**
 
-| Aspect | Tool | HostedTool |
-|--------|------|------------|
+| Aspect | User-Defined Tool | Hosted Tool |
+|--------|-------------------|-------------|
 | Execution | Local handler | Provider server-side |
-| Parameters | `ParamsT` dataclass | `ConfigT` (adapter-defined) |
-| Result | `ToolResult[ResultT]` | Adapter-defined output type |
+| `handler` | Required callable | `None` (ignored if set) |
+| `hosted` | `None` | `HostedToolConfig` instance |
 | Serialization | `{"type": "function", ...}` | Adapter-specific via codec |
+| Result | `ToolResult[ResultT]` | Adapter-defined output type |
 
 ### Section Integration
 
-Sections expose hosted tools via an override point:
+Hosted tools use the existing `tools` parameter on sections:
 
 ```python
-class Section(ABC, Generic[ParamsT]):
-    def hosted_tools(self) -> tuple[HostedTool[Any], ...]:
-        """Hosted tools exposed by this section. Override in subclasses."""
-        return ()
+section = MarkdownSection[Params](
+    title="Research",
+    template="Find information about $topic",
+    key="research",
+    tools=[user_tool, hosted_tool],  # Both tool types in same tuple
+)
 ```
+
+No separate `hosted_tools` method or attribute is needed.
 
 ### RenderedPrompt
 
-Rendered prompts include both tool types:
+`RenderedPrompt.tools` contains all tools (user-defined and hosted):
 
 ```python
 @dataclass(slots=True, frozen=True)
 class RenderedPrompt(Generic[OutputT]):
     # ... existing fields ...
-    tools: tuple[Tool[Any, Any], ...] = ()
-    hosted_tools: tuple[HostedTool[Any], ...] = ()
+    tools: tuple[Tool[Any, Any], ...] = ()  # Includes hosted tools
 ```
 
-Rendering collects hosted tools depth-first from enabled sections, same as
-user-defined tools.
+Adapters inspect `tool.hosted` to determine serialization strategy.
 
 ## Adapter Layer
 
@@ -103,15 +120,19 @@ class HostedToolCodec(Protocol[ConfigT, OutputT]):
 
     def serialize(
         self,
-        tool: HostedTool[ConfigT],
+        tool: Tool[Any, Any],
     ) -> dict[str, Any]:
-        """Convert tool configuration to provider wire format."""
+        """Convert tool configuration to provider wire format.
+
+        The tool is guaranteed to have `tool.hosted` set with `kind` matching
+        this codec's kind.
+        """
         ...
 
     def parse_output(
         self,
         response_items: Sequence[Any],
-        tool: HostedTool[ConfigT],
+        tool: Tool[Any, Any],
     ) -> OutputT | None:
         """Extract typed output from provider response, if present."""
         ...
@@ -205,10 +226,12 @@ class OpenAIWebSearchCodec:
 
     def serialize(
         self,
-        tool: HostedTool[OpenAIWebSearchConfig],
+        tool: Tool[Any, Any],
     ) -> dict[str, Any]:
         spec: dict[str, Any] = {"type": "web_search"}
-        config = tool.config
+        # tool.hosted is guaranteed to be set with matching kind
+        hosted = cast(HostedToolConfig[OpenAIWebSearchConfig], tool.hosted)
+        config = hosted.config
 
         if config.filters:
             filters: dict[str, Any] = {}
@@ -240,7 +263,7 @@ class OpenAIWebSearchCodec:
     def parse_output(
         self,
         response_items: Sequence[Any],
-        tool: HostedTool[OpenAIWebSearchConfig],
+        tool: Tool[Any, Any],
     ) -> OpenAIWebSearchResult | None:
         web_search_call = None
         message_content = None
@@ -286,13 +309,16 @@ def openai_web_search(
     config: OpenAIWebSearchConfig = OpenAIWebSearchConfig(),
     *,
     name: str = "web_search",
-) -> HostedTool[OpenAIWebSearchConfig]:
+) -> Tool[None, None]:
     """Create an OpenAI web search hosted tool."""
-    return HostedTool(
-        kind="web_search",
+    return Tool[None, None](
         name=name,
         description="Search the web for current information and cite sources.",
-        config=config,
+        handler=None,
+        hosted=HostedToolConfig(
+            kind="web_search",
+            config=config,
+        ),
     )
 ```
 
@@ -308,15 +334,12 @@ class OpenAIWebSearchSection(MarkdownSection[EmptyParams]):
         *,
         key: str = "web_search",
     ) -> None:
-        self._tool = openai_web_search(config)
         super().__init__(
             title="Web Search",
             key=key,
             template=_OPENAI_WEB_SEARCH_TEMPLATE,
+            tools=(openai_web_search(config),),  # Uses existing tools parameter
         )
-
-    def hosted_tools(self) -> tuple[HostedTool[OpenAIWebSearchConfig], ...]:
-        return (self._tool,)
 ```
 
 ### Response Structure
@@ -408,7 +431,7 @@ section = MarkdownSection(
     title="Research",
     key="research",
     template="Find information about $topic",
-    hosted_tools=(tool,),
+    tools=(tool,),  # Hosted tools use the same parameter as user-defined tools
 )
 ```
 
@@ -444,17 +467,18 @@ class OpenAICodeInterpreterCodec:
 
     def serialize(
         self,
-        tool: HostedTool[OpenAICodeInterpreterConfig],
+        tool: Tool[Any, Any],
     ) -> dict[str, Any]:
         spec: dict[str, Any] = {"type": "code_interpreter"}
-        if tool.config.container:
-            spec["container"] = tool.config.container
+        hosted = cast(HostedToolConfig[OpenAICodeInterpreterConfig], tool.hosted)
+        if hosted.config.container:
+            spec["container"] = hosted.config.container
         return spec
 
     def parse_output(
         self,
         response_items: Sequence[Any],
-        tool: HostedTool[OpenAICodeInterpreterConfig],
+        tool: Tool[Any, Any],
     ) -> OpenAICodeInterpreterResult | None:
         # Parse code_interpreter_call items
         ...
@@ -471,7 +495,27 @@ hosted_tool_codecs: Mapping[str, HostedToolCodec[Any, Any]] = {
 }
 ```
 
-### Step 4: Export Conveniences (Adapter)
+### Step 4: Create Convenience Factory (Adapter)
+
+```python
+def openai_code_interpreter(
+    config: OpenAICodeInterpreterConfig = OpenAICodeInterpreterConfig(),
+    *,
+    name: str = "code_interpreter",
+) -> Tool[None, None]:
+    """Create an OpenAI code interpreter hosted tool."""
+    return Tool[None, None](
+        name=name,
+        description="Execute Python code in a sandboxed environment.",
+        handler=None,
+        hosted=HostedToolConfig(
+            kind="code_interpreter",
+            config=config,
+        ),
+    )
+```
+
+### Step 5: Export Conveniences (Adapter)
 
 ```python
 # adapters/openai/hosted/__init__.py
@@ -499,15 +543,20 @@ from .code_interpreter import (
 When an adapter encounters an unknown hosted tool kind:
 
 ```python
-def _serialize_hosted_tool(
+def _serialize_tool(
     self,
-    tool: HostedTool[Any],
+    tool: Tool[Any, Any],
     prompt_name: str,
 ) -> dict[str, Any]:
-    codec = self.hosted_tool_codecs.get(tool.kind)
+    if tool.hosted is None:
+        # Standard user-defined tool serialization
+        return self._serialize_function_tool(tool)
+
+    # Hosted tool - lookup codec by kind
+    codec = self.hosted_tool_codecs.get(tool.hosted.kind)
     if codec is None:
         raise PromptEvaluationError(
-            f"Unsupported hosted tool kind '{tool.kind}' for {self.name} adapter.",
+            f"Unsupported hosted tool kind '{tool.hosted.kind}' for {self.name} adapter.",
             prompt_name=prompt_name,
             phase=PROMPT_EVALUATION_PHASE_RENDER,
         )
@@ -540,12 +589,16 @@ fails gracefully. For hard failures, codecs raise `PromptEvaluationError`.
 - Test codec parsing handles various response shapes
 - Verify unknown kinds raise appropriate errors
 - Validate config dataclass constraints
+- Test `Tool` with `hosted` field set behaves as hosted tool
+- Test `Tool` with `hosted=None` behaves as user-defined tool
+- Verify hosted tools can be mixed with user-defined tools in sections
 
 ### Integration Tests
 
 - Round-trip through actual provider with mocked responses
 - Verify citations are correctly extracted
 - Test domain filtering behavior
+- Test section rendering includes both tool types in `tools` tuple
 
 ### Fixtures
 
