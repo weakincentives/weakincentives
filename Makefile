@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo all clean
+.PHONY: format check test lint ty pyright typecheck bandit vulture deptry pip-audit markdown-check integration-tests claude-integration-tests mutation-test mutation-check demo all clean
 
 # Format code with ruff
 format:
@@ -74,6 +74,14 @@ integration-tests:
 		exit 1; \
 	fi
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
+
+# Run Claude Agent SDK integration tests (requires Claude CLI)
+claude-integration-tests:
+	@if ! command -v claude >/dev/null 2>&1; then \
+		echo "Claude CLI not found; install it to run Claude Agent SDK integration tests." >&2; \
+		exit 1; \
+	fi
+	@CLAUDE_AGENT_SDK_INTEGRATION_TESTS=1 uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests/test_claude_agent_sdk_integration.py
 
 # Launch the interactive code reviewer demo
 demo:
