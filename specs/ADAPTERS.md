@@ -258,17 +258,12 @@ class ThrottleError(PromptEvaluationError):
 
 The shared `InnerLoop` drives the request/response cycle:
 
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Render    │───▶│    Call     │───▶│    Parse    │
-│   Prompt    │    │   Provider  │    │   Response  │
-└─────────────┘    └─────────────┘    └─────────────┘
-                         │                   │
-                         ▼                   ▼
-                   ┌───────────┐       ┌───────────┐
-                   │  Throttle │       │   Tools   │
-                   │  Handler  │       │  Dispatch │
-                   └───────────┘       └───────────┘
+```mermaid
+flowchart LR
+    Render["Render<br/>Prompt"] --> Call["Call<br/>Provider"]
+    Call --> Parse["Parse<br/>Response"]
+    Call --> Throttle["Throttle<br/>Handler"]
+    Parse --> Tools["Tools<br/>Dispatch"]
 ```
 
 1. **Render** - Produce `RenderedPrompt` from prompt + params.
@@ -302,12 +297,12 @@ The shared `InnerLoop` drives the request/response cycle:
 
 ### Exception Hierarchy
 
-```
-PromptEvaluationError
-├── ThrottleError          # Retryable provider errors
-├── PromptRenderError      # Template/section failures
-├── OutputParseError       # Structured output validation
-└── DeadlineExceededError  # Time budget exhausted
+```mermaid
+classDiagram
+    PromptEvaluationError <|-- ThrottleError : Retryable provider errors
+    PromptEvaluationError <|-- PromptRenderError : Template/section failures
+    PromptEvaluationError <|-- OutputParseError : Structured output validation
+    PromptEvaluationError <|-- DeadlineExceededError : Time budget exhausted
 ```
 
 ### Error Propagation

@@ -18,6 +18,29 @@ core abstraction, adapter-specific implementations, and integration patterns.
 - **Section-first integration**: Hosted tools attach to sections like user-defined
   tools, respecting visibility and enablement rules.
 
+```mermaid
+flowchart TB
+    subgraph Core["Core Library"]
+        HostedTool["HostedTool〈ConfigT〉<br/>(kind, name, config)"]
+    end
+
+    subgraph Adapter["Adapter Layer"]
+        Codec["HostedToolCodec<br/>(serialize, parse_output)"]
+        Config["ConfigT<br/>(adapter-specific)"]
+        Output["OutputT<br/>(adapter-specific)"]
+    end
+
+    subgraph Provider["Provider Execution"]
+        Serialize["Serialize to<br/>provider format"]
+        Execute["Server-side<br/>execution"]
+        Parse["Parse output<br/>to OutputT"]
+    end
+
+    HostedTool --> Codec
+    Config --> Codec
+    Codec --> Serialize --> Execute --> Parse --> Output
+```
+
 ## Core Abstraction
 
 ### HostedTool

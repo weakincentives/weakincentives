@@ -119,11 +119,12 @@ The `examples` argument is **required** and must contain only
 `TaskExample` instances register as children of `TaskExamplesSection`,
 creating a two-level hierarchy:
 
-```
-TaskExamplesSection (parent)
-├── TaskExample (child 1)
-├── TaskExample (child 2)
-└── TaskExample (child N)
+```mermaid
+flowchart TB
+    Parent["TaskExamplesSection<br/>(parent)"]
+    Parent --> Child1["TaskExample<br/>(child 1)"]
+    Parent --> Child2["TaskExample<br/>(child 2)"]
+    Parent --> ChildN["TaskExample<br/>(child N)"]
 ```
 
 This hierarchy enables:

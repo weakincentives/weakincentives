@@ -18,6 +18,29 @@ tool suite.
 - **Predictable failure semantics**: Tool failures never abort evaluation; they
   return structured error results.
 
+```mermaid
+flowchart TB
+    subgraph Invocation["Tool Invocation"]
+        LLM["LLM Response"] --> Parse["Parse tool_call"]
+        Parse --> Validate["Validate params<br/>(serde.parse)"]
+        Validate --> BuildCtx["Build ToolContext"]
+        BuildCtx --> Handler["Execute handler"]
+    end
+
+    subgraph Result["Result Handling"]
+        Handler --> ToolResult["ToolResult"]
+        ToolResult --> Render["render()"]
+        Render --> Message["Message to LLM"]
+        ToolResult --> Event["ToolInvoked event"]
+    end
+
+    subgraph Failure["Failure Path"]
+        Validate -->|invalid| ErrorResult["ToolResult(success=False)"]
+        Handler -->|exception| ErrorResult
+        ErrorResult --> Message
+    end
+```
+
 ## Core Schemas
 
 ### Tool

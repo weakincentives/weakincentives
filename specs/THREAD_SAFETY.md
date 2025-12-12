@@ -21,6 +21,25 @@ future improvements can be layered without guessing at implicit expectations.
   single-threaded use, state it explicitly so downstream callers know when to
   add their own coordination.
 
+```mermaid
+flowchart TB
+    subgraph ThreadSafe["Thread-Safe Components"]
+        EventBus["InProcessEventBus<br/>(RLock on _handlers)"]
+        Session["Session<br/>(RLock on _state, _reducers)"]
+        OverrideStore["LocalPromptOverridesStore<br/>(per-file locks)"]
+    end
+
+    subgraph Patterns["Synchronization Patterns"]
+        CopyOnWrite["Copy-on-Write<br/>inside critical section"]
+        AtomicRename["Atomic File Write<br/>temp + rename"]
+        SnapshotFirst["Handler Snapshot<br/>before delivery"]
+    end
+
+    EventBus --> SnapshotFirst
+    Session --> CopyOnWrite
+    OverrideStore --> AtomicRename
+```
+
 ## Scope
 
 This document inventories the components that currently assume single-threaded

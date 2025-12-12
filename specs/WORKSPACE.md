@@ -16,6 +16,37 @@ and workspace digest generation.
 - **Single source of state**: Reducers own all mutations; handlers remain pure.
 - **VFS-compatible surface**: All backends expose the same tool interface.
 
+```mermaid
+flowchart TB
+    subgraph Backends["Workspace Backends"]
+        VFS["Virtual Filesystem<br/>(in-memory)"]
+        Podman["Podman Container<br/>(isolated sandbox)"]
+        Asteval["asteval<br/>(safe Python eval)"]
+    end
+
+    subgraph Tools["Tool Interface"]
+        LS["ls"]
+        Read["read_file"]
+        Write["write_file"]
+        Edit["edit_file"]
+        Glob["glob"]
+        Grep["grep"]
+        Exec["execute"]
+    end
+
+    subgraph State["Session State"]
+        VfsSlice["VirtualFileSystem slice"]
+        Reducers["Pure reducers"]
+    end
+
+    Tools --> Backends
+    VFS --> VfsSlice
+    VfsSlice --> Reducers
+    Reducers --> VfsSlice
+
+    HostMount["Host Mounts"] -.->|hydrate| VFS
+```
+
 ## Virtual Filesystem
 
 The VFS provides session-scoped file operations without touching the host disk.
@@ -102,6 +133,17 @@ and file operations.
 1. **Startup** - `sleep infinity` with health check
 1. **Reuse** - Subsequent calls share container
 1. **Teardown** - Stopped and removed on section close
+
+```mermaid
+stateDiagram-v2
+    [*] --> OverlayRoot: Create session cache
+    OverlayRoot --> ContainerCreated: podman create
+    ContainerCreated --> Running: podman start
+    Running --> Running: Tool calls (reuse)
+    Running --> Stopped: section.close()
+    Stopped --> Removed: podman rm
+    Removed --> [*]
+```
 
 ### Tools
 
