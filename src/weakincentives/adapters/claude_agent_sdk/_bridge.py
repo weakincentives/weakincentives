@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BridgedTool",
     "create_bridged_tools",
+    "create_mcp_server",
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
@@ -182,3 +184,83 @@ def create_bridged_tools(
         bridged.append(bridged_tool)
 
     return tuple(bridged)
+
+
+def _make_async_handler(
+    bt: BridgedTool,
+) -> Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]:
+    """Create an async handler wrapper for a bridged tool.
+
+    The SDK expects async handlers, but our BridgedTool is synchronous.
+    This wrapper creates an async function that calls the sync handler.
+    The async def is required by the SDK even though we don't await anything.
+    """
+
+    async def handler(args: dict[str, Any]) -> dict[str, Any]:  # noqa: RUF029
+        return bt(args)
+
+    return handler
+
+
+def create_mcp_server(
+    bridged_tools: tuple[BridgedTool, ...],
+    server_name: str = "weakincentives-tools",
+) -> object:
+    """Create an MCP server config with the bridged tools registered.
+
+    Uses the Claude Agent SDK's create_sdk_mcp_server function to create
+    an in-process MCP server that can be passed to ClaudeAgentOptions.
+
+    Args:
+        bridged_tools: Tuple of BridgedTool instances to register.
+        server_name: Name for the MCP server.
+
+    Returns:
+        McpSdkServerConfig instance ready for use with ClaudeAgentOptions.
+    """
+    try:
+        from claude_agent_sdk import (
+            SdkMcpTool,
+            create_sdk_mcp_server,
+            tool as sdk_tool,
+        )
+    except ImportError as error:
+        raise ImportError(
+            "claude-agent-sdk is required for custom tool bridging. "
+            "Install it with: pip install claude-agent-sdk"
+        ) from error
+
+    sdk_tools: list[SdkMcpTool[Any]] = []
+
+    for bridged_tool in bridged_tools:
+        async_handler = _make_async_handler(bridged_tool)
+
+        # Use the SDK's tool decorator to wrap the handler
+        decorated_tool: SdkMcpTool[Any] = sdk_tool(
+            bridged_tool.name,
+            bridged_tool.description,
+            bridged_tool.input_schema,
+        )(async_handler)
+
+        sdk_tools.append(decorated_tool)
+
+        logger.debug(
+            "claude_agent_sdk.bridge.tool_registered",
+            event="bridge.tool_registered",
+            context={"tool_name": bridged_tool.name},
+        )
+
+    # Create the SDK MCP server config
+    mcp_server_config = create_sdk_mcp_server(
+        name=server_name,
+        version="1.0.0",
+        tools=sdk_tools,
+    )
+
+    logger.info(
+        "claude_agent_sdk.bridge.mcp_server_created",
+        event="bridge.mcp_server_created",
+        context={"server_name": server_name, "tool_count": len(bridged_tools)},
+    )
+
+    return mcp_server_config

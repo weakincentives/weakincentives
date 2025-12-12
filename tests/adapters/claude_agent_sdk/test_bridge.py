@@ -14,14 +14,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from weakincentives.adapters.claude_agent_sdk._bridge import (
     BridgedTool,
+    _make_async_handler,
     create_bridged_tools,
+    create_mcp_server,
 )
 from weakincentives.prompt import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
@@ -316,3 +319,116 @@ class TestCreateBridgedTools:
         )
 
         assert bridged == ()
+
+
+class TestMakeAsyncHandler:
+    """Tests for _make_async_handler function."""
+
+    def test_creates_async_wrapper(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that _make_async_handler creates an async wrapper."""
+        bridged = BridgedTool(
+            name="search",
+            description="Search for content",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        async_handler = _make_async_handler(bridged)
+
+        # Verify it's a coroutine function
+        assert asyncio.iscoroutinefunction(async_handler)
+
+    def test_async_handler_returns_result(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that async handler executes and returns result."""
+        bridged = BridgedTool(
+            name="search",
+            description="Search for content",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        async_handler = _make_async_handler(bridged)
+        result = asyncio.run(async_handler({"query": "test"}))
+
+        assert result["isError"] is False
+        assert "Found matches for test" in result["content"][0]["text"]
+
+
+class TestCreateMcpServer:
+    """Tests for create_mcp_server function."""
+
+    def test_creates_mcp_server_config(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that create_mcp_server creates an MCP server config."""
+        bridged = BridgedTool(
+            name="search",
+            description="Search for content",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        mock_sdk_tool = MagicMock(return_value=lambda f: f)
+        mock_create_server = MagicMock(return_value={"type": "sdk"})
+
+        # Mock SdkMcpTool as a simple type alias
+        class MockSdkMcpTool:
+            pass
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "claude_agent_sdk": MagicMock(
+                    create_sdk_mcp_server=mock_create_server,
+                    tool=mock_sdk_tool,
+                    SdkMcpTool=MockSdkMcpTool,
+                )
+            },
+        ):
+            result = create_mcp_server((bridged,), server_name="test-server")
+
+        assert result == {"type": "sdk"}
+        mock_create_server.assert_called_once()
+        call_kwargs = mock_create_server.call_args[1]
+        assert call_kwargs["name"] == "test-server"
+        assert call_kwargs["version"] == "1.0.0"
+        assert len(call_kwargs["tools"]) == 1
+
+    def test_raises_import_error_when_sdk_missing(self) -> None:
+        """Test that create_mcp_server raises ImportError when SDK is missing."""
+        with (
+            patch.dict("sys.modules", {"claude_agent_sdk": None}),
+            pytest.raises(ImportError, match="claude-agent-sdk is required"),
+        ):
+            create_mcp_server(())
