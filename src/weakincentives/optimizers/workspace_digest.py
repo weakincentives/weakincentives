@@ -37,8 +37,7 @@ from ..tools.digests import (
     set_workspace_digest,
 )
 from ..tools.planning import PlanningStrategy, PlanningToolsSection
-from ..tools.podman import PodmanSandboxSection
-from ..tools.vfs import VfsToolsSection
+from ..tools.workspace import WorkspaceSection
 from ._base import BasePromptOptimizer, OptimizerConfig
 from ._context import OptimizationContext
 from ._results import PersistenceScope, WorkspaceDigestResult
@@ -203,14 +202,15 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
     def _resolve_workspace_section(  # noqa: PLR6301
         self, prompt: Prompt[object], prompt_name: str
     ) -> Section[SupportsDataclass]:
-        try:
-            return prompt.find_section((PodmanSandboxSection, VfsToolsSection))
-        except KeyError as error:
-            raise PromptEvaluationError(
-                "Workspace section required for optimization.",
-                prompt_name=prompt_name,
-                phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            ) from error
+        """Find a section implementing the WorkspaceSection protocol."""
+        for node in prompt.sections:
+            if isinstance(node.section, WorkspaceSection):
+                return node.section
+        raise PromptEvaluationError(
+            "Workspace section required for optimization.",
+            prompt_name=prompt_name,
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+        )
 
     def _resolve_tool_sections(  # noqa: PLR6301
         self, prompt: Prompt[object]

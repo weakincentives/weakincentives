@@ -533,7 +533,18 @@ class Session(SessionProtocol):
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
         normalized_event = event
-        payload = event.value if event.value is not None else event.result.value
+        # Handle both ToolResult dataclass and raw dict from SDK native tools
+        result = event.result
+        if event.value is not None:
+            payload = event.value
+        elif hasattr(result, "value"):
+            # ToolResult dataclass
+            payload = result.value
+        elif isinstance(result, dict):
+            # Raw dict from SDK native tools - no typed value
+            payload = None
+        else:
+            payload = None
         if event.value is None and is_dataclass_instance(payload):
             normalized_event = replace(event, value=payload)
 

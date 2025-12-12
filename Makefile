@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo all clean
+.PHONY: format check test lint ty pyright typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo demo-claude-agent all clean
 
 # Format code with ruff
 format:
@@ -78,6 +78,14 @@ integration-tests:
 # Launch the interactive code reviewer demo
 demo:
 	@uv run --all-extras python code_reviewer_example.py
+
+# Launch the interactive code reviewer demo with Claude Agent SDK
+demo-claude-agent:
+	@if [ -z "$$ANTHROPIC_API_KEY" ]; then \
+		echo "ANTHROPIC_API_KEY is not set; export it to use Claude Agent SDK." >&2; \
+		exit 1; \
+	fi
+	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
 # Run all checks (format check, lint, typecheck, bandit, vulture, deptry, pip-audit, markdown, test)
 check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test

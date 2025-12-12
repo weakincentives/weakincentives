@@ -620,6 +620,8 @@ class _VfsSectionParams:
 class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
     """Prompt section exposing the virtual filesystem tool suite."""
 
+    _is_workspace_section: bool = True
+
     def __init__(
         self,
         *,

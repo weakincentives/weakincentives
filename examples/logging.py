@@ -75,13 +75,34 @@ def _log_tool_invocation(event: object) -> None:
     if not isinstance(tool_event, ToolInvoked):  # pragma: no cover - defensive
         return
 
-    params_repr = format_for_log(dump(tool_event.params, exclude_none=True))
-    result_message = _truncate_for_log(tool_event.result.message or "")
+    # Handle both dataclass params (weakincentives tools) and dict params (SDK native)
+    params = tool_event.params
+    if isinstance(params, dict):
+        params_repr = format_for_log(params)
+    elif hasattr(params, "__dataclass_fields__"):
+        params_repr = format_for_log(dump(params, exclude_none=True))
+    else:
+        params_repr = format_for_log({"params": params})
+
+    # Handle both ToolResult dataclass and dict result (SDK native tools)
+    result = tool_event.result
+    if isinstance(result, dict):
+        result_message = _truncate_for_log(str(result.get("content", result)))
+        payload = result.get("value")
+    elif hasattr(result, "message"):
+        result_message = _truncate_for_log(result.message or "")
+        payload = result.value if hasattr(result, "value") else None
+    else:
+        result_message = _truncate_for_log(str(result) if result else "")
+        payload = None
+
     payload_repr: str | None = None
-    payload = tool_event.result.value
     if payload is not None:
         try:
-            payload_repr = format_for_log(dump(payload, exclude_none=True))
+            if hasattr(payload, "__dataclass_fields__"):
+                payload_repr = format_for_log(dump(payload, exclude_none=True))
+            else:
+                payload_repr = format_for_log({"value": payload})
         except TypeError:
             payload_repr = format_for_log({"value": payload})
 
