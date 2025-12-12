@@ -14,10 +14,11 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, ClassVar
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -78,47 +79,45 @@ class MockHookMatcher:
     hooks: list[object] | None = None
 
 
-class MockClaudeSDKClient:
-    """Mock ClaudeSDKClient for testing."""
+class MockSDKQuery:
+    """Mock for sdk.query() async generator function."""
 
     captured_options: ClassVar[list[MockClaudeAgentOptions]] = []
+    captured_prompts: ClassVar[list[str]] = []
     _results: ClassVar[list[object]] = []
-
-    def __init__(self, options: MockClaudeAgentOptions | None = None) -> None:
-        self.options = options
-        if options is not None:
-            MockClaudeSDKClient.captured_options.append(options)
-
-    async def __aenter__(self) -> MockClaudeSDKClient:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object | None,
-    ) -> None:
-        pass
-
-    async def query(self, prompt: str) -> None:
-        """Send a query - the client pattern sends and receives separately."""
-        pass
-
-    async def receive_messages(self) -> AsyncGenerator[object, None]:
-        """Yield the configured results."""
-        for result in MockClaudeSDKClient._results:
-            yield result
+    _error: ClassVar[Exception | None] = None
 
     @classmethod
     def reset(cls) -> None:
         """Reset captured options and results between tests."""
         cls.captured_options = []
+        cls.captured_prompts = []
         cls._results = []
+        cls._error = None
 
     @classmethod
     def set_results(cls, results: list[object]) -> None:
-        """Set the results to return from receive_messages."""
+        """Set the results to yield from query."""
         cls._results = results
+
+    @classmethod
+    def set_error(cls, error: Exception) -> None:
+        """Set an error to raise during iteration."""
+        cls._error = error
+
+    @classmethod
+    async def query(
+        cls, *, prompt: str, options: MockClaudeAgentOptions
+    ) -> AsyncGenerator[object, None]:
+        """Mock sdk.query() that yields configured results."""
+        cls.captured_prompts.append(prompt)
+        cls.captured_options.append(options)
+
+        if cls._error is not None:
+            raise cls._error
+
+        for result in cls._results:
+            yield result
 
 
 @dataclass(slots=True, frozen=True)
@@ -211,13 +210,41 @@ class TestClaudeAgentSDKAdapterInit:
         assert adapter._disallowed_tools == ("Bash",)
 
 
-def _create_mock_client_class(
-    results: list[object],
-) -> type[MockClaudeSDKClient]:
-    """Create a MockClaudeSDKClient class that yields specific results."""
-    # Configure the class-level results
-    MockClaudeSDKClient.set_results(results)
-    return MockClaudeSDKClient
+def _setup_mock_query(results: list[object]) -> None:
+    """Set up MockSDKQuery with specific results."""
+    MockSDKQuery.reset()
+    MockSDKQuery.set_results(results)
+
+
+def _create_sdk_mock() -> MagicMock:
+    """Create mock SDK module with query function."""
+    mock_sdk = MagicMock()
+    mock_sdk.query = MockSDKQuery.query
+    return mock_sdk
+
+
+@contextmanager
+def sdk_patches() -> Generator[None, None, None]:
+    """Context manager for common SDK patches."""
+    with (
+        patch(
+            "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
+            return_value=_create_sdk_mock(),
+        ),
+        patch(
+            "claude_agent_sdk.types.ClaudeAgentOptions",
+            MockClaudeAgentOptions,
+        ),
+        patch(
+            "claude_agent_sdk.types.HookMatcher",
+            MockHookMatcher,
+        ),
+        patch(
+            "claude_agent_sdk.types.ResultMessage",
+            MockResultMessage,
+        ),
+    ):
+        yield
 
 
 class TestClaudeAgentSDKAdapterEvaluate:
@@ -256,35 +283,13 @@ class TestClaudeAgentSDKAdapterEvaluate:
         events: list[PromptRendered] = []
         session.event_bus.subscribe(PromptRendered, lambda e: events.append(e))
 
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Hello!", usage=None, structured_output=None)]
         )
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
         assert len(events) == 1
@@ -296,8 +301,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
     def test_returns_prompt_response(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [
                 MockResultMessage(
                     result="Hello, world!",
@@ -309,28 +313,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             response = adapter.evaluate(simple_prompt, session=session)
 
         assert response.prompt_name == "test:simple"
@@ -339,8 +322,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
     def test_extracts_structured_output(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [
                 MockResultMessage(
                     result="Hello!",
@@ -352,28 +334,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             response = adapter.evaluate(simple_prompt, session=session)
 
         assert response.output is not None
@@ -382,8 +343,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
     def test_handles_invalid_structured_output(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [
                 MockResultMessage(
                     result="Hello!",
@@ -396,28 +356,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             response = adapter.evaluate(simple_prompt, session=session)
 
         # Should gracefully handle parse error and return None output
@@ -427,35 +366,13 @@ class TestClaudeAgentSDKAdapterEvaluate:
     def test_handles_no_structured_output(
         self, session: Session, untyped_prompt: Prompt[None]
     ) -> None:
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             response = adapter.evaluate(untyped_prompt, session=session)
 
         assert response.output is None
@@ -467,8 +384,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         msg1 = MagicMock()
         msg1.usage = {"input_tokens": 100, "output_tokens": 50}
 
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [
                 msg1,
                 MockResultMessage(
@@ -484,28 +400,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
         assert len(events) == 1
@@ -545,8 +440,7 @@ class TestSDKConfigOptions:
     def test_passes_cwd_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -554,38 +448,16 @@ class TestSDKConfigOptions:
             client_config=ClaudeAgentSDKClientConfig(cwd="/home/user/project"),
         )
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockClaudeSDKClient.captured_options) == 1
-        assert MockClaudeSDKClient.captured_options[0].cwd == "/home/user/project"
+        assert len(MockSDKQuery.captured_options) == 1
+        assert MockSDKQuery.captured_options[0].cwd == "/home/user/project"
 
     def test_passes_max_turns_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -593,69 +465,26 @@ class TestSDKConfigOptions:
             client_config=ClaudeAgentSDKClientConfig(max_turns=10),
         )
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockClaudeSDKClient.captured_options) == 1
-        assert MockClaudeSDKClient.captured_options[0].max_turns == 10
+        assert len(MockSDKQuery.captured_options) == 1
+        assert MockSDKQuery.captured_options[0].max_turns == 10
 
     def test_passes_allowed_tools_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
         adapter = ClaudeAgentSDKAdapter(allowed_tools=("Read", "Write"))
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockClaudeSDKClient.captured_options) == 1
-        assert MockClaudeSDKClient.captured_options[0].allowed_tools == [
+        assert len(MockSDKQuery.captured_options) == 1
+        assert MockSDKQuery.captured_options[0].allowed_tools == [
             "Read",
             "Write",
         ]
@@ -663,39 +492,17 @@ class TestSDKConfigOptions:
     def test_passes_disallowed_tools_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
         adapter = ClaudeAgentSDKAdapter(disallowed_tools=("Bash",))
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockClaudeSDKClient.captured_options) == 1
-        assert MockClaudeSDKClient.captured_options[0].disallowed_tools == ["Bash"]
+        assert len(MockSDKQuery.captured_options) == 1
+        assert MockSDKQuery.captured_options[0].disallowed_tools == ["Bash"]
 
     def test_model_config_does_not_pass_unsupported_params(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
@@ -707,8 +514,7 @@ class TestSDKConfigOptions:
         the adapter handles a model config gracefully without passing these
         unsupported parameters to ClaudeAgentOptions.
         """
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -720,38 +526,17 @@ class TestSDKConfigOptions:
             ),
         )
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        # Verify SDK client was created but max_thinking_tokens was not set
+        # Verify SDK query was called but max_thinking_tokens was not set
         # (since max_tokens doesn't map cleanly to SDK options)
-        assert len(MockClaudeSDKClient.captured_options) == 1
+        assert len(MockSDKQuery.captured_options) == 1
         # max_thinking_tokens should not be set (attribute shouldn't exist
         # or should be None if it was explicitly set)
-        assert not hasattr(
-            MockClaudeSDKClient.captured_options[0], "max_thinking_tokens"
-        ) or (MockClaudeSDKClient.captured_options[0].max_thinking_tokens is None)
+        assert not hasattr(MockSDKQuery.captured_options[0], "max_thinking_tokens") or (
+            MockSDKQuery.captured_options[0].max_thinking_tokens is None
+        )
 
     def test_creates_mcp_server_for_prompt_tools(self, session: Session) -> None:
         """Test that prompts with tools create an MCP server."""
@@ -771,8 +556,7 @@ class TestSDKConfigOptions:
         )
         prompt_with_tools = Prompt(template_with_tools)
 
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -781,26 +565,7 @@ class TestSDKConfigOptions:
         mock_mcp_server = MagicMock(return_value={"type": "sdk"})
 
         with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
+            sdk_patches(),
             patch(
                 "weakincentives.adapters.claude_agent_sdk.adapter.create_mcp_server",
                 mock_mcp_server,
@@ -808,49 +573,27 @@ class TestSDKConfigOptions:
         ):
             adapter.evaluate(prompt_with_tools, session=session)
 
-        assert len(MockClaudeSDKClient.captured_options) == 1
+        assert len(MockSDKQuery.captured_options) == 1
         # Verify mcp_servers was set in options
-        assert MockClaudeSDKClient.captured_options[0].mcp_servers is not None
-        assert "weakincentives" in MockClaudeSDKClient.captured_options[0].mcp_servers
+        assert MockSDKQuery.captured_options[0].mcp_servers is not None
+        assert "weakincentives" in MockSDKQuery.captured_options[0].mcp_servers
         mock_mcp_server.assert_called_once()
 
     def test_passes_hooks_to_options(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Test that hooks are passed to ClaudeAgentOptions."""
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockClaudeSDKClient.captured_options) == 1
-        options = MockClaudeSDKClient.captured_options[0]
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
         # Verify hooks dict is present with expected keys
         assert hasattr(options, "hooks")
         assert options.hooks is not None
@@ -864,37 +607,12 @@ class TestSDKErrorHandling:
     def test_normalizes_sdk_error(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        class ErrorMockClient(MockClaudeSDKClient):
-            async def receive_messages(self) -> AsyncGenerator[Any, None]:
-                raise RuntimeError("SDK crashed")
-                yield  # Make it a generator
-
-        MockClaudeSDKClient.reset()
+        MockSDKQuery.reset()
+        MockSDKQuery.set_error(RuntimeError("SDK crashed"))
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                ErrorMockClient,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             with pytest.raises(PromptEvaluationError, match="SDK crashed"):
                 adapter.evaluate(simple_prompt, session=session)
 
@@ -905,8 +623,7 @@ class TestBudgetTracking:
     ) -> None:
         from weakincentives.budget import Budget, BudgetTracker
 
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [
                 MockResultMessage(
                     result="Done",
@@ -921,28 +638,7 @@ class TestBudgetTracking:
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             adapter.evaluate(
                 simple_prompt, session=session, budget_tracker=budget_tracker
             )
@@ -956,8 +652,7 @@ class TestBudgetTracking:
         """Test that passing budget without budget_tracker creates one."""
         from weakincentives.budget import Budget
 
-        MockClaudeSDKClient.reset()
-        mock_client_class = _create_mock_client_class(
+        _setup_mock_query(
             [
                 MockResultMessage(
                     result="Done",
@@ -971,28 +666,7 @@ class TestBudgetTracking:
 
         adapter = ClaudeAgentSDKAdapter()
 
-        with (
-            patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                mock_client_class,
-            ),
-            patch(
-                "claude_agent_sdk.types.ClaudeAgentOptions",
-                MockClaudeAgentOptions,
-            ),
-            patch(
-                "claude_agent_sdk.types.HookMatcher",
-                MockHookMatcher,
-            ),
-            patch(
-                "claude_agent_sdk.types.ResultMessage",
-                MockResultMessage,
-            ),
-        ):
+        with sdk_patches():
             # Pass budget but not budget_tracker - should create one internally
             response = adapter.evaluate(simple_prompt, session=session, budget=budget)
 

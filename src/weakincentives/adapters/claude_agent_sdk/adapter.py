@@ -315,7 +315,6 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
         # Import the SDK's types
-        from claude_agent_sdk import ClaudeSDKClient
         from claude_agent_sdk.types import ClaudeAgentOptions, HookMatcher
 
         # Build options dict then convert to ClaudeAgentOptions
@@ -375,15 +374,11 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         options = ClaudeAgentOptions(**options_kwargs)
 
-        # Use ClaudeSDKClient instead of sdk.query() - hooks only work with client
-        # The client is an async context manager that requires:
-        # 1. connect() via __aenter__
-        # 2. query() to send the prompt
-        # 3. receive_messages() or receive_response() to get responses
-        client = ClaudeSDKClient(options=options)
-        async with client:
-            await client.query(prompt=prompt_text)
-            return [message async for message in client.receive_messages()]
+        # Use sdk.query() for one-shot queries - it handles hooks properly
+        # unlike ClaudeSDKClient which has issues with connect() + query()
+        return [
+            message async for message in sdk.query(prompt=prompt_text, options=options)
+        ]
 
     def _build_output_format(
         self,
