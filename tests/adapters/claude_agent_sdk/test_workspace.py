@@ -14,20 +14,21 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from weakincentives.adapters.claude_agent_sdk.workspace import (
-    ClaudeAgentWorkspace,
+    ClaudeAgentWorkspaceSection,
     HostMount,
     HostMountPreview,
     WorkspaceBudgetExceededError,
     WorkspaceSecurityError,
-    cleanup_workspace,
-    create_workspace,
 )
+from weakincentives.runtime import InProcessEventBus, Session
+from weakincentives.tools.workspace import WorkspaceSection
 
 
 class TestHostMount:
@@ -75,201 +76,282 @@ class TestHostMountPreview:
         assert preview.bytes_copied == 5000
 
 
-class TestClaudeAgentWorkspace:
-    def test_construction(self) -> None:
-        from datetime import UTC, datetime
-
-        temp_dir = Path("/tmp/wink-test")
-        now = datetime.now(UTC)
-        workspace = ClaudeAgentWorkspace(
-            temp_dir=temp_dir,
-            mount_previews=(),
-            created_at=now,
-        )
-        assert workspace.temp_dir == temp_dir
-        assert workspace.mount_previews == ()
-        assert workspace.created_at == now
+@pytest.fixture
+def session() -> Session:
+    bus = InProcessEventBus()
+    return Session(bus=bus)
 
 
-class TestCreateWorkspace:
-    def test_creates_temp_directory(self) -> None:
+class TestClaudeAgentWorkspaceSectionCore:
+    """Core functionality tests for ClaudeAgentWorkspaceSection."""
+
+    def test_implements_workspace_section_protocol(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            assert isinstance(section, WorkspaceSection)
+            assert section._is_workspace_section is True
+        finally:
+            section.cleanup()
+
+    def test_creates_empty_workspace_when_no_mounts(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            assert section.temp_dir.exists()
+            assert section.mount_previews == ()
+        finally:
+            section.cleanup()
+
+    def test_creates_workspace_from_mounts(self, session: Session) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
             host_path = Path(host_dir)
-            (host_path / "test.txt").write_text("hello")
+            (host_path / "test.py").write_text("print('hello')")
 
-            workspace = create_workspace(
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
                 mounts=[HostMount(host_path=host_dir)],
             )
 
             try:
-                assert workspace.temp_dir.exists()
-                assert workspace.temp_dir.is_dir()
-                assert len(workspace.mount_previews) == 1
+                assert section.temp_dir.exists()
+                assert len(section.mount_previews) == 1
             finally:
-                cleanup_workspace(workspace)
+                section.cleanup()
 
-    def test_copies_single_file(self) -> None:
+    def test_session_property_returns_session(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            assert section.session is session
+        finally:
+            section.cleanup()
+
+    def test_temp_dir_property(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            assert isinstance(section.temp_dir, Path)
+            assert section.temp_dir.exists()
+        finally:
+            section.cleanup()
+
+    def test_mount_previews_property(self, session: Session) -> None:
+        with tempfile.TemporaryDirectory() as host_dir:
+            host_path = Path(host_dir)
+            (host_path / "test.txt").write_text("content")
+
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=host_dir)],
+            )
+
+            try:
+                assert isinstance(section.mount_previews, tuple)
+                assert len(section.mount_previews) == 1
+                assert isinstance(section.mount_previews[0], HostMountPreview)
+            finally:
+                section.cleanup()
+
+    def test_created_at_property(self, session: Session) -> None:
+        from datetime import datetime
+
+        section = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            assert isinstance(section.created_at, datetime)
+        finally:
+            section.cleanup()
+
+
+class TestClaudeAgentWorkspaceSectionCleanup:
+    """Cleanup and clone tests for ClaudeAgentWorkspaceSection."""
+
+    def test_cleanup_removes_temp_directory(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        temp_dir = section.temp_dir
+        assert temp_dir.exists()
+        section.cleanup()
+        assert not temp_dir.exists()
+
+    def test_cleanup_handles_already_deleted(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        shutil.rmtree(section.temp_dir)
+        section.cleanup()  # Should not raise
+
+    def test_clone_creates_new_section_with_same_workspace(
+        self, session: Session
+    ) -> None:
+        with tempfile.TemporaryDirectory() as host_dir:
+            (Path(host_dir) / "file.txt").write_text("content")
+
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=host_dir)],
+            )
+
+            try:
+                new_bus = InProcessEventBus()
+                new_session = Session(bus=new_bus)
+                cloned = section.clone(session=new_session)
+
+                assert cloned is not section
+                assert cloned.session is new_session
+                assert cloned.temp_dir == section.temp_dir
+                assert cloned.mount_previews == section.mount_previews
+            finally:
+                section.cleanup()
+
+    def test_clone_requires_session(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+
+        try:
+            with pytest.raises(TypeError, match="session is required"):
+                section.clone()
+        finally:
+            section.cleanup()
+
+    def test_clone_rejects_mismatched_bus(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+
+        try:
+            new_bus = InProcessEventBus()
+            new_session = Session(bus=new_bus)
+            other_bus = InProcessEventBus()
+
+            with pytest.raises(TypeError, match="bus must match"):
+                section.clone(session=new_session, bus=other_bus)
+        finally:
+            section.cleanup()
+
+
+class TestClaudeAgentWorkspaceSectionTemplate:
+    """Template rendering tests for ClaudeAgentWorkspaceSection."""
+
+    def test_template_renders_mounted_content(self, session: Session) -> None:
+        with tempfile.TemporaryDirectory() as host_dir:
+            host_path = Path(host_dir)
+            (host_path / "main.py").write_text("print('main')")
+            (host_path / "utils.py").write_text("def helper(): pass")
+
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=host_dir)],
+            )
+
+            try:
+                rendered = section.render(None, depth=1, number="1")
+                assert "mounted content:" in rendered
+                assert "(directory):" in rendered
+            finally:
+                section.cleanup()
+
+    def test_template_shows_no_mounts_message(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+
+        try:
+            rendered = section.render(None, depth=1, number="1")
+            assert "(no host mounts configured)" in rendered
+        finally:
+            section.cleanup()
+
+    def test_template_shows_file_mount(self, session: Session) -> None:
+        with tempfile.TemporaryDirectory() as host_dir:
+            host_path = Path(host_dir)
+            test_file = host_path / "single.txt"
+            test_file.write_text("single file content")
+
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=str(test_file))],
+            )
+
+            try:
+                rendered = section.render(None, depth=1, number="1")
+                assert "(file):" in rendered
+            finally:
+                section.cleanup()
+
+    def test_template_truncates_large_entry_lists(self, session: Session) -> None:
+        with tempfile.TemporaryDirectory() as host_dir:
+            host_path = Path(host_dir)
+            # Create more than _TEMPLATE_PREVIEW_LIMIT (10) files
+            for i in range(15):
+                (host_path / f"file{i:02d}.txt").write_text(f"content {i}")
+
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=host_dir)],
+            )
+
+            try:
+                rendered = section.render(None, depth=1, number="1")
+                assert "... and 5 more" in rendered
+            finally:
+                section.cleanup()
+
+
+class TestClaudeAgentWorkspaceSectionMounting:
+    """File and directory mounting tests for ClaudeAgentWorkspaceSection."""
+
+    def test_copies_single_file(self, session: Session) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
             host_path = Path(host_dir)
             test_file = host_path / "test.txt"
             test_file.write_text("hello world")
 
-            workspace = create_workspace(
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
                 mounts=[HostMount(host_path=str(test_file))],
             )
 
             try:
-                copied_file = workspace.temp_dir / "test.txt"
+                copied_file = section.temp_dir / "test.txt"
                 assert copied_file.exists()
                 assert copied_file.read_text() == "hello world"
-                assert workspace.mount_previews[0].is_directory is False
-                assert workspace.mount_previews[0].bytes_copied == 11
+                assert section.mount_previews[0].is_directory is False
+                assert section.mount_previews[0].bytes_copied == 11
             finally:
-                cleanup_workspace(workspace)
+                section.cleanup()
 
-    def test_copies_directory(self) -> None:
+    def test_copies_directory(self, session: Session) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
             host_path = Path(host_dir)
             (host_path / "file1.txt").write_text("content1")
             (host_path / "subdir").mkdir()
             (host_path / "subdir" / "file2.txt").write_text("content2")
 
-            workspace = create_workspace(
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
                 mounts=[HostMount(host_path=host_dir)],
             )
 
             try:
                 base_name = Path(host_dir).name
-                assert (workspace.temp_dir / base_name / "file1.txt").exists()
-                assert (
-                    workspace.temp_dir / base_name / "subdir" / "file2.txt"
-                ).exists()
-                assert workspace.mount_previews[0].is_directory is True
+                assert (section.temp_dir / base_name / "file1.txt").exists()
+                assert (section.temp_dir / base_name / "subdir" / "file2.txt").exists()
+                assert section.mount_previews[0].is_directory is True
             finally:
-                cleanup_workspace(workspace)
+                section.cleanup()
 
-    def test_custom_mount_path(self) -> None:
+    def test_custom_mount_path(self, session: Session) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
             host_path = Path(host_dir)
             (host_path / "test.txt").write_text("hello")
 
-            workspace = create_workspace(
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
                 mounts=[HostMount(host_path=host_dir, mount_path="custom/path")],
             )
 
             try:
-                assert (workspace.temp_dir / "custom/path" / "test.txt").exists()
+                assert (section.temp_dir / "custom/path" / "test.txt").exists()
             finally:
-                cleanup_workspace(workspace)
+                section.cleanup()
 
-    def test_include_glob_filter(self) -> None:
-        with tempfile.TemporaryDirectory() as host_dir:
-            host_path = Path(host_dir)
-            (host_path / "include.py").write_text("python")
-            (host_path / "exclude.txt").write_text("text")
-
-            workspace = create_workspace(
-                mounts=[HostMount(host_path=host_dir, include_glob=("*.py",))],
-            )
-
-            try:
-                base_name = Path(host_dir).name
-                assert (workspace.temp_dir / base_name / "include.py").exists()
-                assert not (workspace.temp_dir / base_name / "exclude.txt").exists()
-            finally:
-                cleanup_workspace(workspace)
-
-    def test_exclude_glob_filter(self) -> None:
-        with tempfile.TemporaryDirectory() as host_dir:
-            host_path = Path(host_dir)
-            (host_path / "keep.txt").write_text("keep")
-            (host_path / "remove.log").write_text("remove")
-
-            workspace = create_workspace(
-                mounts=[HostMount(host_path=host_dir, exclude_glob=("*.log",))],
-            )
-
-            try:
-                base_name = Path(host_dir).name
-                assert (workspace.temp_dir / base_name / "keep.txt").exists()
-                assert not (workspace.temp_dir / base_name / "remove.log").exists()
-            finally:
-                cleanup_workspace(workspace)
-
-    def test_byte_budget_enforced(self) -> None:
-        with tempfile.TemporaryDirectory() as host_dir:
-            host_path = Path(host_dir)
-            (host_path / "large.txt").write_text("x" * 1000)
-
-            with pytest.raises(WorkspaceBudgetExceededError, match="byte budget"):
-                create_workspace(
-                    mounts=[HostMount(host_path=host_dir, max_bytes=100)],
-                )
-
-    def test_byte_budget_file_exceeds(self) -> None:
-        with tempfile.TemporaryDirectory() as host_dir:
-            host_path = Path(host_dir)
-            large_file = host_path / "large.txt"
-            large_file.write_text("x" * 1000)
-
-            with pytest.raises(WorkspaceBudgetExceededError):
-                create_workspace(
-                    mounts=[HostMount(host_path=str(large_file), max_bytes=100)],
-                )
-
-    def test_security_boundary_enforced(self) -> None:
-        with tempfile.TemporaryDirectory() as allowed_dir:
-            with tempfile.TemporaryDirectory() as forbidden_dir:
-                (Path(forbidden_dir) / "secret.txt").write_text("secret")
-
-                with pytest.raises(WorkspaceSecurityError, match="outside allowed"):
-                    create_workspace(
-                        mounts=[HostMount(host_path=forbidden_dir)],
-                        allowed_host_roots=[allowed_dir],
-                    )
-
-    def test_security_boundary_allows_within_root(self) -> None:
-        with tempfile.TemporaryDirectory() as allowed_dir:
-            host_path = Path(allowed_dir)
-            (host_path / "allowed.txt").write_text("allowed")
-
-            workspace = create_workspace(
-                mounts=[HostMount(host_path=allowed_dir)],
-                allowed_host_roots=[allowed_dir],
-            )
-
-            try:
-                assert workspace.temp_dir.exists()
-            finally:
-                cleanup_workspace(workspace)
-
-    def test_nonexistent_path_raises(self) -> None:
-        with pytest.raises(FileNotFoundError):
-            create_workspace(
-                mounts=[HostMount(host_path="/nonexistent/path/12345")],
-            )
-
-    def test_custom_prefix(self) -> None:
-        with tempfile.TemporaryDirectory() as host_dir:
-            (Path(host_dir) / "test.txt").write_text("test")
-
-            workspace = create_workspace(
-                mounts=[HostMount(host_path=host_dir)],
-                temp_dir_prefix="custom-prefix-",
-            )
-
-            try:
-                assert "custom-prefix-" in workspace.temp_dir.name
-            finally:
-                cleanup_workspace(workspace)
-
-    def test_multiple_mounts(self) -> None:
+    def test_multiple_mounts(self, session: Session) -> None:
         with tempfile.TemporaryDirectory() as dir1:
             with tempfile.TemporaryDirectory() as dir2:
                 (Path(dir1) / "file1.txt").write_text("content1")
                 (Path(dir2) / "file2.txt").write_text("content2")
 
-                workspace = create_workspace(
+                section = ClaudeAgentWorkspaceSection(
+                    session=session,
                     mounts=[
                         HostMount(host_path=dir1, mount_path="mount1"),
                         HostMount(host_path=dir2, mount_path="mount2"),
@@ -277,50 +359,110 @@ class TestCreateWorkspace:
                 )
 
                 try:
-                    assert (workspace.temp_dir / "mount1" / "file1.txt").exists()
-                    assert (workspace.temp_dir / "mount2" / "file2.txt").exists()
-                    assert len(workspace.mount_previews) == 2
+                    assert (section.temp_dir / "mount1" / "file1.txt").exists()
+                    assert (section.temp_dir / "mount2" / "file2.txt").exists()
+                    assert len(section.mount_previews) == 2
                 finally:
-                    cleanup_workspace(workspace)
+                    section.cleanup()
 
 
-class TestCleanupWorkspace:
-    def test_removes_temp_directory(self) -> None:
+class TestClaudeAgentWorkspaceSectionFiltering:
+    """Glob filtering tests for ClaudeAgentWorkspaceSection."""
+
+    def test_include_glob_filter(self, session: Session) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
-            (Path(host_dir) / "test.txt").write_text("test")
+            host_path = Path(host_dir)
+            (host_path / "include.py").write_text("python")
+            (host_path / "exclude.txt").write_text("text")
 
-            workspace = create_workspace(
-                mounts=[HostMount(host_path=host_dir)],
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=host_dir, include_glob=("*.py",))],
             )
 
-            temp_dir = workspace.temp_dir
-            assert temp_dir.exists()
+            try:
+                base_name = Path(host_dir).name
+                assert (section.temp_dir / base_name / "include.py").exists()
+                assert not (section.temp_dir / base_name / "exclude.txt").exists()
+            finally:
+                section.cleanup()
 
-            cleanup_workspace(workspace)
-
-            assert not temp_dir.exists()
-
-    def test_handles_already_deleted(self) -> None:
-        import shutil
-
+    def test_exclude_glob_filter(self, session: Session) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
-            (Path(host_dir) / "test.txt").write_text("test")
+            host_path = Path(host_dir)
+            (host_path / "keep.txt").write_text("keep")
+            (host_path / "remove.log").write_text("remove")
 
-            workspace = create_workspace(
-                mounts=[HostMount(host_path=host_dir)],
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=host_dir, exclude_glob=("*.log",))],
             )
 
-            shutil.rmtree(workspace.temp_dir)
+            try:
+                base_name = Path(host_dir).name
+                assert (section.temp_dir / base_name / "keep.txt").exists()
+                assert not (section.temp_dir / base_name / "remove.log").exists()
+            finally:
+                section.cleanup()
 
-            cleanup_workspace(workspace)
 
-    def test_handles_nonexistent(self) -> None:
-        from datetime import UTC, datetime
+class TestClaudeAgentWorkspaceSectionSecurity:
+    """Security and error handling tests for ClaudeAgentWorkspaceSection."""
 
-        workspace = ClaudeAgentWorkspace(
-            temp_dir=Path("/nonexistent/12345"),
-            mount_previews=(),
-            created_at=datetime.now(UTC),
-        )
+    def test_byte_budget_enforced(self, session: Session) -> None:
+        with tempfile.TemporaryDirectory() as host_dir:
+            host_path = Path(host_dir)
+            (host_path / "large.txt").write_text("x" * 1000)
 
-        cleanup_workspace(workspace)
+            with pytest.raises(WorkspaceBudgetExceededError, match="byte budget"):
+                ClaudeAgentWorkspaceSection(
+                    session=session,
+                    mounts=[HostMount(host_path=host_dir, max_bytes=100)],
+                )
+
+    def test_byte_budget_file_exceeds(self, session: Session) -> None:
+        with tempfile.TemporaryDirectory() as host_dir:
+            host_path = Path(host_dir)
+            large_file = host_path / "large.txt"
+            large_file.write_text("x" * 1000)
+
+            with pytest.raises(WorkspaceBudgetExceededError):
+                ClaudeAgentWorkspaceSection(
+                    session=session,
+                    mounts=[HostMount(host_path=str(large_file), max_bytes=100)],
+                )
+
+    def test_security_boundary_enforced(self, session: Session) -> None:
+        with tempfile.TemporaryDirectory() as allowed_dir:
+            with tempfile.TemporaryDirectory() as forbidden_dir:
+                (Path(forbidden_dir) / "secret.txt").write_text("secret")
+
+                with pytest.raises(WorkspaceSecurityError, match="outside allowed"):
+                    ClaudeAgentWorkspaceSection(
+                        session=session,
+                        mounts=[HostMount(host_path=forbidden_dir)],
+                        allowed_host_roots=[allowed_dir],
+                    )
+
+    def test_security_boundary_allows_within_root(self, session: Session) -> None:
+        with tempfile.TemporaryDirectory() as allowed_dir:
+            host_path = Path(allowed_dir)
+            (host_path / "allowed.txt").write_text("allowed")
+
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=allowed_dir)],
+                allowed_host_roots=[allowed_dir],
+            )
+
+            try:
+                assert section.temp_dir.exists()
+            finally:
+                section.cleanup()
+
+    def test_nonexistent_path_raises(self, session: Session) -> None:
+        with pytest.raises(FileNotFoundError):
+            ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path="/nonexistent/path/12345")],
+            )

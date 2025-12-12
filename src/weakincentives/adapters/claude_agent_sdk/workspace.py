@@ -19,23 +19,26 @@ import os
 import shutil
 import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, Final, override
 
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
+from ...prompt import MarkdownSection
+from ...runtime.session import Session
 
 __all__ = [
-    "ClaudeAgentWorkspace",
+    "ClaudeAgentWorkspaceSection",
     "HostMount",
     "HostMountPreview",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
-    "cleanup_workspace",
-    "create_workspace",
 ]
 
-_PREVIEW_ENTRY_LIMIT = 20
+_PREVIEW_ENTRY_LIMIT: Final[int] = 20
+_TEMPLATE_PREVIEW_LIMIT: Final[int] = 10
 
 
 class WorkspaceBudgetExceededError(WinkError):
@@ -95,21 +98,6 @@ class HostMountPreview:
     entries: tuple[str, ...]
     is_directory: bool
     bytes_copied: int
-
-
-@FrozenDataclass()
-class ClaudeAgentWorkspace:
-    """Workspace state for Claude Agent SDK execution.
-
-    Attributes:
-        temp_dir: Path to the temporary directory.
-        mount_previews: Summaries of each materialized mount.
-        created_at: UTC timestamp when the workspace was created.
-    """
-
-    temp_dir: Path
-    mount_previews: tuple[HostMountPreview, ...]
-    created_at: datetime
 
 
 def _resolve_mount_path(
@@ -240,35 +228,33 @@ def _copy_mount_to_temp(
     )
 
 
-def create_workspace(
+def _create_workspace(
     mounts: Sequence[HostMount],
     *,
-    allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
+    allowed_host_roots: Sequence[Path],
     temp_dir_prefix: str = "wink-sdk-",
-) -> ClaudeAgentWorkspace:
+) -> tuple[Path, tuple[HostMountPreview, ...]]:
     """Create a temporary workspace with host files copied in.
 
     Args:
         mounts: Host paths to copy into the temp directory.
         allowed_host_roots: Security boundary for host path resolution.
-            Empty means allow any path.
         temp_dir_prefix: Prefix for the temporary directory name.
 
     Returns:
-        Workspace with temp_dir ready for SDK use.
+        Tuple of (temp_dir, mount_previews).
 
     Raises:
         WorkspaceSecurityError: If a mount path is outside allowed roots.
         WorkspaceBudgetExceededError: If a mount exceeds its byte budget.
         FileNotFoundError: If a host path does not exist.
     """
-    allowed_roots = [Path(r) for r in allowed_host_roots]
     temp_dir = Path(tempfile.mkdtemp(prefix=temp_dir_prefix))
     previews: list[HostMountPreview] = []
 
     try:
         for mount in mounts:
-            resolved = _resolve_mount_path(mount.host_path, allowed_roots)
+            resolved = _resolve_mount_path(mount.host_path, list(allowed_host_roots))
             mount_path = mount.mount_path or Path(mount.host_path).name
             target = temp_dir / mount_path
 
@@ -283,18 +269,170 @@ def create_workspace(
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
-    return ClaudeAgentWorkspace(
-        temp_dir=temp_dir,
-        mount_previews=tuple(previews),
-        created_at=_utcnow(),
+    return temp_dir, tuple(previews)
+
+
+@dataclass(slots=True, frozen=True)
+class _ClaudeAgentWorkspaceSectionParams:
+    """Default params for ClaudeAgentWorkspaceSection (empty placeholder)."""
+
+    pass
+
+
+def _render_workspace_template(previews: tuple[HostMountPreview, ...]) -> str:
+    """Render the workspace section template from mount previews."""
+    lines = [
+        "Claude Code provides direct access to the workspace via its native tools "
+        "(Read, Write, Edit, Glob, Grep, Bash). The workspace has the following "
+        "mounted content:"
+    ]
+
+    if not previews:
+        lines.append("\n- (no host mounts configured)")
+    else:
+        for preview in previews:
+            kind = "directory" if preview.is_directory else "file"
+            lines.append(f"\n**{preview.mount_path}** ({kind}):")
+            if preview.entries:
+                visible_entries = preview.entries[:_TEMPLATE_PREVIEW_LIMIT]
+                lines.extend(f"  - {entry}" for entry in visible_entries)
+                remaining = len(preview.entries) - _TEMPLATE_PREVIEW_LIMIT
+                if remaining > 0:
+                    lines.append(f"  - ... and {remaining} more")
+            lines.append(f"  - Total: {preview.bytes_copied:,} bytes")
+
+    lines.append(
+        "\n\nUse Claude Code's native tools to explore and modify the workspace. "
+        "Focus on understanding the project structure before making changes."
     )
 
+    return "\n".join(lines)
 
-def cleanup_workspace(workspace: ClaudeAgentWorkspace) -> None:
-    """Remove temporary directory.
 
-    Args:
-        workspace: Workspace to clean up.
+class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionParams]):
+    """Prompt section describing the Claude Agent SDK workspace.
+
+    This section manages workspace state directly: temp directory, mount previews,
+    and creation timestamp. It renders information about mounted host files without
+    providing custom tools - the SDK's native tools (Read, Write, Edit, Glob, Grep,
+    Bash) are used directly.
+
+    Attributes:
+        temp_dir: Path to the temporary directory.
+        mount_previews: Summaries of each materialized mount.
+        created_at: UTC timestamp when the workspace was created.
     """
-    if workspace.temp_dir.exists():
-        shutil.rmtree(workspace.temp_dir, ignore_errors=True)
+
+    _is_workspace_section: bool = True
+
+    def __init__(
+        self,
+        *,
+        session: Session,
+        mounts: Sequence[HostMount] = (),
+        allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
+        accepts_overrides: bool = False,
+        _temp_dir: Path | None = None,
+        _mount_previews: tuple[HostMountPreview, ...] | None = None,
+        _created_at: datetime | None = None,
+    ) -> None:
+        """Initialize the workspace section.
+
+        Args:
+            session: Session for state management.
+            mounts: Host mount configurations.
+            allowed_host_roots: Security boundary for host paths.
+            accepts_overrides: Whether section accepts prompt overrides.
+            _temp_dir: Internal - pre-existing temp directory (for cloning).
+            _mount_previews: Internal - pre-existing mount previews (for cloning).
+            _created_at: Internal - pre-existing creation timestamp (for cloning).
+        """
+        self._session = session
+        self._mounts = tuple(mounts)
+        self._allowed_host_roots = tuple(Path(r) for r in allowed_host_roots)
+        self._accepts_overrides = accepts_overrides
+
+        if _temp_dir is not None and _mount_previews is not None:
+            # Cloning path - reuse existing workspace state
+            self._temp_dir = _temp_dir
+            self._mount_previews = _mount_previews
+            self._created_at = _created_at or _utcnow()
+        elif mounts:
+            # Create workspace from mounts
+            self._temp_dir, self._mount_previews = _create_workspace(
+                mounts,
+                allowed_host_roots=self._allowed_host_roots,
+            )
+            self._created_at = _utcnow()
+        else:
+            # Empty workspace
+            self._temp_dir = Path(tempfile.mkdtemp(prefix="wink-sdk-"))
+            self._mount_previews = ()
+            self._created_at = _utcnow()
+
+        template = _render_workspace_template(self._mount_previews)
+
+        super().__init__(
+            title="Workspace",
+            key="claude-agent-workspace",
+            template=template,
+            default_params=_ClaudeAgentWorkspaceSectionParams(),
+            tools=(),
+            accepts_overrides=accepts_overrides,
+        )
+
+    @property
+    def session(self) -> Session:
+        """Return the session associated with this section."""
+        return self._session
+
+    @property
+    def temp_dir(self) -> Path:
+        """Return the path to the temporary workspace directory."""
+        return self._temp_dir
+
+    @property
+    def mount_previews(self) -> tuple[HostMountPreview, ...]:
+        """Return summaries of each materialized mount."""
+        return self._mount_previews
+
+    @property
+    def created_at(self) -> datetime:
+        """Return the UTC timestamp when the workspace was created."""
+        return self._created_at
+
+    def cleanup(self) -> None:
+        """Remove the temporary workspace directory."""
+        if self._temp_dir.exists():
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+
+    @override
+    def clone(self, **kwargs: Any) -> ClaudeAgentWorkspaceSection:
+        """Clone the section with a new session.
+
+        Args:
+            **kwargs: Must include 'session' key with a Session value.
+
+        Returns:
+            New ClaudeAgentWorkspaceSection with the same workspace config.
+
+        Raises:
+            TypeError: If session is not provided or bus doesn't match.
+        """
+        session_obj = kwargs.get("session")
+        if not isinstance(session_obj, Session):
+            msg = "session is required to clone ClaudeAgentWorkspaceSection."
+            raise TypeError(msg)
+        provided_bus = kwargs.get("bus")
+        if provided_bus is not None and provided_bus is not session_obj.event_bus:
+            msg = "Provided bus must match the target session's event bus."
+            raise TypeError(msg)
+        return ClaudeAgentWorkspaceSection(
+            session=session_obj,
+            mounts=self._mounts,
+            allowed_host_roots=self._allowed_host_roots,
+            accepts_overrides=self._accepts_overrides,
+            _temp_dir=self._temp_dir,
+            _mount_previews=self._mount_previews,
+            _created_at=self._created_at,
+        )

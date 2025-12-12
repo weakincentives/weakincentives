@@ -606,6 +606,8 @@ def _resolve_connection_settings(
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     """Prompt section exposing the Podman ``shell_execute`` tool."""
 
+    _is_workspace_section: bool = True
+
     def __init__(
         self, *, session: Session, config: PodmanSandboxConfig | None = None
     ) -> None:

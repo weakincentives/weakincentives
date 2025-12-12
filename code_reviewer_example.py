@@ -33,10 +33,8 @@ from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspace,
+    ClaudeAgentWorkspaceSection,
     HostMount as ClaudeHostMount,
-    cleanup_workspace,
-    create_workspace,
 )
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.deadlines import Deadline
@@ -178,6 +176,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         override_tag: str | None = None,
         use_podman: bool = False,
         use_claude_agent: bool = False,
+        workspace_section: ClaudeAgentWorkspaceSection | None = None,
     ) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
@@ -192,6 +191,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             session=self._session,
             use_podman=use_podman,
             use_claude_agent=use_claude_agent,
+            workspace_section=workspace_section,
         )
         # Seed overrides for all modes - custom MCP tools now work with streaming mode
         self._seed_overrides()
@@ -226,13 +226,9 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         """Execute with auto-optimization for workspace digest.
 
         If no WorkspaceDigest exists in the session, runs optimization first.
-        For Claude Agent SDK mode, skip optimization as it uses native SDK tools
-        rather than VFS/Podman workspace sections.
+        All modes now support workspace optimization: VFS, Podman, and Claude Agent SDK.
         """
-        needs_optimization = (
-            not self._use_claude_agent
-            and self._session.query(WorkspaceDigest).latest() is None
-        )
+        needs_optimization = self._session.query(WorkspaceDigest).latest() is None
         if needs_optimization:
             self._run_optimization()
         effective_deadline = deadline or _default_deadline()
@@ -284,7 +280,7 @@ class CodeReviewApp:
     _bus: EventBus
     _loop: CodeReviewLoop
     _use_claude_agent: bool
-    _workspace: ClaudeAgentWorkspace | None
+    _workspace_section: ClaudeAgentWorkspaceSection | None
 
     def __init__(  # noqa: PLR0913
         self,
@@ -294,12 +290,12 @@ class CodeReviewApp:
         override_tag: str | None = None,
         use_podman: bool = False,
         use_claude_agent: bool = False,
-        workspace: ClaudeAgentWorkspace | None = None,
+        workspace_section: ClaudeAgentWorkspaceSection | None = None,
     ) -> None:
         bus = _create_bus_with_logging()
         self._bus = bus
         self._use_claude_agent = use_claude_agent
-        self._workspace = workspace
+        self._workspace_section = workspace_section
         self._loop = CodeReviewLoop(
             adapter=adapter,
             bus=bus,
@@ -307,6 +303,7 @@ class CodeReviewApp:
             override_tag=override_tag,
             use_podman=use_podman,
             use_claude_agent=use_claude_agent,
+            workspace_section=workspace_section,
         )
         bus.subscribe(MainLoopCompleted, self._on_loop_completed)
 
@@ -358,8 +355,8 @@ class CodeReviewApp:
 
     def _cleanup(self) -> None:
         """Clean up resources."""
-        if self._workspace is not None:
-            cleanup_workspace(self._workspace)
+        if self._workspace_section is not None:
+            self._workspace_section.cleanup()
             _LOGGER.info("Cleaned up Claude Agent workspace.")
 
 
@@ -400,9 +397,14 @@ def main() -> None:
     configure_logging()
 
     if args.claude_agent:
-        adapter, workspace = build_claude_agent_adapter()
+        # Create bus first since build_claude_agent_adapter needs it to materialize workspace
+        bus = _create_bus_with_logging()
+        adapter, workspace_section = build_claude_agent_adapter(bus)
         app = CodeReviewApp(
-            adapter, use_podman=False, use_claude_agent=True, workspace=workspace
+            adapter,
+            use_podman=False,
+            use_claude_agent=True,
+            workspace_section=workspace_section,
         )
     else:
         adapter = build_adapter()
@@ -419,22 +421,33 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
-def build_claude_agent_adapter() -> tuple[
-    ProviderAdapter[ReviewResponse], ClaudeAgentWorkspace
-]:
-    """Build the Claude Agent SDK adapter with workspace.
+def build_claude_agent_adapter(
+    bus: EventBus,
+) -> tuple[ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection]:
+    """Build the Claude Agent SDK adapter with workspace section.
 
-    Creates a workspace with the test repository mounted, and configures
+    Creates a workspace section with the test repository mounted, and configures
     the adapter to use the SDK's native agentic capabilities.
+
+    Args:
+        bus: Event bus for creating a temporary session to materialize the workspace.
+
+    Returns:
+        Tuple of (adapter, workspace_section). The workspace section should be
+        cloned with the real session before use in prompts.
     """
     if "ANTHROPIC_API_KEY" not in os.environ:
         raise SystemExit("Set ANTHROPIC_API_KEY before running with --claude-agent.")
 
     _ensure_test_repository_available()
 
-    # Create workspace with test repository mounted
+    # Create a temporary session for workspace materialization
+    temp_session = Session(bus=bus)
+
+    # Create workspace section with test repository mounted
     sunfish_path = TEST_REPOSITORIES_ROOT / "sunfish"
-    workspace = create_workspace(
+    workspace_section = ClaudeAgentWorkspaceSection(
+        session=temp_session,
         mounts=(
             ClaudeHostMount(
                 host_path=str(sunfish_path),
@@ -452,10 +465,10 @@ def build_claude_agent_adapter() -> tuple[
         model=model,
         client_config=ClaudeAgentSDKClientConfig(
             permission_mode="bypassPermissions",
-            cwd=str(workspace.temp_dir),
+            cwd=str(workspace_section.temp_dir),
         ),
     )
-    return cast(ProviderAdapter[ReviewResponse], adapter), workspace
+    return cast(ProviderAdapter[ReviewResponse], adapter), workspace_section
 
 
 def build_task_prompt(
@@ -463,30 +476,42 @@ def build_task_prompt(
     session: Session,
     use_podman: bool = False,
     use_claude_agent: bool = False,
+    workspace_section: ClaudeAgentWorkspaceSection | None = None,
 ) -> PromptTemplate[ReviewResponse]:
     """Builds the main prompt template for the code review agent.
 
     This prompt demonstrates progressive disclosure: the Reference Documentation
     section starts summarized and can be expanded on demand via `open_sections`.
 
-    For Claude Agent SDK mode, a simpler prompt is used since the SDK provides
-    its own tools (Read, Write, Bash, etc.) natively.
+    All modes now support full features including workspace optimization.
+
+    Args:
+        session: Session for state management.
+        use_podman: If True, use Podman sandbox instead of VFS.
+        use_claude_agent: If True, use Claude Agent SDK mode.
+        workspace_section: Pre-created workspace section (for Claude Agent mode).
+            Will be cloned with the provided session.
     """
     _ensure_test_repository_available()
 
     if use_claude_agent:
-        # Claude Agent SDK mode: use SDK-tailored guidance with custom MCP tools.
-        # Streaming mode enables progressive disclosure (open_sections) and planning tools.
-        # Note: WorkspaceDigestSection is omitted because the SDK uses native filesystem
-        # tools rather than VFS/Podman sections that the optimizer requires.
+        # Claude Agent SDK mode: full features with ClaudeAgentWorkspaceSection.
+        # Streaming mode enables hooks, MCP tool bridging, and workspace optimization.
+        # Clone the workspace section with the real session.
+        if workspace_section is None:
+            msg = "workspace_section is required when use_claude_agent=True"
+            raise ValueError(msg)
+        cloned_workspace = workspace_section.clone(session=session)
         sections = (
             _build_claude_agent_guidance_section(),
+            WorkspaceDigestSection(session=session),
             _build_reference_section(),  # Progressive disclosure section
             PlanningToolsSection(
                 session=session,
                 strategy=PlanningStrategy.PLAN_ACT_REFLECT,
                 accepts_overrides=True,
             ),
+            cloned_workspace,
             MarkdownSection[ReviewTurnParams](
                 title="Review Request",
                 template="${request}",
@@ -494,7 +519,7 @@ def build_task_prompt(
             ),
         )
     else:
-        # Standard mode: full prompt with workspace sections
+        # Standard mode: full prompt with VFS or Podman workspace sections
         workspace_sections = _build_workspace_section(
             session=session, use_podman=use_podman
         )

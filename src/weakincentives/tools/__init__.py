@@ -69,6 +69,7 @@ from .vfs import (
     WriteFile,
     WriteFileParams,
 )
+from .workspace import WorkspaceSection
 
 PodmanSandboxConfig: Any
 PodmanSandboxSection: Any
@@ -120,6 +121,7 @@ __all__ = [
     "VirtualFileSystem",
     "WorkspaceDigest",
     "WorkspaceDigestSection",
+    "WorkspaceSection",
     "WriteFile",
     "WriteFileParams",
     "clear_workspace_digest",

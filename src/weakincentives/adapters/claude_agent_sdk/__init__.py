@@ -23,16 +23,16 @@ Example:
     >>> from weakincentives.adapters.claude_agent_sdk import (
     ...     ClaudeAgentSDKAdapter,
     ...     ClaudeAgentSDKClientConfig,
-    ...     create_workspace,
-    ...     cleanup_workspace,
+    ...     ClaudeAgentWorkspaceSection,
     ...     HostMount,
     ... )
     >>>
     >>> bus = InProcessEventBus()
     >>> session = Session(bus=bus)
     >>>
-    >>> # Optional: create workspace with host files
-    >>> workspace = create_workspace(
+    >>> # Create workspace section with host files
+    >>> workspace = ClaudeAgentWorkspaceSection(
+    ...     session=session,
     ...     mounts=[HostMount(host_path="src")],
     ...     allowed_host_roots=["/home/user/project"],
     ... )
@@ -54,11 +54,12 @@ Example:
     ...             key="task",
     ...             template="Review the code in src/",
     ...         ),
+    ...         workspace,
     ...     ],
     ... )
     >>>
     >>> response = adapter.evaluate(prompt, session=session)
-    >>> cleanup_workspace(workspace)
+    >>> workspace.cleanup()
 """
 
 from __future__ import annotations
@@ -73,13 +74,11 @@ from .config import (
     SettingSource,
 )
 from .workspace import (
-    ClaudeAgentWorkspace,
+    ClaudeAgentWorkspaceSection,
     HostMount,
     HostMountPreview,
     WorkspaceBudgetExceededError,
     WorkspaceSecurityError,
-    cleanup_workspace,
-    create_workspace,
 )
 
 __all__ = [
@@ -87,7 +86,7 @@ __all__ = [
     "ClaudeAgentSDKAdapter",
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
-    "ClaudeAgentWorkspace",
+    "ClaudeAgentWorkspaceSection",
     "HostMount",
     "HostMountPreview",
     "PermissionMode",
@@ -96,6 +95,4 @@ __all__ = [
     "SettingSource",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
-    "cleanup_workspace",
-    "create_workspace",
 ]
