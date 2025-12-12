@@ -39,11 +39,19 @@ class ClaudeAgentSDKClientConfig:
         cwd: Working directory for SDK operations. None uses the current
             working directory.
         max_turns: Maximum number of conversation turns. None means unlimited.
+        suppress_stderr: If True, suppress stderr output from the Claude Code
+            CLI process. Useful for hiding bun-related errors or other CLI
+            noise in programmatic usage.
+        stop_on_structured_output: If True, stop execution immediately after
+            the StructuredOutput tool is called. This ensures the turn ends
+            cleanly after structured output is produced.
     """
 
     permission_mode: PermissionMode = "bypassPermissions"
     cwd: str | None = None
     max_turns: int | None = None
+    suppress_stderr: bool = True
+    stop_on_structured_output: bool = True
 
 
 @FrozenDataclass()

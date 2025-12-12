@@ -225,6 +225,8 @@ def create_pre_tool_use_hook(
 
 def create_post_tool_use_hook(
     hook_context: HookContext,
+    *,
+    stop_on_structured_output: bool = True,
 ) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording.
 
@@ -234,6 +236,8 @@ def create_post_tool_use_hook(
 
     Args:
         hook_context: Context with session and adapter references.
+        stop_on_structured_output: If True, return ``continue: false`` after
+            the StructuredOutput tool to end the turn immediately.
 
     Returns:
         An async hook callback function matching SDK signature.
@@ -317,6 +321,15 @@ def create_post_tool_use_hook(
                 "call_id": tool_use_id,
             },
         )
+
+        # Stop execution after StructuredOutput tool to end turn cleanly
+        if stop_on_structured_output and tool_name == "StructuredOutput":
+            logger.debug(
+                "claude_agent_sdk.hook.structured_output_stop",
+                event="hook.structured_output_stop",
+                context={"tool_name": tool_name},
+            )
+            return {"continue": False}
 
         return {}
 

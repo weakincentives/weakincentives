@@ -28,16 +28,22 @@ class TestClaudeAgentSDKClientConfig:
         assert config.permission_mode == "bypassPermissions"
         assert config.cwd is None
         assert config.max_turns is None
+        assert config.suppress_stderr is True
+        assert config.stop_on_structured_output is True
 
     def test_with_all_values(self) -> None:
         config = ClaudeAgentSDKClientConfig(
             permission_mode="acceptEdits",
             cwd="/home/user/project",
             max_turns=10,
+            suppress_stderr=False,
+            stop_on_structured_output=False,
         )
         assert config.permission_mode == "acceptEdits"
         assert config.cwd == "/home/user/project"
         assert config.max_turns == 10
+        assert config.suppress_stderr is False
+        assert config.stop_on_structured_output is False
 
 
 class TestClaudeAgentSDKModelConfig:

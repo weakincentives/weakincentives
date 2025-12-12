@@ -285,6 +285,42 @@ class TestPostToolUseHook:
         assert len(events) == 1
         assert len(events[0].rendered_output) == 1000
 
+    def test_stops_on_structured_output_by_default(self, session: Session) -> None:
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        assert result == {"continue": False}
+
+    def test_does_not_stop_on_structured_output_when_disabled(
+        self, session: Session
+    ) -> None:
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context, stop_on_structured_output=False)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        assert result == {}
+
 
 class TestUserPromptSubmitHook:
     def test_returns_empty_by_default(self, hook_context: HookContext) -> None:

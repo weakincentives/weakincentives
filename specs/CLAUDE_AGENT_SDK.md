@@ -189,13 +189,17 @@ class ClaudeAgentSDKClientConfig:
     permission_mode: PermissionMode = "bypassPermissions"
     cwd: str | None = None
     max_turns: int | None = None
+    suppress_stderr: bool = True
+    stop_on_structured_output: bool = True
 ```
 
 | Field | Default | Description |
-| ----------------- | --------------------- | ----------------------------- |
+| -------------------------- | --------------------- | ----------------------------------------- |
 | `permission_mode` | `"bypassPermissions"` | Tool permission handling |
 | `cwd` | `None` | Working directory for SDK ops |
 | `max_turns` | `None` | Maximum conversation turns |
+| `suppress_stderr` | `True` | Suppress CLI stderr (hides bun errors) |
+| `stop_on_structured_output` | `True` | End turn after StructuredOutput tool call |
 
 ### PermissionMode
 

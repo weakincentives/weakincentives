@@ -362,9 +362,16 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 "wink": mcp_server_config,
             }
 
+        # Suppress stderr if configured (hides bun errors and CLI noise)
+        if self._client_config.suppress_stderr:
+            options_kwargs["stderr"] = lambda _: None
+
         # Create async hook callbacks
         pre_hook = create_pre_tool_use_hook(hook_context)
-        post_hook = create_post_tool_use_hook(hook_context)
+        post_hook = create_post_tool_use_hook(
+            hook_context,
+            stop_on_structured_output=self._client_config.stop_on_structured_output,
+        )
         stop_hook_fn = create_stop_hook(hook_context)
         prompt_hook = create_user_prompt_submit_hook(hook_context)
 
