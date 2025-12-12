@@ -25,6 +25,7 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Literal,
+    Union as _TypingUnion,  # pyright: ignore[reportDeprecated]
     cast,
     get_args as typing_get_args,
     get_origin,
@@ -44,6 +45,9 @@ from ._utils import (
     _set_extras,
     _type_identifier,
 )
+
+# typing.Union origin (for Optional[X] and Union[X, Y] constructs from type aliases)
+_TYPING_UNION = _TypingUnion
 
 get_args = typing_get_args
 
@@ -102,6 +106,11 @@ _PRIMITIVE_COERCERS: dict[type[object], Callable[[object], object]] = cast(
 )
 
 
+def _is_union_type(origin: object) -> bool:
+    """Check if origin is a union type (either types.UnionType or typing.Union)."""
+    return origin is _UNION_TYPE or origin is _TYPING_UNION
+
+
 def _coerce_union(
     value: object,
     base_type: object,
@@ -110,7 +119,7 @@ def _coerce_union(
     config: _ParseConfig,
 ) -> object:
     origin = get_origin(base_type)
-    if origin is not _UNION_TYPE:
+    if not _is_union_type(origin):
         return _NOT_HANDLED
     if (
         config.coerce
