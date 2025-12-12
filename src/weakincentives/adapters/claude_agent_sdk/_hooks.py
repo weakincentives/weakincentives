@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -30,12 +31,84 @@ __all__ = [
     "AsyncHookCallback",
     "HookCallback",
     "HookContext",
+    "PostToolUseInput",
+    "ToolResponse",
     "create_post_tool_use_hook",
     "create_pre_tool_use_hook",
     "create_stop_hook",
     "create_user_prompt_submit_hook",
     "safe_hook_wrapper",
 ]
+
+
+@dataclass(slots=True, frozen=True)
+class ToolResponse:
+    """Typed representation of SDK tool response.
+
+    The SDK returns tool responses with stdout/stderr for shell tools
+    and other metadata about the execution.
+    """
+
+    stdout: str = ""
+    stderr: str = ""
+    interrupted: bool = False
+    is_image: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ToolResponse:
+        """Parse a dict into a ToolResponse, with best-effort field mapping."""
+        if data is None:
+            return cls()
+        return cls(
+            stdout=str(data.get("stdout", "")),
+            stderr=str(data.get("stderr", "")),
+            interrupted=bool(data.get("interrupted", False)),
+            is_image=bool(data.get("isImage", False)),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class PostToolUseInput:
+    """Typed representation of PostToolUse hook input.
+
+    Mirrors the SDK's PostToolUseHookInput TypedDict but as a frozen dataclass
+    for immutability and better type safety.
+    """
+
+    session_id: str
+    tool_name: str
+    tool_input: dict[str, Any]
+    tool_response: ToolResponse
+    cwd: str = ""
+    transcript_path: str = ""
+    permission_mode: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> PostToolUseInput | None:
+        """Parse a dict into PostToolUseInput, returning None if required fields missing."""
+        if data is None or not isinstance(data, dict):
+            return None
+        # Check required fields
+        if "tool_name" not in data:
+            return None
+        raw_response = data.get("tool_response")
+        if isinstance(raw_response, dict):
+            response = ToolResponse.from_dict(raw_response)
+        else:
+            # Handle non-dict responses (e.g., plain strings)
+            response = ToolResponse(stdout=str(raw_response) if raw_response else "")
+        return cls(
+            session_id=str(data.get("session_id", "")),
+            tool_name=str(data.get("tool_name", "")),
+            tool_input=data.get("tool_input", {})
+            if isinstance(data.get("tool_input"), dict)
+            else {},
+            tool_response=response,
+            cwd=str(data.get("cwd", "")),
+            transcript_path=str(data.get("transcript_path", "")),
+            permission_mode=data.get("permission_mode"),
+        )
+
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "sdk_hooks"})
 
@@ -155,7 +228,9 @@ def create_post_tool_use_hook(
 ) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording.
 
-    The hook publishes ToolInvoked events to the session bus.
+    The hook publishes ToolInvoked events to the session bus. It attempts to
+    parse the input data into typed dataclasses (PostToolUseInput, ToolResponse)
+    for better type safety, falling back to dict access if parsing fails.
 
     Args:
         hook_context: Context with session and adapter references.
@@ -171,42 +246,63 @@ def create_post_tool_use_hook(
     ) -> dict[str, Any]:
         _ = sdk_context
 
-        tool_name = (
-            input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
-        )
-        tool_input = (
-            input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
-        )
-        # SDK provides tool_response, not tool_output
-        tool_response = (
-            input_data.get("tool_response", {}) if isinstance(input_data, dict) else {}
-        )
-        # Check for error in the response
-        tool_error = (
-            tool_response.get("stderr")
-            if isinstance(tool_response, dict) and tool_response.get("stderr")
-            else None
-        )
+        # Attempt to parse into typed dataclass
+        parsed = PostToolUseInput.from_dict(input_data)
+
+        if parsed is not None:
+            # Use typed access
+            tool_name = parsed.tool_name
+            tool_input = parsed.tool_input
+            response = parsed.tool_response
+            tool_error = response.stderr if response.stderr else None
+            output_text = response.stdout or str(response)
+            # Store the ToolResponse dataclass as the result value
+            result_value: Any = response
+            result_raw: Any = (
+                input_data.get("tool_response") if isinstance(input_data, dict) else {}
+            )
+        else:
+            # Fallback to dict access for malformed input
+            tool_name = (
+                input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
+            )
+            tool_input = (
+                input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
+            )
+            tool_response_raw = (
+                input_data.get("tool_response", {})
+                if isinstance(input_data, dict)
+                else {}
+            )
+            tool_error = (
+                tool_response_raw.get("stderr")
+                if isinstance(tool_response_raw, dict)
+                and tool_response_raw.get("stderr")
+                else None
+            )
+            if isinstance(tool_response_raw, dict):
+                output_text = tool_response_raw.get("stdout", "") or str(
+                    tool_response_raw
+                )
+            elif tool_response_raw is not None:
+                output_text = str(tool_response_raw)
+            else:
+                output_text = ""
+            result_value = None
+            result_raw = tool_response_raw
 
         hook_context._tool_count += 1
-
-        output_text = ""
-        if isinstance(tool_response, dict):
-            # Prefer stdout for Bash tools, otherwise stringify the response
-            output_text = tool_response.get("stdout", "") or str(tool_response)
-        elif tool_response is not None:
-            output_text = str(tool_response)
 
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
             name=tool_name,
             params=tool_input,
-            result=tool_response,
+            result=result_raw,
             session_id=None,
             created_at=_utcnow(),
             usage=None,
-            value=None,
+            value=result_value,
             rendered_output=output_text[:1000] if output_text else "",
             call_id=tool_use_id,
         )

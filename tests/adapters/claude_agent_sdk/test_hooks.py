@@ -23,6 +23,8 @@ import pytest
 from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
+    PostToolUseInput,
+    ToolResponse,
     create_post_tool_use_hook,
     create_pre_tool_use_hook,
     create_stop_hook,
@@ -394,3 +396,224 @@ class TestSafeHookWrapper:
         )
 
         assert result == {}
+
+
+class TestToolResponse:
+    def test_from_dict_with_all_fields(self) -> None:
+        data = {
+            "stdout": "hello world",
+            "stderr": "warning",
+            "interrupted": True,
+            "isImage": False,
+        }
+        response = ToolResponse.from_dict(data)
+
+        assert response.stdout == "hello world"
+        assert response.stderr == "warning"
+        assert response.interrupted is True
+        assert response.is_image is False
+
+    def test_from_dict_with_none(self) -> None:
+        response = ToolResponse.from_dict(None)
+
+        assert response.stdout == ""
+        assert response.stderr == ""
+        assert response.interrupted is False
+        assert response.is_image is False
+
+    def test_from_dict_with_partial_fields(self) -> None:
+        data = {"stdout": "output"}
+        response = ToolResponse.from_dict(data)
+
+        assert response.stdout == "output"
+        assert response.stderr == ""
+        assert response.interrupted is False
+        assert response.is_image is False
+
+    def test_is_frozen(self) -> None:
+        response = ToolResponse(stdout="test")
+        with pytest.raises(AttributeError):
+            response.stdout = "modified"  # type: ignore[misc]
+
+
+class TestPostToolUseInput:
+    def test_from_dict_with_full_input(self) -> None:
+        data = {
+            "session_id": "sess-123",
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "file contents", "stderr": ""},
+            "cwd": "/home/user",
+            "transcript_path": "/path/to/transcript",
+            "permission_mode": "bypassPermissions",
+        }
+        parsed = PostToolUseInput.from_dict(data)
+
+        assert parsed is not None
+        assert parsed.session_id == "sess-123"
+        assert parsed.tool_name == "Read"
+        assert parsed.tool_input == {"path": "/test.txt"}
+        assert parsed.tool_response.stdout == "file contents"
+        assert parsed.cwd == "/home/user"
+        assert parsed.permission_mode == "bypassPermissions"
+
+    def test_from_dict_with_none(self) -> None:
+        assert PostToolUseInput.from_dict(None) is None
+
+    def test_from_dict_with_non_dict(self) -> None:
+        assert PostToolUseInput.from_dict("not a dict") is None  # type: ignore[arg-type]
+
+    def test_from_dict_missing_tool_name(self) -> None:
+        data = {"session_id": "sess-123", "tool_input": {}}
+        assert PostToolUseInput.from_dict(data) is None
+
+    def test_from_dict_with_non_dict_tool_response(self) -> None:
+        data = {
+            "tool_name": "Echo",
+            "tool_response": "plain string output",
+        }
+        parsed = PostToolUseInput.from_dict(data)
+
+        assert parsed is not None
+        assert parsed.tool_response.stdout == "plain string output"
+
+    def test_from_dict_with_none_tool_response(self) -> None:
+        data = {
+            "tool_name": "Echo",
+            "tool_response": None,
+        }
+        parsed = PostToolUseInput.from_dict(data)
+
+        assert parsed is not None
+        assert parsed.tool_response.stdout == ""
+
+    def test_is_frozen(self) -> None:
+        parsed = PostToolUseInput(
+            session_id="sess",
+            tool_name="Test",
+            tool_input={},
+            tool_response=ToolResponse(),
+        )
+        with pytest.raises(AttributeError):
+            parsed.tool_name = "modified"  # type: ignore[misc]
+
+
+class TestPostToolUseHookWithTypedParsing:
+    def test_publishes_event_with_typed_value(self, session: Session) -> None:
+        """Test that hook parses input into typed ToolResponse and stores as value."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        # Full SDK-format input
+        input_data = {
+            "session_id": "sess-123",
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {
+                "stdout": "file contents",
+                "stderr": "",
+                "interrupted": False,
+                "isImage": False,
+            },
+            "cwd": "/home",
+            "transcript_path": "/transcript",
+        }
+
+        asyncio.run(hook(input_data, "call-typed", context))
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.name == "Read"
+        # value should be a ToolResponse dataclass
+        assert isinstance(event.value, ToolResponse)
+        assert event.value.stdout == "file contents"
+        assert event.value.stderr == ""
+        # result should be the raw dict
+        assert event.result == {
+            "stdout": "file contents",
+            "stderr": "",
+            "interrupted": False,
+            "isImage": False,
+        }
+
+    def test_fallback_when_missing_tool_name(self, session: Session) -> None:
+        """Test fallback to dict access when parsing fails (missing required field)."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        # Malformed input missing tool_name
+        input_data = {
+            "tool_input": {"key": "value"},
+            "tool_response": {"stdout": "output"},
+        }
+
+        asyncio.run(hook(input_data, "call-fallback", context))
+
+        assert len(events) == 1
+        event = events[0]
+        # Falls back to dict access, tool_name defaults to ""
+        assert event.name == ""
+        # value should be None when parsing fails
+        assert event.value is None
+
+    def test_fallback_with_string_tool_response(self, session: Session) -> None:
+        """Test fallback when parsing fails and tool_response is a string."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        # Missing tool_name causes parsing failure, and tool_response is a string
+        input_data = {
+            "tool_input": {"key": "value"},
+            "tool_response": "string output",  # Non-dict
+        }
+
+        asyncio.run(hook(input_data, "call-string", context))
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.name == ""
+        assert event.rendered_output == "string output"
+        assert event.value is None
+
+    def test_fallback_with_none_tool_response(self, session: Session) -> None:
+        """Test fallback when parsing fails and tool_response is None."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        # Missing tool_name causes parsing failure, and tool_response is None
+        input_data = {
+            "tool_input": {"key": "value"},
+            "tool_response": None,
+        }
+
+        asyncio.run(hook(input_data, "call-none", context))
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.name == ""
+        assert event.rendered_output == ""
+        assert event.value is None
