@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -90,7 +91,7 @@ class TestPreToolUseHook:
         hook = create_pre_tool_use_hook(hook_context)
         input_data = {"tool_name": "Read", "tool_input": {"path": "/test"}}
 
-        result = hook(input_data, "call-123", hook_context)
+        result = asyncio.run(hook(input_data, "call-123", hook_context))
 
         assert result == {}
 
@@ -111,7 +112,7 @@ class TestPreToolUseHook:
         hook = create_pre_tool_use_hook(context)
         input_data = {"tool_name": "Read"}
 
-        result = hook(input_data, "call-123", context)
+        result = asyncio.run(hook(input_data, "call-123", context))
 
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         assert "Deadline exceeded" in result.get("hookSpecificOutput", {}).get(
@@ -134,7 +135,7 @@ class TestPreToolUseHook:
         hook = create_pre_tool_use_hook(context)
         input_data = {"tool_name": "Read"}
 
-        result = hook(input_data, "call-123", context)
+        result = asyncio.run(hook(input_data, "call-123", context))
 
         assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         assert "budget exhausted" in result.get("hookSpecificOutput", {}).get(
@@ -157,7 +158,7 @@ class TestPreToolUseHook:
         hook = create_pre_tool_use_hook(context)
         input_data = {"tool_name": "Read"}
 
-        result = hook(input_data, "call-123", context)
+        result = asyncio.run(hook(input_data, "call-123", context))
 
         assert result == {}
 
@@ -179,7 +180,7 @@ class TestPostToolUseHook:
             "tool_output": {"content": "file contents"},
         }
 
-        hook(input_data, "call-123", context)
+        asyncio.run(hook(input_data, "call-123", context))
 
         assert len(events) == 1
         event = events[0]
@@ -194,17 +195,21 @@ class TestPostToolUseHook:
 
         assert hook_context._tool_count == 0
 
-        hook(
-            {"tool_name": "Read", "tool_input": {}, "tool_output": {}},
-            None,
-            hook_context,
+        asyncio.run(
+            hook(
+                {"tool_name": "Read", "tool_input": {}, "tool_output": {}},
+                None,
+                hook_context,
+            )
         )
         assert hook_context._tool_count == 1
 
-        hook(
-            {"tool_name": "Write", "tool_input": {}, "tool_output": {}},
-            None,
-            hook_context,
+        asyncio.run(
+            hook(
+                {"tool_name": "Write", "tool_input": {}, "tool_output": {}},
+                None,
+                hook_context,
+            )
         )
         assert hook_context._tool_count == 2
 
@@ -225,7 +230,7 @@ class TestPostToolUseHook:
             "tool_error": "File not found",
         }
 
-        hook(input_data, "call-456", context)
+        asyncio.run(hook(input_data, "call-456", context))
 
         assert len(events) == 1
         event = events[0]
@@ -249,7 +254,7 @@ class TestPostToolUseHook:
             "tool_output": long_output,
         }
 
-        hook(input_data, None, context)
+        asyncio.run(hook(input_data, None, context))
 
         assert len(events) == 1
         assert len(events[0].rendered_output) == 1000
@@ -260,7 +265,7 @@ class TestUserPromptSubmitHook:
         hook = create_user_prompt_submit_hook(hook_context)
         input_data = {"prompt": "Do something"}
 
-        result = hook(input_data, None, hook_context)
+        result = asyncio.run(hook(input_data, None, hook_context))
 
         assert result == {}
 
@@ -272,7 +277,7 @@ class TestStopHook:
 
         assert hook_context.stop_reason is None
 
-        hook(input_data, None, hook_context)
+        asyncio.run(hook(input_data, None, hook_context))
 
         assert hook_context.stop_reason == "tool_use"
 
@@ -280,7 +285,7 @@ class TestStopHook:
         hook = create_stop_hook(hook_context)
         input_data = {}
 
-        hook(input_data, None, hook_context)
+        asyncio.run(hook(input_data, None, hook_context))
 
         assert hook_context.stop_reason == "end_turn"
 

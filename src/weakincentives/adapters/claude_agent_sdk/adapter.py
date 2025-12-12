@@ -30,7 +30,7 @@ from ...serde import parse, schema
 from .._names import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ._async_utils import run_async
-from ._bridge import create_bridged_tools
+from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
 from ._hooks import (
     HookContext,
@@ -314,8 +314,9 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         bridged_tools: tuple[Any, ...],
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
-        # Import the SDK's options type
-        from claude_agent_sdk.types import ClaudeAgentOptions
+        # Import the SDK's types
+        from claude_agent_sdk import ClaudeSDKClient
+        from claude_agent_sdk.types import ClaudeAgentOptions, HookMatcher
 
         # Build options dict then convert to ClaudeAgentOptions
         options_kwargs: dict[str, Any] = {
@@ -340,31 +341,49 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         if self._disallowed_tools:
             options_kwargs["disallowed_tools"] = list(self._disallowed_tools)
 
-        # Apply model config parameters (temperature, max_tokens)
-        model_params = self._model_config.to_request_params()
-        if model_params:
-            # max_tokens maps to max_thinking_tokens in SDK
-            if "max_tokens" in model_params:
-                options_kwargs["max_thinking_tokens"] = model_params.pop("max_tokens")
-            # temperature is not directly supported in ClaudeAgentOptions
-            model_params.pop("temperature", None)
+        # Apply model config parameters
+        # Note: The Claude Agent SDK does not expose max_tokens or temperature
+        # parameters directly. It manages token budgets internally. The
+        # max_thinking_tokens option is for extended thinking mode, which
+        # requires a minimum of ~2000 tokens. For now, we simply ignore
+        # max_tokens and temperature from model_config as they don't map
+        # cleanly to SDK options.
+        _ = self._model_config  # Model config applied via model name only
 
+        # Register custom tools via MCP server if any are provided
+        if bridged_tools:
+            # create_mcp_server returns an McpSdkServerConfig directly
+            mcp_server_config = create_mcp_server(bridged_tools)
+            options_kwargs["mcp_servers"] = {
+                "weakincentives": mcp_server_config,
+            }
+
+        # Create async hook callbacks
         pre_hook = create_pre_tool_use_hook(hook_context)
         post_hook = create_post_tool_use_hook(hook_context)
         stop_hook_fn = create_stop_hook(hook_context)
         prompt_hook = create_user_prompt_submit_hook(hook_context)
 
-        _ = pre_hook
-        _ = post_hook
-        _ = stop_hook_fn
-        _ = prompt_hook
-        _ = bridged_tools
+        # Build hooks dict with HookMatcher wrappers
+        # matcher=None matches all tools
+        options_kwargs["hooks"] = {
+            "PreToolUse": [HookMatcher(matcher=None, hooks=[pre_hook])],
+            "PostToolUse": [HookMatcher(matcher=None, hooks=[post_hook])],
+            "Stop": [HookMatcher(matcher=None, hooks=[stop_hook_fn])],
+            "UserPromptSubmit": [HookMatcher(matcher=None, hooks=[prompt_hook])],
+        }
 
         options = ClaudeAgentOptions(**options_kwargs)
 
-        return [
-            message async for message in sdk.query(prompt=prompt_text, options=options)
-        ]
+        # Use ClaudeSDKClient instead of sdk.query() - hooks only work with client
+        # The client is an async context manager that requires:
+        # 1. connect() via __aenter__
+        # 2. query() to send the prompt
+        # 3. receive_messages() or receive_response() to get responses
+        client = ClaudeSDKClient(options=options)
+        async with client:
+            await client.query(prompt=prompt_text)
+            return [message async for message in client.receive_messages()]
 
     def _build_output_format(
         self,

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ...runtime.session.protocols import SessionProtocol
 
 __all__ = [
+    "AsyncHookCallback",
     "HookCallback",
     "HookContext",
     "create_post_tool_use_hook",
@@ -43,6 +44,12 @@ HookCallback = Callable[
     dict[str, Any],
 ]
 """Type alias for synchronous hook callbacks."""
+
+AsyncHookCallback = Callable[
+    [Any, str | None, Any],
+    Awaitable[dict[str, Any]],
+]
+"""Type alias for async hook callbacks matching SDK signature."""
 
 
 class HookContext:
@@ -72,7 +79,7 @@ def _utcnow() -> datetime:
 
 def create_pre_tool_use_hook(
     hook_context: HookContext,
-) -> HookCallback:
+) -> AsyncHookCallback:
     """Create a PreToolUse hook for constraint enforcement.
 
     The hook checks deadlines and budgets before tool execution, blocking
@@ -82,18 +89,20 @@ def create_pre_tool_use_hook(
         hook_context: Context with session, deadline, and budget references.
 
     Returns:
-        A hook callback function.
+        An async hook callback function matching SDK signature.
     """
 
-    def pre_tool_use_hook(
-        input_data: dict[str, Any],
+    async def pre_tool_use_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
-        context: HookContext,
+        sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         _ = tool_use_id
-        _ = context
+        _ = sdk_context
 
-        tool_name = input_data.get("tool_name", "")
+        tool_name = (
+            input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
+        )
 
         if (
             hook_context.deadline
@@ -143,7 +152,7 @@ def create_pre_tool_use_hook(
 
 def create_post_tool_use_hook(
     hook_context: HookContext,
-) -> HookCallback:
+) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording.
 
     The hook publishes ToolInvoked events to the session bus.
@@ -152,20 +161,28 @@ def create_post_tool_use_hook(
         hook_context: Context with session and adapter references.
 
     Returns:
-        A hook callback function.
+        An async hook callback function matching SDK signature.
     """
 
-    def post_tool_use_hook(
-        input_data: dict[str, Any],
+    async def post_tool_use_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
-        context: HookContext,
+        sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
-        _ = context
+        _ = sdk_context
 
-        tool_name = input_data.get("tool_name", "")
-        tool_input = input_data.get("tool_input", {})
-        tool_output = input_data.get("tool_output", {})
-        tool_error = input_data.get("tool_error")
+        tool_name = (
+            input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
+        )
+        tool_input = (
+            input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
+        )
+        tool_output = (
+            input_data.get("tool_output", {}) if isinstance(input_data, dict) else {}
+        )
+        tool_error = (
+            input_data.get("tool_error") if isinstance(input_data, dict) else None
+        )
 
         hook_context._tool_count += 1
 
@@ -207,7 +224,7 @@ def create_post_tool_use_hook(
 
 def create_user_prompt_submit_hook(
     hook_context: HookContext,
-) -> HookCallback:
+) -> AsyncHookCallback:
     """Create a UserPromptSubmit hook for context injection.
 
     Currently a no-op placeholder for future session context injection.
@@ -216,17 +233,17 @@ def create_user_prompt_submit_hook(
         hook_context: Context with session references.
 
     Returns:
-        A hook callback function.
+        An async hook callback function matching SDK signature.
     """
 
-    def user_prompt_submit_hook(
-        input_data: dict[str, Any],
+    async def user_prompt_submit_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
-        context: HookContext,
+        sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         _ = input_data
         _ = tool_use_id
-        _ = context
+        _ = sdk_context
         _ = hook_context
         return {}
 
@@ -235,7 +252,7 @@ def create_user_prompt_submit_hook(
 
 def create_stop_hook(
     hook_context: HookContext,
-) -> HookCallback:
+) -> AsyncHookCallback:
     """Create a Stop hook for execution finalization.
 
     Records the stop reason for later use in result construction.
@@ -244,18 +261,22 @@ def create_stop_hook(
         hook_context: Context to record stop reason.
 
     Returns:
-        A hook callback function.
+        An async hook callback function matching SDK signature.
     """
 
-    def stop_hook(
-        input_data: dict[str, Any],
+    async def stop_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
-        context: HookContext,
+        sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         _ = tool_use_id
-        _ = context
+        _ = sdk_context
 
-        stop_reason = input_data.get("stopReason", "end_turn")
+        stop_reason = (
+            input_data.get("stopReason", "end_turn")
+            if isinstance(input_data, dict)
+            else "end_turn"
+        )
         hook_context.stop_reason = stop_reason
 
         logger.debug(
