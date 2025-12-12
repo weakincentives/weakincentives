@@ -12,37 +12,38 @@ Claude Code's native tools.
 
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        ClaudeAgentSDKAdapter                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────┐    ┌──────────────────────────────────────────────────┐   │
-│  │   Prompt    │    │              sdk.query() streaming               │   │
-│  │  Rendering  │───▶│                                                  │   │
-│  └─────────────┘    │  ┌────────────────────────────────────────────┐  │   │
-│                     │  │           SDK Agentic Loop                 │  │   │
-│  ┌─────────────┐    │  │                                            │  │   │
-│  │   Session   │◀───┼──┼──  PreToolUse ──▶ Tool Exec                │  │   │
-│  │   (Events)  │    │  │       │               │                    │  │   │
-│  │             │◀───┼──┼── PostToolUse ◀───────┤                    │  │   │
-│  │             │◀───┼──┼──    Stop    ◀─── End │                    │  │   │
-│  └─────────────┘    │  └───────────────────────┼────────────────────┘  │   │
-│                     └──────────────────────────┼───────────────────────┘   │
-│                                                │                           │
-│                     ┌──────────────────────────┴───────────────────────┐   │
-│                     │                   Tools                          │   │
-│                     ├──────────────────────────────────────────────────┤   │
-│                     │  Native (Read, Write, Bash, ...)                 │   │
-│                     │       └── Executed by Claude Code CLI            │   │
-│                     │                                                  │   │
-│                     │  Custom (via MCP Server "wink")                  │   │
-│                     │       └── Planning tools, VFS, etc.              │   │
-│                     │       └── Bridged via in-process MCP server      │   │
-│                     └──────────────────────────────────────────────────┘   │
-│                                                                             │
-│  Output: PromptResponse[OutputT] with structured output + events published  │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Adapter["ClaudeAgentSDKAdapter"]
+        Prompt["Prompt<br/>Rendering"]
+        Session["Session<br/>(Events)"]
+
+        subgraph Streaming["sdk.query() streaming"]
+            subgraph Loop["SDK Agentic Loop"]
+                PreToolUse["PreToolUse"]
+                ToolExec["Tool Exec"]
+                PostToolUse["PostToolUse"]
+                Stop["Stop"]
+                LoopEnd["End"]
+            end
+        end
+
+        subgraph Tools["Tools"]
+            Native["Native (Read, Write, Bash, ...)<br/>Executed by Claude Code CLI"]
+            Custom["Custom (via MCP Server 'wink')<br/>Planning tools, VFS, etc.<br/>Bridged via in-process MCP server"]
+        end
+
+        Output["Output: PromptResponse〈OutputT〉<br/>with structured output + events published"]
+    end
+
+    Prompt --> Streaming
+    PreToolUse --> ToolExec
+    ToolExec --> PostToolUse
+    LoopEnd --> Stop
+    PreToolUse -.-> Session
+    PostToolUse -.-> Session
+    Stop -.-> Session
+    ToolExec --> Tools
 ```
 
 ## SDK API Selection
@@ -76,33 +77,27 @@ messages = [msg async for msg in sdk.query(prompt=stream_prompt(), options=optio
 
 ### Hook Event Flow
 
-```
-Prompt submitted
-       │
-       ▼
-┌──────────────────┐
-│ UserPromptSubmit │  (placeholder - no-op currently)
-└──────────────────┘
-       │
-       ▼
-┌──────────────────┐
-│   PreToolUse     │──▶ Check deadline/budget, deny if violated
-└──────────────────┘
-       │
-       ▼
-┌──────────────────┐
-│ Tool Execution   │    (SDK handles natively)
-└──────────────────┘
-       │
-       ▼
-┌──────────────────┐
-│   PostToolUse    │──▶ Publish ToolInvoked event to session bus
-└──────────────────┘
-       │
-       ▼
-┌──────────────────┐
-│      Stop        │──▶ Record stop reason
-└──────────────────┘
+```mermaid
+flowchart TD
+    Submit["Prompt submitted"]
+    UserPromptSubmit["UserPromptSubmit<br/>(placeholder - no-op currently)"]
+    PreToolUse["PreToolUse"]
+    ToolExecution["Tool Execution<br/>(SDK handles natively)"]
+    PostToolUse["PostToolUse"]
+    Stop["Stop"]
+
+    CheckDeadline["Check deadline/budget,<br/>deny if violated"]
+    PublishEvent["Publish ToolInvoked event<br/>to session bus"]
+    RecordStop["Record stop reason"]
+
+    Submit --> UserPromptSubmit
+    UserPromptSubmit --> PreToolUse
+    PreToolUse --> ToolExecution
+    PreToolUse -.- CheckDeadline
+    ToolExecution --> PostToolUse
+    PostToolUse -.- PublishEvent
+    PostToolUse --> Stop
+    Stop -.- RecordStop
 ```
 
 ### HookContext
