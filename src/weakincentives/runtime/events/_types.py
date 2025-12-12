@@ -45,6 +45,23 @@ class EventBus(Protocol):
         ...
 
 
+# Type aliases to clarify bus usage patterns.
+#
+# ControlBus: Used by MainLoop for request/response orchestration
+# (MainLoopRequest, MainLoopCompleted, MainLoopFailed events).
+#
+# TelemetryBus: Used by adapters and sessions for observability
+# (PromptRendered, ToolInvoked, PromptExecuted events).
+#
+# Both aliases resolve to EventBus at runtime; the distinction is semantic.
+
+type ControlBus = EventBus
+"""EventBus used for MainLoop request/response control flow."""
+
+type TelemetryBus = EventBus
+"""EventBus used for session telemetry and adapter observability events."""
+
+
 @FrozenDataclass()
 class HandlerFailure:
     """Container describing a handler error captured during publish."""
@@ -125,10 +142,12 @@ class ToolInvoked:
 
 
 __all__ = [
+    "ControlBus",
     "EventBus",
     "EventHandler",
     "HandlerFailure",
     "PublishResult",
+    "TelemetryBus",
     "TokenUsage",
     "ToolInvoked",
 ]

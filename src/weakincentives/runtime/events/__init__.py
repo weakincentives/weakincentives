@@ -24,10 +24,12 @@ from ...adapters._names import AdapterName
 from ...dataclasses import FrozenDataclass
 from ..logging import StructuredLogger, get_logger
 from ._types import (
+    ControlBus,
     EventBus,
     EventHandler,
     HandlerFailure,
     PublishResult,
+    TelemetryBus,
     TokenUsage,
     ToolInvoked,
 )
@@ -133,12 +135,14 @@ class PromptRendered:
 
 
 __all__ = [
+    "ControlBus",
     "EventBus",
     "HandlerFailure",
     "InProcessEventBus",
     "PromptExecuted",
     "PromptRendered",
     "PublishResult",
+    "TelemetryBus",
     "TokenUsage",
     "ToolInvoked",
 ]

@@ -25,7 +25,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt._visibility import SectionVisibility
 from ..prompt.errors import SectionPath, VisibilityExpansionRequired
-from .events._types import EventBus
+from .events._types import ControlBus
 from .session import Session
 
 if TYPE_CHECKING:
@@ -104,7 +104,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
             def __init__(
-                self, *, adapter: ProviderAdapter[ReviewResult], bus: EventBus
+                self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlBus
             ) -> None:
                 super().__init__(adapter=adapter, bus=bus)
                 self._template = PromptTemplate[ReviewResult](
@@ -129,21 +129,21 @@ class MainLoop[UserRequestT, OutputT](ABC):
     """
 
     _adapter: ProviderAdapter[OutputT]
-    _bus: EventBus
+    _bus: ControlBus
     _config: MainLoopConfig
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        bus: EventBus,
+        bus: ControlBus,
         config: MainLoopConfig | None = None,
     ) -> None:
         """Initialize the MainLoop with an adapter, bus, and optional config.
 
         Args:
             adapter: Provider adapter for prompt evaluation.
-            bus: Event bus for request/response event routing.
+            bus: Control bus for request/response event routing.
             config: Optional configuration for default deadline/budget.
         """
         super().__init__()

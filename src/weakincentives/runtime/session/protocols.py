@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol, Self, overload
 
 from ...prompt._types import SupportsDataclass
-from ..events._types import EventBus
+from ..events._types import TelemetryBus
 from ._observer_types import SliceObserver, Subscription
 from .snapshots import Snapshot
 
@@ -35,7 +35,7 @@ class SessionProtocol(Protocol):
     def snapshot(self) -> SnapshotProtocol: ...
 
     @property
-    def event_bus(self) -> EventBus: ...
+    def event_bus(self) -> TelemetryBus: ...
 
     def select_all(
         self, slice_type: type[SupportsDataclass]

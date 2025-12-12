@@ -26,7 +26,7 @@ from uuid import UUID, uuid4
 
 from ...dbc import invariant
 from ...prompt._types import SupportsDataclass
-from ..events import EventBus, PromptExecuted, PromptRendered, ToolInvoked
+from ..events import PromptExecuted, PromptRendered, TelemetryBus, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ._observer_types import SliceObserver, Subscription
 from ._slice_types import SessionSlice, SessionSliceType
@@ -161,7 +161,7 @@ class Session(SessionProtocol):
     def __init__(
         self,
         *,
-        bus: EventBus | None = None,
+        bus: TelemetryBus | None = None,
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -182,7 +182,7 @@ class Session(SessionProtocol):
         if bus is None:
             from ..events import InProcessEventBus
 
-            self._bus: EventBus = InProcessEventBus()
+            self._bus: TelemetryBus = InProcessEventBus()
         else:
             self._bus = bus
 
@@ -209,7 +209,7 @@ class Session(SessionProtocol):
     def clone(
         self,
         *,
-        bus: EventBus,
+        bus: TelemetryBus,
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -454,8 +454,8 @@ class Session(SessionProtocol):
 
     @property
     @override
-    def event_bus(self) -> EventBus:
-        """Return the event bus backing this session."""
+    def event_bus(self) -> TelemetryBus:
+        """Return the telemetry bus backing this session."""
 
         return self._bus
 
@@ -679,7 +679,7 @@ class Session(SessionProtocol):
                         },
                     )
 
-    def _attach_to_bus(self, bus: EventBus) -> None:
+    def _attach_to_bus(self, bus: TelemetryBus) -> None:
         with self.locked():
             if self._subscriptions_attached and self._bus is bus:
                 return
