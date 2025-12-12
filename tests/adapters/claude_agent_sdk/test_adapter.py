@@ -14,11 +14,11 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, AsyncIterable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -107,10 +107,29 @@ class MockSDKQuery:
 
     @classmethod
     async def query(
-        cls, *, prompt: str, options: MockClaudeAgentOptions
+        cls,
+        *,
+        prompt: str | AsyncIterable[dict[str, Any]],
+        options: MockClaudeAgentOptions,
     ) -> AsyncGenerator[object, None]:
-        """Mock sdk.query() that yields configured results."""
-        cls.captured_prompts.append(prompt)
+        """Mock sdk.query() that yields configured results.
+
+        Handles both string prompts (legacy) and AsyncIterable prompts (streaming mode).
+        For AsyncIterable prompts, consumes the generator and extracts the user message content.
+        """
+        # Handle AsyncIterable prompts (streaming mode)
+        if not isinstance(prompt, str):
+            # Consume the async generator to get prompt content
+            prompt_content = ""
+            async for msg in prompt:
+                if isinstance(msg, dict) and "message" in msg:
+                    message = msg["message"]
+                    if isinstance(message, dict) and "content" in message:
+                        prompt_content = message["content"]
+            cls.captured_prompts.append(prompt_content)
+        else:
+            cls.captured_prompts.append(prompt)
+
         cls.captured_options.append(options)
 
         if cls._error is not None:

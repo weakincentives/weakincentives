@@ -374,10 +374,21 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         options = ClaudeAgentOptions(**options_kwargs)
 
-        # Use sdk.query() for one-shot queries - it handles hooks properly
-        # unlike ClaudeSDKClient which has issues with connect() + query()
+        # Use streaming mode (AsyncIterable) to enable hook support.
+        # The SDK's query() function only initializes hooks when
+        # is_streaming_mode=True, which requires an AsyncIterable prompt.
+        async def stream_prompt() -> Any:  # noqa: RUF029
+            """Yield a single user message in streaming format."""
+            yield {
+                "type": "user",
+                "message": {"role": "user", "content": prompt_text},
+                "parent_tool_use_id": None,
+                "session_id": hook_context.prompt_name,
+            }
+
         return [
-            message async for message in sdk.query(prompt=prompt_text, options=options)
+            message
+            async for message in sdk.query(prompt=stream_prompt(), options=options)
         ]
 
     def _build_output_format(

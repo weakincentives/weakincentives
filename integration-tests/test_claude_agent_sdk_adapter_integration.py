@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -32,7 +33,7 @@ from weakincentives.prompt import (
     ToolContext,
     ToolResult,
 )
-from weakincentives.runtime.events import PromptExecuted
+from weakincentives.runtime.events import PromptExecuted, ToolInvoked
 from weakincentives.runtime.session import Session
 
 pytest.importorskip("claude_agent_sdk")
@@ -360,3 +361,89 @@ def test_claude_agent_sdk_adapter_with_disallowed_tools(
     assert response.prompt_name == "greeting"
     assert response.text is not None
     _assert_prompt_usage(session)
+
+
+@dataclass(slots=True)
+class ReadFileParams:
+    """Prompt parameters for reading a file."""
+
+    file_path: str
+
+
+def _build_file_read_prompt() -> PromptTemplate[object]:
+    """Build a prompt that requests the assistant to read a file."""
+    task_section = MarkdownSection[ReadFileParams](
+        title="Task",
+        template=(
+            "Use the Read tool to read the contents of the file at ${file_path}. "
+            "After reading the file, provide a brief summary of its contents in a single sentence."
+        ),
+        key="task",
+    )
+    return PromptTemplate(
+        ns=_PROMPT_NS,
+        key="integration-file-read",
+        name="file_reader",
+        sections=[task_section],
+    )
+
+
+def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
+    claude_model: str,
+) -> None:
+    """Verify that adapter hooks publish ToolInvoked events for SDK native tools.
+
+    This test validates that the PostToolUse hook correctly publishes ToolInvoked
+    events to the session's event bus when the SDK uses its native tools (like Read).
+    This is a key integration point between the SDK's execution and weakincentives'
+    event-driven architecture.
+    """
+    # Use a fresh client config with permissions that allow the Read tool
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        cwd=str(Path.cwd()),  # Set working directory to current repo
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        # Only allow the Read tool to ensure we get a predictable tool call
+        allowed_tools=("Read",),
+    )
+
+    prompt_template = _build_file_read_prompt()
+    # Use README.md as it's guaranteed to exist in the repo
+    params = ReadFileParams(file_path="README.md")
+    prompt = Prompt(prompt_template).bind(params)
+
+    # Track ToolInvoked events
+    tool_invoked_events: list[ToolInvoked] = []
+    session = Session()
+    session.event_bus.subscribe(ToolInvoked, tool_invoked_events.append)
+
+    response = adapter.evaluate(prompt, session=session)
+
+    # Verify the prompt completed successfully
+    assert response.prompt_name == "file_reader"
+    assert response.text is not None
+
+    # Verify that at least one ToolInvoked event was published
+    # The SDK should have used the Read tool to read README.md
+    assert len(tool_invoked_events) >= 1, (
+        "Expected at least one ToolInvoked event from PostToolUse hook. "
+        "This indicates hooks are not being called or not publishing events."
+    )
+
+    # Verify the Read tool was invoked
+    read_events = [e for e in tool_invoked_events if e.name == "Read"]
+    assert len(read_events) >= 1, (
+        f"Expected at least one Read tool invocation. "
+        f"Got events for: {[e.name for e in tool_invoked_events]}"
+    )
+
+    # Verify the event has expected structure
+    read_event = read_events[0]
+    assert read_event.adapter == "claude_agent_sdk"
+    assert read_event.prompt_name == "file_reader"
+    # The params should be a dict with file_path (SDK native tools pass dict params)
+    assert isinstance(read_event.params, dict)
