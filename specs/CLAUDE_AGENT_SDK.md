@@ -56,16 +56,21 @@ the event-driven architecture while delegating tool execution to Claude Code.
 
 ## SDK API Selection
 
-The adapter exclusively uses `ClaudeSDKClient` (not `query()`) because only the
-client supports hooks and custom tools:
+The adapter uses `sdk.query()` in **streaming mode** for hook support. The SDK's
+`query()` function only initializes hooks when `is_streaming_mode=True`, which
+requires passing an `AsyncIterable` prompt instead of a string. The adapter
+converts string prompts to streaming format automatically.
 
-| Feature | `query()` | `ClaudeSDKClient` |
-|---------|-----------|-------------------|
-| Hooks | ❌ | ✅ |
-| Custom Tools | ❌ | ✅ |
-| Interrupts | ❌ | ✅ |
-| Multi-turn | ❌ | ✅ |
-| State Control | ❌ | ✅ |
+| Feature | `query()` (string) | `query()` (streaming) | `ClaudeSDKClient` |
+|---------|-------------------|----------------------|-------------------|
+| Hooks | ❌ | ✅ | ✅ (but hangs) |
+| Custom Tools via MCP | ✅ | ✅ | ✅ |
+| One-shot queries | ✅ | ✅ | ❌ |
+| Lifecycle management | Automatic | Automatic | Manual |
+
+**Important**: `ClaudeSDKClient` with `connect()` + `query()` hangs when hooks
+are present because stdin is never properly closed. The `sdk.query()` function
+with streaming mode handles the lifecycle correctly.
 
 ## Hook Integration Architecture
 
