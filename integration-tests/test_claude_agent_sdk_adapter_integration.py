@@ -25,6 +25,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
 )
+from weakincentives.adapters.claude_agent_sdk._hooks import ToolResponse
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -33,7 +34,7 @@ from weakincentives.prompt import (
     ToolContext,
     ToolResult,
 )
-from weakincentives.runtime.events import PromptExecuted, ToolInvoked
+from weakincentives.runtime.events import PromptExecuted, PromptRendered, ToolInvoked
 from weakincentives.runtime.session import Session
 
 pytest.importorskip("claude_agent_sdk")
@@ -447,3 +448,342 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     )
     # For successful Read operations, the response may have stdout or similar content
     # The key thing is that the result is not empty/None, confirming PostToolUse captured it
+
+    # Verify that event.value is a typed ToolResponse dataclass
+    assert isinstance(read_event.value, ToolResponse), (
+        f"Expected event.value to be a ToolResponse, got {type(read_event.value)}"
+    )
+    # ToolResponse should have stdout field populated with file contents
+    assert read_event.value.stdout is not None
+
+
+def test_claude_agent_sdk_adapter_publishes_prompt_rendered_event(
+    adapter: ClaudeAgentSDKAdapter,
+) -> None:
+    """Verify that PromptRendered event is published before SDK execution.
+
+    This test validates that the adapter publishes a PromptRendered event
+    containing the rendered prompt text, which is useful for debugging and
+    observability.
+    """
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="prompt rendered test")
+    prompt = Prompt(prompt_template).bind(params)
+
+    prompt_rendered_events: list[PromptRendered] = []
+    session = Session()
+    session.event_bus.subscribe(PromptRendered, prompt_rendered_events.append)
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.prompt_name == "greeting"
+    assert response.text is not None
+
+    # Verify PromptRendered event was published
+    assert len(prompt_rendered_events) == 1, "Expected exactly one PromptRendered event"
+
+    event = prompt_rendered_events[0]
+    assert event.prompt_name == "greeting"
+    assert event.adapter == "claude_agent_sdk"
+    assert event.rendered_prompt is not None
+    # The rendered prompt should contain the audience text
+    assert "prompt rendered test" in event.rendered_prompt
+
+
+@dataclass(slots=True)
+class RenderableResult:
+    """A result type with a custom render() method."""
+
+    value: int
+    message: str
+
+    def render(self) -> str:
+        return f"[RENDERED] Value is {self.value}: {self.message}"
+
+
+@dataclass(slots=True)
+class ComputeParams:
+    """Parameters for the compute tool."""
+
+    x: int
+    y: int
+
+
+def _build_renderable_tool() -> Tool[ComputeParams, RenderableResult]:
+    """Build a tool that returns a renderable result."""
+
+    def compute_handler(
+        params: ComputeParams, *, context: ToolContext
+    ) -> ToolResult[RenderableResult]:
+        del context
+        result = params.x + params.y
+        return ToolResult(
+            message=f"Computed {params.x} + {params.y} = {result}",
+            value=RenderableResult(value=result, message=f"{params.x} + {params.y}"),
+        )
+
+    return Tool[ComputeParams, RenderableResult](
+        name="compute_sum",
+        description="Compute the sum of two integers x and y.",
+        handler=compute_handler,
+    )
+
+
+def _build_renderable_tool_prompt(
+    tool: Tool[ComputeParams, RenderableResult],
+) -> PromptTemplate[object]:
+    """Build a prompt that uses the renderable compute tool."""
+    instruction_section = MarkdownSection[ComputeParams](
+        title="Instruction",
+        template=(
+            "You must call the `compute_sum` tool exactly once with "
+            "x=${x} and y=${y}. After the tool response, "
+            "tell the user what the rendered result says."
+        ),
+        tools=(tool,),
+        key="instruction",
+    )
+    return PromptTemplate(
+        ns=_PROMPT_NS,
+        key="integration-renderable",
+        name="renderable_workflow",
+        sections=[instruction_section],
+    )
+
+
+def test_claude_agent_sdk_adapter_mcp_tool_uses_render(
+    claude_model: str, client_config: ClaudeAgentSDKClientConfig
+) -> None:
+    """Verify that MCP bridged tools call render() on result values.
+
+    This test validates that when a custom weakincentives tool returns a
+    ToolResult with a value that has a render() method, the MCP bridge
+    uses that rendered output when returning to the SDK.
+    """
+    tool = _build_renderable_tool()
+    prompt_template = _build_renderable_tool_prompt(tool)
+    params = ComputeParams(x=7, y=13)
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=client_config,
+    )
+
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.prompt_name == "renderable_workflow"
+    assert response.text is not None
+
+    # The response should mention the rendered output format
+    # The render() method returns "[RENDERED] Value is 20: 7 + 13"
+    assert "20" in response.text, (
+        f"Expected response to mention the computed value 20. Got: {response.text}"
+    )
+    _assert_prompt_usage(session)
+
+
+@dataclass(slots=True)
+class MultiStepParams:
+    """Parameters for multi-step file operations."""
+
+    target_dir: str
+
+
+def _build_multi_tool_prompt() -> PromptTemplate[object]:
+    """Build a prompt that requires multiple tool invocations."""
+    task_section = MarkdownSection[MultiStepParams](
+        title="Task",
+        template=(
+            "Use the Glob tool to list all Python files (*.py pattern) in ${target_dir}. "
+            "Then use the Read tool to read the first Python file you found. "
+            "Finally, summarize what you learned in one sentence."
+        ),
+        key="task",
+    )
+    return PromptTemplate(
+        ns=_PROMPT_NS,
+        key="integration-multi-tool",
+        name="multi_tool_workflow",
+        sections=[task_section],
+    )
+
+
+def test_claude_agent_sdk_adapter_multiple_tool_invocations(
+    claude_model: str,
+) -> None:
+    """Verify adapter tracks multiple sequential tool invocations.
+
+    This test validates that when the SDK uses multiple tools in sequence,
+    each tool invocation is captured via the PostToolUse hook and published
+    as a ToolInvoked event.
+    """
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        cwd=str(Path.cwd()),
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        # Allow Glob and Read for this multi-step task
+        allowed_tools=("Glob", "Read"),
+    )
+
+    prompt_template = _build_multi_tool_prompt()
+    params = MultiStepParams(target_dir="src/weakincentives")
+    prompt = Prompt(prompt_template).bind(params)
+
+    tool_invoked_events: list[ToolInvoked] = []
+    session = Session()
+    session.event_bus.subscribe(ToolInvoked, tool_invoked_events.append)
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.prompt_name == "multi_tool_workflow"
+    assert response.text is not None
+
+    # Verify multiple tool invocations were captured
+    expected_min_tools = 2  # Glob + Read
+    assert len(tool_invoked_events) >= expected_min_tools, (
+        f"Expected at least {expected_min_tools} tool invocations (Glob + Read). "
+        f"Got {len(tool_invoked_events)}: {[e.name for e in tool_invoked_events]}"
+    )
+
+    # Verify both Glob and Read were used
+    tool_names = {e.name for e in tool_invoked_events}
+    assert "Glob" in tool_names, f"Expected Glob to be invoked. Got: {tool_names}"
+    assert "Read" in tool_names, f"Expected Read to be invoked. Got: {tool_names}"
+
+    # Verify each event has the expected adapter attribution
+    for event in tool_invoked_events:
+        assert event.adapter == "claude_agent_sdk"
+        assert event.prompt_name == "multi_tool_workflow"
+
+
+def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
+    claude_model: str,
+) -> None:
+    """Verify adapter accumulates token usage across multi-turn execution.
+
+    This test validates that token usage is properly tracked and reported
+    even when the SDK performs multiple tool calls, which may span multiple
+    API interactions.
+    """
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        cwd=str(Path.cwd()),
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        allowed_tools=("Read",),
+    )
+
+    prompt_template = _build_file_read_prompt()
+    params = ReadFileParams(file_path="README.md")
+    prompt = Prompt(prompt_template).bind(params)
+
+    prompt_executed_events: list[PromptExecuted] = []
+    session = Session()
+    session.event_bus.subscribe(PromptExecuted, prompt_executed_events.append)
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.text is not None
+
+    # Verify PromptExecuted event has usage
+    assert len(prompt_executed_events) == 1
+    event = prompt_executed_events[0]
+    assert event.usage is not None, "Expected token usage to be recorded"
+    assert event.usage.input_tokens is not None and event.usage.input_tokens > 0
+    assert event.usage.output_tokens is not None and event.usage.output_tokens > 0
+    # Total should be sum of input + output
+    assert event.usage.total_tokens is not None
+    assert event.usage.total_tokens == (
+        event.usage.input_tokens + event.usage.output_tokens
+    )
+
+
+@dataclass(slots=True)
+class EchoParams:
+    """Parameters for simple echo."""
+
+    text: str
+
+
+@dataclass(slots=True)
+class EchoResult:
+    """Result from echo tool - no render() method."""
+
+    echoed: str
+
+
+def _build_simple_tool() -> Tool[EchoParams, EchoResult]:
+    """Build a simple tool that echoes text."""
+
+    def echo_handler(
+        params: EchoParams, *, context: ToolContext
+    ) -> ToolResult[EchoResult]:
+        del context
+        return ToolResult(
+            message=f"Echo: {params.text}",
+            value=EchoResult(echoed=params.text),
+        )
+
+    return Tool[EchoParams, EchoResult](
+        name="echo",
+        description="Echo the provided text back.",
+        handler=echo_handler,
+    )
+
+
+def _build_echo_prompt(tool: Tool[EchoParams, EchoResult]) -> PromptTemplate[object]:
+    """Build a prompt that uses the echo tool."""
+    instruction_section = MarkdownSection[EchoParams](
+        title="Instruction",
+        template=(
+            'Call the `echo` tool with text="${text}". '
+            "Then report what the tool returned."
+        ),
+        tools=(tool,),
+        key="instruction",
+    )
+    return PromptTemplate(
+        ns=_PROMPT_NS,
+        key="integration-echo",
+        name="echo_workflow",
+        sections=[instruction_section],
+    )
+
+
+def test_claude_agent_sdk_adapter_custom_tool_without_render(
+    claude_model: str, client_config: ClaudeAgentSDKClientConfig
+) -> None:
+    """Verify MCP bridged tools work when result has no render() method.
+
+    This test validates that custom tools without a render() method on
+    their result value still work correctly, falling back to the message.
+    """
+    tool = _build_simple_tool()
+    prompt_template = _build_echo_prompt(tool)
+    params = EchoParams(text="hello from integration test")
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=client_config,
+    )
+
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.prompt_name == "echo_workflow"
+    assert response.text is not None
+    # The response should mention the echoed text
+    assert "hello" in response.text.lower() or "integration" in response.text.lower()
+    _assert_prompt_usage(session)
