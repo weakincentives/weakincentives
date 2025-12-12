@@ -272,11 +272,17 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             messages, rendered, budget_tracker, prompt_name
         )
 
+        response = PromptResponse(
+            prompt_name=prompt_name,
+            text=result_text,
+            output=output,
+        )
+
         session.event_bus.publish(
             PromptExecuted(
                 prompt_name=prompt_name,
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
-                result=result_text,
+                result=response,
                 session_id=None,
                 created_at=_utcnow(),
                 usage=usage,
@@ -296,11 +302,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             },
         )
 
-        return PromptResponse(
-            prompt_name=prompt_name,
-            text=result_text,
-            output=output,
-        )
+        return response
 
     async def _run_sdk_query(
         self,
@@ -312,31 +314,40 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         bridged_tools: tuple[Any, ...],
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
-        options: dict[str, Any] = {
+        # Import the SDK's options type
+        from claude_agent_sdk.types import ClaudeAgentOptions
+
+        # Build options dict then convert to ClaudeAgentOptions
+        options_kwargs: dict[str, Any] = {
             "model": self._model,
         }
 
         if self._client_config.cwd:
-            options["cwd"] = self._client_config.cwd
+            options_kwargs["cwd"] = self._client_config.cwd
 
         if self._client_config.permission_mode:
-            options["permission_mode"] = self._client_config.permission_mode
+            options_kwargs["permission_mode"] = self._client_config.permission_mode
 
         if self._client_config.max_turns:
-            options["max_turns"] = self._client_config.max_turns
+            options_kwargs["max_turns"] = self._client_config.max_turns
 
         if output_format:
-            options["output_format"] = output_format
+            options_kwargs["output_format"] = output_format
 
         if self._allowed_tools is not None:
-            options["allowed_tools"] = list(self._allowed_tools)
+            options_kwargs["allowed_tools"] = list(self._allowed_tools)
 
         if self._disallowed_tools:
-            options["disallowed_tools"] = list(self._disallowed_tools)
+            options_kwargs["disallowed_tools"] = list(self._disallowed_tools)
 
+        # Apply model config parameters (temperature, max_tokens)
         model_params = self._model_config.to_request_params()
         if model_params:
-            options.update(model_params)
+            # max_tokens maps to max_thinking_tokens in SDK
+            if "max_tokens" in model_params:
+                options_kwargs["max_thinking_tokens"] = model_params.pop("max_tokens")
+            # temperature is not directly supported in ClaudeAgentOptions
+            model_params.pop("temperature", None)
 
         pre_hook = create_pre_tool_use_hook(hook_context)
         post_hook = create_post_tool_use_hook(hook_context)
@@ -349,7 +360,11 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         _ = prompt_hook
         _ = bridged_tools
 
-        return [message async for message in sdk.query(prompt_text, options=options)]
+        options = ClaudeAgentOptions(**options_kwargs)
+
+        return [
+            message async for message in sdk.query(prompt=prompt_text, options=options)
+        ]
 
     def _build_output_format(
         self,
@@ -374,17 +389,20 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         prompt_name: str,
     ) -> tuple[str | None, OutputT | None, TokenUsage | None]:
         """Extract text, structured output, and usage from SDK messages."""
+        # Import SDK types for isinstance checks
+        from claude_agent_sdk.types import ResultMessage
+
         result_text: str | None = None
         structured_output: OutputT | None = None
         total_input_tokens = 0
         total_output_tokens = 0
 
         for message in reversed(messages):
-            message_type = getattr(message, "type", None)
-
-            if message_type == "result":
-                if hasattr(message, "text") and message.text:
-                    result_text = message.text
+            # Check for ResultMessage using isinstance
+            if isinstance(message, ResultMessage):
+                # ResultMessage has 'result' attribute, not 'text'
+                if hasattr(message, "result") and message.result:
+                    result_text = message.result
 
                 if hasattr(message, "structured_output") and message.structured_output:
                     output_type = rendered.output_type
