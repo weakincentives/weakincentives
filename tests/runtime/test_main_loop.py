@@ -169,7 +169,6 @@ def test_config_default_values() -> None:
     config = MainLoopConfig()
     assert config.deadline is None
     assert config.budget is None
-    assert config.parse_output is True
 
 
 def test_config_custom_values() -> None:
@@ -179,11 +178,9 @@ def test_config_custom_values() -> None:
     config = MainLoopConfig(
         deadline=deadline,
         budget=budget,
-        parse_output=False,
     )
     assert config.deadline is deadline
     assert config.budget is budget
-    assert config.parse_output is False
 
 
 # =============================================================================

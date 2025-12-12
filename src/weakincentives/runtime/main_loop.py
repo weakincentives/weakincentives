@@ -42,7 +42,6 @@ class MainLoopConfig:
 
     deadline: Deadline | None = None
     budget: Budget | None = None
-    parse_output: bool = True
 
 
 @FrozenDataclass()
