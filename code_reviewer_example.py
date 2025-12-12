@@ -226,9 +226,13 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         """Execute with auto-optimization for workspace digest.
 
         If no WorkspaceDigest exists in the session, runs optimization first.
-        Custom MCP tools now work with streaming mode, so optimization works for all modes.
+        For Claude Agent SDK mode, skip optimization as it uses native SDK tools
+        rather than VFS/Podman workspace sections.
         """
-        needs_optimization = self._session.query(WorkspaceDigest).latest() is None
+        needs_optimization = (
+            not self._use_claude_agent
+            and self._session.query(WorkspaceDigest).latest() is None
+        )
         if needs_optimization:
             self._run_optimization()
         effective_deadline = deadline or _default_deadline()
@@ -471,12 +475,12 @@ def build_task_prompt(
     _ensure_test_repository_available()
 
     if use_claude_agent:
-        # Claude Agent SDK mode: use same prompt structure but with SDK-tailored guidance.
-        # Custom MCP tools (open_sections, planning tools) now work correctly with
-        # streaming mode, so we can use progressive disclosure and optimization.
+        # Claude Agent SDK mode: use SDK-tailored guidance with custom MCP tools.
+        # Streaming mode enables progressive disclosure (open_sections) and planning tools.
+        # Note: WorkspaceDigestSection is omitted because the SDK uses native filesystem
+        # tools rather than VFS/Podman sections that the optimizer requires.
         sections = (
             _build_claude_agent_guidance_section(),
-            WorkspaceDigestSection(session=session),
             _build_reference_section(),  # Progressive disclosure section
             PlanningToolsSection(
                 session=session,
@@ -690,7 +694,6 @@ def _build_intro(
             - Repository: test-repositories/sunfish mounted in workspace
             - Tools: SDK's native Read, Write, Bash + custom MCP tools (planning, open_sections)
             - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-            - Auto-optimization: Workspace digest generated on first request.
 
             Note: Custom MCP tools are bridged via streaming mode for full feature parity.
             """
