@@ -15,6 +15,7 @@ import json
 import sys
 import types
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from importlib import import_module as std_import_module
 from types import MethodType
 from typing import Any, Literal, TypeVar, cast
@@ -41,6 +42,8 @@ try:
         DummyMessage,
         DummyOpenAIClient,
         DummyResponse,
+        DummyResponseOutput,
+        DummyResponsesAPI,
         DummyToolCall,
         GreetingParams,
         MappingResponse,
@@ -59,6 +62,8 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         DummyMessage,
         DummyOpenAIClient,
         DummyResponse,
+        DummyResponseOutput,
+        DummyResponsesAPI,
         DummyToolCall,
         GreetingParams,
         MappingResponse,
@@ -1972,3 +1977,327 @@ def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
     )
 
     assert result.text == "Hello!"
+
+
+# --- Hosted Tools Tests ---
+
+
+@dataclass
+class DummyWebSearchCall:
+    """Mock web_search_call response item."""
+
+    type: str = "web_search_call"
+
+
+@dataclass
+class DummyUrlAnnotation:
+    """Mock URL annotation for web search."""
+
+    type: str = "url_citation"
+    url: str = ""
+    title: str = ""
+    start_index: int = 0
+    end_index: int = 0
+
+
+@dataclass
+class DummyOutputText:
+    """Mock output_text content part."""
+
+    type: str = "output_text"
+    text: str = ""
+    annotations: list[object] | None = None
+
+
+@dataclass
+class DummyMessageItem:
+    """Mock message item in response output."""
+
+    type: str = "message"
+    content: list[object] | None = None
+
+
+class WebSearchResponse:
+    """Response that includes web search output items."""
+
+    def __init__(
+        self,
+        choices: Sequence[DummyChoice],
+        web_search_call: object | None = None,
+        message_item: object | None = None,
+        *,
+        usage: dict[str, object] | None = None,
+    ) -> None:
+        self.choices = list(choices)
+        self.usage = usage
+        # Build output items including hosted tool outputs
+        base_output = [
+            DummyResponseOutput(choice.message.to_content_parts()) for choice in choices
+        ]
+        output_items: list[object] = []
+        if web_search_call is not None:
+            output_items.append(web_search_call)
+        if message_item is not None:
+            output_items.append(message_item)
+        # Extend with base output content
+        output_items.extend(base_output)
+        self.output = output_items
+
+    def model_dump(self) -> dict[str, Any]:
+        output_list: list[object] = []
+        for item in self.output:
+            model_dump_fn = getattr(item, "model_dump", None)
+            if callable(model_dump_fn):
+                output_list.append(cast(Any, model_dump_fn)())
+            else:
+                output_list.append(item)
+        payload: dict[str, Any] = {"output": output_list}
+        if self.usage is not None:
+            payload["usage"] = self.usage
+        return payload
+
+
+class WebSearchDummyClient:
+    """Client that returns web search responses."""
+
+    def __init__(self, responses: Sequence[WebSearchResponse]) -> None:
+        self.responses = DummyResponsesAPI(responses)  # type: ignore[arg-type]
+
+
+def test_openai_adapter_serializes_hosted_tools_in_request() -> None:
+    """Adapter includes hosted tools in provider request."""
+    module = cast(Any, _reload_module())
+    from weakincentives.adapters.openai_hosted import OpenAIWebSearchSection
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="openai-hosted-tools",
+        name="search_greeting",
+        sections=[
+            MarkdownSection[GreetingParams](
+                title="Greeting",
+                key="greeting",
+                template="Say hello to ${user}.",
+            ),
+            OpenAIWebSearchSection(),
+        ],
+    )
+
+    message = DummyMessage(content="Hello with search!", tool_calls=None)
+    response = DummyResponse([DummyChoice(message)])
+    client = DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = _evaluate_with_session(
+        adapter,
+        prompt,
+        GreetingParams(user="Sam"),
+    )
+
+    assert result.text == "Hello with search!"
+
+    # Verify hosted tool was included in request
+    request = cast(dict[str, Any], client.responses.requests[0])
+    tools = cast(list[dict[str, Any]], request.get("tools", []))
+    hosted_tool = next(
+        (t for t in tools if t.get("type") == "web_search_preview"), None
+    )
+    assert hosted_tool is not None
+
+
+def test_openai_adapter_parses_hosted_tool_outputs() -> None:
+    """Adapter parses hosted tool outputs from response."""
+    module = cast(Any, _reload_module())
+    from weakincentives.adapters.openai_hosted import (
+        OpenAIWebSearchResult,
+        OpenAIWebSearchSection,
+    )
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="openai-hosted-parse",
+        name="search_parse",
+        sections=[
+            MarkdownSection[GreetingParams](
+                title="Greeting",
+                key="greeting",
+                template="Search for ${user}.",
+            ),
+            OpenAIWebSearchSection(),
+        ],
+    )
+
+    # Create response with web search output items
+    web_search_call = DummyWebSearchCall()
+    annotation = DummyUrlAnnotation(
+        url="https://example.com",
+        title="Example",
+        start_index=0,
+        end_index=10,
+    )
+    output_text = DummyOutputText(
+        text="Search result text",
+        annotations=[annotation],
+    )
+    message_item = DummyMessageItem(content=[output_text])
+
+    message = DummyMessage(content="Response text", tool_calls=None)
+    response = WebSearchResponse(
+        [DummyChoice(message)],
+        web_search_call=web_search_call,
+        message_item=message_item,
+    )
+    client = WebSearchDummyClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    result = _evaluate_with_session(
+        adapter,
+        prompt,
+        GreetingParams(user="test"),
+    )
+
+    # Verify hosted outputs were parsed
+    assert result.hosted_outputs is not None
+    assert "web_search" in result.hosted_outputs
+    web_search_result = result.hosted_outputs["web_search"]
+    assert isinstance(web_search_result, OpenAIWebSearchResult)
+    assert web_search_result.text == "Search result text"
+    assert len(web_search_result.citations) == 1
+    assert web_search_result.citations[0].url == "https://example.com"
+
+
+def test_openai_adapter_rejects_unsupported_hosted_tool_kind() -> None:
+    """Adapter raises error for unsupported hosted tool kind."""
+    module = cast(Any, _reload_module())
+    from weakincentives.prompt import HostedTool
+
+    @dataclass
+    class FakeConfig:
+        value: str = "test"
+
+    class UnsupportedHostedToolSection(MarkdownSection[GreetingParams]):
+        """Section with unsupported hosted tool kind."""
+
+        def __init__(self) -> None:
+            self._tool = HostedTool(
+                kind="unsupported_kind",
+                name="fake_tool",
+                description="Fake tool",
+                config=FakeConfig(),
+            )
+            super().__init__(
+                title="Fake Section",
+                key="fake_section",
+                template="Fake: ${user}",
+            )
+
+        def hosted_tools(self) -> tuple[HostedTool[FakeConfig], ...]:
+            return (self._tool,)
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="openai-unsupported-hosted",
+        name="unsupported_hosted",
+        sections=[UnsupportedHostedToolSection()],
+    )
+
+    message = DummyMessage(content="Hello", tool_calls=None)
+    response = DummyResponse([DummyChoice(message)])
+    client = DummyOpenAIClient([response])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    with pytest.raises(PromptEvaluationError) as exc:
+        _evaluate_with_session(
+            adapter,
+            prompt,
+            GreetingParams(user="test"),
+        )
+
+    assert "unsupported_kind" in str(exc.value)
+
+
+def test_openai_adapter_handles_non_sequence_output() -> None:
+    """Adapter handles response with non-Sequence output gracefully."""
+    module = cast(Any, _reload_module())
+    from weakincentives.prompt import HostedTool
+
+    @dataclass
+    class TestConfig:
+        value: str = "test"
+
+    # Create an adapter and test _parse_hosted_outputs directly
+    client = DummyOpenAIClient([])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+
+    # Create a hosted tool
+    test_tool = HostedTool(
+        kind="web_search",
+        name="web_search",
+        description="Test tool",
+        config=TestConfig(),
+    )
+
+    # Create a mock response capture with non-Sequence output
+    class MockResponseCapture:
+        def __init__(self) -> None:
+            # Create a response with non-Sequence output
+            self.value: object = type(
+                "MockResponse",
+                (),
+                {"output": 42},  # Non-Sequence value
+            )()
+
+    response_capture = MockResponseCapture()
+
+    # Call _parse_hosted_outputs directly
+    result = adapter._parse_hosted_outputs(
+        (test_tool,),
+        response_capture,
+    )
+
+    # Should return empty dict when output is not a Sequence
+    assert result == {}
+
+
+def test_openai_adapter_skips_hosted_tool_without_codec() -> None:
+    """Adapter skips hosted tools that don't have a registered codec during parsing."""
+    module = cast(Any, _reload_module())
+    from weakincentives.prompt import HostedTool
+
+    @dataclass
+    class TestConfig:
+        value: str = "test"
+
+    # Create an adapter with no codecs registered
+    client = DummyOpenAIClient([])
+    adapter = module.OpenAIAdapter(model="gpt-test", client=client)
+    adapter._hosted_tool_codecs = {}
+
+    # Create a hosted tool with an unknown kind
+    unknown_tool = HostedTool(
+        kind="unknown_kind",
+        name="unknown_tool",
+        description="Unknown tool",
+        config=TestConfig(),
+    )
+
+    # Create a mock response capture with valid response
+    class MockResponseCapture:
+        def __init__(self) -> None:
+            # Create a response with web_search output items
+            self.value: object = type(
+                "MockResponse",
+                (),
+                {"output": [DummyWebSearchCall(), DummyMessageItem(content=[])]},
+            )()
+
+    response_capture = MockResponseCapture()
+
+    # Call _parse_hosted_outputs directly with a tool that has no codec
+    result = adapter._parse_hosted_outputs(
+        (unknown_tool,),
+        response_capture,
+    )
+
+    # Should return empty dict since there's no codec for "unknown_kind"
+    assert result == {}

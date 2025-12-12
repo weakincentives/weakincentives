@@ -27,6 +27,7 @@ from .errors import (
     SectionPath,
     VisibilityExpansionRequired,
 )
+from .hosted_tool import HostedTool
 from .markdown import MarkdownSection
 from .overrides import (
     LocalPromptOverridesStore,
@@ -62,6 +63,7 @@ from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
+    "HostedTool",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",

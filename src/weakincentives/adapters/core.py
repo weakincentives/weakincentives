@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from dataclasses import field
+from types import MappingProxyType
 from typing import Any, Literal, TypeVar
 
 from ..budget import Budget, BudgetTracker
@@ -29,6 +31,9 @@ from ..runtime.session.protocols import SessionProtocol
 OutputT = TypeVar("OutputT")
 
 
+_EMPTY_HOSTED_OUTPUTS: Mapping[str, object] = MappingProxyType({})
+
+
 @FrozenDataclass()
 class PromptResponse[OutputT]:
     """Structured result emitted by an adapter evaluation."""
@@ -36,6 +41,7 @@ class PromptResponse[OutputT]:
     prompt_name: str
     text: str | None
     output: OutputT | None
+    hosted_outputs: Mapping[str, object] = field(default=_EMPTY_HOSTED_OUTPUTS)
 
 
 class ProviderAdapter(ABC):

@@ -70,6 +70,22 @@ Release highlights for weakincentives.
   removing separate `bus` parameter since session now owns its event bus.
 - Added native web search tool integration spec for provider-executed tools.
 
+### Hosted Tools
+
+- Added `HostedTool` abstraction for provider-executed capabilities like web
+  search. Unlike user-defined tools, hosted tools are executed server-side by
+  the provider.
+- Added `OpenAIWebSearchConfig`, `OpenAIWebSearchFilters`, and
+  `OpenAIUserLocation` types for configuring OpenAI's web_search tool.
+- Added `OpenAIWebSearchSection` convenience section that enables web search
+  with optional domain filtering and geographic context.
+- Added `hosted_tools()` method to `Section` base class for exposing hosted
+  tools from sections.
+- Added `hosted_tools` property to `RenderedPrompt` for collecting hosted tools
+  during rendering.
+- Added `hosted_outputs` field to `PromptResponse` for returning parsed outputs
+  from hosted tool invocations.
+
 ### Error Handling
 
 - Introduced `WinkError` as the root exception class for all library exceptions,
