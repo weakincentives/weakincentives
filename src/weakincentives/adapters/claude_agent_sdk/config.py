@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Literal
 
 from ...dataclasses import FrozenDataclass
@@ -24,35 +23,10 @@ __all__ = [
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
     "PermissionMode",
-    "SandboxNetworkConfig",
-    "SandboxSettings",
-    "SettingSource",
 ]
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 """Permission handling mode for Claude Agent SDK tool execution."""
-
-SettingSource = Literal["user", "project", "local"]
-"""Configuration file source for SDK settings."""
-
-
-@FrozenDataclass()
-class SandboxNetworkConfig:
-    """Network-specific sandbox configuration."""
-
-    allow_local_binding: bool = False
-    allow_unix_sockets: tuple[str, ...] = ()
-
-
-@FrozenDataclass()
-class SandboxSettings:
-    """Sandboxing configuration for SDK execution."""
-
-    enabled: bool = False
-    auto_allow_bash_if_sandboxed: bool = False
-    excluded_commands: tuple[str, ...] = ()
-    allow_unsandboxed_commands: bool = False
-    network: SandboxNetworkConfig | None = None
 
 
 @FrozenDataclass()
@@ -64,24 +38,12 @@ class ClaudeAgentSDKClientConfig:
             ``"bypassPermissions"`` for programmatic access.
         cwd: Working directory for SDK operations. None uses the current
             working directory.
-        add_dirs: Additional directories accessible to the SDK.
-        env: Environment variables passed to the SDK process.
-        setting_sources: Configuration file sources (empty = isolated from
-            user/project settings).
-        sandbox: Sandboxing configuration for SDK execution.
         max_turns: Maximum number of conversation turns. None means unlimited.
-        include_partial_messages: Whether to include streaming partial messages
-            in the result.
     """
 
     permission_mode: PermissionMode = "bypassPermissions"
     cwd: str | None = None
-    add_dirs: tuple[str, ...] = ()
-    env: Mapping[str, str] | None = None
-    setting_sources: tuple[SettingSource, ...] = ()
-    sandbox: SandboxSettings | None = None
     max_turns: int | None = None
-    include_partial_messages: bool = False
 
 
 @FrozenDataclass()

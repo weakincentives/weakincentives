@@ -19,47 +19,7 @@ import pytest
 from weakincentives.adapters.claude_agent_sdk.config import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
-    SandboxNetworkConfig,
-    SandboxSettings,
 )
-
-
-class TestSandboxNetworkConfig:
-    def test_defaults(self) -> None:
-        config = SandboxNetworkConfig()
-        assert config.allow_local_binding is False
-        assert config.allow_unix_sockets == ()
-
-    def test_with_values(self) -> None:
-        config = SandboxNetworkConfig(
-            allow_local_binding=True,
-            allow_unix_sockets=("/tmp/socket1", "/tmp/socket2"),
-        )
-        assert config.allow_local_binding is True
-        assert config.allow_unix_sockets == ("/tmp/socket1", "/tmp/socket2")
-
-
-class TestSandboxSettings:
-    def test_defaults(self) -> None:
-        config = SandboxSettings()
-        assert config.enabled is False
-        assert config.auto_allow_bash_if_sandboxed is False
-        assert config.excluded_commands == ()
-        assert config.allow_unsandboxed_commands is False
-        assert config.network is None
-
-    def test_with_network_config(self) -> None:
-        network = SandboxNetworkConfig(allow_local_binding=True)
-        config = SandboxSettings(
-            enabled=True,
-            auto_allow_bash_if_sandboxed=True,
-            excluded_commands=("rm", "sudo"),
-            network=network,
-        )
-        assert config.enabled is True
-        assert config.auto_allow_bash_if_sandboxed is True
-        assert config.excluded_commands == ("rm", "sudo")
-        assert config.network is network
 
 
 class TestClaudeAgentSDKClientConfig:
@@ -67,33 +27,17 @@ class TestClaudeAgentSDKClientConfig:
         config = ClaudeAgentSDKClientConfig()
         assert config.permission_mode == "bypassPermissions"
         assert config.cwd is None
-        assert config.add_dirs == ()
-        assert config.env is None
-        assert config.setting_sources == ()
-        assert config.sandbox is None
         assert config.max_turns is None
-        assert config.include_partial_messages is False
 
     def test_with_all_values(self) -> None:
-        sandbox = SandboxSettings(enabled=True)
         config = ClaudeAgentSDKClientConfig(
             permission_mode="acceptEdits",
             cwd="/home/user/project",
-            add_dirs=("/usr/local",),
-            env={"MY_VAR": "value"},
-            setting_sources=("user", "project"),
-            sandbox=sandbox,
             max_turns=10,
-            include_partial_messages=True,
         )
         assert config.permission_mode == "acceptEdits"
         assert config.cwd == "/home/user/project"
-        assert config.add_dirs == ("/usr/local",)
-        assert config.env == {"MY_VAR": "value"}
-        assert config.setting_sources == ("user", "project")
-        assert config.sandbox is sandbox
         assert config.max_turns == 10
-        assert config.include_partial_messages is True
 
 
 class TestClaudeAgentSDKModelConfig:

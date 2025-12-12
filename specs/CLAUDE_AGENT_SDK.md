@@ -23,11 +23,22 @@ Claude Code's native tools.
 │  └─────────────┘    │  ┌────────────────────────────────────────────┐  │   │
 │                     │  │           SDK Agentic Loop                 │  │   │
 │  ┌─────────────┐    │  │                                            │  │   │
-│  │   Session   │◀───┼──┼──  PreToolUse ──▶ Tool Exec (Native)       │  │   │
+│  │   Session   │◀───┼──┼──  PreToolUse ──▶ Tool Exec                │  │   │
 │  │   (Events)  │    │  │       │               │                    │  │   │
-│  │             │◀───┼──┼── PostToolUse ◀───────┘                    │  │   │
-│  │             │◀───┼──┼──    Stop    ◀─── End                      │  │   │
-│  └─────────────┘    │  └────────────────────────────────────────────┘  │   │
+│  │             │◀───┼──┼── PostToolUse ◀───────┤                    │  │   │
+│  │             │◀───┼──┼──    Stop    ◀─── End │                    │  │   │
+│  └─────────────┘    │  └───────────────────────┼────────────────────┘  │   │
+│                     └──────────────────────────┼───────────────────────┘   │
+│                                                │                           │
+│                     ┌──────────────────────────┴───────────────────────┐   │
+│                     │                   Tools                          │   │
+│                     ├──────────────────────────────────────────────────┤   │
+│                     │  Native (Read, Write, Bash, ...)                 │   │
+│                     │       └── Executed by Claude Code CLI            │   │
+│                     │                                                  │   │
+│                     │  Custom (via MCP Server "weakincentives")        │   │
+│                     │       └── Planning tools, VFS, etc.              │   │
+│                     │       └── Bridged via in-process MCP server      │   │
 │                     └──────────────────────────────────────────────────┘   │
 │                                                                             │
 │  Output: PromptResponse[OutputT] with structured output + events published  │
@@ -196,6 +207,45 @@ PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 - `"acceptEdits"`: Auto-accept file edits
 - `"plan"`: Planning mode only
 - `"default"`: Interactive permission prompts
+
+### Sandboxing
+
+The Claude Agent SDK supports OS-level sandboxing (Linux bubblewrap, macOS seatbelt)
+that isolates filesystem and network access. Sandboxing is configured externally
+via Claude Code settings, not via the Python SDK options.
+
+**Configuration** (in `~/.claude/settings.json` or project `.claude/settings.json`):
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": []
+    }
+  }
+}
+```
+
+**Key settings**:
+
+| Setting | Description |
+| ---------------------------------- | ------------------------------------------- |
+| `sandbox.enabled` | Enable OS-level sandboxing |
+| `sandbox.network.allowedDomains` | Domains accessible (empty = no internet) |
+| `sandbox.allowUnixSockets` | Allow Unix socket access (security risk) |
+| `sandbox.allowUnsandboxedCommands` | Allow escape hatch for specific commands |
+| `sandbox.excludedCommands` | Commands that bypass sandbox (e.g., docker) |
+
+**Autonomous sandbox mode**: For fully autonomous operation within a
+network-restricted sandbox:
+
+1. Configure sandbox with `enabled: true` and `allowedDomains: []`
+1. Use `permission_mode="bypassPermissions"` in the adapter
+1. Claude Code can execute any operation without permission prompts, but cannot
+   access the network or files outside the working directory
+
+This reduces permission prompts by ~84% while maintaining security boundaries.
 
 ### ClaudeAgentSDKModelConfig
 

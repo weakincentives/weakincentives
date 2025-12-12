@@ -69,9 +69,6 @@ from .config import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
     PermissionMode,
-    SandboxNetworkConfig,
-    SandboxSettings,
-    SettingSource,
 )
 from .workspace import (
     ClaudeAgentWorkspaceSection,
@@ -90,9 +87,6 @@ __all__ = [
     "HostMount",
     "HostMountPreview",
     "PermissionMode",
-    "SandboxNetworkConfig",
-    "SandboxSettings",
-    "SettingSource",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
 ]
