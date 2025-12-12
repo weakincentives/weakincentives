@@ -601,7 +601,7 @@ class TestSDKConfigOptions:
         assert len(MockSDKQuery.captured_options) == 1
         # Verify mcp_servers was set in options
         assert MockSDKQuery.captured_options[0].mcp_servers is not None
-        assert "weakincentives" in MockSDKQuery.captured_options[0].mcp_servers
+        assert "wink" in MockSDKQuery.captured_options[0].mcp_servers
         mock_mcp_server.assert_called_once()
 
     def test_passes_hooks_to_options(

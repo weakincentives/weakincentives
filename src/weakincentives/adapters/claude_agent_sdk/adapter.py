@@ -359,7 +359,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             # create_mcp_server returns an McpSdkServerConfig directly
             mcp_server_config = create_mcp_server(bridged_tools)
             options_kwargs["mcp_servers"] = {
-                "weakincentives": mcp_server_config,
+                "wink": mcp_server_config,
             }
 
         # Create async hook callbacks

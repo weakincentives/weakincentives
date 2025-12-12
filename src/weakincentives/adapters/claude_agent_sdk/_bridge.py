@@ -261,7 +261,7 @@ def _make_async_handler(
 
 def create_mcp_server(
     bridged_tools: tuple[BridgedTool, ...],
-    server_name: str = "weakincentives-tools",
+    server_name: str = "wink-tools",
 ) -> object:
     """Create an MCP server config with the bridged tools registered.
 

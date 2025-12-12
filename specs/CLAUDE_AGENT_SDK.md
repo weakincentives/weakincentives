@@ -36,7 +36,7 @@ Claude Code's native tools.
 │                     │  Native (Read, Write, Bash, ...)                 │   │
 │                     │       └── Executed by Claude Code CLI            │   │
 │                     │                                                  │   │
-│                     │  Custom (via MCP Server "weakincentives")        │   │
+│                     │  Custom (via MCP Server "wink")                  │   │
 │                     │       └── Planning tools, VFS, etc.              │   │
 │                     │       └── Bridged via in-process MCP server      │   │
 │                     └──────────────────────────────────────────────────┘   │
@@ -347,7 +347,7 @@ Tools are registered with the SDK via `mcp_servers` option:
 
 ```python
 options_kwargs["mcp_servers"] = {
-    "weakincentives": create_mcp_server(bridged_tools),
+    "wink": create_mcp_server(bridged_tools),
 }
 ```
 
