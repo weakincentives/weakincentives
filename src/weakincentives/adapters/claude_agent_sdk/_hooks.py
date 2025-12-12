@@ -177,27 +177,32 @@ def create_post_tool_use_hook(
         tool_input = (
             input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
         )
-        tool_output = (
-            input_data.get("tool_output", {}) if isinstance(input_data, dict) else {}
+        # SDK provides tool_response, not tool_output
+        tool_response = (
+            input_data.get("tool_response", {}) if isinstance(input_data, dict) else {}
         )
+        # Check for error in the response
         tool_error = (
-            input_data.get("tool_error") if isinstance(input_data, dict) else None
+            tool_response.get("stderr")
+            if isinstance(tool_response, dict) and tool_response.get("stderr")
+            else None
         )
 
         hook_context._tool_count += 1
 
         output_text = ""
-        if isinstance(tool_output, dict):
-            output_text = tool_output.get("content", str(tool_output))
-        elif tool_output is not None:
-            output_text = str(tool_output)
+        if isinstance(tool_response, dict):
+            # Prefer stdout for Bash tools, otherwise stringify the response
+            output_text = tool_response.get("stdout", "") or str(tool_response)
+        elif tool_response is not None:
+            output_text = str(tool_response)
 
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
             name=tool_name,
             params=tool_input,
-            result=tool_output,
+            result=tool_response,
             session_id=None,
             created_at=_utcnow(),
             usage=None,

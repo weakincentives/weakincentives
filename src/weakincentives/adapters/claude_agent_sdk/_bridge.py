@@ -105,8 +105,13 @@ class BridgedTool:
 
             result = handler(params, context=context)
 
+            # Use render() which calls render_tool_payload on the value,
+            # falling back to message if render returns empty
+            rendered = result.render()
+            output_text = rendered if rendered else result.message
+
             return {
-                "content": [{"type": "text", "text": result.message}],
+                "content": [{"type": "text", "text": output_text}],
                 "isError": not result.success,
             }
 

@@ -437,3 +437,13 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     assert read_event.prompt_name == "file_reader"
     # The params should be a dict with file_path (SDK native tools pass dict params)
     assert isinstance(read_event.params, dict)
+
+    # Verify the result contains tool_response data from the SDK
+    # The PostToolUse hook receives tool_response with stdout/stderr/etc.
+    assert read_event.result is not None, "Expected tool result to be captured"
+    # The result should be a dict (the tool_response from SDK)
+    assert isinstance(read_event.result, dict), (
+        f"Expected result to be a dict (tool_response), got {type(read_event.result)}"
+    )
+    # For successful Read operations, the response may have stdout or similar content
+    # The key thing is that the result is not empty/None, confirming PostToolUse captured it

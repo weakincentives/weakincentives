@@ -40,6 +40,17 @@ class SearchParams:
 class SearchResult:
     matches: int
 
+    def render(self) -> str:
+        return f"Found {self.matches} matches"
+
+
+@dataclass(slots=True, frozen=True)
+class EmptyRenderResult:
+    """Result with empty render()."""
+
+    def render(self) -> str:
+        return ""
+
 
 def search_handler(
     params: SearchParams, *, context: ToolContext
@@ -117,7 +128,8 @@ class TestBridgedTool:
         result = bridged({"query": "test"})
 
         assert result["isError"] is False
-        assert "Found matches for test" in result["content"][0]["text"]
+        # Output uses render() from SearchResult which returns "Found 5 matches"
+        assert "Found 5 matches" in result["content"][0]["text"]
 
     def test_returns_error_for_no_handler(
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
@@ -187,6 +199,73 @@ class TestBridgedTool:
 
         assert result["isError"] is True
         assert "Error" in result["content"][0]["text"]
+
+    def test_uses_render_method_on_result_value(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that bridged tool uses render() on result value when available."""
+        bridged = BridgedTool(
+            name="search",
+            description="Search for content",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        result = bridged({"query": "test"})
+
+        # SearchResult.render() returns "Found 5 matches"
+        assert result["content"][0]["text"] == "Found 5 matches"
+
+    def test_falls_back_to_message_when_render_empty(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that bridged tool falls back to message when render() returns empty."""
+
+        def empty_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[EmptyRenderResult]:
+            del context
+            return ToolResult(
+                message=f"Searched for {params.query}",
+                value=EmptyRenderResult(),
+                success=True,
+            )
+
+        empty_tool = Tool[SearchParams, EmptyRenderResult](
+            name="empty_render",
+            description="Tool with empty render",
+            handler=empty_handler,
+        )
+
+        bridged = BridgedTool(
+            name="empty_render",
+            description="Tool with empty render",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=empty_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        result = bridged({"query": "test"})
+
+        # Falls back to message since render() returned empty
+        assert result["content"][0]["text"] == "Searched for test"
 
 
 class TestCreateBridgedTools:
@@ -373,7 +452,8 @@ class TestMakeAsyncHandler:
         result = asyncio.run(async_handler({"query": "test"}))
 
         assert result["isError"] is False
-        assert "Found matches for test" in result["content"][0]["text"]
+        # Output uses render() from SearchResult which returns "Found 5 matches"
+        assert "Found 5 matches" in result["content"][0]["text"]
 
 
 class TestCreateMcpServer:

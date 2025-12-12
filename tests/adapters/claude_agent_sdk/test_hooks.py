@@ -177,7 +177,7 @@ class TestPostToolUseHook:
         input_data = {
             "tool_name": "Read",
             "tool_input": {"path": "/test.txt"},
-            "tool_output": {"content": "file contents"},
+            "tool_response": {"stdout": "file contents"},
         }
 
         asyncio.run(hook(input_data, "call-123", context))
@@ -186,6 +186,7 @@ class TestPostToolUseHook:
         event = events[0]
         assert event.name == "Read"
         assert event.params == {"path": "/test.txt"}
+        assert event.result == {"stdout": "file contents"}
         assert event.call_id == "call-123"
         assert event.adapter == "test_adapter"
         assert event.prompt_name == "test_prompt"
@@ -197,7 +198,7 @@ class TestPostToolUseHook:
 
         asyncio.run(
             hook(
-                {"tool_name": "Read", "tool_input": {}, "tool_output": {}},
+                {"tool_name": "Read", "tool_input": {}, "tool_response": {}},
                 None,
                 hook_context,
             )
@@ -206,7 +207,7 @@ class TestPostToolUseHook:
 
         asyncio.run(
             hook(
-                {"tool_name": "Write", "tool_input": {}, "tool_output": {}},
+                {"tool_name": "Write", "tool_input": {}, "tool_response": {}},
                 None,
                 hook_context,
             )
@@ -226,8 +227,7 @@ class TestPostToolUseHook:
         input_data = {
             "tool_name": "Read",
             "tool_input": {"path": "/missing.txt"},
-            "tool_output": None,
-            "tool_error": "File not found",
+            "tool_response": {"stderr": "File not found"},
         }
 
         asyncio.run(hook(input_data, "call-456", context))
@@ -236,6 +236,30 @@ class TestPostToolUseHook:
         event = events[0]
         assert event.name == "Read"
         assert event.call_id == "call-456"
+
+    def test_handles_non_dict_tool_response(self, session: Session) -> None:
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        # tool_response is a non-dict, non-None value (e.g., a string)
+        input_data = {
+            "tool_name": "Echo",
+            "tool_input": {"message": "hello"},
+            "tool_response": "hello world",  # Non-dict response
+        }
+
+        asyncio.run(hook(input_data, "call-789", context))
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.name == "Echo"
+        assert event.rendered_output == "hello world"
 
     def test_truncates_long_output(self, session: Session) -> None:
         events: list[ToolInvoked] = []
@@ -251,7 +275,7 @@ class TestPostToolUseHook:
         input_data = {
             "tool_name": "Read",
             "tool_input": {},
-            "tool_output": long_output,
+            "tool_response": {"stdout": long_output},
         }
 
         asyncio.run(hook(input_data, None, context))
