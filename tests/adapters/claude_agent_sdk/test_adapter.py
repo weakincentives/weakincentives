@@ -32,7 +32,13 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 from weakincentives.adapters.core import PromptEvaluationError
 from weakincentives.deadlines import Deadline
-from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    SectionVisibility,
+)
+from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.runtime.events import (
     InProcessEventBus,
     PromptExecuted,
@@ -690,3 +696,34 @@ class TestBudgetTracking:
             response = adapter.evaluate(simple_prompt, session=session, budget=budget)
 
         assert response.text == "Done"
+
+
+class TestVisibilityExpansionRequired:
+    """Tests for VisibilityExpansionRequired exception propagation."""
+
+    def test_propagates_visibility_expansion_required(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that VisibilityExpansionRequired propagates through the adapter."""
+        MockSDKQuery.reset()
+        MockSDKQuery.set_error(
+            VisibilityExpansionRequired(
+                "Model requested expansion",
+                requested_overrides={("section", "key"): SectionVisibility.FULL},
+                reason="Need more details",
+                section_keys=("section.key",),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with pytest.raises(VisibilityExpansionRequired) as exc_info:
+                adapter.evaluate(simple_prompt, session=session)
+
+        # Verify the exception has the expected attributes
+        exc = exc_info.value
+        assert isinstance(exc, VisibilityExpansionRequired)
+        assert exc.requested_overrides == {("section", "key"): SectionVisibility.FULL}
+        assert exc.section_keys == ("section.key",)
+        assert exc.reason == "Need more details"

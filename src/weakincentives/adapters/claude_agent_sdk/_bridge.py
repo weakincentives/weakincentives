@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
+from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.tool import Tool, ToolContext
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
@@ -125,6 +126,10 @@ class BridgedTool:
                 "content": [{"type": "text", "text": f"Validation error: {error}"}],
                 "isError": True,
             }
+
+        except VisibilityExpansionRequired:
+            # Progressive disclosure: let this propagate to the caller
+            raise
 
         except Exception as error:
             logger.exception(

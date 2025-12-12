@@ -26,7 +26,8 @@ from weakincentives.adapters.claude_agent_sdk._bridge import (
     create_bridged_tools,
     create_mcp_server,
 )
-from weakincentives.prompt import Tool, ToolContext, ToolResult
+from weakincentives.prompt import SectionVisibility, Tool, ToolContext, ToolResult
+from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 
@@ -512,3 +513,100 @@ class TestCreateMcpServer:
             pytest.raises(ImportError, match="claude-agent-sdk is required"),
         ):
             create_mcp_server(())
+
+
+class TestVisibilityExpansionRequiredPropagation:
+    """Tests for VisibilityExpansionRequired exception propagation."""
+
+    def test_bridged_tool_propagates_visibility_expansion_required(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that BridgedTool re-raises VisibilityExpansionRequired."""
+
+        def expanding_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            del context
+            raise VisibilityExpansionRequired(
+                "Model requested expansion",
+                requested_overrides={("section", "key"): SectionVisibility.FULL},
+                reason="Need more details",
+                section_keys=("section.key",),
+            )
+
+        expanding_tool = Tool[SearchParams, SearchResult](
+            name="expanding",
+            description="Tool that requests expansion",
+            handler=expanding_handler,
+        )
+
+        bridged = BridgedTool(
+            name="expanding",
+            description="Tool that requests expansion",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=expanding_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        # The exception should propagate, not be caught
+        with pytest.raises(VisibilityExpansionRequired) as exc_info:
+            bridged({"query": "test"})
+
+        # Verify the exception has the expected attributes
+        exc = exc_info.value
+        assert isinstance(exc, VisibilityExpansionRequired)
+        assert exc.requested_overrides == {("section", "key"): SectionVisibility.FULL}
+        assert exc.section_keys == ("section.key",)
+        assert exc.reason == "Need more details"
+
+    def test_async_handler_propagates_visibility_expansion_required(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that async handler wrapper propagates VisibilityExpansionRequired."""
+
+        def expanding_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            del context
+            raise VisibilityExpansionRequired(
+                "Expansion required",
+                requested_overrides={("a", "b"): SectionVisibility.FULL},
+                reason="Test reason",
+                section_keys=("a.b",),
+            )
+
+        expanding_tool = Tool[SearchParams, SearchResult](
+            name="expanding",
+            description="Tool that requests expansion",
+            handler=expanding_handler,
+        )
+
+        bridged = BridgedTool(
+            name="expanding",
+            description="Tool that requests expansion",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=expanding_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        async_handler = _make_async_handler(bridged)
+
+        # The async wrapper should also propagate the exception
+        with pytest.raises(VisibilityExpansionRequired):
+            asyncio.run(async_handler({"query": "test"}))

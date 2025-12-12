@@ -21,7 +21,7 @@ from typing import Any, TypeVar, cast, override
 from ...budget import Budget, BudgetTracker
 from ...deadlines import Deadline
 from ...prompt import Prompt, RenderedPrompt, SectionVisibility
-from ...prompt.errors import SectionPath
+from ...prompt.errors import SectionPath, VisibilityExpansionRequired
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
@@ -262,6 +262,9 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 hook_context=hook_context,
                 bridged_tools=bridged_tools,
             )
+        except VisibilityExpansionRequired:
+            # Progressive disclosure: let this propagate to the caller
+            raise
         except Exception as error:
             raise normalize_sdk_error(error, prompt_name) from error
 
