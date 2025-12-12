@@ -193,9 +193,8 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             use_podman=use_podman,
             use_claude_agent=use_claude_agent,
         )
-        if not use_claude_agent:
-            # Only seed overrides for non-SDK modes
-            self._seed_overrides()
+        # Seed overrides for all modes - custom MCP tools now work with streaming mode
+        self._seed_overrides()
 
     def _seed_overrides(self) -> None:
         """Initialize prompt overrides store."""
@@ -206,9 +205,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 
     def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]:
         """Create and bind the review prompt for the given request."""
-        if self._use_claude_agent:
-            # For Claude Agent SDK, don't use overrides
-            return Prompt(self._template).bind(request)
+        # Use overrides for all modes - custom MCP tools now work with streaming mode
         return Prompt(
             self._template,
             overrides_store=self._overrides_store,
@@ -229,12 +226,9 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         """Execute with auto-optimization for workspace digest.
 
         If no WorkspaceDigest exists in the session, runs optimization first.
-        For Claude Agent SDK mode, skip optimization as the SDK handles tools.
+        Custom MCP tools now work with streaming mode, so optimization works for all modes.
         """
-        needs_optimization = (
-            not self._use_claude_agent
-            and self._session.query(WorkspaceDigest).latest() is None
-        )
+        needs_optimization = self._session.query(WorkspaceDigest).latest() is None
         if needs_optimization:
             self._run_optimization()
         effective_deadline = deadline or _default_deadline()
@@ -319,10 +313,9 @@ class CodeReviewApp:
 
         print("\n--- Agent Response ---")
         print(answer)
-        if not self._use_claude_agent:
-            # Plan snapshot only available for non-SDK modes
-            print("\n--- Plan Snapshot ---")
-            print(render_plan_snapshot(self._loop.session))
+        # Plan snapshot available for all modes - custom MCP tools now work with streaming mode
+        print("\n--- Plan Snapshot ---")
+        print(render_plan_snapshot(self._loop.session))
         print("-" * 23 + "\n")
 
     def run(self) -> None:
@@ -478,13 +471,18 @@ def build_task_prompt(
     _ensure_test_repository_available()
 
     if use_claude_agent:
-        # Claude Agent SDK mode: simpler prompt, SDK provides tools
-        # Use _build_claude_agent_reference_section() to avoid progressive
-        # disclosure (and thus the open_sections tool which triggers MCP
-        # server creation that has a bug in the SDK).
-        sections: tuple[MarkdownSection[SupportsDataclass], ...] = (
+        # Claude Agent SDK mode: use same prompt structure but with SDK-tailored guidance.
+        # Custom MCP tools (open_sections, planning tools) now work correctly with
+        # streaming mode, so we can use progressive disclosure and optimization.
+        sections = (
             _build_claude_agent_guidance_section(),
-            _build_claude_agent_reference_section(),
+            WorkspaceDigestSection(session=session),
+            _build_reference_section(),  # Progressive disclosure section
+            PlanningToolsSection(
+                session=session,
+                strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+                accepts_overrides=True,
+            ),
             MarkdownSection[ReviewTurnParams](
                 title="Review Request",
                 template="${request}",
@@ -622,47 +620,6 @@ def _build_reference_section() -> MarkdownSection[ReferenceParams]:
     )
 
 
-def _build_claude_agent_reference_section() -> MarkdownSection[ReferenceParams]:
-    """Build a reference documentation section for Claude Agent SDK mode.
-
-    Unlike _build_reference_section(), this version does NOT use progressive
-    disclosure (SUMMARY visibility). This avoids adding the open_sections tool,
-    which would trigger MCP server creation. The Claude Agent SDK has a bug
-    (ProcessTransport is not ready for writing) when custom MCP servers are used.
-
-    Instead, we include full documentation inline since the SDK has no custom
-    tool overhead and the model can simply read through it.
-    """
-    return MarkdownSection[ReferenceParams](
-        title="Reference Documentation",
-        template=textwrap.dedent(
-            """
-            Documentation for the ${project_name} project:
-
-            ## Architecture Overview
-            - The project follows a modular architecture with clear separation of concerns.
-            - Core components are organized into discrete packages.
-            - Dependencies flow inward toward the domain layer.
-
-            ## Code Conventions
-            - Follow PEP 8 style guidelines.
-            - Use type annotations for all public functions.
-            - Document public APIs with docstrings.
-            - Prefer composition over inheritance.
-
-            ## Review Checklist
-            - Verify that new code includes appropriate tests.
-            - Check for security vulnerabilities in user input handling.
-            - Ensure error handling follows project conventions.
-            - Validate that changes are backward compatible.
-            """
-        ).strip(),
-        default_params=ReferenceParams(),
-        key="reference-docs",
-        # No visibility=SectionVisibility.SUMMARY to avoid open_sections tool
-    )
-
-
 def _sunfish_mounts() -> tuple[HostMount, ...]:
     return (
         HostMount(
@@ -727,14 +684,15 @@ def _build_intro(
 ) -> str:
     if use_claude_agent:
         return textwrap.dedent(
-            """
+            f"""
             Launching example code reviewer agent with Claude Agent SDK.
             - Adapter: Claude Agent SDK (native agentic capabilities)
             - Repository: test-repositories/sunfish mounted in workspace
-            - Tools: SDK's native Read, Write, Bash, etc.
+            - Tools: SDK's native Read, Write, Bash + custom MCP tools (planning, open_sections)
+            - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
+            - Auto-optimization: Workspace digest generated on first request.
 
-            Note: The SDK handles tool execution internally. Structured output
-            will be parsed from the response.
+            Note: Custom MCP tools are bridged via streaming mode for full feature parity.
             """
         ).strip()
 
