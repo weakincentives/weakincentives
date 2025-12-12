@@ -212,24 +212,14 @@ def test_claude_agent_sdk_adapter_returns_text(adapter: ClaudeAgentSDKAdapter) -
     _assert_prompt_usage(session)
 
 
-@pytest.mark.skip(
-    reason=(
-        "Custom MCP server tools fail with 'ProcessTransport is not ready for writing' "
-        "in claude-agent-sdk v0.1.15. See GitHub issues: "
-        "https://github.com/anthropics/claude-agent-sdk-python/issues/176, "
-        "https://github.com/anthropics/claude-agent-sdk-python/issues/266, "
-        "https://github.com/anthropics/claude-agent-sdk-python/issues/386"
-    )
-)
 def test_claude_agent_sdk_adapter_processes_tool_invocation(
     claude_model: str, client_config: ClaudeAgentSDKClientConfig
 ) -> None:
     """Test that the adapter processes custom tool invocations via MCP bridge.
 
-    Note: This test is currently skipped due to a bug in claude-agent-sdk v0.1.15
-    where SDK MCP servers fail with 'ProcessTransport is not ready for writing'.
-    The MCP bridge implementation in _bridge.py is ready and will work once the
-    SDK bug is fixed.
+    This test validates that weakincentives tools are correctly bridged to the
+    SDK via an in-process MCP server. The streaming mode approach enables proper
+    MCP server initialization.
     """
     tool = _build_uppercase_tool()
     prompt_template = _build_tool_prompt(tool)
