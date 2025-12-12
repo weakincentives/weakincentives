@@ -30,6 +30,14 @@ from examples import (
     resolve_override_tag,
 )
 from weakincentives.adapters import PromptResponse, ProviderAdapter
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    ClaudeAgentWorkspace,
+    HostMount as ClaudeHostMount,
+    cleanup_workspace,
+    create_workspace,
+)
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session as dump_session_tree
@@ -159,8 +167,9 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     _overrides_store: LocalPromptOverridesStore
     _override_tag: str
     _use_podman: bool
+    _use_claude_agent: bool
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         adapter: ProviderAdapter[ReviewResponse],
@@ -168,6 +177,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
         use_podman: bool = False,
+        use_claude_agent: bool = False,
     ) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
@@ -175,10 +185,17 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
         )
         self._use_podman = use_podman
+        self._use_claude_agent = use_claude_agent
         # Create persistent session at construction time
         self._session = build_logged_session(tags={"app": "code-reviewer"})
-        self._template = build_task_prompt(session=self._session, use_podman=use_podman)
-        self._seed_overrides()
+        self._template = build_task_prompt(
+            session=self._session,
+            use_podman=use_podman,
+            use_claude_agent=use_claude_agent,
+        )
+        if not use_claude_agent:
+            # Only seed overrides for non-SDK modes
+            self._seed_overrides()
 
     def _seed_overrides(self) -> None:
         """Initialize prompt overrides store."""
@@ -189,6 +206,9 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 
     def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]:
         """Create and bind the review prompt for the given request."""
+        if self._use_claude_agent:
+            # For Claude Agent SDK, don't use overrides
+            return Prompt(self._template).bind(request)
         return Prompt(
             self._template,
             overrides_store=self._overrides_store,
@@ -209,8 +229,13 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         """Execute with auto-optimization for workspace digest.
 
         If no WorkspaceDigest exists in the session, runs optimization first.
+        For Claude Agent SDK mode, skip optimization as the SDK handles tools.
         """
-        if self._session.query(WorkspaceDigest).latest() is None:
+        needs_optimization = (
+            not self._use_claude_agent
+            and self._session.query(WorkspaceDigest).latest() is None
+        )
+        if needs_optimization:
             self._run_optimization()
         effective_deadline = deadline or _default_deadline()
         return super().execute(request, budget=budget, deadline=effective_deadline)
@@ -260,23 +285,30 @@ class CodeReviewApp:
 
     _bus: EventBus
     _loop: CodeReviewLoop
+    _use_claude_agent: bool
+    _workspace: ClaudeAgentWorkspace | None
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         adapter: ProviderAdapter[ReviewResponse],
         *,
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
         use_podman: bool = False,
+        use_claude_agent: bool = False,
+        workspace: ClaudeAgentWorkspace | None = None,
     ) -> None:
         bus = _create_bus_with_logging()
         self._bus = bus
+        self._use_claude_agent = use_claude_agent
+        self._workspace = workspace
         self._loop = CodeReviewLoop(
             adapter=adapter,
             bus=bus,
             overrides_store=overrides_store,
             override_tag=override_tag,
             use_podman=use_podman,
+            use_claude_agent=use_claude_agent,
         )
         bus.subscribe(MainLoopCompleted, self._on_loop_completed)
 
@@ -287,34 +319,51 @@ class CodeReviewApp:
 
         print("\n--- Agent Response ---")
         print(answer)
-        print("\n--- Plan Snapshot ---")
-        print(render_plan_snapshot(self._loop.session))
+        if not self._use_claude_agent:
+            # Plan snapshot only available for non-SDK modes
+            print("\n--- Plan Snapshot ---")
+            print(render_plan_snapshot(self._loop.session))
         print("-" * 23 + "\n")
 
     def run(self) -> None:
         """Start the interactive review session."""
-        print(_build_intro(self._loop.override_tag, use_podman=self._loop.use_podman))
+        print(
+            _build_intro(
+                self._loop.override_tag,
+                use_podman=self._loop.use_podman,
+                use_claude_agent=self._use_claude_agent,
+            )
+        )
         print("Type a review prompt to begin. (Type 'exit' to quit.)")
 
-        while True:
-            try:
-                user_prompt = input("Review prompt: ").strip()
-            except EOFError:  # pragma: no cover - interactive convenience
-                print()
-                break
+        try:
+            while True:
+                try:
+                    user_prompt = input("Review prompt: ").strip()
+                except EOFError:  # pragma: no cover - interactive convenience
+                    print()
+                    break
 
-            if not user_prompt or user_prompt.lower() in {"exit", "quit"}:
-                break
+                if not user_prompt or user_prompt.lower() in {"exit", "quit"}:
+                    break
 
-            request = ReviewTurnParams(request=user_prompt)
-            request_event = MainLoopRequest(
-                request=request,
-                deadline=_default_deadline(),
-            )
-            self._bus.publish(request_event)
+                request = ReviewTurnParams(request=user_prompt)
+                request_event = MainLoopRequest(
+                    request=request,
+                    deadline=_default_deadline(),
+                )
+                self._bus.publish(request_event)
+        finally:
+            self._cleanup()
 
         print("Goodbye.")
         dump_session_tree(self._loop.session, SNAPSHOT_DIR)
+
+    def _cleanup(self) -> None:
+        """Clean up resources."""
+        if self._workspace is not None:
+            cleanup_workspace(self._workspace)
+            _LOGGER.info("Cleaned up Claude Agent workspace.")
 
 
 def _create_bus_with_logging() -> EventBus:
@@ -337,6 +386,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use Podman sandbox instead of VFS + Asteval (requires Podman connection).",
     )
+    parser.add_argument(
+        "--claude-agent",
+        action="store_true",
+        help=(
+            "Use Claude Agent SDK adapter with native agentic capabilities. "
+            "Requires ANTHROPIC_API_KEY. Uses SDK's built-in tools."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -344,8 +401,16 @@ def main() -> None:
     """Entry point used by the `weakincentives` CLI harness."""
     args = parse_args()
     configure_logging()
-    adapter = build_adapter()
-    app = CodeReviewApp(adapter, use_podman=args.podman)
+
+    if args.claude_agent:
+        adapter, workspace = build_claude_agent_adapter()
+        app = CodeReviewApp(
+            adapter, use_podman=False, use_claude_agent=True, workspace=workspace
+        )
+    else:
+        adapter = build_adapter()
+        app = CodeReviewApp(adapter, use_podman=args.podman)
+
     app.run()
 
 
@@ -357,34 +422,97 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
+def build_claude_agent_adapter() -> tuple[
+    ProviderAdapter[ReviewResponse], ClaudeAgentWorkspace
+]:
+    """Build the Claude Agent SDK adapter with workspace.
+
+    Creates a workspace with the test repository mounted, and configures
+    the adapter to use the SDK's native agentic capabilities.
+    """
+    if "ANTHROPIC_API_KEY" not in os.environ:
+        raise SystemExit("Set ANTHROPIC_API_KEY before running with --claude-agent.")
+
+    _ensure_test_repository_available()
+
+    # Create workspace with test repository mounted
+    sunfish_path = TEST_REPOSITORIES_ROOT / "sunfish"
+    workspace = create_workspace(
+        mounts=(
+            ClaudeHostMount(
+                host_path=str(sunfish_path),
+                mount_path="sunfish",
+                include_glob=SUNFISH_MOUNT_INCLUDE_GLOBS,
+                exclude_glob=SUNFISH_MOUNT_EXCLUDE_GLOBS,
+                max_bytes=SUNFISH_MOUNT_MAX_BYTES,
+            ),
+        ),
+        allowed_host_roots=(str(TEST_REPOSITORIES_ROOT),),
+    )
+
+    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+    adapter = ClaudeAgentSDKAdapter(
+        model=model,
+        client_config=ClaudeAgentSDKClientConfig(
+            permission_mode="bypassPermissions",
+            cwd=str(workspace.temp_dir),
+        ),
+    )
+    return cast(ProviderAdapter[ReviewResponse], adapter), workspace
+
+
 def build_task_prompt(
-    *, session: Session, use_podman: bool = False
+    *,
+    session: Session,
+    use_podman: bool = False,
+    use_claude_agent: bool = False,
 ) -> PromptTemplate[ReviewResponse]:
     """Builds the main prompt template for the code review agent.
 
     This prompt demonstrates progressive disclosure: the Reference Documentation
     section starts summarized and can be expanded on demand via `open_sections`.
+
+    For Claude Agent SDK mode, a simpler prompt is used since the SDK provides
+    its own tools (Read, Write, Bash, etc.) natively.
     """
     _ensure_test_repository_available()
-    workspace_sections = _build_workspace_section(
-        session=session, use_podman=use_podman
-    )
-    sections = (
-        _build_review_guidance_section(),
-        WorkspaceDigestSection(session=session),
-        _build_reference_section(),  # Progressive disclosure section
-        PlanningToolsSection(
-            session=session,
-            strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-            accepts_overrides=True,
-        ),
-        *workspace_sections,
-        MarkdownSection[ReviewTurnParams](
-            title="Review Request",
-            template="${request}",
-            key="review-request",
-        ),
-    )
+
+    if use_claude_agent:
+        # Claude Agent SDK mode: simpler prompt, SDK provides tools
+        # Use _build_claude_agent_reference_section() to avoid progressive
+        # disclosure (and thus the open_sections tool which triggers MCP
+        # server creation that has a bug in the SDK).
+        sections: tuple[MarkdownSection[SupportsDataclass], ...] = (
+            _build_claude_agent_guidance_section(),
+            _build_claude_agent_reference_section(),
+            MarkdownSection[ReviewTurnParams](
+                title="Review Request",
+                template="${request}",
+                key="review-request",
+            ),
+        )
+    else:
+        # Standard mode: full prompt with workspace sections
+        workspace_sections = _build_workspace_section(
+            session=session, use_podman=use_podman
+        )
+        sections = (
+            _build_review_guidance_section(),
+            WorkspaceDigestSection(session=session),
+            _build_reference_section(),  # Progressive disclosure section
+            PlanningToolsSection(
+                session=session,
+                strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+                accepts_overrides=True,
+            ),
+            *workspace_sections,
+            MarkdownSection[ReviewTurnParams](
+                title="Review Request",
+                template="${request}",
+                key="review-request",
+            ),
+        )
+
     return PromptTemplate[ReviewResponse](
         ns="examples/code-review",
         key="code-review-session",
@@ -417,6 +545,34 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
               When available, the `shell_execute` command runs short Podman
               commands (no network access). Mounted files are read-only; use
               writes to stage new snapshots.
+
+            Respond with JSON containing:
+            - summary: One paragraph describing your findings so far.
+            - issues: List concrete risks, questions, or follow-ups you found.
+            - next_steps: Actionable recommendations to progress the task.
+            """
+        ).strip(),
+        default_params=ReviewGuidance(),
+        key="code-review-brief",
+    )
+
+
+def _build_claude_agent_guidance_section() -> MarkdownSection[ReviewGuidance]:
+    """Build guidance section for Claude Agent SDK mode.
+
+    This version is tailored for the SDK's native agentic capabilities.
+    """
+    return MarkdownSection[ReviewGuidance](
+        title="Code Review Brief",
+        template=textwrap.dedent(
+            """
+            You are a code review assistant. The repository has been mounted
+            in your current working directory under `sunfish/`.
+
+            Use your native tools to explore the codebase:
+            - Read files to understand the code structure
+            - Use Bash to run commands like `find`, `grep`, or `git`
+            - Write files if you need to suggest changes
 
             Respond with JSON containing:
             - summary: One paragraph describing your findings so far.
@@ -463,6 +619,47 @@ def _build_reference_section() -> MarkdownSection[ReferenceParams]:
         default_params=ReferenceParams(),
         key="reference-docs",
         visibility=SectionVisibility.SUMMARY,
+    )
+
+
+def _build_claude_agent_reference_section() -> MarkdownSection[ReferenceParams]:
+    """Build a reference documentation section for Claude Agent SDK mode.
+
+    Unlike _build_reference_section(), this version does NOT use progressive
+    disclosure (SUMMARY visibility). This avoids adding the open_sections tool,
+    which would trigger MCP server creation. The Claude Agent SDK has a bug
+    (ProcessTransport is not ready for writing) when custom MCP servers are used.
+
+    Instead, we include full documentation inline since the SDK has no custom
+    tool overhead and the model can simply read through it.
+    """
+    return MarkdownSection[ReferenceParams](
+        title="Reference Documentation",
+        template=textwrap.dedent(
+            """
+            Documentation for the ${project_name} project:
+
+            ## Architecture Overview
+            - The project follows a modular architecture with clear separation of concerns.
+            - Core components are organized into discrete packages.
+            - Dependencies flow inward toward the domain layer.
+
+            ## Code Conventions
+            - Follow PEP 8 style guidelines.
+            - Use type annotations for all public functions.
+            - Document public APIs with docstrings.
+            - Prefer composition over inheritance.
+
+            ## Review Checklist
+            - Verify that new code includes appropriate tests.
+            - Check for security vulnerabilities in user input handling.
+            - Ensure error handling follows project conventions.
+            - Validate that changes are backward compatible.
+            """
+        ).strip(),
+        default_params=ReferenceParams(),
+        key="reference-docs",
+        # No visibility=SectionVisibility.SUMMARY to avoid open_sections tool
     )
 
 
@@ -525,7 +722,22 @@ def _build_workspace_section(
     )
 
 
-def _build_intro(override_tag: str, *, use_podman: bool) -> str:
+def _build_intro(
+    override_tag: str, *, use_podman: bool, use_claude_agent: bool = False
+) -> str:
+    if use_claude_agent:
+        return textwrap.dedent(
+            """
+            Launching example code reviewer agent with Claude Agent SDK.
+            - Adapter: Claude Agent SDK (native agentic capabilities)
+            - Repository: test-repositories/sunfish mounted in workspace
+            - Tools: SDK's native Read, Write, Bash, etc.
+
+            Note: The SDK handles tool execution internally. Structured output
+            will be parsed from the response.
+            """
+        ).strip()
+
     workspace_mode = "Podman sandbox" if use_podman else "VFS + Asteval"
     return textwrap.dedent(
         f"""
