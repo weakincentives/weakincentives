@@ -16,12 +16,14 @@ from __future__ import annotations
 
 from . import events, main_loop, session
 from .events import (
+    ControlBus,
     EventBus,
     HandlerFailure,
     InProcessEventBus,
     PromptExecuted,
     PromptRendered,
     PublishResult,
+    TelemetryBus,
     TokenUsage,
     ToolInvoked,
 )
@@ -56,6 +58,7 @@ from .session import (
 )
 
 __all__ = [
+    "ControlBus",
     "DataEvent",
     "EventBus",
     "HandlerFailure",
@@ -80,6 +83,7 @@ __all__ = [
     "SnapshotRestoreError",
     "SnapshotSerializationError",
     "StructuredLogger",
+    "TelemetryBus",
     "TokenUsage",
     "ToolInvoked",
     "TypedReducer",
