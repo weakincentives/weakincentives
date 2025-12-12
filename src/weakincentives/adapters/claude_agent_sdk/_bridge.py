@@ -15,12 +15,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from typing import TYPE_CHECKING, Any
+from dataclasses import is_dataclass
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.tool import Tool, ToolContext
+from ...prompt.tool import Tool, ToolContext, ToolResult
+from ...runtime.events import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
 
@@ -61,6 +64,8 @@ class BridgedTool:
         rendered_prompt: RenderedPromptProtocol[Any] | None,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
+        adapter_name: str = "claude_agent_sdk",
+        prompt_name: str | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -72,6 +77,8 @@ class BridgedTool:
         self._rendered_prompt = rendered_prompt
         self._deadline = deadline
         self._budget_tracker = budget_tracker
+        self._adapter_name = adapter_name
+        self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -111,6 +118,10 @@ class BridgedTool:
             rendered = result.render()
             output_text = rendered if rendered else result.message
 
+            # Publish ToolInvoked event with the actual tool result value
+            # This enables session reducers to dispatch based on the value type
+            self._publish_tool_invoked(args, result, output_text)
+
             return {
                 "content": [{"type": "text", "text": output_text}],
                 "isError": not result.success,
@@ -142,6 +153,35 @@ class BridgedTool:
                 "isError": True,
             }
 
+    def _publish_tool_invoked(
+        self,
+        args: dict[str, Any],
+        result: ToolResult[Any],
+        rendered_output: str,
+    ) -> None:
+        """Publish a ToolInvoked event with the tool result value.
+
+        This enables session reducers to dispatch based on the value type,
+        which is critical for planning tools and other stateful tools.
+        """
+        # Extract the dataclass value for session dispatch
+        value = result.value if is_dataclass(result.value) else None
+
+        event = ToolInvoked(
+            prompt_name=self._prompt_name,
+            adapter=self._adapter_name,
+            name=self.name,
+            params=args,
+            result=cast(ToolResult[object], result),
+            session_id=None,
+            created_at=datetime.now(UTC),
+            usage=None,
+            value=value,
+            rendered_output=rendered_output[:1000] if rendered_output else "",
+            call_id=None,
+        )
+        self._session.event_bus.publish(event)
+
 
 def create_bridged_tools(
     tools: tuple[Tool[Any, Any], ...],
@@ -152,6 +192,8 @@ def create_bridged_tools(
     rendered_prompt: RenderedPromptProtocol[Any] | None,
     deadline: Deadline | None,
     budget_tracker: BudgetTracker | None,
+    adapter_name: str = "claude_agent_sdk",
+    prompt_name: str | None = None,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -163,11 +205,14 @@ def create_bridged_tools(
         rendered_prompt: Rendered prompt for tool context.
         deadline: Optional deadline for tool context.
         budget_tracker: Optional budget tracker for tool context.
+        adapter_name: Name of the adapter for event publishing.
+        prompt_name: Name of the prompt for event publishing.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
     """
     bridged: list[BridgedTool] = []
+    resolved_prompt_name = prompt_name or prompt.name or f"{prompt.ns}:{prompt.key}"
 
     for tool in tools:
         if tool.handler is None:
@@ -190,6 +235,8 @@ def create_bridged_tools(
             rendered_prompt=rendered_prompt,
             deadline=deadline,
             budget_tracker=budget_tracker,
+            adapter_name=adapter_name,
+            prompt_name=resolved_prompt_name,
         )
         bridged.append(bridged_tool)
 
