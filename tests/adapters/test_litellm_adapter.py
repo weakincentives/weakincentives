@@ -77,6 +77,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         simple_handler,
     )
 from tests.helpers.events import NullEventBus
+from weakincentives import ToolValidationError
 from weakincentives.budget import Budget
 from weakincentives.prompt import (
     MarkdownSection,
@@ -100,7 +101,6 @@ from weakincentives.runtime.session import (
     Session,
     replace_latest,
 )
-from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.litellm"
 PROMPT_NS = "tests/adapters/litellm"

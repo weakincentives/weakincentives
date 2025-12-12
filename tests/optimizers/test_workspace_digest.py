@@ -24,12 +24,19 @@ from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
 )
+from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
+from weakincentives.contrib.tools.digests import (
+    WorkspaceDigest,
+    WorkspaceDigestSection,
+    latest_workspace_digest,
+    set_workspace_digest,
+)
+from weakincentives.contrib.tools.vfs import VfsToolsSection
 from weakincentives.deadlines import Deadline
 from weakincentives.optimizers import (
     OptimizationContext,
     OptimizerConfig,
     PersistenceScope,
-    WorkspaceDigestOptimizer,
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.overrides import (
@@ -42,13 +49,6 @@ from weakincentives.prompt.overrides import (
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session, SessionProtocol
-from weakincentives.tools.digests import (
-    WorkspaceDigest,
-    WorkspaceDigestSection,
-    latest_workspace_digest,
-    set_workspace_digest,
-)
-from weakincentives.tools.vfs import VfsToolsSection
 
 
 @dataclass(slots=True, frozen=True)

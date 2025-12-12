@@ -10,7 +10,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Public surface for built-in tool suites."""
+"""Contributed tool suites for specific agent styles.
+
+This package provides domain-specific tools that extend the core primitives:
+
+- **Planning tools**: Session-scoped todo list for background agents
+- **VFS tools**: Virtual filesystem with glob, grep, and file operations
+- **Asteval tools**: Sandboxed Python expression evaluation
+- **Podman tools**: Containerized shell execution
+- **Workspace digest**: Caching and optimization for workspace sections
+
+Example usage::
+
+    from weakincentives.contrib.tools import (
+        PlanningToolsSection,
+        VfsToolsSection,
+        AstevalSection,
+        PodmanSandboxSection,
+    )
+"""
 
 # pyright: reportImportCycles=false
 
@@ -33,7 +51,6 @@ from .digests import (
     latest_workspace_digest,
     set_workspace_digest,
 )
-from .errors import DeadlineExceededError, ToolValidationError
 from .planning import (
     AddStep,
     Plan,
@@ -80,7 +97,6 @@ PodmanWorkspace: Any
 __all__ = [
     "AddStep",
     "AstevalSection",
-    "DeadlineExceededError",
     "DeleteEntry",
     "EditFileParams",
     "EvalFileRead",
@@ -113,7 +129,6 @@ __all__ = [
     "RemoveParams",
     "SetupPlan",
     "StepStatus",
-    "ToolValidationError",
     "UpdateStep",
     "VfsFile",
     "VfsPath",

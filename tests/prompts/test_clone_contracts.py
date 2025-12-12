@@ -16,11 +16,11 @@ from dataclasses import dataclass
 
 import pytest
 
+from weakincentives.contrib.tools.asteval import AstevalSection
+from weakincentives.contrib.tools.planning import PlanningStrategy, PlanningToolsSection
+from weakincentives.contrib.tools.vfs import VfsToolsSection
 from weakincentives.prompt import MarkdownSection
 from weakincentives.runtime.session import Session
-from weakincentives.tools.asteval import AstevalSection
-from weakincentives.tools.planning import PlanningStrategy, PlanningToolsSection
-from weakincentives.tools.vfs import VfsToolsSection
 
 
 @dataclass

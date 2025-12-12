@@ -28,6 +28,7 @@ from uuid import uuid4
 from ..budget import BudgetExceededError, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
+from ..errors import DeadlineExceededError, ToolValidationError
 from ..prompt._types import (
     SupportsDataclass,
     SupportsDataclassOrNone,
@@ -55,7 +56,6 @@ from ..runtime.events import (
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.dataclasses import is_dataclass_instance
 from ..serde import parse, schema
-from ..tools.errors import DeadlineExceededError, ToolValidationError
 from ..types import JSONValue
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
 from ._provider_protocols import (

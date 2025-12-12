@@ -2,6 +2,33 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Breaking Changes
+
+- **Moved tools to `weakincentives.contrib.tools`**: All domain-specific tools
+  (Planning, VFS, Asteval, Podman, workspace digest) are now in the `contrib`
+  package. Import paths change:
+
+  - `from weakincentives.tools import ...` → `from weakincentives.contrib.tools import ...`
+  - `from weakincentives.tools.planning import ...` → `from weakincentives.contrib.tools.planning import ...`
+
+- **Moved `WorkspaceDigestOptimizer` to `weakincentives.contrib.optimizers`**:
+
+  - `from weakincentives.optimizers import WorkspaceDigestOptimizer` → `from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer`
+
+- **Moved error types to root module**: `DeadlineExceededError` and
+  `ToolValidationError` are now exported from `weakincentives` directly:
+
+  - `from weakincentives.tools import DeadlineExceededError` → `from weakincentives import DeadlineExceededError`
+  - `from weakincentives.tools.errors import ToolValidationError` → `from weakincentives import ToolValidationError`
+
+### Architecture
+
+- Library now organized as "core primitives" + "batteries for specific agent styles":
+  - **Core** (`weakincentives.*`): Prompt composition, sessions, adapters, serde, dbc
+  - **Contrib** (`weakincentives.contrib.*`): Planning tools, VFS, Podman, asteval, workspace optimizers
+
 ## v0.13.0 - 2025-12-07
 
 ### MainLoop Orchestration

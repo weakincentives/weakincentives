@@ -23,11 +23,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal, cast, override
 
-from ..dataclasses import FrozenDataclass
-from ..prompt import SupportsDataclass, SupportsToolResult
-from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
-from ..runtime.session import (
+from ...dataclasses import FrozenDataclass
+from ...errors import ToolValidationError
+from ...prompt import SupportsDataclass, SupportsToolResult
+from ...prompt.markdown import MarkdownSection
+from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
+from ...runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
     ReducerEventWithValue,
@@ -36,7 +37,6 @@ from ..runtime.session import (
     replace_latest,
 )
 from ._context import ensure_context_uses_session
-from .errors import ToolValidationError
 
 FileEncoding = Literal["utf-8"]
 WriteMode = Literal["create", "overwrite", "append"]

@@ -10,19 +10,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt optimization algorithms and utilities.
+"""Prompt optimization framework and utilities.
 
-This module provides the ``PromptOptimizer`` protocol and concrete
-implementations for transforming, enhancing, or generating content
-for ``Prompt`` objects.
+This module provides the ``PromptOptimizer`` protocol and base classes
+for building prompt optimizers. Concrete implementations live in
+``weakincentives.contrib.optimizers``.
 
 Example usage::
 
     from weakincentives.optimizers import (
         OptimizationContext,
         PersistenceScope,
-        WorkspaceDigestOptimizer,
     )
+    from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
 
     context = OptimizationContext(
         adapter=adapter,
@@ -43,7 +43,6 @@ from ._context import OptimizationContext
 from ._events import OptimizationCompleted, OptimizationFailed, OptimizationStarted
 from ._protocol import PromptOptimizer
 from ._results import OptimizationResult, PersistenceScope, WorkspaceDigestResult
-from .workspace_digest import WorkspaceDigestOptimizer
 
 __all__ = [
     "BasePromptOptimizer",
@@ -55,6 +54,5 @@ __all__ = [
     "OptimizerConfig",
     "PersistenceScope",
     "PromptOptimizer",
-    "WorkspaceDigestOptimizer",
     "WorkspaceDigestResult",
 ]

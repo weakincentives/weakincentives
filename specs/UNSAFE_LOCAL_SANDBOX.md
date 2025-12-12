@@ -172,7 +172,7 @@ workspace directory must be within the allowed host roots.
 ```python
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
-from weakincentives.tools.unsafe_local import (
+from weakincentives.contrib.tools.unsafe_local import (
     UnsafeLocalSandboxSection,
     UnsafeLocalSandboxConfig,
     UnsafeLocalWorkspace,
@@ -217,11 +217,11 @@ external isolation. Do not assume files outside `/workspace` are accessible."""
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 from weakincentives.prompt import Prompt, MarkdownSection
-from weakincentives.tools.unsafe_local import (
+from weakincentives.contrib.tools.unsafe_local import (
     UnsafeLocalSandboxSection,
     UnsafeLocalSandboxConfig,
 )
-from weakincentives.tools.vfs import HostMount
+from weakincentives.contrib.tools.vfs import HostMount
 
 bus = InProcessEventBus()
 session = Session(bus=bus)
@@ -364,7 +364,7 @@ to temp |
 
 ```python
 # Before
-from weakincentives.tools.podman import PodmanSandboxSection, PodmanSandboxConfig
+from weakincentives.contrib.tools.podman import PodmanSandboxSection, PodmanSandboxConfig
 
 section = PodmanSandboxSection(
     session=session,
@@ -375,7 +375,7 @@ section = PodmanSandboxSection(
 )
 
 # After
-from weakincentives.tools.unsafe_local import (
+from weakincentives.contrib.tools.unsafe_local import (
     UnsafeLocalSandboxSection,
     UnsafeLocalSandboxConfig,
 )

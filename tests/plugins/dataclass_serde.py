@@ -40,12 +40,12 @@ from typing import Any
 
 import pytest
 
-from weakincentives.serde import dump, parse
-from weakincentives.tools import (
+from weakincentives.contrib.tools import (
     asteval as asteval_tools,
     planning as planning_tools,
     vfs as vfs_tools,
 )
+from weakincentives.serde import dump, parse
 
 SupportsFactory = Callable[[], object]
 

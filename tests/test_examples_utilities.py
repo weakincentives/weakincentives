@@ -18,10 +18,10 @@ import pytest
 
 from examples import build_logged_session, render_plan_snapshot, resolve_override_tag
 from tests.tools.helpers import find_tool, invoke_tool
+from weakincentives.contrib.tools import PlanningStrategy, PlanningToolsSection
+from weakincentives.contrib.tools.planning import SetupPlan, UpdateStep
 from weakincentives.runtime import Session
 from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.tools import PlanningStrategy, PlanningToolsSection
-from weakincentives.tools.planning import SetupPlan, UpdateStep
 
 # Tests for build_logged_session
 

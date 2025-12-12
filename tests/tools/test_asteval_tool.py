@@ -21,12 +21,10 @@ from typing import cast
 
 import pytest
 
-import weakincentives.tools.asteval as asteval_module
+import weakincentives.contrib.tools.asteval as asteval_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.prompt.tool import Tool, ToolResult
-from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session
-from weakincentives.tools import (
+from weakincentives import ToolValidationError
+from weakincentives.contrib.tools import (
     AstevalSection,
     EvalFileRead,
     EvalFileWrite,
@@ -35,13 +33,15 @@ from weakincentives.tools import (
     HostMount,
     ListDirectory,
     ListDirectoryResult,
-    ToolValidationError,
     VfsPath,
     VfsToolsSection,
     VirtualFileSystem,
     WriteFile,
     WriteFileParams,
 )
+from weakincentives.prompt.tool import Tool, ToolResult
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 
 def _assert_success_message(result: ToolResult[EvalResult]) -> None:
@@ -307,7 +307,7 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
         return True, None, "Execution timed out."
 
     monkeypatch.setattr(
-        "weakincentives.tools.asteval._execute_with_timeout", fake_timeout
+        "weakincentives.contrib.tools.asteval._execute_with_timeout", fake_timeout
     )
 
     params = EvalParams(
@@ -342,7 +342,7 @@ def test_timeout_reports_discarded_writes_message(
         return True, None, "Execution timed out."
 
     monkeypatch.setattr(
-        "weakincentives.tools.asteval._execute_with_timeout", fake_timeout
+        "weakincentives.contrib.tools.asteval._execute_with_timeout", fake_timeout
     )
 
     result = invoke_tool(

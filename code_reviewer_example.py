@@ -37,12 +37,24 @@ from weakincentives.adapters.claude_agent_sdk import (
     HostMount as ClaudeHostMount,
 )
 from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
+from weakincentives.contrib.tools import (
+    AstevalSection,
+    HostMount,
+    PlanningStrategy,
+    PlanningToolsSection,
+    PodmanSandboxConfig,
+    PodmanSandboxSection,
+    VfsPath,
+    VfsToolsSection,
+    WorkspaceDigest,
+    WorkspaceDigestSection,
+)
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session as dump_session_tree
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
-    WorkspaceDigestOptimizer,
 )
 from weakincentives.prompt import (
     MarkdownSection,
@@ -61,18 +73,6 @@ from weakincentives.runtime import (
     MainLoopCompleted,
     MainLoopRequest,
     Session,
-)
-from weakincentives.tools import (
-    AstevalSection,
-    HostMount,
-    PlanningStrategy,
-    PlanningToolsSection,
-    PodmanSandboxConfig,
-    PodmanSandboxSection,
-    VfsPath,
-    VfsToolsSection,
-    WorkspaceDigest,
-    WorkspaceDigestSection,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent

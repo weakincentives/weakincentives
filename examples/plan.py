@@ -14,8 +14,8 @@
 
 from __future__ import annotations
 
+from weakincentives.contrib.tools import Plan
 from weakincentives.runtime import Session
-from weakincentives.tools import Plan
 
 __all__ = [
     "render_plan_snapshot",

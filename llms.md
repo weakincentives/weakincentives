@@ -526,7 +526,7 @@ response = adapter.evaluate(..., throttle=policy)
 ### VfsToolsSection - Sandboxed file operations
 
 ```python
-from weakincentives.tools import VfsToolsSection, HostMount, VfsPath
+from weakincentives.contrib.tools import VfsToolsSection, HostMount, VfsPath
 vfs = VfsToolsSection(
     session=session,
     mounts=(HostMount(host_path="./repo", mount_path=VfsPath(("workspace",)),
@@ -540,7 +540,7 @@ Tools: `read_file`, `write_file`, `list_directory`, `glob`, `grep`
 ### PlanningToolsSection - Multi-step planning
 
 ```python
-from weakincentives.tools import PlanningToolsSection, PlanningStrategy
+from weakincentives.contrib.tools import PlanningToolsSection, PlanningStrategy
 planning = PlanningToolsSection(session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT)
 ```
 

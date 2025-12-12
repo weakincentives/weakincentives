@@ -48,6 +48,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         ToolPayload,
     )
 
+from weakincentives import DeadlineExceededError, ToolValidationError
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -75,7 +76,6 @@ from weakincentives.runtime.session import (
     SessionProtocol,
     replace_latest,
 )
-from weakincentives.tools import DeadlineExceededError, ToolValidationError
 
 
 def _split_tool_message_content(content: str) -> tuple[str, str | None]:

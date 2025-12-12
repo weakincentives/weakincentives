@@ -25,6 +25,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     from ._test_stubs import DummyToolCall, ToolParams, ToolPayload
 
 from tests.helpers import FrozenUtcNow
+from weakincentives import DeadlineExceededError
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
@@ -51,7 +52,6 @@ from weakincentives.prompt import (
 )
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, SessionProtocol
-from weakincentives.tools import DeadlineExceededError
 
 
 def _build_prompt(tool: Tool[ToolParams, ToolPayload]) -> PromptTemplate[ToolPayload]:

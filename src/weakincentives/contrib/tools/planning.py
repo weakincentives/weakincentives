@@ -19,13 +19,14 @@ from dataclasses import field
 from enum import Enum
 from typing import Final, Literal, cast, override
 
-from ..dataclasses import FrozenDataclass
-from ..prompt import SupportsDataclass, SupportsToolResult
-from ..prompt._visibility import SectionVisibility
-from ..prompt.errors import PromptRenderError
-from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
-from ..runtime.session import (
+from ...dataclasses import FrozenDataclass
+from ...errors import ToolValidationError
+from ...prompt import SupportsDataclass, SupportsToolResult
+from ...prompt._visibility import SectionVisibility
+from ...prompt.errors import PromptRenderError
+from ...prompt.markdown import MarkdownSection
+from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
+from ...runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
     ReducerEventWithValue,
@@ -33,7 +34,6 @@ from ..runtime.session import (
     replace_latest,
 )
 from ._context import ensure_context_uses_session
-from .errors import ToolValidationError
 
 PlanStatus = Literal["active", "completed"]
 StepStatus = Literal["pending", "in_progress", "done"]
@@ -151,7 +151,7 @@ class UpdateStep:
 class ReadPlan:
     """Request the most recent plan snapshot from the session store."""
 
-    def render(self) -> str:  # pragma: no cover - mirrors Request semantics
+    def render(self) -> str:  # noqa: PLR6301 - mirrors Request semantics
         return "Read latest plan snapshot."
 
 

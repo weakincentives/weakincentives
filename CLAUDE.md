@@ -45,16 +45,24 @@ enforce a clean run.
 
 ```
 src/weakincentives/
-├── adapters/        # Provider integrations (OpenAI, LiteLLM)
+├── adapters/        # Provider integrations (OpenAI, LiteLLM, Claude Agent SDK)
 ├── cli/             # wink CLI entrypoints
+├── contrib/         # Batteries for specific agent styles
+│   ├── tools/       # Planning, VFS, asteval, Podman, workspace digest
+│   └── optimizers/  # Workspace digest optimizer
 ├── dataclasses/     # FrozenDataclass utilities
 ├── dbc/             # Design-by-contract decorators
+├── optimizers/      # Optimizer framework and protocols
 ├── prompt/          # Section/Prompt composition, overrides, tools
 ├── runtime/         # Session, events, logging
 ├── serde/           # Dataclass serialization (no Pydantic)
-├── tools/           # Planning, VFS, asteval, Podman
 └── types/           # JSON type aliases
 ```
+
+The library is organized as "core primitives" + "batteries for specific agent styles":
+
+- **Core** (`weakincentives.*`): Prompt composition, sessions, adapters, serde, dbc
+- **Contrib** (`weakincentives.contrib.*`): Planning tools, VFS, Podman, asteval, workspace optimizers
 
 ## Code Conventions
 
@@ -180,6 +188,7 @@ prompt = Prompt[OutputType](
 
 ```python
 from weakincentives.runtime import Session, InProcessEventBus
+from weakincentives.contrib.tools import Plan, AddStep
 
 bus = InProcessEventBus()
 session = Session(bus=bus)

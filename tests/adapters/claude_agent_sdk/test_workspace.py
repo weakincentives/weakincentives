@@ -27,8 +27,8 @@ from weakincentives.adapters.claude_agent_sdk.workspace import (
     WorkspaceBudgetExceededError,
     WorkspaceSecurityError,
 )
+from weakincentives.contrib.tools.workspace import WorkspaceSection
 from weakincentives.runtime import InProcessEventBus, Session
-from weakincentives.tools.workspace import WorkspaceSection
 
 
 class TestHostMount:

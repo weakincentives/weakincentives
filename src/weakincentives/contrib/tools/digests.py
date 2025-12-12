@@ -17,13 +17,13 @@ from __future__ import annotations
 import textwrap
 from typing import override
 
-from ..dataclasses import FrozenDataclass
-from ..prompt._types import SupportsDataclass
-from ..prompt._visibility import SectionVisibility
-from ..prompt.section import Section
-from ..runtime.logging import StructuredLogger, get_logger
-from ..runtime.session import Session
-from ..runtime.session.protocols import SessionProtocol
+from ...dataclasses import FrozenDataclass
+from ...prompt._types import SupportsDataclass
+from ...prompt._visibility import SectionVisibility
+from ...prompt.section import Section
+from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.session import Session
+from ...runtime.session.protocols import SessionProtocol
 
 
 @FrozenDataclass()
@@ -35,7 +35,7 @@ class WorkspaceDigest(SupportsDataclass):
 
 
 def _normalized_key(section_key: str) -> str:
-    from ..prompt._normalization import normalize_component_key
+    from ...prompt._normalization import normalize_component_key
 
     return normalize_component_key(section_key, owner="WorkspaceDigest")
 

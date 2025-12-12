@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import pytest
 
+from weakincentives.contrib.tools import PlanningStrategy, PlanningToolsSection
 from weakincentives.prompt import PromptRenderError
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
-from weakincentives.tools import PlanningStrategy, PlanningToolsSection
 
 
 def _make_section(

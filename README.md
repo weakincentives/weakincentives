@@ -163,7 +163,7 @@ via `Prompt`:
 
 ```python
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.tools import PlanningToolsSection, VfsToolsSection, WorkspaceDigestSection
+from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection, WorkspaceDigestSection
 
 template = PromptTemplate[ReviewResponse](
     ns="examples/code-review",
@@ -187,7 +187,7 @@ prompt = Prompt(template).bind(ReviewTurnParams(request="Review main.py"))
 Give agents file access without host risk:
 
 ```python
-from weakincentives.tools import HostMount, VfsPath, VfsToolsSection
+from weakincentives.contrib.tools import HostMount, VfsPath, VfsToolsSection
 
 mounts = (
     HostMount(
@@ -242,7 +242,7 @@ review: ReviewResponse = response.output  # typed, validated
 Every action is recorded. Query the session for plans, tool calls, or any slice:
 
 ```python
-from weakincentives.tools.planning import Plan
+from weakincentives.contrib.tools.planning import Plan
 
 plan = session.query(Plan).latest()
 if plan:
