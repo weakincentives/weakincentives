@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -25,6 +26,8 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     PostToolUseInput,
     ToolResponse,
+    _expand_transcript_paths,
+    _read_transcript_file,
     create_notification_hook,
     create_post_tool_use_hook,
     create_pre_compact_hook,
@@ -757,6 +760,229 @@ class TestSubagentStopHook:
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
 
         assert result == {}
+
+    def test_expands_transcript_path(self, session: Session, tmp_path: Path) -> None:
+        session.mutate(Notification).register(Notification, append)
+
+        # Create a temporary JSONL transcript file
+        transcript_file = tmp_path / "transcript.jsonl"
+        transcript_file.write_text(
+            '{"role": "user", "content": "hello"}\n'
+            '{"role": "assistant", "content": "hi there"}\n'
+        )
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_subagent_stop_hook(context)
+        input_data = {
+            "session_id": "sess-123",
+            "transcript_path": str(transcript_file),
+        }
+
+        asyncio.run(hook(input_data, None, context))
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 1
+        notif = notifications[0]
+        assert notif.source == "subagent_stop"
+        # transcript_path should now be a list of parsed entries
+        assert notif.payload["transcript_path"] == [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi there"},
+        ]
+
+    def test_expands_agent_transcript_path(
+        self, session: Session, tmp_path: Path
+    ) -> None:
+        session.mutate(Notification).register(Notification, append)
+
+        # Create a temporary JSONL transcript file
+        transcript_file = tmp_path / "agent_transcript.jsonl"
+        transcript_file.write_text('{"event": "tool_call", "name": "Read"}\n')
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_subagent_stop_hook(context)
+        input_data = {
+            "session_id": "sess-123",
+            "agent_transcript_path": str(transcript_file),
+        }
+
+        asyncio.run(hook(input_data, None, context))
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 1
+        notif = notifications[0]
+        assert notif.payload["agent_transcript_path"] == [
+            {"event": "tool_call", "name": "Read"},
+        ]
+
+    def test_expands_both_transcript_paths(
+        self, session: Session, tmp_path: Path
+    ) -> None:
+        session.mutate(Notification).register(Notification, append)
+
+        transcript_file = tmp_path / "transcript.jsonl"
+        transcript_file.write_text('{"role": "user", "content": "test"}\n')
+
+        agent_transcript_file = tmp_path / "agent.jsonl"
+        agent_transcript_file.write_text('{"event": "start"}\n')
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_subagent_stop_hook(context)
+        input_data = {
+            "session_id": "sess-123",
+            "transcript_path": str(transcript_file),
+            "agent_transcript_path": str(agent_transcript_file),
+        }
+
+        asyncio.run(hook(input_data, None, context))
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 1
+        notif = notifications[0]
+        assert notif.payload["transcript_path"] == [
+            {"role": "user", "content": "test"},
+        ]
+        assert notif.payload["agent_transcript_path"] == [{"event": "start"}]
+
+    def test_handles_nonexistent_transcript_path(self, session: Session) -> None:
+        session.mutate(Notification).register(Notification, append)
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_subagent_stop_hook(context)
+        input_data = {
+            "session_id": "sess-123",
+            "transcript_path": "/nonexistent/path/transcript.jsonl",
+        }
+
+        asyncio.run(hook(input_data, None, context))
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 1
+        notif = notifications[0]
+        # Returns empty list for nonexistent file
+        assert notif.payload["transcript_path"] == []
+
+
+class TestReadTranscriptFile:
+    def test_reads_jsonl_file(self, tmp_path: Path) -> None:
+        transcript_file = tmp_path / "test.jsonl"
+        transcript_file.write_text('{"a": 1}\n{"b": 2}\n{"c": 3}\n')
+
+        result = _read_transcript_file(str(transcript_file))
+
+        assert result == [{"a": 1}, {"b": 2}, {"c": 3}]
+
+    def test_returns_empty_list_for_empty_path(self) -> None:
+        assert _read_transcript_file("") == []
+
+    def test_returns_empty_list_for_nonexistent_file(self) -> None:
+        assert _read_transcript_file("/nonexistent/file.jsonl") == []
+
+    def test_handles_blank_lines(self, tmp_path: Path) -> None:
+        transcript_file = tmp_path / "test.jsonl"
+        transcript_file.write_text('{"a": 1}\n\n{"b": 2}\n  \n')
+
+        result = _read_transcript_file(str(transcript_file))
+
+        assert result == [{"a": 1}, {"b": 2}]
+
+    def test_handles_invalid_json_gracefully(self, tmp_path: Path) -> None:
+        transcript_file = tmp_path / "test.jsonl"
+        transcript_file.write_text('{"a": 1}\nnot json\n{"b": 2}\n')
+
+        # Returns empty list on JSON decode error
+        result = _read_transcript_file(str(transcript_file))
+
+        assert result == []
+
+    def test_expands_tilde_in_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Create file in tmp_path and mock expanduser
+        transcript_file = tmp_path / "test.jsonl"
+        transcript_file.write_text('{"key": "value"}\n')
+
+        original_expanduser = Path.expanduser
+
+        def mock_expanduser(path_self: Path) -> Path:
+            if str(path_self).startswith("~"):
+                return tmp_path / str(path_self)[2:]  # Remove "~/"
+            return original_expanduser(path_self)
+
+        monkeypatch.setattr(Path, "expanduser", mock_expanduser)
+
+        result = _read_transcript_file("~/test.jsonl")
+
+        assert result == [{"key": "value"}]
+
+
+class TestExpandTranscriptPaths:
+    def test_expands_transcript_path(self, tmp_path: Path) -> None:
+        transcript_file = tmp_path / "transcript.jsonl"
+        transcript_file.write_text('{"role": "user"}\n')
+
+        payload = {"session_id": "123", "transcript_path": str(transcript_file)}
+        result = _expand_transcript_paths(payload)
+
+        assert result["session_id"] == "123"
+        assert result["transcript_path"] == [{"role": "user"}]
+
+    def test_expands_agent_transcript_path(self, tmp_path: Path) -> None:
+        transcript_file = tmp_path / "agent.jsonl"
+        transcript_file.write_text('{"event": "start"}\n')
+
+        payload = {"agent_transcript_path": str(transcript_file)}
+        result = _expand_transcript_paths(payload)
+
+        assert result["agent_transcript_path"] == [{"event": "start"}]
+
+    def test_preserves_other_fields(self, tmp_path: Path) -> None:
+        transcript_file = tmp_path / "transcript.jsonl"
+        transcript_file.write_text('{"msg": 1}\n')
+
+        payload = {
+            "session_id": "abc",
+            "transcript_path": str(transcript_file),
+            "other_field": "value",
+        }
+        result = _expand_transcript_paths(payload)
+
+        assert result["session_id"] == "abc"
+        assert result["other_field"] == "value"
+
+    def test_does_not_modify_original_payload(self, tmp_path: Path) -> None:
+        transcript_file = tmp_path / "transcript.jsonl"
+        transcript_file.write_text('{"data": 1}\n')
+
+        original_path = str(transcript_file)
+        payload = {"transcript_path": original_path}
+        _expand_transcript_paths(payload)
+
+        # Original should be unchanged
+        assert payload["transcript_path"] == original_path
+
+    def test_handles_non_string_transcript_path(self) -> None:
+        # If transcript_path is not a string, leave it unchanged
+        payload = {"transcript_path": 123}
+        result = _expand_transcript_paths(payload)
+
+        assert result["transcript_path"] == 123
 
 
 class TestPreCompactHook:
