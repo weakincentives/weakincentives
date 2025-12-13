@@ -1177,3 +1177,38 @@ def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
     assert not ephemeral_home.exists(), (
         f"Ephemeral home not cleaned up: {ephemeral_home}"
     )
+
+
+@pytest.mark.skipif(
+    os.uname().sysname != "Linux",
+    reason="Network sandbox enforcement requires Linux bubblewrap; macOS seatbelt is limited",
+)
+def test_claude_agent_sdk_adapter_empty_network_policy_fails(
+    claude_model: str,
+) -> None:
+    """Verify that blocking all network access causes API calls to fail.
+
+    This test validates that NetworkPolicy with empty allowed_domains prevents
+    the SDK from reaching the Anthropic API. This proves that a hypothetical
+    no_network() policy would be broken - the subprocess needs API access.
+
+    Note: This test only runs on Linux where bubblewrap enforces network policy.
+    macOS seatbelt sandbox has limited network enforcement capabilities.
+    """
+    # Create a policy that blocks ALL network access
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy(allowed_domains=()),  # Block everything
+            sandbox=SandboxConfig(enabled=True),
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(model=claude_model, client_config=config)
+    prompt = Prompt(_build_greeting_prompt()).bind(
+        GreetingParams(audience="network blocked test")
+    )
+    session = _make_session_with_usage_tracking()
+
+    # The SDK subprocess cannot reach api.anthropic.com, so this should fail
+    with pytest.raises(Exception):  # noqa: B017
+        adapter.evaluate(prompt, session=session)

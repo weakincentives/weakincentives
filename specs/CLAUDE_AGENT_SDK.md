@@ -228,31 +228,6 @@ adapter = ClaudeAgentSDKAdapter(
 )
 ```
 
-### Story 6: Completely Offline Agent
-
-Run the agent with no network access at all. Useful for processing sensitive
-data that must never leave the machine.
-
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    IsolationConfig,
-    NetworkPolicy,
-    SandboxConfig,
-)
-
-# Note: This requires a cached model or will fail
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        isolation=IsolationConfig(
-            network_policy=NetworkPolicy.no_network(),
-            sandbox=SandboxConfig(enabled=True),
-        ),
-    ),
-)
-```
-
 ## Purpose
 
 The Claude Agent SDK adapter enables weakincentives prompts to leverage Claude's
@@ -362,7 +337,8 @@ class IsolationConfig:
 
 ### NetworkPolicy
 
-Controls network access within the sandbox:
+Controls network access within the sandbox. Note that `api.anthropic.com` must
+always be accessible since the Claude Code CLI subprocess makes direct API calls:
 
 ```python
 @FrozenDataclass()
@@ -373,11 +349,9 @@ class NetworkPolicy:
     allowed_ports: tuple[int, ...] | None = None # Port restrictions
 
     @classmethod
-    def no_network(cls) -> NetworkPolicy: ...    # Block all network
+    def api_only(cls) -> NetworkPolicy: ...      # Only api.anthropic.com (minimum)
     @classmethod
-    def api_only(cls) -> NetworkPolicy: ...      # Only api.anthropic.com
-    @classmethod
-    def with_domains(cls, *domains) -> NetworkPolicy: ...
+    def with_domains(cls, *domains) -> NetworkPolicy: ...  # Custom domains
 ```
 
 ### SandboxConfig
