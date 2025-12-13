@@ -69,11 +69,10 @@ class _RepositoryOptimizationAdapter:
         bus: InProcessEventBus | None = None,
         session: Session | None = None,
         deadline: object | None = None,
-        visibility_overrides: object | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
     ) -> PromptResponse[Any]:
-        del deadline, visibility_overrides, budget, budget_tracker
+        del deadline, budget, budget_tracker
         self.calls.append(prompt.key)
 
         if "workspace-digest" in prompt.key:
@@ -118,11 +117,10 @@ class _RecordingDeadlineAdapter:
         bus: InProcessEventBus | None = None,
         session: Session | None = None,
         deadline: Deadline | None = None,
-        visibility_overrides: object | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
     ) -> PromptResponse[Any]:
-        del bus, session, visibility_overrides, budget, budget_tracker
+        del bus, session, budget, budget_tracker
         self.deadlines.append(deadline)
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,
@@ -336,9 +334,12 @@ def test_dump_session_skips_empty_session(
     caplog: pytest.LogCaptureFixture,
     _redirect_snapshots: Path,
 ) -> None:
+    """Sessions with no data (only empty slices) skip snapshot dump."""
     caplog.set_level(logging.INFO, logger="weakincentives.debug")
     session = Session()
 
+    # Sessions have builtin reducers registered but no data
+    # Empty slices are excluded from snapshots, so this should be skipped
     snapshot_path = dump_session(session, _redirect_snapshots)
 
     assert snapshot_path is None

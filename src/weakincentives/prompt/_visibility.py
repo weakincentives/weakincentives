@@ -17,9 +17,13 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from enum import Enum
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
+from ._enabled_predicate import callable_accepts_session_kwarg
 from ._types import SupportsDataclass
+
+if TYPE_CHECKING:
+    from ..runtime.session.protocols import SessionProtocol
 
 
 class SectionVisibility(Enum):
@@ -42,6 +46,11 @@ VisibilitySelector = (
     | SectionVisibility
 )
 
+# Normalized callable signature that accepts params and session keyword argument
+NormalizedVisibilitySelector = Callable[
+    [SupportsDataclass | None, "SessionProtocol | None"], SectionVisibility
+]
+
 
 def _coerce_section_visibility(value: object) -> SectionVisibility:
     if isinstance(value, SectionVisibility):
@@ -52,30 +61,90 @@ def _coerce_section_visibility(value: object) -> SectionVisibility:
 def normalize_visibility_selector(
     visibility: VisibilitySelector,
     params_type: type[SupportsDataclass] | None,
-) -> Callable[[SupportsDataclass | None], SectionVisibility]:
-    """Normalize static or callable visibility into a shared interface."""
+) -> NormalizedVisibilitySelector:
+    """Normalize static or callable visibility into a shared interface.
 
+    The returned callable always accepts params and session arguments.
+    The session argument must be keyword-only in the original callable.
+    If the original callable does not accept a session keyword argument,
+    the session is not passed to it.
+
+    Supported signatures:
+        - () -> SectionVisibility
+        - (*, session) -> SectionVisibility
+        - (params) -> SectionVisibility
+        - (params, *, session) -> SectionVisibility
+        - SectionVisibility (constant)
+    """
     if callable(visibility):
+        accepts_session = callable_accepts_session_kwarg(visibility)
+
         if params_type is None and not _visibility_requires_positional_argument(
             visibility
         ):
+            if accepts_session:
+                # Zero-arg + session keyword callable: (*, session) -> SectionVisibility
+                zero_arg_with_session = cast(
+                    Callable[..., SectionVisibility], visibility
+                )
+
+                def _without_params_with_session(
+                    _: SupportsDataclass | None,
+                    session: SessionProtocol | None,
+                ) -> SectionVisibility:
+                    return _coerce_section_visibility(
+                        zero_arg_with_session(session=session)
+                    )
+
+                return _without_params_with_session
+
+            # Zero-arg callable without session: () -> SectionVisibility
             zero_arg_selector = cast(Callable[[], SectionVisibility], visibility)
 
-            def _without_params(_: SupportsDataclass | None) -> SectionVisibility:
+            def _without_params(
+                _: SupportsDataclass | None,
+                session: SessionProtocol | None,
+            ) -> SectionVisibility:
+                del session
                 return _coerce_section_visibility(zero_arg_selector())
 
             return _without_params
 
+        if accepts_session:
+            # Params + session keyword callable: (params, *, session) -> SectionVisibility
+            selector_with_session = cast(Callable[..., SectionVisibility], visibility)
+
+            def _with_params_and_session(
+                value: SupportsDataclass | None,
+                session: SessionProtocol | None,
+            ) -> SectionVisibility:
+                return _coerce_section_visibility(
+                    selector_with_session(
+                        cast(SupportsDataclass, value), session=session
+                    )
+                )
+
+            return _with_params_and_session
+
+        # Params only callable: (params) -> SectionVisibility
         selector = cast(Callable[[SupportsDataclass], SectionVisibility], visibility)
 
-        def _with_params(value: SupportsDataclass | None) -> SectionVisibility:
+        def _with_params(
+            value: SupportsDataclass | None,
+            session: SessionProtocol | None,
+        ) -> SectionVisibility:
+            del session
             return _coerce_section_visibility(selector(cast(SupportsDataclass, value)))
 
         return _with_params
 
     constant_visibility = visibility
 
-    def _constant(_: SupportsDataclass | None) -> SectionVisibility:
+    def _constant(
+        _: SupportsDataclass | None,
+        session: SessionProtocol | None,
+    ) -> SectionVisibility:
+        del session
         return constant_visibility
 
     return _constant
@@ -102,6 +171,7 @@ def _visibility_requires_positional_argument(
 
 
 __all__ = [
+    "NormalizedVisibilitySelector",
     "SectionVisibility",
     "VisibilitySelector",
     "normalize_visibility_selector",

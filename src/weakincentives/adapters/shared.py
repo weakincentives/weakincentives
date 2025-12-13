@@ -34,8 +34,7 @@ from ..prompt._types import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
-from ..prompt._visibility import SectionVisibility
-from ..prompt.errors import SectionPath, VisibilityExpansionRequired
+from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.structured_output import (
@@ -186,11 +185,16 @@ class AdapterRenderContext[OutputT]:
 
 @FrozenDataclass()
 class AdapterRenderOptions:
-    """Configuration for rendering prompts ahead of provider evaluation."""
+    """Configuration for rendering prompts ahead of provider evaluation.
+
+    Visibility overrides are managed exclusively via Session state using the
+    VisibilityOverrides state slice. Use session.mutate(VisibilityOverrides)
+    to set visibility overrides before rendering.
+    """
 
     enable_json_schema: bool
     deadline: Deadline | None
-    visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None
+    session: SessionProtocol | None = None
 
 
 @FrozenDataclass()
@@ -979,7 +983,7 @@ def prepare_adapter_conversation[
         )
 
     rendered = prompt.render(
-        visibility_overrides=options.visibility_overrides,
+        session=options.session,
     )
     if options.deadline is not None:
         rendered = replace(rendered, deadline=options.deadline)

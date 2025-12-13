@@ -60,8 +60,18 @@ from .structured_output import (
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
+from .visibility_overrides import (
+    ClearAllVisibilityOverrides,
+    ClearVisibilityOverride,
+    SetVisibilityOverride,
+    VisibilityOverrides,
+    get_session_visibility_override,
+    register_visibility_reducers,
+)
 
 __all__ = [
+    "ClearAllVisibilityOverrides",
+    "ClearVisibilityOverride",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",
@@ -87,6 +97,7 @@ __all__ = [
     "SectionOverride",
     "SectionPath",
     "SectionVisibility",
+    "SetVisibilityOverride",
     "StructuredOutputConfig",
     "SupportsDataclass",
     "SupportsDataclassOrNone",
@@ -103,9 +114,12 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "VisibilityExpansionRequired",
+    "VisibilityOverrides",
+    "get_session_visibility_override",
     "hash_json",
     "hash_text",
     "parse_structured_output",
+    "register_visibility_reducers",
 ]
 
 

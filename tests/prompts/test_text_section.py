@@ -23,12 +23,16 @@ from weakincentives.prompt import (
     PromptRenderError,
     Section,
     SectionVisibility,
+    SetVisibilityOverride,
     SupportsDataclass,
     Tool,
+    VisibilityOverrides,
 )
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.rendering import PromptRenderer
 from weakincentives.prompt.tool import ToolContext, ToolResult
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 
 @dataclass
@@ -362,12 +366,14 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
     assert len(rendered_full.tools) == 1
     assert rendered_full.tools[0].name == "search_tool"
 
-    # With SUMMARY visibility, the section's own tools are excluded,
+    # With SUMMARY visibility via session state, the section's own tools are excluded,
     # but the open_sections tool is injected for progressive disclosure
-    rendered_summary = renderer.render(
-        params_lookup,
-        visibility_overrides={(section.key,): SectionVisibility.SUMMARY},
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.mutate(VisibilityOverrides).dispatch(
+        SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.SUMMARY)
     )
+    rendered_summary = renderer.render(params_lookup, session=session)
     assert len(rendered_summary.tools) == 1
     assert rendered_summary.tools[0].name == "open_sections"
     assert "Summary: Test" in rendered_summary.text
@@ -412,11 +418,13 @@ def test_summary_visibility_skips_child_sections() -> None:
     assert "Parent full: Parent Title" in rendered_full.text
     assert "Child content: Child Detail" in rendered_full.text
 
-    # With SUMMARY visibility on parent, child is skipped
-    rendered_summary = renderer.render(
-        params_lookup,
-        visibility_overrides={("parent",): SectionVisibility.SUMMARY},
+    # With SUMMARY visibility on parent via session state, child is skipped
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.mutate(VisibilityOverrides).dispatch(
+        SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
+    rendered_summary = renderer.render(params_lookup, session=session)
     assert "Parent summary: Parent Title" in rendered_summary.text
     assert "Child content" not in rendered_summary.text
     assert "Child Detail" not in rendered_summary.text
@@ -468,12 +476,14 @@ def test_summary_visibility_skips_child_tools() -> None:
     assert len(rendered_full.tools) == 1
     assert rendered_full.tools[0].name == "child_tool"
 
-    # With SUMMARY visibility on parent, child (and its tools) are skipped.
+    # With SUMMARY visibility on parent via session state, child (and its tools) are skipped.
     # The open_sections tool is injected for progressive disclosure.
-    rendered_summary = renderer.render(
-        params_lookup,
-        visibility_overrides={("parent",): SectionVisibility.SUMMARY},
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.mutate(VisibilityOverrides).dispatch(
+        SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
+    rendered_summary = renderer.render(params_lookup, session=session)
     assert len(rendered_summary.tools) == 1
     assert rendered_summary.tools[0].name == "open_sections"
 
@@ -514,11 +524,13 @@ def test_summary_visibility_default_excludes_tools() -> None:
     assert rendered.tools[0].name == "open_sections"
     assert "Summary: Test" in rendered.text
 
-    # Override to FULL includes tools
-    rendered_full = renderer.render(
-        params_lookup,
-        visibility_overrides={(section.key,): SectionVisibility.FULL},
+    # Override to FULL via session state includes tools
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.mutate(VisibilityOverrides).dispatch(
+        SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.FULL)
     )
+    rendered_full = renderer.render(params_lookup, session=session)
     assert len(rendered_full.tools) == 1
     assert "Full: Test" in rendered_full.text
 
@@ -575,11 +587,13 @@ def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
         )
     )
 
-    # With SUMMARY visibility on parent, child is skipped but sibling is rendered
-    rendered = renderer.render(
-        params_lookup,
-        visibility_overrides={("parent",): SectionVisibility.SUMMARY},
+    # With SUMMARY visibility on parent via session state, child is skipped but sibling is rendered
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.mutate(VisibilityOverrides).dispatch(
+        SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
+    rendered = renderer.render(params_lookup, session=session)
     assert "Parent summary: Parent Title" in rendered.text
     assert "Child content" not in rendered.text  # Child is skipped
     assert "Sibling content: Sibling Info" in rendered.text  # Sibling is rendered

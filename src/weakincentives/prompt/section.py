@@ -13,21 +13,28 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
+    from ..runtime.session.protocols import SessionProtocol
     from .tool import Tool
 
-from ._enabled_predicate import EnabledPredicate, normalize_enabled_predicate
+from ._enabled_predicate import (
+    EnabledPredicate,
+    NormalizedEnabledPredicate,
+    normalize_enabled_predicate,
+)
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._visibility import (
+    NormalizedVisibilitySelector,
     SectionVisibility,
     VisibilitySelector,
     normalize_visibility_selector,
 )
+from .errors import SectionPath
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -78,18 +85,29 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
                 raise TypeError("Section children must be Section instances.")
             normalized_children.append(cast(Section[SupportsDataclass], child))
         self.children = tuple(normalized_children)
-        self._enabled: Callable[[SupportsDataclass | None], bool] | None = (
-            normalize_enabled_predicate(enabled, params_type)
+        self._enabled: NormalizedEnabledPredicate | None = normalize_enabled_predicate(
+            enabled, params_type
         )
         self._tools = self._normalize_tools(tools)
-        self._visibility = normalize_visibility_selector(visibility, params_type)
+        self._visibility: NormalizedVisibilitySelector = normalize_visibility_selector(
+            visibility, params_type
+        )
 
-    def is_enabled(self, params: SupportsDataclass | None) -> bool:
-        """Return True when the section should render for the given params."""
+    def is_enabled(
+        self,
+        params: SupportsDataclass | None,
+        *,
+        session: SessionProtocol | None = None,
+    ) -> bool:
+        """Return True when the section should render for the given params.
 
+        Args:
+            params: The section parameters.
+            session: Optional session for visibility callables that inspect state.
+        """
         if self._enabled is None:
             return True
-        return bool(self._enabled(params))
+        return bool(self._enabled(params, session))
 
     @abstractmethod
     def render(
@@ -108,10 +126,12 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             depth: The nesting depth of this section (affects heading level).
             number: The section number prefix (e.g., "1.2.").
             path: The section path as a tuple of keys (e.g., ("parent", "child")).
-            visibility: Optional override for the section's default visibility.
-                When provided, this takes precedence over the section's
-                configured visibility. This allows callers to dynamically
-                control whether to render the full content or just a summary.
+            visibility: The effective visibility to use for rendering. When
+                called from PromptRenderer, this is the already-computed
+                effective visibility (incorporating session state, overrides,
+                and user-provided selectors). When called directly, this may
+                be None, in which case the section should compute effective
+                visibility using its default selector.
         """
 
     def placeholder_names(self) -> set[str]:
@@ -142,23 +162,43 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         self,
         override: SectionVisibility | None = None,
         params: SupportsDataclass | None = None,
+        *,
+        session: SessionProtocol | None = None,
+        path: SectionPath | None = None,
     ) -> SectionVisibility:
         """Return the visibility to use for rendering.
 
+        The visibility is resolved in the following order:
+        1. Explicit ``override`` parameter (if provided)
+        2. Session state override (if session has VisibilityOverrides with path)
+        3. User-provided visibility selector/constant
+
         Args:
             override: Optional visibility override. When provided, this takes
-                precedence over the section's configured visibility.
+                precedence over all other visibility sources.
             params: Parameters used to render the section, when available.
+            session: Optional session for visibility callables that inspect state.
+                Also used to query VisibilityOverrides from session state.
+            path: Section path used to look up session-based overrides.
 
         Returns:
-            The effective visibility to use. If an override is provided, it is
-            returned. Otherwise, the section's configured visibility is used.
-            If no summary is available and SUMMARY visibility is requested,
-            FULL visibility is used as a fallback.
+            The effective visibility to use. If no summary is available and
+            SUMMARY visibility is requested, FULL visibility is used as a
+            fallback.
         """
         visibility = override
+
+        # Check session state for override if no explicit override provided
+        if visibility is None and session is not None and path is not None:
+            from .visibility_overrides import get_session_visibility_override
+
+            visibility = get_session_visibility_override(session, path)
+
+        # Fall back to user-provided selector
         if visibility is None:
-            visibility = self._visibility(params)
+            visibility = self._visibility(params, session)
+
+        # SUMMARY falls back to FULL if no summary template
         if visibility == SectionVisibility.SUMMARY and self.summary is None:
             return SectionVisibility.FULL
         return visibility

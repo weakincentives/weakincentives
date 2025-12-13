@@ -14,11 +14,19 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from ._types import SupportsDataclass
 
+if TYPE_CHECKING:
+    from ..runtime.session.protocols import SessionProtocol
+
 EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
+
+# Normalized callable signature that accepts params and session keyword argument
+NormalizedEnabledPredicate = Callable[
+    [SupportsDataclass | None, "SessionProtocol | None"], bool
+]
 
 
 def callable_requires_positional_argument(callback: EnabledPredicate) -> bool:
@@ -39,23 +47,88 @@ def callable_requires_positional_argument(callback: EnabledPredicate) -> bool:
     return False
 
 
+def callable_accepts_session_kwarg(callback: Callable[..., object]) -> bool:
+    """Check if the callable accepts a 'session' keyword-only argument."""
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        return False
+    param = signature.parameters.get("session")
+    if param is None:
+        return False
+    # Only accept keyword-only parameters for session
+    return param.kind == inspect.Parameter.KEYWORD_ONLY
+
+
 def normalize_enabled_predicate(
     enabled: EnabledPredicate | None,
     params_type: type[SupportsDataclass] | None,
-) -> Callable[[SupportsDataclass | None], bool] | None:
+) -> NormalizedEnabledPredicate | None:
+    """Normalize enabled predicate to a callable accepting (params, *, session).
+
+    The returned callable always accepts params and session arguments.
+    The session argument must be keyword-only in the original callable.
+    If the original callable does not accept a session keyword argument,
+    the session is not passed to it.
+
+    Supported signatures:
+        - () -> bool
+        - (*, session) -> bool
+        - (params) -> bool
+        - (params, *, session) -> bool
+    """
     if enabled is None:
         return None
+
+    accepts_session = callable_accepts_session_kwarg(enabled)
+
     if params_type is None and not callable_requires_positional_argument(enabled):
+        if accepts_session:
+            # Zero-arg + session keyword callable: (*, session) -> bool
+            zero_arg_with_session = cast(Callable[..., bool], enabled)
+
+            def _without_params_with_session(
+                _: SupportsDataclass | None,
+                session: SessionProtocol | None,
+            ) -> bool:
+                return bool(zero_arg_with_session(session=session))
+
+            return _without_params_with_session
+
+        # Zero-arg callable without session: () -> bool
         zero_arg = cast(Callable[[], bool], enabled)
 
-        def _without_params(_: SupportsDataclass | None) -> bool:
+        def _without_params(
+            _: SupportsDataclass | None,
+            session: SessionProtocol | None,
+        ) -> bool:
+            del session
             return bool(zero_arg())
 
         return _without_params
 
+    if accepts_session:
+        # Params + session keyword callable: (params, *, session) -> bool
+        coerced_with_session = cast(Callable[..., bool], enabled)
+
+        def _with_params_and_session(
+            value: SupportsDataclass | None,
+            session: SessionProtocol | None,
+        ) -> bool:
+            return bool(
+                coerced_with_session(cast(SupportsDataclass, value), session=session)
+            )
+
+        return _with_params_and_session
+
+    # Params only callable: (params) -> bool
     coerced = cast(Callable[[SupportsDataclass], bool], enabled)
 
-    def _with_params(value: SupportsDataclass | None) -> bool:
+    def _with_params(
+        value: SupportsDataclass | None,
+        session: SessionProtocol | None,
+    ) -> bool:
+        del session
         return bool(coerced(cast(SupportsDataclass, value)))
 
     return _with_params
@@ -63,6 +136,8 @@ def normalize_enabled_predicate(
 
 __all__ = [
     "EnabledPredicate",
+    "NormalizedEnabledPredicate",
+    "callable_accepts_session_kwarg",
     "callable_requires_positional_argument",
     "normalize_enabled_predicate",
 ]

@@ -25,8 +25,6 @@ from typing import Any, Final, Protocol, TypeVar, cast, override
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt._types import SupportsDataclass
-from ..prompt._visibility import SectionVisibility
-from ..prompt.errors import SectionPath
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
 from ..runtime.logging import StructuredLogger, get_logger
@@ -605,14 +603,13 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
         context = self._setup_evaluation(
             prompt,
             deadline=deadline,
-            visibility_overrides=visibility_overrides,
+            session=session,
         )
 
         # Create tracker if budget provided but tracker not supplied
@@ -652,7 +649,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         prompt: Prompt[OutputT],
         *,
         deadline: Deadline | None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        session: SessionProtocol | None = None,
     ) -> _EvaluationContext[OutputT]:
         prompt_name = prompt.name or prompt.template.__class__.__name__
         render_inputs = prompt.params
@@ -660,7 +657,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         rendered = self._render_prompt(
             prompt,
             deadline=deadline,
-            visibility_overrides=visibility_overrides,
+            session=session,
         )
         response_format = self._build_response_format(
             rendered,
@@ -690,9 +687,11 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         prompt: Prompt[OutputT],
         *,
         deadline: Deadline | None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
+        session: SessionProtocol | None = None,
     ) -> RenderedPrompt[OutputT]:
-        rendered = prompt.render(visibility_overrides=visibility_overrides)
+        rendered = prompt.render(
+            session=session,
+        )
         if deadline is not None:
             rendered = replace(rendered, deadline=deadline)
         return rendered

@@ -25,7 +25,9 @@ from weakincentives.prompt import (
     MarkdownSection,
     PromptValidationError,
     SectionVisibility,
+    SetVisibilityOverride,
     VisibilityExpansionRequired,
+    VisibilityOverrides,
 )
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.progressive_disclosure import (
@@ -38,6 +40,8 @@ from weakincentives.prompt.progressive_disclosure import (
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.section import Section
 from weakincentives.prompt.tool import ToolContext
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 
 @dataclass
@@ -141,7 +145,7 @@ def test_has_summarized_sections_with_summary_text() -> None:
 
 
 def test_has_summarized_sections_with_overrides() -> None:
-    """Visibility overrides can expand summarized sections."""
+    """Visibility overrides via session state can expand summarized sections."""
     section = _make_section(
         key="sec",
         visibility=SectionVisibility.SUMMARY,
@@ -153,9 +157,13 @@ def test_has_summarized_sections_with_overrides() -> None:
     # Without override, it's summarized
     assert has_summarized_sections(snapshot) is True
 
-    # With override to FULL, no summarized sections
-    overrides = {("sec",): SectionVisibility.FULL}
-    assert has_summarized_sections(snapshot, overrides) is False
+    # With override to FULL via session state, no summarized sections
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.mutate(VisibilityOverrides).dispatch(
+        SetVisibilityOverride(path=("sec",), visibility=SectionVisibility.FULL)
+    )
+    assert has_summarized_sections(snapshot, session=session) is False
 
 
 # Tests for compute_current_visibility
@@ -176,7 +184,7 @@ def test_compute_current_visibility_default() -> None:
 
 
 def test_compute_current_visibility_with_overrides() -> None:
-    """Applies visibility overrides."""
+    """Applies visibility overrides from session state."""
     section = _make_section(
         key="sec",
         visibility=SectionVisibility.SUMMARY,
@@ -185,8 +193,12 @@ def test_compute_current_visibility_with_overrides() -> None:
     registry = _make_registry((section,))
     snapshot = registry.snapshot()
 
-    overrides = {("sec",): SectionVisibility.FULL}
-    result = compute_current_visibility(snapshot, overrides)
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    session.mutate(VisibilityOverrides).dispatch(
+        SetVisibilityOverride(path=("sec",), visibility=SectionVisibility.FULL)
+    )
+    result = compute_current_visibility(snapshot, session=session)
     assert result["sec",] == SectionVisibility.FULL
 
 

@@ -15,15 +15,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
 from typing import Any, Literal, TypeVar
 
 from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import WinkError
-from ..prompt import Prompt, SectionVisibility
-from ..prompt.errors import SectionPath
+from ..prompt import Prompt
 from ..runtime.session.protocols import SessionProtocol
 
 OutputT = TypeVar("OutputT")
@@ -52,11 +50,14 @@ class ProviderAdapter(ABC):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response.
+
+        Visibility overrides are managed exclusively via Session state using the
+        VisibilityOverrides state slice. Use session.mutate(VisibilityOverrides)
+        to set visibility overrides before calling evaluate().
 
         When ``budget`` is provided and ``budget_tracker`` is not, a new tracker
         is created. When ``budget_tracker`` is supplied, it is used directly for

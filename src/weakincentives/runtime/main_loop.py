@@ -23,8 +23,11 @@ from uuid import UUID, uuid4
 from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
-from ..prompt._visibility import SectionVisibility
-from ..prompt.errors import SectionPath, VisibilityExpansionRequired
+from ..prompt.errors import VisibilityExpansionRequired
+from ..prompt.visibility_overrides import (
+    SetVisibilityOverride,
+    VisibilityOverrides,
+)
 from .events._types import ControlBus
 from .session import Session
 
@@ -207,7 +210,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """
         session = self.create_session()
         prompt = self.create_prompt(request)
-        visibility_overrides: dict[SectionPath, SectionVisibility] = {}
 
         effective_budget = budget if budget is not None else self._config.budget
         effective_deadline = deadline if deadline is not None else self._config.deadline
@@ -223,12 +225,15 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 response = self._adapter.evaluate(
                     prompt,
                     session=session,
-                    visibility_overrides=visibility_overrides,
                     deadline=effective_deadline,
                     budget_tracker=budget_tracker,
                 )
             except VisibilityExpansionRequired as e:
-                visibility_overrides.update(e.requested_overrides)
+                # Update session state with requested visibility overrides
+                for path, visibility in e.requested_overrides.items():
+                    session.mutate(VisibilityOverrides).dispatch(
+                        SetVisibilityOverride(path=path, visibility=visibility)
+                    )
             else:
                 return response, session
 
@@ -266,7 +271,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             failed = MainLoopFailed(
                 request_id=request_event.request_id,
                 error=exc,
-                session_id=self.create_session().session_id,
+                session_id=None,
             )
             _ = self._bus.publish(failed)
             raise
