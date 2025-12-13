@@ -136,19 +136,24 @@ class DurableMainLoop(MainLoop[UserRequestT, OutputT]):
         adapter: ProviderAdapter[OutputT],
         bus: EventBus,
         checkpoint_dir: Path,
+        request_type: type[UserRequestT],  # Required for deserializing persisted request
         checkpoint_trigger: CheckpointTrigger | None = None,
         config: MainLoopConfig | None = None,
     ) -> None:
         super().__init__(adapter=adapter, bus=bus, config=config)
         self._checkpoint_dir = checkpoint_dir
+        self._request_type = request_type
         self._checkpoint_trigger = checkpoint_trigger or CheckpointTrigger()
+        self._store = CheckpointStore(checkpoint_dir)
 
-    def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
+    def execute(self, request: UserRequestT | None = None) -> PromptResponse[OutputT]:
         # Check for incomplete execution from previous run
-        if self._has_incomplete_execution():
-            return self._resume_execution(request)
+        if self._store.has_incomplete():
+            return self._resume_execution()
 
-        # Fresh execution
+        # Fresh execution requires request
+        if request is None:
+            raise ValueError("Request required for fresh execution")
         return self._fresh_execution(request)
 ```
 
@@ -162,15 +167,13 @@ def _fresh_execution(self, request: UserRequestT) -> PromptResponse[OutputT]:
     # Subscribe to checkpoint triggers
     self._setup_checkpoint_observer(session)
 
-    # Clear any stale state
-    self._clear_checkpoint()
-
-    # Persist request for resume context
-    self._persist_request(request)
+    # Clear any stale state and persist request
+    self._store.clear()
+    self._store.persist_request(request)
 
     try:
         response = self._evaluate_with_checkpointing(prompt, session)
-        self._mark_completed()
+        self._store.mark_completed()
         return response
     except Exception:
         # Checkpoint persisted; can resume on restart
@@ -180,15 +183,16 @@ def _fresh_execution(self, request: UserRequestT) -> PromptResponse[OutputT]:
 ### Resume Execution Flow
 
 ```python
-def _resume_execution(self, request: UserRequestT) -> PromptResponse[OutputT]:
-    # Load checkpoint
-    snapshot = self._load_checkpoint()
+def _resume_execution(self) -> PromptResponse[OutputT]:
+    # Load persisted request and checkpoint
+    request = self._store.load_request(self._request_type)
+    snapshot = self._store.load_checkpoint()
 
     # Create session and restore state
     session = self.create_session()
     session.mutate().rollback(snapshot)
 
-    # Same prompt - template queries session for context
+    # Same prompt with original request - template queries session for context
     prompt = self.create_prompt(request)
 
     # Continue with checkpointing
@@ -196,7 +200,7 @@ def _resume_execution(self, request: UserRequestT) -> PromptResponse[OutputT]:
 
     try:
         response = self._evaluate_with_checkpointing(prompt, session)
-        self._mark_completed()
+        self._store.mark_completed()
         return response
     except Exception:
         raise
@@ -414,23 +418,23 @@ resume attempts can occur:
 
 ```python
 # In DurableMainLoop
-def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
+def execute(self, request: UserRequestT | None = None) -> PromptResponse[OutputT]:
     deadline = self._effective_deadline()
 
-    while True:
-        if deadline and deadline.remaining() <= timedelta(0):
-            raise DeadlineExceededError(...)
+    if deadline and deadline.remaining() <= timedelta(0):
+        raise DeadlineExceededError(...)
 
-        try:
-            if self._has_incomplete_execution():
-                return self._resume_execution(request)
-            return self._fresh_execution(request)
-        except Exception as e:
-            if not self._has_incomplete_execution():
-                raise  # No checkpoint, can't retry
-            # Loop will attempt resume on next iteration
-            # (In practice, worker process restarts externally)
-            raise
+    try:
+        if self._store.has_incomplete():
+            return self._resume_execution()  # Loads request from disk
+        if request is None:
+            raise ValueError("Request required for fresh execution")
+        return self._fresh_execution(request)
+    except Exception:
+        if not self._store.has_incomplete():
+            raise  # No checkpoint, can't retry
+        # Checkpoint exists; worker process restarts externally and resumes
+        raise
 ```
 
 In practice, the worker process crashes and restarts externally. The deadline
@@ -454,16 +458,25 @@ def _persist_checkpoint(self, session: Session) -> None:
 
 ### Corrupted Checkpoints
 
-If a checkpoint cannot be loaded, start fresh:
+If a checkpoint cannot be loaded, start fresh. Note that this requires the
+original request to still be loadable; if both are corrupted, the execution
+fails:
 
 ```python
-def _resume_execution(self, request: UserRequestT) -> PromptResponse[OutputT]:
+def _resume_execution(self) -> PromptResponse[OutputT]:
     try:
+        request = self._store.load_request(self._request_type)
         snapshot = self._store.load_checkpoint()
-    except (SnapshotRestoreError, FileNotFoundError, json.JSONDecodeError):
-        logger.warning("Checkpoint corrupted, starting fresh", exc_info=True)
-        self._store.clear()
-        return self._fresh_execution(request)
+    except (SnapshotRestoreError, FileNotFoundError, json.JSONDecodeError) as e:
+        # Try to salvage: if request loads but checkpoint doesn't, start fresh
+        try:
+            request = self._store.load_request(self._request_type)
+            logger.warning("Checkpoint corrupted, starting fresh", exc_info=True)
+            self._store.clear()
+            return self._fresh_execution(request)
+        except Exception:
+            # Both corrupted, cannot recover
+            raise e from None
     # ... continue with valid snapshot
 ```
 
