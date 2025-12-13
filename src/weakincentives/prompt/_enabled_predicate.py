@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 EnabledPredicate = Callable[[SupportsDataclass], bool] | Callable[[], bool]
 
-# Normalized callable signature that accepts both params and optional session
+# Normalized callable signature that accepts params and session keyword argument
 NormalizedEnabledPredicate = Callable[
     [SupportsDataclass | None, "SessionProtocol | None"], bool
 ]
@@ -48,7 +48,7 @@ def callable_requires_positional_argument(callback: EnabledPredicate) -> bool:
 
 
 def callable_accepts_session_kwarg(callback: Callable[..., object]) -> bool:
-    """Check if the callable accepts a 'session' keyword argument."""
+    """Check if the callable accepts a 'session' keyword-only argument."""
     try:
         signature = inspect.signature(callback)
     except (TypeError, ValueError):
@@ -56,21 +56,26 @@ def callable_accepts_session_kwarg(callback: Callable[..., object]) -> bool:
     param = signature.parameters.get("session")
     if param is None:
         return False
-    return param.kind in (
-        inspect.Parameter.KEYWORD_ONLY,
-        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-    )
+    # Only accept keyword-only parameters for session
+    return param.kind == inspect.Parameter.KEYWORD_ONLY
 
 
 def normalize_enabled_predicate(
     enabled: EnabledPredicate | None,
     params_type: type[SupportsDataclass] | None,
 ) -> NormalizedEnabledPredicate | None:
-    """Normalize enabled predicate to a callable accepting (params, session).
+    """Normalize enabled predicate to a callable accepting (params, *, session).
 
-    The returned callable always accepts both params and session arguments.
+    The returned callable always accepts params and session arguments.
+    The session argument must be keyword-only in the original callable.
     If the original callable does not accept a session keyword argument,
     the session is not passed to it.
+
+    Supported signatures:
+        - () -> bool
+        - (*, session) -> bool
+        - (params) -> bool
+        - (params, *, session) -> bool
     """
     if enabled is None:
         return None
@@ -79,7 +84,7 @@ def normalize_enabled_predicate(
 
     if params_type is None and not callable_requires_positional_argument(enabled):
         if accepts_session:
-            # Zero-arg + session callable
+            # Zero-arg + session keyword callable: (*, session) -> bool
             zero_arg_with_session = cast(Callable[..., bool], enabled)
 
             def _without_params_with_session(
@@ -90,7 +95,7 @@ def normalize_enabled_predicate(
 
             return _without_params_with_session
 
-        # Zero-arg callable without session
+        # Zero-arg callable without session: () -> bool
         zero_arg = cast(Callable[[], bool], enabled)
 
         def _without_params(
@@ -103,7 +108,7 @@ def normalize_enabled_predicate(
         return _without_params
 
     if accepts_session:
-        # Params + session callable
+        # Params + session keyword callable: (params, *, session) -> bool
         coerced_with_session = cast(Callable[..., bool], enabled)
 
         def _with_params_and_session(
@@ -116,7 +121,7 @@ def normalize_enabled_predicate(
 
         return _with_params_and_session
 
-    # Params only callable
+    # Params only callable: (params) -> bool
     coerced = cast(Callable[[SupportsDataclass], bool], enabled)
 
     def _with_params(

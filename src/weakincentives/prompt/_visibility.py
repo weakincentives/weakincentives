@@ -46,7 +46,7 @@ VisibilitySelector = (
     | SectionVisibility
 )
 
-# Normalized callable signature that accepts both params and optional session
+# Normalized callable signature that accepts params and session keyword argument
 NormalizedVisibilitySelector = Callable[
     [SupportsDataclass | None, "SessionProtocol | None"], SectionVisibility
 ]
@@ -64,9 +64,17 @@ def normalize_visibility_selector(
 ) -> NormalizedVisibilitySelector:
     """Normalize static or callable visibility into a shared interface.
 
-    The returned callable always accepts both params and session arguments.
+    The returned callable always accepts params and session arguments.
+    The session argument must be keyword-only in the original callable.
     If the original callable does not accept a session keyword argument,
     the session is not passed to it.
+
+    Supported signatures:
+        - () -> SectionVisibility
+        - (*, session) -> SectionVisibility
+        - (params) -> SectionVisibility
+        - (params, *, session) -> SectionVisibility
+        - SectionVisibility (constant)
     """
     if callable(visibility):
         accepts_session = callable_accepts_session_kwarg(visibility)
@@ -75,7 +83,7 @@ def normalize_visibility_selector(
             visibility
         ):
             if accepts_session:
-                # Zero-arg + session callable
+                # Zero-arg + session keyword callable: (*, session) -> SectionVisibility
                 zero_arg_with_session = cast(
                     Callable[..., SectionVisibility], visibility
                 )
@@ -90,7 +98,7 @@ def normalize_visibility_selector(
 
                 return _without_params_with_session
 
-            # Zero-arg callable without session
+            # Zero-arg callable without session: () -> SectionVisibility
             zero_arg_selector = cast(Callable[[], SectionVisibility], visibility)
 
             def _without_params(
@@ -103,7 +111,7 @@ def normalize_visibility_selector(
             return _without_params
 
         if accepts_session:
-            # Params + session callable
+            # Params + session keyword callable: (params, *, session) -> SectionVisibility
             selector_with_session = cast(Callable[..., SectionVisibility], visibility)
 
             def _with_params_and_session(
@@ -118,7 +126,7 @@ def normalize_visibility_selector(
 
             return _with_params_and_session
 
-        # Params only callable
+        # Params only callable: (params) -> SectionVisibility
         selector = cast(Callable[[SupportsDataclass], SectionVisibility], visibility)
 
         def _with_params(

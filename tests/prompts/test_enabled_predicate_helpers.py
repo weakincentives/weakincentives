@@ -77,8 +77,8 @@ def test_callable_accepts_session_kwarg_detects_keyword_only() -> None:
 
     assert callable_accepts_session_kwarg(with_session) is True
     assert callable_accepts_session_kwarg(without_session) is False
-    # Positional-or-keyword parameters named session should be accepted
-    assert callable_accepts_session_kwarg(positional_session) is True
+    # Only keyword-only parameters named session are accepted, not positional
+    assert callable_accepts_session_kwarg(positional_session) is False
 
 
 def test_normalize_enabled_predicate_with_session_kwarg() -> None:
