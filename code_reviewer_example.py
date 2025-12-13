@@ -35,6 +35,9 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentWorkspaceSection,
     HostMount as ClaudeHostMount,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
 )
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
@@ -102,6 +105,15 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
 SUNFISH_MOUNT_MAX_BYTES = 600_000
 DEFAULT_DEADLINE_MINUTES = 5
 _LOGGER = logging.getLogger(__name__)
+
+# Domains allowed for code review reference documentation
+CODE_REVIEW_ALLOWED_DOMAINS: tuple[str, ...] = (
+    "api.anthropic.com",  # Required for API access
+    "peps.python.org",  # PEP documentation
+    "docs.python.org",  # Python standard library docs
+    "typing.readthedocs.io",  # typing module documentation
+    "mypy.readthedocs.io",  # mypy type checker docs
+)
 
 
 def _default_deadline() -> Deadline:
@@ -424,10 +436,12 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
 def build_claude_agent_adapter(
     bus: EventBus,
 ) -> tuple[ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection]:
-    """Build the Claude Agent SDK adapter with workspace section.
+    """Build the Claude Agent SDK adapter with workspace section and isolation.
 
     Creates a workspace section with the test repository mounted, and configures
-    the adapter to use the SDK's native agentic capabilities.
+    the adapter to use the SDK's native agentic capabilities with hermetic
+    isolation. The sandbox has network access to Python documentation sites
+    for code quality reference.
 
     Args:
         bus: Event bus for creating a temporary session to materialize the workspace.
@@ -460,12 +474,27 @@ def build_claude_agent_adapter(
         allowed_host_roots=(str(TEST_REPOSITORIES_ROOT),),
     )
 
+    # Configure hermetic isolation with access to Python documentation
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy(
+            allowed_domains=CODE_REVIEW_ALLOWED_DOMAINS,
+        ),
+        sandbox=SandboxConfig(
+            enabled=True,
+            # Allow reading the workspace directory
+            readable_paths=(str(workspace_section.temp_dir),),
+            # Auto-approve bash commands in sandbox (safe with network restrictions)
+            bash_auto_allow=True,
+        ),
+    )
+
     model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
     adapter = ClaudeAgentSDKAdapter(
         model=model,
         client_config=ClaudeAgentSDKClientConfig(
             permission_mode="bypassPermissions",
             cwd=str(workspace_section.temp_dir),
+            isolation=isolation,
         ),
     )
     return cast(ProviderAdapter[ReviewResponse], adapter), workspace_section
@@ -587,7 +616,8 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
 def _build_claude_agent_guidance_section() -> MarkdownSection[ReviewGuidance]:
     """Build guidance section for Claude Agent SDK mode.
 
-    This version is tailored for the SDK's native agentic capabilities.
+    This version is tailored for the SDK's native agentic capabilities
+    and includes references to accessible Python documentation.
     """
     return MarkdownSection[ReviewGuidance](
         title="Code Review Brief",
@@ -600,6 +630,17 @@ def _build_claude_agent_guidance_section() -> MarkdownSection[ReviewGuidance]:
             - Read files to understand the code structure
             - Use Bash to run commands like `find`, `grep`, or `git`
             - Write files if you need to suggest changes
+
+            ## Code Quality References
+
+            You have network access to Python documentation for code quality guidance:
+            - **PEP 8** (https://peps.python.org/pep-0008/): Style guide for Python code
+            - **PEP 484** (https://peps.python.org/pep-0484/): Type hints
+            - **PEP 257** (https://peps.python.org/pep-0257/): Docstring conventions
+            - **PEP 20** (https://peps.python.org/pep-0020/): The Zen of Python
+            - **Python docs** (https://docs.python.org/): Standard library reference
+
+            When reviewing code, consider citing relevant PEPs for style or design issues.
 
             Respond with JSON containing:
             - summary: One paragraph describing your findings so far.
@@ -716,8 +757,10 @@ def _build_intro(
             f"""
             Launching example code reviewer agent with Claude Agent SDK.
             - Adapter: Claude Agent SDK (native agentic capabilities)
+            - Isolation: Hermetic sandbox with ephemeral home directory
             - Repository: test-repositories/sunfish mounted in workspace
             - Tools: SDK's native Read, Write, Bash + custom MCP tools (planning, open_sections)
+            - Network: Access to peps.python.org, docs.python.org for code quality reference
             - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
 
             Note: Custom MCP tools are bridged via streaming mode for full feature parity.

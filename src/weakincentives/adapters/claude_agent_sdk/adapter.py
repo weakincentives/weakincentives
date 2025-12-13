@@ -197,7 +197,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             )
         )
 
-    async def _evaluate_async(
+    async def _evaluate_async(  # noqa: PLR0914
         self,
         prompt: Prompt[OutputT],
         *,
@@ -334,7 +334,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         return response
 
-    async def _run_sdk_query(
+    async def _run_sdk_query(  # noqa: C901
         self,
         *,
         sdk: Any,

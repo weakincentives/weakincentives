@@ -224,9 +224,7 @@ class EphemeralHome:
             settings["sandbox"]["allowUnixSockets"] = True
 
         if network.allowed_ports is not None:
-            settings["sandbox"]["network"]["allowedPorts"] = list(
-                network.allowed_ports
-            )
+            settings["sandbox"]["network"]["allowedPorts"] = list(network.allowed_ports)
 
         # Write settings
         settings_path = self._claude_dir / "settings.json"
@@ -244,11 +242,13 @@ class EphemeralHome:
 
         if self._isolation.include_host_env:
             # Copy non-sensitive host env vars
-            env.update({
-                k: v
-                for k, v in os.environ.items()
-                if not any(k.startswith(p) for p in _SENSITIVE_ENV_PREFIXES)
-            })
+            env.update(
+                {
+                    k: v
+                    for k, v in os.environ.items()
+                    if not any(k.startswith(p) for p in _SENSITIVE_ENV_PREFIXES)
+                }
+            )
 
         # Override HOME to ephemeral directory
         env["HOME"] = self._temp_dir
@@ -265,7 +265,8 @@ class EphemeralHome:
 
         return env
 
-    def get_setting_sources(self) -> list[str]:
+    @staticmethod
+    def get_setting_sources() -> list[str]:
         """Get the setting_sources value for SDK options.
 
         Returns empty list to prevent SDK from loading any filesystem-based

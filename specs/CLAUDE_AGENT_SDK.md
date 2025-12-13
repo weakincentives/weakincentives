@@ -189,7 +189,7 @@ class ClaudeAgentSDKClientConfig:
 ```
 
 | Field | Default | Description |
-| -------------------------- | --------------------- | ----------------------------------------- |
+| --------------------------- | --------------------- | ----------------------------------------- |
 | `permission_mode` | `"bypassPermissions"` | Tool permission handling |
 | `cwd` | `None` | Working directory for SDK ops |
 | `max_turns` | `None` | Maximum conversation turns |
@@ -309,10 +309,10 @@ class IsolationConfig:
 When `IsolationConfig` is provided to the adapter:
 
 1. A temporary directory is created as the ephemeral home
-2. Settings are generated from `network_policy` and `sandbox` configs
-3. The SDK subprocess runs with `HOME` pointing to the ephemeral directory
-4. `setting_sources=[]` prevents loading any filesystem-based settings
-5. Cleanup removes the ephemeral home after execution
+1. Settings are generated from `network_policy` and `sandbox` configs
+1. The SDK subprocess runs with `HOME` pointing to the ephemeral directory
+1. `setting_sources=[]` prevents loading any filesystem-based settings
+1. Cleanup removes the ephemeral home after execution
 
 ### NetworkPolicy
 
@@ -597,7 +597,7 @@ adapter = ClaudeAgentSDKAdapter(
 **What isolation guarantees:**
 
 | Guarantee | Mechanism |
-|-----------|-----------|
+| ------------------------ | ----------------------------------------------------- |
 | No access to `~/.claude` | HOME redirected to ephemeral directory |
 | No host credentials | setting_sources=[] prevents filesystem config loading |
 | Network restrictions | OS sandbox enforces domain allowlist |
@@ -606,7 +606,7 @@ adapter = ClaudeAgentSDKAdapter(
 **What isolation does NOT guarantee:**
 
 | Risk | Mitigation |
-|------|------------|
+| ------------------------------- | ---------------------------------------------- |
 | Process can still see host PIDs | Use container isolation for full PID namespace |
 | Shared /tmp (if not sandboxed) | Enable sandbox for temp directory isolation |
 | Host environment leakage | Set `include_host_env=False` (default) |

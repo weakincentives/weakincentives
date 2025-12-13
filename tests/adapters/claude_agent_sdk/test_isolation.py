@@ -131,7 +131,8 @@ class TestEphemeralHome:
         config = IsolationConfig()
         with EphemeralHome(config) as home:
             assert Path(home.home_path).is_dir()
-            assert home.home_path.startswith("/tmp/claude-agent-")
+            # Temp dir location is platform-dependent (e.g., /tmp on Linux, /var/folders on macOS)
+            assert "claude-agent-" in home.home_path
 
     def test_creates_claude_directory(self) -> None:
         config = IsolationConfig()
@@ -197,17 +198,13 @@ class TestEphemeralHomeSettingsGeneration:
             ]
 
     def test_network_policy_allow_localhost(self) -> None:
-        config = IsolationConfig(
-            network_policy=NetworkPolicy(allow_localhost=True)
-        )
+        config = IsolationConfig(network_policy=NetworkPolicy(allow_localhost=True))
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["network"]["allowLocalBinding"] is True
 
     def test_network_policy_allow_unix_sockets(self) -> None:
-        config = IsolationConfig(
-            network_policy=NetworkPolicy(allow_unix_sockets=True)
-        )
+        config = IsolationConfig(network_policy=NetworkPolicy(allow_unix_sockets=True))
         with EphemeralHome(config) as home:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["allowUnixSockets"] is True

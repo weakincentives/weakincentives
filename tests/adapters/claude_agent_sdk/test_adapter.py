@@ -727,3 +727,83 @@ class TestVisibilityExpansionRequired:
         assert exc.requested_overrides == {("section", "key"): SectionVisibility.FULL}
         assert exc.section_keys == ("section.key",)
         assert exc.reason == "Need more details"
+
+
+class TestIsolationConfig:
+    """Tests for IsolationConfig integration with the adapter."""
+
+    def test_evaluate_with_isolation_creates_ephemeral_home(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that isolation config creates an ephemeral home and cleans it up."""
+        from weakincentives.adapters.claude_agent_sdk import (
+            IsolationConfig,
+            NetworkPolicy,
+            SandboxConfig,
+        )
+
+        _setup_mock_query(
+            [MockResultMessage(result="Hello!", usage={"input_tokens": 10})]
+        )
+
+        isolation = IsolationConfig(
+            network_policy=NetworkPolicy.api_only(),
+            sandbox=SandboxConfig(enabled=True),
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                permission_mode="bypassPermissions",
+                isolation=isolation,
+            ),
+        )
+
+        with sdk_patches():
+            response = adapter.evaluate(simple_prompt, session=session)
+
+        assert response.text == "Hello!"
+
+        # Verify isolation options were passed to SDK
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+
+        # Verify env was set with ephemeral HOME
+        assert hasattr(options, "env")
+        env: dict[str, str] = options.env  # type: ignore[assignment]
+        assert isinstance(env, dict)
+        assert "HOME" in env
+        # Ephemeral home should be in temp directory
+        home_value = env["HOME"]
+        assert isinstance(home_value, str)
+        assert "claude-agent-" in home_value
+
+        # Verify setting_sources was set to empty list
+        assert hasattr(options, "setting_sources")
+        assert options.setting_sources == []
+
+    def test_evaluate_with_isolation_cleans_up_on_error(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that ephemeral home is cleaned up even when SDK raises an error."""
+        from weakincentives.adapters.claude_agent_sdk import (
+            IsolationConfig,
+            NetworkPolicy,
+        )
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_error(RuntimeError("SDK error"))
+
+        isolation = IsolationConfig(
+            network_policy=NetworkPolicy.api_only(),
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                permission_mode="bypassPermissions",
+                isolation=isolation,
+            ),
+        )
+
+        with sdk_patches():
+            with pytest.raises(Exception):  # noqa: B017
+                adapter.evaluate(simple_prompt, session=session)

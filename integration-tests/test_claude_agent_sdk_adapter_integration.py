@@ -928,7 +928,6 @@ def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
     ensuring the user's personal configuration is not affected.
     """
     import tempfile
-    import shutil
 
     # Create a fake ~/.claude directory to monitor
     with tempfile.TemporaryDirectory() as fake_home:
@@ -1063,10 +1062,9 @@ def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
     isolation is properly cleaned up after the adapter.evaluate() returns,
     even on successful execution.
     """
-    import glob
-
     # Count temp directories with our prefix before
-    temp_dirs_before = set(glob.glob("/tmp/claude-agent-*"))
+    temp_dir = Path("/tmp")
+    temp_dirs_before = set(temp_dir.glob("claude-agent-*"))
 
     isolation = IsolationConfig(
         network_policy=NetworkPolicy.api_only(),
@@ -1093,10 +1091,89 @@ def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
 
     # Count temp directories after - should be same as before
     # (cleanup should have removed the ephemeral home)
-    temp_dirs_after = set(glob.glob("/tmp/claude-agent-*"))
+    temp_dirs_after = set(temp_dir.glob("claude-agent-*"))
 
     # Any new directories should have been cleaned up
     new_dirs = temp_dirs_after - temp_dirs_before
     assert len(new_dirs) == 0, (
         f"Expected ephemeral home to be cleaned up. Found orphaned dirs: {new_dirs}"
+    )
+
+
+def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
+    claude_model: str,
+) -> None:
+    """Verify files are created in the ephemeral home directory during execution.
+
+    This test validates that the isolation mechanism actually uses the ephemeral
+    home directory by capturing the directory during execution and verifying
+    that expected files (like .claude/settings.json) are created there.
+
+    This complements the negative test (host not modified) with positive proof
+    that the ephemeral home is being used.
+    """
+    import json
+    from unittest.mock import patch
+
+    from weakincentives.adapters.claude_agent_sdk.isolation import EphemeralHome
+
+    # Capture state: {home_path: (env_home, settings_dict or None)}
+    captured: dict[Path, tuple[str, dict[str, object] | None]] = {}
+    original_cleanup = EphemeralHome.cleanup
+
+    def capturing_cleanup(self: EphemeralHome) -> None:
+        """Capture ephemeral home state before cleanup."""
+        home_path = Path(self._temp_dir)
+        if home_path not in captured:
+            settings_path = home_path / ".claude" / "settings.json"
+            env_home = self.get_env().get("HOME", "")
+            settings = (
+                json.loads(settings_path.read_text())
+                if settings_path.exists()
+                else None
+            )
+            captured[home_path] = (env_home, settings)
+        original_cleanup(self)
+
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.api_only(),
+            sandbox=SandboxConfig(enabled=True),
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(model=claude_model, client_config=config)
+    prompt = Prompt(_build_greeting_prompt()).bind(
+        GreetingParams(audience="ephemeral home verification")
+    )
+    session = _make_session_with_usage_tracking()
+
+    with patch.object(EphemeralHome, "cleanup", capturing_cleanup):
+        response = adapter.evaluate(prompt, session=session)
+
+    assert response.text is not None
+    _assert_prompt_usage(session)
+
+    # Verify exactly one ephemeral home was created
+    assert len(captured) == 1, f"Expected one ephemeral home, got {len(captured)}"
+    ephemeral_home, (env_home, settings) = next(iter(captured.items()))
+
+    # Verify HOME env var pointed to ephemeral directory
+    assert env_home == str(ephemeral_home), f"HOME mismatch: {env_home}"
+
+    # Verify settings.json was created with expected structure
+    assert settings is not None, "Expected settings.json in ephemeral .claude directory"
+    assert "sandbox" in settings, "Expected sandbox configuration in settings"
+    sandbox = settings["sandbox"]
+    assert isinstance(sandbox, dict) and sandbox.get("enabled") is True
+
+    # Verify network policy was applied
+    assert "network" in sandbox, "Expected network configuration in sandbox"
+    network = sandbox["network"]
+    assert isinstance(network, dict)
+    assert "api.anthropic.com" in network.get("allowedDomains", [])
+
+    # Verify cleanup occurred
+    assert not ephemeral_home.exists(), (
+        f"Ephemeral home not cleaned up: {ephemeral_home}"
     )
