@@ -35,13 +35,7 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     create_user_prompt_submit_hook,
     safe_hook_wrapper,
 )
-from weakincentives.adapters.claude_agent_sdk._notifications import (
-    Notification,
-    PreCompactInput,
-    SubagentStartInput,
-    SubagentStopInput,
-    UserNotificationInput,
-)
+from weakincentives.adapters.claude_agent_sdk._notifications import Notification
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.runtime.events import InProcessEventBus
@@ -666,209 +660,26 @@ class TestPostToolUseHookWithTypedParsing:
         assert event.value is None
 
 
-class TestSubagentStartInput:
-    def test_from_dict_with_all_fields(self) -> None:
-        data = {
-            "session_id": "sess-123",
-            "parent_session_id": "parent-456",
-            "subagent_type": "code_reviewer",
-            "prompt": "Review the code",
-        }
-        parsed = SubagentStartInput.from_dict(data)
-
-        assert parsed.session_id == "sess-123"
-        assert parsed.parent_session_id == "parent-456"
-        assert parsed.subagent_type == "code_reviewer"
-        assert parsed.prompt == "Review the code"
-
-    def test_from_dict_with_type_instead_of_subagent_type(self) -> None:
-        data = {
-            "session_id": "sess-123",
-            "type": "analyzer",
-        }
-        parsed = SubagentStartInput.from_dict(data)
-
-        assert parsed.subagent_type == "analyzer"
-
-    def test_from_dict_with_none(self) -> None:
-        parsed = SubagentStartInput.from_dict(None)
-
-        assert parsed.session_id == ""
-        assert parsed.parent_session_id is None
-        assert parsed.subagent_type == ""
-        assert parsed.prompt == ""
-
-    def test_render(self) -> None:
-        parsed = SubagentStartInput(
-            session_id="sess-123",
-            subagent_type="code_reviewer",
-            prompt="Review the code",
-        )
-        rendered = parsed.render()
-
-        assert "SubagentStart: code_reviewer" in rendered
-        assert "sess-123" in rendered
-        assert "Review the code" in rendered
-
-    def test_render_with_parent_session_id(self) -> None:
-        parsed = SubagentStartInput(
-            session_id="sess-123",
-            parent_session_id="parent-456",
-            subagent_type="analyzer",
-        )
-        rendered = parsed.render()
-
-        assert "parent_session_id: parent-456" in rendered
-
-
-class TestSubagentStopInput:
-    def test_from_dict_with_all_fields(self) -> None:
-        data = {
-            "session_id": "sess-123",
-            "stop_reason": "completed",
-            "result": "All code looks good",
-        }
-        parsed = SubagentStopInput.from_dict(data)
-
-        assert parsed.session_id == "sess-123"
-        assert parsed.stop_reason == "completed"
-        assert parsed.result == "All code looks good"
-
-    def test_from_dict_with_stopReason(self) -> None:
-        data = {
-            "session_id": "sess-123",
-            "stopReason": "error",
-        }
-        parsed = SubagentStopInput.from_dict(data)
-
-        assert parsed.stop_reason == "error"
-
-    def test_from_dict_with_none(self) -> None:
-        parsed = SubagentStopInput.from_dict(None)
-
-        assert parsed.session_id == ""
-        assert parsed.stop_reason == ""
-        assert parsed.result == ""
-
-    def test_render(self) -> None:
-        parsed = SubagentStopInput(
-            session_id="sess-123",
-            stop_reason="completed",
-            result="Done",
-        )
-        rendered = parsed.render()
-
-        assert "SubagentStop: completed" in rendered
-        assert "sess-123" in rendered
-        assert "Done" in rendered
-
-
-class TestPreCompactInput:
-    def test_from_dict_with_all_fields(self) -> None:
-        data = {
-            "session_id": "sess-123",
-            "message_count": 50,
-            "token_count": 10000,
-        }
-        parsed = PreCompactInput.from_dict(data)
-
-        assert parsed.session_id == "sess-123"
-        assert parsed.message_count == 50
-        assert parsed.token_count == 10000
-
-    def test_from_dict_with_camelCase(self) -> None:
-        data = {
-            "session_id": "sess-123",
-            "messageCount": 25,
-            "tokenCount": 5000,
-        }
-        parsed = PreCompactInput.from_dict(data)
-
-        assert parsed.message_count == 25
-        assert parsed.token_count == 5000
-
-    def test_from_dict_with_none(self) -> None:
-        parsed = PreCompactInput.from_dict(None)
-
-        assert parsed.session_id == ""
-        assert parsed.message_count == 0
-        assert parsed.token_count == 0
-
-    def test_render(self) -> None:
-        parsed = PreCompactInput(
-            session_id="sess-123",
-            message_count=50,
-            token_count=10000,
-        )
-        rendered = parsed.render()
-
-        assert "PreCompact" in rendered
-        assert "50 messages" in rendered
-        assert "10000 tokens" in rendered
-
-
-class TestUserNotificationInput:
-    def test_from_dict_with_all_fields(self) -> None:
-        data = {
-            "session_id": "sess-123",
-            "message": "Task completed successfully",
-            "level": "info",
-        }
-        parsed = UserNotificationInput.from_dict(data)
-
-        assert parsed.session_id == "sess-123"
-        assert parsed.message == "Task completed successfully"
-        assert parsed.level == "info"
-
-    def test_from_dict_with_none(self) -> None:
-        parsed = UserNotificationInput.from_dict(None)
-
-        assert parsed.session_id == ""
-        assert parsed.message == ""
-        assert parsed.level == "info"
-
-    def test_render(self) -> None:
-        parsed = UserNotificationInput(
-            session_id="sess-123",
-            message="Warning message",
-            level="warning",
-        )
-        rendered = parsed.render()
-
-        assert "Notification [warning]" in rendered
-        assert "Warning message" in rendered
-
-
 class TestNotification:
     def test_construction(self) -> None:
-        payload = SubagentStartInput(
-            session_id="sess-123",
-            subagent_type="analyzer",
-        )
+        payload = {"session_id": "sess-123", "subagent_type": "analyzer"}
         notification = Notification(
             source="subagent_start",
             payload=payload,
-            raw_input={"session_id": "sess-123"},
             prompt_name="test_prompt",
             adapter_name="test_adapter",
         )
 
         assert notification.source == "subagent_start"
-        assert notification.payload is payload
-        assert notification.raw_input == {"session_id": "sess-123"}
+        assert notification.payload == payload
         assert notification.prompt_name == "test_prompt"
         assert notification.adapter_name == "test_adapter"
         assert notification.notification_id is not None
 
     def test_render(self) -> None:
-        payload = UserNotificationInput(
-            session_id="sess-123",
-            message="Test message",
-            level="info",
-        )
         notification = Notification(
             source="notification",
-            payload=payload,
+            payload={"message": "Test message"},
             prompt_name="test_prompt",
             adapter_name="test_adapter",
         )
@@ -876,7 +687,6 @@ class TestNotification:
 
         assert "[notification]" in rendered
         assert "test_prompt" in rendered
-        assert "test_adapter" in rendered
 
 
 class TestSubagentStartHook:
@@ -902,9 +712,7 @@ class TestSubagentStartHook:
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "subagent_start"
-        assert isinstance(notif.payload, SubagentStartInput)
-        assert notif.payload.session_id == "sess-123"
-        assert notif.payload.subagent_type == "code_reviewer"
+        assert notif.payload == input_data
         assert notif.prompt_name == "test_prompt"
         assert notif.adapter_name == "test_adapter"
 
@@ -940,9 +748,7 @@ class TestSubagentStopHook:
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "subagent_stop"
-        assert isinstance(notif.payload, SubagentStopInput)
-        assert notif.payload.session_id == "sess-123"
-        assert notif.payload.stop_reason == "completed"
+        assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
         hook_context.session.mutate(Notification).register(Notification, append)
@@ -975,10 +781,7 @@ class TestPreCompactHook:
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "pre_compact"
-        assert isinstance(notif.payload, PreCompactInput)
-        assert notif.payload.session_id == "sess-123"
-        assert notif.payload.message_count == 100
-        assert notif.payload.token_count == 50000
+        assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
         hook_context.session.mutate(Notification).register(Notification, append)
@@ -1011,10 +814,7 @@ class TestNotificationHook:
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "notification"
-        assert isinstance(notif.payload, UserNotificationInput)
-        assert notif.payload.session_id == "sess-123"
-        assert notif.payload.message == "Operation completed"
-        assert notif.payload.level == "info"
+        assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
         hook_context.session.mutate(Notification).register(Notification, append)

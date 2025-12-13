@@ -23,13 +23,7 @@ from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
-from ._notifications import (
-    Notification,
-    PreCompactInput,
-    SubagentStartInput,
-    SubagentStopInput,
-    UserNotificationInput,
-)
+from ._notifications import Notification
 
 if TYPE_CHECKING:
     from ...runtime.session.protocols import SessionProtocol
@@ -437,13 +431,11 @@ def create_subagent_start_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        raw_input = input_data if isinstance(input_data, dict) else {}
-        parsed = SubagentStartInput.from_dict(raw_input)
+        payload = input_data if isinstance(input_data, dict) else {}
 
         notification = Notification(
             source="subagent_start",
-            payload=parsed,
-            raw_input=raw_input,
+            payload=payload,
             prompt_name=hook_context.prompt_name,
             adapter_name=hook_context.adapter_name,
             created_at=_utcnow(),
@@ -454,10 +446,7 @@ def create_subagent_start_hook(
         logger.debug(
             "claude_agent_sdk.hook.subagent_start",
             event="hook.subagent_start",
-            context={
-                "session_id": parsed.session_id,
-                "subagent_type": parsed.subagent_type,
-            },
+            context={"payload": payload},
         )
 
         return {}
@@ -487,13 +476,11 @@ def create_subagent_stop_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        raw_input = input_data if isinstance(input_data, dict) else {}
-        parsed = SubagentStopInput.from_dict(raw_input)
+        payload = input_data if isinstance(input_data, dict) else {}
 
         notification = Notification(
             source="subagent_stop",
-            payload=parsed,
-            raw_input=raw_input,
+            payload=payload,
             prompt_name=hook_context.prompt_name,
             adapter_name=hook_context.adapter_name,
             created_at=_utcnow(),
@@ -504,10 +491,7 @@ def create_subagent_stop_hook(
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
             event="hook.subagent_stop",
-            context={
-                "session_id": parsed.session_id,
-                "stop_reason": parsed.stop_reason,
-            },
+            context={"payload": payload},
         )
 
         return {}
@@ -537,13 +521,11 @@ def create_pre_compact_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        raw_input = input_data if isinstance(input_data, dict) else {}
-        parsed = PreCompactInput.from_dict(raw_input)
+        payload = input_data if isinstance(input_data, dict) else {}
 
         notification = Notification(
             source="pre_compact",
-            payload=parsed,
-            raw_input=raw_input,
+            payload=payload,
             prompt_name=hook_context.prompt_name,
             adapter_name=hook_context.adapter_name,
             created_at=_utcnow(),
@@ -554,11 +536,7 @@ def create_pre_compact_hook(
         logger.debug(
             "claude_agent_sdk.hook.pre_compact",
             event="hook.pre_compact",
-            context={
-                "session_id": parsed.session_id,
-                "message_count": parsed.message_count,
-                "token_count": parsed.token_count,
-            },
+            context={"payload": payload},
         )
 
         return {}
@@ -588,13 +566,11 @@ def create_notification_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        raw_input = input_data if isinstance(input_data, dict) else {}
-        parsed = UserNotificationInput.from_dict(raw_input)
+        payload = input_data if isinstance(input_data, dict) else {}
 
         notification = Notification(
             source="notification",
-            payload=parsed,
-            raw_input=raw_input,
+            payload=payload,
             prompt_name=hook_context.prompt_name,
             adapter_name=hook_context.adapter_name,
             created_at=_utcnow(),
@@ -605,11 +581,7 @@ def create_notification_hook(
         logger.debug(
             "claude_agent_sdk.hook.notification",
             event="hook.notification",
-            context={
-                "session_id": parsed.session_id,
-                "level": parsed.level,
-                "message": parsed.message[:100] if parsed.message else "",
-            },
+            context={"payload": payload},
         )
 
         return {}

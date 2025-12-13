@@ -64,14 +64,7 @@ Example:
 
 from __future__ import annotations
 
-from ._notifications import (
-    Notification,
-    NotificationSource,
-    PreCompactInput,
-    SubagentStartInput,
-    SubagentStopInput,
-    UserNotificationInput,
-)
+from ._notifications import Notification, NotificationSource
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
     ClaudeAgentSDKClientConfig,
@@ -97,10 +90,6 @@ __all__ = [
     "Notification",
     "NotificationSource",
     "PermissionMode",
-    "PreCompactInput",
-    "SubagentStartInput",
-    "SubagentStopInput",
-    "UserNotificationInput",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
 ]
