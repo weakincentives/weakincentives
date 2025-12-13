@@ -66,11 +66,6 @@ class NetworkPolicy:
         return cls(allowed_domains=())
 
     @classmethod
-    def api_only(cls) -> NetworkPolicy:
-        """Create a policy allowing only Anthropic API access."""
-        return cls(allowed_domains=("api.anthropic.com",))
-
-    @classmethod
     def with_domains(cls, *domains: str) -> NetworkPolicy:
         """Create a policy allowing specific domains."""
         return cls(allowed_domains=domains)
@@ -155,7 +150,7 @@ class EphemeralHome:
 
     Example:
         >>> isolation = IsolationConfig(
-        ...     network_policy=NetworkPolicy.api_only(),
+        ...     network_policy=NetworkPolicy.no_network(),
         ...     api_key="sk-ant-...",
         ... )
         >>> ephemeral = EphemeralHome(isolation)

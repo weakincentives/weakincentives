@@ -61,7 +61,7 @@ adapter = ClaudeAgentSDKAdapter(
         permission_mode="bypassPermissions",
         cwd=str(workspace.temp_dir),
         isolation=IsolationConfig(
-            network_policy=NetworkPolicy.api_only(),
+            network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(
                 enabled=True,
                 readable_paths=(str(workspace.temp_dir),),
@@ -179,7 +179,7 @@ adapter = ClaudeAgentSDKAdapter(
         cwd="/workspace",
         isolation=IsolationConfig(
             # Only API access
-            network_policy=NetworkPolicy.api_only(),
+            network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(
                 enabled=True,
                 writable_paths=("/workspace/output",),
@@ -373,11 +373,9 @@ class NetworkPolicy:
     allowed_ports: tuple[int, ...] | None = None # Port restrictions
 
     @classmethod
-    def no_network(cls) -> NetworkPolicy: ...    # Block all network
+    def no_network(cls) -> NetworkPolicy: ...    # Block all tool network access
     @classmethod
-    def api_only(cls) -> NetworkPolicy: ...      # Only api.anthropic.com
-    @classmethod
-    def with_domains(cls, *domains) -> NetworkPolicy: ...
+    def with_domains(cls, *domains) -> NetworkPolicy: ...  # Allow specific domains
 ```
 
 ### SandboxConfig

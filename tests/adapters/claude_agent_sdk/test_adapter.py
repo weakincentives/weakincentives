@@ -747,7 +747,7 @@ class TestIsolationConfig:
         )
 
         isolation = IsolationConfig(
-            network_policy=NetworkPolicy.api_only(),
+            network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(enabled=True),
         )
 
@@ -794,7 +794,7 @@ class TestIsolationConfig:
         MockSDKQuery.set_error(RuntimeError("SDK error"))
 
         isolation = IsolationConfig(
-            network_policy=NetworkPolicy.api_only(),
+            network_policy=NetworkPolicy.no_network(),
         )
 
         adapter = ClaudeAgentSDKAdapter(

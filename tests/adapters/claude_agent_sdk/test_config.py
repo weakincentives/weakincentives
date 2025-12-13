@@ -37,7 +37,7 @@ class TestClaudeAgentSDKClientConfig:
         assert config.isolation is None
 
     def test_with_all_values(self) -> None:
-        isolation = IsolationConfig(network_policy=NetworkPolicy.api_only())
+        isolation = IsolationConfig(network_policy=NetworkPolicy.no_network())
         config = ClaudeAgentSDKClientConfig(
             permission_mode="acceptEdits",
             cwd="/home/user/project",

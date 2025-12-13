@@ -40,11 +40,6 @@ class TestNetworkPolicy:
         assert policy.allowed_domains == ()
         assert policy.allow_localhost is False
 
-    def test_api_only_factory(self) -> None:
-        policy = NetworkPolicy.api_only()
-        assert policy.allowed_domains == ("api.anthropic.com",)
-        assert policy.allow_localhost is False
-
     def test_with_domains_factory(self) -> None:
         policy = NetworkPolicy.with_domains("api.github.com", "pypi.org")
         assert policy.allowed_domains == ("api.github.com", "pypi.org")
@@ -104,7 +99,7 @@ class TestIsolationConfig:
         assert config.include_host_env is False
 
     def test_with_network_policy(self) -> None:
-        policy = NetworkPolicy.api_only()
+        policy = NetworkPolicy.no_network()
         config = IsolationConfig(network_policy=policy)
         assert config.network_policy is policy
 

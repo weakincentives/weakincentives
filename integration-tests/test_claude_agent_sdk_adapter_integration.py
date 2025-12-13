@@ -811,7 +811,7 @@ def test_claude_agent_sdk_adapter_with_isolation_returns_text(
     4. Cleanup happens after execution
     """
     isolation = IsolationConfig(
-        network_policy=NetworkPolicy.api_only(),
+        network_policy=NetworkPolicy.no_network(),
         sandbox=SandboxConfig(enabled=True),
     )
 
@@ -848,7 +848,7 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_tools(
     not affect tool bridging functionality.
     """
     isolation = IsolationConfig(
-        network_policy=NetworkPolicy.api_only(),
+        network_policy=NetworkPolicy.no_network(),
         sandbox=SandboxConfig(enabled=True),
     )
 
@@ -887,7 +887,7 @@ def test_claude_agent_sdk_adapter_isolation_with_structured_output(
     when the adapter is configured with isolation.
     """
     isolation = IsolationConfig(
-        network_policy=NetworkPolicy.api_only(),
+        network_policy=NetworkPolicy.no_network(),
     )
 
     config = ClaudeAgentSDKClientConfig(
@@ -941,7 +941,7 @@ def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
 
         # Configure isolation
         isolation = IsolationConfig(
-            network_policy=NetworkPolicy.api_only(),
+            network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(enabled=True),
             # Note: We don't use include_host_env because that would
             # potentially inherit HOME from the test environment
@@ -979,17 +979,18 @@ def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
         assert files_in_claude_dir[0].name == "marker.txt"
 
 
-def test_claude_agent_sdk_adapter_isolation_network_policy_api_only(
+def test_claude_agent_sdk_adapter_isolation_network_policy_no_network(
     claude_model: str,
 ) -> None:
-    """Verify NetworkPolicy.api_only() allows Anthropic API access.
+    """Verify NetworkPolicy.no_network() still allows Claude API access.
 
-    This test validates that the api_only() network policy correctly
-    allows access to api.anthropic.com while the adapter is in isolated mode.
-    A successful response proves the network policy is being applied correctly.
+    This test validates that even with no_network() (which blocks all tool
+    network access), the Claude Code CLI can still reach the Anthropic API.
+    The network policy only affects tools running in the sandbox, not the
+    CLI itself.
     """
     isolation = IsolationConfig(
-        network_policy=NetworkPolicy.api_only(),
+        network_policy=NetworkPolicy.no_network(),
         sandbox=SandboxConfig(enabled=True),
     )
 
@@ -1026,7 +1027,7 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_env(
     passes environment variables to the SDK subprocess.
     """
     isolation = IsolationConfig(
-        network_policy=NetworkPolicy.api_only(),
+        network_policy=NetworkPolicy.no_network(),
         env={
             "WINK_TEST_VAR": "isolation_test_value",
         },
@@ -1067,7 +1068,7 @@ def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
     temp_dirs_before = set(temp_dir.glob("claude-agent-*"))
 
     isolation = IsolationConfig(
-        network_policy=NetworkPolicy.api_only(),
+        network_policy=NetworkPolicy.no_network(),
     )
 
     config = ClaudeAgentSDKClientConfig(
@@ -1138,7 +1139,7 @@ def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         isolation=IsolationConfig(
-            network_policy=NetworkPolicy.api_only(),
+            network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(enabled=True),
         ),
     )
@@ -1275,7 +1276,7 @@ def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         isolation=IsolationConfig(
-            network_policy=NetworkPolicy.api_only(),  # Only api.anthropic.com
+            network_policy=NetworkPolicy.no_network(),  # Block all tool network
             sandbox=SandboxConfig(enabled=True),
         ),
     )
