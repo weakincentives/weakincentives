@@ -45,18 +45,27 @@ Example:
     ...     ),
     ... )
     >>>
-    >>> prompt = Prompt[str](
+    >>> from weakincentives import PromptTemplate
+    >>> from dataclasses import dataclass
+    >>>
+    >>> @dataclass(frozen=True)
+    ... class ReviewResult:
+    ...     summary: str
+    ...     issues: list[str]
+    ...
+    >>> template = PromptTemplate[ReviewResult](
     ...     ns="test",
-    ...     key="hello",
-    ...     sections=[
+    ...     key="review",
+    ...     sections=(
     ...         MarkdownSection(
     ...             title="Task",
     ...             key="task",
     ...             template="Review the code in src/",
     ...         ),
     ...         workspace,
-    ...     ],
+    ...     ),
     ... )
+    >>> prompt = Prompt(template)
     >>>
     >>> response = adapter.evaluate(prompt, session=session)
     >>> workspace.cleanup()
@@ -70,6 +79,12 @@ from .config import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
     PermissionMode,
+)
+from .isolation import (
+    EphemeralHome,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
 )
 from .workspace import (
     ClaudeAgentWorkspaceSection,
@@ -85,11 +100,15 @@ __all__ = [
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
     "ClaudeAgentWorkspaceSection",
+    "EphemeralHome",
     "HostMount",
     "HostMountPreview",
+    "IsolationConfig",
+    "NetworkPolicy",
     "Notification",
     "NotificationSource",
     "PermissionMode",
+    "SandboxConfig",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
 ]

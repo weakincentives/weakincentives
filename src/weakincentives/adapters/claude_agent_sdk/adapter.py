@@ -45,6 +45,7 @@ from ._hooks import (
 )
 from ._notifications import Notification
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
+from .isolation import EphemeralHome
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
@@ -105,16 +106,22 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         ...     ),
         ... )
         >>>
-        >>> template = PromptTemplate[str](
+        >>> from dataclasses import dataclass
+        >>>
+        >>> @dataclass(frozen=True)
+        ... class TaskResult:
+        ...     message: str
+        ...
+        >>> template = PromptTemplate[TaskResult](
         ...     ns="test",
         ...     key="hello",
-        ...     sections=[
+        ...     sections=(
         ...         MarkdownSection(
         ...             title="Task",
         ...             key="task",
         ...             template="Say hello",
         ...         ),
-        ...     ],
+        ...     ),
         ... )
         >>> prompt = Prompt(template)
         >>>
@@ -196,7 +203,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             )
         )
 
-    async def _evaluate_async(
+    async def _evaluate_async(  # noqa: PLR0914
         self,
         prompt: Prompt[OutputT],
         *,
@@ -261,10 +268,19 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 "model": self._model,
                 "tool_count": len(bridged_tools),
                 "has_structured_output": output_format is not None,
+                "isolated": self._client_config.isolation is not None,
             },
         )
 
         start_time = _utcnow()
+
+        # Create ephemeral home for isolation if configured
+        ephemeral_home: EphemeralHome | None = None
+        if self._client_config.isolation:
+            ephemeral_home = EphemeralHome(
+                self._client_config.isolation,
+                workspace_path=self._client_config.cwd,
+            )
 
         try:
             messages = await self._run_sdk_query(
@@ -273,12 +289,17 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 output_format=output_format,
                 hook_context=hook_context,
                 bridged_tools=bridged_tools,
+                ephemeral_home=ephemeral_home,
             )
         except VisibilityExpansionRequired:
             # Progressive disclosure: let this propagate to the caller
             raise
         except Exception as error:
             raise normalize_sdk_error(error, prompt_name) from error
+        finally:
+            # Always clean up ephemeral home
+            if ephemeral_home:
+                ephemeral_home.cleanup()
 
         end_time = _utcnow()
         duration_ms = int((end_time - start_time).total_seconds() * 1000)
@@ -319,7 +340,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         return response
 
-    async def _run_sdk_query(
+    async def _run_sdk_query(  # noqa: C901
         self,
         *,
         sdk: Any,
@@ -327,6 +348,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         output_format: dict[str, Any] | None,
         hook_context: HookContext,
         bridged_tools: tuple[Any, ...],
+        ephemeral_home: EphemeralHome | None = None,
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
         # Import the SDK's types
@@ -354,6 +376,13 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         if self._disallowed_tools:
             options_kwargs["disallowed_tools"] = list(self._disallowed_tools)
+
+        # Apply isolation configuration if ephemeral home is provided
+        if ephemeral_home:
+            # Set environment variables including redirected HOME
+            options_kwargs["env"] = ephemeral_home.get_env()
+            # Prevent loading any external settings
+            options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
 
         # Apply model config parameters
         # Note: The Claude Agent SDK does not expose max_tokens or temperature

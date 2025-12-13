@@ -14,10 +14,13 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ...dataclasses import FrozenDataclass
 from ..config import LLMConfig
+
+if TYPE_CHECKING:
+    from .isolation import IsolationConfig
 
 __all__ = [
     "ClaudeAgentSDKClientConfig",
@@ -45,6 +48,9 @@ class ClaudeAgentSDKClientConfig:
         stop_on_structured_output: If True, stop execution immediately after
             the StructuredOutput tool is called. This ensures the turn ends
             cleanly after structured output is produced.
+        isolation: Hermetic isolation configuration. When provided, creates
+            an ephemeral home directory and prevents access to the host's
+            ~/.claude configuration. See :class:`IsolationConfig` for details.
     """
 
     permission_mode: PermissionMode = "bypassPermissions"
@@ -52,6 +58,7 @@ class ClaudeAgentSDKClientConfig:
     max_turns: int | None = None
     suppress_stderr: bool = True
     stop_on_structured_output: bool = True
+    isolation: IsolationConfig | None = None
 
 
 @FrozenDataclass()
