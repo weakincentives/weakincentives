@@ -126,10 +126,12 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             depth: The nesting depth of this section (affects heading level).
             number: The section number prefix (e.g., "1.2.").
             path: The section path as a tuple of keys (e.g., ("parent", "child")).
-            visibility: Optional override for the section's default visibility.
-                When provided, this takes precedence over the section's
-                configured visibility. This allows callers to dynamically
-                control whether to render the full content or just a summary.
+            visibility: The effective visibility to use for rendering. When
+                called from PromptRenderer, this is the already-computed
+                effective visibility (incorporating session state, overrides,
+                and user-provided selectors). When called directly, this may
+                be None, in which case the section should compute effective
+                visibility using its default selector.
         """
 
     def placeholder_names(self) -> set[str]:

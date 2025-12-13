@@ -22,8 +22,6 @@ from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
-from ..prompt._visibility import SectionVisibility
-from ..prompt.errors import SectionPath
 from ..prompt.prompt import Prompt
 from ..runtime.logging import StructuredLogger, get_logger
 from . import shared as _shared
@@ -262,14 +260,13 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
         render_options = AdapterRenderOptions(
             enable_json_schema=True,
             deadline=deadline,
-            visibility_overrides=visibility_overrides,
+            session=session,
         )
 
         render_context = prepare_adapter_conversation(

@@ -14,14 +14,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast, override
 
 from ...budget import Budget, BudgetTracker
 from ...deadlines import Deadline
-from ...prompt import Prompt, RenderedPrompt, SectionVisibility
-from ...prompt.errors import SectionPath, VisibilityExpansionRequired
+from ...prompt import Prompt, RenderedPrompt
+from ...prompt.errors import VisibilityExpansionRequired
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
@@ -148,17 +147,19 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using Claude Agent SDK with hook-based state sync.
 
+        Visibility overrides are managed exclusively via Session state using the
+        VisibilityOverrides state slice. Use session.mutate(VisibilityOverrides)
+        to set visibility overrides before calling evaluate().
+
         Args:
             prompt: The prompt to evaluate.
             session: Session for state management and event publishing.
             deadline: Optional deadline for execution timeout.
-            visibility_overrides: Optional section visibility overrides.
             budget: Optional token budget constraints.
             budget_tracker: Optional shared budget tracker.
 
@@ -185,7 +186,6 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 prompt,
                 session=session,
                 deadline=effective_deadline,
-                visibility_overrides=visibility_overrides,
                 budget_tracker=budget_tracker,
             )
         )
@@ -196,14 +196,12 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None,
         budget_tracker: BudgetTracker | None,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
         sdk = _import_sdk()
 
         rendered = prompt.render(
-            visibility_overrides=visibility_overrides,
             session=session,
         )
         prompt_text = rendered.text

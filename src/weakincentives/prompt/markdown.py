@@ -77,7 +77,13 @@ class MarkdownSection(Section[MarkdownParamsT]):
         path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
     ) -> str:
-        effective = self.effective_visibility(override=visibility, params=params)
+        # Use passed visibility directly when provided (already computed by renderer)
+        # Fall back to effective_visibility for direct render() calls without renderer
+        effective = (
+            visibility
+            if visibility is not None
+            else self.effective_visibility(override=None, params=params)
+        )
         if effective == SectionVisibility.SUMMARY and self.summary is not None:
             return self.render_with_template(self.summary, params, depth, number, path)
         return self.render_with_template(self.template, params, depth, number, path)

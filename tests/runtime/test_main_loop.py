@@ -31,6 +31,7 @@ from weakincentives.prompt import (
     SectionPath,
     SectionVisibility,
     VisibilityExpansionRequired,
+    VisibilityOverrides,
 )
 from weakincentives.runtime.events import EventBus, InProcessEventBus
 from weakincentives.runtime.main_loop import (
@@ -84,9 +85,6 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self._error = error
         self._visibility_requests = list(visibility_requests or [])
         self._call_count = 0
-        self._last_visibility_overrides: (
-            Mapping[SectionPath, SectionVisibility] | None
-        ) = None
         self._last_budget_tracker: BudgetTracker | None = None
         self._budget_trackers: list[BudgetTracker | None] = []
         self._last_deadline: Deadline | None = None
@@ -98,13 +96,11 @@ class _MockAdapter(ProviderAdapter[_Output]):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[_Output]:
         del prompt, budget
         self._call_count += 1
-        self._last_visibility_overrides = visibility_overrides
         self._last_budget_tracker = budget_tracker
         self._budget_trackers.append(budget_tracker)
         self._last_deadline = deadline
@@ -345,7 +341,7 @@ def test_execute_deadline_overrides_config() -> None:
 
 
 def test_execute_handles_visibility_expansion() -> None:
-    """MainLoop.execute accumulates visibility overrides and retries."""
+    """MainLoop.execute accumulates visibility overrides in session state and retries."""
     bus = InProcessEventBus()
     visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
         {("section1",): SectionVisibility.FULL},
@@ -354,15 +350,16 @@ def test_execute_handles_visibility_expansion() -> None:
     adapter = _MockAdapter(visibility_requests=visibility_requests)
     loop = _TestLoop(adapter=adapter, bus=bus)
 
-    response, _ = loop.execute(_Request(message="hello"))
+    response, session = loop.execute(_Request(message="hello"))
 
     assert response.output == _Output(result="success")
     # Called 3 times: 2 visibility expansions + 1 success
     assert adapter._call_count == 3
-    # Final overrides should contain both sections
-    assert adapter._last_visibility_overrides is not None
-    assert ("section1",) in adapter._last_visibility_overrides
-    assert ("section2",) in adapter._last_visibility_overrides
+    # Final overrides should be in session state
+    overrides = session.query(VisibilityOverrides).latest()
+    assert overrides is not None
+    assert overrides.get(("section1",)) == SectionVisibility.FULL
+    assert overrides.get(("section2",)) == SectionVisibility.FULL
 
 
 def test_execute_propagates_adapter_error() -> None:

@@ -158,21 +158,19 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: PLR0913, PLR0914
+    def render(  # noqa: PLR0914
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
         tool_overrides: Mapping[str, ToolOverride] | None = None,
         *,
         descriptor: PromptDescriptor | None = None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         session: SessionProtocol | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
         override_lookup = dict(overrides or {})
         tool_override_lookup = dict(tool_overrides or {})
-        visibility_override_lookup = dict(visibility_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
         summary_skip_depth: int | None = None
         has_summarized = False
@@ -191,9 +189,10 @@ class PromptRenderer[OutputT]:
                 if getattr(node.section, "accepts_overrides", True)
                 else None
             )
-            visibility_override = visibility_override_lookup.get(node.path)
+            # Visibility overrides are now managed exclusively via session state.
+            # effective_visibility checks session's VisibilityOverrides first.
             effective_visibility = node.section.effective_visibility(
-                visibility_override, section_params, session=session, path=node.path
+                None, section_params, session=session, path=node.path
             )
 
             # When rendering with SUMMARY visibility, skip children
@@ -202,7 +201,7 @@ class PromptRenderer[OutputT]:
                 has_summarized = True
 
             rendered = self._render_section(
-                node, section_params, override_body, visibility_override
+                node, section_params, override_body, effective_visibility
             )
 
             # Append summary suffix for sections rendered with SUMMARY visibility
@@ -232,7 +231,6 @@ class PromptRenderer[OutputT]:
         if has_summarized:
             current_visibility = compute_current_visibility(
                 self._registry,
-                visibility_overrides,
                 param_lookup,
                 session=session,
             )
@@ -348,7 +346,7 @@ class PromptRenderer[OutputT]:
         node: SectionNode[SupportsDataclass],
         section_params: SupportsDataclass | None,
         override_body: str | None,
-        visibility_override: SectionVisibility | None = None,
+        effective_visibility: SectionVisibility,
     ) -> str:
         params_type = node.section.param_type
         try:
@@ -369,7 +367,7 @@ class PromptRenderer[OutputT]:
                     node.depth,
                     node.number,
                     path=node.path,
-                    visibility=visibility_override,
+                    visibility=effective_visibility,
                 )
         except PromptRenderError as error:
             if error.section_path and error.dataclass_type:

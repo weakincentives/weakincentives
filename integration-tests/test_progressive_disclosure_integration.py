@@ -29,10 +29,13 @@ from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
     SectionVisibility,
+    SetVisibilityOverride,
     Tool,
     ToolContext,
     ToolResult,
     VisibilityExpansionRequired,
+    VisibilityOverrides,
+    register_visibility_reducers,
 )
 from weakincentives.prompt.errors import SectionPath
 from weakincentives.runtime.session import Session
@@ -196,10 +199,10 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
     params = InstructionParams(task="Verify the value 'integration-test-value'")
 
     adapter = OpenAIAdapter(model=openai_model)
-    visibility_overrides: dict[SectionPath, SectionVisibility] = {}
 
     prompt = Prompt(prompt_template).bind(params)
     session = Session()
+    register_visibility_reducers(session)
 
     max_expansions = 5
     expansion_count = 0
@@ -210,7 +213,6 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
             response = adapter.evaluate(
                 prompt,
                 session=session,
-                visibility_overrides=visibility_overrides,
             )
             # Evaluation completed without expansion request
             # Check if the model used the verify_result tool
@@ -222,10 +224,13 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
             break
 
         except VisibilityExpansionRequired as e:
-            # Model requested section expansion
+            # Model requested section expansion - update session state
             expansion_count += 1
-            visibility_overrides.update(e.requested_overrides)
-            # Continue the loop with updated visibility
+            for path, visibility in e.requested_overrides.items():
+                session.mutate(VisibilityOverrides).dispatch(
+                    SetVisibilityOverride(path=path, visibility=visibility)
+                )
+            # Continue the loop with updated visibility in session state
 
     # Assertions
     assert expansion_count > 0, (
@@ -241,17 +246,17 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
         "after expanding the summarized sections."
     )
 
-    # Verify that the expected sections were expanded
-    expected_paths = [
+    # Verify that the expected sections were expanded in session state
+    overrides = session.query(VisibilityOverrides).latest()
+    assert overrides is not None, "Expected VisibilityOverrides in session state"
+    expected_paths: list[SectionPath] = [
         ("instructions", "guidelines"),
         ("instructions", "guidelines", "tools-reference"),
     ]
     for path in expected_paths:
-        assert path in visibility_overrides, (
-            f"Expected section path {path} to be expanded, "
-            f"but visibility_overrides only contains: {list(visibility_overrides.keys())}"
+        assert overrides.get(path) == SectionVisibility.FULL, (
+            f"Expected section path {path} to be expanded to FULL"
         )
-        assert visibility_overrides[path] == SectionVisibility.FULL
 
 
 def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None:
@@ -267,10 +272,10 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
     )
 
     adapter = OpenAIAdapter(model=openai_model)
-    visibility_overrides: dict[SectionPath, SectionVisibility] = {}
 
     prompt = Prompt(prompt_template).bind(params)
     session = Session()
+    register_visibility_reducers(session)
 
     max_iterations = 5
     iteration = 0
@@ -282,13 +287,15 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
             response = adapter.evaluate(
                 prompt,
                 session=session,
-                visibility_overrides=visibility_overrides,
             )
             final_response = response
             break
 
         except VisibilityExpansionRequired as e:
-            visibility_overrides.update(e.requested_overrides)
+            for path, visibility in e.requested_overrides.items():
+                session.mutate(VisibilityOverrides).dispatch(
+                    SetVisibilityOverride(path=path, visibility=visibility)
+                )
 
     assert final_response is not None, (
         f"Expected a final response after {max_iterations} iterations."
@@ -296,7 +303,8 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
     assert final_response.text is not None, "Expected text response from model."
 
     # The leaf section should be expanded to expose the tool
-    leaf_path = ("instructions", "guidelines", "tools-reference")
-    assert leaf_path in visibility_overrides, (
-        f"Expected leaf section {leaf_path} to be expanded."
-    )
+    overrides = session.query(VisibilityOverrides).latest()
+    leaf_path: SectionPath = ("instructions", "guidelines", "tools-reference")
+    assert (
+        overrides is not None and overrides.get(leaf_path) == SectionVisibility.FULL
+    ), f"Expected leaf section {leaf_path} to be expanded."

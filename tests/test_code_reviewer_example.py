@@ -69,11 +69,10 @@ class _RepositoryOptimizationAdapter:
         bus: InProcessEventBus | None = None,
         session: Session | None = None,
         deadline: object | None = None,
-        visibility_overrides: object | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
     ) -> PromptResponse[Any]:
-        del deadline, visibility_overrides, budget, budget_tracker
+        del deadline, budget, budget_tracker
         self.calls.append(prompt.key)
 
         if "workspace-digest" in prompt.key:
@@ -118,11 +117,10 @@ class _RecordingDeadlineAdapter:
         bus: InProcessEventBus | None = None,
         session: Session | None = None,
         deadline: Deadline | None = None,
-        visibility_overrides: object | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
     ) -> PromptResponse[Any]:
-        del bus, session, visibility_overrides, budget, budget_tracker
+        del bus, session, budget, budget_tracker
         self.deadlines.append(deadline)
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,

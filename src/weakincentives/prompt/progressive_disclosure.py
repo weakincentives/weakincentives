@@ -183,30 +183,31 @@ def build_summary_suffix(section_key: str, child_keys: tuple[str, ...]) -> str:
 
 def has_summarized_sections(
     registry: RegistrySnapshot,
-    visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass] | None = None,
     *,
     session: SessionProtocol | None = None,
 ) -> bool:
     """Check if the prompt contains any sections that will render as SUMMARY.
 
+    Visibility overrides are managed exclusively via Session state using the
+    VisibilityOverrides state slice.
+
     Args:
         registry: The prompt's section registry snapshot.
-        visibility_overrides: Optional visibility overrides applied at render time.
         param_lookup: Optional parameter lookup used to evaluate visibility
             selectors that depend on section parameters.
         session: Optional session for visibility callables that inspect state.
+            Also used to query VisibilityOverrides from session state.
 
     Returns:
         True if at least one section renders with SUMMARY visibility.
     """
-    overrides = visibility_overrides or {}
     params = dict(param_lookup or {})
 
     for node in registry.sections:
         section_params = registry.resolve_section_params(node, dict(params))
         effective = node.section.effective_visibility(
-            overrides.get(node.path),
+            None,
             section_params,
             session=session,
             path=node.path,
@@ -219,31 +220,32 @@ def has_summarized_sections(
 
 def compute_current_visibility(
     registry: RegistrySnapshot,
-    visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
     param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass] | None = None,
     *,
     session: SessionProtocol | None = None,
 ) -> dict[SectionPath, SectionVisibility]:
     """Compute the effective visibility for all sections.
 
+    Visibility overrides are managed exclusively via Session state using the
+    VisibilityOverrides state slice.
+
     Args:
         registry: The prompt's section registry snapshot.
-        visibility_overrides: Optional visibility overrides.
         param_lookup: Optional parameter lookup used to evaluate visibility
             selectors that depend on section parameters.
         session: Optional session for visibility callables that inspect state.
+            Also used to query VisibilityOverrides from session state.
 
     Returns:
         Mapping from section paths to their effective visibility.
     """
-    overrides = visibility_overrides or {}
     params = dict(param_lookup or {})
     result: dict[SectionPath, SectionVisibility] = {}
 
     for node in registry.sections:
         section_params = registry.resolve_section_params(node, dict(params))
         effective = node.section.effective_visibility(
-            overrides.get(node.path),
+            None,
             section_params,
             session=session,
             path=node.path,
