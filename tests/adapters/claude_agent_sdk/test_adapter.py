@@ -777,9 +777,9 @@ class TestIsolationConfig:
         assert isinstance(home_value, str)
         assert "claude-agent-" in home_value
 
-        # Verify setting_sources was set to empty list
+        # Verify setting_sources was set to load from ephemeral HOME
         assert hasattr(options, "setting_sources")
-        assert options.setting_sources == []
+        assert options.setting_sources == ["user"]
 
     def test_evaluate_with_isolation_cleans_up_on_error(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]

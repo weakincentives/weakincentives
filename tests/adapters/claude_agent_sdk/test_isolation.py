@@ -168,11 +168,12 @@ class TestEphemeralHome:
             assert home_path.is_dir()
         assert not home_path.exists()
 
-    def test_get_setting_sources_returns_empty_list(self) -> None:
+    def test_get_setting_sources_returns_user(self) -> None:
         config = IsolationConfig()
         with EphemeralHome(config) as home:
             sources = home.get_setting_sources()
-            assert sources == []
+            # Returns ["user"] to load settings from ephemeral HOME
+            assert sources == ["user"]
 
 
 class TestEphemeralHomeSettingsGeneration:

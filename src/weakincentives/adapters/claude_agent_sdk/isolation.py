@@ -269,13 +269,17 @@ class EphemeralHome:
     def get_setting_sources() -> list[str]:
         """Get the setting_sources value for SDK options.
 
-        Returns empty list to prevent SDK from loading any filesystem-based
-        settings outside the ephemeral home.
+        Returns ["user"] to make the SDK read settings from $HOME/.claude/settings.json.
+        Since we redirect HOME to the ephemeral directory, this loads our generated
+        settings including sandbox and network policy configuration.
+
+        Note: An empty list would prevent ALL filesystem loading, including our
+        ephemeral settings. We need "user" to read from the redirected HOME.
 
         Returns:
-            Empty list to disable external setting sources.
+            List containing "user" to load settings from ephemeral HOME.
         """
-        return []
+        return ["user"]
 
     def cleanup(self) -> None:
         """Remove ephemeral home directory.

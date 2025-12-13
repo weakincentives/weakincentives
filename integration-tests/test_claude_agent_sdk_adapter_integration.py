@@ -1177,3 +1177,174 @@ def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
     assert not ephemeral_home.exists(), (
         f"Ephemeral home not cleaned up: {ephemeral_home}"
     )
+
+
+@dataclass(slots=True)
+class NetworkTestParams:
+    """Parameters for network test prompt."""
+
+    url: str
+
+
+@dataclass(slots=True, frozen=True)
+class NetworkTestResult:
+    """Result of network connectivity test."""
+
+    reachable: bool
+    http_status: int | None
+    error_message: str | None
+
+
+def _build_network_test_prompt() -> PromptTemplate[NetworkTestResult]:
+    """Build a prompt that tests network connectivity from within the sandbox."""
+    return PromptTemplate[NetworkTestResult](
+        ns=_PROMPT_NS,
+        key="network-test",
+        name="network_test",
+        sections=(
+            MarkdownSection[NetworkTestParams](
+                title="Task",
+                key="task",
+                template=(
+                    "Use the Bash tool to test network connectivity to ${url}. "
+                    "Run: curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 ${url} 2>&1 "
+                    "If successful, return reachable=true with the HTTP status code. "
+                    "If it fails (connection refused, timeout, etc.), return reachable=false "
+                    "with the error message. Set http_status to null if no response was received."
+                ),
+            ),
+        ),
+    )
+
+
+def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
+    claude_model: str,
+) -> None:
+    """Verify network policy allows access to explicitly listed domains.
+
+    This test validates that when a domain IS in allowed_domains, tools
+    running in the sandbox can successfully reach it.
+    """
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy(
+                allowed_domains=("api.anthropic.com", "example.com"),
+            ),
+            sandbox=SandboxConfig(enabled=True),
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        allowed_tools=("Bash",),
+    )
+
+    prompt = Prompt(_build_network_test_prompt()).bind(
+        NetworkTestParams(url="https://example.com")
+    )
+    session = _make_session_with_usage_tracking()
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.output is not None, (
+        f"Expected structured output, got: {response.text}"
+    )
+    result = response.output
+    print(
+        f"Allowed domain test: reachable={result.reachable}, status={result.http_status}, error={result.error_message}"
+    )
+    # example.com is in allowed_domains, so it should be reachable with HTTP 200
+    http_ok = 200
+    assert result.reachable is True, (
+        f"Expected example.com to be reachable: {result.error_message}"
+    )
+    assert result.http_status == http_ok
+
+
+def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
+    claude_model: str,
+) -> None:
+    """Verify network policy blocks access to domains not in the allowed list.
+
+    This test validates that when a domain is NOT in allowed_domains, tools
+    running in the sandbox cannot reach it.
+
+    See: https://github.com/anthropic-experimental/sandbox-runtime
+    """
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.api_only(),  # Only api.anthropic.com
+            sandbox=SandboxConfig(enabled=True),
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        allowed_tools=("Bash",),
+    )
+
+    prompt = Prompt(_build_network_test_prompt()).bind(
+        NetworkTestParams(url="https://example.com")
+    )
+    session = _make_session_with_usage_tracking()
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.output is not None, (
+        f"Expected structured output, got: {response.text}"
+    )
+    result = response.output
+    print(
+        f"Blocked domain test: reachable={result.reachable}, status={result.http_status}, error={result.error_message}"
+    )
+
+    # example.com should be blocked since it's not in allowed_domains
+    assert result.reachable is False, (
+        f"Expected example.com to be blocked, but got status {result.http_status}"
+    )
+
+
+def test_claude_agent_sdk_adapter_no_network_blocks_all_tool_access(
+    claude_model: str,
+) -> None:
+    """Verify no_network() blocks all network access for tools.
+
+    This test validates that NetworkPolicy.no_network() blocks tools from
+    accessing any external network resources. The Claude Code CLI can still
+    reach the API (it runs outside the tool sandbox), but tools like Bash
+    cannot make network requests.
+    """
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),  # Block all tool network
+            sandbox=SandboxConfig(enabled=True),
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        allowed_tools=("Bash",),
+    )
+
+    prompt = Prompt(_build_network_test_prompt()).bind(
+        NetworkTestParams(url="https://example.com")
+    )
+    session = _make_session_with_usage_tracking()
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.output is not None, (
+        f"Expected structured output, got: {response.text}"
+    )
+    result = response.output
+    print(
+        f"No network test: reachable={result.reachable}, status={result.http_status}, error={result.error_message}"
+    )
+
+    # All network should be blocked for tools
+    assert result.reachable is False, (
+        f"Expected all network blocked, but got status {result.http_status}"
+    )
