@@ -40,25 +40,20 @@ __all__ = [
 class NetworkPolicy:
     """Network access policy for Claude Agent SDK sandbox.
 
-    Controls which network resources the SDK can access during execution.
+    Controls which network resources tools can access during execution.
     All constraints are enforced at the OS level via bubblewrap (Linux) or
     seatbelt (macOS).
 
+    Note: This policy only affects tools making outbound network connections
+    (e.g., curl, wget). The MCP bridge for custom weakincentives tools and
+    the Claude API connection are not affected by this policy.
+
     Attributes:
-        allowed_domains: Domains the SDK can access. Empty tuple means no
+        allowed_domains: Domains tools can access. Empty tuple means no
             network access. Use ("*",) for unrestricted access (not recommended).
-        allow_localhost: If True, allow connections to localhost/127.0.0.1.
-            Required for local MCP servers or development APIs.
-        allow_unix_sockets: If True, allow Unix domain socket connections.
-            Security risk—enables Docker socket access if available.
-        allowed_ports: Specific ports allowed for outbound connections.
-            None means all ports on allowed domains. Empty tuple blocks all.
     """
 
     allowed_domains: tuple[str, ...] = ()
-    allow_localhost: bool = False
-    allow_unix_sockets: bool = False
-    allowed_ports: tuple[int, ...] | None = None
 
     @classmethod
     def no_network(cls) -> NetworkPolicy:
@@ -211,15 +206,6 @@ class EphemeralHome:
         settings["sandbox"]["network"] = {
             "allowedDomains": list(network.allowed_domains),
         }
-
-        if network.allow_localhost:
-            settings["sandbox"]["network"]["allowLocalBinding"] = True
-
-        if network.allow_unix_sockets:
-            settings["sandbox"]["allowUnixSockets"] = True
-
-        if network.allowed_ports is not None:
-            settings["sandbox"]["network"]["allowedPorts"] = list(network.allowed_ports)
 
         # Write settings
         settings_path = self._claude_dir / "settings.json"

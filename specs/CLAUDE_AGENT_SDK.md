@@ -148,7 +148,6 @@ adapter = ClaudeAgentSDKAdapter(
             # Allow all network access (development only!)
             network_policy=NetworkPolicy(
                 allowed_domains=("*",),
-                allow_localhost=True,  # For local services
             ),
             # Disable sandbox for full filesystem access
             sandbox=SandboxConfig(enabled=False),
@@ -212,12 +211,10 @@ adapter = ClaudeAgentSDKAdapter(
         isolation=IsolationConfig(
             network_policy=NetworkPolicy(
                 allowed_domains=(
-                    "api.anthropic.com",
                     "api.github.com",
                     "registry.npmjs.org",
                     "internal-api.company.com",
                 ),
-                allow_localhost=True,  # For local MCP servers
             ),
             sandbox=SandboxConfig(
                 enabled=True,
@@ -368,15 +365,16 @@ Controls network access within the sandbox:
 @FrozenDataclass()
 class NetworkPolicy:
     allowed_domains: tuple[str, ...] = ()        # Accessible domains
-    allow_localhost: bool = False                # Allow 127.0.0.1
-    allow_unix_sockets: bool = False             # Allow Unix sockets
-    allowed_ports: tuple[int, ...] | None = None # Port restrictions
 
     @classmethod
     def no_network(cls) -> NetworkPolicy: ...    # Block all tool network access
     @classmethod
     def with_domains(cls, *domains) -> NetworkPolicy: ...  # Allow specific domains
 ```
+
+Note: This policy only affects tools making outbound network connections
+(e.g., curl, wget). The MCP bridge for custom weakincentives tools and
+the Claude API connection are not affected by this policy.
 
 ### SandboxConfig
 

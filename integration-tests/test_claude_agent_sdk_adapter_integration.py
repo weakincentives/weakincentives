@@ -1168,11 +1168,12 @@ def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
     sandbox = settings["sandbox"]
     assert isinstance(sandbox, dict) and sandbox.get("enabled") is True
 
-    # Verify network policy was applied
+    # Verify network policy was applied (no_network() means empty allowed domains)
     assert "network" in sandbox, "Expected network configuration in sandbox"
     network = sandbox["network"]
     assert isinstance(network, dict)
-    assert "api.anthropic.com" in network.get("allowedDomains", [])
+    # no_network() creates empty allowed domains - CLI reaches API outside sandbox
+    assert network.get("allowedDomains") == []
 
     # Verify cleanup occurred
     assert not ephemeral_home.exists(), (
@@ -1349,3 +1350,595 @@ def test_claude_agent_sdk_adapter_no_network_blocks_all_tool_access(
     assert result.reachable is False, (
         f"Expected all network blocked, but got status {result.http_status}"
     )
+
+
+# =============================================================================
+# Additional Isolation Configuration Tests
+# =============================================================================
+#
+# These tests cover additional IsolationConfig options to ensure each
+# configuration option behaves as documented.
+# =============================================================================
+
+
+@dataclass(slots=True, frozen=True)
+class EnvTestResult:
+    """Result of environment variable test."""
+
+    found_vars: list[str]
+    path_value: str | None
+    custom_var_value: str | None
+
+
+@dataclass(slots=True)
+class EmptyParams:
+    """Empty params placeholder for prompts without parameters."""
+
+    pass
+
+
+def _build_env_test_prompt() -> PromptTemplate[EnvTestResult]:
+    """Build a prompt that tests environment variable inheritance."""
+    return PromptTemplate[EnvTestResult](
+        ns=_PROMPT_NS,
+        key="env-test",
+        name="env_test",
+        sections=(
+            MarkdownSection[EmptyParams](
+                title="Task",
+                key="task",
+                template=(
+                    "Use the Bash tool to inspect environment variables. "
+                    "Run: env | head -20 "
+                    "Return found_vars with a list of variable names you see. "
+                    "Return path_value with the value of PATH if present (or null). "
+                    "Return custom_var_value with the value of WINK_CUSTOM_TEST_VAR "
+                    "if present (or null)."
+                ),
+            ),
+        ),
+    )
+
+
+def test_claude_agent_sdk_adapter_include_host_env_false(
+    claude_model: str,
+) -> None:
+    """Verify include_host_env=False limits environment passed to SDK.
+
+    This test validates that when include_host_env=False (the default),
+    we only pass HOME, ANTHROPIC_API_KEY, and custom env vars to the SDK.
+
+    NOTE: The actual subprocess environment may still include variables
+    from the Claude Code CLI process itself. This test validates that
+    custom env vars are correctly passed through our isolation layer.
+    """
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),
+            include_host_env=False,  # Explicitly false
+            env={"WINK_CUSTOM_TEST_VAR": "custom_value"},
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        allowed_tools=("Bash",),
+    )
+
+    prompt = Prompt(_build_env_test_prompt()).bind(EmptyParams())
+    session = _make_session_with_usage_tracking()
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.output is not None, (
+        f"Expected structured output, got: {response.text}"
+    )
+    result = response.output
+    print(
+        f"Env test (include_host_env=False): found_vars={result.found_vars}, "
+        f"path={result.path_value}, custom={result.custom_var_value}"
+    )
+
+    # The key validation: our custom env var is present
+    assert result.custom_var_value == "custom_value", (
+        f"Expected custom var to be 'custom_value', got {result.custom_var_value}"
+    )
+
+
+def test_claude_agent_sdk_adapter_include_host_env_true(
+    claude_model: str,
+) -> None:
+    """Verify include_host_env=True inherits non-sensitive host environment.
+
+    This test validates that when include_host_env=True, safe host
+    environment variables like PATH are inherited, but sensitive ones
+    (AWS_*, OPENAI_*, etc.) are filtered out.
+    """
+    import os as test_os
+
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),
+            include_host_env=True,  # Inherit host env
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        allowed_tools=("Bash",),
+    )
+
+    prompt = Prompt(_build_env_test_prompt()).bind(EmptyParams())
+    session = _make_session_with_usage_tracking()
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.output is not None, (
+        f"Expected structured output, got: {response.text}"
+    )
+    result = response.output
+    print(
+        f"Env test (include_host_env=True): found_vars={result.found_vars}, "
+        f"path={result.path_value}"
+    )
+
+    # PATH should be inherited from host
+    host_path = test_os.environ.get("PATH")
+    if host_path:
+        assert result.path_value is not None, "Expected PATH to be inherited from host"
+
+    # Sensitive variables should NOT be in found_vars
+    sensitive_prefixes = ["AWS_", "OPENAI_", "GOOGLE_", "AZURE_"]
+    for var in result.found_vars:
+        for prefix in sensitive_prefixes:
+            assert not var.startswith(prefix), (
+                f"Sensitive variable {var} should be filtered"
+            )
+
+
+@dataclass(slots=True, frozen=True)
+class FileWriteTestResult:
+    """Result of file write test."""
+
+    write_succeeded: bool
+    file_path: str | None
+    error_message: str | None
+
+
+def _build_file_write_test_prompt() -> PromptTemplate[FileWriteTestResult]:
+    """Build a prompt that tests file writing to a specific path."""
+    return PromptTemplate[FileWriteTestResult](
+        ns=_PROMPT_NS,
+        key="file-write-test",
+        name="file_write_test",
+        sections=(
+            MarkdownSection[ReadFileParams](
+                title="Task",
+                key="task",
+                template=(
+                    "Use the Bash tool to try writing a file to ${file_path}. "
+                    "Run: echo 'test content' > ${file_path} 2>&1 && echo SUCCESS || echo FAILED "
+                    "Return write_succeeded=true if the write succeeded, false otherwise. "
+                    "Return the file_path you tried to write to. "
+                    "Return any error message if the write failed."
+                ),
+            ),
+        ),
+    )
+
+
+def test_claude_agent_sdk_adapter_sandbox_writable_paths(
+    claude_model: str,
+) -> None:
+    """Verify writable_paths allows writing to extra directories.
+
+    This test validates that SandboxConfig.writable_paths correctly
+    allows writing to directories outside the default workspace.
+    """
+    import tempfile
+
+    # Create a temp directory to use as a writable path
+    with tempfile.TemporaryDirectory(prefix="wink-writable-") as writable_dir:
+        test_file = f"{writable_dir}/test-writable.txt"
+
+        config = ClaudeAgentSDKClientConfig(
+            permission_mode="bypassPermissions",
+            isolation=IsolationConfig(
+                network_policy=NetworkPolicy.no_network(),
+                sandbox=SandboxConfig(
+                    enabled=True,
+                    writable_paths=(writable_dir,),
+                ),
+            ),
+        )
+        adapter = ClaudeAgentSDKAdapter(
+            model=claude_model,
+            client_config=config,
+            allowed_tools=("Bash",),
+        )
+
+        prompt = Prompt(_build_file_write_test_prompt()).bind(
+            ReadFileParams(file_path=test_file)
+        )
+        session = _make_session_with_usage_tracking()
+
+        response = adapter.evaluate(prompt, session=session)
+
+        assert response.output is not None, (
+            f"Expected structured output, got: {response.text}"
+        )
+        result = response.output
+        print(
+            f"Writable paths test: succeeded={result.write_succeeded}, "
+            f"path={result.file_path}, error={result.error_message}"
+        )
+
+        # With writable_paths configured, write should succeed
+        assert result.write_succeeded is True, (
+            f"Expected write to succeed with writable_paths: {result.error_message}"
+        )
+
+        # Verify file actually exists
+        assert Path(test_file).exists(), "Expected file to be created"
+
+
+@dataclass(slots=True, frozen=True)
+class FileReadTestResult:
+    """Result of file read test."""
+
+    read_succeeded: bool
+    content: str | None
+    error_message: str | None
+
+
+def _build_file_read_test_prompt() -> PromptTemplate[FileReadTestResult]:
+    """Build a prompt that tests file reading from a specific path."""
+    return PromptTemplate[FileReadTestResult](
+        ns=_PROMPT_NS,
+        key="file-read-test",
+        name="file_read_test",
+        sections=(
+            MarkdownSection[ReadFileParams](
+                title="Task",
+                key="task",
+                template=(
+                    "Use the Read tool to read the file at ${file_path}. "
+                    "Return read_succeeded=true if you can read it, false otherwise. "
+                    "Return the content if readable, or the error message if not."
+                ),
+            ),
+        ),
+    )
+
+
+def test_claude_agent_sdk_adapter_sandbox_readable_paths(
+    claude_model: str,
+) -> None:
+    """Verify readable_paths allows reading extra directories.
+
+    This test validates that SandboxConfig.readable_paths correctly
+    allows reading from directories outside the default workspace.
+    """
+    import tempfile
+
+    # Create a temp directory with a file to read
+    with tempfile.TemporaryDirectory(prefix="wink-readable-") as readable_dir:
+        test_file = f"{readable_dir}/test-readable.txt"
+        Path(test_file).write_text("readable test content")
+
+        config = ClaudeAgentSDKClientConfig(
+            permission_mode="bypassPermissions",
+            isolation=IsolationConfig(
+                network_policy=NetworkPolicy.no_network(),
+                sandbox=SandboxConfig(
+                    enabled=True,
+                    readable_paths=(readable_dir,),
+                ),
+            ),
+        )
+        adapter = ClaudeAgentSDKAdapter(
+            model=claude_model,
+            client_config=config,
+            allowed_tools=("Read",),
+        )
+
+        prompt = Prompt(_build_file_read_test_prompt()).bind(
+            ReadFileParams(file_path=test_file)
+        )
+        session = _make_session_with_usage_tracking()
+
+        response = adapter.evaluate(prompt, session=session)
+
+        assert response.output is not None, (
+            f"Expected structured output, got: {response.text}"
+        )
+        result = response.output
+        print(
+            f"Readable paths test: succeeded={result.read_succeeded}, "
+            f"content={result.content}, error={result.error_message}"
+        )
+
+        # With readable_paths configured, read should succeed
+        assert result.read_succeeded is True, (
+            f"Expected read to succeed with readable_paths: {result.error_message}"
+        )
+        assert result.content is not None
+        assert "readable test content" in result.content
+
+
+def test_claude_agent_sdk_adapter_sandbox_disabled(
+    claude_model: str,
+) -> None:
+    """Verify sandbox can be disabled with enabled=False.
+
+    This test validates that SandboxConfig(enabled=False) disables
+    OS-level sandboxing, allowing full filesystem access.
+    """
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),
+            sandbox=SandboxConfig(enabled=False),
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        allowed_tools=("Read",),
+    )
+
+    # Try to read a system file that would normally be outside sandbox
+    prompt = Prompt(_build_file_read_test_prompt()).bind(
+        ReadFileParams(file_path="/etc/hosts")
+    )
+    session = _make_session_with_usage_tracking()
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.output is not None, (
+        f"Expected structured output, got: {response.text}"
+    )
+    result = response.output
+    print(
+        f"Sandbox disabled test: succeeded={result.read_succeeded}, "
+        f"error={result.error_message}"
+    )
+
+    # With sandbox disabled, /etc/hosts should be readable
+    assert result.read_succeeded is True, (
+        f"Expected /etc/hosts to be readable with sandbox disabled: {result.error_message}"
+    )
+    assert result.content is not None
+    assert "localhost" in result.content.lower() or "127.0.0.1" in result.content
+
+
+@dataclass(slots=True, frozen=True)
+class CommandTestResult:
+    """Result of command execution test."""
+
+    command_succeeded: bool
+    output: str | None
+    error_message: str | None
+
+
+def _build_command_test_prompt() -> PromptTemplate[CommandTestResult]:
+    """Build a prompt that tests running a specific command."""
+    return PromptTemplate[CommandTestResult](
+        ns=_PROMPT_NS,
+        key="command-test",
+        name="command_test",
+        sections=(
+            MarkdownSection[EchoParams](
+                title="Task",
+                key="task",
+                template=(
+                    "Use the Bash tool to run the following command: ${text} "
+                    "Return command_succeeded=true if it ran successfully. "
+                    "Return the output if successful, or error_message if it failed."
+                ),
+            ),
+        ),
+    )
+
+
+def test_claude_agent_sdk_adapter_sandbox_excluded_commands(
+    claude_model: str,
+) -> None:
+    """Verify excluded_commands allows specific commands to bypass sandbox.
+
+    This test validates that SandboxConfig.excluded_commands correctly
+    allows specific commands to run outside the sandbox.
+    """
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),
+            sandbox=SandboxConfig(
+                enabled=True,
+                excluded_commands=("ls",),
+                allow_unsandboxed_commands=True,
+            ),
+        ),
+    )
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        allowed_tools=("Bash",),
+    )
+
+    # Run ls which is in excluded_commands
+    prompt = Prompt(_build_command_test_prompt()).bind(EchoParams(text="ls /"))
+    session = _make_session_with_usage_tracking()
+
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.output is not None, (
+        f"Expected structured output, got: {response.text}"
+    )
+    result = response.output
+    print(
+        f"Excluded commands test: succeeded={result.command_succeeded}, "
+        f"output={result.output}, error={result.error_message}"
+    )
+
+    # Command in excluded_commands should succeed
+    assert result.command_succeeded is True, (
+        f"Expected excluded command to succeed: {result.error_message}"
+    )
+
+
+# =============================================================================
+# ClaudeAgentWorkspaceSection Integration Tests
+# =============================================================================
+
+
+def test_claude_agent_sdk_adapter_with_workspace_section(
+    claude_model: str,
+) -> None:
+    """Verify ClaudeAgentWorkspaceSection works with the adapter.
+
+    This test validates that host files can be mounted into a workspace
+    and the SDK can read them through native tools.
+    """
+    from weakincentives.adapters.claude_agent_sdk import (
+        ClaudeAgentWorkspaceSection,
+        HostMount,
+    )
+
+    # Create session and workspace
+    session = Session()
+
+    # Mount the current directory's README.md
+    workspace = ClaudeAgentWorkspaceSection(
+        session=session,
+        mounts=(
+            HostMount(
+                host_path="README.md",
+                mount_path="readme.md",
+            ),
+        ),
+        allowed_host_roots=(str(Path.cwd()),),
+    )
+
+    try:
+        config = ClaudeAgentSDKClientConfig(
+            permission_mode="bypassPermissions",
+            cwd=str(workspace.temp_dir),
+            isolation=IsolationConfig(
+                network_policy=NetworkPolicy.no_network(),
+                sandbox=SandboxConfig(
+                    enabled=True,
+                    readable_paths=(str(workspace.temp_dir),),
+                ),
+            ),
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            model=claude_model,
+            client_config=config,
+            allowed_tools=("Read",),
+        )
+
+        # Build a prompt to read the mounted file
+        prompt_template = PromptTemplate[FileReadTestResult](
+            ns=_PROMPT_NS,
+            key="workspace-read",
+            name="workspace_read",
+            sections=(
+                workspace,
+                MarkdownSection[EmptyParams](
+                    title="Task",
+                    key="task",
+                    template=(
+                        "Read the file 'readme.md' in the current workspace directory. "
+                        "Return read_succeeded=true if successful. "
+                        "Return the first 100 characters of content."
+                    ),
+                ),
+            ),
+        )
+        prompt = Prompt(prompt_template).bind(EmptyParams())
+
+        response = adapter.evaluate(prompt, session=session)
+
+        assert response.output is not None, (
+            f"Expected structured output, got: {response.text}"
+        )
+        result = response.output
+        print(
+            f"Workspace test: succeeded={result.read_succeeded}, "
+            f"content={result.content[:50] if result.content else None}..."
+        )
+
+        # Should be able to read the mounted file
+        assert result.read_succeeded is True, (
+            f"Expected workspace file read to succeed: {result.error_message}"
+        )
+        assert result.content is not None
+
+    finally:
+        workspace.cleanup()
+
+
+def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(
+    claude_model: str,
+) -> None:
+    """Verify HostMount.max_bytes is enforced during workspace creation.
+
+    This test validates that the workspace section correctly rejects
+    mounts that exceed their byte budget.
+    """
+    from weakincentives.adapters.claude_agent_sdk import (
+        ClaudeAgentWorkspaceSection,
+        HostMount,
+        WorkspaceBudgetExceededError,
+    )
+
+    session = Session()
+
+    # Try to mount README.md with a very small byte limit
+    with pytest.raises(WorkspaceBudgetExceededError):
+        ClaudeAgentWorkspaceSection(
+            session=session,
+            mounts=(
+                HostMount(
+                    host_path="README.md",
+                    mount_path="readme.md",
+                    max_bytes=10,  # Very small - should fail
+                ),
+            ),
+            allowed_host_roots=(str(Path.cwd()),),
+        )
+
+
+def test_claude_agent_sdk_adapter_workspace_security_check(
+    claude_model: str,
+) -> None:
+    """Verify allowed_host_roots security boundary is enforced.
+
+    This test validates that attempting to mount files outside
+    the allowed_host_roots raises a security error.
+    """
+    from weakincentives.adapters.claude_agent_sdk import (
+        ClaudeAgentWorkspaceSection,
+        HostMount,
+        WorkspaceSecurityError,
+    )
+
+    session = Session()
+
+    # Try to mount /etc/hosts which is outside allowed_host_roots
+    with pytest.raises(WorkspaceSecurityError):
+        ClaudeAgentWorkspaceSection(
+            session=session,
+            mounts=(
+                HostMount(
+                    host_path="/etc/hosts",
+                    mount_path="hosts",
+                ),
+            ),
+            # Only allow current directory
+            allowed_host_roots=(str(Path.cwd()),),
+        )

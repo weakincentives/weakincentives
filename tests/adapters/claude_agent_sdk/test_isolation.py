@@ -31,30 +31,14 @@ class TestNetworkPolicy:
     def test_defaults(self) -> None:
         policy = NetworkPolicy()
         assert policy.allowed_domains == ()
-        assert policy.allow_localhost is False
-        assert policy.allow_unix_sockets is False
-        assert policy.allowed_ports is None
 
     def test_no_network_factory(self) -> None:
         policy = NetworkPolicy.no_network()
         assert policy.allowed_domains == ()
-        assert policy.allow_localhost is False
 
     def test_with_domains_factory(self) -> None:
         policy = NetworkPolicy.with_domains("api.github.com", "pypi.org")
         assert policy.allowed_domains == ("api.github.com", "pypi.org")
-
-    def test_with_all_options(self) -> None:
-        policy = NetworkPolicy(
-            allowed_domains=("example.com",),
-            allow_localhost=True,
-            allow_unix_sockets=True,
-            allowed_ports=(80, 443),
-        )
-        assert policy.allowed_domains == ("example.com",)
-        assert policy.allow_localhost is True
-        assert policy.allow_unix_sockets is True
-        assert policy.allowed_ports == (80, 443)
 
 
 class TestSandboxConfig:
@@ -192,26 +176,6 @@ class TestEphemeralHomeSettingsGeneration:
                 "api.anthropic.com",
                 "api.github.com",
             ]
-
-    def test_network_policy_allow_localhost(self) -> None:
-        config = IsolationConfig(network_policy=NetworkPolicy(allow_localhost=True))
-        with EphemeralHome(config) as home:
-            settings = json.loads(home.settings_path.read_text())
-            assert settings["sandbox"]["network"]["allowLocalBinding"] is True
-
-    def test_network_policy_allow_unix_sockets(self) -> None:
-        config = IsolationConfig(network_policy=NetworkPolicy(allow_unix_sockets=True))
-        with EphemeralHome(config) as home:
-            settings = json.loads(home.settings_path.read_text())
-            assert settings["sandbox"]["allowUnixSockets"] is True
-
-    def test_network_policy_allowed_ports(self) -> None:
-        config = IsolationConfig(
-            network_policy=NetworkPolicy(allowed_ports=(80, 443, 8080))
-        )
-        with EphemeralHome(config) as home:
-            settings = json.loads(home.settings_path.read_text())
-            assert settings["sandbox"]["network"]["allowedPorts"] == [80, 443, 8080]
 
     def test_sandbox_disabled(self) -> None:
         config = IsolationConfig(
