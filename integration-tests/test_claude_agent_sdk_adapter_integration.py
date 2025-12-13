@@ -25,7 +25,6 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
 )
-from weakincentives.adapters.claude_agent_sdk._hooks import ToolResponse
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -449,12 +448,10 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     # For successful Read operations, the response may have stdout or similar content
     # The key thing is that the result is not empty/None, confirming PostToolUse captured it
 
-    # Verify that event.value is a typed ToolResponse dataclass
-    assert isinstance(read_event.value, ToolResponse), (
-        f"Expected event.value to be a ToolResponse, got {type(read_event.value)}"
+    # For SDK native tools, value is None (typed values only for WINK tools)
+    assert read_event.value is None, (
+        f"Expected event.value to be None for SDK native tools, got {type(read_event.value)}"
     )
-    # ToolResponse should have stdout field populated with file contents
-    assert read_event.value.stdout is not None
 
 
 def test_claude_agent_sdk_adapter_publishes_prompt_rendered_event(

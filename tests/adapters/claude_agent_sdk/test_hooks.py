@@ -25,7 +25,6 @@ from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     PostToolUseInput,
-    ToolResponse,
     _expand_transcript_paths,
     _read_transcript_file,
     create_notification_hook,
@@ -492,44 +491,6 @@ class TestSafeHookWrapper:
         assert result == {}
 
 
-class TestToolResponse:
-    def test_from_dict_with_all_fields(self) -> None:
-        data = {
-            "stdout": "hello world",
-            "stderr": "warning",
-            "interrupted": True,
-            "isImage": False,
-        }
-        response = ToolResponse.from_dict(data)
-
-        assert response.stdout == "hello world"
-        assert response.stderr == "warning"
-        assert response.interrupted is True
-        assert response.is_image is False
-
-    def test_from_dict_with_none(self) -> None:
-        response = ToolResponse.from_dict(None)
-
-        assert response.stdout == ""
-        assert response.stderr == ""
-        assert response.interrupted is False
-        assert response.is_image is False
-
-    def test_from_dict_with_partial_fields(self) -> None:
-        data = {"stdout": "output"}
-        response = ToolResponse.from_dict(data)
-
-        assert response.stdout == "output"
-        assert response.stderr == ""
-        assert response.interrupted is False
-        assert response.is_image is False
-
-    def test_is_frozen(self) -> None:
-        response = ToolResponse(stdout="test")
-        with pytest.raises(AttributeError):
-            response.stdout = "modified"  # type: ignore[misc]
-
-
 class TestPostToolUseInput:
     def test_from_dict_with_full_input(self) -> None:
         data = {
@@ -547,7 +508,8 @@ class TestPostToolUseInput:
         assert parsed.session_id == "sess-123"
         assert parsed.tool_name == "Read"
         assert parsed.tool_input == {"path": "/test.txt"}
-        assert parsed.tool_response.stdout == "file contents"
+        # tool_response is now a raw dict
+        assert parsed.tool_response == {"stdout": "file contents", "stderr": ""}
         assert parsed.cwd == "/home/user"
         assert parsed.permission_mode == "bypassPermissions"
 
@@ -569,7 +531,8 @@ class TestPostToolUseInput:
         parsed = PostToolUseInput.from_dict(data)
 
         assert parsed is not None
-        assert parsed.tool_response.stdout == "plain string output"
+        # tool_response is kept as string when non-dict
+        assert parsed.tool_response == "plain string output"
 
     def test_from_dict_with_none_tool_response(self) -> None:
         data = {
@@ -579,22 +542,23 @@ class TestPostToolUseInput:
         parsed = PostToolUseInput.from_dict(data)
 
         assert parsed is not None
-        assert parsed.tool_response.stdout == ""
+        # None becomes empty string
+        assert parsed.tool_response == ""
 
     def test_is_frozen(self) -> None:
         parsed = PostToolUseInput(
             session_id="sess",
             tool_name="Test",
             tool_input={},
-            tool_response=ToolResponse(),
+            tool_response={},
         )
         with pytest.raises(AttributeError):
             parsed.tool_name = "modified"  # type: ignore[misc]
 
 
 class TestPostToolUseHookWithTypedParsing:
-    def test_publishes_event_with_typed_value(self, session: Session) -> None:
-        """Test that hook parses input into typed ToolResponse and stores as value."""
+    def test_publishes_event_with_raw_result(self, session: Session) -> None:
+        """Test that hook stores raw dict as result, not typed dataclass."""
         events: list[ToolInvoked] = []
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
@@ -624,10 +588,8 @@ class TestPostToolUseHookWithTypedParsing:
         assert len(events) == 1
         event = events[0]
         assert event.name == "Read"
-        # value should be a ToolResponse dataclass
-        assert isinstance(event.value, ToolResponse)
-        assert event.value.stdout == "file contents"
-        assert event.value.stderr == ""
+        # value should be None (SDK native tools don't produce typed values)
+        assert event.value is None
         # result should be the raw dict
         assert event.result == {
             "stdout": "file contents",

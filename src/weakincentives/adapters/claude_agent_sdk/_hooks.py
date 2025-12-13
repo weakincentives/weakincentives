@@ -35,7 +35,6 @@ __all__ = [
     "HookCallback",
     "HookContext",
     "PostToolUseInput",
-    "ToolResponse",
     "create_notification_hook",
     "create_post_tool_use_hook",
     "create_pre_compact_hook",
@@ -49,43 +48,19 @@ __all__ = [
 
 
 @dataclass(slots=True, frozen=True)
-class ToolResponse:
-    """Typed representation of SDK tool response.
-
-    The SDK returns tool responses with stdout/stderr for shell tools
-    and other metadata about the execution.
-    """
-
-    stdout: str = ""
-    stderr: str = ""
-    interrupted: bool = False
-    is_image: bool = False
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> ToolResponse:
-        """Parse a dict into a ToolResponse, with best-effort field mapping."""
-        if data is None:
-            return cls()
-        return cls(
-            stdout=str(data.get("stdout", "")),
-            stderr=str(data.get("stderr", "")),
-            interrupted=bool(data.get("interrupted", False)),
-            is_image=bool(data.get("isImage", False)),
-        )
-
-
-@dataclass(slots=True, frozen=True)
 class PostToolUseInput:
     """Typed representation of PostToolUse hook input.
 
     Mirrors the SDK's PostToolUseHookInput TypedDict but as a frozen dataclass
-    for immutability and better type safety.
+    for immutability and better type safety. The tool_response is kept as a raw
+    value (dict or string) to avoid creating dataclasses that could be added
+    to session state.
     """
 
     session_id: str
     tool_name: str
     tool_input: dict[str, Any]
-    tool_response: ToolResponse
+    tool_response: dict[str, Any] | str
     cwd: str = ""
     transcript_path: str = ""
     permission_mode: str | None = None
@@ -99,11 +74,11 @@ class PostToolUseInput:
         if "tool_name" not in data:
             return None
         raw_response = data.get("tool_response")
+        # Keep tool_response as raw dict or string
         if isinstance(raw_response, dict):
-            response = ToolResponse.from_dict(raw_response)
+            response: dict[str, Any] | str = raw_response
         else:
-            # Handle non-dict responses (e.g., plain strings)
-            response = ToolResponse(stdout=str(raw_response) if raw_response else "")
+            response = str(raw_response) if raw_response is not None else ""
         return cls(
             session_id=str(data.get("session_id", "")),
             tool_name=str(data.get("tool_name", "")),
@@ -331,13 +306,14 @@ def create_post_tool_use_hook(
             tool_name = parsed.tool_name
             tool_input = parsed.tool_input
             response = parsed.tool_response
-            tool_error = response.stderr if response.stderr else None
-            output_text = response.stdout or str(response)
-            # Store the ToolResponse dataclass as the result value
-            result_value: Any = response
-            result_raw: Any = (
-                input_data.get("tool_response") if isinstance(input_data, dict) else {}
-            )
+            # Extract stdout/stderr from dict response, or use string directly
+            if isinstance(response, dict):
+                tool_error = response.get("stderr") if response.get("stderr") else None
+                output_text = response.get("stdout", "") or str(response)
+            else:
+                tool_error = None
+                output_text = response
+            result_raw: Any = response
         else:
             # Fallback to dict access for malformed input
             tool_name = (
@@ -365,7 +341,6 @@ def create_post_tool_use_hook(
                 output_text = str(tool_response_raw)
             else:
                 output_text = ""
-            result_value = None
             result_raw = tool_response_raw
 
         hook_context._tool_count += 1
@@ -379,7 +354,7 @@ def create_post_tool_use_hook(
             session_id=None,
             created_at=_utcnow(),
             usage=None,
-            value=result_value,
+            value=None,  # SDK native tools don't produce typed values for session
             rendered_output=output_text[:1000] if output_text else "",
             call_id=tool_use_id,
         )
