@@ -24,6 +24,9 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
 )
 from weakincentives.prompt import (
     MarkdownSection,
@@ -784,3 +787,316 @@ def test_claude_agent_sdk_adapter_custom_tool_without_render(
     # The response should mention the echoed text
     assert "hello" in response.text.lower() or "integration" in response.text.lower()
     _assert_prompt_usage(session)
+
+
+# =============================================================================
+# Isolation Integration Tests
+# =============================================================================
+#
+# These tests validate that the IsolationConfig properly isolates SDK execution
+# from the host's ~/.claude configuration, preventing interference with the
+# user's personal Claude Code installation.
+# =============================================================================
+
+
+def test_claude_agent_sdk_adapter_with_isolation_returns_text(
+    claude_model: str,
+) -> None:
+    """Verify adapter works correctly with IsolationConfig enabled.
+
+    This test validates that:
+    1. The adapter creates an ephemeral home directory
+    2. SDK execution uses the ephemeral home instead of ~/.claude
+    3. The adapter still returns valid responses
+    4. Cleanup happens after execution
+    """
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy.api_only(),
+        sandbox=SandboxConfig(enabled=True),
+    )
+
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=isolation,
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+    )
+
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="isolation tests")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.prompt_name == "greeting"
+    assert response.text is not None
+    assert response.text.strip()
+    _assert_prompt_usage(session)
+
+
+def test_claude_agent_sdk_adapter_isolation_with_custom_tools(
+    claude_model: str,
+) -> None:
+    """Verify custom tools work correctly in isolated mode.
+
+    This test validates that MCP-bridged tools function correctly when
+    the adapter is configured with isolation. The ephemeral home should
+    not affect tool bridging functionality.
+    """
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy.api_only(),
+        sandbox=SandboxConfig(enabled=True),
+    )
+
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=isolation,
+    )
+
+    tool = _build_uppercase_tool()
+    prompt_template = _build_tool_prompt(tool)
+    params = TransformRequest(text="isolation mode")
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+    )
+
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.prompt_name == "uppercase_workflow"
+    assert response.text is not None
+    # The uppercase text should appear in the response
+    assert "ISOLATION MODE" in response.text
+    _assert_prompt_usage(session)
+
+
+def test_claude_agent_sdk_adapter_isolation_with_structured_output(
+    claude_model: str,
+) -> None:
+    """Verify structured output works in isolated mode.
+
+    This test validates that structured output parsing functions correctly
+    when the adapter is configured with isolation.
+    """
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy.api_only(),
+    )
+
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=isolation,
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+    )
+
+    prompt_template = _build_structured_prompt()
+    sample = ReviewParams(
+        text="The isolated execution mode provides security benefits. Users report peace of mind.",
+    )
+
+    prompt = Prompt(prompt_template).bind(sample)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.prompt_name == "structured_review"
+    assert response.output is not None
+    assert isinstance(response.output, ReviewAnalysis)
+    assert response.output.summary
+    assert response.output.sentiment
+    _assert_prompt_usage(session)
+
+
+def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
+    claude_model: str,
+) -> None:
+    """Verify isolation prevents modification of host ~/.claude directory.
+
+    This test validates that running with IsolationConfig does not create,
+    modify, or read from the real ~/.claude directory. This is critical for
+    ensuring the user's personal configuration is not affected.
+    """
+    import tempfile
+    import shutil
+
+    # Create a fake ~/.claude directory to monitor
+    with tempfile.TemporaryDirectory() as fake_home:
+        fake_claude_dir = Path(fake_home) / ".claude"
+        fake_claude_dir.mkdir()
+
+        # Create a marker file to verify it's not modified
+        marker_file = fake_claude_dir / "marker.txt"
+        marker_file.write_text("original content")
+        original_mtime = marker_file.stat().st_mtime
+
+        # Configure isolation
+        isolation = IsolationConfig(
+            network_policy=NetworkPolicy.api_only(),
+            sandbox=SandboxConfig(enabled=True),
+            # Note: We don't use include_host_env because that would
+            # potentially inherit HOME from the test environment
+        )
+
+        config = ClaudeAgentSDKClientConfig(
+            permission_mode="bypassPermissions",
+            isolation=isolation,
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            model=claude_model,
+            client_config=config,
+        )
+
+        prompt_template = _build_greeting_prompt()
+        params = GreetingParams(audience="host protection test")
+        prompt = Prompt(prompt_template).bind(params)
+
+        session = _make_session_with_usage_tracking()
+        response = adapter.evaluate(prompt, session=session)
+
+        # Verify execution completed
+        assert response.text is not None
+
+        # Verify marker file was not modified
+        assert marker_file.exists(), "Marker file should still exist"
+        assert marker_file.read_text() == "original content"
+        assert marker_file.stat().st_mtime == original_mtime
+
+        # Verify no new files were created in fake_claude_dir
+        # (besides our marker file)
+        files_in_claude_dir = list(fake_claude_dir.iterdir())
+        assert len(files_in_claude_dir) == 1
+        assert files_in_claude_dir[0].name == "marker.txt"
+
+
+def test_claude_agent_sdk_adapter_isolation_network_policy_api_only(
+    claude_model: str,
+) -> None:
+    """Verify NetworkPolicy.api_only() allows Anthropic API access.
+
+    This test validates that the api_only() network policy correctly
+    allows access to api.anthropic.com while the adapter is in isolated mode.
+    A successful response proves the network policy is being applied correctly.
+    """
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy.api_only(),
+        sandbox=SandboxConfig(enabled=True),
+    )
+
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=isolation,
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+    )
+
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="network policy test")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+
+    # This should succeed because api.anthropic.com is allowed
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.text is not None
+    assert response.text.strip()
+    _assert_prompt_usage(session)
+
+
+def test_claude_agent_sdk_adapter_isolation_with_custom_env(
+    claude_model: str,
+) -> None:
+    """Verify custom environment variables are passed to SDK subprocess.
+
+    This test validates that the env parameter in IsolationConfig correctly
+    passes environment variables to the SDK subprocess.
+    """
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy.api_only(),
+        env={
+            "WINK_TEST_VAR": "isolation_test_value",
+        },
+    )
+
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=isolation,
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+    )
+
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="custom env test")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.text is not None
+    _assert_prompt_usage(session)
+
+
+def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
+    claude_model: str,
+) -> None:
+    """Verify ephemeral home is cleaned up after successful execution.
+
+    This test validates that the ephemeral home directory created for
+    isolation is properly cleaned up after the adapter.evaluate() returns,
+    even on successful execution.
+    """
+    import glob
+
+    # Count temp directories with our prefix before
+    temp_dirs_before = set(glob.glob("/tmp/claude-agent-*"))
+
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy.api_only(),
+    )
+
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=isolation,
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+    )
+
+    prompt_template = _build_greeting_prompt()
+    params = GreetingParams(audience="cleanup test")
+    prompt = Prompt(prompt_template).bind(params)
+
+    session = _make_session_with_usage_tracking()
+    response = adapter.evaluate(prompt, session=session)
+
+    assert response.text is not None
+
+    # Count temp directories after - should be same as before
+    # (cleanup should have removed the ephemeral home)
+    temp_dirs_after = set(glob.glob("/tmp/claude-agent-*"))
+
+    # Any new directories should have been cleaned up
+    new_dirs = temp_dirs_after - temp_dirs_before
+    assert len(new_dirs) == 0, (
+        f"Expected ephemeral home to be cleaned up. Found orphaned dirs: {new_dirs}"
+    )

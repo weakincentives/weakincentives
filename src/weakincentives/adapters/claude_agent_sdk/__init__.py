@@ -71,6 +71,12 @@ from .config import (
     ClaudeAgentSDKModelConfig,
     PermissionMode,
 )
+from .isolation import (
+    EphemeralHome,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
+)
 from .workspace import (
     ClaudeAgentWorkspaceSection,
     HostMount,
@@ -85,11 +91,15 @@ __all__ = [
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
     "ClaudeAgentWorkspaceSection",
+    "EphemeralHome",
     "HostMount",
     "HostMountPreview",
+    "IsolationConfig",
+    "NetworkPolicy",
     "Notification",
     "NotificationSource",
     "PermissionMode",
+    "SandboxConfig",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
 ]
