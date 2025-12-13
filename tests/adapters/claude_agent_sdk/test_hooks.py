@@ -329,6 +329,56 @@ class TestPostToolUseHook:
 
         assert result == {}
 
+    def test_skips_mcp_wink_tools(self, session: Session) -> None:
+        """MCP-bridged WINK tools should not publish events (they do it themselves)."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "mcp__wink__planning_setup_plan",
+            "tool_input": {"objective": "test plan"},
+            "tool_response": {"stdout": "Plan created"},
+        }
+
+        result = asyncio.run(hook(input_data, "call-mcp", context))
+
+        # Should return empty without publishing event
+        assert result == {}
+        assert len(events) == 0
+        # Tool count should not be incremented
+        assert context._tool_count == 0
+
+    def test_skips_mcp_wink_tools_with_parsed_input(self, session: Session) -> None:
+        """MCP-bridged WINK tools should be skipped even with full SDK input format."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        # Full SDK-format input that will be parsed successfully
+        input_data = {
+            "session_id": "sess-123",
+            "tool_name": "mcp__wink__open_sections",
+            "tool_input": {"section_keys": ["reference-docs"]},
+            "tool_response": {"stdout": "Sections opened"},
+            "cwd": "/home",
+        }
+
+        result = asyncio.run(hook(input_data, "call-mcp-full", context))
+
+        assert result == {}
+        assert len(events) == 0
+
 
 class TestUserPromptSubmitHook:
     def test_returns_empty_by_default(self, hook_context: HookContext) -> None:

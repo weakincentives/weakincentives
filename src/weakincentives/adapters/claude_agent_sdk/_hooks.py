@@ -312,6 +312,20 @@ def create_post_tool_use_hook(
         # Attempt to parse into typed dataclass
         parsed = PostToolUseInput.from_dict(input_data)
 
+        # Skip logging for MCP-bridged WINK tools - they publish their own
+        # ToolInvoked events via BridgedTool with richer context (typed values).
+        tool_name_raw = (
+            parsed.tool_name
+            if parsed is not None
+            else (
+                input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
+            )
+        )
+        if tool_name_raw.startswith("mcp__wink__"):
+            # Skip logging for MCP-bridged WINK tools - they publish their own
+            # ToolInvoked events via BridgedTool with richer context (typed values).
+            return {}
+
         if parsed is not None:
             # Use typed access
             tool_name = parsed.tool_name
