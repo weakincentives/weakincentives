@@ -19,6 +19,38 @@ structured output, and progressive disclosure.
   selectors to prevent complex control flow.
 - **Declarative over Imperative**: Prompts describe structure, not logic.
 
+```mermaid
+flowchart TB
+    subgraph Construction["Prompt Construction"]
+        Template["PromptTemplate<br/>(ns, key, sections)"]
+        Prompt["Prompt(template)"]
+        Bind["bind(params)"]
+    end
+
+    subgraph Rendering["Render Pipeline"]
+        CheckEnabled["Check enabled()"]
+        CheckVisibility["Resolve visibility"]
+        Substitute["Template.substitute()"]
+        ApplyOverrides["Apply overrides"]
+        BuildMarkdown["Build markdown tree"]
+    end
+
+    subgraph Output["Rendered Output"]
+        RenderedPrompt["RenderedPrompt"]
+        Text["Markdown text"]
+        Tools["Tool schemas"]
+        OutputSchema["Output schema"]
+    end
+
+    Template --> Prompt --> Bind
+    Bind --> CheckEnabled --> CheckVisibility --> Substitute
+    Substitute --> ApplyOverrides --> BuildMarkdown
+    BuildMarkdown --> RenderedPrompt
+    RenderedPrompt --> Text
+    RenderedPrompt --> Tools
+    RenderedPrompt --> OutputSchema
+```
+
 ## Core Components
 
 ### PromptTemplate and Prompt

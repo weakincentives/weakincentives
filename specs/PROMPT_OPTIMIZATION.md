@@ -14,6 +14,35 @@ optimizer abstraction for algorithmic prompt transformations.
   are opt-in layers.
 - **Observable execution**: Optimizers emit events for tracing and debugging.
 
+```mermaid
+flowchart TB
+    subgraph Override["Override System"]
+        Original["Original Prompt<br/>(source of truth)"]
+        Descriptor["PromptDescriptor<br/>(ns, key, hashes)"]
+        Store["PromptOverridesStore"]
+        Override_["PromptOverride<br/>(tag: stable/latest)"]
+
+        Original --> Descriptor
+        Store --> Override_
+        Override_ -->|hash match| Rendered
+        Override_ -->|hash mismatch| Skipped["Skipped (stale)"]
+    end
+
+    subgraph Optimizer["Optimizer Pipeline"]
+        Context["OptimizationContext"]
+        Optimizer_["PromptOptimizer"]
+        IsolatedSession["Isolated Session"]
+        Result["OptimizationResult"]
+
+        Context --> Optimizer_
+        Optimizer_ --> IsolatedSession
+        IsolatedSession --> Result
+    end
+
+    Descriptor --> Store
+    Original --> Rendered["Rendered Prompt"]
+```
+
 ## Override System
 
 ### Terminology

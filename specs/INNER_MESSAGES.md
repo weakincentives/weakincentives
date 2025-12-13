@@ -14,20 +14,19 @@ transient list that exists only for the duration of a single `evaluate()` call.
 When a process terminates mid-evaluation—especially during a tool call—all
 conversation context is lost:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Current Architecture                                                        │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   Adapter.evaluate()                                                        │
-│       │                                                                     │
-│       ▼                                                                     │
-│   InnerLoop._messages: list[dict]  ◄── Transient, lost on restart          │
-│       │                                                                     │
-│       ▼                                                                     │
-│   Session (slices only)            ◄── Persisted via snapshot              │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Current["Current Architecture"]
+        Eval["Adapter.evaluate()"]
+        Messages["InnerLoop._messages: list[dict]"]
+        Session["Session (slices only)"]
+
+        Eval --> Messages
+        Messages --> Session
+
+        Messages -.- Note1["Transient, lost on restart"]
+        Session -.- Note2["Persisted via snapshot"]
+    end
 ```
 
 Session snapshots capture accumulated dataclass state but not the raw message
@@ -106,21 +105,26 @@ invocations |
 
 ### Sequence Numbering
 
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│ sequence=0   │ role=system    │ turn=0  │ System prompt                    │
-├────────────────────────────────────────────────────────────────────────────┤
-│ sequence=1   │ role=assistant │ turn=1  │ "I'll search for that"           │
-│              │                │         │ tool_calls=[{call_id="c1",...}]  │
-├────────────────────────────────────────────────────────────────────────────┤
-│ sequence=2   │ role=tool      │ turn=1  │ tool_call_id="c1"                │
-│              │                │         │ Result from first tool           │
-├────────────────────────────────────────────────────────────────────────────┤
-│ sequence=3   │ role=tool      │ turn=1  │ tool_call_id="c2"                │
-│              │                │         │ Result from second tool          │
-├────────────────────────────────────────────────────────────────────────────┤
-│ sequence=4   │ role=assistant │ turn=2  │ Final response, no tool_calls    │
-└────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant S as System
+    participant A as Assistant
+    participant T as Tool
+
+    Note over S: seq=0, turn=0
+    S->>A: System prompt
+
+    Note over A: seq=1, turn=1
+    A->>T: tool_calls=[c1, c2]
+
+    Note over T: seq=2, turn=1
+    T->>A: tool_call_id=c1 (Result 1)
+
+    Note over T: seq=3, turn=1
+    T->>A: tool_call_id=c2 (Result 2)
+
+    Note over A: seq=4, turn=2
+    A->>S: Final response
 ```
 
 ## Reducer
@@ -319,27 +323,24 @@ def _mark_tool_completed(self, call_id: str) -> None:
 
 ### State Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ Proposed Architecture                                                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   Adapter.evaluate()                                                        │
-│       │                                                                     │
-│       ▼                                                                     │
-│   InnerLoop                                                                 │
-│       │                                                                     │
-│       ├──► _messages (working copy for provider calls)                      │
-│       │                                                                     │
-│       └──► Per-message: session.mutate(InnerMessage).append(...)     │
-│                   │                                                         │
-│                   ▼                                                         │
-│            InnerMessage slice (N items)                              │
-│                   │                                                         │
-│                   ▼                                                         │
-│            Snapshot includes all messages  ◄── Per-tool granularity        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Proposed["Proposed Architecture"]
+        Eval["Adapter.evaluate()"]
+        Loop["InnerLoop"]
+        Working["_messages<br/>(working copy)"]
+        Mutate["session.mutate(InnerMessage).append(...)"]
+        Slice["InnerMessage slice<br/>(N items)"]
+        Snapshot["Snapshot includes all messages"]
+
+        Eval --> Loop
+        Loop --> Working
+        Loop --> Mutate
+        Mutate --> Slice
+        Slice --> Snapshot
+
+        Snapshot -.- Note["Per-tool granularity"]
+    end
 ```
 
 ## Snapshot Serialization

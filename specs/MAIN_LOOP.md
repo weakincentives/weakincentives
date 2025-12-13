@@ -78,13 +78,12 @@ Request-level `budget` and `deadline` override config defaults. A fresh
 
 ## Execution
 
-```
-Request ──▶ Session ──▶ Prompt ──▶ Evaluate ──┬──▶ Result
-                                              │
-                                              ▼
-                                     VisibilityExpansion
-                                              │
-                                              └──▶ (retry)
+```mermaid
+flowchart LR
+    Request --> Session --> Prompt --> Evaluate
+    Evaluate --> Result
+    Evaluate --> Visibility["VisibilityExpansion"]
+    Visibility -->|retry| Evaluate
 ```
 
 1. Receive `MainLoopRequest` via bus or direct `execute()` call

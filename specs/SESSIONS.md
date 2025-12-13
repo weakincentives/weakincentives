@@ -18,6 +18,34 @@ event emission and subscription, deadline enforcement, and budget tracking.
 - **No implicit globals**: Callers must provide an `EventBus` instance per
   evaluation.
 
+```mermaid
+flowchart TB
+    subgraph Session["Session State Management"]
+        Event["Event"] --> Dispatch["dispatch()"]
+        Dispatch --> Reducer["Reducer"]
+        Reducer --> NewSlice["New Slice<br/>(immutable tuple)"]
+        NewSlice --> Observers["Notify Observers"]
+    end
+
+    subgraph Query["Query API"]
+        Select["select_all()"]
+        QueryBuilder["query().latest()"]
+        QueryFilter["query().where()"]
+    end
+
+    subgraph Mutate["Mutation API"]
+        Seed["seed()"]
+        Append["append()"]
+        Clear["clear()"]
+        Register["register()"]
+    end
+
+    Session --> Snapshot["snapshot()"]
+    Snapshot --> JSON["to_json()"]
+    JSON --> Restore["rollback()"]
+    Restore --> Session
+```
+
 ## Session State
 
 ### Session
@@ -187,6 +215,24 @@ for session in iter_sessions_bottom_up(root_session):
 ```
 
 ## Event System
+
+```mermaid
+sequenceDiagram
+    participant A as Adapter
+    participant B as EventBus
+    participant H as Handlers
+
+    A->>B: publish(PromptRendered)
+    B->>H: dispatch to subscribers
+    H-->>B: handler results
+    B-->>A: PublishResult
+
+    A->>B: publish(ToolInvoked)
+    B->>H: dispatch to subscribers
+
+    A->>B: publish(PromptExecuted)
+    B->>H: dispatch to subscribers
+```
 
 ### Event Bus
 
