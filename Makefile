@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo demo-claude-agent all clean
+.PHONY: format check test lint ty pyright typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent all clean
 
 # Format code with ruff
 format:
@@ -78,6 +78,10 @@ integration-tests:
 # Launch the interactive code reviewer demo
 demo:
 	@uv run --all-extras python code_reviewer_example.py
+
+# Launch the interactive code reviewer demo using the Podman sandbox (if available)
+demo-podman:
+	@uv run --all-extras python code_reviewer_example.py --podman
 
 # Launch the interactive code reviewer demo with Claude Agent SDK
 demo-claude-agent:
