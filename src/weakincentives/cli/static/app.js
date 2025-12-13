@@ -174,8 +174,8 @@ function getCommandItems() {
     items.push({
       type: "slice",
       id: `slice:${slice.slice_type}`,
-      title: slice.slice_type,
-      subtitle: `${slice.item_type} · ${slice.count} items`,
+      title: slice.display_name || slice.slice_type,
+      subtitle: `${slice.item_display_name || slice.item_type} · ${slice.count} items`,
       action: () => selectSlice(slice.slice_type),
     });
   });
@@ -653,8 +653,8 @@ function renderSliceList() {
     target.innerHTML = "";
     const filtered = entries.filter(
       (entry) =>
-        entry.slice_type.toLowerCase().includes(filter) ||
-        entry.item_type.toLowerCase().includes(filter)
+        (entry.display_name || entry.slice_type).toLowerCase().includes(filter) ||
+        (entry.item_display_name || entry.item_type).toLowerCase().includes(filter)
     );
 
     if (!filtered.length) {
@@ -672,11 +672,11 @@ function renderSliceList() {
 
       const title = document.createElement("div");
       title.className = "slice-title";
-      title.textContent = entry.slice_type;
+      title.textContent = entry.display_name || entry.slice_type;
 
       const subtitle = document.createElement("div");
       subtitle.className = "slice-subtitle";
-      subtitle.textContent = `${entry.item_type} · ${entry.count} items`;
+      subtitle.textContent = `${entry.item_display_name || entry.item_type} · ${entry.count} items`;
 
       item.appendChild(title);
       item.appendChild(subtitle);
@@ -706,7 +706,7 @@ function showSliceContent(show) {
 
 function renderSliceDetail(slice) {
   showSliceContent(true);
-  elements.sliceTitle.textContent = slice.slice_type;
+  elements.sliceTitle.textContent = slice.display_name || slice.slice_type;
   elements.itemCount.textContent = `${slice.items.length} items`;
   elements.typeRow.innerHTML = "";
   state.currentItems = slice.items;
@@ -719,11 +719,11 @@ function renderSliceDetail(slice) {
 
   const slicePill = document.createElement("span");
   slicePill.className = "pill";
-  slicePill.textContent = `slice: ${slice.slice_type}`;
+  slicePill.textContent = `slice: ${slice.display_name || slice.slice_type}`;
 
   const itemPill = document.createElement("span");
   itemPill.className = "pill";
-  itemPill.textContent = `item: ${slice.item_type}`;
+  itemPill.textContent = `item: ${slice.item_display_name || slice.item_type}`;
 
   elements.typeRow.appendChild(slicePill);
   elements.typeRow.appendChild(itemPill);

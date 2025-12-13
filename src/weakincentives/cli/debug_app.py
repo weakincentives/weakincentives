@@ -101,6 +101,11 @@ def _render_markdown_values(value: JSONValue) -> JSONValue:
     return value
 
 
+def _class_name(type_identifier: str) -> str:
+    """Extract the class name from a fully qualified type identifier."""
+    return type_identifier.rsplit(".", 1)[-1]
+
+
 @FrozenDataclass()
 class SliceSummary:
     slice_type: str
@@ -446,6 +451,8 @@ def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
             {
                 "slice_type": entry.slice_type,
                 "item_type": entry.item_type,
+                "display_name": _class_name(entry.slice_type),
+                "item_display_name": _class_name(entry.item_type),
                 "count": entry.count,
             }
             for entry in meta.slices
@@ -487,6 +494,8 @@ class _DebugAppHandlers:
         return {
             "slice_type": slice_items.slice_type,
             "item_type": slice_items.item_type,
+            "display_name": _class_name(slice_items.slice_type),
+            "item_display_name": _class_name(slice_items.item_type),
             "items": rendered_items,
         }
 
