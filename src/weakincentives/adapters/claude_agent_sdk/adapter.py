@@ -24,6 +24,7 @@ from ...prompt.errors import VisibilityExpansionRequired
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.session import append
 from ...runtime.session.protocols import SessionProtocol
 from ...serde import parse, schema
 from .._names import AdapterName
@@ -33,11 +34,16 @@ from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
 from ._hooks import (
     HookContext,
+    create_notification_hook,
     create_post_tool_use_hook,
+    create_pre_compact_hook,
     create_pre_tool_use_hook,
     create_stop_hook,
+    create_subagent_start_hook,
+    create_subagent_stop_hook,
     create_user_prompt_submit_hook,
 )
+from ._notifications import Notification
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 
 __all__ = [
@@ -224,6 +230,9 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
 
+        # Register Notification reducer if not already registered
+        session.mutate(Notification).register(Notification, append)
+
         hook_context = HookContext(
             session=session,
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
@@ -375,6 +384,10 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         )
         stop_hook_fn = create_stop_hook(hook_context)
         prompt_hook = create_user_prompt_submit_hook(hook_context)
+        subagent_start_hook = create_subagent_start_hook(hook_context)
+        subagent_stop_hook = create_subagent_stop_hook(hook_context)
+        pre_compact_hook = create_pre_compact_hook(hook_context)
+        notification_hook = create_notification_hook(hook_context)
 
         # Build hooks dict with HookMatcher wrappers
         # matcher=None matches all tools
@@ -383,6 +396,10 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             "PostToolUse": [HookMatcher(matcher=None, hooks=[post_hook])],
             "Stop": [HookMatcher(matcher=None, hooks=[stop_hook_fn])],
             "UserPromptSubmit": [HookMatcher(matcher=None, hooks=[prompt_hook])],
+            "SubagentStart": [HookMatcher(matcher=None, hooks=[subagent_start_hook])],
+            "SubagentStop": [HookMatcher(matcher=None, hooks=[subagent_stop_hook])],
+            "PreCompact": [HookMatcher(matcher=None, hooks=[pre_compact_hook])],
+            "Notification": [HookMatcher(matcher=None, hooks=[notification_hook])],
         }
 
         options = ClaudeAgentOptions(**options_kwargs)

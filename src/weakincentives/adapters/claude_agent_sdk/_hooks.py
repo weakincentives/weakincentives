@@ -23,6 +23,13 @@ from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
+from ._notifications import (
+    Notification,
+    PreCompactInput,
+    SubagentStartInput,
+    SubagentStopInput,
+    UserNotificationInput,
+)
 
 if TYPE_CHECKING:
     from ...runtime.session.protocols import SessionProtocol
@@ -33,9 +40,13 @@ __all__ = [
     "HookContext",
     "PostToolUseInput",
     "ToolResponse",
+    "create_notification_hook",
     "create_post_tool_use_hook",
+    "create_pre_compact_hook",
     "create_pre_tool_use_hook",
     "create_stop_hook",
+    "create_subagent_start_hook",
+    "create_subagent_stop_hook",
     "create_user_prompt_submit_hook",
     "safe_hook_wrapper",
 ]
@@ -402,6 +413,208 @@ def create_stop_hook(
         return {}
 
     return stop_hook
+
+
+def create_subagent_start_hook(
+    hook_context: HookContext,
+) -> AsyncHookCallback:
+    """Create a SubagentStart hook to capture subagent launch events.
+
+    Records Notification events when subagents are spawned during execution.
+
+    Args:
+        hook_context: Context with session references.
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def subagent_start_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        raw_input = input_data if isinstance(input_data, dict) else {}
+        parsed = SubagentStartInput.from_dict(raw_input)
+
+        notification = Notification(
+            source="subagent_start",
+            payload=parsed,
+            raw_input=raw_input,
+            prompt_name=hook_context.prompt_name,
+            adapter_name=hook_context.adapter_name,
+            created_at=_utcnow(),
+        )
+
+        hook_context.session.mutate(Notification).dispatch(notification)
+
+        logger.debug(
+            "claude_agent_sdk.hook.subagent_start",
+            event="hook.subagent_start",
+            context={
+                "session_id": parsed.session_id,
+                "subagent_type": parsed.subagent_type,
+            },
+        )
+
+        return {}
+
+    return subagent_start_hook
+
+
+def create_subagent_stop_hook(
+    hook_context: HookContext,
+) -> AsyncHookCallback:
+    """Create a SubagentStop hook to capture subagent completion events.
+
+    Records Notification events when subagents complete execution.
+
+    Args:
+        hook_context: Context with session references.
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def subagent_stop_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        raw_input = input_data if isinstance(input_data, dict) else {}
+        parsed = SubagentStopInput.from_dict(raw_input)
+
+        notification = Notification(
+            source="subagent_stop",
+            payload=parsed,
+            raw_input=raw_input,
+            prompt_name=hook_context.prompt_name,
+            adapter_name=hook_context.adapter_name,
+            created_at=_utcnow(),
+        )
+
+        hook_context.session.mutate(Notification).dispatch(notification)
+
+        logger.debug(
+            "claude_agent_sdk.hook.subagent_stop",
+            event="hook.subagent_stop",
+            context={
+                "session_id": parsed.session_id,
+                "stop_reason": parsed.stop_reason,
+            },
+        )
+
+        return {}
+
+    return subagent_stop_hook
+
+
+def create_pre_compact_hook(
+    hook_context: HookContext,
+) -> AsyncHookCallback:
+    """Create a PreCompact hook to capture context compaction events.
+
+    Records Notification events before the SDK compacts conversation context.
+
+    Args:
+        hook_context: Context with session references.
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def pre_compact_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        raw_input = input_data if isinstance(input_data, dict) else {}
+        parsed = PreCompactInput.from_dict(raw_input)
+
+        notification = Notification(
+            source="pre_compact",
+            payload=parsed,
+            raw_input=raw_input,
+            prompt_name=hook_context.prompt_name,
+            adapter_name=hook_context.adapter_name,
+            created_at=_utcnow(),
+        )
+
+        hook_context.session.mutate(Notification).dispatch(notification)
+
+        logger.debug(
+            "claude_agent_sdk.hook.pre_compact",
+            event="hook.pre_compact",
+            context={
+                "session_id": parsed.session_id,
+                "message_count": parsed.message_count,
+                "token_count": parsed.token_count,
+            },
+        )
+
+        return {}
+
+    return pre_compact_hook
+
+
+def create_notification_hook(
+    hook_context: HookContext,
+) -> AsyncHookCallback:
+    """Create a Notification hook to capture user-facing notifications.
+
+    Records Notification events from the SDK's notification system.
+
+    Args:
+        hook_context: Context with session references.
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def notification_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        raw_input = input_data if isinstance(input_data, dict) else {}
+        parsed = UserNotificationInput.from_dict(raw_input)
+
+        notification = Notification(
+            source="notification",
+            payload=parsed,
+            raw_input=raw_input,
+            prompt_name=hook_context.prompt_name,
+            adapter_name=hook_context.adapter_name,
+            created_at=_utcnow(),
+        )
+
+        hook_context.session.mutate(Notification).dispatch(notification)
+
+        logger.debug(
+            "claude_agent_sdk.hook.notification",
+            event="hook.notification",
+            context={
+                "session_id": parsed.session_id,
+                "level": parsed.level,
+                "message": parsed.message[:100] if parsed.message else "",
+            },
+        )
+
+        return {}
+
+    return notification_hook
 
 
 def safe_hook_wrapper(

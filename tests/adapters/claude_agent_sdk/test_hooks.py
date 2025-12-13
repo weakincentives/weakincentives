@@ -25,17 +25,28 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     PostToolUseInput,
     ToolResponse,
+    create_notification_hook,
     create_post_tool_use_hook,
+    create_pre_compact_hook,
     create_pre_tool_use_hook,
     create_stop_hook,
+    create_subagent_start_hook,
+    create_subagent_stop_hook,
     create_user_prompt_submit_hook,
     safe_hook_wrapper,
+)
+from weakincentives.adapters.claude_agent_sdk._notifications import (
+    Notification,
+    PreCompactInput,
+    SubagentStartInput,
+    SubagentStopInput,
+    UserNotificationInput,
 )
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.events._types import TokenUsage, ToolInvoked
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.session import Session, append
 
 
 @pytest.fixture
@@ -653,3 +664,408 @@ class TestPostToolUseHookWithTypedParsing:
         assert event.name == ""
         assert event.rendered_output == ""
         assert event.value is None
+
+
+class TestSubagentStartInput:
+    def test_from_dict_with_all_fields(self) -> None:
+        data = {
+            "session_id": "sess-123",
+            "parent_session_id": "parent-456",
+            "subagent_type": "code_reviewer",
+            "prompt": "Review the code",
+        }
+        parsed = SubagentStartInput.from_dict(data)
+
+        assert parsed.session_id == "sess-123"
+        assert parsed.parent_session_id == "parent-456"
+        assert parsed.subagent_type == "code_reviewer"
+        assert parsed.prompt == "Review the code"
+
+    def test_from_dict_with_type_instead_of_subagent_type(self) -> None:
+        data = {
+            "session_id": "sess-123",
+            "type": "analyzer",
+        }
+        parsed = SubagentStartInput.from_dict(data)
+
+        assert parsed.subagent_type == "analyzer"
+
+    def test_from_dict_with_none(self) -> None:
+        parsed = SubagentStartInput.from_dict(None)
+
+        assert parsed.session_id == ""
+        assert parsed.parent_session_id is None
+        assert parsed.subagent_type == ""
+        assert parsed.prompt == ""
+
+    def test_render(self) -> None:
+        parsed = SubagentStartInput(
+            session_id="sess-123",
+            subagent_type="code_reviewer",
+            prompt="Review the code",
+        )
+        rendered = parsed.render()
+
+        assert "SubagentStart: code_reviewer" in rendered
+        assert "sess-123" in rendered
+        assert "Review the code" in rendered
+
+    def test_render_with_parent_session_id(self) -> None:
+        parsed = SubagentStartInput(
+            session_id="sess-123",
+            parent_session_id="parent-456",
+            subagent_type="analyzer",
+        )
+        rendered = parsed.render()
+
+        assert "parent_session_id: parent-456" in rendered
+
+
+class TestSubagentStopInput:
+    def test_from_dict_with_all_fields(self) -> None:
+        data = {
+            "session_id": "sess-123",
+            "stop_reason": "completed",
+            "result": "All code looks good",
+        }
+        parsed = SubagentStopInput.from_dict(data)
+
+        assert parsed.session_id == "sess-123"
+        assert parsed.stop_reason == "completed"
+        assert parsed.result == "All code looks good"
+
+    def test_from_dict_with_stopReason(self) -> None:
+        data = {
+            "session_id": "sess-123",
+            "stopReason": "error",
+        }
+        parsed = SubagentStopInput.from_dict(data)
+
+        assert parsed.stop_reason == "error"
+
+    def test_from_dict_with_none(self) -> None:
+        parsed = SubagentStopInput.from_dict(None)
+
+        assert parsed.session_id == ""
+        assert parsed.stop_reason == ""
+        assert parsed.result == ""
+
+    def test_render(self) -> None:
+        parsed = SubagentStopInput(
+            session_id="sess-123",
+            stop_reason="completed",
+            result="Done",
+        )
+        rendered = parsed.render()
+
+        assert "SubagentStop: completed" in rendered
+        assert "sess-123" in rendered
+        assert "Done" in rendered
+
+
+class TestPreCompactInput:
+    def test_from_dict_with_all_fields(self) -> None:
+        data = {
+            "session_id": "sess-123",
+            "message_count": 50,
+            "token_count": 10000,
+        }
+        parsed = PreCompactInput.from_dict(data)
+
+        assert parsed.session_id == "sess-123"
+        assert parsed.message_count == 50
+        assert parsed.token_count == 10000
+
+    def test_from_dict_with_camelCase(self) -> None:
+        data = {
+            "session_id": "sess-123",
+            "messageCount": 25,
+            "tokenCount": 5000,
+        }
+        parsed = PreCompactInput.from_dict(data)
+
+        assert parsed.message_count == 25
+        assert parsed.token_count == 5000
+
+    def test_from_dict_with_none(self) -> None:
+        parsed = PreCompactInput.from_dict(None)
+
+        assert parsed.session_id == ""
+        assert parsed.message_count == 0
+        assert parsed.token_count == 0
+
+    def test_render(self) -> None:
+        parsed = PreCompactInput(
+            session_id="sess-123",
+            message_count=50,
+            token_count=10000,
+        )
+        rendered = parsed.render()
+
+        assert "PreCompact" in rendered
+        assert "50 messages" in rendered
+        assert "10000 tokens" in rendered
+
+
+class TestUserNotificationInput:
+    def test_from_dict_with_all_fields(self) -> None:
+        data = {
+            "session_id": "sess-123",
+            "message": "Task completed successfully",
+            "level": "info",
+        }
+        parsed = UserNotificationInput.from_dict(data)
+
+        assert parsed.session_id == "sess-123"
+        assert parsed.message == "Task completed successfully"
+        assert parsed.level == "info"
+
+    def test_from_dict_with_none(self) -> None:
+        parsed = UserNotificationInput.from_dict(None)
+
+        assert parsed.session_id == ""
+        assert parsed.message == ""
+        assert parsed.level == "info"
+
+    def test_render(self) -> None:
+        parsed = UserNotificationInput(
+            session_id="sess-123",
+            message="Warning message",
+            level="warning",
+        )
+        rendered = parsed.render()
+
+        assert "Notification [warning]" in rendered
+        assert "Warning message" in rendered
+
+
+class TestNotification:
+    def test_construction(self) -> None:
+        payload = SubagentStartInput(
+            session_id="sess-123",
+            subagent_type="analyzer",
+        )
+        notification = Notification(
+            source="subagent_start",
+            payload=payload,
+            raw_input={"session_id": "sess-123"},
+            prompt_name="test_prompt",
+            adapter_name="test_adapter",
+        )
+
+        assert notification.source == "subagent_start"
+        assert notification.payload is payload
+        assert notification.raw_input == {"session_id": "sess-123"}
+        assert notification.prompt_name == "test_prompt"
+        assert notification.adapter_name == "test_adapter"
+        assert notification.notification_id is not None
+
+    def test_render(self) -> None:
+        payload = UserNotificationInput(
+            session_id="sess-123",
+            message="Test message",
+            level="info",
+        )
+        notification = Notification(
+            source="notification",
+            payload=payload,
+            prompt_name="test_prompt",
+            adapter_name="test_adapter",
+        )
+        rendered = notification.render()
+
+        assert "[notification]" in rendered
+        assert "test_prompt" in rendered
+        assert "test_adapter" in rendered
+
+
+class TestSubagentStartHook:
+    def test_dispatches_notification_to_session(self, session: Session) -> None:
+        # Register reducer for Notification
+        session.mutate(Notification).register(Notification, append)
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_subagent_start_hook(context)
+        input_data = {
+            "session_id": "sess-123",
+            "subagent_type": "code_reviewer",
+            "prompt": "Review this code",
+        }
+
+        asyncio.run(hook(input_data, None, context))
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 1
+        notif = notifications[0]
+        assert notif.source == "subagent_start"
+        assert isinstance(notif.payload, SubagentStartInput)
+        assert notif.payload.session_id == "sess-123"
+        assert notif.payload.subagent_type == "code_reviewer"
+        assert notif.prompt_name == "test_prompt"
+        assert notif.adapter_name == "test_adapter"
+
+    def test_returns_empty_dict(self, hook_context: HookContext) -> None:
+        # Register reducer for Notification
+        hook_context.session.mutate(Notification).register(Notification, append)
+
+        hook = create_subagent_start_hook(hook_context)
+        result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
+
+        assert result == {}
+
+
+class TestSubagentStopHook:
+    def test_dispatches_notification_to_session(self, session: Session) -> None:
+        session.mutate(Notification).register(Notification, append)
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_subagent_stop_hook(context)
+        input_data = {
+            "session_id": "sess-123",
+            "stop_reason": "completed",
+            "result": "Review complete",
+        }
+
+        asyncio.run(hook(input_data, None, context))
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 1
+        notif = notifications[0]
+        assert notif.source == "subagent_stop"
+        assert isinstance(notif.payload, SubagentStopInput)
+        assert notif.payload.session_id == "sess-123"
+        assert notif.payload.stop_reason == "completed"
+
+    def test_returns_empty_dict(self, hook_context: HookContext) -> None:
+        hook_context.session.mutate(Notification).register(Notification, append)
+
+        hook = create_subagent_stop_hook(hook_context)
+        result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
+
+        assert result == {}
+
+
+class TestPreCompactHook:
+    def test_dispatches_notification_to_session(self, session: Session) -> None:
+        session.mutate(Notification).register(Notification, append)
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_pre_compact_hook(context)
+        input_data = {
+            "session_id": "sess-123",
+            "message_count": 100,
+            "token_count": 50000,
+        }
+
+        asyncio.run(hook(input_data, None, context))
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 1
+        notif = notifications[0]
+        assert notif.source == "pre_compact"
+        assert isinstance(notif.payload, PreCompactInput)
+        assert notif.payload.session_id == "sess-123"
+        assert notif.payload.message_count == 100
+        assert notif.payload.token_count == 50000
+
+    def test_returns_empty_dict(self, hook_context: HookContext) -> None:
+        hook_context.session.mutate(Notification).register(Notification, append)
+
+        hook = create_pre_compact_hook(hook_context)
+        result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
+
+        assert result == {}
+
+
+class TestNotificationHook:
+    def test_dispatches_notification_to_session(self, session: Session) -> None:
+        session.mutate(Notification).register(Notification, append)
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_notification_hook(context)
+        input_data = {
+            "session_id": "sess-123",
+            "message": "Operation completed",
+            "level": "info",
+        }
+
+        asyncio.run(hook(input_data, None, context))
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 1
+        notif = notifications[0]
+        assert notif.source == "notification"
+        assert isinstance(notif.payload, UserNotificationInput)
+        assert notif.payload.session_id == "sess-123"
+        assert notif.payload.message == "Operation completed"
+        assert notif.payload.level == "info"
+
+    def test_returns_empty_dict(self, hook_context: HookContext) -> None:
+        hook_context.session.mutate(Notification).register(Notification, append)
+
+        hook = create_notification_hook(hook_context)
+        result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
+
+        assert result == {}
+
+
+class TestMultipleNotificationsAccumulate:
+    def test_multiple_hooks_accumulate_notifications(self, session: Session) -> None:
+        """Test that notifications from different hooks accumulate in session."""
+        session.mutate(Notification).register(Notification, append)
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        # Fire multiple different hooks
+        subagent_start = create_subagent_start_hook(context)
+        asyncio.run(
+            subagent_start(
+                {"session_id": "sess-1", "subagent_type": "analyzer"}, None, context
+            )
+        )
+
+        pre_compact = create_pre_compact_hook(context)
+        asyncio.run(
+            pre_compact({"session_id": "sess-1", "message_count": 50}, None, context)
+        )
+
+        subagent_stop = create_subagent_stop_hook(context)
+        asyncio.run(
+            subagent_stop(
+                {"session_id": "sess-1", "stop_reason": "completed"}, None, context
+            )
+        )
+
+        notification = create_notification_hook(context)
+        asyncio.run(
+            notification({"session_id": "sess-1", "message": "Done"}, None, context)
+        )
+
+        notifications = session.query(Notification).all()
+        assert len(notifications) == 4
+
+        sources = [n.source for n in notifications]
+        assert "subagent_start" in sources
+        assert "pre_compact" in sources
+        assert "subagent_stop" in sources
+        assert "notification" in sources
