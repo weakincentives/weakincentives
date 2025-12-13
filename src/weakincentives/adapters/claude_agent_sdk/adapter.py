@@ -106,16 +106,22 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         ...     ),
         ... )
         >>>
-        >>> template = PromptTemplate[str](
+        >>> from dataclasses import dataclass
+        >>>
+        >>> @dataclass(frozen=True)
+        ... class TaskResult:
+        ...     message: str
+        ...
+        >>> template = PromptTemplate[TaskResult](
         ...     ns="test",
         ...     key="hello",
-        ...     sections=[
+        ...     sections=(
         ...         MarkdownSection(
         ...             title="Task",
         ...             key="task",
         ...             template="Say hello",
         ...         ),
-        ...     ],
+        ...     ),
         ... )
         >>> prompt = Prompt(template)
         >>>

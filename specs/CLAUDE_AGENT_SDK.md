@@ -13,7 +13,7 @@ Review code in a fully isolated environment with no network access except to
 the Anthropic API. The agent cannot leak data or access external services.
 
 ```python
-import os
+from dataclasses import dataclass
 from weakincentives import Prompt, MarkdownSection, PromptTemplate
 from weakincentives.runtime import Session, InProcessEventBus
 from weakincentives.adapters.claude_agent_sdk import (
@@ -26,6 +26,16 @@ from weakincentives.adapters.claude_agent_sdk import (
     SandboxConfig,
 )
 
+
+@dataclass(frozen=True)
+class SecurityReview:
+    """Structured output for security review."""
+
+    summary: str
+    findings: list[str]
+    severity: str
+
+
 # Create session
 bus = InProcessEventBus()
 session = Session(bus=bus)
@@ -33,15 +43,15 @@ session = Session(bus=bus)
 # Mount your codebase into a temporary workspace
 workspace = ClaudeAgentWorkspaceSection(
     session=session,
-    mounts=[
+    mounts=(
         HostMount(
             host_path="/path/to/your/project",
             mount_path="project",
             exclude_glob=("*.pyc", "__pycache__/*", ".git/*"),
             max_bytes=5_000_000,  # 5MB limit
         ),
-    ],
-    allowed_host_roots=["/path/to/your"],
+    ),
+    allowed_host_roots=("/path/to/your",),
 )
 
 # Configure hermetic isolation with API-only network access
@@ -60,23 +70,28 @@ adapter = ClaudeAgentSDKAdapter(
     ),
 )
 
-# Build and run the prompt
-template = PromptTemplate[dict](
+# Build and run the prompt (output type must be a dataclass)
+template = PromptTemplate[SecurityReview](
     ns="review",
     key="security",
-    sections=[
+    sections=(
         MarkdownSection(
             title="Task",
             key="task",
             template="Review the code in project/ for security vulnerabilities.",
         ),
         workspace,
-    ],
+    ),
 )
 prompt = Prompt(template)
 response = adapter.evaluate(prompt, session=session)
 
-print(response.text)
+# Access structured output
+if response.output:
+    print(f"Severity: {response.output.severity}")
+    for finding in response.output.findings:
+        print(f"- {finding}")
+
 workspace.cleanup()
 ```
 
