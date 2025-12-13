@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -23,6 +23,11 @@ from weakincentives.prompt._visibility import (
     _visibility_requires_positional_argument,
     normalize_visibility_selector,
 )
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
+
+if TYPE_CHECKING:
+    from weakincentives.runtime.session.protocols import SessionProtocol
 
 
 @dataclass
@@ -36,7 +41,7 @@ def test_visibility_selector_rejects_invalid_return_type() -> None:
     )
 
     with pytest.raises(TypeError):
-        selector(_VisibilityParams())
+        selector(_VisibilityParams(), None)
 
 
 def test_visibility_requires_positional_argument_branches() -> None:
@@ -54,3 +59,57 @@ def test_visibility_requires_positional_argument_branches() -> None:
         )
         is True
     )
+
+
+def test_normalize_visibility_selector_with_session_kwarg() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    received_session: list[SessionProtocol | None] = []
+
+    def selector(*, session: SessionProtocol | None) -> SectionVisibility:
+        received_session.append(session)
+        return (
+            SectionVisibility.FULL if session is not None else SectionVisibility.SUMMARY
+        )
+
+    normalized = normalize_visibility_selector(selector, params_type=None)
+
+    assert normalized(None, session) == SectionVisibility.FULL
+    assert received_session == [session]
+    assert normalized(None, None) == SectionVisibility.SUMMARY
+
+
+def test_normalize_visibility_selector_with_params_and_session() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    received: list[tuple[_VisibilityParams, SessionProtocol | None]] = []
+
+    def selector(
+        params: _VisibilityParams, *, session: SessionProtocol | None
+    ) -> SectionVisibility:
+        received.append((params, session))
+        return SectionVisibility.FULL if params.flag else SectionVisibility.SUMMARY
+
+    normalized = normalize_visibility_selector(selector, params_type=_VisibilityParams)
+
+    params = _VisibilityParams(flag=True)
+    assert normalized(params, session) == SectionVisibility.FULL
+    assert received == [(params, session)]
+
+    params_false = _VisibilityParams(flag=False)
+    assert normalized(params_false, session) == SectionVisibility.SUMMARY
+
+
+def test_normalize_visibility_selector_constant() -> None:
+    """Constant visibility selectors should work with the new signature."""
+    selector = normalize_visibility_selector(
+        SectionVisibility.SUMMARY, params_type=None
+    )
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    assert selector(None, None) == SectionVisibility.SUMMARY
+    assert selector(None, session) == SectionVisibility.SUMMARY

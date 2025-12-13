@@ -202,7 +202,10 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         """Async implementation of evaluate."""
         sdk = _import_sdk()
 
-        rendered = prompt.render(visibility_overrides=visibility_overrides)
+        rendered = prompt.render(
+            visibility_overrides=visibility_overrides,
+            session=session,
+        )
         prompt_text = rendered.text
 
         session.event_bus.publish(

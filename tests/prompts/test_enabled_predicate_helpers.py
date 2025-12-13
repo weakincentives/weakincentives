@@ -13,11 +13,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from weakincentives.prompt._enabled_predicate import (
+    callable_accepts_session_kwarg,
     callable_requires_positional_argument,
     normalize_enabled_predicate,
 )
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
+
+if TYPE_CHECKING:
+    from weakincentives.runtime.session.protocols import SessionProtocol
 
 
 @dataclass
@@ -29,7 +36,7 @@ def test_normalize_enabled_predicate_accepts_zero_arg_callable() -> None:
     predicate = normalize_enabled_predicate(lambda: False, params_type=None)
 
     assert predicate is not None
-    assert predicate(None) is False
+    assert predicate(None, None) is False
     assert callable_requires_positional_argument(lambda: False) is False
 
 
@@ -43,7 +50,7 @@ def test_normalize_enabled_predicate_passes_positional_value() -> None:
     predicate = normalize_enabled_predicate(enabled, params_type=None)
 
     assert predicate is not None
-    assert predicate(None) is True
+    assert predicate(None, None) is True
     assert recorded == [None]
 
 
@@ -54,5 +61,60 @@ def test_normalize_enabled_predicate_handles_parameterized_callable() -> None:
     predicate = normalize_enabled_predicate(enabled, params_type=ToggleParams)
 
     assert predicate is not None
-    assert predicate(ToggleParams(include=True)) is True
-    assert predicate(ToggleParams(include=False)) is False
+    assert predicate(ToggleParams(include=True), None) is True
+    assert predicate(ToggleParams(include=False), None) is False
+
+
+def test_callable_accepts_session_kwarg_detects_keyword_only() -> None:
+    def with_session(*, session: SessionProtocol) -> bool:
+        return True
+
+    def without_session() -> bool:
+        return True
+
+    def positional_session(session: SessionProtocol) -> bool:
+        return True
+
+    assert callable_accepts_session_kwarg(with_session) is True
+    assert callable_accepts_session_kwarg(without_session) is False
+    # Positional-or-keyword parameters named session should be accepted
+    assert callable_accepts_session_kwarg(positional_session) is True
+
+
+def test_normalize_enabled_predicate_with_session_kwarg() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    received_session: list[SessionProtocol | None] = []
+
+    def enabled(*, session: SessionProtocol | None) -> bool:
+        received_session.append(session)
+        return session is not None
+
+    predicate = normalize_enabled_predicate(enabled, params_type=None)
+
+    assert predicate is not None
+    assert predicate(None, session) is True
+    assert received_session == [session]
+    assert predicate(None, None) is False
+
+
+def test_normalize_enabled_predicate_with_params_and_session() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    received: list[tuple[ToggleParams, SessionProtocol | None]] = []
+
+    def enabled(params: ToggleParams, *, session: SessionProtocol | None) -> bool:
+        received.append((params, session))
+        return params.include and session is not None
+
+    predicate = normalize_enabled_predicate(enabled, params_type=ToggleParams)
+
+    assert predicate is not None
+    params = ToggleParams(include=True)
+    assert predicate(params, session) is True
+    assert received == [(params, session)]
+
+    params_false = ToggleParams(include=False)
+    assert predicate(params_false, session) is False
