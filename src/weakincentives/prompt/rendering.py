@@ -193,7 +193,7 @@ class PromptRenderer[OutputT]:
             )
             visibility_override = visibility_override_lookup.get(node.path)
             effective_visibility = node.section.effective_visibility(
-                visibility_override, section_params, session=session
+                visibility_override, section_params, session=session, path=node.path
             )
 
             # When rendering with SUMMARY visibility, skip children

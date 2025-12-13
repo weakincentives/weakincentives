@@ -209,6 +209,7 @@ def has_summarized_sections(
             overrides.get(node.path),
             section_params,
             session=session,
+            path=node.path,
         )
         if effective == SectionVisibility.SUMMARY and node.section.summary is not None:
             return True
@@ -245,6 +246,7 @@ def compute_current_visibility(
             overrides.get(node.path),
             section_params,
             session=session,
+            path=node.path,
         )
         result[node.path] = effective
 

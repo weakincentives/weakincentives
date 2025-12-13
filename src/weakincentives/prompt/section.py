@@ -34,6 +34,7 @@ from ._visibility import (
     VisibilitySelector,
     normalize_visibility_selector,
 )
+from .errors import SectionPath
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -161,24 +162,41 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         params: SupportsDataclass | None = None,
         *,
         session: SessionProtocol | None = None,
+        path: SectionPath | None = None,
     ) -> SectionVisibility:
         """Return the visibility to use for rendering.
 
+        The visibility is resolved in the following order:
+        1. Explicit ``override`` parameter (if provided)
+        2. Session state override (if session has VisibilityOverrides with path)
+        3. User-provided visibility selector/constant
+
         Args:
             override: Optional visibility override. When provided, this takes
-                precedence over the section's configured visibility.
+                precedence over all other visibility sources.
             params: Parameters used to render the section, when available.
             session: Optional session for visibility callables that inspect state.
+                Also used to query VisibilityOverrides from session state.
+            path: Section path used to look up session-based overrides.
 
         Returns:
-            The effective visibility to use. If an override is provided, it is
-            returned. Otherwise, the section's configured visibility is used.
-            If no summary is available and SUMMARY visibility is requested,
-            FULL visibility is used as a fallback.
+            The effective visibility to use. If no summary is available and
+            SUMMARY visibility is requested, FULL visibility is used as a
+            fallback.
         """
         visibility = override
+
+        # Check session state for override if no explicit override provided
+        if visibility is None and session is not None and path is not None:
+            from .visibility_overrides import get_session_visibility_override
+
+            visibility = get_session_visibility_override(session, path)
+
+        # Fall back to user-provided selector
         if visibility is None:
             visibility = self._visibility(params, session)
+
+        # SUMMARY falls back to FULL if no summary template
         if visibility == SectionVisibility.SUMMARY and self.summary is None:
             return SectionVisibility.FULL
         return visibility
