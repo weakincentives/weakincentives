@@ -35,6 +35,11 @@ class TestNetworkPolicy:
         assert policy.allow_unix_sockets is False
         assert policy.allowed_ports is None
 
+    def test_no_network_factory(self) -> None:
+        policy = NetworkPolicy.no_network()
+        assert policy.allowed_domains == ()
+        assert policy.allow_localhost is False
+
     def test_api_only_factory(self) -> None:
         policy = NetworkPolicy.api_only()
         assert policy.allowed_domains == ("api.anthropic.com",)
@@ -177,10 +182,7 @@ class TestEphemeralHomeSettingsGeneration:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["enabled"] is True
             assert settings["sandbox"]["autoAllowBashIfSandboxed"] is True
-            # Default to api_only() since SDK needs API access
-            assert settings["sandbox"]["network"]["allowedDomains"] == [
-                "api.anthropic.com"
-            ]
+            assert settings["sandbox"]["network"]["allowedDomains"] == []
 
     def test_network_policy_allowed_domains(self) -> None:
         config = IsolationConfig(

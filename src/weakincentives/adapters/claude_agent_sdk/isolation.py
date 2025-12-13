@@ -61,6 +61,11 @@ class NetworkPolicy:
     allowed_ports: tuple[int, ...] | None = None
 
     @classmethod
+    def no_network(cls) -> NetworkPolicy:
+        """Create a policy that blocks all network access."""
+        return cls(allowed_domains=())
+
+    @classmethod
     def api_only(cls) -> NetworkPolicy:
         """Create a policy allowing only Anthropic API access."""
         return cls(allowed_domains=("api.anthropic.com",))
@@ -206,8 +211,8 @@ class EphemeralHome:
         if sandbox.readable_paths:
             settings["sandbox"]["readablePaths"] = list(sandbox.readable_paths)
 
-        # Network settings (default to api_only since SDK needs API access)
-        network = self._isolation.network_policy or NetworkPolicy.api_only()
+        # Network settings
+        network = self._isolation.network_policy or NetworkPolicy.no_network()
         settings["sandbox"]["network"] = {
             "allowedDomains": list(network.allowed_domains),
         }
