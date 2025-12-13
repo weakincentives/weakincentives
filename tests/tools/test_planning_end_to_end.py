@@ -17,10 +17,7 @@ from __future__ import annotations
 from typing import cast
 
 from tests.tools.helpers import invoke_tool
-from weakincentives.prompt.tool import Tool
-from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session
-from weakincentives.tools import (
+from weakincentives.contrib.tools import (
     AddStep,
     Plan,
     PlanningToolsSection,
@@ -28,6 +25,9 @@ from weakincentives.tools import (
     SetupPlan,
     UpdateStep,
 )
+from weakincentives.prompt.tool import Tool
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 
 def test_planning_end_to_end_flow() -> None:

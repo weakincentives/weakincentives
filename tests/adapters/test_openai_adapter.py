@@ -72,6 +72,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         simple_handler,
     )
 from tests.helpers.events import NullEventBus
+from weakincentives import ToolValidationError
 from weakincentives.adapters import PromptEvaluationError
 from weakincentives.budget import Budget
 from weakincentives.prompt import (
@@ -96,7 +97,6 @@ from weakincentives.runtime.session import (
     Session,
     replace_latest,
 )
-from weakincentives.tools import ToolValidationError
 
 MODULE_PATH = "weakincentives.adapters.openai"
 PROMPT_NS = "tests/adapters/openai"

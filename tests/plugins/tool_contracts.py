@@ -36,9 +36,9 @@ class ToolDataclassContractCase:
 
 
 _MODULES_TO_AUDIT: tuple[str, ...] = (
-    "weakincentives.tools.planning",
-    "weakincentives.tools.vfs",
-    "weakincentives.tools.asteval",
+    "weakincentives.contrib.tools.planning",
+    "weakincentives.contrib.tools.vfs",
+    "weakincentives.contrib.tools.asteval",
 )
 
 

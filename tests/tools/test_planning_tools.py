@@ -22,6 +22,22 @@ import pytest
 
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
+from weakincentives import ToolValidationError
+from weakincentives.contrib.tools import (
+    AddStep,
+    Plan,
+    PlanningToolsSection,
+    PlanStep,
+    ReadPlan,
+    SetupPlan,
+    UpdateStep,
+)
+from weakincentives.contrib.tools.planning import (
+    _add_step_reducer,
+    _latest_plan,
+    _next_step_id,
+    _update_step_reducer,
+)
 from weakincentives.prompt import SupportsDataclass
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
@@ -29,22 +45,6 @@ from weakincentives.runtime.session import (
     ReducerContext,
     Session,
     build_reducer_context,
-)
-from weakincentives.tools import (
-    AddStep,
-    Plan,
-    PlanningToolsSection,
-    PlanStep,
-    ReadPlan,
-    SetupPlan,
-    ToolValidationError,
-    UpdateStep,
-)
-from weakincentives.tools.planning import (
-    _add_step_reducer,
-    _latest_plan,
-    _next_step_id,
-    _update_step_reducer,
 )
 
 

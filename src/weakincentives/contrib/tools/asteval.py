@@ -28,11 +28,12 @@ from importlib import import_module
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast, override
 
-from ..dataclasses import FrozenDataclass
-from ..prompt.markdown import MarkdownSection
-from ..prompt.tool import Tool, ToolContext, ToolExample, ToolResult
-from ..runtime.logging import StructuredLogger, get_logger
-from ..runtime.session import (
+from ...dataclasses import FrozenDataclass
+from ...errors import ToolValidationError
+from ...prompt.markdown import MarkdownSection
+from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
+from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
     ReducerEventWithValue,
@@ -40,7 +41,6 @@ from ..runtime.session import (
     TypedReducer,
 )
 from ._context import ensure_context_uses_session
-from .errors import ToolValidationError
 from .vfs import VfsFile, VfsPath, VirtualFileSystem
 
 _LOGGER: StructuredLogger = get_logger(__name__, context={"component": "tools.asteval"})
@@ -52,6 +52,7 @@ _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_SEGMENT_LENGTH: Final[int] = 80
 _ASCII: Final[str] = "ascii"
 _TIMEOUT_SECONDS: Final[float] = 5.0
+_FIRST_PRINTABLE_ASCII: Final[int] = 32  # Space character code point
 _MISSING_DEPENDENCY_MESSAGE: Final[str] = (
     "Install weakincentives[asteval] to enable the Python evaluation tool."
 )
@@ -347,7 +348,7 @@ def _normalize_code(code: str) -> str:
         raise ToolValidationError("Code exceeds maximum length of 2,000 characters.")
     for char in code:
         code_point = ord(char)
-        if code_point < 32 and char not in {"\n", "\t"}:
+        if code_point < _FIRST_PRINTABLE_ASCII and char not in {"\n", "\t"}:
             raise ToolValidationError("Code contains unsupported control characters.")
     return code
 
@@ -657,7 +658,7 @@ class _AstevalToolSuite:
         super().__init__()
         self._section = section
 
-    def run(
+    def run(  # noqa: PLR0914
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
         ensure_context_uses_session(context=context, session=self._section.session)

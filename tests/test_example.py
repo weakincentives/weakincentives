@@ -13,7 +13,7 @@
 """Smoke tests to verify the test harness is wired correctly."""
 
 import weakincentives
-from weakincentives import Prompt, adapters, prompt, runtime, tools
+from weakincentives import Prompt, adapters, contrib, prompt, runtime
 
 
 def test_example() -> None:
@@ -26,7 +26,7 @@ def test_package_dir_lists_public_symbols() -> None:
     assert symbols == sorted(symbols)
     assert "Prompt" in symbols
     assert "prompt" in symbols
-    assert "tools" in symbols
+    assert "contrib" in symbols
 
 
 def test_package_exposes_public_attributes() -> None:
@@ -44,13 +44,13 @@ def test_adapters_dir_lists_public_symbols() -> None:
 
 def test_public_namespaces_resolve_symbols() -> None:
     assert runtime.Session is runtime.Session
-    assert tools.Plan is tools.Plan
+    assert contrib.tools.Plan is contrib.tools.Plan
     assert prompt.MarkdownSection is prompt.MarkdownSection
 
 
 def test_submodule_dir_lists_exports() -> None:
     prompt_symbols = prompt.__dir__()
-    tools_symbols = tools.__dir__()
+    tools_symbols = contrib.tools.__dir__()
 
     assert prompt_symbols == sorted(prompt_symbols)
     assert "Prompt" in prompt_symbols

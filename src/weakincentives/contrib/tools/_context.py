@@ -10,19 +10,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared error types for built-in tools."""
+"""Shared helpers for validating tool execution context."""
 
 from __future__ import annotations
 
-from ..errors import WinkError
+from ...prompt.tool import ToolContext
+from ...runtime.session import Session
 
 
-class ToolValidationError(WinkError, ValueError):
-    """Raised when tool parameters fail validation checks."""
+def ensure_context_uses_session(*, context: ToolContext, session: Session) -> None:
+    """Verify ``context`` matches the ``session`` bound to the tool section."""
+
+    if context.session is not session:
+        message = (
+            "ToolContext session does not match the section session. "
+            "Ensure the tool is invoked with the bound session."
+        )
+        raise RuntimeError(message)
 
 
-class DeadlineExceededError(WinkError, RuntimeError):
-    """Raised when tool execution cannot finish before the deadline."""
-
-
-__all__ = ["DeadlineExceededError", "ToolValidationError"]
+__all__ = ["ensure_context_uses_session"]

@@ -22,9 +22,7 @@ from typing import cast
 import pytest
 
 from tests.tools.helpers import build_tool_context, find_tool
-from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session
-from weakincentives.tools import (
+from weakincentives.contrib.tools import (
     EvalParams,
     EvalResult,
     PodmanSandboxConfig,
@@ -35,6 +33,8 @@ from weakincentives.tools import (
     ReadFileResult,
     WriteFileParams,
 )
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 
 @pytest.mark.integration

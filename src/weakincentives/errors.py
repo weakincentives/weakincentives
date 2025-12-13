@@ -28,4 +28,12 @@ class WinkError(Exception):
     """
 
 
-__all__ = ["WinkError"]
+class ToolValidationError(WinkError, ValueError):
+    """Raised when tool parameters fail validation checks."""
+
+
+class DeadlineExceededError(WinkError, RuntimeError):
+    """Raised when tool execution cannot finish before the deadline."""
+
+
+__all__ = ["DeadlineExceededError", "ToolValidationError", "WinkError"]

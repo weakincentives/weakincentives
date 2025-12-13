@@ -22,11 +22,10 @@ from typing import cast
 
 import pytest
 
-import weakincentives.tools.vfs as vfs_module
+import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session
-from weakincentives.tools import (
+from weakincentives import ToolValidationError
+from weakincentives.contrib.tools import (
     DeleteEntry,
     EditFileParams,
     FileInfo,
@@ -39,7 +38,6 @@ from weakincentives.tools import (
     ReadFileParams,
     ReadFileResult,
     RemoveParams,
-    ToolValidationError,
     VfsFile,
     VfsPath,
     VfsToolsSection,
@@ -47,6 +45,8 @@ from weakincentives.tools import (
     WriteFile,
     WriteFileParams,
 )
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 
 def _make_section(
@@ -288,7 +288,7 @@ def test_write_file_creates_snapshot(
 ) -> None:
     session, _bus = session_and_bus
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr("weakincentives.tools.vfs._now", lambda: timestamp)
+    monkeypatch.setattr("weakincentives.contrib.tools.vfs._now", lambda: timestamp)
 
     section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")

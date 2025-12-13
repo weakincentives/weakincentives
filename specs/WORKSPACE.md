@@ -292,7 +292,7 @@ class WorkspaceDigestResult:
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 from weakincentives.prompt import Prompt, MarkdownSection
-from weakincentives.tools import vfs, podman, asteval
+from weakincentives.contrib.tools import vfs, podman, asteval
 
 bus = InProcessEventBus()
 session = Session(bus=bus)

@@ -35,16 +35,16 @@ from examples.logging import attach_logging_subscribers
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.contrib.tools.digests import (
+    latest_workspace_digest,
+    set_workspace_digest,
+)
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt, SupportsDataclass
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered
 from weakincentives.runtime.session import Session
-from weakincentives.tools.digests import (
-    latest_workspace_digest,
-    set_workspace_digest,
-)
 
 
 @dataclass(slots=True, frozen=True)

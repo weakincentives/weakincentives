@@ -18,7 +18,7 @@ from .adapters import PromptResponse
 from .budget import Budget, BudgetExceededError, BudgetTracker
 from .dataclasses import FrozenDataclass
 from .deadlines import Deadline
-from .errors import WinkError
+from .errors import DeadlineExceededError, ToolValidationError, WinkError
 from .prompt import (
     MarkdownSection,
     Prompt,
@@ -37,6 +37,7 @@ __all__ = [
     "BudgetExceededError",
     "BudgetTracker",
     "Deadline",
+    "DeadlineExceededError",
     "FrozenDataclass",
     "JSONValue",
     "MarkdownSection",
@@ -48,6 +49,7 @@ __all__ = [
     "ToolContext",
     "ToolHandler",
     "ToolResult",
+    "ToolValidationError",
     "WinkError",
     "configure_logging",
     "get_logger",

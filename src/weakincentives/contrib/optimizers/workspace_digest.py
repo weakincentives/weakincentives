@@ -18,18 +18,21 @@ import textwrap
 from dataclasses import dataclass
 from typing import Any, cast, override
 
-from ..adapters.core import (
+from ...adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PromptEvaluationError,
     PromptResponse,
 )
-from ..prompt import MarkdownSection, Prompt, PromptTemplate
-from ..prompt._types import SupportsDataclass
-from ..prompt.overrides import PromptLike, PromptOverridesError
-from ..prompt.section import Section
-from ..runtime.session import Session
-from ..runtime.session.protocols import SessionProtocol
+from ...optimizers._base import BasePromptOptimizer, OptimizerConfig
+from ...optimizers._context import OptimizationContext
+from ...optimizers._results import PersistenceScope, WorkspaceDigestResult
+from ...prompt import MarkdownSection, Prompt, PromptTemplate
+from ...prompt._types import SupportsDataclass
+from ...prompt.overrides import PromptLike, PromptOverridesError
+from ...prompt.section import Section
+from ...runtime.session import Session
+from ...runtime.session.protocols import SessionProtocol
 from ..tools.asteval import AstevalSection
 from ..tools.digests import (
     WorkspaceDigestSection,
@@ -38,9 +41,6 @@ from ..tools.digests import (
 )
 from ..tools.planning import PlanningStrategy, PlanningToolsSection
 from ..tools.workspace import WorkspaceSection
-from ._base import BasePromptOptimizer, OptimizerConfig
-from ._context import OptimizationContext
-from ._results import PersistenceScope, WorkspaceDigestResult
 
 
 @dataclass(slots=True, frozen=True)

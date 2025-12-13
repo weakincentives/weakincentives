@@ -22,6 +22,7 @@ import pytest
 
 from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
+from weakincentives import ToolValidationError
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -57,7 +58,6 @@ from weakincentives.runtime.events import (
 from weakincentives.runtime.events._types import EventHandler
 from weakincentives.runtime.logging import get_logger
 from weakincentives.runtime.session.session import Session
-from weakincentives.tools.errors import ToolValidationError
 
 
 class RecordingBus(EventBus):

@@ -27,13 +27,11 @@ from uuid import uuid4
 
 import pytest
 
-import weakincentives.tools.podman as podman_module
-import weakincentives.tools.vfs as vfs_module
+import weakincentives.contrib.tools.podman as podman_module
+import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
-from weakincentives.prompt.tool import Tool
-from weakincentives.runtime.events import InProcessEventBus
-from weakincentives.runtime.session import Session
-from weakincentives.tools import (
+from weakincentives import ToolValidationError
+from weakincentives.contrib.tools import (
     EditFileParams,
     EvalFileRead,
     EvalFileWrite,
@@ -56,7 +54,9 @@ from weakincentives.tools import (
     RemoveParams,
     WriteFileParams,
 )
-from weakincentives.tools.errors import ToolValidationError
+from weakincentives.prompt.tool import Tool
+from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.session import Session
 
 
 @dataclass(slots=True)
@@ -3229,7 +3229,7 @@ def test_write_via_container_handles_cli_failures(
 
 
 def test_tools_module_missing_attr_raises() -> None:
-    from weakincentives import tools
+    from weakincentives.contrib import tools
 
     with pytest.raises(AttributeError):
         _ = tools.TOTALLY_UNKNOWN

@@ -16,6 +16,10 @@ from pathlib import Path
 
 import pytest
 
+from weakincentives.contrib.tools.digests import (
+    WorkspaceDigest,
+    WorkspaceDigestSection,
+)
 from weakincentives.prompt import MarkdownSection, PromptTemplate
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -23,10 +27,6 @@ from weakincentives.prompt.overrides import (
 )
 from weakincentives.prompt.overrides.versioning import PromptDescriptor
 from weakincentives.runtime.session import Session
-from weakincentives.tools.digests import (
-    WorkspaceDigest,
-    WorkspaceDigestSection,
-)
 
 
 def _build_prompt() -> PromptTemplate[str]:
