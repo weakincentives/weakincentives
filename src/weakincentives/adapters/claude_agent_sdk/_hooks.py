@@ -14,15 +14,18 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
+from ._notifications import Notification
 
 if TYPE_CHECKING:
     from ...runtime.session.protocols import SessionProtocol
@@ -33,9 +36,13 @@ __all__ = [
     "HookContext",
     "PostToolUseInput",
     "ToolResponse",
+    "create_notification_hook",
     "create_post_tool_use_hook",
+    "create_pre_compact_hook",
     "create_pre_tool_use_hook",
     "create_stop_hook",
+    "create_subagent_start_hook",
+    "create_subagent_stop_hook",
     "create_user_prompt_submit_hook",
     "safe_hook_wrapper",
 ]
@@ -148,6 +155,58 @@ class HookContext:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _read_transcript_file(path_str: str) -> list[dict[str, Any]]:
+    """Read a JSONL transcript file and return its contents as a list.
+
+    Args:
+        path_str: Path to the transcript file (JSONL format).
+
+    Returns:
+        List of parsed JSON objects from the file.
+        Returns empty list if file doesn't exist or can't be read.
+    """
+    if not path_str:
+        return []
+
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return []
+
+    try:
+        entries: list[dict[str, Any]] = []
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    entries.append(json.loads(line))
+    except (OSError, json.JSONDecodeError):
+        return []
+    else:
+        return entries
+
+
+def _expand_transcript_paths(payload: dict[str, Any]) -> dict[str, Any]:
+    """Expand transcript_path and agent_transcript_path in payload.
+
+    Reads the JSONL files at transcript_path and agent_transcript_path
+    and replaces the path strings with the actual transcript content.
+
+    Args:
+        payload: The hook input payload dict.
+
+    Returns:
+        A new payload dict with transcript paths expanded to content.
+    """
+    result = dict(payload)
+
+    for key in ("transcript_path", "agent_transcript_path"):
+        if key in result and isinstance(result[key], str):
+            path_str = result[key]
+            result[key] = _read_transcript_file(path_str)
+
+    return result
 
 
 def create_pre_tool_use_hook(
@@ -402,6 +461,189 @@ def create_stop_hook(
         return {}
 
     return stop_hook
+
+
+def create_subagent_start_hook(
+    hook_context: HookContext,
+) -> AsyncHookCallback:
+    """Create a SubagentStart hook to capture subagent launch events.
+
+    Records Notification events when subagents are spawned during execution.
+
+    Args:
+        hook_context: Context with session references.
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def subagent_start_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        payload = input_data if isinstance(input_data, dict) else {}
+
+        notification = Notification(
+            source="subagent_start",
+            payload=payload,
+            prompt_name=hook_context.prompt_name,
+            adapter_name=hook_context.adapter_name,
+            created_at=_utcnow(),
+        )
+
+        hook_context.session.mutate(Notification).dispatch(notification)
+
+        logger.debug(
+            "claude_agent_sdk.hook.subagent_start",
+            event="hook.subagent_start",
+            context={"payload": payload},
+        )
+
+        return {}
+
+    return subagent_start_hook
+
+
+def create_subagent_stop_hook(
+    hook_context: HookContext,
+) -> AsyncHookCallback:
+    """Create a SubagentStop hook to capture subagent completion events.
+
+    Records Notification events when subagents complete execution.
+    Automatically expands transcript_path and agent_transcript_path fields
+    by reading the JSONL files and replacing the paths with their content.
+
+    Args:
+        hook_context: Context with session references.
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def subagent_stop_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        raw_payload = input_data if isinstance(input_data, dict) else {}
+        payload = _expand_transcript_paths(raw_payload)
+
+        notification = Notification(
+            source="subagent_stop",
+            payload=payload,
+            prompt_name=hook_context.prompt_name,
+            adapter_name=hook_context.adapter_name,
+            created_at=_utcnow(),
+        )
+
+        hook_context.session.mutate(Notification).dispatch(notification)
+
+        logger.debug(
+            "claude_agent_sdk.hook.subagent_stop",
+            event="hook.subagent_stop",
+            context={"payload": payload},
+        )
+
+        return {}
+
+    return subagent_stop_hook
+
+
+def create_pre_compact_hook(
+    hook_context: HookContext,
+) -> AsyncHookCallback:
+    """Create a PreCompact hook to capture context compaction events.
+
+    Records Notification events before the SDK compacts conversation context.
+
+    Args:
+        hook_context: Context with session references.
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def pre_compact_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        payload = input_data if isinstance(input_data, dict) else {}
+
+        notification = Notification(
+            source="pre_compact",
+            payload=payload,
+            prompt_name=hook_context.prompt_name,
+            adapter_name=hook_context.adapter_name,
+            created_at=_utcnow(),
+        )
+
+        hook_context.session.mutate(Notification).dispatch(notification)
+
+        logger.debug(
+            "claude_agent_sdk.hook.pre_compact",
+            event="hook.pre_compact",
+            context={"payload": payload},
+        )
+
+        return {}
+
+    return pre_compact_hook
+
+
+def create_notification_hook(
+    hook_context: HookContext,
+) -> AsyncHookCallback:
+    """Create a Notification hook to capture user-facing notifications.
+
+    Records Notification events from the SDK's notification system.
+
+    Args:
+        hook_context: Context with session references.
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def notification_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        payload = input_data if isinstance(input_data, dict) else {}
+
+        notification = Notification(
+            source="notification",
+            payload=payload,
+            prompt_name=hook_context.prompt_name,
+            adapter_name=hook_context.adapter_name,
+            created_at=_utcnow(),
+        )
+
+        hook_context.session.mutate(Notification).dispatch(notification)
+
+        logger.debug(
+            "claude_agent_sdk.hook.notification",
+            event="hook.notification",
+            context={"payload": payload},
+        )
+
+        return {}
+
+    return notification_hook
 
 
 def safe_hook_wrapper(

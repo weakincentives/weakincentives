@@ -64,6 +64,7 @@ Example:
 
 from __future__ import annotations
 
+from ._notifications import Notification, NotificationSource
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
     ClaudeAgentSDKClientConfig,
@@ -86,6 +87,8 @@ __all__ = [
     "ClaudeAgentWorkspaceSection",
     "HostMount",
     "HostMountPreview",
+    "Notification",
+    "NotificationSource",
     "PermissionMode",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
