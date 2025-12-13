@@ -31,6 +31,7 @@ __all__ = [
     "AsyncHookCallback",
     "HookCallback",
     "HookContext",
+    "PostToolUseFailureHook",
     "PostToolUseInput",
     "ToolResponse",
     "create_post_tool_use_hook",
@@ -123,6 +124,20 @@ AsyncHookCallback = Callable[
     Awaitable[dict[str, Any]],
 ]
 """Type alias for async hook callbacks matching SDK signature."""
+
+PostToolUseFailureHook = Callable[[PostToolUseInput], bool]
+"""Hook to determine if a tool execution should be considered a failure.
+
+This callback receives the parsed PostToolUseInput and returns True if the
+tool execution should be marked as a failure (success=False on ToolInvoked).
+
+Example:
+    def is_failure(input: PostToolUseInput) -> bool:
+        # Consider it a failure if stderr contains "error" (case-insensitive)
+        return "error" in input.tool_response.stderr.lower()
+
+    hook = create_post_tool_use_hook(context, is_failure=is_failure)
+"""
 
 
 class HookContext:
@@ -227,6 +242,7 @@ def create_post_tool_use_hook(
     hook_context: HookContext,
     *,
     stop_on_structured_output: bool = True,
+    is_failure: PostToolUseFailureHook | None = None,
 ) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording.
 
@@ -234,10 +250,17 @@ def create_post_tool_use_hook(
     parse the input data into typed dataclasses (PostToolUseInput, ToolResponse)
     for better type safety, falling back to dict access if parsing fails.
 
+    The published ToolInvoked event includes a ``success`` field that defaults
+    to ``True``. When an ``is_failure`` hook is provided, it is called to
+    determine if the tool execution should be marked as a failure.
+
     Args:
         hook_context: Context with session and adapter references.
         stop_on_structured_output: If True, return ``continue: false`` after
             the StructuredOutput tool to end the turn immediately.
+        is_failure: Optional hook to determine if a tool execution failed.
+            Receives the parsed PostToolUseInput and returns True if the
+            execution should be marked as a failure (success=False).
 
     Returns:
         An async hook callback function matching SDK signature.
@@ -258,7 +281,6 @@ def create_post_tool_use_hook(
             tool_name = parsed.tool_name
             tool_input = parsed.tool_input
             response = parsed.tool_response
-            tool_error = response.stderr if response.stderr else None
             output_text = response.stdout or str(response)
             # Store the ToolResponse dataclass as the result value
             result_value: Any = response
@@ -278,12 +300,6 @@ def create_post_tool_use_hook(
                 if isinstance(input_data, dict)
                 else {}
             )
-            tool_error = (
-                tool_response_raw.get("stderr")
-                if isinstance(tool_response_raw, dict)
-                and tool_response_raw.get("stderr")
-                else None
-            )
             if isinstance(tool_response_raw, dict):
                 output_text = tool_response_raw.get("stdout", "") or str(
                     tool_response_raw
@@ -297,6 +313,22 @@ def create_post_tool_use_hook(
 
         hook_context._tool_count += 1
 
+        # Determine success: default to True, but call is_failure hook if provided
+        success = True
+        if is_failure is not None and parsed is not None:
+            try:
+                if is_failure(parsed):
+                    success = False
+            except Exception as hook_error:
+                logger.exception(
+                    "claude_agent_sdk.hook.is_failure_error",
+                    event="hook.is_failure_error",
+                    context={
+                        "tool_name": tool_name,
+                        "error": str(hook_error),
+                    },
+                )
+
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
@@ -305,6 +337,7 @@ def create_post_tool_use_hook(
             result=result_raw,
             session_id=None,
             created_at=_utcnow(),
+            success=success,
             usage=None,
             value=result_value,
             rendered_output=output_text[:1000] if output_text else "",
@@ -317,7 +350,7 @@ def create_post_tool_use_hook(
             event="hook.tool_invoked",
             context={
                 "tool_name": tool_name,
-                "success": tool_error is None,
+                "success": success,
                 "call_id": tool_use_id,
             },
         )

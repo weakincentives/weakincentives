@@ -125,7 +125,24 @@ class TokenUsage:
 
 @FrozenDataclass()
 class ToolInvoked:
-    """Event emitted after an adapter executes a tool handler."""
+    """Event emitted after an adapter executes a tool handler.
+
+    Attributes:
+        prompt_name: Name of the prompt that triggered the tool invocation.
+        adapter: Name of the adapter that executed the tool.
+        name: Name of the tool that was invoked.
+        params: Parameters passed to the tool.
+        result: Raw result from the tool execution.
+        session_id: Session ID if tool was executed within a session context.
+        created_at: Timestamp when the tool was invoked.
+        success: Whether the tool execution succeeded. Derived from ToolResult.success
+            for custom tools. SDK native tools default to True.
+        usage: Token usage if available from the provider.
+        value: Typed result value (dataclass instances for session dispatch).
+        rendered_output: Text representation of the result (truncated to 1000 chars).
+        call_id: Provider-specific call identifier.
+        event_id: Unique identifier for this event.
+    """
 
     prompt_name: str
     adapter: AdapterName
@@ -134,6 +151,7 @@ class ToolInvoked:
     result: Any
     session_id: UUID | None
     created_at: datetime
+    success: bool = True
     usage: TokenUsage | None = None
     value: Any | None = None
     rendered_output: str = ""

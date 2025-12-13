@@ -157,12 +157,31 @@ async def post_tool_use_hook(input_data, tool_use_id, sdk_context):
         name=input_data.get("tool_name", ""),
         params=input_data.get("tool_input", {}),
         result=input_data.get("tool_response", {}),
+        success=True,  # SDK native tools default to True
         call_id=tool_use_id,
         # ... other fields
     )
     session.event_bus.publish(event)
     return {}
 ```
+
+The `success` field defaults to `True`. To customize failure detection, provide
+an `is_failure` hook:
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    PostToolUseInput,
+    PostToolUseFailureHook,
+)
+
+def is_failure(input: PostToolUseInput) -> bool:
+    # Mark as failure if stderr contains "error" (case-insensitive)
+    return "error" in input.tool_response.stderr.lower()
+
+hook = create_post_tool_use_hook(context, is_failure=is_failure)
+```
+
+For custom tools bridged via MCP, success is set based on `ToolResult.success`.
 
 ### Stop Hook
 

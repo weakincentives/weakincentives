@@ -64,6 +64,7 @@ Example:
 
 from __future__ import annotations
 
+from ._hooks import PostToolUseFailureHook, PostToolUseInput
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
     ClaudeAgentSDKClientConfig,
@@ -87,6 +88,8 @@ __all__ = [
     "HostMount",
     "HostMountPreview",
     "PermissionMode",
+    "PostToolUseFailureHook",
+    "PostToolUseInput",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
 ]

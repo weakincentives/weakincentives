@@ -653,3 +653,189 @@ class TestPostToolUseHookWithTypedParsing:
         assert event.name == ""
         assert event.rendered_output == ""
         assert event.value is None
+
+
+class TestToolInvokedSuccessField:
+    """Tests for ToolInvoked.success field in PostToolUse hook."""
+
+    def test_success_defaults_to_true(self, session: Session) -> None:
+        """SDK native tools should default to success=True."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "file contents", "stderr": ""},
+        }
+
+        asyncio.run(hook(input_data, "call-success", context))
+
+        assert len(events) == 1
+        assert events[0].success is True
+
+    def test_success_true_even_with_stderr(self, session: Session) -> None:
+        """SDK native tools should be success=True even with stderr output.
+
+        Stderr is not a reliable failure indicator - many tools write warnings
+        or debug info to stderr even on success.
+        """
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "contents", "stderr": "Warning: file is large"},
+        }
+
+        asyncio.run(hook(input_data, "call-with-stderr", context))
+
+        assert len(events) == 1
+        assert events[0].success is True
+
+    def test_success_true_when_empty_response(self, session: Session) -> None:
+        """Tool execution with empty response should default to success=True."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "NoOp",
+            "tool_input": {},
+            "tool_response": {},
+        }
+
+        asyncio.run(hook(input_data, "call-empty", context))
+
+        assert len(events) == 1
+        assert events[0].success is True
+
+    def test_is_failure_hook_sets_success_false(self, session: Session) -> None:
+        """is_failure hook returning True should set success=False."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        def is_failure(input_data: PostToolUseInput) -> bool:
+            return "error" in input_data.tool_response.stderr.lower()
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context, is_failure=is_failure)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "", "stderr": "Error: file not found"},
+        }
+
+        asyncio.run(hook(input_data, "call-failure", context))
+
+        assert len(events) == 1
+        assert events[0].success is False
+
+    def test_is_failure_hook_returns_false_keeps_success_true(
+        self, session: Session
+    ) -> None:
+        """is_failure hook returning False should keep success=True."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        def is_failure(input_data: PostToolUseInput) -> bool:
+            return "error" in input_data.tool_response.stderr.lower()
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context, is_failure=is_failure)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "contents", "stderr": "Warning: deprecated"},
+        }
+
+        asyncio.run(hook(input_data, "call-success", context))
+
+        assert len(events) == 1
+        assert events[0].success is True
+
+    def test_is_failure_hook_exception_keeps_success_true(
+        self, session: Session
+    ) -> None:
+        """Exception in is_failure hook should be caught and keep success=True."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        def is_failure(input_data: PostToolUseInput) -> bool:
+            raise ValueError("Hook error")
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context, is_failure=is_failure)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "contents"},
+        }
+
+        # Should not raise
+        asyncio.run(hook(input_data, "call-exception", context))
+
+        assert len(events) == 1
+        assert events[0].success is True
+
+    def test_is_failure_hook_not_called_when_parsing_fails(
+        self, session: Session
+    ) -> None:
+        """is_failure hook should not be called when input parsing fails."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        call_count = 0
+
+        def is_failure(input_data: PostToolUseInput) -> bool:
+            nonlocal call_count
+            call_count += 1
+            return True
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context, is_failure=is_failure)
+        # Missing tool_name causes parsing to fail
+        input_data = {
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "contents"},
+        }
+
+        asyncio.run(hook(input_data, "call-no-parse", context))
+
+        assert len(events) == 1
+        assert events[0].success is True  # Default when hook not called
+        assert call_count == 0  # Hook was not called

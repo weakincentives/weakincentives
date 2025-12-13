@@ -4,6 +4,35 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Tool Invocation Failure Handling
+
+- Added `success` field to `ToolInvoked` event to explicitly track tool execution
+  success/failure. The field is `True` by default and set to `False` when
+  custom tools return `ToolResult(success=False)`.
+
+- Added `PostToolUseFailureHook` for custom failure detection in the Claude Agent
+  SDK adapter. The `create_post_tool_use_hook` function now accepts an optional
+  `is_failure` callback to determine when a tool execution should be marked as
+  a failure:
+
+  ```python
+  from weakincentives.adapters.claude_agent_sdk import (
+      PostToolUseInput,
+      PostToolUseFailureHook,
+  )
+
+  def is_failure(input: PostToolUseInput) -> bool:
+      # Mark as failure if stderr contains "error" (case-insensitive)
+      return "error" in input.tool_response.stderr.lower()
+
+  hook = create_post_tool_use_hook(context, is_failure=is_failure)
+  ```
+
+- New exports from `weakincentives.adapters.claude_agent_sdk`:
+
+  - `PostToolUseFailureHook`: Type alias for the failure detection callback
+  - `PostToolUseInput`: Typed representation of PostToolUse hook input
+
 ### Breaking Changes
 
 - **Moved tools to `weakincentives.contrib.tools`**: All domain-specific tools

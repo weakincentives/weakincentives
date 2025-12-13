@@ -175,6 +175,7 @@ class BridgedTool:
             result=cast(ToolResult[object], result),
             session_id=None,
             created_at=datetime.now(UTC),
+            success=result.success,
             usage=None,
             value=value,
             rendered_output=rendered_output[:1000] if rendered_output else "",
