@@ -21,7 +21,7 @@ user-provided visibility selector or constant.
 from __future__ import annotations
 
 from dataclasses import field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..dataclasses import FrozenDataclass
 from ._visibility import SectionVisibility
@@ -30,6 +30,7 @@ from .errors import SectionPath
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ..runtime.session._types import ReducerContextProtocol, ReducerEvent
     from ..runtime.session.protocols import SessionProtocol
 
 
@@ -109,65 +110,70 @@ class ClearAllVisibilityOverrides:
     """Event to clear all visibility overrides."""
 
 
-def _set_override_reducer(
-    values: tuple[VisibilityOverrides, ...],
-    event: SetVisibilityOverride,
+def set_visibility_override_reducer(
+    slice_values: tuple[VisibilityOverrides, ...],
+    event: ReducerEvent,
     *,
-    context: object,
+    context: ReducerContextProtocol,
 ) -> tuple[VisibilityOverrides, ...]:
     """Reducer for SetVisibilityOverride events."""
     del context
-    current = values[-1] if values else VisibilityOverrides()
-    updated = current.with_override(event.path, event.visibility)
+    typed_event = cast(SetVisibilityOverride, event)
+    current = slice_values[-1] if slice_values else VisibilityOverrides()
+    updated = current.with_override(typed_event.path, typed_event.visibility)
     return (updated,)
 
 
-def _clear_override_reducer(
-    values: tuple[VisibilityOverrides, ...],
-    event: ClearVisibilityOverride,
+def clear_visibility_override_reducer(
+    slice_values: tuple[VisibilityOverrides, ...],
+    event: ReducerEvent,
     *,
-    context: object,
+    context: ReducerContextProtocol,
 ) -> tuple[VisibilityOverrides, ...]:
     """Reducer for ClearVisibilityOverride events."""
     del context
-    current = values[-1] if values else VisibilityOverrides()
-    updated = current.without_override(event.path)
+    typed_event = cast(ClearVisibilityOverride, event)
+    current = slice_values[-1] if slice_values else VisibilityOverrides()
+    updated = current.without_override(typed_event.path)
     return (updated,)
 
 
-def _clear_all_reducer(
-    values: tuple[VisibilityOverrides, ...],
-    event: ClearAllVisibilityOverrides,
+def clear_all_visibility_overrides_reducer(
+    slice_values: tuple[VisibilityOverrides, ...],
+    event: ReducerEvent,
     *,
-    context: object,
+    context: ReducerContextProtocol,
 ) -> tuple[VisibilityOverrides, ...]:
     """Reducer for ClearAllVisibilityOverrides events."""
-    del context, event, values
+    del context, event, slice_values
     return (VisibilityOverrides(),)
 
 
 def register_visibility_reducers(session: SessionProtocol) -> None:
     """Register the standard visibility override reducers with a session.
 
-    Call this once per session to enable visibility override events::
+    Note: Sessions automatically register visibility reducers on creation,
+    so calling this function manually is typically unnecessary. It is safe
+    to call multiple times as it will not add duplicate registrations.
+
+    Usage::
 
         session = Session(bus=bus)
-        register_visibility_reducers(session)
 
-        # Now you can dispatch visibility override events
+        # Reducers are already registered - just dispatch events
         session.mutate(VisibilityOverrides).dispatch(
             SetVisibilityOverride(path=("section",), visibility=SectionVisibility.SUMMARY)
         )
 
     """
     session.mutate(VisibilityOverrides).register(
-        SetVisibilityOverride, _set_override_reducer
+        SetVisibilityOverride, set_visibility_override_reducer
     )
     session.mutate(VisibilityOverrides).register(
-        ClearVisibilityOverride, _clear_override_reducer
+        ClearVisibilityOverride, clear_visibility_override_reducer
     )
     session.mutate(VisibilityOverrides).register(
-        ClearAllVisibilityOverrides, _clear_all_reducer
+        ClearAllVisibilityOverrides, clear_all_visibility_overrides_reducer
     )
 
 
@@ -197,6 +203,9 @@ __all__ = [
     "ClearVisibilityOverride",
     "SetVisibilityOverride",
     "VisibilityOverrides",
+    "clear_all_visibility_overrides_reducer",
+    "clear_visibility_override_reducer",
     "get_session_visibility_override",
     "register_visibility_reducers",
+    "set_visibility_override_reducer",
 ]

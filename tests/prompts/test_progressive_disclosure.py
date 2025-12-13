@@ -28,7 +28,6 @@ from weakincentives.prompt import (
     SetVisibilityOverride,
     VisibilityExpansionRequired,
     VisibilityOverrides,
-    register_visibility_reducers,
 )
 from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.progressive_disclosure import (
@@ -161,7 +160,6 @@ def test_has_summarized_sections_with_overrides() -> None:
     # With override to FULL via session state, no summarized sections
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    register_visibility_reducers(session)
     session.mutate(VisibilityOverrides).dispatch(
         SetVisibilityOverride(path=("sec",), visibility=SectionVisibility.FULL)
     )
@@ -197,7 +195,6 @@ def test_compute_current_visibility_with_overrides() -> None:
 
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    register_visibility_reducers(session)
     session.mutate(VisibilityOverrides).dispatch(
         SetVisibilityOverride(path=("sec",), visibility=SectionVisibility.FULL)
     )

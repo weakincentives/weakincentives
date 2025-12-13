@@ -27,7 +27,6 @@ from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.visibility_overrides import (
     SetVisibilityOverride,
     VisibilityOverrides,
-    register_visibility_reducers,
 )
 from .events._types import ControlBus
 from .session import Session
@@ -210,9 +209,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
             (except VisibilityExpansionRequired which is handled internally).
         """
         session = self.create_session()
-        # Register visibility reducers to enable session-managed visibility overrides
-        register_visibility_reducers(session)
-
         prompt = self.create_prompt(request)
 
         effective_budget = budget if budget is not None else self._config.budget
@@ -275,7 +271,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             failed = MainLoopFailed(
                 request_id=request_event.request_id,
                 error=exc,
-                session_id=self.create_session().session_id,
+                session_id=None,
             )
             _ = self._bus.publish(failed)
             raise

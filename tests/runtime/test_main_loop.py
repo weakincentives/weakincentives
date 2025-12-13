@@ -410,23 +410,7 @@ def test_handle_request_publishes_failed_event_and_reraises_on_error() -> None:
     assert len(failed_events) == 1
     assert failed_events[0].request_id == request.request_id
     assert failed_events[0].error is error
-    assert failed_events[0].session_id is not None
-
-
-def test_handle_request_failed_event_has_session_id_when_session_created() -> None:
-    """MainLoopFailed includes session_id when session was created."""
-    bus = InProcessEventBus()
-    error = RuntimeError("adapter failure")
-    adapter = _MockAdapter(error=error)
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    failed_events: list[MainLoopFailed] = []
-    bus.subscribe(MainLoopFailed, lambda e: failed_events.append(e))
-    request = MainLoopRequest(request=_Request(message="hello"))
-    with pytest.raises(RuntimeError):
-        loop.handle_request(request)
-
-    assert failed_events[0].session_id == loop.session_created.session_id  # type: ignore[union-attr]
+    assert failed_events[0].session_id is None
 
 
 def test_handle_request_budget_overrides_config() -> None:

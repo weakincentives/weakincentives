@@ -67,10 +67,17 @@ def _normalize_tags(
 def normalize_snapshot_state(
     state: Mapping[SessionSliceType, SessionSlice],
 ) -> SnapshotState:
-    """Validate snapshot state and return an immutable copy."""
+    """Validate snapshot state and return an immutable copy.
+
+    Empty slices (those with no values) are excluded from the result.
+    """
 
     normalized: dict[SessionSliceType, SessionSlice] = {}
     for slice_key, values in state.items():
+        if not values:
+            # Skip empty slices (e.g., registered reducers with no data)
+            continue
+
         if not _is_dataclass_type(slice_key):
             raise ValueError("Slice keys must be dataclass types")
 

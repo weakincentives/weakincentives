@@ -27,7 +27,6 @@ from weakincentives.prompt import (
     SupportsDataclass,
     Tool,
     VisibilityOverrides,
-    register_visibility_reducers,
 )
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.rendering import PromptRenderer
@@ -371,7 +370,6 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
     # but the open_sections tool is injected for progressive disclosure
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    register_visibility_reducers(session)
     session.mutate(VisibilityOverrides).dispatch(
         SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.SUMMARY)
     )
@@ -423,7 +421,6 @@ def test_summary_visibility_skips_child_sections() -> None:
     # With SUMMARY visibility on parent via session state, child is skipped
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    register_visibility_reducers(session)
     session.mutate(VisibilityOverrides).dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
@@ -483,7 +480,6 @@ def test_summary_visibility_skips_child_tools() -> None:
     # The open_sections tool is injected for progressive disclosure.
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    register_visibility_reducers(session)
     session.mutate(VisibilityOverrides).dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
@@ -531,7 +527,6 @@ def test_summary_visibility_default_excludes_tools() -> None:
     # Override to FULL via session state includes tools
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    register_visibility_reducers(session)
     session.mutate(VisibilityOverrides).dispatch(
         SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.FULL)
     )
@@ -595,7 +590,6 @@ def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
     # With SUMMARY visibility on parent via session state, child is skipped but sibling is rendered
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    register_visibility_reducers(session)
     session.mutate(VisibilityOverrides).dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )

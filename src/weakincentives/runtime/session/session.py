@@ -200,6 +200,7 @@ class Session(SessionProtocol):
         if parent is not None:
             parent._register_child(self)
         self._attach_to_bus(self._bus)
+        self._register_builtin_reducers()
 
     @contextmanager
     def locked(self) -> Iterator[None]:
@@ -235,7 +236,12 @@ class Session(SessionProtocol):
             ),
         )
 
+        # Copy non-builtin reducers from original session.
+        # Builtin reducers (visibility overrides) are already registered by __init__.
         for data_type, registrations in reducer_snapshot:
+            if data_type in clone._reducers:
+                # Skip event types already registered by __init__
+                continue
             for registration in registrations:
                 clone.mutation_register_reducer(
                     data_type,
@@ -688,6 +694,43 @@ class Session(SessionProtocol):
             bus.subscribe(ToolInvoked, self._on_tool_invoked)
             bus.subscribe(PromptExecuted, self._on_prompt_executed)
             bus.subscribe(PromptRendered, self._on_prompt_rendered)
+
+    def _register_builtin_reducers(self) -> None:
+        """Register built-in reducers for prompt visibility overrides.
+
+        Called once during Session initialization. Safe to call multiple times
+        as it guards against re-registration.
+        """
+        from ...prompt.visibility_overrides import (
+            ClearAllVisibilityOverrides,
+            ClearVisibilityOverride,
+            SetVisibilityOverride,
+            VisibilityOverrides,
+            clear_all_visibility_overrides_reducer,
+            clear_visibility_override_reducer,
+            set_visibility_override_reducer,
+        )
+
+        # Guard against re-registration (e.g., during clone)
+        with self.locked():
+            if SetVisibilityOverride in self._reducers:
+                return
+
+        self.mutation_register_reducer(
+            SetVisibilityOverride,
+            set_visibility_override_reducer,
+            slice_type=VisibilityOverrides,
+        )
+        self.mutation_register_reducer(
+            ClearVisibilityOverride,
+            clear_visibility_override_reducer,
+            slice_type=VisibilityOverrides,
+        )
+        self.mutation_register_reducer(
+            ClearAllVisibilityOverrides,
+            clear_all_visibility_overrides_reducer,
+            slice_type=VisibilityOverrides,
+        )
 
 
 __all__ = [

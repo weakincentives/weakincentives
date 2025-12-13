@@ -35,7 +35,6 @@ from weakincentives.prompt import (
     ToolResult,
     VisibilityExpansionRequired,
     VisibilityOverrides,
-    register_visibility_reducers,
 )
 from weakincentives.prompt.errors import SectionPath
 from weakincentives.runtime.session import Session
@@ -202,7 +201,6 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
 
     prompt = Prompt(prompt_template).bind(params)
     session = Session()
-    register_visibility_reducers(session)
 
     max_expansions = 5
     expansion_count = 0
@@ -275,7 +273,6 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
 
     prompt = Prompt(prompt_template).bind(params)
     session = Session()
-    register_visibility_reducers(session)
 
     max_iterations = 5
     iteration = 0

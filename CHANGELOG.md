@@ -6,28 +6,48 @@ Release highlights for weakincentives.
 
 ### Breaking Changes
 
+- **Visibility overrides now managed via Session state**: The `visibility_overrides`
+  parameter has been removed from all adapter `evaluate()` methods. Use the
+  `VisibilityOverrides` session state slice instead:
+
+  ```python
+  from weakincentives.prompt import SetVisibilityOverride, VisibilityOverrides
+
+  session.mutate(VisibilityOverrides).dispatch(
+      SetVisibilityOverride(path=("section",), visibility=SectionVisibility.FULL)
+  )
+  response = adapter.evaluate(prompt, session=session)
+  ```
+
 - **Moved tools to `weakincentives.contrib.tools`**: All domain-specific tools
-  (Planning, VFS, Asteval, Podman, workspace digest) are now in the `contrib`
-  package. Import paths change:
+  (Planning, VFS, Asteval, Podman, workspace digest) moved to the `contrib`
+  package. Update imports accordingly.
 
-  - `from weakincentives.tools import ...` → `from weakincentives.contrib.tools import ...`
-  - `from weakincentives.tools.planning import ...` → `from weakincentives.contrib.tools.planning import ...`
-
-- **Moved `WorkspaceDigestOptimizer` to `weakincentives.contrib.optimizers`**:
-
-  - `from weakincentives.optimizers import WorkspaceDigestOptimizer` → `from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer`
+- **Moved `WorkspaceDigestOptimizer` to `weakincentives.contrib.optimizers`**.
 
 - **Moved error types to root module**: `DeadlineExceededError` and
-  `ToolValidationError` are now exported from `weakincentives` directly:
+  `ToolValidationError` are now exported from `weakincentives` directly.
 
-  - `from weakincentives.tools import DeadlineExceededError` → `from weakincentives import DeadlineExceededError`
-  - `from weakincentives.tools.errors import ToolValidationError` → `from weakincentives import ToolValidationError`
+### Session
+
+- `Session` now automatically registers visibility override reducers. Visibility
+  events (`SetVisibilityOverride`, `ClearVisibilityOverride`,
+  `ClearAllVisibilityOverrides`) work out of the box without manual setup.
+
+### Prompts & Visibility
+
+- Visibility selectors and enabled predicates now accept an optional `session`
+  keyword-only parameter for dynamic visibility based on session state.
+
+- Added `VisibilityOverrides` session state slice with Redux-style events.
+
+- Added `get_session_visibility_override(session, path)` helper.
 
 ### Architecture
 
-- Library now organized as "core primitives" + "batteries for specific agent styles":
+- Library organized as "core primitives" + "batteries":
   - **Core** (`weakincentives.*`): Prompt composition, sessions, adapters, serde, dbc
-  - **Contrib** (`weakincentives.contrib.*`): Planning tools, VFS, Podman, asteval, workspace optimizers
+  - **Contrib** (`weakincentives.contrib.*`): Planning, VFS, Podman, asteval, optimizers
 
 ## v0.13.0 - 2025-12-07
 

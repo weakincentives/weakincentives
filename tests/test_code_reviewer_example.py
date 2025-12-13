@@ -334,9 +334,12 @@ def test_dump_session_skips_empty_session(
     caplog: pytest.LogCaptureFixture,
     _redirect_snapshots: Path,
 ) -> None:
+    """Sessions with no data (only empty slices) skip snapshot dump."""
     caplog.set_level(logging.INFO, logger="weakincentives.debug")
     session = Session()
 
+    # Sessions have builtin reducers registered but no data
+    # Empty slices are excluded from snapshots, so this should be skipped
     snapshot_path = dump_session(session, _redirect_snapshots)
 
     assert snapshot_path is None

@@ -69,7 +69,8 @@ def make_snapshot_payload_with_slice_mutation(**entry_overrides: object) -> str:
 
 def test_normalize_snapshot_state_validates_keys() -> None:
     with pytest.raises(ValueError):
-        normalize_snapshot_state(cast(SnapshotState, {"not a type": ()}))
+        # Use non-empty tuple since empty slices are now skipped
+        normalize_snapshot_state(cast(SnapshotState, {"not a type": (object(),)}))
 
 
 def test_normalize_snapshot_state_rejects_nondataclass_values() -> None:
