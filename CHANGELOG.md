@@ -4,50 +4,112 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Claude Agent SDK Adapter
+
+A new adapter enables running WINK agents through Claude Code's agentic
+infrastructure, with full CLI capabilities and hermetic execution:
+
+```python
+from weakincentives.adapters import ClaudeAgentSDKAdapter, ClaudeAgentSDKModelConfig
+
+adapter = ClaudeAgentSDKAdapter(
+    model=ClaudeAgentSDKModelConfig(model="claude-sonnet-4-20250514"),
+)
+response = adapter.evaluate(prompt, session=session)
+```
+
+Key capabilities:
+
+- **Session synchronization**: Hook-based state sync keeps your WINK session
+  as the source of truth while Claude Code executes tools
+- **MCP tool bridging**: WINK tools are exposed to Claude Code via the Model
+  Context Protocol, enabling native tool execution
+- **Workspace mounting**: Mount directories into Claude Code's workspace with
+  configurable read/write permissions
+- **Isolation mode**: Run without affecting the host's `~/.claude` config
+  using ephemeral home directories
+- **Network policies**: Programmatic control over network access
+  (`no_network`, `api_only`, `with_domains`)
+
+### Session State Observers
+
+Sessions now support reactive observation of state changes, eliminating the
+need for polling:
+
+```python
+def on_plan_change(state: list[Plan]) -> None:
+    print(f"Plan updated: {len(state)} items")
+
+subscription = session.observe(Plan, on_plan_change)
+# ... later
+subscription.unsubscribe()
+```
+
+Observers are notified immediately after any mutation to their watched slice.
+
+### Session-Managed Visibility Overrides
+
+Visibility overrides are now managed through session state using Redux-style
+events:
+
+```python
+from weakincentives.prompt import SetVisibilityOverride, VisibilityOverrides
+
+session.mutate(VisibilityOverrides).dispatch(
+    SetVisibilityOverride(path=("section",), visibility=SectionVisibility.FULL)
+)
+response = adapter.evaluate(prompt, session=session)
+```
+
+Visibility selectors and enabled predicates now accept an optional `session`
+parameter for dynamic decisions based on session state:
+
+```python
+def dynamic_visibility(params: MyParams, *, session: Session) -> SectionVisibility:
+    state = session.query(MyState).latest()
+    return SectionVisibility.FULL if state and state.expanded else SectionVisibility.SUMMARY
+```
+
+Sessions automatically register visibility reducers—no manual setup required.
+
 ### Breaking Changes
 
-- **Visibility overrides now managed via Session state**: The `visibility_overrides`
+- **Visibility overrides moved to Session state**: The `visibility_overrides`
   parameter has been removed from all adapter `evaluate()` methods. Use the
-  `VisibilityOverrides` session state slice instead:
+  `VisibilityOverrides` session state slice instead (see above).
+
+- **Tools relocated to `weakincentives.contrib.tools`**: Planning, VFS,
+  Asteval, Podman, and workspace digest tools now live in the `contrib`
+  package. Update imports:
 
   ```python
-  from weakincentives.prompt import SetVisibilityOverride, VisibilityOverrides
+  # Before
+  from weakincentives.tools import PlanningToolsSection, VfsToolsSection
 
-  session.mutate(VisibilityOverrides).dispatch(
-      SetVisibilityOverride(path=("section",), visibility=SectionVisibility.FULL)
-  )
-  response = adapter.evaluate(prompt, session=session)
+  # After
+  from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection
   ```
 
-- **Moved tools to `weakincentives.contrib.tools`**: All domain-specific tools
-  (Planning, VFS, Asteval, Podman, workspace digest) moved to the `contrib`
-  package. Update imports accordingly.
+- **Optimizer relocated to `weakincentives.contrib.optimizers`**: The
+  `WorkspaceDigestOptimizer` moved to the contrib package.
 
-- **Moved `WorkspaceDigestOptimizer` to `weakincentives.contrib.optimizers`**.
-
-- **Moved error types to root module**: `DeadlineExceededError` and
-  `ToolValidationError` are now exported from `weakincentives` directly.
-
-### Session
-
-- `Session` now automatically registers visibility override reducers. Visibility
-  events (`SetVisibilityOverride`, `ClearVisibilityOverride`,
-  `ClearAllVisibilityOverrides`) work out of the box without manual setup.
-
-### Prompts & Visibility
-
-- Visibility selectors and enabled predicates now accept an optional `session`
-  keyword-only parameter for dynamic visibility based on session state.
-
-- Added `VisibilityOverrides` session state slice with Redux-style events.
-
-- Added `get_session_visibility_override(session, path)` helper.
+- **Error types now at root**: `DeadlineExceededError` and
+  `ToolValidationError` are now exported directly from `weakincentives`.
 
 ### Architecture
 
-- Library organized as "core primitives" + "batteries":
-  - **Core** (`weakincentives.*`): Prompt composition, sessions, adapters, serde, dbc
-  - **Contrib** (`weakincentives.contrib.*`): Planning, VFS, Podman, asteval, optimizers
+The library is now organized as "core primitives" + "batteries for specific
+agent styles":
+
+- **Core** (`weakincentives.*`): Prompt composition, sessions, adapters, serde,
+  design-by-contract—the minimal essential abstractions
+- **Contrib** (`weakincentives.contrib.*`): Planning, VFS, Podman, asteval,
+  workspace digest optimizer—optional domain-specific utilities
+
+### Wink Debugger
+
+- Slice list now displays class names instead of full module paths for
+  improved readability
 
 ## v0.13.0 - 2025-12-07
 
