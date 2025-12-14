@@ -141,6 +141,7 @@ Consult these specs before modifying related code:
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
 | `specs/HOSTED_TOOLS.md` | Provider-executed tools (web search, code interpreter) |
+| `specs/LEDGER.md` | Append-only event log, session reconstruction, persistence |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
 | `specs/PROMPTS.md` | Prompt system, composition, structured output |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |

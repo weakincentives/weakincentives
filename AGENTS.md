@@ -87,6 +87,8 @@ a goal at any time.
   modules.
 - **HOSTED_TOOLS.md**: Provider-executed tools (web search, code interpreter)—
   when integrating provider-side capabilities.
+- **LEDGER.md**: Append-only event log for session reconstruction—when working
+  on session persistence or replay.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.
