@@ -80,6 +80,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `BudgetExceededError`: Exception raised when a budget limit is breached.
     - `BudgetTracker`: Thread-safe tracker for cumulative token usage against a Budget.
     - `Deadline`: Immutable value object describing a wall-clock expiration.
+    - `DeadlineExceededError`: Exception raised when a deadline expires during execution.
     - `FrozenDataclass`: Decorator providing immutable dataclass utilities (copy, asdict, normalization).
     - `JSONValue`: Type alias for JSON-compatible primitives, objects, and arrays.
     - `MarkdownSection`: Render markdown content using `string.Template`.
@@ -91,6 +92,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `ToolContext`: Immutable container exposing prompt execution state to handlers.
     - `ToolHandler`: Callable protocol implemented by tool handlers.
     - `ToolResult`: Structured response emitted by a tool handler.
+    - `ToolValidationError`: Exception raised when tool parameter validation fails.
     - `WinkError`: Base class for all weakincentives exceptions.
     - `configure_logging`: Configure the root logger with sensible defaults.
     - `get_logger`: Return a `StructuredLogger` scoped to a name.

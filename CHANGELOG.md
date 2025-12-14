@@ -2,7 +2,7 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.14.0 - 2025-12-14
 
 ### Claude Agent SDK Adapter
 
@@ -106,10 +106,27 @@ agent styles":
 - **Contrib** (`weakincentives.contrib.*`): Planning, VFS, Podman, asteval,
   workspace digest optimizer—optional domain-specific utilities
 
+### Planning Tools
+
+- Planning mutation tools (`setup_plan`, `add_step`, `update_step`) now return
+  the full `Plan` snapshot instead of echoing the input event, providing
+  immediate visibility into the updated plan state after each mutation.
+
+### Bug Fixes
+
+- Fixed Claude Agent SDK tool bridge not respecting `exclude_value_from_context`
+  flag on `ToolResult`, which could spill large datasets into model context.
+
 ### Wink Debugger
 
 - Slice list now displays class names instead of full module paths for
-  improved readability
+  improved readability.
+
+### Specifications
+
+- Added `SESSION_ANNOTATIONS.md` spec defining annotation system for
+  dataclasses stored in session snapshots (field annotations via metadata dict,
+  slice annotations via `__slice_meta__` class attribute).
 
 ## v0.13.0 - 2025-12-07
 
