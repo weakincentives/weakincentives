@@ -43,10 +43,14 @@ Optional extras enable specific providers or tooling:
 
 - `pip install "weakincentives[openai]"` for the OpenAI adapter.
 - `pip install "weakincentives[litellm]"` for the LiteLLM adapter.
+- `pip install "weakincentives[claude-agent-sdk]"` for the Claude Agent SDK adapter.
 - `pip install "weakincentives[asteval]"` to enable the sandboxed Python eval
   tool.
 - `pip install "weakincentives[podman]"` for Podman-based sandboxes.
 - `pip install "weakincentives[wink]"` for the demo CLI (`wink`).
+
+The Claude Agent SDK adapter also requires the Claude Code CLI:
+`npm install -g @anthropic-ai/claude-code`
 
 ## Key Concepts
 
@@ -94,7 +98,7 @@ Optional extras enable specific providers or tooling:
   - Modules: `adapters`, `cli`, `deadlines`, `debug`, `optimizers`, `prompt`,
     `runtime`, `serde`, `tools`, `types`.
 - `weakincentives.adapters`: Provider integrations, configuration, and throttling primitives.
-  - Constants: `LITELLM_ADAPTER_NAME`, `OPENAI_ADAPTER_NAME`.
+  - Constants: `CLAUDE_AGENT_SDK_ADAPTER_NAME`, `LITELLM_ADAPTER_NAME`, `OPENAI_ADAPTER_NAME`.
   - Types:
     - `AdapterName`: Type alias for adapter names.
     - `PromptEvaluationError`: Raised when evaluation against a provider fails.
@@ -109,7 +113,21 @@ Optional extras enable specific providers or tooling:
     - `OpenAIModelConfig`: OpenAI-specific model configuration extending LLMConfig.
     - `LiteLLMClientConfig`: Configuration for LiteLLM client instantiation.
     - `LiteLLMModelConfig`: LiteLLM-specific model configuration extending LLMConfig.
+    - `ClaudeAgentSDKClientConfig`: Configuration for Claude Agent SDK (permission_mode, cwd, max_turns, isolation).
+    - `ClaudeAgentSDKModelConfig`: Claude Agent SDK model configuration extending LLMConfig.
   - Factory: `new_throttle_policy`: Factory for creating throttle policies.
+  - Claude Agent SDK Isolation (`weakincentives.adapters.claude_agent_sdk`):
+    - `IsolationConfig`: Hermetic isolation configuration (network_policy, sandbox, env, api_key).
+    - `NetworkPolicy`: Network access constraints (allowed_domains). Use `NetworkPolicy.no_network()` for API-only.
+    - `SandboxConfig`: OS-level sandboxing (enabled, writable_paths, readable_paths, bash_auto_allow).
+    - `EphemeralHome`: Temporary HOME directory for isolation (auto-created when IsolationConfig is set).
+    - `PermissionMode`: Literal type for SDK permission levels ("default", "acceptEdits", "plan", "bypassPermissions").
+  - Claude Agent SDK Workspace (`weakincentives.adapters.claude_agent_sdk`):
+    - `ClaudeAgentWorkspaceSection`: Section that materializes host files into a temp directory for SDK access.
+    - `HostMount`: Configuration for mounting host paths (host_path, mount_path, include_glob, exclude_glob, max_bytes).
+    - `HostMountPreview`: Preview of mount contents before materialization.
+    - `WorkspaceBudgetExceededError`: Raised when mount exceeds max_bytes.
+    - `WorkspaceSecurityError`: Raised when accessing paths outside allowed_host_roots.
 - `weakincentives.prompt`: Prompt authoring, rendering, and override helpers.
   - Authoring:
     - `PromptTemplate`: Immutable prompt blueprint with sections (import from here).
@@ -470,6 +488,110 @@ adapter = OpenAIAdapter(
 
 # LiteLLM for multi-provider support
 adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")  # Any LiteLLM model
+```
+
+### Claude Agent SDK adapter
+
+The Claude Agent SDK adapter provides Claude's full agentic capabilities through
+the official `claude-agent-sdk` package. Unlike OpenAI/LiteLLM adapters, this runs
+Claude Code as a subprocess with native tools (Read, Write, Bash, Glob, Grep).
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    ClaudeAgentWorkspaceSection,
+    HostMount,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
+)
+
+# Create workspace section that materializes host files
+workspace = ClaudeAgentWorkspaceSection(
+    session=session,
+    mounts=(
+        HostMount(
+            host_path="/path/to/project",
+            mount_path="project",
+            include_glob=("*.py", "*.md"),
+            exclude_glob=("*.pyc", "__pycache__/*"),
+            max_bytes=5_000_000,
+        ),
+    ),
+    allowed_host_roots=("/path/to",),
+)
+
+# Configure with hermetic isolation
+adapter = ClaudeAgentSDKAdapter(
+    model="claude-sonnet-4-5-20250929",
+    client_config=ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",  # Auto-approve all tools
+        cwd=str(workspace.temp_dir),          # Working directory
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),  # API-only access
+            sandbox=SandboxConfig(
+                enabled=True,
+                readable_paths=(str(workspace.temp_dir),),
+            ),
+        ),
+    ),
+)
+
+# Evaluate prompt (add workspace section to prompt template)
+response = adapter.evaluate(prompt, session=session)
+
+# Clean up temp directory when done
+workspace.cleanup()
+```
+
+#### Isolation modes
+
+```python
+# Minimal isolation (development)
+adapter = ClaudeAgentSDKAdapter(model="claude-sonnet-4-5-20250929")
+
+# Hermetic with specific domains (documentation access)
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy(
+                allowed_domains=("docs.python.org", "peps.python.org"),
+            ),
+            sandbox=SandboxConfig(enabled=True),
+        ),
+    ),
+)
+
+# Full lockdown (sensitive data)
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),
+            sandbox=SandboxConfig(enabled=True),
+            include_host_env=False,  # Don't inherit environment
+        ),
+    ),
+)
+```
+
+#### MCP tool bridging
+
+Custom weakincentives tools with handlers are automatically bridged to the SDK via
+MCP servers. The adapter creates an MCP server for tools from prompt sections:
+
+```python
+from weakincentives.contrib.tools import PlanningToolsSection
+
+# Planning tools are bridged as MCP tools
+template = PromptTemplate[Result](
+    ns="app", key="agent",
+    sections=(
+        MarkdownSection(title="Task", template="...", key="task"),
+        PlanningToolsSection(session=session),  # setup_plan, add_step, etc.
+        workspace,  # No tools - just provides workspace info
+    ),
+)
 ```
 
 ### ProviderAdapter.evaluate() signature
