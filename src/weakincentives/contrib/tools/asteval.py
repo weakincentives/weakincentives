@@ -32,6 +32,7 @@ from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
+from ...runtime.annotations import SliceMeta, register_annotations
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import (
     ReducerContextProtocol,
@@ -182,34 +183,48 @@ class EvalFileWrite:
 class EvalParams:
     """Parameter payload passed to the Python evaluation tool."""
 
+    __slice_meta__ = SliceMeta(
+        label="Eval Parameters",
+        description="Parameter payload passed to the Python evaluation tool.",
+        icon="code",
+    )
+
     code: str = field(
-        metadata={"description": "Python script to execute (<=2,000 characters)."}
+        metadata={
+            "display": "primary",
+            "format": "code",
+            "description": "Python script to execute (<=2,000 characters).",
+        }
     )
     globals: dict[str, str] = field(
         default_factory=_str_dict_factory,
         metadata={
+            "display": "secondary",
+            "format": "json",
             "description": (
                 "Mapping of global variable names to JSON-encoded strings. The "
                 "payload is decoded before execution."
-            )
+            ),
         },
     )
     reads: tuple[EvalFileRead, ...] = field(
         default_factory=tuple,
         metadata={
+            "display": "secondary",
             "description": (
                 "Files to load into the VFS before execution. Each entry is "
                 "available to helper utilities."
-            )
+            ),
         },
     )
     writes: tuple[EvalFileWrite, ...] = field(
         default_factory=tuple,
         metadata={
+            "display": "secondary",
             "description": (
                 "Files to write after execution completes. These mirror calls to "
                 "`write_text`."
-            )
+            ),
         },
     )
 
@@ -218,40 +233,60 @@ class EvalParams:
 class EvalResult:
     """Structured result produced by the Python evaluation tool."""
 
+    __slice_meta__ = SliceMeta(
+        label="Eval Result",
+        description="Structured result produced by the Python evaluation tool.",
+        icon="terminal",
+    )
+
     value_repr: str | None = field(
         metadata={
+            "display": "primary",
+            "format": "code",
             "description": (
                 "String representation of the final expression result. Null when "
                 "no value was produced."
-            )
+            ),
         }
     )
     stdout: str = field(
         metadata={
+            "display": "primary",
+            "format": "code",
             "description": (
                 "Captured standard output stream, truncated to 4,096 characters."
-            )
+            ),
         }
     )
     stderr: str = field(
         metadata={
+            "display": "primary",
+            "format": "code",
             "description": (
                 "Captured standard error stream, truncated to 4,096 characters."
-            )
+            ),
         }
     )
     globals: dict[str, str] = field(
         metadata={
+            "display": "secondary",
+            "format": "json",
             "description": (
                 "JSON-serialisable globals returned from the sandbox after execution."
-            )
+            ),
         }
     )
     reads: tuple[EvalFileRead, ...] = field(
-        metadata={"description": "File read requests fulfilled during execution."}
+        metadata={
+            "display": "secondary",
+            "description": "File read requests fulfilled during execution.",
+        }
     )
     writes: tuple[EvalFileWrite, ...] = field(
-        metadata={"description": "File write operations requested by the code."}
+        metadata={
+            "display": "secondary",
+            "description": "File write operations requested by the code.",
+        }
     )
 
     def render(self) -> str:
@@ -1094,3 +1129,7 @@ __all__ = [
     "parse_eval_globals",
     "summarize_eval_writes",
 ]
+
+# Register annotations at module import time
+register_annotations(EvalParams)
+register_annotations(EvalResult)

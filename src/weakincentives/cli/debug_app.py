@@ -34,6 +34,11 @@ from markdown_it import MarkdownIt
 
 from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
+from ..runtime.annotations import (
+    SliceAnnotations,
+    is_header_line,
+    parse_header,
+)
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.snapshots import (
     Snapshot,
@@ -47,6 +52,9 @@ from ..types import JSONValue
 logger: StructuredLogger = get_logger(__name__)
 
 _MARKDOWN_WRAPPER_KEY = "__markdown__"
+
+# Heuristic patterns for backward-compatible markdown detection.
+# Used as fallback when annotations are not available.
 _MARKDOWN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(^|\n)#{1,6}\s"),
     re.compile(r"(^|\n)[-*+]\s"),
@@ -57,6 +65,7 @@ _MARKDOWN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\*\*[^\s].+?\*\*"),
 )
 _MIN_MARKDOWN_LENGTH = 16
+
 _markdown = MarkdownIt("commonmark", {"linkify": True})
 
 # pyright: reportUnusedFunction=false
@@ -67,6 +76,10 @@ class SnapshotLoadError(WinkError, RuntimeError):
 
 
 def _looks_like_markdown(text: str) -> bool:
+    """Heuristic check for markdown content.
+
+    Used as a fallback when annotation-based detection is unavailable.
+    """
     candidate = text.strip()
     if len(candidate) < _MIN_MARKDOWN_LENGTH:
         return False
@@ -80,9 +93,81 @@ def _render_markdown(text: str) -> Mapping[str, str]:
     }
 
 
-def _render_markdown_values(value: JSONValue) -> JSONValue:
+def _should_render_as_markdown(
+    value: str,
+    annotations: Mapping[str, SliceAnnotations] | None,
+    type_id: str | None,
+    field_path: tuple[str, ...],
+) -> bool:
+    """Determine if a string value should be rendered as markdown."""
+    # Check annotation-based detection
+    if annotations and type_id and field_path:
+        slice_ann = annotations.get(type_id)
+        if slice_ann:
+            field_name = field_path[-1]
+            field_ann = slice_ann.fields.get(field_name)
+            if field_ann and field_ann.format == "markdown":
+                return True
+        return False
+    # Fallback to heuristics when no annotations available
+    return not annotations and _looks_like_markdown(value)
+
+
+def _render_markdown_mapping(
+    mapping_value: Mapping[str, JSONValue],
+    annotations: Mapping[str, SliceAnnotations] | None,
+    type_id: str | None,
+    field_path: tuple[str, ...],
+) -> dict[str, JSONValue]:
+    """Recursively render markdown values in a mapping."""
+    normalized: dict[str, JSONValue] = {}
+
+    # Try to extract nested type identifier for recursive annotation lookup
+    nested_type_id = type_id
+    if "__type__" in mapping_value:
+        nested_type = mapping_value["__type__"]
+        if isinstance(nested_type, str):
+            nested_type_id = nested_type
+
+    for key, item in mapping_value.items():
+        if key == "__type__":
+            normalized[key] = item
+            continue
+        child_path = (*field_path, str(key))
+        normalized[str(key)] = _render_markdown_values(
+            item,
+            annotations=annotations,
+            type_id=nested_type_id,
+            field_path=child_path,
+        )
+    return normalized
+
+
+def _render_markdown_values(
+    value: JSONValue,
+    *,
+    annotations: Mapping[str, SliceAnnotations] | None = None,
+    type_id: str | None = None,
+    field_path: tuple[str, ...] = (),
+) -> JSONValue:
+    """Render markdown values using annotations when available.
+
+    When annotations are available and the field has format="markdown", the
+    content is wrapped for rendering. When annotations are not available
+    (e.g., for backward compatibility with old snapshot files), falls back
+    to heuristic detection.
+
+    Args:
+        value: The JSON value to process.
+        annotations: Parsed header annotations keyed by type identifier.
+        type_id: The current slice/item type identifier for annotation lookup.
+        field_path: Path of field names leading to this value.
+
+    Returns:
+        Transformed value with markdown fields wrapped.
+    """
     if isinstance(value, str):
-        if _looks_like_markdown(value):
+        if _should_render_as_markdown(value, annotations, type_id, field_path):
             return {_MARKDOWN_WRAPPER_KEY: _render_markdown(value)}
         return value
 
@@ -90,13 +175,18 @@ def _render_markdown_values(value: JSONValue) -> JSONValue:
         if _MARKDOWN_WRAPPER_KEY in value:
             return value
         mapping_value = cast(Mapping[str, JSONValue], value)
-        normalized: dict[str, JSONValue] = {}
-        for key, item in mapping_value.items():
-            normalized[str(key)] = _render_markdown_values(item)
-        return normalized
+        return _render_markdown_mapping(mapping_value, annotations, type_id, field_path)
 
     if isinstance(value, list):
-        return [_render_markdown_values(item) for item in value]
+        return [
+            _render_markdown_values(
+                item,
+                annotations=annotations,
+                type_id=type_id,
+                field_path=field_path,
+            )
+            for item in value
+        ]
 
     return value
 
@@ -132,6 +222,15 @@ class LoadedSnapshot:
     raw_payload: Mapping[str, JSONValue]
     raw_text: str
     path: Path
+    annotations: Mapping[str, SliceAnnotations] = MappingProxyType({})
+
+
+@FrozenDataclass()
+class LoadResult:
+    """Result of loading a snapshot file including header annotations."""
+
+    entries: tuple[LoadedSnapshot, ...]
+    annotations: Mapping[str, SliceAnnotations]
 
 
 SnapshotLoader = Callable[[Path], tuple[LoadedSnapshot, ...]]
@@ -139,6 +238,12 @@ SnapshotLoader = Callable[[Path], tuple[LoadedSnapshot, ...]]
 
 def load_snapshot(snapshot_path: Path) -> tuple[LoadedSnapshot, ...]:
     """Load and validate one or more snapshots from disk."""
+    result = load_snapshot_with_annotations(snapshot_path)
+    return result.entries
+
+
+def load_snapshot_with_annotations(snapshot_path: Path) -> LoadResult:
+    """Load and validate snapshots with annotation header parsing."""
 
     if not snapshot_path.exists():
         msg = f"Snapshot file not found: {snapshot_path}"
@@ -150,25 +255,59 @@ def load_snapshot(snapshot_path: Path) -> tuple[LoadedSnapshot, ...]:
         msg = f"Snapshot file cannot be read: {snapshot_path}"
         raise SnapshotLoadError(msg) from error
 
+    # Extract lines, detecting and parsing header
+    lines, annotations = _extract_snapshot_lines(raw_text)
+
     entries: list[LoadedSnapshot] = []
-    for line_number, line in _extract_snapshot_lines(raw_text):
-        entries.append(_load_snapshot_line(line, line_number, snapshot_path))
+    for line_number, line in lines:
+        snapshot = _load_snapshot_line(line, line_number, snapshot_path)
+        # Attach annotations to each snapshot
+        snapshot_with_annotations = LoadedSnapshot(
+            meta=snapshot.meta,
+            slices=snapshot.slices,
+            raw_payload=snapshot.raw_payload,
+            raw_text=snapshot.raw_text,
+            path=snapshot.path,
+            annotations=annotations,
+        )
+        entries.append(snapshot_with_annotations)
 
     if not entries:
         msg = f"Snapshot file contained no entries: {snapshot_path}"
         raise SnapshotLoadError(msg)
 
-    return tuple(entries)
+    return LoadResult(entries=tuple(entries), annotations=annotations)
 
 
-def _extract_snapshot_lines(raw_text: str) -> list[tuple[int, str]]:
+def _extract_snapshot_lines(
+    raw_text: str,
+) -> tuple[list[tuple[int, str]], Mapping[str, SliceAnnotations]]:
+    """Extract snapshot lines and parse header if present.
+
+    Returns:
+        Tuple of (lines excluding header, parsed annotations).
+    """
     lines: list[tuple[int, str]] = []
+    annotations: Mapping[str, SliceAnnotations] = MappingProxyType({})
+
     for index, line in enumerate(raw_text.splitlines(), start=1):
         stripped = line.strip()
         if not stripped:
             continue
+
+        # Check for header line (only on first non-empty line)
+        if not lines and is_header_line(stripped):
+            try:
+                header_data = json.loads(stripped)
+                annotations = parse_header(header_data)
+            except json.JSONDecodeError:
+                # If header parsing fails, treat as regular line
+                lines.append((index, stripped))
+            continue
+
         lines.append((index, stripped))
-    return lines
+
+    return lines, annotations
 
 
 def _slice_lookup(
@@ -285,6 +424,11 @@ class SnapshotStore:
     @property
     def entries(self) -> tuple[LoadedSnapshot, ...]:
         return self._entries
+
+    @property
+    def annotations(self) -> Mapping[str, SliceAnnotations]:
+        """Return annotations from the current snapshot."""
+        return self._current.annotations
 
     def list_snapshots(self) -> list[Mapping[str, JSONValue]]:
         snapshots: list[tuple[float, Path]] = []
@@ -490,7 +634,17 @@ class _DebugAppHandlers:
         items = self._paginate_items(
             list(slice_items.items), offset=offset, limit=limit
         )
-        rendered_items = [_render_markdown_values(item) for item in items]
+        # Get annotations from store for markdown rendering
+        annotations = self._store.annotations
+        item_type_id = slice_items.item_type
+        rendered_items = [
+            _render_markdown_values(
+                item,
+                annotations=annotations,
+                type_id=item_type_id,
+            )
+            for item in items
+        ]
         return {
             "slice_type": slice_items.slice_type,
             "item_type": slice_items.item_type,

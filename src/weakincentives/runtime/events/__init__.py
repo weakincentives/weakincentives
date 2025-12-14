@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 from ...dataclasses import FrozenDataclass
+from ..annotations import SliceMeta, register_annotations
 from ..logging import StructuredLogger, get_logger
 from ._types import (
     ControlBus,
@@ -108,13 +109,60 @@ class InProcessEventBus:
 class PromptExecuted:
     """Event emitted after an adapter finishes evaluating a prompt."""
 
-    prompt_name: str
-    adapter: AdapterName
-    result: Any
-    session_id: UUID | None
-    created_at: datetime
-    usage: TokenUsage | None = None
-    event_id: UUID = field(default_factory=uuid4)
+    __slice_meta__ = SliceMeta(
+        label="Prompt Executed",
+        description="Event emitted after an adapter finishes evaluating a prompt.",
+        icon="message-square",
+        sort_key="created_at",
+        sort_order="desc",
+    )
+
+    prompt_name: str = field(
+        metadata={
+            "display": "primary",
+            "description": "Name of the prompt that was executed.",
+        }
+    )
+    adapter: AdapterName = field(
+        metadata={
+            "display": "secondary",
+            "description": "Adapter used for execution.",
+        }
+    )
+    result: Any = field(
+        metadata={
+            "display": "primary",
+            "format": "json",
+            "description": "Result returned from the adapter.",
+        }
+    )
+    session_id: UUID | None = field(
+        metadata={
+            "display": "secondary",
+            "description": "Session identifier for the execution.",
+        }
+    )
+    created_at: datetime = field(
+        metadata={
+            "display": "secondary",
+            "description": "Timestamp of execution completion.",
+        }
+    )
+    usage: TokenUsage | None = field(
+        default=None,
+        metadata={
+            "display": "secondary",
+            "format": "json",
+            "description": "Token usage statistics for the request.",
+        },
+    )
+    event_id: UUID = field(
+        default_factory=uuid4,
+        metadata={
+            "display": "hidden",
+            "description": "Unique identifier for this event.",
+        },
+    )
 
 
 @FrozenDataclass()
@@ -145,3 +193,8 @@ __all__ = [
     "TokenUsage",
     "ToolInvoked",
 ]
+
+# Register annotations at module import time
+register_annotations(PromptExecuted)
+register_annotations(PromptRendered)
+register_annotations(ToolInvoked)

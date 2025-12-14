@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 from ...dataclasses import FrozenDataclass
+from ..annotations import SliceMeta
 
 EventHandler = Callable[[object], None]
 
@@ -127,17 +128,89 @@ class TokenUsage:
 class ToolInvoked:
     """Event emitted after an adapter executes a tool handler."""
 
-    prompt_name: str
-    adapter: AdapterName
-    name: str
-    params: Any
-    result: Any
-    session_id: UUID | None
-    created_at: datetime
-    usage: TokenUsage | None = None
-    rendered_output: str = ""
-    call_id: str | None = None
-    event_id: UUID = field(default_factory=uuid4)
+    __slice_meta__ = SliceMeta(
+        label="Tool Invoked",
+        description="Event emitted after an adapter executes a tool handler.",
+        icon="wrench",
+        sort_key="created_at",
+        sort_order="desc",
+    )
+
+    prompt_name: str = field(
+        metadata={
+            "display": "secondary",
+            "description": "Name of the prompt containing the tool.",
+        }
+    )
+    adapter: AdapterName = field(
+        metadata={
+            "display": "hidden",
+            "description": "Adapter used for execution.",
+        }
+    )
+    name: str = field(
+        metadata={
+            "display": "primary",
+            "label": "Tool",
+            "description": "Name of the tool that was invoked.",
+        }
+    )
+    params: Any = field(
+        metadata={
+            "display": "primary",
+            "format": "json",
+            "description": "Parameters passed to the tool handler.",
+        }
+    )
+    result: Any = field(
+        metadata={
+            "display": "primary",
+            "format": "json",
+            "description": "Result returned by the tool handler.",
+        }
+    )
+    session_id: UUID | None = field(
+        metadata={
+            "display": "hidden",
+            "description": "Session identifier for the invocation.",
+        }
+    )
+    created_at: datetime = field(
+        metadata={
+            "display": "secondary",
+            "description": "Timestamp of tool invocation.",
+        }
+    )
+    usage: TokenUsage | None = field(
+        default=None,
+        metadata={
+            "display": "secondary",
+            "format": "json",
+            "description": "Token usage statistics if applicable.",
+        },
+    )
+    rendered_output: str = field(
+        default="",
+        metadata={
+            "display": "secondary",
+            "format": "text",
+            "description": "Rendered output from the tool result.",
+        },
+    )
+    call_id: str | None = field(
+        default=None,
+        metadata={
+            "display": "hidden",
+            "description": "Provider-assigned call identifier.",
+        },
+    )
+    event_id: UUID = field(
+        default_factory=uuid4,
+        metadata={
+            "display": "hidden",
+            "description": "Unique identifier for this event.",
+        },
+    )
 
 
 __all__ = [

@@ -28,6 +28,7 @@ from ...errors import ToolValidationError
 from ...prompt import SupportsDataclass, SupportsToolResult
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
+from ...runtime.annotations import SliceMeta, register_annotations
 from ...runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -80,36 +81,60 @@ class VfsPath:
 class VfsFile:
     """Snapshot of a single file stored in the virtual filesystem."""
 
+    __slice_meta__ = SliceMeta(
+        label="VFS File",
+        description="Snapshot of a single file stored in the virtual filesystem.",
+        icon="file-text",
+        sort_key="updated_at",
+        sort_order="desc",
+    )
+
     path: VfsPath = field(
-        metadata={"description": "Location of the file within the virtual filesystem."}
+        metadata={
+            "display": "primary",
+            "description": "Location of the file within the virtual filesystem.",
+        }
     )
     content: str = field(
         metadata={
+            "display": "primary",
+            "format": "code",
             "description": (
                 "UTF-8 text content of the file. Binary data is not supported."
-            )
+            ),
         }
     )
     encoding: FileEncoding = field(
-        metadata={"description": "Name of the codec used to decode the file contents."}
+        metadata={
+            "display": "hidden",
+            "description": "Name of the codec used to decode the file contents.",
+        }
     )
     size_bytes: int = field(
-        metadata={"description": "Size of the encoded file on disk, in bytes."}
+        metadata={
+            "display": "secondary",
+            "description": "Size of the encoded file on disk, in bytes.",
+        }
     )
     version: int = field(
         metadata={
+            "display": "secondary",
             "description": (
                 "Monotonic version counter that increments after each write."
-            )
+            ),
         }
     )
     created_at: datetime = field(
         metadata={
-            "description": "Timestamp indicating when the file was first created."
+            "display": "secondary",
+            "description": "Timestamp indicating when the file was first created.",
         }
     )
     updated_at: datetime = field(
-        metadata={"description": "Timestamp of the most recent write operation."}
+        metadata={
+            "display": "secondary",
+            "description": "Timestamp of the most recent write operation.",
+        }
     )
 
 
@@ -117,13 +142,21 @@ class VfsFile:
 class VirtualFileSystem:
     """Immutable snapshot of the virtual filesystem state."""
 
+    __slice_meta__ = SliceMeta(
+        label="Virtual Filesystem",
+        description="Immutable snapshot of the virtual filesystem state.",
+        icon="folder",
+    )
+
     files: tuple[VfsFile, ...] = field(
         default_factory=tuple,
         metadata={
+            "display": "primary",
+            "format": "json",
             "description": (
                 "Collection of tracked files. Each entry captures file metadata "
                 "and contents."
-            )
+            ),
         },
     )
 
@@ -1621,3 +1654,7 @@ __all__ = [
     "normalize_path",
     "normalize_string_path",
 ]
+
+# Register annotations at module import time
+register_annotations(VfsFile)
+register_annotations(VirtualFileSystem)

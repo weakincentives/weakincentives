@@ -700,3 +700,131 @@ def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None
     }
     assert config_calls["run_called"] is True
     assert infos[0]["event"] == "debug.server.start"
+
+
+def test_snapshot_with_header_parses_annotations(tmp_path: Path) -> None:
+    """Test that JSONL headers with annotations are parsed correctly."""
+    snapshot_path = tmp_path / "snapshot.jsonl"
+
+    # Create a header with annotations for _ExampleSlice
+    type_id = f"{_ExampleSlice.__module__}:{_ExampleSlice.__qualname__}"
+    header = {
+        "header": True,
+        "annotation_version": "1",
+        "slices": {
+            type_id: {
+                "label": "Example",
+                "fields": {
+                    "value": {
+                        "display": "primary",
+                        "format": "markdown",
+                    }
+                },
+            }
+        },
+    }
+
+    # Create snapshot with markdown content
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={_ExampleSlice: (_ExampleSlice("# Heading\n\n**bold**"),)},
+        tags={"session_id": "annotated"},
+    )
+
+    # Write header + snapshot
+    with dbc_enabled(False):
+        snapshot_path.write_text(json.dumps(header) + "\n" + snapshot.to_json())
+
+    loaded = debug_app.load_snapshot(snapshot_path)
+
+    # Verify annotations were loaded
+    assert len(loaded) == 1
+    assert loaded[0].annotations is not None
+    assert type_id in loaded[0].annotations
+
+    # Test via the API to ensure markdown rendering uses annotations
+    logger = debug_app.get_logger("test.annotations")
+    store = debug_app.SnapshotStore(
+        snapshot_path, loader=debug_app.load_snapshot, logger=logger
+    )
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
+    detail = client.get(f"/api/slices/{quote(slice_type)}").json()
+
+    # The value should be rendered as markdown due to annotations
+    item = detail["items"][0]["value"]
+    assert "__markdown__" in item
+    assert item["__markdown__"]["text"] == "# Heading\n\n**bold**"
+
+
+def test_header_json_decode_error_treated_as_content(tmp_path: Path) -> None:
+    """Test that invalid JSON header line is treated as content."""
+    snapshot_path = tmp_path / "snapshot.jsonl"
+
+    # Create an invalid JSON that looks like a header (starts with {"header":)
+    invalid_header = '{"header": true, invalid json'
+
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={_ExampleSlice: (_ExampleSlice("value"),)},
+        tags={"session_id": "fallback"},
+    )
+
+    with dbc_enabled(False):
+        snapshot_path.write_text(invalid_header + "\n" + snapshot.to_json())
+
+    # This should not raise, and should treat the invalid header as an error line
+    with pytest.raises(debug_app.SnapshotLoadError):
+        debug_app.load_snapshot(snapshot_path)
+
+
+def test_annotations_non_markdown_field_not_rendered(tmp_path: Path) -> None:
+    """Test that fields not annotated as markdown are not rendered."""
+    snapshot_path = tmp_path / "snapshot.jsonl"
+
+    # Create a header with annotations but format="text" (not markdown)
+    type_id = f"{_ExampleSlice.__module__}:{_ExampleSlice.__qualname__}"
+    header = {
+        "header": True,
+        "annotation_version": "1",
+        "slices": {
+            type_id: {
+                "label": "Example",
+                "fields": {
+                    "value": {
+                        "display": "primary",
+                        "format": "text",  # Not markdown!
+                    }
+                },
+            }
+        },
+    }
+
+    # Create snapshot with content that looks like markdown (has # Heading)
+    markdown_looking_content = "# Heading\n\n**bold**"
+    snapshot = Snapshot(
+        created_at=datetime.now(UTC),
+        slices={_ExampleSlice: (_ExampleSlice(markdown_looking_content),)},
+        tags={"session_id": "not-markdown"},
+    )
+
+    with dbc_enabled(False):
+        snapshot_path.write_text(json.dumps(header) + "\n" + snapshot.to_json())
+
+    # Test via the API
+    logger = debug_app.get_logger("test.not-markdown")
+    store = debug_app.SnapshotStore(
+        snapshot_path, loader=debug_app.load_snapshot, logger=logger
+    )
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
+    detail = client.get(f"/api/slices/{quote(slice_type)}").json()
+
+    # The value should NOT be rendered as markdown (format="text")
+    item = detail["items"][0]["value"]
+    # Should be the raw string, not a markdown object
+    assert item == markdown_looking_content

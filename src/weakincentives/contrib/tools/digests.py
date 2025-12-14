@@ -21,6 +21,7 @@ from ...dataclasses import FrozenDataclass
 from ...prompt._types import SupportsDataclass
 from ...prompt._visibility import SectionVisibility
 from ...prompt.section import Section
+from ...runtime.annotations import SliceMeta, register_annotations
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
 from ...runtime.session.protocols import SessionProtocol
@@ -29,6 +30,12 @@ from ...runtime.session.protocols import SessionProtocol
 @FrozenDataclass()
 class WorkspaceDigest(SupportsDataclass):
     """Digest entry persisted within a :class:`Session` slice."""
+
+    __slice_meta__ = SliceMeta(
+        label="Workspace Digest",
+        description="Cached workspace section content for prompt optimization.",
+        icon="file-text",
+    )
 
     section_key: str
     body: str
@@ -188,3 +195,6 @@ __all__ = [
     "latest_workspace_digest",
     "set_workspace_digest",
 ]
+
+# Register annotations at module import time
+register_annotations(WorkspaceDigest)

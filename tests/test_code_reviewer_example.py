@@ -318,7 +318,8 @@ def test_dump_session_logs_success(
     assert snapshot_path == _redirect_snapshots / f"{session.session_id}.jsonl"
     assert snapshot_path is not None and snapshot_path.exists()
     content = snapshot_path.read_text().splitlines()
-    assert len(content) == 1
+    # First line is header, second is snapshot
+    assert len(content) == 2
     record = next(
         rec
         for rec in caplog.records

@@ -26,6 +26,7 @@ from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import PromptRenderError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
+from ...runtime.annotations import SliceMeta, register_annotations
 from ...runtime.session import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -44,15 +45,29 @@ _MAX_TITLE_LENGTH: Final[int] = 500
 class PlanStep:
     """Single actionable step tracked within a plan."""
 
+    __slice_meta__ = SliceMeta(
+        label="Plan Step",
+        description="Single actionable step tracked within a plan.",
+        icon="check-square",
+    )
+
     step_id: int = field(
-        metadata={"description": "Stable identifier for the step (integer)."}
+        metadata={
+            "display": "secondary",
+            "description": "Stable identifier for the step (integer).",
+        }
     )
     title: str = field(
-        metadata={"description": "Concise summary of the work item (<=500 characters)."}
+        metadata={
+            "display": "primary",
+            "label": "Step",
+            "description": "Concise summary of the work item (<=500 characters).",
+        }
     )
     status: StepStatus = field(
         metadata={
-            "description": "Current progress state: pending, in_progress, or done."
+            "display": "primary",
+            "description": "Current progress state: pending, in_progress, or done.",
         }
     )
 
@@ -64,15 +79,31 @@ class PlanStep:
 class Plan:
     """Immutable snapshot of the active plan."""
 
+    __slice_meta__ = SliceMeta(
+        label="Execution Plan",
+        description="Tracks objectives and steps for agent execution.",
+        icon="clipboard-list",
+    )
+
     objective: str = field(
-        metadata={"description": "Single-sentence objective for the session."}
+        metadata={
+            "display": "primary",
+            "description": "Single-sentence objective for the session.",
+        }
     )
     status: PlanStatus = field(
-        metadata={"description": "Lifecycle state: active or completed."}
+        metadata={
+            "display": "primary",
+            "description": "Lifecycle state: active or completed.",
+        }
     )
     steps: tuple[PlanStep, ...] = field(
         default_factory=tuple,
-        metadata={"description": "Ordered collection of plan steps."},
+        metadata={
+            "display": "primary",
+            "format": "json",
+            "description": "Ordered collection of plan steps.",
+        },
     )
 
     def render(self) -> str:
@@ -641,3 +672,7 @@ __all__ = [
     "StepStatus",
     "UpdateStep",
 ]
+
+# Register annotations at module import time
+register_annotations(Plan)
+register_annotations(PlanStep)
