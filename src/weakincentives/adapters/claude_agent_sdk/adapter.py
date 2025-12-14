@@ -322,7 +322,6 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 session_id=None,
                 created_at=_utcnow(),
                 usage=usage,
-                value=output,
             )
         )
 

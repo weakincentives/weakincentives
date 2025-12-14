@@ -92,7 +92,6 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
         call_id=str(index),
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
-        value=result_payload,
         rendered_output=rendered_output,
     )
     bus.publish(event)
@@ -117,7 +116,6 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         call_id="999",
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
-        value=result_payload,
         rendered_output=rendered_output,
     )
 
@@ -214,8 +212,8 @@ def test_session_snapshots_restore_across_threads(
             assert tool_value_counts[value] >= count
 
         for tool_event in restored_tool_events:
-            assert isinstance(tool_event.value, ExampleResult)
-            assert tool_event.value.value == int(tool_event.call_id)
+            assert isinstance(tool_event.result.value, ExampleResult)
+            assert tool_event.result.value.value == int(tool_event.call_id)
 
 
 @pytest.mark.threadstress(min_workers=2, max_workers=6)

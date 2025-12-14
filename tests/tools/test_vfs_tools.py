@@ -845,9 +845,7 @@ def test_write_reducer_supports_append() -> None:
             ),
         )
     )
-    event = SimpleNamespace(
-        value=WriteFile(path=VfsPath(("log.txt",)), content="\nline2", mode="append")
-    )
+    event = WriteFile(path=VfsPath(("log.txt",)), content="\nline2", mode="append")
     context = SimpleNamespace(session=None, event_bus=None)
     (updated,) = reducer((initial,), event, context=context)
     file = updated.files[0]

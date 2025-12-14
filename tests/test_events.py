@@ -63,7 +63,6 @@ def test_null_event_bus_is_noop() -> None:
             result=make_prompt_response("demo"),
             session_id=uuid4(),
             created_at=datetime.now(UTC),
-            value=None,
         )
     )
 
@@ -84,7 +83,6 @@ def test_publish_without_subscribers_returns_success_result() -> None:
         result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
-        value=None,
     )
 
     result = bus.publish(event)
@@ -139,7 +137,6 @@ def test_in_process_bus_delivers_in_order() -> None:
         result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
-        value=None,
     )
     result = bus.publish(event)
 
@@ -174,7 +171,6 @@ def test_in_process_bus_isolates_handler_exceptions(
         result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
-        value=None,
     )
     with caplog.at_level(logging.ERROR, logger="weakincentives.runtime.events"):
         result = bus.publish(event)
@@ -214,7 +210,6 @@ def test_publish_result_raise_if_errors() -> None:
             result=make_prompt_response("demo"),
             session_id=uuid4(),
             created_at=datetime.now(UTC),
-            value=None,
         )
     )
 
@@ -253,7 +248,6 @@ def test_tool_invoked_event_fields() -> None:
         call_id="abc123",
         session_id=uuid4(),
         created_at=datetime.now(UTC),
-        value=_Payload(value="data"),
         rendered_output=rendered_output,
     )
 
@@ -264,7 +258,7 @@ def test_tool_invoked_event_fields() -> None:
     assert event.params.value == 1
     assert isinstance(event.session_id, UUID)
     assert isinstance(event.created_at, datetime)
-    assert isinstance(event.value, _Payload)
+    assert isinstance(event.result.value, _Payload)
     assert event.result is result
     assert event.call_id == "abc123"
     assert isinstance(event.event_id, UUID)
@@ -298,7 +292,6 @@ def test_unsubscribe_removes_handler_and_returns_true() -> None:
         result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
-        value=None,
     )
 
     bus.publish(event)
@@ -358,7 +351,6 @@ def test_unsubscribe_does_not_affect_other_handlers() -> None:
         result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
-        value=None,
     )
 
     bus.publish(event)

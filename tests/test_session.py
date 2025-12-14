@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, is_dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
@@ -35,7 +35,6 @@ from weakincentives.runtime.session import (
     QueryBuilder,
     ReducerContextProtocol,
     ReducerEvent,
-    ReducerEventWithValue,
     Session,
     SliceObserver,
     Snapshot,
@@ -84,7 +83,6 @@ def make_tool_event(value: int) -> ToolInvoked:
         result=tool_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        value=payload,
         rendered_output=rendered_output,
     )
 
@@ -95,18 +93,12 @@ def make_prompt_event(output: object) -> PromptExecuted:
         text="done",
         output=output,
     )
-    prompt_value = (
-        cast(SupportsDataclass, output)
-        if output is not None and is_dataclass(output)
-        else None
-    )
     return PromptExecuted(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         result=response,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        value=prompt_value,
     )
 
 
@@ -141,27 +133,28 @@ def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> N
     assert isinstance(event.event_id, UUID)
 
 
-def test_tool_invoked_enriches_missing_value(session_factory: SessionFactory) -> None:
+def test_tool_invoked_extracts_value_from_result(
+    session_factory: SessionFactory,
+) -> None:
+    """Session extracts value from result.value for slice dispatch."""
     session, bus = session_factory()
 
     payload = ExamplePayload(value=7)
-    enriched_result = cast(ToolResult[object], ToolResult(message="ok", value=payload))
-    enriched_event = ToolInvoked(
+    tool_result = cast(ToolResult[object], ToolResult(message="ok", value=payload))
+    event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=7),
-        result=enriched_result,
+        result=tool_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        value=None,
-        rendered_output=enriched_result.render(),
+        rendered_output=tool_result.render(),
     )
 
-    bus.publish(enriched_event)
+    bus.publish(event)
 
-    tool_events = session.query(ToolInvoked).all()
-    assert tool_events[0].value == payload
+    # Session dispatches result.value to slice reducers
     assert session.query(ExamplePayload).all() == (payload,)
 
 
@@ -218,8 +211,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     ) -> tuple[FirstSlice, ...]:
         del context
         call_order.append("first")
-        assert isinstance(event, ReducerEventWithValue)
-        value = cast(ExampleOutput, event.value)
+        value = cast(ExampleOutput, event)
         return (*slice_values, FirstSlice(value.text))
 
     def second(
@@ -230,8 +222,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     ) -> tuple[SecondSlice, ...]:
         del context
         call_order.append("second")
-        assert isinstance(event, ReducerEventWithValue)
-        value = cast(ExampleOutput, event.value)
+        value = cast(ExampleOutput, event)
         return (*slice_values, SecondSlice(value.text))
 
     session.mutate(FirstSlice).register(ExampleOutput, first)
@@ -256,13 +247,14 @@ def test_default_append_used_when_no_custom_reducer(
     assert session.query(ExampleOutput).all() == (ExampleOutput(text="hello"),)
 
 
-def test_prompt_executed_enriches_missing_value(
+def test_prompt_executed_extracts_value_from_result(
     session_factory: SessionFactory,
 ) -> None:
+    """Session extracts output from result.output for slice dispatch."""
     session, bus = session_factory()
 
     output = ExampleOutput(text="filled")
-    enriched_event = PromptExecuted(
+    event = PromptExecuted(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         result=cast(
@@ -275,13 +267,11 @@ def test_prompt_executed_enriches_missing_value(
         ),
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        value=None,
     )
 
-    bus.publish(enriched_event)
+    bus.publish(event)
 
-    prompt_events = session.query(PromptExecuted).all()
-    assert prompt_events[0].value == output
+    # Session dispatches result.output to slice reducers
     assert session.query(ExampleOutput).all() == (output,)
 
 
@@ -300,7 +290,6 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
         result=non_dataclass_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        value=None,
         rendered_output=non_dataclass_result.render(),
     )
 
@@ -364,15 +353,16 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
         result=failure,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        value=None,
         rendered_output=failure.render(),
     )
     bus.publish(failure_event)
 
     tool_events = session.query(ToolInvoked).all()
     assert len(tool_events) == 2
-    assert tool_events[0].value == ExamplePayload(value=1)
-    assert tool_events[1].value is None
+    # First event has payload via result.value
+    assert tool_events[0].result.value == ExamplePayload(value=1)
+    # Failure event has no value
+    assert tool_events[1].result.value is None
     assert tool_events[1].result.success is False
 
 
@@ -445,8 +435,7 @@ def test_snapshot_preserves_custom_reducer_behavior(
         context: ReducerContextProtocol,
     ) -> tuple[Summary, ...]:
         del context
-        assert isinstance(event, ReducerEventWithValue)
-        value = cast(ExampleOutput, event.value)
+        value = cast(ExampleOutput, event)
         entries = slice_values[-1].entries if slice_values else ()
         return (Summary((*entries, value.text)),)
 
@@ -494,8 +483,8 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     tools_snapshot = cast(tuple[ToolInvoked, ...], snapshot.slices[ToolInvoked])
 
     assert rendered_snapshot == (rendered_event,)
-    assert executed_snapshot[0].value == ExampleOutput(text="complete")
-    assert tools_snapshot[0].value == ExamplePayload(value=4)
+    assert executed_snapshot[0].result.output == ExampleOutput(text="complete")
+    assert tools_snapshot[0].result.value == ExamplePayload(value=4)
 
     restored_rendered = cast(
         tuple[PromptRendered, ...], restored.slices[PromptRendered]
@@ -509,7 +498,7 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     restored_executed = restored_executed_slice[0]
     assert restored_executed.event_id == executed_event.event_id
     assert restored_executed.result["prompt_name"] == "example"
-    assert restored_executed.value == {"text": "complete"}
+    assert restored_executed.result["output"] == {"text": "complete"}
 
     restored_tool = restored_tool_slice[0]
     assert restored_tool.event_id == tool_event.event_id
@@ -847,14 +836,9 @@ def test_mutate_dispatch_triggers_registered_reducer(
         *,
         context: ReducerContextProtocol,
     ) -> tuple[ExampleOutput, ...]:
-        del context
-        if isinstance(event, ReducerEventWithValue) and isinstance(
-            event.value, SetText
-        ):
-            return (ExampleOutput(text=event.value.text),)
-        if isinstance(event, SetText):
-            return (ExampleOutput(text=event.text),)
-        return slice_values
+        del context, slice_values
+        value = cast(SetText, event)
+        return (ExampleOutput(text=value.text),)
 
     session.mutate(ExampleOutput).register(SetText, set_text_reducer)
     session.mutate(ExampleOutput).dispatch(SetText(text="dispatched"))

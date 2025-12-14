@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from ...prompt._types import SupportsDataclass
 
@@ -22,15 +22,7 @@ if TYPE_CHECKING:
     from .protocols import SessionProtocol
 
 
-@runtime_checkable
-class ReducerEventWithValue(Protocol):
-    """Structural type satisfied by events exposing payloads via ``value``."""
-
-    @property
-    def value(self) -> SupportsDataclass | None: ...
-
-
-ReducerEvent = SupportsDataclass | ReducerEventWithValue
+ReducerEvent = SupportsDataclass
 
 
 S = TypeVar("S", bound=SupportsDataclass)
@@ -57,6 +49,5 @@ class TypedReducer(Protocol[S]):
 __all__ = [
     "ReducerContextProtocol",
     "ReducerEvent",
-    "ReducerEventWithValue",
     "TypedReducer",
 ]

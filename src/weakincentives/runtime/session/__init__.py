@@ -17,7 +17,6 @@ from ._observer_types import SliceObserver, Subscription
 from ._types import (
     ReducerContextProtocol,
     ReducerEvent,
-    ReducerEventWithValue,
     TypedReducer,
 )
 from .mutation import GlobalMutationBuilder, MutationBuilder
@@ -41,7 +40,6 @@ __all__ = [
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
-    "ReducerEventWithValue",
     "Session",
     "SessionProtocol",
     "SliceObserver",

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
@@ -100,8 +100,7 @@ def _append_event(
     context: ReducerContextProtocol,
 ) -> tuple[SupportsDataclass, ...]:
     del context
-    appended = cast(SupportsDataclass, event)
-    return (*slice_values, appended)
+    return (*slice_values, event)
 
 
 @dataclass(slots=True)
@@ -456,7 +455,7 @@ class Session(SessionProtocol):
         This method implements :class:`MutationProvider` for use by
         :class:`MutationBuilder`.
         """
-        self._dispatch_data_event(slice_type, cast(ReducerEvent, event))
+        self._dispatch_data_event(slice_type, event)
 
     @property
     @override
@@ -538,12 +537,15 @@ class Session(SessionProtocol):
         self._handle_prompt_rendered(start_event)
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
-        normalized_event = event
-        # Handle both ToolResult dataclass and raw dict from SDK native tools
+        # Dispatch ToolInvoked to any reducers registered for ToolInvoked events
+        self._dispatch_data_event(
+            _TOOL_INVOKED_TYPE,
+            cast(ReducerEvent, event),
+        )
+
+        # Extract payload from ToolResult for slice dispatch
         result = event.result
-        if event.value is not None:
-            payload = event.value
-        elif hasattr(result, "value"):
+        if hasattr(result, "value"):
             # ToolResult dataclass
             payload = result.value
         elif isinstance(result, dict):
@@ -551,48 +553,33 @@ class Session(SessionProtocol):
             payload = None
         else:
             payload = None
-        if event.value is None and is_dataclass_instance(payload):
-            normalized_event = replace(event, value=payload)
 
-        self._dispatch_data_event(
-            _TOOL_INVOKED_TYPE,
-            cast(ReducerEvent, normalized_event),
-        )
-
-        if normalized_event.value is not None:
-            value_type = cast(SessionSliceType, type(normalized_event.value))
-            self._dispatch_data_event(
-                value_type,
-                cast(ReducerEvent, normalized_event),
-            )
+        # Dispatch payload directly to slice reducers
+        if is_dataclass_instance(payload):
+            # Narrow for ty: payload is SupportsDataclass after TypeGuard
+            narrowed = cast(SupportsDataclass, payload)  # pyright: ignore[reportUnnecessaryCast]
+            self._dispatch_data_event(type(narrowed), narrowed)
 
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
-        normalized_event = event
-        output = event.result.output
-        if event.value is None and is_dataclass_instance(output):
-            normalized_event = replace(event, value=output)
-
+        # Dispatch PromptExecuted to any reducers registered for PromptExecuted events
         self._dispatch_data_event(
             _PROMPT_EXECUTED_TYPE,
-            cast(ReducerEvent, normalized_event),
+            cast(ReducerEvent, event),
         )
 
-        if normalized_event.value is not None:
-            value_type = cast(SessionSliceType, type(normalized_event.value))
-            self._dispatch_data_event(
-                value_type,
-                cast(ReducerEvent, normalized_event),
-            )
+        # Dispatch output directly to slice reducers
+        output = event.result.output
+        if is_dataclass_instance(output):
+            self._dispatch_data_event(type(output), output)
             return
 
+        # Handle iterable outputs (dispatch each item directly)
         if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
             for item in cast(Iterable[object], output):
                 if is_dataclass_instance(item):
-                    enriched_event = replace(normalized_event, value=item)
-                    self._dispatch_data_event(
-                        type(item),
-                        cast(ReducerEvent, enriched_event),
-                    )
+                    # Narrow for ty: item is SupportsDataclass after TypeGuard
+                    narrowed_item = cast(SupportsDataclass, item)  # pyright: ignore[reportUnnecessaryCast]
+                    self._dispatch_data_event(type(narrowed_item), narrowed_item)
 
     def _handle_prompt_rendered(self, event: PromptRendered) -> None:
         self._dispatch_data_event(

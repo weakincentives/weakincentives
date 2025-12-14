@@ -114,7 +114,6 @@ class PromptExecuted:
     session_id: UUID | None
     created_at: datetime
     usage: TokenUsage | None = None
-    value: Any | None = None
     event_id: UUID = field(default_factory=uuid4)
 
 

@@ -27,7 +27,6 @@ from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
-    SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
@@ -101,7 +100,6 @@ def invoke_tool(
         result=cast(ToolResult[object], result),
         session_id=getattr(session, "session_id", None),
         created_at=datetime.now(UTC),
-        value=cast(SupportsDataclass | None, result.value),
         rendered_output=rendered_output,
     )
     publish_result = session.event_bus.publish(event)

@@ -23,12 +23,7 @@ from weakincentives.runtime.session.reducers import replace_latest_by
 @dataclass(slots=True)
 class _Sample:
     key: str
-    value: str
-
-
-@dataclass(slots=True)
-class _ReducerEvent:
-    value: _Sample
+    data: str
 
 
 @dataclass(slots=True)
@@ -45,11 +40,11 @@ def test_replace_latest_by_replaces_matching_entry() -> None:
 
     updated = reducer(
         initial,
-        _ReducerEvent(value=_Sample("a", "updated")),
+        _Sample("a", "updated"),
         context=context,
     )
 
     assert len(updated) == 2
     assert updated[-1].key == "a"
-    assert updated[-1].value == "updated"
-    assert any(item.value == "second" for item in updated)
+    assert updated[-1].data == "updated"
+    assert any(item.data == "second" for item in updated)
