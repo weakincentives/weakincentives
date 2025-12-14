@@ -26,6 +26,7 @@ from ...deadlines import Deadline
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ._notifications import Notification
+from ._sdk_results import parse_sdk_tool_result
 
 if TYPE_CHECKING:
     from ...runtime.session.protocols import SessionProtocol
@@ -358,6 +359,20 @@ def create_post_tool_use_hook(
             call_id=tool_use_id,
         )
         hook_context.session.event_bus.publish(event)
+
+        # Parse SDK tool result into typed dataclass for session slice routing
+        typed_result = parse_sdk_tool_result(tool_name, tool_input, result_raw)
+        if typed_result is not None:
+            # Dispatch typed result to session slice via mutate().dispatch()
+            hook_context.session.mutate(type(typed_result)).dispatch(typed_result)
+            logger.debug(
+                "claude_agent_sdk.hook.typed_result_dispatched",
+                event="hook.typed_result_dispatched",
+                context={
+                    "tool_name": tool_name,
+                    "result_type": type(typed_result).__name__,
+                },
+            )
 
         logger.debug(
             "claude_agent_sdk.hook.tool_invoked",

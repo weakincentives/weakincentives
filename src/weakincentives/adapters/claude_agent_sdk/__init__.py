@@ -74,6 +74,15 @@ Example:
 from __future__ import annotations
 
 from ._notifications import Notification, NotificationSource
+from ._sdk_results import (
+    SdkBashResult,
+    SdkEditResult,
+    SdkFileRead,
+    SdkGlobResult,
+    SdkGrepResult,
+    SdkToolResult,
+    SdkWriteResult,
+)
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
     ClaudeAgentSDKClientConfig,
@@ -109,6 +118,13 @@ __all__ = [
     "NotificationSource",
     "PermissionMode",
     "SandboxConfig",
+    "SdkBashResult",
+    "SdkEditResult",
+    "SdkFileRead",
+    "SdkGlobResult",
+    "SdkGrepResult",
+    "SdkToolResult",
+    "SdkWriteResult",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
 ]
