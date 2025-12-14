@@ -112,10 +112,15 @@ class BridgedTool:
 
             result = handler(params, context=context)
 
-            # Use render() which calls render_tool_payload on the value,
-            # falling back to message if render returns empty
-            rendered = result.render()
-            output_text = rendered if rendered else result.message
+            # Respect exclude_value_from_context to avoid spilling large/sensitive
+            # data into the model context
+            if result.exclude_value_from_context:
+                output_text = result.message
+            else:
+                # Use render() which calls render_tool_payload on the value,
+                # falling back to message if render returns empty
+                rendered = result.render()
+                output_text = rendered if rendered else result.message
 
             # Publish ToolInvoked event with the actual tool result value
             # This enables session reducers to dispatch based on the value type

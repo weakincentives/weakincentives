@@ -8,11 +8,11 @@ important and how they should be rendered.
 
 1. **Focus UI on important fields** – Not all fields matter equally; annotations
    mark the subset that deserves prominence.
-2. **Explicit rendering hints** – Replace heuristic markdown detection with
+1. **Explicit rendering hints** – Replace heuristic markdown detection with
    explicit annotations.
-3. **Self-describing JSONL files** – Include annotation metadata in the file
+1. **Self-describing JSONL files** – Include annotation metadata in the file
    header so tooling can interpret snapshots without hardcoded knowledge.
-4. **Zero runtime cost** – Annotations are static metadata extracted at import
+1. **Zero runtime cost** – Annotations are static metadata extracted at import
    time, not computed per-instance.
 
 ## Field Annotations
@@ -174,9 +174,9 @@ compatible).
 At JSONL write time, the system:
 
 1. Collects all unique dataclass types present in the snapshot tree
-2. Extracts field annotations from each type's `field.metadata`
-3. Extracts slice annotations from `__slice_meta__` if present
-4. Writes header as first line, then snapshot lines
+1. Extracts field annotations from each type's `field.metadata`
+1. Extracts slice annotations from `__slice_meta__` if present
+1. Writes header as first line, then snapshot lines
 
 ## wink debug Integration
 
@@ -198,8 +198,8 @@ if field_meta.get("format") == "markdown":
 ### Rendering Pipeline
 
 1. Load header from first JSONL line
-2. Build `field_key → annotation` lookup from header
-3. For each snapshot item:
+1. Build `field_key → annotation` lookup from header
+1. For each snapshot item:
    - Look up field annotations by `(slice_type, field_name)`
    - Apply format transformation based on `format` annotation
    - Filter/sort fields based on `display` level and UI mode
@@ -237,23 +237,23 @@ def get_all_registered() -> dict[str, SliceAnnotations]: ...
 ### Phase 1: Add Infrastructure
 
 1. Define `FieldAnnotation`, `SliceMeta`, `SliceAnnotations` dataclasses
-2. Implement annotation registry
-3. Add header writing to `dump_session()`
-4. Update `wink debug` to read header and use annotations
+1. Implement annotation registry
+1. Add header writing to `dump_session()`
+1. Update `wink debug` to read header and use annotations
 
 ### Phase 2: Annotate Core Types
 
 1. Add annotations to `Plan`, `PlanStep`
-2. Add annotations to `VfsFile`, `VirtualFileSystem`
-3. Add annotations to `AstevalResult`, `AstevalCode`
-4. Add annotations to `WorkspaceDigest`
-5. Add annotations to `ToolInvoked`, `PromptExecuted`
+1. Add annotations to `VfsFile`, `VirtualFileSystem`
+1. Add annotations to `AstevalResult`, `AstevalCode`
+1. Add annotations to `WorkspaceDigest`
+1. Add annotations to `ToolInvoked`, `PromptExecuted`
 
 ### Phase 3: Remove Heuristics
 
 1. Remove `_MARKDOWN_PATTERNS` and `_looks_like_markdown()`
-2. Remove `_MIN_MARKDOWN_LENGTH` threshold
-3. Update tests to use annotation-based detection
+1. Remove `_MIN_MARKDOWN_LENGTH` threshold
+1. Update tests to use annotation-based detection
 
 ## Backward Compatibility
 
@@ -284,4 +284,3 @@ hints without per-instance overhead.
 
 Heuristics are fragile. A field containing `# Comment` in code gets
 misdetected as markdown. Explicit `format: "code"` is unambiguous.
-
