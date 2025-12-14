@@ -285,8 +285,3 @@ hints without per-instance overhead.
 Heuristics are fragile. A field containing `# Comment` in code gets
 misdetected as markdown. Explicit `format: "code"` is unambiguous.
 
-## Open Questions
-
-1. Should `format` support language hints for code (e.g., `"code:python"`)?
-2. Should we support computed labels via callables?
-3. How should nested dataclasses inherit/override annotations?
