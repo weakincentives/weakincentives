@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -115,6 +116,7 @@ class TestSdkFileRead:
             path="/test.py",
             content="print('hello')",
             line_count=1,
+            created_at=datetime.now(UTC),
             offset=0,
             limit=None,
             truncated=False,
@@ -127,12 +129,24 @@ class TestSdkFileRead:
             path="/big.py",
             content="...",
             line_count=5000,
+            created_at=datetime.now(UTC),
             offset=0,
             limit=None,
             truncated=True,
         )
 
         assert "(truncated)" in file_read.render()
+
+    def test_created_at_is_populated(self) -> None:
+        result = parse_sdk_tool_result(
+            "Read",
+            {"file_path": "/test.py"},
+            "content",
+        )
+
+        assert isinstance(result, SdkFileRead)
+        assert result.created_at is not None
+        assert isinstance(result.created_at, datetime)
 
 
 class TestSdkBashResult:
@@ -217,6 +231,7 @@ class TestSdkBashResult:
             stdout="file1",
             stderr="",
             exit_code=0,
+            created_at=datetime.now(UTC),
             interrupted=False,
         )
 
@@ -230,6 +245,7 @@ class TestSdkBashResult:
             stdout="",
             stderr="not found",
             exit_code=127,
+            created_at=datetime.now(UTC),
             interrupted=False,
         )
 
@@ -243,12 +259,24 @@ class TestSdkBashResult:
             stdout=long_output,
             stderr="",
             exit_code=0,
+            created_at=datetime.now(UTC),
             interrupted=False,
         )
 
         rendered = bash_result.render()
         assert "..." in rendered
         assert len(rendered) < len(long_output) + 50  # Account for header
+
+    def test_created_at_is_populated(self) -> None:
+        result = parse_sdk_tool_result(
+            "Bash",
+            {"command": "ls"},
+            {"stdout": "ok", "stderr": "", "exitCode": 0},
+        )
+
+        assert isinstance(result, SdkBashResult)
+        assert result.created_at is not None
+        assert isinstance(result.created_at, datetime)
 
 
 class TestSdkGlobResult:
@@ -301,11 +329,23 @@ class TestSdkGlobResult:
             path="/src",
             matches=("a.py", "b.py"),
             match_count=2,
+            created_at=datetime.now(UTC),
         )
 
         rendered = glob_result.render()
         assert "Glob *.py" in rendered
         assert "a.py" in rendered
+
+    def test_created_at_is_populated(self) -> None:
+        result = parse_sdk_tool_result(
+            "Glob",
+            {"pattern": "*.py"},
+            "file.py",
+        )
+
+        assert isinstance(result, SdkGlobResult)
+        assert result.created_at is not None
+        assert isinstance(result.created_at, datetime)
 
 
 class TestSdkGrepResult:
@@ -358,11 +398,23 @@ class TestSdkGrepResult:
             path="/logs",
             matches=("line1", "line2"),
             match_count=2,
+            created_at=datetime.now(UTC),
             files_searched=0,
         )
 
         rendered = grep_result.render()
         assert "Grep error" in rendered
+
+    def test_created_at_is_populated(self) -> None:
+        result = parse_sdk_tool_result(
+            "Grep",
+            {"pattern": "error"},
+            "match",
+        )
+
+        assert isinstance(result, SdkGrepResult)
+        assert result.created_at is not None
+        assert isinstance(result.created_at, datetime)
 
 
 class TestSdkWriteResult:
@@ -391,10 +443,22 @@ class TestSdkWriteResult:
         write_result = SdkWriteResult(
             path="/test.txt",
             bytes_written=100,
+            created_at=datetime.now(UTC),
             created=True,
         )
 
         assert "Created /test.txt" in write_result.render()
+
+    def test_created_at_is_populated(self) -> None:
+        result = parse_sdk_tool_result(
+            "Write",
+            {"file_path": "/test.txt", "content": "hello"},
+            "ok",
+        )
+
+        assert isinstance(result, SdkWriteResult)
+        assert result.created_at is not None
+        assert isinstance(result.created_at, datetime)
 
 
 class TestSdkEditResult:
@@ -439,9 +503,21 @@ class TestSdkEditResult:
             old_string="old",
             new_string="new",
             replacements=3,
+            created_at=datetime.now(UTC),
         )
 
         assert "Edited /test.py: 3 replacement(s)" in edit_result.render()
+
+    def test_created_at_is_populated(self) -> None:
+        result = parse_sdk_tool_result(
+            "Edit",
+            {"file_path": "/test.py", "old_string": "a", "new_string": "b"},
+            "ok",
+        )
+
+        assert isinstance(result, SdkEditResult)
+        assert result.created_at is not None
+        assert isinstance(result.created_at, datetime)
 
 
 class TestUnknownTool:

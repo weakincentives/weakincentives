@@ -23,6 +23,7 @@ outputs, enabling first-class access via session queries:
 from __future__ import annotations
 
 from dataclasses import field
+from datetime import UTC, datetime
 from typing import Any, Final
 
 from ...dataclasses import FrozenDataclass
@@ -58,6 +59,9 @@ class SdkFileRead:
     line_count: int = field(
         metadata={"description": "Number of lines in the returned content."}
     )
+    created_at: datetime = field(
+        metadata={"description": "Timestamp when the tool was executed."}
+    )
     offset: int = field(
         default=0,
         metadata={"description": "Line offset if pagination was used."},
@@ -92,6 +96,9 @@ class SdkBashResult:
     exit_code: int = field(
         metadata={"description": "Exit code from the command (0 = success)."}
     )
+    created_at: datetime = field(
+        metadata={"description": "Timestamp when the tool was executed."}
+    )
     interrupted: bool = field(
         default=False,
         metadata={"description": "Whether the command was interrupted/timed out."},
@@ -120,6 +127,9 @@ class SdkGlobResult:
         metadata={"description": "File paths matching the pattern."}
     )
     match_count: int = field(metadata={"description": "Total number of matches found."})
+    created_at: datetime = field(
+        metadata={"description": "Timestamp when the tool was executed."}
+    )
 
     def render(self) -> str:
         preview = ", ".join(self.matches[:_GLOB_PREVIEW_COUNT])
@@ -146,6 +156,9 @@ class SdkGrepResult:
         metadata={"description": "Lines containing matches."}
     )
     match_count: int = field(metadata={"description": "Total number of matches found."})
+    created_at: datetime = field(
+        metadata={"description": "Timestamp when the tool was executed."}
+    )
     files_searched: int = field(
         default=0,
         metadata={"description": "Number of files that were searched."},
@@ -170,6 +183,9 @@ class SdkWriteResult:
     bytes_written: int = field(
         metadata={"description": "Number of bytes written to the file."}
     )
+    created_at: datetime = field(
+        metadata={"description": "Timestamp when the tool was executed."}
+    )
     created: bool = field(
         default=False,
         metadata={"description": "Whether the file was newly created."},
@@ -192,6 +208,9 @@ class SdkEditResult:
     old_string: str = field(metadata={"description": "The string that was replaced."})
     new_string: str = field(metadata={"description": "The replacement string."})
     replacements: int = field(metadata={"description": "Number of replacements made."})
+    created_at: datetime = field(
+        metadata={"description": "Timestamp when the tool was executed."}
+    )
 
     def render(self) -> str:
         return f"Edited {self.path}: {self.replacements} replacement(s)"
@@ -209,7 +228,9 @@ type SdkToolResult = (
 
 
 def _parse_file_read(
-    tool_input: dict[str, Any], tool_response: dict[str, Any] | str
+    tool_input: dict[str, Any],
+    tool_response: dict[str, Any] | str,
+    created_at: datetime,
 ) -> SdkFileRead | None:
     """Parse Read tool response into SdkFileRead."""
     path = tool_input.get("file_path", "")
@@ -229,6 +250,7 @@ def _parse_file_read(
         path=path,
         content=content,
         line_count=len(lines),
+        created_at=created_at,
         offset=tool_input.get("offset", 0),
         limit=tool_input.get("limit"),
         truncated=len(content) > _TRUNCATION_THRESHOLD,
@@ -236,7 +258,9 @@ def _parse_file_read(
 
 
 def _parse_bash_result(
-    tool_input: dict[str, Any], tool_response: dict[str, Any] | str
+    tool_input: dict[str, Any],
+    tool_response: dict[str, Any] | str,
+    created_at: datetime,
 ) -> SdkBashResult | None:
     """Parse Bash tool response into SdkBashResult."""
     command = tool_input.get("command", "")
@@ -264,12 +288,15 @@ def _parse_bash_result(
         stdout=stdout,
         stderr=stderr,
         exit_code=exit_code,
+        created_at=created_at,
         interrupted=interrupted,
     )
 
 
 def _parse_glob_result(
-    tool_input: dict[str, Any], tool_response: dict[str, Any] | str
+    tool_input: dict[str, Any],
+    tool_response: dict[str, Any] | str,
+    created_at: datetime,
 ) -> SdkGlobResult | None:
     """Parse Glob tool response into SdkGlobResult."""
     pattern = tool_input.get("pattern", "")
@@ -291,11 +318,14 @@ def _parse_glob_result(
         path=path,
         matches=tuple(matches),
         match_count=len(matches),
+        created_at=created_at,
     )
 
 
 def _parse_grep_result(
-    tool_input: dict[str, Any], tool_response: dict[str, Any] | str
+    tool_input: dict[str, Any],
+    tool_response: dict[str, Any] | str,
+    created_at: datetime,
 ) -> SdkGrepResult | None:
     """Parse Grep tool response into SdkGrepResult."""
     pattern = tool_input.get("pattern", "")
@@ -316,12 +346,15 @@ def _parse_grep_result(
         path=path,
         matches=tuple(matches),
         match_count=len(matches),
+        created_at=created_at,
         files_searched=0,  # SDK doesn't provide this
     )
 
 
 def _parse_write_result(
-    tool_input: dict[str, Any], tool_response: dict[str, Any] | str
+    tool_input: dict[str, Any],
+    tool_response: dict[str, Any] | str,
+    created_at: datetime,
 ) -> SdkWriteResult | None:
     """Parse Write tool response into SdkWriteResult."""
     path = tool_input.get("file_path", "")
@@ -332,12 +365,15 @@ def _parse_write_result(
     return SdkWriteResult(
         path=path,
         bytes_written=len(content.encode("utf-8")) if content else 0,
+        created_at=created_at,
         created=True,  # Write always creates
     )
 
 
 def _parse_edit_result(
-    tool_input: dict[str, Any], tool_response: dict[str, Any] | str
+    tool_input: dict[str, Any],
+    tool_response: dict[str, Any] | str,
+    created_at: datetime,
 ) -> SdkEditResult | None:
     """Parse Edit tool response into SdkEditResult."""
     path = tool_input.get("file_path", "")
@@ -354,6 +390,7 @@ def _parse_edit_result(
         old_string=old_string,
         new_string=new_string,
         replacements=replacements,
+        created_at=created_at,
     )
 
 
@@ -380,6 +417,7 @@ def parse_sdk_tool_result(
     tool_name: str,
     tool_input: dict[str, Any],
     tool_response: dict[str, Any] | str,
+    created_at: datetime | None = None,
 ) -> SdkToolResult | None:
     """Parse an SDK native tool result into a typed dataclass.
 
@@ -387,6 +425,7 @@ def parse_sdk_tool_result(
         tool_name: Name of the SDK tool (e.g., "Read", "Bash", "Glob").
         tool_input: Input parameters passed to the tool.
         tool_response: Raw response from the tool.
+        created_at: Timestamp when the tool was executed. Defaults to now.
 
     Returns:
         Typed dataclass instance if parsing succeeds, None otherwise.
@@ -404,8 +443,10 @@ def parse_sdk_tool_result(
     if parser is None:
         return None
 
+    timestamp = created_at if created_at is not None else datetime.now(UTC)
+
     try:
-        return parser(tool_input, tool_response)
+        return parser(tool_input, tool_response, timestamp)
     except Exception:
         # Silently ignore parsing errors to avoid breaking the hook
         return None
