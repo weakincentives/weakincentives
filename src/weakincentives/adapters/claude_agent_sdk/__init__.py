@@ -75,13 +75,13 @@ from __future__ import annotations
 
 from ._notifications import Notification, NotificationSource
 from ._sdk_results import (
-    SdkBashResult,
-    SdkEditResult,
-    SdkFileRead,
-    SdkGlobResult,
-    SdkGrepResult,
-    SdkToolResult,
-    SdkWriteResult,
+    ClaudeBashResult,
+    ClaudeEditResult,
+    ClaudeFileRead,
+    ClaudeGlobResult,
+    ClaudeGrepResult,
+    ClaudeToolResult,
+    ClaudeWriteResult,
 )
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
@@ -109,6 +109,13 @@ __all__ = [
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
     "ClaudeAgentWorkspaceSection",
+    "ClaudeBashResult",
+    "ClaudeEditResult",
+    "ClaudeFileRead",
+    "ClaudeGlobResult",
+    "ClaudeGrepResult",
+    "ClaudeToolResult",
+    "ClaudeWriteResult",
     "EphemeralHome",
     "HostMount",
     "HostMountPreview",
@@ -118,13 +125,6 @@ __all__ = [
     "NotificationSource",
     "PermissionMode",
     "SandboxConfig",
-    "SdkBashResult",
-    "SdkEditResult",
-    "SdkFileRead",
-    "SdkGlobResult",
-    "SdkGrepResult",
-    "SdkToolResult",
-    "SdkWriteResult",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
 ]

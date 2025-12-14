@@ -26,7 +26,7 @@ from ...deadlines import Deadline
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ._notifications import Notification
-from ._sdk_results import parse_sdk_tool_result
+from ._sdk_results import parse_claude_tool_result
 
 if TYPE_CHECKING:
     from ...runtime.session.protocols import SessionProtocol
@@ -361,7 +361,7 @@ def create_post_tool_use_hook(
         hook_context.session.event_bus.publish(event)
 
         # Parse SDK tool result into typed dataclass for session slice routing
-        typed_result = parse_sdk_tool_result(tool_name, tool_input, result_raw)
+        typed_result = parse_claude_tool_result(tool_name, tool_input, result_raw)
         if typed_result is not None:
             # Dispatch typed result to session slice via mutate().dispatch()
             hook_context.session.mutate(type(typed_result)).dispatch(typed_result)

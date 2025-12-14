@@ -30,18 +30,20 @@ Key capabilities:
   using ephemeral home directories
 - **Network policies**: Programmatic control over network access
   (`no_network`, `api_only`, `with_domains`)
-- **Typed SDK tool results**: SDK native tool outputs (Read, Bash, Glob, Grep,
-  Write, Edit) are now automatically parsed into typed dataclasses and
-  dispatched to session slices for first-class querying:
+- **Typed Claude tool results**: Claude Agent SDK native tool outputs (Read,
+  Bash, Glob, Grep, Write, Edit) are now automatically parsed into typed
+  dataclasses and dispatched to session slices for first-class querying. Each
+  result includes `event_id` and `created_at` fields for event slice
+  classification in the wink debug UI:
 
 ```python
-from weakincentives.adapters.claude_agent_sdk import SdkFileRead, SdkBashResult
+from weakincentives.adapters.claude_agent_sdk import ClaudeFileRead, ClaudeBashResult
 
 # Query files the agent read
-files = session.query(SdkFileRead).all()
+files = session.query(ClaudeFileRead).all()
 
 # Find failed commands
-failed = session.query(SdkBashResult).where(lambda r: r.exit_code != 0)
+failed = session.query(ClaudeBashResult).where(lambda r: r.exit_code != 0)
 ```
 
 ### Session State Observers

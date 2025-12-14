@@ -21,18 +21,20 @@ from typing import Any
 import pytest
 
 from weakincentives.adapters.claude_agent_sdk import (
-    SdkBashResult,
-    SdkEditResult,
-    SdkFileRead,
-    SdkGlobResult,
-    SdkGrepResult,
-    SdkWriteResult,
+    ClaudeBashResult,
+    ClaudeEditResult,
+    ClaudeFileRead,
+    ClaudeGlobResult,
+    ClaudeGrepResult,
+    ClaudeWriteResult,
 )
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     create_post_tool_use_hook,
 )
-from weakincentives.adapters.claude_agent_sdk._sdk_results import parse_sdk_tool_result
+from weakincentives.adapters.claude_agent_sdk._sdk_results import (
+    parse_claude_tool_result,
+)
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 
@@ -52,15 +54,15 @@ def hook_context(session: Session) -> HookContext:
     )
 
 
-class TestSdkFileRead:
+class TestClaudeFileRead:
     def test_parse_with_dict_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Read",
             {"file_path": "/home/user/test.py"},
             {"stdout": "def hello():\n    print('hello')"},
         )
 
-        assert isinstance(result, SdkFileRead)
+        assert isinstance(result, ClaudeFileRead)
         assert result.path == "/home/user/test.py"
         assert result.content == "def hello():\n    print('hello')"
         assert result.line_count == 2
@@ -69,30 +71,30 @@ class TestSdkFileRead:
         assert result.truncated is False
 
     def test_parse_with_string_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Read",
             {"file_path": "/test.txt"},
             "line1\nline2\nline3",
         )
 
-        assert isinstance(result, SdkFileRead)
+        assert isinstance(result, ClaudeFileRead)
         assert result.path == "/test.txt"
         assert result.content == "line1\nline2\nline3"
         assert result.line_count == 3
 
     def test_parse_with_offset_and_limit(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Read",
             {"file_path": "/test.txt", "offset": 10, "limit": 50},
             "content",
         )
 
-        assert isinstance(result, SdkFileRead)
+        assert isinstance(result, ClaudeFileRead)
         assert result.offset == 10
         assert result.limit == 50
 
     def test_parse_returns_none_without_path(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Read",
             {},
             "content",
@@ -101,18 +103,19 @@ class TestSdkFileRead:
         assert result is None
 
     def test_parse_with_non_str_non_dict_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Read",
             {"file_path": "/test.txt"},
             123,  # type: ignore[arg-type]
         )
 
-        assert isinstance(result, SdkFileRead)
+        assert isinstance(result, ClaudeFileRead)
         assert result.path == "/test.txt"
         assert result.content == "123"
 
     def test_render(self) -> None:
-        file_read = SdkFileRead(
+        file_read = ClaudeFileRead(
+            event_id="test-event-1",
             path="/test.py",
             content="print('hello')",
             line_count=1,
@@ -125,7 +128,8 @@ class TestSdkFileRead:
         assert file_read.render() == "Read /test.py: 1 lines"
 
     def test_render_truncated(self) -> None:
-        file_read = SdkFileRead(
+        file_read = ClaudeFileRead(
+            event_id="test-event-2",
             path="/big.py",
             content="...",
             line_count=5000,
@@ -138,26 +142,26 @@ class TestSdkFileRead:
         assert "(truncated)" in file_read.render()
 
     def test_created_at_is_populated(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Read",
             {"file_path": "/test.py"},
             "content",
         )
 
-        assert isinstance(result, SdkFileRead)
+        assert isinstance(result, ClaudeFileRead)
         assert result.created_at is not None
         assert isinstance(result.created_at, datetime)
 
 
-class TestSdkBashResult:
+class TestClaudeBashResult:
     def test_parse_with_dict_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Bash",
             {"command": "ls -la"},
             {"stdout": "file1\nfile2", "stderr": "", "exitCode": 0},
         )
 
-        assert isinstance(result, SdkBashResult)
+        assert isinstance(result, ClaudeBashResult)
         assert result.command == "ls -la"
         assert result.stdout == "file1\nfile2"
         assert result.stderr == ""
@@ -165,40 +169,40 @@ class TestSdkBashResult:
         assert result.interrupted is False
 
     def test_parse_with_exit_code_key(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Bash",
             {"command": "false"},
             {"stdout": "", "stderr": "error", "exit_code": 1},
         )
 
-        assert isinstance(result, SdkBashResult)
+        assert isinstance(result, ClaudeBashResult)
         assert result.exit_code == 1
         assert result.stderr == "error"
 
     def test_parse_with_string_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Bash",
             {"command": "echo hello"},
             "hello",
         )
 
-        assert isinstance(result, SdkBashResult)
+        assert isinstance(result, ClaudeBashResult)
         assert result.stdout == "hello"
         assert result.stderr == ""
         assert result.exit_code == 0
 
     def test_parse_with_interrupted(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Bash",
             {"command": "sleep 1000"},
             {"stdout": "", "stderr": "", "interrupted": True},
         )
 
-        assert isinstance(result, SdkBashResult)
+        assert isinstance(result, ClaudeBashResult)
         assert result.interrupted is True
 
     def test_parse_returns_none_without_command(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Bash",
             {},
             {"stdout": "output"},
@@ -207,17 +211,17 @@ class TestSdkBashResult:
         assert result is None
 
     def test_parse_with_none_exit_code(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Bash",
             {"command": "test"},
             {"stdout": "ok", "stderr": "", "exitCode": None},
         )
 
-        assert isinstance(result, SdkBashResult)
+        assert isinstance(result, ClaudeBashResult)
         assert result.exit_code == 0
 
     def test_parse_returns_none_for_non_str_non_dict_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Bash",
             {"command": "echo"},
             123,  # type: ignore[arg-type]
@@ -226,7 +230,8 @@ class TestSdkBashResult:
         assert result is None
 
     def test_render_success(self) -> None:
-        bash_result = SdkBashResult(
+        bash_result = ClaudeBashResult(
+            event_id="test-bash-1",
             command="ls",
             stdout="file1",
             stderr="",
@@ -240,7 +245,8 @@ class TestSdkBashResult:
         assert "file1" in rendered
 
     def test_render_failure(self) -> None:
-        bash_result = SdkBashResult(
+        bash_result = ClaudeBashResult(
+            event_id="test-bash-2",
             command="bad_command",
             stdout="",
             stderr="not found",
@@ -254,7 +260,8 @@ class TestSdkBashResult:
 
     def test_render_long_output_truncated(self) -> None:
         long_output = "x" * 200
-        bash_result = SdkBashResult(
+        bash_result = ClaudeBashResult(
+            event_id="test-bash-3",
             command="cat bigfile",
             stdout=long_output,
             stderr="",
@@ -268,54 +275,54 @@ class TestSdkBashResult:
         assert len(rendered) < len(long_output) + 50  # Account for header
 
     def test_created_at_is_populated(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Bash",
             {"command": "ls"},
             {"stdout": "ok", "stderr": "", "exitCode": 0},
         )
 
-        assert isinstance(result, SdkBashResult)
+        assert isinstance(result, ClaudeBashResult)
         assert result.created_at is not None
         assert isinstance(result.created_at, datetime)
 
 
-class TestSdkGlobResult:
+class TestClaudeGlobResult:
     def test_parse_with_string_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Glob",
             {"pattern": "**/*.py", "path": "/src"},
             "file1.py\nfile2.py\nfile3.py",
         )
 
-        assert isinstance(result, SdkGlobResult)
+        assert isinstance(result, ClaudeGlobResult)
         assert result.pattern == "**/*.py"
         assert result.path == "/src"
         assert result.matches == ("file1.py", "file2.py", "file3.py")
         assert result.match_count == 3
 
     def test_parse_with_dict_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Glob",
             {"pattern": "*.txt", "path": "."},
             {"stdout": "a.txt\nb.txt"},
         )
 
-        assert isinstance(result, SdkGlobResult)
+        assert isinstance(result, ClaudeGlobResult)
         assert result.matches == ("a.txt", "b.txt")
 
     def test_parse_with_empty_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Glob",
             {"pattern": "*.nonexistent"},
             "",
         )
 
-        assert isinstance(result, SdkGlobResult)
+        assert isinstance(result, ClaudeGlobResult)
         assert result.matches == ()
         assert result.match_count == 0
 
     def test_parse_returns_none_without_pattern(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Glob",
             {"path": "/src"},
             "file1.py",
@@ -324,7 +331,8 @@ class TestSdkGlobResult:
         assert result is None
 
     def test_render(self) -> None:
-        glob_result = SdkGlobResult(
+        glob_result = ClaudeGlobResult(
+            event_id="test-glob-1",
             pattern="*.py",
             path="/src",
             matches=("a.py", "b.py"),
@@ -337,54 +345,54 @@ class TestSdkGlobResult:
         assert "a.py" in rendered
 
     def test_created_at_is_populated(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Glob",
             {"pattern": "*.py"},
             "file.py",
         )
 
-        assert isinstance(result, SdkGlobResult)
+        assert isinstance(result, ClaudeGlobResult)
         assert result.created_at is not None
         assert isinstance(result.created_at, datetime)
 
 
-class TestSdkGrepResult:
+class TestClaudeGrepResult:
     def test_parse_with_string_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Grep",
             {"pattern": "TODO", "path": "/src"},
             "file1.py:10: # TODO fix\nfile2.py:5: # TODO clean",
         )
 
-        assert isinstance(result, SdkGrepResult)
+        assert isinstance(result, ClaudeGrepResult)
         assert result.pattern == "TODO"
         assert result.path == "/src"
         assert len(result.matches) == 2
         assert result.match_count == 2
 
     def test_parse_with_dict_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Grep",
             {"pattern": "error", "path": "."},
             {"stdout": "log.txt:1: error occurred"},
         )
 
-        assert isinstance(result, SdkGrepResult)
+        assert isinstance(result, ClaudeGrepResult)
         assert result.matches == ("log.txt:1: error occurred",)
 
     def test_parse_with_empty_response(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Grep",
             {"pattern": "notfound"},
             "",
         )
 
-        assert isinstance(result, SdkGrepResult)
+        assert isinstance(result, ClaudeGrepResult)
         assert result.matches == ()
         assert result.match_count == 0
 
     def test_parse_returns_none_without_pattern(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Grep",
             {"path": "/src"},
             "match",
@@ -393,7 +401,8 @@ class TestSdkGrepResult:
         assert result is None
 
     def test_render(self) -> None:
-        grep_result = SdkGrepResult(
+        grep_result = ClaudeGrepResult(
+            event_id="test-grep-1",
             pattern="error",
             path="/logs",
             matches=("line1", "line2"),
@@ -406,32 +415,32 @@ class TestSdkGrepResult:
         assert "Grep error" in rendered
 
     def test_created_at_is_populated(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Grep",
             {"pattern": "error"},
             "match",
         )
 
-        assert isinstance(result, SdkGrepResult)
+        assert isinstance(result, ClaudeGrepResult)
         assert result.created_at is not None
         assert isinstance(result.created_at, datetime)
 
 
-class TestSdkWriteResult:
+class TestClaudeWriteResult:
     def test_parse(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Write",
             {"file_path": "/test.txt", "content": "hello world"},
             "File written",
         )
 
-        assert isinstance(result, SdkWriteResult)
+        assert isinstance(result, ClaudeWriteResult)
         assert result.path == "/test.txt"
         assert result.bytes_written == len(b"hello world")
         assert result.created is True
 
     def test_parse_returns_none_without_path(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Write",
             {"content": "hello"},
             "ok",
@@ -440,7 +449,8 @@ class TestSdkWriteResult:
         assert result is None
 
     def test_render(self) -> None:
-        write_result = SdkWriteResult(
+        write_result = ClaudeWriteResult(
+            event_id="test-write-1",
             path="/test.txt",
             bytes_written=100,
             created_at=datetime.now(UTC),
@@ -450,20 +460,20 @@ class TestSdkWriteResult:
         assert "Created /test.txt" in write_result.render()
 
     def test_created_at_is_populated(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Write",
             {"file_path": "/test.txt", "content": "hello"},
             "ok",
         )
 
-        assert isinstance(result, SdkWriteResult)
+        assert isinstance(result, ClaudeWriteResult)
         assert result.created_at is not None
         assert isinstance(result.created_at, datetime)
 
 
-class TestSdkEditResult:
+class TestClaudeEditResult:
     def test_parse(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Edit",
             {
                 "file_path": "/test.py",
@@ -473,14 +483,14 @@ class TestSdkEditResult:
             "Edit successful",
         )
 
-        assert isinstance(result, SdkEditResult)
+        assert isinstance(result, ClaudeEditResult)
         assert result.path == "/test.py"
         assert result.old_string == "foo"
         assert result.new_string == "bar"
         assert result.replacements == 1
 
     def test_parse_returns_none_without_path(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Edit",
             {"old_string": "a", "new_string": "b"},
             "ok",
@@ -489,7 +499,7 @@ class TestSdkEditResult:
         assert result is None
 
     def test_parse_returns_none_without_old_string(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Edit",
             {"file_path": "/test.py", "new_string": "b"},
             "ok",
@@ -498,7 +508,8 @@ class TestSdkEditResult:
         assert result is None
 
     def test_render(self) -> None:
-        edit_result = SdkEditResult(
+        edit_result = ClaudeEditResult(
+            event_id="test-edit-1",
             path="/test.py",
             old_string="old",
             new_string="new",
@@ -509,20 +520,20 @@ class TestSdkEditResult:
         assert "Edited /test.py: 3 replacement(s)" in edit_result.render()
 
     def test_created_at_is_populated(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Edit",
             {"file_path": "/test.py", "old_string": "a", "new_string": "b"},
             "ok",
         )
 
-        assert isinstance(result, SdkEditResult)
+        assert isinstance(result, ClaudeEditResult)
         assert result.created_at is not None
         assert isinstance(result.created_at, datetime)
 
 
 class TestUnknownTool:
     def test_unknown_tool_returns_none(self) -> None:
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "UnknownTool",
             {"some": "params"},
             "output",
@@ -534,7 +545,7 @@ class TestUnknownTool:
 class TestParseErrorHandling:
     def test_handles_malformed_input_gracefully(self) -> None:
         # This shouldn't raise, just return None
-        result = parse_sdk_tool_result(
+        result = parse_claude_tool_result(
             "Read",
             None,  # type: ignore[arg-type]
             "content",
@@ -559,7 +570,7 @@ class TestHookDispatchesTypedResults:
 
         asyncio.run(hook(input_data, "call-read", context))
 
-        results = session.query(SdkFileRead).all()
+        results = session.query(ClaudeFileRead).all()
         assert len(results) == 1
         assert results[0].path == "/test.py"
         assert results[0].content == "print('hello')"
@@ -579,7 +590,7 @@ class TestHookDispatchesTypedResults:
 
         asyncio.run(hook(input_data, "call-bash", context))
 
-        results = session.query(SdkBashResult).all()
+        results = session.query(ClaudeBashResult).all()
         assert len(results) == 1
         assert results[0].command == "echo hello"
         assert results[0].stdout == "hello"
@@ -600,7 +611,7 @@ class TestHookDispatchesTypedResults:
 
         asyncio.run(hook(input_data, "call-glob", context))
 
-        results = session.query(SdkGlobResult).all()
+        results = session.query(ClaudeGlobResult).all()
         assert len(results) == 1
         assert results[0].pattern == "*.py"
         assert results[0].matches == ("a.py", "b.py")
@@ -620,7 +631,7 @@ class TestHookDispatchesTypedResults:
 
         asyncio.run(hook(input_data, "call-grep", context))
 
-        results = session.query(SdkGrepResult).all()
+        results = session.query(ClaudeGrepResult).all()
         assert len(results) == 1
         assert results[0].pattern == "TODO"
 
@@ -639,7 +650,7 @@ class TestHookDispatchesTypedResults:
 
         asyncio.run(hook(input_data, "call-write", context))
 
-        results = session.query(SdkWriteResult).all()
+        results = session.query(ClaudeWriteResult).all()
         assert len(results) == 1
         assert results[0].path == "/new.txt"
 
@@ -662,7 +673,7 @@ class TestHookDispatchesTypedResults:
 
         asyncio.run(hook(input_data, "call-edit", context))
 
-        results = session.query(SdkEditResult).all()
+        results = session.query(ClaudeEditResult).all()
         assert len(results) == 1
         assert results[0].path == "/test.py"
         assert results[0].old_string == "foo"
@@ -712,11 +723,11 @@ class TestHookDispatchesTypedResults:
         )
 
         # Query all file reads
-        file_reads = session.query(SdkFileRead).all()
+        file_reads = session.query(ClaudeFileRead).all()
         assert len(file_reads) == 2
 
         # Query all bash results
-        bash_results = session.query(SdkBashResult).all()
+        bash_results = session.query(ClaudeBashResult).all()
         assert len(bash_results) == 1
 
     def test_query_with_predicate(self, session: Session) -> None:
@@ -767,12 +778,12 @@ class TestHookDispatchesTypedResults:
         )
 
         # Query failed commands only
-        failed = session.query(SdkBashResult).where(lambda r: r.exit_code != 0)
+        failed = session.query(ClaudeBashResult).where(lambda r: r.exit_code != 0)
         assert len(failed) == 1
         assert failed[0].command == "bad_cmd"
 
         # Query successful commands
-        successful = session.query(SdkBashResult).where(lambda r: r.exit_code == 0)
+        successful = session.query(ClaudeBashResult).where(lambda r: r.exit_code == 0)
         assert len(successful) == 2
 
     def test_does_not_dispatch_for_unknown_tools(self, session: Session) -> None:
@@ -796,11 +807,11 @@ class TestHookDispatchesTypedResults:
         )
 
         # No typed results should be in any slice
-        assert session.query(SdkFileRead).all() == ()
-        assert session.query(SdkBashResult).all() == ()
+        assert session.query(ClaudeFileRead).all() == ()
+        assert session.query(ClaudeBashResult).all() == ()
 
 
-class TestSdkFileReadQueryPatterns:
+class TestClaudeFileReadQueryPatterns:
     def test_query_by_path_pattern(self, session: Session) -> None:
         context = HookContext(
             session=session,
@@ -824,12 +835,12 @@ class TestSdkFileReadQueryPatterns:
             )
 
         # Query only test files
-        test_files = session.query(SdkFileRead).where(lambda r: "/tests/" in r.path)
+        test_files = session.query(ClaudeFileRead).where(lambda r: "/tests/" in r.path)
         assert len(test_files) == 1
         assert test_files[0].path == "/tests/test_main.py"
 
         # Query src files
-        src_files = session.query(SdkFileRead).where(lambda r: "/src/" in r.path)
+        src_files = session.query(ClaudeFileRead).where(lambda r: "/src/" in r.path)
         assert len(src_files) == 2
 
     def test_latest_file_read(self, session: Session) -> None:
@@ -863,6 +874,6 @@ class TestSdkFileReadQueryPatterns:
             )
         )
 
-        latest = session.query(SdkFileRead).latest()
+        latest = session.query(ClaudeFileRead).latest()
         assert latest is not None
         assert latest.path == "/second.py"

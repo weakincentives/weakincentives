@@ -16,12 +16,16 @@ SDK native tools (Read, Bash, Glob, Grep, Write, Edit) produce raw dict
 responses. This module provides typed dataclasses that auto-parse these
 outputs, enabling first-class access via session queries:
 
-    files_read = session.query(SdkFileRead).all()
-    bash_results = session.query(SdkBashResult).where(lambda r: r.exit_code != 0)
+    files_read = session.query(ClaudeFileRead).all()
+    bash_results = session.query(ClaudeBashResult).where(lambda r: r.exit_code != 0)
+
+Each result type includes event_id and created_at fields, which are used
+by the wink debug UI to classify these as event slices.
 """
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import field
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -35,25 +39,26 @@ _GREP_PREVIEW_COUNT: Final[int] = 3
 _TRUNCATION_THRESHOLD: Final[int] = 50000
 
 __all__ = [
-    "SdkBashResult",
-    "SdkEditResult",
-    "SdkFileRead",
-    "SdkGlobResult",
-    "SdkGrepResult",
-    "SdkToolResult",
-    "SdkWriteResult",
-    "parse_sdk_tool_result",
+    "ClaudeBashResult",
+    "ClaudeEditResult",
+    "ClaudeFileRead",
+    "ClaudeGlobResult",
+    "ClaudeGrepResult",
+    "ClaudeToolResult",
+    "ClaudeWriteResult",
+    "parse_claude_tool_result",
 ]
 
 
 @FrozenDataclass()
-class SdkFileRead:
-    """Result from the SDK Read tool.
+class ClaudeFileRead:
+    """Result from the Claude Agent SDK Read tool.
 
     Captures file content read by the agent, enabling queries like:
-        session.query(SdkFileRead).where(lambda r: "error" in r.path)
+        session.query(ClaudeFileRead).where(lambda r: "error" in r.path)
     """
 
+    event_id: str = field(metadata={"description": "Unique identifier for this event."})
     path: str = field(metadata={"description": "Absolute file path that was read."})
     content: str = field(metadata={"description": "File content returned by the tool."})
     line_count: int = field(
@@ -81,13 +86,14 @@ class SdkFileRead:
 
 
 @FrozenDataclass()
-class SdkBashResult:
-    """Result from the SDK Bash tool.
+class ClaudeBashResult:
+    """Result from the Claude Agent SDK Bash tool.
 
     Captures command execution results, enabling queries like:
-        failed = session.query(SdkBashResult).where(lambda r: r.exit_code != 0)
+        failed = session.query(ClaudeBashResult).where(lambda r: r.exit_code != 0)
     """
 
+    event_id: str = field(metadata={"description": "Unique identifier for this event."})
     command: str = field(
         metadata={"description": "The bash command that was executed."}
     )
@@ -114,13 +120,14 @@ class SdkBashResult:
 
 
 @FrozenDataclass()
-class SdkGlobResult:
-    """Result from the SDK Glob tool.
+class ClaudeGlobResult:
+    """Result from the Claude Agent SDK Glob tool.
 
     Captures file pattern matching results, enabling queries like:
-        py_globs = session.query(SdkGlobResult).where(lambda r: "*.py" in r.pattern)
+        py_globs = session.query(ClaudeGlobResult).where(lambda r: "*.py" in r.pattern)
     """
 
+    event_id: str = field(metadata={"description": "Unique identifier for this event."})
     pattern: str = field(metadata={"description": "The glob pattern that was matched."})
     path: str = field(metadata={"description": "Directory where glob was executed."})
     matches: tuple[str, ...] = field(
@@ -139,13 +146,14 @@ class SdkGlobResult:
 
 
 @FrozenDataclass()
-class SdkGrepResult:
-    """Result from the SDK Grep tool.
+class ClaudeGrepResult:
+    """Result from the Claude Agent SDK Grep tool.
 
     Captures content search results, enabling queries like:
-        todo_greps = session.query(SdkGrepResult).where(lambda r: "TODO" in r.pattern)
+        todo_greps = session.query(ClaudeGrepResult).where(lambda r: "TODO" in r.pattern)
     """
 
+    event_id: str = field(metadata={"description": "Unique identifier for this event."})
     pattern: str = field(
         metadata={"description": "The regex pattern that was searched."}
     )
@@ -172,13 +180,14 @@ class SdkGrepResult:
 
 
 @FrozenDataclass()
-class SdkWriteResult:
-    """Result from the SDK Write tool.
+class ClaudeWriteResult:
+    """Result from the Claude Agent SDK Write tool.
 
     Captures file write operations, enabling queries like:
-        writes = session.query(SdkWriteResult).all()
+        writes = session.query(ClaudeWriteResult).all()
     """
 
+    event_id: str = field(metadata={"description": "Unique identifier for this event."})
     path: str = field(metadata={"description": "Absolute file path that was written."})
     bytes_written: int = field(
         metadata={"description": "Number of bytes written to the file."}
@@ -197,13 +206,14 @@ class SdkWriteResult:
 
 
 @FrozenDataclass()
-class SdkEditResult:
-    """Result from the SDK Edit tool.
+class ClaudeEditResult:
+    """Result from the Claude Agent SDK Edit tool.
 
     Captures file edit operations, enabling queries like:
-        edits = session.query(SdkEditResult).where(lambda r: r.replacements > 0)
+        edits = session.query(ClaudeEditResult).where(lambda r: r.replacements > 0)
     """
 
+    event_id: str = field(metadata={"description": "Unique identifier for this event."})
     path: str = field(metadata={"description": "Absolute file path that was edited."})
     old_string: str = field(metadata={"description": "The string that was replaced."})
     new_string: str = field(metadata={"description": "The replacement string."})
@@ -216,23 +226,24 @@ class SdkEditResult:
         return f"Edited {self.path}: {self.replacements} replacement(s)"
 
 
-# Union type for all SDK tool results
-type SdkToolResult = (
-    SdkFileRead
-    | SdkBashResult
-    | SdkGlobResult
-    | SdkGrepResult
-    | SdkWriteResult
-    | SdkEditResult
+# Union type for all Claude tool results
+type ClaudeToolResult = (
+    ClaudeFileRead
+    | ClaudeBashResult
+    | ClaudeGlobResult
+    | ClaudeGrepResult
+    | ClaudeWriteResult
+    | ClaudeEditResult
 )
 
 
 def _parse_file_read(
     tool_input: dict[str, Any],
     tool_response: dict[str, Any] | str,
+    event_id: str,
     created_at: datetime,
-) -> SdkFileRead | None:
-    """Parse Read tool response into SdkFileRead."""
+) -> ClaudeFileRead | None:
+    """Parse Read tool response into ClaudeFileRead."""
     path = tool_input.get("file_path", "")
     if not path:
         return None
@@ -246,7 +257,8 @@ def _parse_file_read(
         content = str(tool_response) if tool_response else ""
 
     lines = content.splitlines()
-    return SdkFileRead(
+    return ClaudeFileRead(
+        event_id=event_id,
         path=path,
         content=content,
         line_count=len(lines),
@@ -260,9 +272,10 @@ def _parse_file_read(
 def _parse_bash_result(
     tool_input: dict[str, Any],
     tool_response: dict[str, Any] | str,
+    event_id: str,
     created_at: datetime,
-) -> SdkBashResult | None:
-    """Parse Bash tool response into SdkBashResult."""
+) -> ClaudeBashResult | None:
+    """Parse Bash tool response into ClaudeBashResult."""
     command = tool_input.get("command", "")
     if not command:
         return None
@@ -283,7 +296,8 @@ def _parse_bash_result(
     else:
         return None
 
-    return SdkBashResult(
+    return ClaudeBashResult(
+        event_id=event_id,
         command=command,
         stdout=stdout,
         stderr=stderr,
@@ -296,9 +310,10 @@ def _parse_bash_result(
 def _parse_glob_result(
     tool_input: dict[str, Any],
     tool_response: dict[str, Any] | str,
+    event_id: str,
     created_at: datetime,
-) -> SdkGlobResult | None:
-    """Parse Glob tool response into SdkGlobResult."""
+) -> ClaudeGlobResult | None:
+    """Parse Glob tool response into ClaudeGlobResult."""
     pattern = tool_input.get("pattern", "")
     path = tool_input.get("path", ".")
     if not pattern:
@@ -313,7 +328,8 @@ def _parse_glob_result(
         if stdout:
             matches = [line.strip() for line in stdout.splitlines() if line.strip()]
 
-    return SdkGlobResult(
+    return ClaudeGlobResult(
+        event_id=event_id,
         pattern=pattern,
         path=path,
         matches=tuple(matches),
@@ -325,9 +341,10 @@ def _parse_glob_result(
 def _parse_grep_result(
     tool_input: dict[str, Any],
     tool_response: dict[str, Any] | str,
+    event_id: str,
     created_at: datetime,
-) -> SdkGrepResult | None:
-    """Parse Grep tool response into SdkGrepResult."""
+) -> ClaudeGrepResult | None:
+    """Parse Grep tool response into ClaudeGrepResult."""
     pattern = tool_input.get("pattern", "")
     path = tool_input.get("path", ".")
     if not pattern:
@@ -341,7 +358,8 @@ def _parse_grep_result(
         if stdout:
             matches = [line.strip() for line in stdout.splitlines() if line.strip()]
 
-    return SdkGrepResult(
+    return ClaudeGrepResult(
+        event_id=event_id,
         pattern=pattern,
         path=path,
         matches=tuple(matches),
@@ -354,15 +372,17 @@ def _parse_grep_result(
 def _parse_write_result(
     tool_input: dict[str, Any],
     tool_response: dict[str, Any] | str,
+    event_id: str,
     created_at: datetime,
-) -> SdkWriteResult | None:
-    """Parse Write tool response into SdkWriteResult."""
+) -> ClaudeWriteResult | None:
+    """Parse Write tool response into ClaudeWriteResult."""
     path = tool_input.get("file_path", "")
     content = tool_input.get("content", "")
     if not path:
         return None
 
-    return SdkWriteResult(
+    return ClaudeWriteResult(
+        event_id=event_id,
         path=path,
         bytes_written=len(content.encode("utf-8")) if content else 0,
         created_at=created_at,
@@ -373,9 +393,10 @@ def _parse_write_result(
 def _parse_edit_result(
     tool_input: dict[str, Any],
     tool_response: dict[str, Any] | str,
+    event_id: str,
     created_at: datetime,
-) -> SdkEditResult | None:
-    """Parse Edit tool response into SdkEditResult."""
+) -> ClaudeEditResult | None:
+    """Parse Edit tool response into ClaudeEditResult."""
     path = tool_input.get("file_path", "")
     old_string = tool_input.get("old_string", "")
     new_string = tool_input.get("new_string", "")
@@ -385,7 +406,8 @@ def _parse_edit_result(
     # We can't know the actual replacement count from the SDK response
     replacements = 1
 
-    return SdkEditResult(
+    return ClaudeEditResult(
+        event_id=event_id,
         path=path,
         old_string=old_string,
         new_string=new_string,
@@ -394,37 +416,39 @@ def _parse_edit_result(
     )
 
 
-# Registry mapping SDK tool names to their parsers
-_SDK_TOOL_PARSERS: dict[
+# Registry mapping Claude tool names to their result types
+_CLAUDE_TOOL_TYPES: dict[
     str,
-    type[SdkFileRead]
-    | type[SdkBashResult]
-    | type[SdkGlobResult]
-    | type[SdkGrepResult]
-    | type[SdkWriteResult]
-    | type[SdkEditResult],
+    type[ClaudeFileRead]
+    | type[ClaudeBashResult]
+    | type[ClaudeGlobResult]
+    | type[ClaudeGrepResult]
+    | type[ClaudeWriteResult]
+    | type[ClaudeEditResult],
 ] = {
-    "Read": SdkFileRead,
-    "Bash": SdkBashResult,
-    "Glob": SdkGlobResult,
-    "Grep": SdkGrepResult,
-    "Write": SdkWriteResult,
-    "Edit": SdkEditResult,
+    "Read": ClaudeFileRead,
+    "Bash": ClaudeBashResult,
+    "Glob": ClaudeGlobResult,
+    "Grep": ClaudeGrepResult,
+    "Write": ClaudeWriteResult,
+    "Edit": ClaudeEditResult,
 }
 
 
-def parse_sdk_tool_result(
+def parse_claude_tool_result(
     tool_name: str,
     tool_input: dict[str, Any],
     tool_response: dict[str, Any] | str,
+    event_id: str | None = None,
     created_at: datetime | None = None,
-) -> SdkToolResult | None:
-    """Parse an SDK native tool result into a typed dataclass.
+) -> ClaudeToolResult | None:
+    """Parse a Claude Agent SDK native tool result into a typed dataclass.
 
     Args:
         tool_name: Name of the SDK tool (e.g., "Read", "Bash", "Glob").
         tool_input: Input parameters passed to the tool.
         tool_response: Raw response from the tool.
+        event_id: Unique identifier for this event. Defaults to a new UUID.
         created_at: Timestamp when the tool was executed. Defaults to now.
 
     Returns:
@@ -443,10 +467,11 @@ def parse_sdk_tool_result(
     if parser is None:
         return None
 
+    eid = event_id if event_id is not None else str(uuid.uuid4())
     timestamp = created_at if created_at is not None else datetime.now(UTC)
 
     try:
-        return parser(tool_input, tool_response, timestamp)
+        return parser(tool_input, tool_response, eid, timestamp)
     except Exception:
         # Silently ignore parsing errors to avoid breaking the hook
         return None
