@@ -77,6 +77,7 @@ def test_plan_render_helpers() -> None:
 
 def test_plan_command_renders() -> None:
     setup = SetupPlan(objective="ship", initial_steps=("draft",))
+    setup_no_steps = SetupPlan(objective="ship", initial_steps=())
     add = AddStep(steps=("refine",))
     empty_add = AddStep(steps=())
     update = UpdateStep(step_id=1, title="rename")
@@ -84,6 +85,7 @@ def test_plan_command_renders() -> None:
     read = ReadPlan()
 
     assert "ship" in setup.render()
+    assert "<none>" in setup_no_steps.render()
     assert "refine" in add.render()
     assert "no steps" in empty_add.render()
     assert "rename" in update.render()
@@ -125,6 +127,26 @@ def test_setup_plan_normalizes_payloads() -> None:
     assert plan.steps == (
         PlanStep(step_id=1, title="draft checklist", status="pending"),
     )
+
+
+def test_setup_plan_returns_plan() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = PlanningToolsSection(session=session)
+    setup_tool = find_tool(section, "planning_setup_plan")
+
+    params = SetupPlan(
+        objective="ship feature",
+        initial_steps=("draft", "review"),
+    )
+    result = invoke_tool(setup_tool, params, session=session)
+
+    assert isinstance(result.value, Plan)
+    assert result.value.objective == "ship feature"
+    assert result.value.status == "active"
+    assert len(result.value.steps) == 2
+    assert result.value.steps[0].title == "draft"
+    assert result.value.steps[1].title == "review"
 
 
 def test_setup_plan_rejects_invalid_objective() -> None:
@@ -181,6 +203,31 @@ def test_add_step_appends_new_steps() -> None:
     assert plan is not None
     assert [step.step_id for step in plan.steps] == [1, 2, 3]
     assert [step.title for step in plan.steps] == ["draft", "review", "release"]
+
+
+def test_add_step_returns_plan() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = PlanningToolsSection(session=session)
+    setup_tool = find_tool(section, "planning_setup_plan")
+    add_tool = find_tool(section, "planning_add_step")
+
+    invoke_tool(
+        setup_tool,
+        SetupPlan(objective="ship", initial_steps=("draft",)),
+        session=session,
+    )
+    result = invoke_tool(
+        add_tool,
+        AddStep(steps=("review", "release")),
+        session=session,
+    )
+
+    assert isinstance(result.value, Plan)
+    assert result.value.objective == "ship"
+    assert len(result.value.steps) == 3
+    assert result.value.steps[1].title == "review"
+    assert result.value.steps[2].title == "release"
 
 
 def test_add_step_rejects_empty_payload() -> None:
@@ -295,6 +342,34 @@ def test_update_step_updates_existing_step_title() -> None:
         "categorise replies",
     ]
     assert plan.steps[1].step_id == 2
+
+
+def test_update_step_returns_plan() -> None:
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = PlanningToolsSection(session=session)
+    setup_tool = find_tool(section, "planning_setup_plan")
+    update_tool = find_tool(section, "planning_update_step")
+
+    invoke_tool(
+        setup_tool,
+        SetupPlan(
+            objective="ship",
+            initial_steps=("draft", "review"),
+        ),
+        session=session,
+    )
+
+    result = invoke_tool(
+        update_tool,
+        UpdateStep(step_id=1, status="done"),
+        session=session,
+    )
+
+    assert isinstance(result.value, Plan)
+    assert result.value.objective == "ship"
+    assert result.value.steps[0].status == "done"
+    assert result.value.steps[1].status == "pending"
 
 
 def test_update_step_updates_status() -> None:

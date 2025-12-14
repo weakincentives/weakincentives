@@ -286,7 +286,7 @@ def _build_tools(
     return cast(
         tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
         (
-            Tool[SetupPlan, SetupPlan](
+            Tool[SetupPlan, Plan](
                 name="planning_setup_plan",
                 description=(
                     "Create or replace the session plan with an objective and "
@@ -295,7 +295,7 @@ def _build_tools(
                 handler=suite.setup_plan,
                 accepts_overrides=accepts_overrides,
                 examples=(
-                    ToolExample[SetupPlan, SetupPlan](
+                    ToolExample[SetupPlan, Plan](
                         description="Create a plan with an objective and two steps.",
                         input=SetupPlan(
                             objective="Publish migration guide",
@@ -304,44 +304,93 @@ def _build_tools(
                                 "List breaking changes",
                             ),
                         ),
-                        output=SetupPlan(
+                        output=Plan(
                             objective="Publish migration guide",
-                            initial_steps=(
-                                "Audit existing guides",
-                                "List breaking changes",
+                            status="active",
+                            steps=(
+                                PlanStep(
+                                    step_id=1,
+                                    title="Audit existing guides",
+                                    status="pending",
+                                ),
+                                PlanStep(
+                                    step_id=2,
+                                    title="List breaking changes",
+                                    status="pending",
+                                ),
                             ),
                         ),
                     ),
                 ),
             ),
-            Tool[AddStep, AddStep](
+            Tool[AddStep, Plan](
                 name="planning_add_step",
                 description="Append one or more steps to the active plan.",
                 handler=suite.add_step,
                 accepts_overrides=accepts_overrides,
                 examples=(
-                    ToolExample[AddStep, AddStep](
+                    ToolExample[AddStep, Plan](
                         description="Add two follow-up steps.",
                         input=AddStep(steps=("Draft outline", "Review with team")),
-                        output=AddStep(steps=("Draft outline", "Review with team")),
+                        output=Plan(
+                            objective="Publish migration guide",
+                            status="active",
+                            steps=(
+                                PlanStep(
+                                    step_id=1, title="Audit guides", status="done"
+                                ),
+                                PlanStep(
+                                    step_id=2, title="Draft outline", status="pending"
+                                ),
+                                PlanStep(
+                                    step_id=3,
+                                    title="Review with team",
+                                    status="pending",
+                                ),
+                            ),
+                        ),
                     ),
                 ),
             ),
-            Tool[UpdateStep, UpdateStep](
+            Tool[UpdateStep, Plan](
                 name="planning_update_step",
                 description="Update a step's title or status by its ID.",
                 handler=suite.update_step,
                 accepts_overrides=accepts_overrides,
                 examples=(
-                    ToolExample[UpdateStep, UpdateStep](
+                    ToolExample[UpdateStep, Plan](
                         description="Mark step 1 as done.",
                         input=UpdateStep(step_id=1, status="done"),
-                        output=UpdateStep(step_id=1, status="done"),
+                        output=Plan(
+                            objective="Publish migration guide",
+                            status="active",
+                            steps=(
+                                PlanStep(
+                                    step_id=1, title="Audit guides", status="done"
+                                ),
+                                PlanStep(
+                                    step_id=2, title="Draft outline", status="pending"
+                                ),
+                            ),
+                        ),
                     ),
-                    ToolExample[UpdateStep, UpdateStep](
+                    ToolExample[UpdateStep, Plan](
                         description="Rename step 2.",
                         input=UpdateStep(step_id=2, title="Finalize outline"),
-                        output=UpdateStep(step_id=2, title="Finalize outline"),
+                        output=Plan(
+                            objective="Publish migration guide",
+                            status="active",
+                            steps=(
+                                PlanStep(
+                                    step_id=1, title="Audit guides", status="done"
+                                ),
+                                PlanStep(
+                                    step_id=2,
+                                    title="Finalize outline",
+                                    status="pending",
+                                ),
+                            ),
+                        ),
                     ),
                 ),
             ),
@@ -382,19 +431,22 @@ class _PlanningToolSuite:
 
     def setup_plan(
         self, params: SetupPlan, *, context: ToolContext
-    ) -> ToolResult[SetupPlan]:
+    ) -> ToolResult[Plan]:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
         objective = _normalize_text(params.objective, "objective")
         initial_steps = _normalize_step_titles(params.initial_steps)
         normalized = SetupPlan(objective=objective, initial_steps=initial_steps)
+        session = self._section.session
+        session.mutate(Plan).dispatch(normalized)
+        plan = _require_plan(session)
         step_count = len(initial_steps)
         message = (
             f"Plan initialised with {step_count} step{'s' if step_count != 1 else ''}."
         )
-        return ToolResult(message=message, value=normalized)
+        return ToolResult(message=message, value=plan)
 
-    def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[AddStep]:
+    def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[Plan]:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
@@ -404,12 +456,15 @@ class _PlanningToolSuite:
         if not normalized_steps:
             message = "Provide at least one step to add."
             raise ToolValidationError(message)
+        normalized = AddStep(steps=normalized_steps)
+        session.mutate(Plan).dispatch(normalized)
+        plan = _require_plan(session)
         message = f"Added {len(normalized_steps)} step{'s' if len(normalized_steps) != 1 else ''}."
-        return ToolResult(message=message, value=AddStep(steps=normalized_steps))
+        return ToolResult(message=message, value=plan)
 
     def update_step(
         self, params: UpdateStep, *, context: ToolContext
-    ) -> ToolResult[UpdateStep]:
+    ) -> ToolResult[Plan]:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
@@ -429,7 +484,9 @@ class _PlanningToolSuite:
             title=updated_title,
             status=updated_status,
         )
-        return ToolResult(message=f"Step {step_id} updated.", value=normalized)
+        session.mutate(Plan).dispatch(normalized)
+        plan = _require_plan(session)
+        return ToolResult(message=f"Step {step_id} updated.", value=plan)
 
     def read_plan(self, params: ReadPlan, *, context: ToolContext) -> ToolResult[Plan]:
         del params
