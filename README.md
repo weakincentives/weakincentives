@@ -96,10 +96,11 @@ structure itself.
   state. Mount host directories read-only when needed; the sandbox prevents
   accidental writes to the host. See [Workspace Tools](specs/WORKSPACE.md).
 
-- **Provider-agnostic adapters.** Swap between OpenAI, LiteLLM, or other providers
-  without touching agent logic. Adapters handle tool negotiation, structured
-  output schemas, and response normalization.
-  See [Adapters](specs/ADAPTERS.md).
+- **Provider-agnostic adapters.** Swap between OpenAI, LiteLLM, Claude Agent SDK,
+  or other providers without touching agent logic. Adapters handle tool
+  negotiation, structured output schemas, and response normalization. The Claude
+  Agent SDK adapter provides full agentic capabilities with hermetic isolation.
+  See [Adapters](specs/ADAPTERS.md) and [Claude Agent SDK](specs/CLAUDE_AGENT_SDK.md).
 
 - **Minimal dependencies.** No Pydantic, no heavyweight stacks. Custom serde
   modules provide validation without sprawling dependency trees.
@@ -114,10 +115,11 @@ structure itself.
 ```bash
 uv add weakincentives
 # optional extras
-uv add "weakincentives[asteval]"      # safe Python evaluation
-uv add "weakincentives[openai]"       # OpenAI adapter
-uv add "weakincentives[litellm]"      # LiteLLM adapter
-uv add "weakincentives[wink]"         # debug UI
+uv add "weakincentives[asteval]"          # safe Python evaluation
+uv add "weakincentives[openai]"           # OpenAI adapter
+uv add "weakincentives[litellm]"          # LiteLLM adapter
+uv add "weakincentives[claude-agent-sdk]" # Claude Agent SDK adapter
+uv add "weakincentives[wink]"             # debug UI
 ```
 
 ### Debug UI
@@ -272,6 +274,65 @@ key, and tag.
 
 A code review agent with structured output, sandboxed file access, observable
 state, and tunable prompts—built as regular software, not ad-hoc scripts.
+
+### Using the Claude Agent SDK
+
+The code reviewer also supports running with the Claude Agent SDK adapter,
+which provides Claude's full agentic capabilities through native tools
+(Read, Write, Bash, Glob, Grep) rather than the VFS sandbox. This mode offers
+hermetic isolation with network restrictions while letting Claude use its
+native tooling.
+
+```bash
+# Run with Claude Agent SDK (requires ANTHROPIC_API_KEY)
+python code_reviewer_example.py --claude-agent
+```
+
+Key differences in Claude Agent SDK mode:
+
+- **Native tools**: Uses Claude Code's built-in tools instead of VFS
+- **Hermetic isolation**: Ephemeral home directory prevents access to host config
+- **Network policy**: Restricted to specific documentation domains (PEPs, Python docs)
+- **MCP bridging**: Custom WINK tools (planning, workspace digest) bridged via MCP
+- **Sandbox**: OS-level sandboxing (bubblewrap on Linux, seatbelt on macOS)
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    ClaudeAgentWorkspaceSection,
+    HostMount,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
+)
+
+# Create workspace with code mounted
+workspace = ClaudeAgentWorkspaceSection(
+    session=session,
+    mounts=(HostMount(host_path="src", mount_path="src"),),
+    allowed_host_roots=("/path/to/project",),
+)
+
+# Configure hermetic isolation
+adapter = ClaudeAgentSDKAdapter(
+    model="claude-sonnet-4-5-20250929",
+    client_config=ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        cwd=str(workspace.temp_dir),
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy(allowed_domains=("docs.python.org",)),
+            sandbox=SandboxConfig(enabled=True),
+        ),
+    ),
+)
+
+response = adapter.evaluate(prompt, session=session)
+workspace.cleanup()  # Clean up temp directory
+```
+
+See [Claude Agent SDK Adapter](specs/CLAUDE_AGENT_SDK.md) for full configuration
+reference and isolation guarantees.
 
 ## Logging
 
