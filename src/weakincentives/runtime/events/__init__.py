@@ -169,16 +169,83 @@ class PromptExecuted:
 class PromptRendered:
     """Event emitted immediately before dispatching a rendered prompt."""
 
-    prompt_ns: str
-    prompt_key: str
-    prompt_name: str | None
-    adapter: AdapterName
-    session_id: UUID | None
-    render_inputs: tuple[Any, ...]
-    rendered_prompt: str
-    created_at: datetime
-    descriptor: PromptDescriptor | None = None
-    event_id: UUID = field(default_factory=uuid4)
+    __slice_meta__ = SliceMeta(
+        label="Prompt Rendered",
+        description="Pre-dispatch prompt rendering event with full text.",
+        icon="file-text",
+        sort_key="created_at",
+        sort_order="desc",
+    )
+
+    # Required fields (no defaults)
+    prompt_ns: str = field(
+        metadata={
+            "display": "secondary",
+            "description": "Namespace of the rendered prompt.",
+        }
+    )
+    prompt_key: str = field(
+        metadata={
+            "display": "secondary",
+            "description": "Key of the rendered prompt.",
+        }
+    )
+    adapter: AdapterName = field(
+        metadata={
+            "display": "primary",
+            "description": "Adapter processing this prompt.",
+        }
+    )
+    rendered_prompt: str = field(
+        metadata={
+            "display": "primary",
+            "format": "markdown",
+            "description": "Full rendered prompt text.",
+        }
+    )
+    created_at: datetime = field(
+        metadata={
+            "display": "secondary",
+            "description": "Timestamp of rendering.",
+        }
+    )
+    # Optional fields (with defaults)
+    prompt_name: str | None = field(
+        default=None,
+        metadata={
+            "display": "primary",
+            "description": "Human-readable name of the prompt.",
+        },
+    )
+    session_id: UUID | None = field(
+        default=None,
+        metadata={
+            "display": "secondary",
+            "description": "Session identifier.",
+        },
+    )
+    render_inputs: tuple[Any, ...] = field(
+        default=(),
+        metadata={
+            "display": "hidden",
+            "format": "json",
+            "description": "Inputs used to render the prompt.",
+        },
+    )
+    descriptor: PromptDescriptor | None = field(
+        default=None,
+        metadata={
+            "display": "hidden",
+            "description": "Prompt metadata descriptor.",
+        },
+    )
+    event_id: UUID = field(
+        default_factory=uuid4,
+        metadata={
+            "display": "hidden",
+            "description": "Unique event identifier.",
+        },
+    )
 
 
 __all__ = [

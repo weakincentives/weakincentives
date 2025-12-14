@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import textwrap
+from dataclasses import field as datafield
 from typing import override
 
 from ...dataclasses import FrozenDataclass
@@ -37,8 +38,19 @@ class WorkspaceDigest(SupportsDataclass):
         icon="file-text",
     )
 
-    section_key: str
-    body: str
+    section_key: str = datafield(
+        metadata={
+            "display": "primary",
+            "description": "Identifier for the section this digest belongs to.",
+        }
+    )
+    body: str = datafield(
+        metadata={
+            "display": "primary",
+            "format": "markdown",
+            "description": "Cached digest content.",
+        }
+    )
 
 
 def _normalized_key(section_key: str) -> str:

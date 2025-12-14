@@ -24,8 +24,8 @@ const state = {
   sidebarCollapsed: localStorage.getItem("wink-sidebar-collapsed") === "true",
   // Focused item index for J/K navigation
   focusedItemIndex: -1,
-  // Display mode for fields
-  showHiddenFields: false,
+  // Display mode: "compact" (primary only), "detailed" (primary + secondary), "raw" (all)
+  displayMode: localStorage.getItem("wink-display-mode") || "compact",
 };
 
 const MARKDOWN_KEY = "__markdown__";
@@ -74,6 +74,8 @@ const elements = {
   markdownModalBody: document.getElementById("markdown-modal-body"),
   // Layout element for sidebar toggle
   layout: document.querySelector(".layout"),
+  // Display mode selector
+  displayMode: document.getElementById("display-mode"),
 };
 
 // --- Theme Management ---
@@ -860,6 +862,16 @@ elements.objectFilter.addEventListener("input", () => {
   renderItems(state.currentItems);
 });
 
+// Display mode selector
+elements.displayMode.addEventListener("change", () => {
+  state.displayMode = elements.displayMode.value;
+  localStorage.setItem("wink-display-mode", state.displayMode);
+  renderItems(state.currentItems);
+});
+
+// Initialize display mode from state
+elements.displayMode.value = state.displayMode;
+
 document.addEventListener("DOMContentLoaded", async () => {
   setLoading(true);
   try {
@@ -1143,13 +1155,29 @@ function getFieldAnnotation(label) {
   return state.currentAnnotations.fields[label] || null;
 }
 
+// Check if a field should be visible based on display mode and annotation
+function shouldShowField(fieldAnn) {
+  const display = fieldAnn?.display || "secondary";
+  const mode = state.displayMode;
+
+  if (mode === "raw") {
+    return true; // Show all fields
+  }
+  if (mode === "detailed") {
+    return display !== "hidden"; // Show primary + secondary
+  }
+  // Compact mode: show primary only
+  return display === "primary";
+}
+
 function renderTree(value, path, depth, label) {
   // Get field annotation for this label
   const fieldAnn = getFieldAnnotation(label);
 
-  // Check if this field should be hidden
-  if (fieldAnn?.display === "hidden" && !state.showHiddenFields) {
-    return null; // Skip hidden fields
+  // Check if this field should be visible based on display mode
+  // Only apply to top-level fields (depth 1), not nested objects
+  if (depth === 1 && !shouldShowField(fieldAnn)) {
+    return null; // Skip based on display mode
   }
 
   const node = document.createElement("div");

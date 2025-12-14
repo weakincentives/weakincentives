@@ -24,6 +24,7 @@ from dataclasses import field
 from typing import TYPE_CHECKING, cast
 
 from ..dataclasses import FrozenDataclass
+from ..runtime.annotations import SliceMeta, register_annotations
 from ._visibility import SectionVisibility
 from .errors import SectionPath
 
@@ -61,8 +62,18 @@ class VisibilityOverrides:
 
     """
 
+    __slice_meta__ = SliceMeta(
+        label="Visibility Overrides",
+        description="Dynamic section visibility state for prompt rendering.",
+        icon="eye",
+    )
+
     overrides: Mapping[SectionPath, SectionVisibility] = field(
-        default_factory=lambda: dict[SectionPath, SectionVisibility]()
+        default_factory=lambda: dict[SectionPath, SectionVisibility](),
+        metadata={
+            "display": "primary",
+            "description": "Map of section paths to visibility levels.",
+        },
     )
 
     def get(self, path: SectionPath) -> SectionVisibility | None:
@@ -209,3 +220,6 @@ __all__ = [
     "register_visibility_reducers",
     "set_visibility_override_reducer",
 ]
+
+# Register annotations at module import time
+register_annotations(VisibilityOverrides)

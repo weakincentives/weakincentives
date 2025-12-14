@@ -24,6 +24,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from ...dataclasses import FrozenDataclass
+from ...runtime.annotations import SliceMeta, register_annotations
 
 __all__ = [
     "Notification",
@@ -47,28 +48,55 @@ class Notification:
     and Notification hooks for debugging and observability.
     """
 
+    __slice_meta__ = SliceMeta(
+        label="SDK Notification",
+        description="Hook inputs from Claude Agent SDK for debugging.",
+        icon="bell",
+        sort_key="created_at",
+        sort_order="desc",
+    )
+
     source: NotificationSource = field(
-        metadata={"description": "Hook that generated this notification."}
+        metadata={
+            "display": "primary",
+            "description": "Hook that generated this notification.",
+        }
     )
     payload: dict[str, Any] = field(
         default_factory=dict,
-        metadata={"description": "Raw input dict from the SDK hook."},
+        metadata={
+            "display": "secondary",
+            "format": "json",
+            "description": "Raw input dict from the SDK hook.",
+        },
     )
     prompt_name: str = field(
         default="",
-        metadata={"description": "Name of the prompt being evaluated."},
+        metadata={
+            "display": "primary",
+            "description": "Name of the prompt being evaluated.",
+        },
     )
     adapter_name: str = field(
         default="",
-        metadata={"description": "Name of the adapter that received the hook."},
+        metadata={
+            "display": "secondary",
+            "description": "Name of the adapter that received the hook.",
+        },
     )
     created_at: datetime = field(
         default_factory=lambda: datetime.now(UTC),
-        metadata={"description": "Timestamp when the notification was created."},
+        metadata={
+            "display": "primary",
+            "description": "Timestamp when the notification was created.",
+        },
     )
     notification_id: UUID = field(
         default_factory=uuid4,
-        metadata={"description": "Unique identifier for this notification."},
+        metadata={
+            "display": "hidden",
+            "description": "Unique identifier for this notification.",
+        },
     )
 
     def render(self) -> str:
@@ -76,3 +104,7 @@ class Notification:
         return (
             f"[{self.source}] {self.created_at.isoformat()} prompt={self.prompt_name}"
         )
+
+
+# Register annotations at module import time
+register_annotations(Notification)
