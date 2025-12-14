@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from dataclasses import is_dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -159,14 +158,10 @@ class BridgedTool:
         result: ToolResult[Any],
         rendered_output: str,
     ) -> None:
-        """Publish a ToolInvoked event with the tool result value.
+        """Publish a ToolInvoked event for session reducer dispatch.
 
-        This enables session reducers to dispatch based on the value type,
-        which is critical for planning tools and other stateful tools.
+        The session extracts the value from result.value for slice routing.
         """
-        # Extract the dataclass value for session dispatch
-        value = result.value if is_dataclass(result.value) else None
-
         event = ToolInvoked(
             prompt_name=self._prompt_name,
             adapter=self._adapter_name,
@@ -176,7 +171,6 @@ class BridgedTool:
             session_id=None,
             created_at=datetime.now(UTC),
             usage=None,
-            value=value,
             rendered_output=rendered_output[:1000] if rendered_output else "",
             call_id=None,
         )

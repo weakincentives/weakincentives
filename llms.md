@@ -198,8 +198,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `DataEvent`: Event carrying data.
     - `ReducerContext`: Context for reducers.
     - `ReducerContextProtocol`: Protocol for reducer context.
-    - `ReducerEvent`: Base class for reducer events.
-    - `ReducerEventWithValue`: Reducer event with a value.
+    - `ReducerEvent`: Type alias for reducer events (dataclasses).
     - `Session`: Immutable event ledger with Redux-like reducers.
     - `SessionProtocol`: Protocol for sessions.
     - `Snapshot`: Session snapshot.

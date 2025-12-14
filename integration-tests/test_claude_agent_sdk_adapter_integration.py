@@ -451,11 +451,6 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     # For successful Read operations, the response may have stdout or similar content
     # The key thing is that the result is not empty/None, confirming PostToolUse captured it
 
-    # For SDK native tools, value is None (typed values only for WINK tools)
-    assert read_event.value is None, (
-        f"Expected event.value to be None for SDK native tools, got {type(read_event.value)}"
-    )
-
 
 def test_claude_agent_sdk_adapter_publishes_prompt_rendered_event(
     adapter: ClaudeAgentSDKAdapter,

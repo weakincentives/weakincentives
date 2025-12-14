@@ -53,7 +53,6 @@ from ..runtime.events import (
     ToolInvoked,
 )
 from ..runtime.logging import StructuredLogger, get_logger
-from ..runtime.session.dataclasses import is_dataclass_instance
 from ..serde import parse, schema
 from ..types import JSONValue
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
@@ -770,11 +769,6 @@ def _publish_tool_invocation(
 ) -> ToolInvoked:
     snapshot = context.session.snapshot()
     session_id = getattr(context.session, "session_id", None)
-    tool_value = outcome.result.value
-    dataclass_value: SupportsDataclass | None = None
-    if is_dataclass_instance(tool_value):
-        dataclass_value = cast(SupportsDataclass, tool_value)  # pyright: ignore[reportUnnecessaryCast]
-
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
 
@@ -787,7 +781,6 @@ def _publish_tool_invocation(
         session_id=session_id,
         created_at=datetime.now(UTC),
         usage=usage,
-        value=dataclass_value,
         rendered_output=rendered_output,
         call_id=outcome.call_id,
         event_id=uuid4(),
@@ -1652,19 +1645,16 @@ class InnerLoop[OutputT]:
             output=output,
         )
 
-        self._publish_executed_event(response_payload, output)
+        self._publish_executed_event(response_payload)
 
         return response_payload
 
     def _publish_executed_event(
-        self, response_payload: PromptResponse[OutputT], output: OutputT | None
+        self, response_payload: PromptResponse[OutputT]
     ) -> None:
         """Publish the PromptExecuted event."""
 
         usage = token_usage_from_payload(self._provider_payload)
-        prompt_value: SupportsDataclass | None = None
-        if is_dataclass_instance(output):
-            prompt_value = cast(SupportsDataclass, output)  # pyright: ignore[reportUnnecessaryCast]
 
         publish_result = self.config.session.event_bus.publish(
             PromptExecuted(
@@ -1674,7 +1664,6 @@ class InnerLoop[OutputT]:
                 session_id=getattr(self.config.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 usage=usage,
-                value=prompt_value,
                 event_id=uuid4(),
             )
         )
@@ -1697,7 +1686,7 @@ class InnerLoop[OutputT]:
             event="prompt_execution_succeeded",
             context={
                 "tool_count": len(self._tool_executor.tool_message_records),
-                "has_output": output is not None,
+                "has_output": response_payload.output is not None,
                 "text_length": len(response_payload.text or "")
                 if response_payload.text
                 else 0,

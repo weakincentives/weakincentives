@@ -588,9 +588,7 @@ class TestPostToolUseHookWithTypedParsing:
         assert len(events) == 1
         event = events[0]
         assert event.name == "Read"
-        # value should be None (SDK native tools don't produce typed values)
-        assert event.value is None
-        # result should be the raw dict
+        # result should be the raw dict (SDK native tools)
         assert event.result == {
             "stdout": "file contents",
             "stderr": "",
@@ -621,8 +619,6 @@ class TestPostToolUseHookWithTypedParsing:
         event = events[0]
         # Falls back to dict access, tool_name defaults to ""
         assert event.name == ""
-        # value should be None when parsing fails
-        assert event.value is None
 
     def test_fallback_with_string_tool_response(self, session: Session) -> None:
         """Test fallback when parsing fails and tool_response is a string."""
@@ -647,7 +643,6 @@ class TestPostToolUseHookWithTypedParsing:
         event = events[0]
         assert event.name == ""
         assert event.rendered_output == "string output"
-        assert event.value is None
 
     def test_fallback_with_none_tool_response(self, session: Session) -> None:
         """Test fallback when parsing fails and tool_response is None."""
@@ -672,7 +667,6 @@ class TestPostToolUseHookWithTypedParsing:
         event = events[0]
         assert event.name == ""
         assert event.rendered_output == ""
-        assert event.value is None
 
 
 class TestNotification:

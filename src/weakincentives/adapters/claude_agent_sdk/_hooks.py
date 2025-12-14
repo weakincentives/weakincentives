@@ -354,7 +354,6 @@ def create_post_tool_use_hook(
             session_id=None,
             created_at=_utcnow(),
             usage=None,
-            value=None,  # SDK native tools don't produce typed values for session
             rendered_output=output_text[:1000] if output_text else "",
             call_id=tool_use_id,
         )

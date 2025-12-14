@@ -58,7 +58,6 @@ def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
         result=cast(ToolResult[object], result),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
-        value=value,
         rendered_output=result.render(),
     )
 
