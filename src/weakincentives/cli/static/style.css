@@ -678,6 +678,54 @@ button.ghost:hover {
   border: 1px solid transparent;
 }
 
+/* Code format styling */
+.tree-leaf-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  white-space: pre-wrap;
+}
+
+.tree-leaf-code code {
+  font-family: inherit;
+}
+
+/* JSON format styling */
+.tree-leaf-json {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  white-space: pre-wrap;
+}
+
+/* Primary field styling */
+.field-primary > .tree-header {
+  background: var(--color-primary-subtle);
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
+.label-primary {
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+/* Hidden field styling (shown when toggled) */
+.field-hidden {
+  opacity: 0.6;
+}
+
+.field-hidden > .tree-header {
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
 .leaf-wrapper {
   display: inline-flex;
   align-items: flex-start;

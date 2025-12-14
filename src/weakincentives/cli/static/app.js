@@ -4,6 +4,7 @@ const state = {
   snapshots: [],
   entries: [],
   currentItems: [],
+  currentAnnotations: null, // Field annotations for current slice
   openPaths: new Set(),
   closedPaths: new Set(),
   markdownViews: new Map(),
@@ -23,6 +24,8 @@ const state = {
   sidebarCollapsed: localStorage.getItem("wink-sidebar-collapsed") === "true",
   // Focused item index for J/K navigation
   focusedItemIndex: -1,
+  // Display mode for fields
+  showHiddenFields: false,
 };
 
 const MARKDOWN_KEY = "__markdown__";
@@ -651,11 +654,15 @@ function renderSliceList() {
   const filter = elements.sliceFilter.value.toLowerCase().trim();
   const renderBucket = (target, entries, emptyLabel) => {
     target.innerHTML = "";
-    const filtered = entries.filter(
-      (entry) =>
-        (entry.display_name || entry.slice_type).toLowerCase().includes(filter) ||
-        (entry.item_display_name || entry.item_type).toLowerCase().includes(filter)
-    );
+    const filtered = entries.filter((entry) => {
+      // Use annotation label if available, otherwise fall back to display_name
+      const displayLabel = entry.label || entry.display_name || entry.slice_type;
+      const itemLabel = entry.item_display_name || entry.item_type;
+      return (
+        displayLabel.toLowerCase().includes(filter) ||
+        itemLabel.toLowerCase().includes(filter)
+      );
+    });
 
     if (!filtered.length) {
       const empty = document.createElement("li");
@@ -670,13 +677,21 @@ function renderSliceList() {
       item.className =
         "slice-item" + (entry.slice_type === state.selectedSlice ? " active" : "");
 
+      // Use annotation label if available
+      const displayLabel = entry.label || entry.display_name || entry.slice_type;
+
       const title = document.createElement("div");
       title.className = "slice-title";
-      title.textContent = entry.display_name || entry.slice_type;
+      title.textContent = displayLabel;
 
       const subtitle = document.createElement("div");
       subtitle.className = "slice-subtitle";
       subtitle.textContent = `${entry.item_display_name || entry.item_type} · ${entry.count} items`;
+
+      // Add description tooltip if available
+      if (entry.description) {
+        item.title = entry.description;
+      }
 
       item.appendChild(title);
       item.appendChild(subtitle);
@@ -706,10 +721,17 @@ function showSliceContent(show) {
 
 function renderSliceDetail(slice) {
   showSliceContent(true);
-  elements.sliceTitle.textContent = slice.display_name || slice.slice_type;
+
+  // Use annotation label if available
+  const sliceMeta = slice.annotations?.slice_meta;
+  const displayLabel =
+    sliceMeta?.label || slice.display_name || slice.slice_type;
+
+  elements.sliceTitle.textContent = displayLabel;
   elements.itemCount.textContent = `${slice.items.length} items`;
   elements.typeRow.innerHTML = "";
   state.currentItems = slice.items;
+  state.currentAnnotations = slice.annotations || null;
   state.markdownViews = new Map();
   state.searchQuery = "";
   state.objectFilterQuery = "";
@@ -719,7 +741,7 @@ function renderSliceDetail(slice) {
 
   const slicePill = document.createElement("span");
   slicePill.className = "pill";
-  slicePill.textContent = `slice: ${slice.display_name || slice.slice_type}`;
+  slicePill.textContent = `slice: ${displayLabel}`;
 
   const itemPill = document.createElement("span");
   itemPill.className = "pill";
@@ -727,6 +749,19 @@ function renderSliceDetail(slice) {
 
   elements.typeRow.appendChild(slicePill);
   elements.typeRow.appendChild(itemPill);
+
+  // Add description if available
+  if (sliceMeta?.description) {
+    const descPill = document.createElement("span");
+    descPill.className = "pill pill-quiet";
+    descPill.textContent = sliceMeta.description;
+    descPill.style.maxWidth = "400px";
+    descPill.style.overflow = "hidden";
+    descPill.style.textOverflow = "ellipsis";
+    descPill.style.whiteSpace = "nowrap";
+    descPill.title = sliceMeta.description;
+    elements.typeRow.appendChild(descPill);
+  }
 
   renderItems(slice.items);
 }
@@ -1100,9 +1135,32 @@ function setOpenForAll(items, open) {
   items.forEach((item, index) => update(item, [`item-${index}`]));
 }
 
+// Get field annotation for a given label (field name)
+function getFieldAnnotation(label) {
+  if (!state.currentAnnotations?.fields || !label) {
+    return null;
+  }
+  return state.currentAnnotations.fields[label] || null;
+}
+
 function renderTree(value, path, depth, label) {
+  // Get field annotation for this label
+  const fieldAnn = getFieldAnnotation(label);
+
+  // Check if this field should be hidden
+  if (fieldAnn?.display === "hidden" && !state.showHiddenFields) {
+    return null; // Skip hidden fields
+  }
+
   const node = document.createElement("div");
   node.className = "tree-node";
+
+  // Add display-level class for styling
+  if (fieldAnn?.display === "primary") {
+    node.classList.add("field-primary");
+  } else if (fieldAnn?.display === "hidden") {
+    node.classList.add("field-hidden");
+  }
 
   const header = document.createElement("div");
   header.className = "tree-header";
@@ -1113,15 +1171,31 @@ function renderTree(value, path, depth, label) {
   // Add type icon
   header.appendChild(createTypeIcon(type));
 
+  // Use annotation label if available, otherwise use field name
+  const displayLabel = fieldAnn?.label || label;
+
   const name = document.createElement("span");
   name.className = "tree-label";
+
+  // Add primary styling
+  if (fieldAnn?.display === "primary") {
+    name.classList.add("label-primary");
+  }
+
   // Highlight matching property names when object filter is active
   if (state.objectFilterQuery && keyMatchesFilter(label, state.objectFilterQuery)) {
-    name.innerHTML = highlightMatch(label, state.objectFilterQuery);
+    name.innerHTML = highlightMatch(displayLabel, state.objectFilterQuery);
     name.classList.add("filter-match");
   } else {
-    name.textContent = label;
+    name.textContent = displayLabel;
   }
+
+  // Add tooltip with description if available
+  if (fieldAnn?.description) {
+    name.title = fieldAnn.description;
+    name.style.cursor = "help";
+  }
+
   header.appendChild(name);
 
   const badge = document.createElement("span");
@@ -1132,10 +1206,18 @@ function renderTree(value, path, depth, label) {
       : type === "object" && value !== null
         ? Object.keys(value).length
         : 0;
+
+  // Use format hint from annotation if available
+  const formatHint = fieldAnn?.format;
+
   if (type === "array") {
     badge.textContent = `array (${value.length})`;
   } else if (type === "markdown") {
     badge.textContent = "markdown";
+  } else if (formatHint === "code") {
+    badge.textContent = "code";
+  } else if (formatHint === "json") {
+    badge.textContent = "json";
   } else if (type === "object" && value !== null) {
     badge.textContent = `object (${Object.keys(value).length})`;
   } else {
@@ -1247,6 +1329,33 @@ function renderTree(value, path, depth, label) {
       wrapper.appendChild(toggle);
       wrapper.appendChild(renderedSection);
       wrapper.appendChild(rawSection);
+    } else if (formatHint === "code") {
+      // Render as code block
+      const code = document.createElement("pre");
+      code.className = "tree-leaf tree-leaf-code";
+      const codeInner = document.createElement("code");
+      codeInner.textContent = String(value);
+      code.appendChild(codeInner);
+      const toggle = applyTruncation(code, countLines(value));
+      wrapper.appendChild(code);
+      if (toggle) {
+        wrapper.appendChild(toggle);
+      }
+    } else if (formatHint === "json" && typeof value === "string") {
+      // Try to format as JSON
+      const pre = document.createElement("pre");
+      pre.className = "tree-leaf tree-leaf-json";
+      try {
+        const parsed = JSON.parse(value);
+        pre.textContent = JSON.stringify(parsed, null, 2);
+      } catch {
+        pre.textContent = String(value);
+      }
+      const toggle = applyTruncation(pre, countLines(pre.textContent));
+      wrapper.appendChild(pre);
+      if (toggle) {
+        wrapper.appendChild(toggle);
+      }
     } else {
       const leaf = document.createElement("div");
       leaf.className = "tree-leaf";
@@ -1340,21 +1449,23 @@ function renderTree(value, path, depth, label) {
       } else {
         childrenContainer.classList.remove("compact-array");
         value.forEach((child, index) => {
-          childrenContainer.appendChild(
-            renderTree(
-              child,
-              path.concat(String(index)),
-              depth + 1,
-              `[${index}]`
-            )
+          const childNode = renderTree(
+            child,
+            path.concat(String(index)),
+            depth + 1,
+            `[${index}]`
           );
+          if (childNode) {
+            childrenContainer.appendChild(childNode);
+          }
         });
       }
     } else {
       Object.entries(value).forEach(([key, child]) => {
-        childrenContainer.appendChild(
-          renderTree(child, path.concat(key), depth + 1, key)
-        );
+        const childNode = renderTree(child, path.concat(key), depth + 1, key);
+        if (childNode) {
+          childrenContainer.appendChild(childNode);
+        }
       });
     }
   };
@@ -1416,7 +1527,10 @@ function renderItems(items) {
 
     const body = document.createElement("div");
     body.className = "item-body tree-root";
-    body.appendChild(renderTree(displayItem, [`item-${index}`], 0, "root"));
+    const treeNode = renderTree(displayItem, [`item-${index}`], 0, "root");
+    if (treeNode) {
+      body.appendChild(treeNode);
+    }
     card.appendChild(body);
     elements.jsonViewer.appendChild(card);
   });

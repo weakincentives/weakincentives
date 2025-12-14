@@ -582,7 +582,31 @@ class SnapshotStore:
         return self._entries[self._index]
 
 
-def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
+def _meta_response(
+    meta: SnapshotMeta,
+    annotations: Mapping[str, SliceAnnotations] | None = None,
+) -> Mapping[str, JSONValue]:
+    slices_data: list[dict[str, JSONValue]] = []
+    for entry in meta.slices:
+        slice_data: dict[str, JSONValue] = {
+            "slice_type": entry.slice_type,
+            "item_type": entry.item_type,
+            "display_name": _class_name(entry.slice_type),
+            "item_display_name": _class_name(entry.item_type),
+            "count": entry.count,
+        }
+        # Add annotation metadata if available
+        if annotations:
+            # Check for annotations by item_type (the actual dataclass type)
+            ann = annotations.get(entry.item_type)
+            if ann and ann.slice_meta:
+                slice_data["label"] = ann.slice_meta.label
+                slice_data["description"] = ann.slice_meta.description
+                slice_data["icon"] = ann.slice_meta.icon
+                slice_data["sort_key"] = ann.slice_meta.sort_key
+                slice_data["sort_order"] = ann.slice_meta.sort_order
+        slices_data.append(slice_data)
+
     return {
         "version": meta.version,
         "created_at": meta.created_at,
@@ -591,16 +615,7 @@ def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
         "line_number": meta.line_number,
         "tags": dict(meta.tags),
         "validation_error": meta.validation_error,
-        "slices": [
-            {
-                "slice_type": entry.slice_type,
-                "item_type": entry.item_type,
-                "display_name": _class_name(entry.slice_type),
-                "item_display_name": _class_name(entry.item_type),
-                "count": entry.count,
-            }
-            for entry in meta.slices
-        ],
+        "slices": slices_data,
     }
 
 
@@ -618,7 +633,7 @@ class _DebugAppHandlers:
         return index_path.read_text()
 
     def get_meta(self) -> Mapping[str, JSONValue]:
-        return _meta_response(self._store.meta)
+        return _meta_response(self._store.meta, self._store.annotations)
 
     def list_entries(self) -> list[Mapping[str, JSONValue]]:
         return self._store.list_entries()
@@ -645,19 +660,45 @@ class _DebugAppHandlers:
             )
             for item in items
         ]
+
+        # Build field annotations for frontend
+        field_annotations: dict[str, dict[str, JSONValue]] = {}
+        slice_meta: dict[str, JSONValue] | None = None
+        ann = annotations.get(item_type_id)
+        if ann:
+            if ann.slice_meta:
+                slice_meta = {
+                    "label": ann.slice_meta.label,
+                    "description": ann.slice_meta.description,
+                    "icon": ann.slice_meta.icon,
+                    "sort_key": ann.slice_meta.sort_key,
+                    "sort_order": ann.slice_meta.sort_order,
+                }
+            for field_name, field_ann in ann.fields.items():
+                field_annotations[field_name] = {
+                    "display": field_ann.display,
+                    "format": field_ann.format,
+                    "label": field_ann.label,
+                    "description": field_ann.description,
+                }
+
         return {
             "slice_type": slice_items.slice_type,
             "item_type": slice_items.item_type,
             "display_name": _class_name(slice_items.slice_type),
             "item_display_name": _class_name(slice_items.item_type),
             "items": rendered_items,
+            "annotations": {
+                "slice_meta": slice_meta,
+                "fields": field_annotations,
+            },
         }
 
     def get_raw(self) -> JSONResponse:
         return JSONResponse(json.loads(self._store.raw_text))
 
     def reload(self) -> Mapping[str, JSONValue]:
-        return _meta_response(self._execute_reload())
+        return _meta_response(self._execute_reload(), self._store.annotations)
 
     def list_snapshots(self) -> list[Mapping[str, JSONValue]]:
         return self._store.list_snapshots()
@@ -667,7 +708,7 @@ class _DebugAppHandlers:
         meta = self._execute_snapshot_command(
             lambda: self._store.select(session_id=session_id, line_number=line_number)
         )
-        return _meta_response(meta)
+        return _meta_response(meta, self._store.annotations)
 
     def switch(self, payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
         path, session_id, line_number = self._parse_switch_payload(payload)
@@ -678,7 +719,7 @@ class _DebugAppHandlers:
                 line_number=line_number,
             )
         )
-        return _meta_response(meta)
+        return _meta_response(meta, self._store.annotations)
 
     def _slice_items(self, encoded_slice_type: str) -> SnapshotSlicePayload:
         slice_type = unquote(encoded_slice_type)
