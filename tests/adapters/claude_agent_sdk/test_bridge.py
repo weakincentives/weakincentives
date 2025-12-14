@@ -268,6 +268,50 @@ class TestBridgedTool:
         # Falls back to message since render() returned empty
         assert result["content"][0]["text"] == "Searched for test"
 
+    def test_exclude_value_from_context_uses_message_only(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that exclude_value_from_context skips value rendering."""
+
+        def data_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            del context
+            return ToolResult(
+                message="Query processed",
+                value=SearchResult(matches=100),
+                success=True,
+                exclude_value_from_context=True,
+            )
+
+        data_tool = Tool[SearchParams, SearchResult](
+            name="data_tool",
+            description="Tool returning large data",
+            handler=data_handler,
+        )
+
+        bridged = BridgedTool(
+            name="data_tool",
+            description="Tool returning large data",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=data_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+        )
+
+        result = bridged({"query": "test"})
+
+        # Should use message only, not the rendered value
+        assert result["content"][0]["text"] == "Query processed"
+        assert "100" not in result["content"][0]["text"]
+
 
 class TestCreateBridgedTools:
     def test_creates_bridged_tools(
