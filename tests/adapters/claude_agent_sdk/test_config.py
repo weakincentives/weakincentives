@@ -20,6 +20,10 @@ from weakincentives.adapters.claude_agent_sdk.config import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentSDKModelConfig,
 )
+from weakincentives.adapters.claude_agent_sdk.isolation import (
+    IsolationConfig,
+    NetworkPolicy,
+)
 
 
 class TestClaudeAgentSDKClientConfig:
@@ -30,20 +34,24 @@ class TestClaudeAgentSDKClientConfig:
         assert config.max_turns is None
         assert config.suppress_stderr is True
         assert config.stop_on_structured_output is True
+        assert config.isolation is None
 
     def test_with_all_values(self) -> None:
+        isolation = IsolationConfig(network_policy=NetworkPolicy.no_network())
         config = ClaudeAgentSDKClientConfig(
             permission_mode="acceptEdits",
             cwd="/home/user/project",
             max_turns=10,
             suppress_stderr=False,
             stop_on_structured_output=False,
+            isolation=isolation,
         )
         assert config.permission_mode == "acceptEdits"
         assert config.cwd == "/home/user/project"
         assert config.max_turns == 10
         assert config.suppress_stderr is False
         assert config.stop_on_structured_output is False
+        assert config.isolation is isolation
 
 
 class TestClaudeAgentSDKModelConfig:
