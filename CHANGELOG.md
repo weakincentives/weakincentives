@@ -4,6 +4,39 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Tool Failure Handling
+
+`ToolInvoked` events now include a `success` field that explicitly captures
+whether the tool execution succeeded:
+
+```python
+from weakincentives.runtime.events import ToolInvoked
+
+# The success field is True by default, False when stderr is present
+event = ToolInvoked(
+    name="Read",
+    params={"path": "/test.txt"},
+    result={"stdout": "contents"},
+    success=True,  # New field
+    ...
+)
+```
+
+Additionally, the Claude Agent SDK adapter now provides a failure hook for
+responding to tool failures:
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    create_post_tool_use_failure_hook,
+    HookContext,
+)
+
+def on_failure(tool_name: str, tool_input: dict, error: str, call_id: str | None):
+    print(f"Tool {tool_name} failed: {error}")
+
+hook = create_post_tool_use_failure_hook(hook_context, on_failure)
+```
+
 ### Claude Agent SDK Adapter
 
 A new adapter enables running WINK agents through Claude Code's agentic

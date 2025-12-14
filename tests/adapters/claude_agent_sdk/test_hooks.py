@@ -28,6 +28,7 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     _expand_transcript_paths,
     _read_transcript_file,
     create_notification_hook,
+    create_post_tool_use_failure_hook,
     create_post_tool_use_hook,
     create_pre_compact_hook,
     create_pre_tool_use_hook,
@@ -1101,3 +1102,252 @@ class TestMultipleNotificationsAccumulate:
         assert "pre_compact" in sources
         assert "subagent_stop" in sources
         assert "notification" in sources
+
+
+class TestToolInvokedSuccessField:
+    def test_success_true_for_successful_tool(self, session: Session) -> None:
+        """Test that ToolInvoked.success is True when tool succeeds."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "file contents"},
+        }
+
+        asyncio.run(hook(input_data, "call-success", context))
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.success is True
+
+    def test_success_false_for_failed_tool(self, session: Session) -> None:
+        """Test that ToolInvoked.success is False when tool fails."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/missing.txt"},
+            "tool_response": {"stderr": "File not found"},
+        }
+
+        asyncio.run(hook(input_data, "call-failure", context))
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.success is False
+
+    def test_success_true_for_empty_stderr(self, session: Session) -> None:
+        """Test that ToolInvoked.success is True when stderr is empty string."""
+        events: list[ToolInvoked] = []
+        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo hello"},
+            "tool_response": {"stdout": "hello", "stderr": ""},
+        }
+
+        asyncio.run(hook(input_data, "call-empty-stderr", context))
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.success is True
+
+
+class TestPostToolUseFailureHook:
+    def test_calls_callback_on_failure(self, session: Session) -> None:
+        """Test that callback is invoked when tool fails."""
+        captured: list[tuple[str, dict[str, Any], str, str | None]] = []
+
+        def callback(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            error_message: str,
+            call_id: str | None,
+        ) -> None:
+            captured.append((tool_name, tool_input, error_message, call_id))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_failure_hook(context, callback)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/missing.txt"},
+            "tool_response": {"stderr": "File not found"},
+        }
+
+        asyncio.run(hook(input_data, "call-fail", context))
+
+        assert len(captured) == 1
+        tool_name, tool_input, error_message, call_id = captured[0]
+        assert tool_name == "Read"
+        assert tool_input == {"path": "/missing.txt"}
+        assert error_message == "File not found"
+        assert call_id == "call-fail"
+
+    def test_no_callback_on_success(self, session: Session) -> None:
+        """Test that callback is NOT invoked when tool succeeds."""
+        captured: list[tuple[str, dict[str, Any], str, str | None]] = []
+
+        def callback(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            error_message: str,
+            call_id: str | None,
+        ) -> None:
+            captured.append((tool_name, tool_input, error_message, call_id))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_failure_hook(context, callback)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/test.txt"},
+            "tool_response": {"stdout": "file contents"},
+        }
+
+        asyncio.run(hook(input_data, "call-success", context))
+
+        assert len(captured) == 0
+
+    def test_no_callback_on_empty_stderr(self, session: Session) -> None:
+        """Test that callback is NOT invoked when stderr is empty string."""
+        captured: list[tuple[str, dict[str, Any], str, str | None]] = []
+
+        def callback(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            error_message: str,
+            call_id: str | None,
+        ) -> None:
+            captured.append((tool_name, tool_input, error_message, call_id))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_failure_hook(context, callback)
+        input_data = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo hello"},
+            "tool_response": {"stdout": "hello", "stderr": ""},
+        }
+
+        asyncio.run(hook(input_data, "call-empty-stderr", context))
+
+        assert len(captured) == 0
+
+    def test_returns_empty_dict(self, session: Session) -> None:
+        """Test that hook always returns empty dict (no control flow changes)."""
+
+        def callback(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            error_message: str,
+            call_id: str | None,
+        ) -> None:
+            pass  # No-op
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_failure_hook(context, callback)
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"path": "/missing.txt"},
+            "tool_response": {"stderr": "File not found"},
+        }
+
+        result = asyncio.run(hook(input_data, "call-fail", context))
+
+        assert result == {}
+
+    def test_handles_malformed_input(self, session: Session) -> None:
+        """Test fallback behavior with malformed input."""
+        captured: list[tuple[str, dict[str, Any], str, str | None]] = []
+
+        def callback(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            error_message: str,
+            call_id: str | None,
+        ) -> None:
+            captured.append((tool_name, tool_input, error_message, call_id))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_failure_hook(context, callback)
+        # Missing tool_name causes parsing failure - uses fallback
+        input_data = {
+            "tool_input": {"key": "value"},
+            "tool_response": {"stderr": "Error occurred"},
+        }
+
+        asyncio.run(hook(input_data, "call-malformed", context))
+
+        assert len(captured) == 1
+        tool_name, _tool_input, error_message, _call_id = captured[0]
+        assert tool_name == ""  # Fallback default
+        assert error_message == "Error occurred"
+
+    def test_handles_string_tool_response(self, session: Session) -> None:
+        """Test that string tool_response does not trigger failure callback."""
+        captured: list[tuple[str, dict[str, Any], str, str | None]] = []
+
+        def callback(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            error_message: str,
+            call_id: str | None,
+        ) -> None:
+            captured.append((tool_name, tool_input, error_message, call_id))
+
+        context = HookContext(
+            session=session,
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_failure_hook(context, callback)
+        input_data = {
+            "tool_name": "Echo",
+            "tool_input": {"message": "hello"},
+            "tool_response": "hello world",  # String response, no stderr
+        }
+
+        asyncio.run(hook(input_data, "call-string", context))
+
+        # String responses don't have stderr, so no failure callback
+        assert len(captured) == 0

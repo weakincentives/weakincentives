@@ -481,15 +481,36 @@ Records tool execution by publishing `ToolInvoked` events:
 
 ```python
 async def post_tool_use_hook(input_data, tool_use_id, sdk_context):
+    tool_error = input_data.get("tool_response", {}).get("stderr")
     event = ToolInvoked(
         name=input_data.get("tool_name"),
         params=input_data.get("tool_input"),
         result=input_data.get("tool_response"),
+        success=tool_error is None,  # False if stderr present
         call_id=tool_use_id,
     )
     session.event_bus.publish(event)
     return {}
 ```
+
+### PostToolUseFailure Hook
+
+Triggers a callback when tool execution fails (stderr present):
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    create_post_tool_use_failure_hook,
+    HookContext,
+)
+
+def on_tool_failure(tool_name: str, tool_input: dict, error: str, call_id: str | None):
+    print(f"Tool {tool_name} failed: {error}")
+
+hook = create_post_tool_use_failure_hook(hook_context, on_tool_failure)
+```
+
+This hook does NOT publish `ToolInvoked` events—use in conjunction with
+`create_post_tool_use_hook` for full event tracking.
 
 ## Custom Tool Bridging
 

@@ -134,6 +134,7 @@ class ToolInvoked:
     result: Any
     session_id: UUID | None
     created_at: datetime
+    success: bool = True
     usage: TokenUsage | None = None
     rendered_output: str = ""
     call_id: str | None = None

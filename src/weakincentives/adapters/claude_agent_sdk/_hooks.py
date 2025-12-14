@@ -35,7 +35,9 @@ __all__ = [
     "HookCallback",
     "HookContext",
     "PostToolUseInput",
+    "ToolFailureCallback",
     "create_notification_hook",
+    "create_post_tool_use_failure_hook",
     "create_post_tool_use_hook",
     "create_pre_compact_hook",
     "create_pre_tool_use_hook",
@@ -353,6 +355,7 @@ def create_post_tool_use_hook(
             result=result_raw,
             session_id=None,
             created_at=_utcnow(),
+            success=tool_error is None,
             usage=None,
             rendered_output=output_text[:1000] if output_text else "",
             call_id=tool_use_id,
@@ -381,6 +384,104 @@ def create_post_tool_use_hook(
         return {}
 
     return post_tool_use_hook
+
+
+ToolFailureCallback = Callable[
+    [
+        str,
+        dict[str, Any],
+        str,
+        str | None,
+    ],  # tool_name, tool_input, error_message, call_id
+    None,
+]
+"""Type alias for tool failure callbacks.
+
+Args:
+    tool_name: Name of the tool that failed.
+    tool_input: Input parameters passed to the tool.
+    error_message: The error message (typically from stderr).
+    call_id: Optional tool use identifier.
+"""
+
+
+def create_post_tool_use_failure_hook(
+    hook_context: HookContext,
+    callback: ToolFailureCallback,
+) -> AsyncHookCallback:
+    """Create a PostToolUse hook that triggers on tool failures.
+
+    This hook inspects tool results for errors and invokes the provided callback
+    when a failure is detected. A failure is determined by the presence of
+    a non-empty ``stderr`` field in the tool response.
+
+    Note: This hook does NOT publish ToolInvoked events - use in conjunction
+    with ``create_post_tool_use_hook`` for full event tracking.
+
+    Args:
+        hook_context: Context with session and adapter references.
+        callback: Function to call when a tool failure is detected.
+            Receives (tool_name, tool_input, error_message, call_id).
+
+    Returns:
+        An async hook callback function matching SDK signature.
+    """
+
+    async def post_tool_use_failure_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = sdk_context
+        _ = hook_context  # Available if needed for future extensions
+
+        # Attempt to parse into typed dataclass
+        parsed = PostToolUseInput.from_dict(input_data)
+
+        if parsed is not None:
+            tool_name = parsed.tool_name
+            tool_input = parsed.tool_input
+            response = parsed.tool_response
+            if isinstance(response, dict):
+                tool_error = response.get("stderr") if response.get("stderr") else None
+            else:
+                tool_error = None
+        else:
+            # Fallback to dict access for malformed input
+            tool_name = (
+                input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
+            )
+            tool_input = (
+                input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
+            )
+            tool_response_raw = (
+                input_data.get("tool_response", {})
+                if isinstance(input_data, dict)
+                else {}
+            )
+            tool_error = (
+                tool_response_raw.get("stderr")
+                if isinstance(tool_response_raw, dict)
+                and tool_response_raw.get("stderr")
+                else None
+            )
+
+        # Only invoke callback on failure
+        if tool_error is not None:
+            logger.debug(
+                "claude_agent_sdk.hook.tool_failure",
+                event="hook.tool_failure",
+                context={
+                    "tool_name": tool_name,
+                    "call_id": tool_use_id,
+                    "error": tool_error[:200] if tool_error else "",
+                },
+            )
+            callback(tool_name, tool_input, tool_error, tool_use_id)
+
+        return {}
+
+    return post_tool_use_failure_hook
 
 
 def create_user_prompt_submit_hook(

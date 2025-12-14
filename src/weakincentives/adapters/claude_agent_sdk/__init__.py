@@ -73,6 +73,11 @@ Example:
 
 from __future__ import annotations
 
+from ._hooks import (
+    HookContext,
+    ToolFailureCallback,
+    create_post_tool_use_failure_hook,
+)
 from ._notifications import Notification, NotificationSource
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
@@ -101,6 +106,7 @@ __all__ = [
     "ClaudeAgentSDKModelConfig",
     "ClaudeAgentWorkspaceSection",
     "EphemeralHome",
+    "HookContext",
     "HostMount",
     "HostMountPreview",
     "IsolationConfig",
@@ -109,6 +115,8 @@ __all__ = [
     "NotificationSource",
     "PermissionMode",
     "SandboxConfig",
+    "ToolFailureCallback",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
+    "create_post_tool_use_failure_hook",
 ]

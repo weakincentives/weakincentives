@@ -780,6 +780,7 @@ def _publish_tool_invocation(
         result=cast(ToolResult[object], outcome.result),
         session_id=session_id,
         created_at=datetime.now(UTC),
+        success=outcome.result.success,
         usage=usage,
         rendered_output=rendered_output,
         call_id=outcome.call_id,
