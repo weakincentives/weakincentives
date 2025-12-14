@@ -59,6 +59,7 @@ class Notification:
     source: NotificationSource = field(
         metadata={
             "display": "primary",
+            "label": "Hook",
             "description": "Hook that generated this notification.",
         }
     )
@@ -67,6 +68,7 @@ class Notification:
         metadata={
             "display": "secondary",
             "format": "json",
+            "label": "Data",
             "description": "Raw input dict from the SDK hook.",
         },
     )
@@ -74,20 +76,21 @@ class Notification:
         default="",
         metadata={
             "display": "primary",
+            "label": "Prompt",
             "description": "Name of the prompt being evaluated.",
         },
     )
     adapter_name: str = field(
         default="",
         metadata={
-            "display": "secondary",
+            "display": "hidden",
             "description": "Name of the adapter that received the hook.",
         },
     )
     created_at: datetime = field(
         default_factory=lambda: datetime.now(UTC),
         metadata={
-            "display": "primary",
+            "display": "secondary",
             "description": "Timestamp when the notification was created.",
         },
     )

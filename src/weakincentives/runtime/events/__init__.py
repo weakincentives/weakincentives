@@ -120,12 +120,13 @@ class PromptExecuted:
     prompt_name: str = field(
         metadata={
             "display": "primary",
+            "label": "Prompt",
             "description": "Name of the prompt that was executed.",
         }
     )
     adapter: AdapterName = field(
         metadata={
-            "display": "secondary",
+            "display": "hidden",
             "description": "Adapter used for execution.",
         }
     )
@@ -133,12 +134,13 @@ class PromptExecuted:
         metadata={
             "display": "primary",
             "format": "json",
+            "label": "Result",
             "description": "Result returned from the adapter.",
         }
     )
     session_id: UUID | None = field(
         metadata={
-            "display": "secondary",
+            "display": "hidden",
             "description": "Session identifier for the execution.",
         }
     )
@@ -151,8 +153,9 @@ class PromptExecuted:
     usage: TokenUsage | None = field(
         default=None,
         metadata={
-            "display": "secondary",
+            "display": "primary",
             "format": "json",
+            "label": "Tokens",
             "description": "Token usage statistics for the request.",
         },
     )
@@ -180,19 +183,19 @@ class PromptRendered:
     # Required fields (no defaults)
     prompt_ns: str = field(
         metadata={
-            "display": "secondary",
+            "display": "hidden",
             "description": "Namespace of the rendered prompt.",
         }
     )
     prompt_key: str = field(
         metadata={
-            "display": "secondary",
+            "display": "hidden",
             "description": "Key of the rendered prompt.",
         }
     )
     adapter: AdapterName = field(
         metadata={
-            "display": "primary",
+            "display": "secondary",
             "description": "Adapter processing this prompt.",
         }
     )
@@ -200,6 +203,7 @@ class PromptRendered:
         metadata={
             "display": "primary",
             "format": "markdown",
+            "label": "Prompt",
             "description": "Full rendered prompt text.",
         }
     )
@@ -214,13 +218,14 @@ class PromptRendered:
         default=None,
         metadata={
             "display": "primary",
+            "label": "Name",
             "description": "Human-readable name of the prompt.",
         },
     )
     session_id: UUID | None = field(
         default=None,
         metadata={
-            "display": "secondary",
+            "display": "hidden",
             "description": "Session identifier.",
         },
     )

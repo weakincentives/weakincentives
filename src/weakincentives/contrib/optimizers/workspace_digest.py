@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast, override
 
 from ...adapters.core import (
@@ -31,6 +31,7 @@ from ...prompt import MarkdownSection, Prompt, PromptTemplate
 from ...prompt._types import SupportsDataclass
 from ...prompt.overrides import PromptLike, PromptOverridesError
 from ...prompt.section import Section
+from ...runtime.annotations import SliceMeta, register_annotations
 from ...runtime.session import Session
 from ...runtime.session.protocols import SessionProtocol
 from ..tools.asteval import AstevalSection
@@ -47,7 +48,24 @@ from ..tools.workspace import WorkspaceSection
 class _OptimizationResponse:
     """Structured response emitted by the workspace digest optimization prompt."""
 
-    digest: str
+    __slice_meta__ = SliceMeta(
+        label="Optimization Response",
+        description="Result from workspace digest optimization.",
+        icon="sparkles",
+    )
+
+    digest: str = field(
+        metadata={
+            "display": "primary",
+            "format": "markdown",
+            "label": "Digest",
+            "description": "Generated workspace digest content.",
+        }
+    )
+
+
+# Register annotations at module import time
+register_annotations(_OptimizationResponse)
 
 
 class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult]):
