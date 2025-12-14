@@ -14,14 +14,146 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol, cast, override
+from enum import Enum
+from typing import Any, Literal, Protocol, cast, override
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 from ...dataclasses import FrozenDataclass
+
+
+class ToolCallStatus(Enum):
+    """Lifecycle states for tool calls."""
+
+    REQUESTED = "requested"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+ToolCallStatusLiteral = Literal["requested", "running", "completed", "failed"]
+
+
+def compute_correlation_key(tool_name: str, args: dict[str, Any]) -> str:
+    """Compute a stable correlation key from tool name and arguments.
+
+    This enables correlation between SDK tool_use_id events and MCP tool
+    invocations that don't have direct access to the tool_use_id.
+
+    Args:
+        tool_name: Name of the tool being invoked.
+        args: Arguments passed to the tool.
+
+    Returns:
+        A hex string derived from tool name and canonicalized arguments.
+    """
+    # Canonicalize args by sorting keys for deterministic hashing
+    canonical = json.dumps({"tool": tool_name, "args": args}, sort_keys=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+@FrozenDataclass()
+class ToolCall:
+    """Canonical state slice representing a tool call through its lifecycle.
+
+    This slice tracks tool calls from request to completion, enabling
+    correlation between PreToolUse/PostToolUse hooks and actual tool execution.
+
+    Attributes:
+        call_id: Provider's tool_use_id (None for MCP tools before correlation).
+        tool_name: Name of the tool being invoked.
+        params: Arguments passed to the tool.
+        status: Current lifecycle state.
+        correlation_key: Hash-based key for MCP tool correlation.
+        prompt_name: Name of the prompt that invoked the tool.
+        adapter: Name of the adapter executing the tool.
+        requested_at: When the tool call was first requested.
+        started_at: When tool execution began.
+        completed_at: When tool execution finished.
+        result: Tool result (set on completion).
+        error: Error message (set on failure).
+        metadata: Additional tool metadata.
+        event_id: Unique identifier for this tool call.
+    """
+
+    tool_name: str
+    params: dict[str, Any]
+    status: ToolCallStatus
+    correlation_key: str
+    prompt_name: str
+    adapter: AdapterName
+    requested_at: datetime
+    call_id: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    result: Any = None
+    error: str | None = None
+    metadata: dict[str, Any] | None = None
+    event_id: UUID = field(default_factory=uuid4)
+
+    @property
+    def duration_ms(self) -> float | None:
+        """Return execution duration in milliseconds if timing is available."""
+        if self.started_at is None or self.completed_at is None:
+            return None
+        delta = self.completed_at - self.started_at
+        return delta.total_seconds() * 1000
+
+    @classmethod
+    def create_requested(  # noqa: PLR0913
+        cls,
+        *,
+        tool_name: str,
+        params: dict[str, Any],
+        prompt_name: str,
+        adapter: AdapterName,
+        requested_at: datetime,
+        call_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ToolCall:
+        """Create a new tool call in REQUESTED state."""
+        return cls(
+            tool_name=tool_name,
+            params=params,
+            status=ToolCallStatus.REQUESTED,
+            correlation_key=compute_correlation_key(tool_name, params),
+            prompt_name=prompt_name,
+            adapter=adapter,
+            requested_at=requested_at,
+            call_id=call_id,
+            metadata=metadata,
+        )
+
+    def with_status(  # noqa: PLR0913
+        self,
+        status: ToolCallStatus,
+        *,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
+        result: object = None,
+        error: str | None = None,
+        call_id: str | None = None,
+    ) -> ToolCall:
+        """Return a copy with updated status and optional timing/result."""
+        from dataclasses import replace
+
+        return replace(
+            self,
+            status=status,
+            started_at=started_at if started_at is not None else self.started_at,
+            completed_at=completed_at
+            if completed_at is not None
+            else self.completed_at,
+            result=result if result is not None else self.result,
+            error=error if error is not None else self.error,
+            call_id=call_id if call_id is not None else self.call_id,
+        )
+
 
 EventHandler = Callable[[object], None]
 
@@ -125,7 +257,25 @@ class TokenUsage:
 
 @FrozenDataclass()
 class ToolInvoked:
-    """Event emitted after an adapter executes a tool handler."""
+    """Event emitted after an adapter executes a tool handler.
+
+    Attributes:
+        prompt_name: Name of the prompt that invoked the tool.
+        adapter: Name of the adapter that executed the tool.
+        name: Name of the tool that was invoked.
+        params: Parameters passed to the tool handler.
+        result: Result returned by the tool handler.
+        session_id: Session ID for correlation.
+        created_at: When the event was created.
+        usage: Token usage from the provider response.
+        rendered_output: Rendered output text (truncated).
+        call_id: Provider's tool call ID for correlation.
+        started_at: When tool execution started (if available).
+        completed_at: When tool execution completed (if available).
+        metadata: Additional tool metadata (e.g., tool version, source).
+        correlation_key: Key for correlating MCP tools with SDK tool_use_id.
+        event_id: Unique identifier for this event.
+    """
 
     prompt_name: str
     adapter: AdapterName
@@ -137,7 +287,19 @@ class ToolInvoked:
     usage: TokenUsage | None = None
     rendered_output: str = ""
     call_id: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
+    correlation_key: str | None = None
     event_id: UUID = field(default_factory=uuid4)
+
+    @property
+    def duration_ms(self) -> float | None:
+        """Return execution duration in milliseconds if timing is available."""
+        if self.started_at is None or self.completed_at is None:
+            return None
+        delta = self.completed_at - self.started_at
+        return delta.total_seconds() * 1000
 
 
 __all__ = [
@@ -148,5 +310,9 @@ __all__ = [
     "PublishResult",
     "TelemetryBus",
     "TokenUsage",
+    "ToolCall",
+    "ToolCallStatus",
+    "ToolCallStatusLiteral",
     "ToolInvoked",
+    "compute_correlation_key",
 ]

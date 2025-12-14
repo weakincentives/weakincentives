@@ -31,7 +31,11 @@ from ._types import (
     PublishResult,
     TelemetryBus,
     TokenUsage,
+    ToolCall,
+    ToolCallStatus,
+    ToolCallStatusLiteral,
     ToolInvoked,
+    compute_correlation_key,
 )
 
 if TYPE_CHECKING:
@@ -143,5 +147,9 @@ __all__ = [
     "PublishResult",
     "TelemetryBus",
     "TokenUsage",
+    "ToolCall",
+    "ToolCallStatus",
+    "ToolCallStatusLiteral",
     "ToolInvoked",
+    "compute_correlation_key",
 ]

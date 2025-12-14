@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
-from ...runtime.events._types import ToolInvoked
+from ...runtime.events._types import ToolInvoked, compute_correlation_key
 from ...runtime.logging import StructuredLogger, get_logger
 from ._notifications import Notification
 
@@ -345,6 +345,9 @@ def create_post_tool_use_hook(
 
         hook_context._tool_count += 1
 
+        # Compute correlation key for linking with MCP tools
+        correlation_key = compute_correlation_key(tool_name, tool_input)
+
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
@@ -356,6 +359,8 @@ def create_post_tool_use_hook(
             usage=None,
             rendered_output=output_text[:1000] if output_text else "",
             call_id=tool_use_id,
+            correlation_key=correlation_key,
+            metadata={"source": "sdk_native"},
         )
         hook_context.session.event_bus.publish(event)
 

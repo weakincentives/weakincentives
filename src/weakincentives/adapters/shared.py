@@ -51,6 +51,7 @@ from ..runtime.events import (
     PromptRendered,
     TokenUsage,
     ToolInvoked,
+    compute_correlation_key,
 )
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse, schema
@@ -494,6 +495,9 @@ class ToolExecutionOutcome:
     result: ToolResult[SupportsToolResult]
     call_id: str | None
     log: StructuredLogger
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    arguments_mapping: Mapping[str, Any] | None = None
 
 
 def _resolve_tool_and_handler(
@@ -701,6 +705,8 @@ def tool_execution(
 
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsToolResult]
+    started_at = datetime.now(UTC)
+    completed_at: datetime | None = None
     try:
         tool_params = _parse_tool_params(tool=tool, arguments_mapping=arguments_mapping)
         _ensure_deadline_not_expired(
@@ -721,7 +727,9 @@ def tool_execution(
             tool_params=tool_params,
             context=tool_context,
         )
+        completed_at = datetime.now(UTC)
     except ToolValidationError as error:
+        completed_at = datetime.now(UTC)
         if tool_params is None:
             tool_params = cast(
                 SupportsDataclass,
@@ -741,6 +749,7 @@ def tool_execution(
             deadline=context.deadline,
         ) from error
     except Exception as error:  # propagate message via ToolResult
+        completed_at = datetime.now(UTC)
         tool_result = _handle_unexpected_tool_error(
             log=log,
             tool_name=tool_name,
@@ -759,6 +768,9 @@ def tool_execution(
         result=tool_result,
         call_id=call_id,
         log=log,
+        started_at=started_at,
+        completed_at=completed_at,
+        arguments_mapping=arguments_mapping,
     )
 
 
@@ -772,6 +784,12 @@ def _publish_tool_invocation(
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
 
+    # Compute correlation key from tool name and arguments
+    args_dict: dict[str, Any] = (
+        dict(outcome.arguments_mapping) if outcome.arguments_mapping else {}
+    )
+    correlation_key = compute_correlation_key(outcome.tool.name, args_dict)
+
     invocation = ToolInvoked(
         prompt_name=context.prompt_name,
         adapter=context.adapter_name,
@@ -779,10 +797,14 @@ def _publish_tool_invocation(
         params=outcome.params,
         result=cast(ToolResult[object], outcome.result),
         session_id=session_id,
-        created_at=datetime.now(UTC),
+        created_at=outcome.completed_at or datetime.now(UTC),
         usage=usage,
         rendered_output=rendered_output,
         call_id=outcome.call_id,
+        started_at=outcome.started_at,
+        completed_at=outcome.completed_at,
+        metadata={"source": "provider_adapter"},
+        correlation_key=correlation_key,
         event_id=uuid4(),
     )
     publish_result = context.session.event_bus.publish(invocation)

@@ -31,7 +31,10 @@ from weakincentives.runtime.events import (
     PromptRendered,
     PublishResult,
     TokenUsage,
+    ToolCall,
+    ToolCallStatus,
     ToolInvoked,
+    compute_correlation_key,
 )
 
 
@@ -373,3 +376,276 @@ def test_null_event_bus_unsubscribe_returns_false() -> None:
     bus.subscribe(PromptExecuted, handler)
     result = bus.unsubscribe(PromptExecuted, handler)
     assert result is False
+
+
+# --- Trace Correlation Tests ---
+
+
+class TestComputeCorrelationKey:
+    def test_same_inputs_produce_same_key(self) -> None:
+        key1 = compute_correlation_key("test_tool", {"a": 1, "b": "hello"})
+        key2 = compute_correlation_key("test_tool", {"a": 1, "b": "hello"})
+        assert key1 == key2
+
+    def test_different_tool_names_produce_different_keys(self) -> None:
+        key1 = compute_correlation_key("tool_a", {"x": 1})
+        key2 = compute_correlation_key("tool_b", {"x": 1})
+        assert key1 != key2
+
+    def test_different_args_produce_different_keys(self) -> None:
+        key1 = compute_correlation_key("test_tool", {"x": 1})
+        key2 = compute_correlation_key("test_tool", {"x": 2})
+        assert key1 != key2
+
+    def test_key_is_deterministic_with_different_arg_order(self) -> None:
+        """Args dict order should not affect the correlation key."""
+        key1 = compute_correlation_key("test_tool", {"a": 1, "b": 2})
+        key2 = compute_correlation_key("test_tool", {"b": 2, "a": 1})
+        assert key1 == key2
+
+    def test_returns_16_char_hex_string(self) -> None:
+        key = compute_correlation_key("tool", {"arg": "value"})
+        assert len(key) == 16
+        assert all(c in "0123456789abcdef" for c in key)
+
+    def test_empty_args_produces_consistent_key(self) -> None:
+        key1 = compute_correlation_key("tool", {})
+        key2 = compute_correlation_key("tool", {})
+        assert key1 == key2
+
+
+class TestToolInvokedTiming:
+    def test_tool_invoked_with_timing_fields(self) -> None:
+        started = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        completed = datetime(2025, 1, 1, 12, 0, 1, tzinfo=UTC)
+        raw_result = ToolResult(message="ok", value=_Payload(value="data"))
+        result = cast(ToolResult[object], raw_result)
+
+        event = ToolInvoked(
+            prompt_name="demo",
+            adapter=TEST_ADAPTER_NAME,
+            name="tool",
+            params=_Params(value=1),
+            result=result,
+            session_id=uuid4(),
+            created_at=completed,
+            started_at=started,
+            completed_at=completed,
+            metadata={"source": "test"},
+            correlation_key="abc123",
+        )
+
+        assert event.started_at == started
+        assert event.completed_at == completed
+        assert event.metadata == {"source": "test"}
+        assert event.correlation_key == "abc123"
+
+    def test_duration_ms_calculation(self) -> None:
+        started = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        completed = datetime(2025, 1, 1, 12, 0, 1, 500000, tzinfo=UTC)  # 1.5s later
+        raw_result = ToolResult(message="ok", value=None)
+        result = cast(ToolResult[object], raw_result)
+
+        event = ToolInvoked(
+            prompt_name="demo",
+            adapter=TEST_ADAPTER_NAME,
+            name="tool",
+            params={},
+            result=result,
+            session_id=uuid4(),
+            created_at=completed,
+            started_at=started,
+            completed_at=completed,
+        )
+
+        assert event.duration_ms == 1500.0
+
+    def test_duration_ms_returns_none_without_timing(self) -> None:
+        raw_result = ToolResult(message="ok", value=None)
+        result = cast(ToolResult[object], raw_result)
+
+        event = ToolInvoked(
+            prompt_name="demo",
+            adapter=TEST_ADAPTER_NAME,
+            name="tool",
+            params={},
+            result=result,
+            session_id=uuid4(),
+            created_at=datetime.now(UTC),
+        )
+
+        assert event.duration_ms is None
+
+
+class TestToolCallSlice:
+    def test_create_requested(self) -> None:
+        requested_at = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        tool_call = ToolCall.create_requested(
+            tool_name="test_tool",
+            params={"arg": "value"},
+            prompt_name="test_prompt",
+            adapter=TEST_ADAPTER_NAME,
+            requested_at=requested_at,
+            call_id="call-123",
+            metadata={"version": "1.0"},
+        )
+
+        assert tool_call.tool_name == "test_tool"
+        assert tool_call.params == {"arg": "value"}
+        assert tool_call.status == ToolCallStatus.REQUESTED
+        assert tool_call.prompt_name == "test_prompt"
+        assert tool_call.adapter == TEST_ADAPTER_NAME
+        assert tool_call.requested_at == requested_at
+        assert tool_call.call_id == "call-123"
+        assert tool_call.metadata == {"version": "1.0"}
+        assert tool_call.started_at is None
+        assert tool_call.completed_at is None
+        assert tool_call.result is None
+        assert tool_call.error is None
+        assert len(tool_call.correlation_key) == 16
+
+    def test_with_status_running(self) -> None:
+        requested_at = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        started_at = datetime(2025, 1, 1, 12, 0, 0, 100000, tzinfo=UTC)
+        tool_call = ToolCall.create_requested(
+            tool_name="test_tool",
+            params={"arg": "value"},
+            prompt_name="test_prompt",
+            adapter=TEST_ADAPTER_NAME,
+            requested_at=requested_at,
+        )
+
+        running = tool_call.with_status(ToolCallStatus.RUNNING, started_at=started_at)
+
+        assert running.status == ToolCallStatus.RUNNING
+        assert running.started_at == started_at
+        assert running.completed_at is None
+        # Original should be unchanged
+        assert tool_call.status == ToolCallStatus.REQUESTED
+        assert tool_call.started_at is None
+
+    def test_with_status_completed(self) -> None:
+        requested_at = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        started_at = datetime(2025, 1, 1, 12, 0, 0, 100000, tzinfo=UTC)
+        completed_at = datetime(2025, 1, 1, 12, 0, 1, tzinfo=UTC)
+        tool_call = ToolCall.create_requested(
+            tool_name="test_tool",
+            params={},
+            prompt_name="test_prompt",
+            adapter=TEST_ADAPTER_NAME,
+            requested_at=requested_at,
+        )
+
+        completed = tool_call.with_status(
+            ToolCallStatus.COMPLETED,
+            started_at=started_at,
+            completed_at=completed_at,
+            result={"output": "success"},
+        )
+
+        assert completed.status == ToolCallStatus.COMPLETED
+        assert completed.started_at == started_at
+        assert completed.completed_at == completed_at
+        assert completed.result == {"output": "success"}
+        assert completed.error is None
+
+    def test_with_status_failed(self) -> None:
+        requested_at = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        started_at = datetime(2025, 1, 1, 12, 0, 0, 100000, tzinfo=UTC)
+        completed_at = datetime(2025, 1, 1, 12, 0, 1, tzinfo=UTC)
+        tool_call = ToolCall.create_requested(
+            tool_name="test_tool",
+            params={},
+            prompt_name="test_prompt",
+            adapter=TEST_ADAPTER_NAME,
+            requested_at=requested_at,
+        )
+
+        failed = tool_call.with_status(
+            ToolCallStatus.FAILED,
+            started_at=started_at,
+            completed_at=completed_at,
+            error="Connection timeout",
+        )
+
+        assert failed.status == ToolCallStatus.FAILED
+        assert failed.error == "Connection timeout"
+        assert failed.result is None
+
+    def test_duration_ms(self) -> None:
+        requested_at = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        started_at = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        completed_at = datetime(2025, 1, 1, 12, 0, 2, 500000, tzinfo=UTC)  # 2.5s later
+        tool_call = ToolCall.create_requested(
+            tool_name="test_tool",
+            params={},
+            prompt_name="test_prompt",
+            adapter=TEST_ADAPTER_NAME,
+            requested_at=requested_at,
+        )
+
+        completed = tool_call.with_status(
+            ToolCallStatus.COMPLETED,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+
+        assert completed.duration_ms == 2500.0
+
+    def test_duration_ms_none_without_timing(self) -> None:
+        requested_at = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+        tool_call = ToolCall.create_requested(
+            tool_name="test_tool",
+            params={},
+            prompt_name="test_prompt",
+            adapter=TEST_ADAPTER_NAME,
+            requested_at=requested_at,
+        )
+
+        assert tool_call.duration_ms is None
+
+    def test_correlation_key_matches_compute_function(self) -> None:
+        params = {"arg1": "value1", "arg2": 42}
+        tool_call = ToolCall.create_requested(
+            tool_name="test_tool",
+            params=params,
+            prompt_name="test_prompt",
+            adapter=TEST_ADAPTER_NAME,
+            requested_at=datetime.now(UTC),
+        )
+
+        expected_key = compute_correlation_key("test_tool", params)
+        assert tool_call.correlation_key == expected_key
+
+    def test_with_status_can_update_call_id(self) -> None:
+        """Test that call_id can be updated via with_status for MCP correlation."""
+        tool_call = ToolCall.create_requested(
+            tool_name="mcp_tool",
+            params={},
+            prompt_name="test_prompt",
+            adapter=TEST_ADAPTER_NAME,
+            requested_at=datetime.now(UTC),
+            call_id=None,  # MCP tools start without call_id
+        )
+
+        assert tool_call.call_id is None
+
+        # After correlation, we can add the call_id
+        correlated = tool_call.with_status(
+            ToolCallStatus.RUNNING,
+            call_id="toolu_abc123",
+        )
+
+        assert correlated.call_id == "toolu_abc123"
+
+
+class TestToolCallStatusEnum:
+    def test_status_values(self) -> None:
+        assert ToolCallStatus.REQUESTED.value == "requested"
+        assert ToolCallStatus.RUNNING.value == "running"
+        assert ToolCallStatus.COMPLETED.value == "completed"
+        assert ToolCallStatus.FAILED.value == "failed"
+
+    def test_all_statuses_defined(self) -> None:
+        statuses = list(ToolCallStatus)
+        assert len(statuses) == 4

@@ -22,7 +22,7 @@ from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.tool import Tool, ToolContext, ToolResult
-from ...runtime.events import ToolInvoked
+from ...runtime.events import ToolInvoked, compute_correlation_key
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
 
@@ -95,6 +95,7 @@ class BridgedTool:
                 "isError": True,
             }
 
+        started_at = datetime.now(UTC)
         try:
             if self._tool.params_type is type(None):
                 params = None
@@ -111,6 +112,7 @@ class BridgedTool:
             )
 
             result = handler(params, context=context)
+            completed_at = datetime.now(UTC)
 
             # Use render() which calls render_tool_payload on the value,
             # falling back to message if render returns empty
@@ -119,7 +121,9 @@ class BridgedTool:
 
             # Publish ToolInvoked event with the actual tool result value
             # This enables session reducers to dispatch based on the value type
-            self._publish_tool_invoked(args, result, output_text)
+            self._publish_tool_invoked(
+                args, result, output_text, started_at, completed_at
+            )
 
             return {
                 "content": [{"type": "text", "text": output_text}],
@@ -127,6 +131,7 @@ class BridgedTool:
             }
 
         except (TypeError, ValueError) as error:
+            completed_at = datetime.now(UTC)
             logger.warning(
                 "claude_agent_sdk.bridge.validation_error",
                 event="bridge.validation_error",
@@ -142,6 +147,7 @@ class BridgedTool:
             raise
 
         except Exception as error:
+            completed_at = datetime.now(UTC)
             logger.exception(
                 "claude_agent_sdk.bridge.handler_error",
                 event="bridge.handler_error",
@@ -157,11 +163,18 @@ class BridgedTool:
         args: dict[str, Any],
         result: ToolResult[Any],
         rendered_output: str,
+        started_at: datetime,
+        completed_at: datetime,
     ) -> None:
         """Publish a ToolInvoked event for session reducer dispatch.
 
         The session extracts the value from result.value for slice routing.
+        Includes timing information and a correlation key for MCP tool
+        correlation with SDK tool_use_id.
         """
+        # Generate correlation key for MCP tool correlation
+        correlation_key = compute_correlation_key(self.name, args)
+
         event = ToolInvoked(
             prompt_name=self._prompt_name,
             adapter=self._adapter_name,
@@ -169,10 +182,14 @@ class BridgedTool:
             params=args,
             result=cast(ToolResult[object], result),
             session_id=None,
-            created_at=datetime.now(UTC),
+            created_at=completed_at,
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
-            call_id=None,
+            call_id=None,  # MCP tools don't have call_id directly
+            started_at=started_at,
+            completed_at=completed_at,
+            metadata={"source": "mcp_bridge"},
+            correlation_key=correlation_key,
         )
         self._session.event_bus.publish(event)
 
