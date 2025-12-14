@@ -260,15 +260,25 @@ execution to Claude Code's native tools.
 
 ## Architecture Overview
 
+The adapter uses `ClientSession` to manage the lifecycle of a `ClaudeSDKClient`
+connection. This client-based approach enables:
+
+- **Real cancellation** via `interrupt()` when deadline/budget exceeds
+- **Streaming progress** through `receive_response()` iteration
+- **Clean lifecycle management** with connect/disconnect
+- **Session continuity** (optional reuse across evaluations)
+
 ```mermaid
 flowchart TB
     subgraph Adapter["ClaudeAgentSDKAdapter.evaluate()"]
         Render["Prompt.render()"]
         Isolation["EphemeralHome<br/>(if IsolationConfig)"]
 
-        subgraph SDK["sdk.query() streaming"]
-            Options["ClaudeAgentOptions<br/>model, cwd, hooks, env"]
-            Loop["Agentic Loop"]
+        subgraph Client["ClientSession"]
+            Connect["client.connect()"]
+            Query["client.query()"]
+            Receive["receive_response()"]
+            Interrupt["interrupt()<br/>(on deadline/budget)"]
         end
 
         subgraph Hooks["Hook Callbacks"]
@@ -287,12 +297,14 @@ flowchart TB
     end
 
     Render --> Isolation
-    Isolation --> Options
-    Options --> Loop
-    Loop --> Hooks
+    Isolation --> Connect
+    Connect --> Query
+    Query --> Receive
+    Receive --> Hooks
     Hooks --> Extract
     Extract --> Publish
-    Loop --> Tools
+    Receive --> Tools
+    Interrupt -.-> Receive
 ```
 
 ## Hermetic Isolation
@@ -447,6 +459,43 @@ flowchart LR
     Stop -->|"Record stop_reason"| Done["Complete"]
 ```
 
+### ClientSession
+
+The adapter uses `ClientSession` to manage `ClaudeSDKClient` lifecycle:
+
+```python
+@dataclass(slots=True, frozen=True)
+class ClientConfig:
+    model: str
+    cwd: str | None = None
+    permission_mode: str = "bypassPermissions"
+    max_turns: int | None = None
+    output_format: dict[str, Any] | None = None
+    allowed_tools: tuple[str, ...] | None = None
+    disallowed_tools: tuple[str, ...] = ()
+    suppress_stderr: bool = True
+    env: dict[str, str] | None = None
+    setting_sources: list[str] | None = None
+    mcp_servers: dict[str, Any] | None = None
+    hooks: dict[str, list[Any]] | None = None
+
+class ClientSession:
+    async def connect(self) -> None: ...
+    async def disconnect(self) -> None: ...
+    async def query(self, prompt: str, *, session_id: str) -> QueryResult: ...
+    async def interrupt(self) -> None: ...
+    def _should_interrupt(self) -> bool: ...
+```
+
+The session:
+
+1. **Connects once** per evaluation (via async context manager)
+1. **Sends query** via `client.query()`
+1. **Iterates responses** via `receive_response()` until `ResultMessage`
+1. **Checks interrupts** before processing each message
+1. **Calls interrupt()** when deadline/budget exceeds
+1. **Disconnects** on exit (automatic cleanup)
+
 ### HookContext
 
 Shared context passed to all hooks:
@@ -551,6 +600,7 @@ src/weakincentives/adapters/claude_agent_sdk/
 ├── config.py             # ClaudeAgentSDKClientConfig, ModelConfig
 ├── isolation.py          # IsolationConfig, NetworkPolicy, SandboxConfig
 ├── workspace.py          # ClaudeAgentWorkspaceSection, HostMount
+├── _client.py            # ClientSession, ClientConfig, QueryResult
 ├── _hooks.py             # Hook implementations
 ├── _bridge.py            # MCP tool bridge
 ├── _async_utils.py       # Async/sync bridging

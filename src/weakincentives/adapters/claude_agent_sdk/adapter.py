@@ -31,6 +31,7 @@ from .._names import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server
+from ._client import ClientConfig, ClientSession, QueryResult
 from ._errors import normalize_sdk_error
 from ._hooks import (
     HookContext,
@@ -66,12 +67,12 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def _import_sdk() -> Any:  # pragma: no cover
-    """Import the Claude Agent SDK, raising a helpful error if not installed."""
+def _import_sdk_types() -> Any:  # pragma: no cover
+    """Import SDK types for hook registration."""
     try:
-        import claude_agent_sdk
+        from claude_agent_sdk.types import HookMatcher
 
-        return claude_agent_sdk
+        return HookMatcher
     except ImportError as error:
         raise ImportError(
             "claude-agent-sdk is not installed. Install it with: "
@@ -83,9 +84,16 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
     """Adapter using Claude Agent SDK with hook-based state synchronization.
 
     This adapter uses the Claude Agent SDK's ClaudeSDKClient to execute
-    prompts with full agentic capabilities. Hooks synchronize state
-    bidirectionally between the SDK's internal execution and the
-    weakincentives Session.
+    prompts with full agentic capabilities. The client-based approach
+    enables:
+
+    - Real cancellation via interrupt()
+    - Streaming progress through receive_response()
+    - Clean lifecycle management with connect/disconnect
+    - Session continuity across multiple queries
+
+    Hooks synchronize state bidirectionally between the SDK's internal
+    execution and the weakincentives Session.
 
     Example:
         >>> from weakincentives import Prompt, PromptTemplate, MarkdownSection
@@ -203,7 +211,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             )
         )
 
-    async def _evaluate_async(  # noqa: PLR0914
+    async def _evaluate_async(
         self,
         prompt: Prompt[OutputT],
         *,
@@ -211,9 +219,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
     ) -> PromptResponse[OutputT]:
-        """Async implementation of evaluate."""
-        sdk = _import_sdk()
-
+        """Async implementation of evaluate using ClaudeSDKClient."""
         rendered = prompt.render(
             session=session,
         )
@@ -283,13 +289,14 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             )
 
         try:
-            messages = await self._run_sdk_query(
-                sdk=sdk,
+            query_result = await self._run_client_query(
                 prompt_text=prompt_text,
                 output_format=output_format,
                 hook_context=hook_context,
                 bridged_tools=bridged_tools,
                 ephemeral_home=ephemeral_home,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
             )
         except VisibilityExpansionRequired:
             # Progressive disclosure: let this propagate to the caller
@@ -304,8 +311,12 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         end_time = _utcnow()
         duration_ms = int((end_time - start_time).total_seconds() * 1000)
 
+        # Update hook context stop reason from query result
+        if query_result.stop_reason:
+            hook_context.stop_reason = query_result.stop_reason
+
         result_text, output, usage = self._extract_result(
-            messages, rendered, budget_tracker, prompt_name
+            query_result, rendered, budget_tracker, prompt_name
         )
 
         response = PromptResponse(
@@ -334,77 +345,56 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 "input_tokens": usage.input_tokens if usage else None,
                 "output_tokens": usage.output_tokens if usage else None,
                 "stop_reason": hook_context.stop_reason,
+                "interrupted": query_result.interrupted,
             },
         )
 
         return response
 
-    async def _run_sdk_query(  # noqa: C901
+    async def _run_client_query(
         self,
         *,
-        sdk: Any,
         prompt_text: str,
         output_format: dict[str, Any] | None,
         hook_context: HookContext,
         bridged_tools: tuple[Any, ...],
         ephemeral_home: EphemeralHome | None = None,
-    ) -> list[Any]:
-        """Execute the SDK query and return message list."""
-        # Import the SDK's types
-        from claude_agent_sdk.types import ClaudeAgentOptions, HookMatcher
+        deadline: Deadline | None = None,
+        budget_tracker: BudgetTracker | None = None,
+    ) -> QueryResult:
+        """Execute query using ClaudeSDKClient and return result."""
+        # Build client configuration
+        client_config = self._build_client_config(
+            output_format=output_format,
+            hook_context=hook_context,
+            bridged_tools=bridged_tools,
+            ephemeral_home=ephemeral_home,
+        )
 
-        # Build options dict then convert to ClaudeAgentOptions
-        options_kwargs: dict[str, Any] = {
-            "model": self._model,
-        }
+        # Create and use client session
+        async with ClientSession(
+            client_config,
+            hook_context,
+            deadline=deadline,
+            budget_tracker=budget_tracker,
+        ) as client:
+            return await client.query(
+                prompt_text,
+                session_id=hook_context.prompt_name,
+            )
 
-        if self._client_config.cwd:
-            options_kwargs["cwd"] = self._client_config.cwd
+    def _build_client_config(
+        self,
+        *,
+        output_format: dict[str, Any] | None,
+        hook_context: HookContext,
+        bridged_tools: tuple[Any, ...],
+        ephemeral_home: EphemeralHome | None = None,
+    ) -> ClientConfig:
+        """Build ClientConfig from adapter configuration."""
+        HookMatcher = _import_sdk_types()
 
-        if self._client_config.permission_mode:
-            options_kwargs["permission_mode"] = self._client_config.permission_mode
-
-        if self._client_config.max_turns:
-            options_kwargs["max_turns"] = self._client_config.max_turns
-
-        if output_format:
-            options_kwargs["output_format"] = output_format
-
-        if self._allowed_tools is not None:
-            options_kwargs["allowed_tools"] = list(self._allowed_tools)
-
-        if self._disallowed_tools:
-            options_kwargs["disallowed_tools"] = list(self._disallowed_tools)
-
-        # Apply isolation configuration if ephemeral home is provided
-        if ephemeral_home:
-            # Set environment variables including redirected HOME
-            options_kwargs["env"] = ephemeral_home.get_env()
-            # Prevent loading any external settings
-            options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
-
-        # Apply model config parameters
-        # Note: The Claude Agent SDK does not expose max_tokens or temperature
-        # parameters directly. It manages token budgets internally. The
-        # max_thinking_tokens option is for extended thinking mode, which
-        # requires a minimum of ~2000 tokens. For now, we simply ignore
-        # max_tokens and temperature from model_config as they don't map
-        # cleanly to SDK options.
-        _ = self._model_config  # Model config applied via model name only
-
-        # Register custom tools via MCP server if any are provided
-        if bridged_tools:
-            # create_mcp_server returns an McpSdkServerConfig directly
-            mcp_server_config = create_mcp_server(bridged_tools)
-            options_kwargs["mcp_servers"] = {
-                "wink": mcp_server_config,
-            }
-
-        # Suppress stderr if configured (hides bun errors and CLI noise)
-        if self._client_config.suppress_stderr:
-            options_kwargs["stderr"] = lambda _: None
-
-        # Create async hook callbacks
+        # Build hooks
         pre_hook = create_pre_tool_use_hook(hook_context)
         post_hook = create_post_tool_use_hook(
             hook_context,
@@ -417,9 +407,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         pre_compact_hook = create_pre_compact_hook(hook_context)
         notification_hook = create_notification_hook(hook_context)
 
-        # Build hooks dict with HookMatcher wrappers
-        # matcher=None matches all tools
-        options_kwargs["hooks"] = {
+        hooks: dict[str, list[Any]] = {
             "PreToolUse": [HookMatcher(matcher=None, hooks=[pre_hook])],
             "PostToolUse": [HookMatcher(matcher=None, hooks=[post_hook])],
             "Stop": [HookMatcher(matcher=None, hooks=[stop_hook_fn])],
@@ -430,24 +418,33 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             "Notification": [HookMatcher(matcher=None, hooks=[notification_hook])],
         }
 
-        options = ClaudeAgentOptions(**options_kwargs)
+        # Build MCP servers config
+        mcp_servers: dict[str, Any] | None = None
+        if bridged_tools:
+            mcp_server_config = create_mcp_server(bridged_tools)
+            mcp_servers = {"wink": mcp_server_config}
 
-        # Use streaming mode (AsyncIterable) to enable hook support.
-        # The SDK's query() function only initializes hooks when
-        # is_streaming_mode=True, which requires an AsyncIterable prompt.
-        async def stream_prompt() -> Any:  # noqa: RUF029
-            """Yield a single user message in streaming format."""
-            yield {
-                "type": "user",
-                "message": {"role": "user", "content": prompt_text},
-                "parent_tool_use_id": None,
-                "session_id": hook_context.prompt_name,
-            }
+        # Build env and setting_sources from ephemeral home
+        env: dict[str, str] | None = None
+        setting_sources: list[str] | None = None
+        if ephemeral_home:
+            env = ephemeral_home.get_env()
+            setting_sources = ephemeral_home.get_setting_sources()
 
-        return [
-            message
-            async for message in sdk.query(prompt=stream_prompt(), options=options)
-        ]
+        return ClientConfig(
+            model=self._model,
+            cwd=self._client_config.cwd,
+            permission_mode=self._client_config.permission_mode,
+            max_turns=self._client_config.max_turns,
+            output_format=output_format,
+            allowed_tools=self._allowed_tools,
+            disallowed_tools=self._disallowed_tools,
+            suppress_stderr=self._client_config.suppress_stderr,
+            env=env,
+            setting_sources=setting_sources,
+            mcp_servers=mcp_servers,
+            hooks=hooks,
+        )
 
     def _build_output_format(
         self,
@@ -466,56 +463,39 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
     def _extract_result(
         self,
-        messages: list[Any],
+        query_result: QueryResult,
         rendered: RenderedPrompt[OutputT],
         budget_tracker: BudgetTracker | None,
         prompt_name: str,
     ) -> tuple[str | None, OutputT | None, TokenUsage | None]:
-        """Extract text, structured output, and usage from SDK messages."""
-        # Import SDK types for isinstance checks
-        from claude_agent_sdk.types import ResultMessage
-
-        result_text: str | None = None
+        """Extract text, structured output, and usage from QueryResult."""
+        result_text = query_result.result_text
         structured_output: OutputT | None = None
-        total_input_tokens = 0
-        total_output_tokens = 0
 
-        for message in reversed(messages):
-            # Check for ResultMessage using isinstance
-            if isinstance(message, ResultMessage):
-                # ResultMessage has 'result' attribute, not 'text'
-                if hasattr(message, "result") and message.result:
-                    result_text = message.result
-
-                if hasattr(message, "structured_output") and message.structured_output:
-                    output_type = rendered.output_type
-                    if output_type and output_type is not type(None):
-                        try:
-                            structured_output = parse(
-                                output_type,
-                                message.structured_output,
-                                extra="ignore",
-                            )
-                        except (TypeError, ValueError) as error:
-                            logger.warning(
-                                "claude_agent_sdk.parse.structured_output_error",
-                                event="parse.structured_output_error",
-                                context={"error": str(error)},
-                            )
-
-            if hasattr(message, "usage") and message.usage:
-                usage_dict = message.usage
-                if isinstance(usage_dict, dict):
-                    total_input_tokens += usage_dict.get("input_tokens", 0)
-                    total_output_tokens += usage_dict.get("output_tokens", 0)
+        # Parse structured output if present
+        if query_result.structured_output:
+            output_type = rendered.output_type
+            if output_type and output_type is not type(None):
+                try:
+                    structured_output = parse(
+                        output_type,
+                        query_result.structured_output,
+                        extra="ignore",
+                    )
+                except (TypeError, ValueError) as error:
+                    logger.warning(
+                        "claude_agent_sdk.parse.structured_output_error",
+                        event="parse.structured_output_error",
+                        context={"error": str(error)},
+                    )
 
         usage = TokenUsage(
-            input_tokens=total_input_tokens or None,
-            output_tokens=total_output_tokens or None,
+            input_tokens=query_result.input_tokens or None,
+            output_tokens=query_result.output_tokens or None,
             cached_tokens=None,
         )
 
-        if budget_tracker and (total_input_tokens or total_output_tokens):
+        if budget_tracker and (query_result.input_tokens or query_result.output_tokens):
             budget_tracker.record_cumulative(
                 prompt_name,
                 usage,

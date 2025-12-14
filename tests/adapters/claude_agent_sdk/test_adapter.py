@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, AsyncIterable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -55,6 +55,7 @@ class MockResultMessage:
     result: str | None = None
     structured_output: dict[str, object] | None = None
     usage: dict[str, int] | None = None
+    stop_reason: str | None = None
 
 
 class MockClaudeAgentOptions:
@@ -85,13 +86,19 @@ class MockHookMatcher:
     hooks: list[object] | None = None
 
 
-class MockSDKQuery:
-    """Mock for sdk.query() async generator function."""
+class MockClaudeSDKClient:
+    """Mock ClaudeSDKClient for testing."""
 
     captured_options: ClassVar[list[MockClaudeAgentOptions]] = []
     captured_prompts: ClassVar[list[str]] = []
     _results: ClassVar[list[object]] = []
     _error: ClassVar[Exception | None] = None
+
+    def __init__(self, options: MockClaudeAgentOptions | None = None) -> None:
+        self._options = options
+        if options is not None:
+            MockClaudeSDKClient.captured_options.append(options)
+        self._connected = False
 
     @classmethod
     def reset(cls) -> None:
@@ -103,7 +110,7 @@ class MockSDKQuery:
 
     @classmethod
     def set_results(cls, results: list[object]) -> None:
-        """Set the results to yield from query."""
+        """Set the results to yield from receive_response."""
         cls._results = results
 
     @classmethod
@@ -111,38 +118,24 @@ class MockSDKQuery:
         """Set an error to raise during iteration."""
         cls._error = error
 
-    @classmethod
-    async def query(
-        cls,
-        *,
-        prompt: str | AsyncIterable[dict[str, Any]],
-        options: MockClaudeAgentOptions,
-    ) -> AsyncGenerator[object, None]:
-        """Mock sdk.query() that yields configured results.
+    async def connect(self) -> None:
+        self._connected = True
 
-        Handles both string prompts (legacy) and AsyncIterable prompts (streaming mode).
-        For AsyncIterable prompts, consumes the generator and extracts the user message content.
-        """
-        # Handle AsyncIterable prompts (streaming mode)
-        if not isinstance(prompt, str):
-            # Consume the async generator to get prompt content
-            prompt_content = ""
-            async for msg in prompt:
-                if isinstance(msg, dict) and "message" in msg:
-                    message = msg["message"]
-                    if isinstance(message, dict) and "content" in message:
-                        prompt_content = message["content"]
-            cls.captured_prompts.append(prompt_content)
-        else:
-            cls.captured_prompts.append(prompt)
+    async def disconnect(self) -> None:
+        self._connected = False
 
-        cls.captured_options.append(options)
+    async def query(self, prompt: str, session_id: str = "default") -> None:
+        MockClaudeSDKClient.captured_prompts.append(prompt)
 
-        if cls._error is not None:
-            raise cls._error
+    async def receive_response(self) -> Any:  # noqa: ANN401
+        if MockClaudeSDKClient._error is not None:
+            raise MockClaudeSDKClient._error
 
-        for result in cls._results:
+        for result in MockClaudeSDKClient._results:
             yield result
+
+    async def interrupt(self) -> None:
+        pass
 
 
 @dataclass(slots=True, frozen=True)
@@ -235,38 +228,36 @@ class TestClaudeAgentSDKAdapterInit:
         assert adapter._disallowed_tools == ("Bash",)
 
 
-def _setup_mock_query(results: list[object]) -> None:
-    """Set up MockSDKQuery with specific results."""
-    MockSDKQuery.reset()
-    MockSDKQuery.set_results(results)
+def _setup_mock_client(results: list[object]) -> None:
+    """Set up MockClaudeSDKClient with specific results."""
+    MockClaudeSDKClient.reset()
+    MockClaudeSDKClient.set_results(results)
 
 
 def _create_sdk_mock() -> MagicMock:
-    """Create mock SDK module with query function."""
+    """Create mock SDK module with ClaudeSDKClient."""
     mock_sdk = MagicMock()
-    mock_sdk.query = MockSDKQuery.query
+    mock_sdk.ClaudeSDKClient = MockClaudeSDKClient
+    mock_sdk.types = MagicMock()
+    mock_sdk.types.ClaudeAgentOptions = MockClaudeAgentOptions
+    mock_sdk.types.HookMatcher = MockHookMatcher
+    mock_sdk.types.ResultMessage = MockResultMessage
     return mock_sdk
 
 
 @contextmanager
 def sdk_patches() -> Generator[None, None, None]:
     """Context manager for common SDK patches."""
+    mock_sdk = _create_sdk_mock()
+
     with (
         patch(
-            "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
-            return_value=_create_sdk_mock(),
+            "weakincentives.adapters.claude_agent_sdk._client._import_sdk",
+            return_value=mock_sdk,
         ),
         patch(
-            "claude_agent_sdk.types.ClaudeAgentOptions",
-            MockClaudeAgentOptions,
-        ),
-        patch(
-            "claude_agent_sdk.types.HookMatcher",
-            MockHookMatcher,
-        ),
-        patch(
-            "claude_agent_sdk.types.ResultMessage",
-            MockResultMessage,
+            "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk_types",
+            return_value=MockHookMatcher,
         ),
     ):
         yield
@@ -294,13 +285,19 @@ class TestClaudeAgentSDKAdapterEvaluate:
     ) -> None:
         adapter = ClaudeAgentSDKAdapter()
 
-        with patch.dict("sys.modules", {"claude_agent_sdk": None}):
-            with patch(
-                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk",
+        with (
+            patch(
+                "weakincentives.adapters.claude_agent_sdk._client._import_sdk",
                 side_effect=ImportError("claude-agent-sdk is not installed"),
-            ):
-                with pytest.raises(ImportError, match="claude-agent-sdk"):
-                    adapter.evaluate(simple_prompt, session=session)
+            ),
+            patch(
+                "weakincentives.adapters.claude_agent_sdk.adapter._import_sdk_types",
+                side_effect=ImportError("claude-agent-sdk is not installed"),
+            ),
+        ):
+            # ImportError is normalized to PromptEvaluationError
+            with pytest.raises(PromptEvaluationError, match="claude-agent-sdk"):
+                adapter.evaluate(simple_prompt, session=session)
 
     def test_publishes_prompt_rendered_event(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
@@ -308,7 +305,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         events: list[PromptRendered] = []
         session.event_bus.subscribe(PromptRendered, lambda e: events.append(e))
 
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Hello!", usage=None, structured_output=None)]
         )
 
@@ -326,7 +323,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
     def test_returns_prompt_response(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        _setup_mock_query(
+        _setup_mock_client(
             [
                 MockResultMessage(
                     result="Hello, world!",
@@ -347,7 +344,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
     def test_extracts_structured_output(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        _setup_mock_query(
+        _setup_mock_client(
             [
                 MockResultMessage(
                     result="Hello!",
@@ -368,7 +365,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
     def test_handles_invalid_structured_output(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        _setup_mock_query(
+        _setup_mock_client(
             [
                 MockResultMessage(
                     result="Hello!",
@@ -391,7 +388,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
     def test_handles_no_structured_output(
         self, session: Session, untyped_prompt: Prompt[None]
     ) -> None:
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -409,7 +406,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         msg1 = MagicMock()
         msg1.usage = {"input_tokens": 100, "output_tokens": 50}
 
-        _setup_mock_query(
+        _setup_mock_client(
             [
                 msg1,
                 MockResultMessage(
@@ -465,7 +462,7 @@ class TestSDKConfigOptions:
     def test_passes_cwd_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -476,13 +473,13 @@ class TestSDKConfigOptions:
         with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockSDKQuery.captured_options) == 1
-        assert MockSDKQuery.captured_options[0].cwd == "/home/user/project"
+        assert len(MockClaudeSDKClient.captured_options) == 1
+        assert MockClaudeSDKClient.captured_options[0].cwd == "/home/user/project"
 
     def test_passes_max_turns_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -493,13 +490,13 @@ class TestSDKConfigOptions:
         with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockSDKQuery.captured_options) == 1
-        assert MockSDKQuery.captured_options[0].max_turns == 10
+        assert len(MockClaudeSDKClient.captured_options) == 1
+        assert MockClaudeSDKClient.captured_options[0].max_turns == 10
 
     def test_passes_allowed_tools_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -508,8 +505,8 @@ class TestSDKConfigOptions:
         with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockSDKQuery.captured_options) == 1
-        assert MockSDKQuery.captured_options[0].allowed_tools == [
+        assert len(MockClaudeSDKClient.captured_options) == 1
+        assert MockClaudeSDKClient.captured_options[0].allowed_tools == [
             "Read",
             "Write",
         ]
@@ -517,7 +514,7 @@ class TestSDKConfigOptions:
     def test_passes_disallowed_tools_option(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -526,8 +523,8 @@ class TestSDKConfigOptions:
         with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockSDKQuery.captured_options) == 1
-        assert MockSDKQuery.captured_options[0].disallowed_tools == ["Bash"]
+        assert len(MockClaudeSDKClient.captured_options) == 1
+        assert MockClaudeSDKClient.captured_options[0].disallowed_tools == ["Bash"]
 
     def test_model_config_does_not_pass_unsupported_params(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
@@ -539,7 +536,7 @@ class TestSDKConfigOptions:
         the adapter handles a model config gracefully without passing these
         unsupported parameters to ClaudeAgentOptions.
         """
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -556,12 +553,12 @@ class TestSDKConfigOptions:
 
         # Verify SDK query was called but max_thinking_tokens was not set
         # (since max_tokens doesn't map cleanly to SDK options)
-        assert len(MockSDKQuery.captured_options) == 1
+        assert len(MockClaudeSDKClient.captured_options) == 1
         # max_thinking_tokens should not be set (attribute shouldn't exist
         # or should be None if it was explicitly set)
-        assert not hasattr(MockSDKQuery.captured_options[0], "max_thinking_tokens") or (
-            MockSDKQuery.captured_options[0].max_thinking_tokens is None
-        )
+        assert not hasattr(
+            MockClaudeSDKClient.captured_options[0], "max_thinking_tokens"
+        ) or (MockClaudeSDKClient.captured_options[0].max_thinking_tokens is None)
 
     def test_creates_mcp_server_for_prompt_tools(self, session: Session) -> None:
         """Test that prompts with tools create an MCP server."""
@@ -581,7 +578,7 @@ class TestSDKConfigOptions:
         )
         prompt_with_tools = Prompt(template_with_tools)
 
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -598,17 +595,17 @@ class TestSDKConfigOptions:
         ):
             adapter.evaluate(prompt_with_tools, session=session)
 
-        assert len(MockSDKQuery.captured_options) == 1
+        assert len(MockClaudeSDKClient.captured_options) == 1
         # Verify mcp_servers was set in options
-        assert MockSDKQuery.captured_options[0].mcp_servers is not None
-        assert "wink" in MockSDKQuery.captured_options[0].mcp_servers
+        assert MockClaudeSDKClient.captured_options[0].mcp_servers is not None
+        assert "wink" in MockClaudeSDKClient.captured_options[0].mcp_servers
         mock_mcp_server.assert_called_once()
 
     def test_passes_hooks_to_options(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Test that hooks are passed to ClaudeAgentOptions."""
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Done", usage=None, structured_output=None)]
         )
 
@@ -617,8 +614,8 @@ class TestSDKConfigOptions:
         with sdk_patches():
             adapter.evaluate(simple_prompt, session=session)
 
-        assert len(MockSDKQuery.captured_options) == 1
-        options = MockSDKQuery.captured_options[0]
+        assert len(MockClaudeSDKClient.captured_options) == 1
+        options = MockClaudeSDKClient.captured_options[0]
         # Verify hooks dict is present with expected keys
         assert hasattr(options, "hooks")
         assert options.hooks is not None
@@ -632,8 +629,8 @@ class TestSDKErrorHandling:
     def test_normalizes_sdk_error(
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
-        MockSDKQuery.reset()
-        MockSDKQuery.set_error(RuntimeError("SDK crashed"))
+        MockClaudeSDKClient.reset()
+        MockClaudeSDKClient.set_error(RuntimeError("SDK crashed"))
 
         adapter = ClaudeAgentSDKAdapter()
 
@@ -648,7 +645,7 @@ class TestBudgetTracking:
     ) -> None:
         from weakincentives.budget import Budget, BudgetTracker
 
-        _setup_mock_query(
+        _setup_mock_client(
             [
                 MockResultMessage(
                     result="Done",
@@ -677,7 +674,7 @@ class TestBudgetTracking:
         """Test that passing budget without budget_tracker creates one."""
         from weakincentives.budget import Budget
 
-        _setup_mock_query(
+        _setup_mock_client(
             [
                 MockResultMessage(
                     result="Done",
@@ -705,8 +702,8 @@ class TestVisibilityExpansionRequired:
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         """Test that VisibilityExpansionRequired propagates through the adapter."""
-        MockSDKQuery.reset()
-        MockSDKQuery.set_error(
+        MockClaudeSDKClient.reset()
+        MockClaudeSDKClient.set_error(
             VisibilityExpansionRequired(
                 "Model requested expansion",
                 requested_overrides={("section", "key"): SectionVisibility.FULL},
@@ -742,7 +739,7 @@ class TestIsolationConfig:
             SandboxConfig,
         )
 
-        _setup_mock_query(
+        _setup_mock_client(
             [MockResultMessage(result="Hello!", usage={"input_tokens": 10})]
         )
 
@@ -764,8 +761,8 @@ class TestIsolationConfig:
         assert response.text == "Hello!"
 
         # Verify isolation options were passed to SDK
-        assert len(MockSDKQuery.captured_options) == 1
-        options = MockSDKQuery.captured_options[0]
+        assert len(MockClaudeSDKClient.captured_options) == 1
+        options = MockClaudeSDKClient.captured_options[0]
 
         # Verify env was set with ephemeral HOME
         assert hasattr(options, "env")
@@ -790,8 +787,8 @@ class TestIsolationConfig:
             NetworkPolicy,
         )
 
-        MockSDKQuery.reset()
-        MockSDKQuery.set_error(RuntimeError("SDK error"))
+        MockClaudeSDKClient.reset()
+        MockClaudeSDKClient.set_error(RuntimeError("SDK error"))
 
         isolation = IsolationConfig(
             network_policy=NetworkPolicy.no_network(),
@@ -807,3 +804,32 @@ class TestIsolationConfig:
         with sdk_patches():
             with pytest.raises(Exception):  # noqa: B017
                 adapter.evaluate(simple_prompt, session=session)
+
+
+class TestQueryResult:
+    """Tests for query result extraction."""
+
+    def test_extracts_stop_reason_from_result(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Test that stop_reason is extracted from QueryResult."""
+        _setup_mock_client(
+            [
+                MockResultMessage(
+                    result="Done",
+                    usage=None,
+                    structured_output=None,
+                    stop_reason="end_turn",
+                )
+            ]
+        )
+
+        events: list[PromptExecuted] = []
+        session.event_bus.subscribe(PromptExecuted, lambda e: events.append(e))
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            adapter.evaluate(simple_prompt, session=session)
+
+        assert len(events) == 1
