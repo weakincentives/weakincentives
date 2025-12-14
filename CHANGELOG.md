@@ -31,6 +31,42 @@ Key capabilities:
 - **Network policies**: Programmatic control over network access
   (`no_network`, `api_only`, `with_domains`)
 
+### Declarative State Slices
+
+State slices can now be defined declaratively with reducers co-located as
+methods on the dataclass itself:
+
+```python
+from dataclasses import dataclass, replace
+from weakincentives.runtime.session import state_slice, reducer
+
+@dataclass(frozen=True)
+class AddStep:
+    step: str
+
+@state_slice(initial=lambda: AgentPlan())
+@dataclass(frozen=True)
+class AgentPlan:
+    steps: tuple[str, ...] = ()
+    current_step: int = 0
+
+    @reducer(on=AddStep)
+    def add_step(self, event: AddStep) -> "AgentPlan":
+        return replace(self, steps=(*self.steps, event.step))
+
+# Install once, then use naturally
+session.install(AgentPlan)
+session.mutate(AgentPlan).dispatch(AddStep(step="Research"))
+session[AgentPlan].latest()  # Convenient indexing access
+```
+
+The `@state_slice` decorator extracts `@reducer`-decorated methods and
+auto-registers them when `session.install()` is called. An optional `initial`
+factory enables reducers to handle events even when no state exists yet.
+
+Sessions also now support indexing for convenient query access:
+`session[Plan].latest()` is equivalent to `session.query(Plan).latest()`.
+
 ### Session State Observers
 
 Sessions now support reactive observation of state changes, eliminating the

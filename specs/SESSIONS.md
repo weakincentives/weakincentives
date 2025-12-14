@@ -201,6 +201,134 @@ session.mutate().rollback(snapshot)    # Restore from snapshot
 - `reset()` - Clear all stored slices while preserving reducer registrations.
 - `rollback(snapshot)` - Restore session slices from the provided snapshot.
 
+### Indexing Access
+
+Sessions support indexing for convenient query access:
+
+```python
+# Equivalent to session.query(Plan).latest()
+session[Plan].latest()
+
+# Equivalent to session.query(Plan).all()
+session[Plan].all()
+
+# Equivalent to session.query(Plan).where(predicate)
+session[Plan].where(lambda p: p.active)
+```
+
+## Declarative State Slices
+
+The `@state_slice` and `@reducer` decorators enable self-describing state slices
+where reducers are co-located as methods on the dataclass itself.
+
+### Motivation
+
+The traditional pattern requires manual reducer registration:
+
+```python
+session.mutate(Plan).register(AddStep, add_step_reducer)
+session.mutate(Plan).register(UpdateStep, update_step_reducer)
+```
+
+The declarative pattern eliminates this boilerplate by auto-registering:
+
+```python
+session.install(AgentPlan)  # Registers all @reducer methods
+```
+
+### Defining a Declarative State Slice
+
+```python
+from dataclasses import dataclass, replace
+from weakincentives.runtime.session import state_slice, reducer
+
+# Event types (must be defined before the slice)
+@dataclass(frozen=True)
+class AddStep:
+    step: str
+
+@dataclass(frozen=True)
+class CompleteStep:
+    pass
+
+# Declarative state slice
+@state_slice
+@dataclass(frozen=True)
+class AgentPlan:
+    steps: tuple[str, ...]
+    current_step: int = 0
+
+    @reducer(on=AddStep)
+    def add_step(self, event: AddStep) -> "AgentPlan":
+        return replace(self, steps=self.steps + (event.step,))
+
+    @reducer(on=CompleteStep)
+    def complete(self, event: CompleteStep) -> "AgentPlan":
+        return replace(self, current_step=self.current_step + 1)
+```
+
+### Installing a State Slice
+
+```python
+session = Session(bus=bus)
+session.install(AgentPlan)
+
+# Now use the slice
+session.mutate(AgentPlan).seed(AgentPlan(steps=("Research",)))
+session.mutate(AgentPlan).dispatch(AddStep(step="Implement"))
+latest = session[AgentPlan].latest()
+```
+
+### Initial State Factory
+
+For slices that need auto-initialization when empty, provide an `initial` factory:
+
+```python
+def _counters_initial() -> Counters:
+    return Counters()
+
+@state_slice(initial=_counters_initial)
+@dataclass(frozen=True)
+class Counters:
+    count: int = 0
+
+    @reducer(on=Increment)
+    def increment(self, event: Increment) -> "Counters":
+        return replace(self, count=self.count + event.amount)
+```
+
+With an initial factory, reducers can handle events even when no state exists yet.
+The factory creates the initial instance, then the reducer method is called.
+
+### How It Works
+
+1. `@state_slice` extracts metadata from `@reducer`-decorated methods
+1. `session.install()` registers a wrapper reducer for each method
+1. When an event dispatches, the wrapper:
+   - Gets the latest slice value (or creates via initial factory)
+   - Calls the method with the event
+   - Returns the result as a singleton tuple
+
+### Reducer Method Signature
+
+Reducer methods must follow this pattern:
+
+```python
+@reducer(on=EventType)
+def method_name(self, event: EventType) -> SelfType:
+    # self is the current state
+    # event is the dispatched event
+    # Return a new instance (use replace() for immutability)
+    return replace(self, ...)
+```
+
+### Constraints
+
+- The decorated class must be a frozen dataclass
+- Event types must be defined before the slice class
+- Reducer methods receive only `self` and `event` (no context parameter)
+- Methods must return a new instance of the slice type
+
 ### Session Hierarchy
 
 Sessions form a tree for nested orchestration:

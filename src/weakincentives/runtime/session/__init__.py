@@ -30,6 +30,15 @@ from .snapshots import (
     SnapshotRestoreError,
     SnapshotSerializationError,
 )
+from .state_slice import (
+    ReducerMeta,
+    StateSliceMeta,
+    get_state_slice_meta,
+    install_state_slice,
+    is_state_slice,
+    reducer,
+    state_slice,
+)
 
 __all__ = [
     "DataEvent",
@@ -40,6 +49,7 @@ __all__ = [
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
+    "ReducerMeta",
     "Session",
     "SessionProtocol",
     "SliceObserver",
@@ -47,12 +57,18 @@ __all__ = [
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
+    "StateSliceMeta",
     "Subscription",
     "TypedReducer",
     "append",
     "build_reducer_context",
+    "get_state_slice_meta",
+    "install_state_slice",
+    "is_state_slice",
     "iter_sessions_bottom_up",
+    "reducer",
     "replace_latest",
     "replace_latest_by",
+    "state_slice",
     "upsert_by",
 ]

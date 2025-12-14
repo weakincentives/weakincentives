@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportImportCycles=false
+
 """Session state container synchronized with the event bus."""
 
 from __future__ import annotations
@@ -352,6 +354,58 @@ class Session(SessionProtocol):
 
         return subscription
 
+    @override
+    def __getitem__[S: SupportsDataclass](self, slice_type: type[S]) -> QueryBuilder[S]:
+        """Convenient access to query builder via indexing.
+
+        Supports declarative state slices with natural syntax.
+
+        Usage::
+
+            session[Plan].latest()
+            session[Plan].all()
+            session[Plan].where(lambda p: p.active)
+
+        """
+        return QueryBuilder(self, slice_type)
+
+    @override
+    def install[S: SupportsDataclass](self, slice_type: type[S]) -> None:
+        """Install a declarative state slice.
+
+        Auto-registers all reducers defined with ``@reducer`` decorators
+        on the slice class.
+
+        Args:
+            slice_type: A class decorated with ``@state_slice``.
+
+        Raises:
+            TypeError: If the class is not a state slice.
+
+        Example::
+
+            @state_slice
+            @dataclass(frozen=True)
+            class AgentPlan:
+                steps: tuple[str, ...]
+
+                @reducer(on=AddStep)
+                def add_step(self, event: AddStep) -> "AgentPlan":
+                    return replace(self, steps=self.steps + (event.step,))
+
+            session.install(AgentPlan)
+            session[AgentPlan].latest()
+
+        """
+        # Lazy import to avoid import cycle
+        from .state_slice import install_state_slice, is_state_slice
+
+        if not is_state_slice(slice_type):
+            msg = f"{slice_type.__name__} is not a state slice (missing @state_slice decorator)"
+            raise TypeError(msg)
+
+        install_state_slice(self, slice_type)
+
     # ──────────────────────────────────────────────────────────────────────
     # MutationProvider implementation (used by MutationBuilder)
     # ──────────────────────────────────────────────────────────────────────
@@ -689,13 +743,8 @@ class Session(SessionProtocol):
         as it guards against re-registration.
         """
         from ...prompt.visibility_overrides import (
-            ClearAllVisibilityOverrides,
-            ClearVisibilityOverride,
             SetVisibilityOverride,
-            VisibilityOverrides,
-            clear_all_visibility_overrides_reducer,
-            clear_visibility_override_reducer,
-            set_visibility_override_reducer,
+            register_visibility_reducers,
         )
 
         # Guard against re-registration (e.g., during clone)
@@ -703,21 +752,7 @@ class Session(SessionProtocol):
             if SetVisibilityOverride in self._reducers:
                 return
 
-        self.mutation_register_reducer(
-            SetVisibilityOverride,
-            set_visibility_override_reducer,
-            slice_type=VisibilityOverrides,
-        )
-        self.mutation_register_reducer(
-            ClearVisibilityOverride,
-            clear_visibility_override_reducer,
-            slice_type=VisibilityOverrides,
-        )
-        self.mutation_register_reducer(
-            ClearAllVisibilityOverrides,
-            clear_all_visibility_overrides_reducer,
-            slice_type=VisibilityOverrides,
-        )
+        register_visibility_reducers(self)
 
 
 __all__ = [

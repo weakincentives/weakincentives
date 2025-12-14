@@ -35,6 +35,32 @@ if TYPE_CHECKING:
 
 
 @FrozenDataclass()
+class SetVisibilityOverride:
+    """Event to set a visibility override for a section path."""
+
+    path: SectionPath = field(
+        metadata={"description": "Section path as tuple of keys."}
+    )
+    visibility: SectionVisibility = field(
+        metadata={"description": "Visibility to set for the section."}
+    )
+
+
+@FrozenDataclass()
+class ClearVisibilityOverride:
+    """Event to clear a visibility override for a section path."""
+
+    path: SectionPath = field(
+        metadata={"description": "Section path to clear override for."}
+    )
+
+
+@FrozenDataclass()
+class ClearAllVisibilityOverrides:
+    """Event to clear all visibility overrides."""
+
+
+@FrozenDataclass()
 class VisibilityOverrides:
     """Session state slice for section visibility overrides.
 
@@ -59,6 +85,9 @@ class VisibilityOverrides:
             SetVisibilityOverride(path=("instructions",), visibility=SectionVisibility.FULL)
         )
 
+        # Query using natural syntax
+        session[VisibilityOverrides].latest()
+
     """
 
     overrides: Mapping[SectionPath, SectionVisibility] = field(
@@ -82,32 +111,6 @@ class VisibilityOverrides:
         new_overrides = dict(self.overrides)
         _ = new_overrides.pop(path, None)
         return VisibilityOverrides(overrides=new_overrides)
-
-
-@FrozenDataclass()
-class SetVisibilityOverride:
-    """Event to set a visibility override for a section path."""
-
-    path: SectionPath = field(
-        metadata={"description": "Section path as tuple of keys."}
-    )
-    visibility: SectionVisibility = field(
-        metadata={"description": "Visibility to set for the section."}
-    )
-
-
-@FrozenDataclass()
-class ClearVisibilityOverride:
-    """Event to clear a visibility override for a section path."""
-
-    path: SectionPath = field(
-        metadata={"description": "Section path to clear override for."}
-    )
-
-
-@FrozenDataclass()
-class ClearAllVisibilityOverrides:
-    """Event to clear all visibility overrides."""
 
 
 def set_visibility_override_reducer(
