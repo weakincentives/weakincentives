@@ -26,12 +26,7 @@ from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import PromptRenderError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
-from ...runtime.session import (
-    ReducerContextProtocol,
-    ReducerEvent,
-    Session,
-    replace_latest,
-)
+from ...runtime.session import Session, reducer
 from ._context import ensure_context_uses_session
 
 PlanStatus = Literal["active", "completed"]
@@ -58,30 +53,6 @@ class PlanStep:
 
     def render(self) -> str:
         return f"{self.step_id} [{self.status}] {self.title}"
-
-
-@FrozenDataclass()
-class Plan:
-    """Immutable snapshot of the active plan."""
-
-    objective: str = field(
-        metadata={"description": "Single-sentence objective for the session."}
-    )
-    status: PlanStatus = field(
-        metadata={"description": "Lifecycle state: active or completed."}
-    )
-    steps: tuple[PlanStep, ...] = field(
-        default_factory=tuple,
-        metadata={"description": "Ordered collection of plan steps."},
-    )
-
-    def render(self) -> str:
-        lines = [f"Objective: {self.objective}", f"Status: {self.status}", ""]
-        if not self.steps:
-            lines.append("<no steps>")
-        else:
-            lines.extend(step.render() for step in self.steps)
-        return "\n".join(lines)
 
 
 @FrozenDataclass()
@@ -144,6 +115,78 @@ class UpdateStep:
             changes.append(f"status={self.status}")
         payload = ", ".join(changes) or "no changes"
         return f"UpdateStep {self.step_id}: {payload}"
+
+
+@FrozenDataclass()
+class Plan:
+    """Immutable snapshot of the active plan."""
+
+    objective: str = field(
+        metadata={"description": "Single-sentence objective for the session."}
+    )
+    status: PlanStatus = field(
+        metadata={"description": "Lifecycle state: active or completed."}
+    )
+    steps: tuple[PlanStep, ...] = field(
+        default_factory=tuple,
+        metadata={"description": "Ordered collection of plan steps."},
+    )
+
+    def render(self) -> str:
+        lines = [f"Objective: {self.objective}", f"Status: {self.status}", ""]
+        if not self.steps:
+            lines.append("<no steps>")
+        else:
+            lines.extend(step.render() for step in self.steps)
+        return "\n".join(lines)
+
+    @reducer(on=SetupPlan)
+    def handle_setup(self, event: SetupPlan) -> Plan:
+        """Create or replace the plan with a new objective and initial steps."""
+        del self  # SetupPlan creates a new plan, ignoring current state
+        steps = tuple(
+            PlanStep(step_id=index + 1, title=title, status="pending")
+            for index, title in enumerate(event.initial_steps)
+        )
+        return Plan(objective=event.objective, status="active", steps=steps)
+
+    @reducer(on=AddStep)
+    def handle_add_step(self, event: AddStep) -> Plan:
+        """Append new steps to the current plan."""
+        existing = list(self.steps)
+        next_id = max((step.step_id for step in existing), default=0) + 1
+        for title in event.steps:
+            existing.append(PlanStep(step_id=next_id, title=title, status="pending"))
+            next_id += 1
+        return Plan(
+            objective=self.objective,
+            status="active",
+            steps=tuple(existing),
+        )
+
+    @reducer(on=UpdateStep)
+    def handle_update_step(self, event: UpdateStep) -> Plan:
+        """Modify a step's title or status."""
+        updated_steps: list[PlanStep] = []
+        for step in self.steps:
+            if step.step_id != event.step_id:
+                updated_steps.append(step)
+                continue
+            new_title = event.title if event.title is not None else step.title
+            new_status = event.status if event.status is not None else step.status
+            updated_steps.append(
+                PlanStep(step_id=step.step_id, title=new_title, status=new_status)
+            )
+        plan_status: PlanStatus
+        if updated_steps and all(step.status == "done" for step in updated_steps):
+            plan_status = "completed"
+        else:
+            plan_status = "active"
+        return Plan(
+            objective=self.objective,
+            status=plan_status,
+            steps=tuple(updated_steps),
+        )
 
 
 @FrozenDataclass()
@@ -236,10 +279,12 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
 
     @staticmethod
     def _initialize_session(session: Session) -> None:
-        session.mutate(Plan).register(Plan, replace_latest)
-        session.mutate(Plan).register(SetupPlan, _setup_plan_reducer)
-        session.mutate(Plan).register(AddStep, _add_step_reducer)
-        session.mutate(Plan).register(UpdateStep, _update_step_reducer)
+        # Use a dummy initial factory so SetupPlan can create a new plan
+        # even when no plan exists yet
+        session.install(
+            Plan,
+            initial=lambda: Plan(objective="", status="active", steps=()),
+        )
 
     @override
     def clone(self, **kwargs: object) -> PlanningToolsSection:
@@ -449,92 +494,6 @@ class _PlanningToolSuite:
                 f"with {step_count} step{'s' if step_count != 1 else ''}."
             )
         return ToolResult(message=message, value=plan)
-
-
-def _setup_plan_reducer(
-    slice_values: tuple[Plan, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[Plan, ...]:
-    del context, slice_values
-    params = cast(SetupPlan, event)
-    steps = tuple(
-        PlanStep(step_id=index + 1, title=title, status="pending")
-        for index, title in enumerate(params.initial_steps)
-    )
-    plan = Plan(objective=params.objective, status="active", steps=steps)
-    return (plan,)
-
-
-def _add_step_reducer(
-    slice_values: tuple[Plan, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[Plan, ...]:
-    del context
-    previous = _latest_plan(slice_values)
-    if previous is None:
-        return slice_values
-    params = cast(AddStep, event)
-    existing = list(previous.steps)
-    next_id = _next_step_id(existing)
-    for title in params.steps:
-        existing.append(PlanStep(step_id=next_id, title=title, status="pending"))
-        next_id += 1
-    updated = Plan(
-        objective=previous.objective,
-        status="active",
-        steps=tuple(existing),
-    )
-    return (updated,)
-
-
-def _update_step_reducer(
-    slice_values: tuple[Plan, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[Plan, ...]:
-    del context
-    previous = _latest_plan(slice_values)
-    if previous is None:
-        return slice_values
-    params = cast(UpdateStep, event)
-    updated_steps: list[PlanStep] = []
-    for step in previous.steps:
-        if step.step_id != params.step_id:
-            updated_steps.append(step)
-            continue
-        new_title = params.title if params.title is not None else step.title
-        new_status = params.status if params.status is not None else step.status
-        updated_steps.append(
-            PlanStep(step_id=step.step_id, title=new_title, status=new_status)
-        )
-    plan_status: PlanStatus
-    if updated_steps and all(step.status == "done" for step in updated_steps):
-        plan_status = "completed"
-    else:
-        plan_status = "active"
-    updated_plan = Plan(
-        objective=previous.objective,
-        status=plan_status,
-        steps=tuple(updated_steps),
-    )
-    return (updated_plan,)
-
-
-def _latest_plan(plans: tuple[Plan, ...]) -> Plan | None:
-    if not plans:
-        return None
-    return plans[-1]
-
-
-def _next_step_id(steps: Sequence[PlanStep]) -> int:
-    if not steps:
-        return 1
-    return max(step.step_id for step in steps) + 1
 
 
 def _normalize_step_titles(titles: Sequence[str]) -> tuple[str, ...]:

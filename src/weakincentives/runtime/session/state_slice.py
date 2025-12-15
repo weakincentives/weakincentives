@@ -297,19 +297,29 @@ def _create_reducer_for_method[S: SupportsDataclass, E: SupportsDataclass](
 
 
 def install_state_slice[T: SupportsDataclass](
-    session: Session, slice_type: type[T]
+    session: Session,
+    slice_type: type[T],
+    *,
+    initial: Callable[[], T] | None = None,
 ) -> None:
     """Install a declarative state slice into a session.
 
     This registers all reducers defined on the slice class with the session.
     It should be called once per session to enable the slice.
 
+    The slice class can optionally be decorated with ``@state_slice`` for
+    additional configuration (like initial factory), but this is not required.
+    Methods decorated with ``@reducer`` will be discovered automatically.
+
     Args:
         session: The session to install the slice into.
-        slice_type: The state slice class decorated with @state_slice.
+        slice_type: The state slice class (a frozen dataclass with @reducer methods).
+        initial: Optional factory function to create initial state when empty.
+            Overrides any initial factory from @state_slice decorator.
 
     Raises:
-        TypeError: If the class is not a state slice.
+        TypeError: If the class is not a frozen dataclass.
+        ValueError: If no @reducer methods are found.
 
     Example::
 
@@ -317,20 +327,40 @@ def install_state_slice[T: SupportsDataclass](
         # or equivalently:
         install_state_slice(session, AgentPlan)
 
+        # With initial factory:
+        session.install(AgentPlan, initial=lambda: AgentPlan(steps=()))
+
     """
-    meta = get_state_slice_meta(slice_type)
-    if meta is None:
-        msg = f"{slice_type.__name__} is not a state slice (missing @state_slice decorator)"
+    # Validate it's a dataclass
+    if not is_dataclass(slice_type):
+        msg = f"{slice_type.__name__} must be a dataclass"
         raise TypeError(msg)
 
-    # Get initial factory if provided
-    initial_factory = cast(
-        Callable[[], T] | None,
-        meta.initial_factory,
-    )
+    # Check if frozen
+    params = getattr(slice_type, "__dataclass_params__", None)
+    if params is not None and not getattr(params, "frozen", False):
+        msg = f"{slice_type.__name__} must be a frozen dataclass"
+        raise TypeError(msg)
+
+    # Get metadata from @state_slice if present, otherwise scan directly
+    meta = get_state_slice_meta(slice_type)
+    if meta is not None:
+        reducer_metas = meta.reducers
+        initial_factory = initial or cast(
+            Callable[[], T] | None,
+            meta.initial_factory,
+        )
+    else:
+        # Scan class directly for @reducer decorated methods
+        reducer_metas = _extract_reducer_metadata(slice_type)
+        initial_factory = initial
+
+    if not reducer_metas:
+        msg = f"{slice_type.__name__} has no @reducer decorated methods"
+        raise ValueError(msg)
 
     # Register each reducer method
-    for reducer_meta in meta.reducers:
+    for reducer_meta in reducer_metas:
         method_reducer = _create_reducer_for_method(
             slice_type,
             reducer_meta.method_name,

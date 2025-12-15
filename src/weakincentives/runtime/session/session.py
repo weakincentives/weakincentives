@@ -370,41 +370,43 @@ class Session(SessionProtocol):
         return QueryBuilder(self, slice_type)
 
     @override
-    def install[S: SupportsDataclass](self, slice_type: type[S]) -> None:
+    def install[S: SupportsDataclass](
+        self,
+        slice_type: type[S],
+        *,
+        initial: Callable[[], S] | None = None,
+    ) -> None:
         """Install a declarative state slice.
 
         Auto-registers all reducers defined with ``@reducer`` decorators
-        on the slice class.
+        on the slice class. The ``@state_slice`` decorator is optional.
 
         Args:
-            slice_type: A class decorated with ``@state_slice``.
+            slice_type: A frozen dataclass with ``@reducer`` decorated methods.
+            initial: Optional factory function to create initial state when empty.
 
         Raises:
-            TypeError: If the class is not a state slice.
+            TypeError: If the class is not a frozen dataclass.
+            ValueError: If no @reducer methods are found.
 
         Example::
 
-            @state_slice
             @dataclass(frozen=True)
             class AgentPlan:
                 steps: tuple[str, ...]
 
                 @reducer(on=AddStep)
                 def add_step(self, event: AddStep) -> "AgentPlan":
-                    return replace(self, steps=self.steps + (event.step,))
+                    return replace(self, steps=(*self.steps, event.step))
 
             session.install(AgentPlan)
             session[AgentPlan].latest()
 
         """
         # Lazy import to avoid import cycle
-        from .state_slice import install_state_slice, is_state_slice
+        from .state_slice import install_state_slice
 
-        if not is_state_slice(slice_type):
-            msg = f"{slice_type.__name__} is not a state slice (missing @state_slice decorator)"
-            raise TypeError(msg)
-
-        install_state_slice(self, slice_type)
+        install_state_slice(self, slice_type, initial=initial)
 
     # ──────────────────────────────────────────────────────────────────────
     # MutationProvider implementation (used by MutationBuilder)

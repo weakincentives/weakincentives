@@ -32,20 +32,10 @@ from weakincentives.contrib.tools import (
     SetupPlan,
     UpdateStep,
 )
-from weakincentives.contrib.tools.planning import (
-    _add_step_reducer,
-    _latest_plan,
-    _next_step_id,
-    _update_step_reducer,
-)
 from weakincentives.prompt import SupportsDataclass
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
-from weakincentives.runtime.session import (
-    ReducerContext,
-    Session,
-    build_reducer_context,
-)
+from weakincentives.runtime.session import Session
 
 
 def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
@@ -60,12 +50,6 @@ def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
         created_at=datetime.now(UTC),
         rendered_output=result.render(),
     )
-
-
-def _make_reducer_context() -> ReducerContext:
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    return build_reducer_context(session=session)
 
 
 def test_plan_render_helpers() -> None:
@@ -455,35 +439,6 @@ def test_read_plan_reports_empty_steps() -> None:
 
     result = invoke_tool(read_tool, ReadPlan(), session=session)
     assert result.message == "Retrieved the current plan (no steps recorded)."
-
-
-def test_reducers_ignore_events_without_plan() -> None:
-    add_event = _make_tool_event("planning_add_step", AddStep(steps=("draft",)))
-    update_event = _make_tool_event(
-        "planning_update_step",
-        UpdateStep(step_id=1, title="rename"),
-    )
-
-    context = _make_reducer_context()
-
-    assert _add_step_reducer((), add_event, context=context) == ()
-    assert _update_step_reducer((), update_event, context=context) == ()
-
-
-def test_latest_plan_returns_none_when_empty() -> None:
-    assert _latest_plan(()) is None
-
-
-def test_next_step_id_returns_one_when_empty() -> None:
-    assert _next_step_id([]) == 1
-
-
-def test_next_step_id_returns_max_plus_one() -> None:
-    steps = [
-        PlanStep(step_id=1, title="a", status="pending"),
-        PlanStep(step_id=5, title="b", status="pending"),
-    ]
-    assert _next_step_id(steps) == 6
 
 
 def test_planning_tools_section_disables_tool_overrides_by_default() -> None:

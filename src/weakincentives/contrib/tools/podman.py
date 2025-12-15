@@ -940,14 +940,8 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         return PodmanSandboxSection(session=session, config=self._config)
 
     def _initialize_vfs_state(self, session: Session) -> None:
-        session.mutate(VirtualFileSystem).register(VirtualFileSystem, replace_latest)
+        session.install(VirtualFileSystem, initial=lambda: VirtualFileSystem())
         session.mutate(VirtualFileSystem).seed(self._mount_snapshot)
-        session.mutate(VirtualFileSystem).register(
-            WriteFile, vfs_module.make_write_reducer()
-        )
-        session.mutate(VirtualFileSystem).register(
-            DeleteEntry, vfs_module.make_delete_reducer()
-        )
 
     def latest_snapshot(self) -> VirtualFileSystem:
         snapshot = self._session.query(VirtualFileSystem).latest()

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, Self, overload
 
 from ...prompt._types import SupportsDataclass
@@ -65,7 +65,12 @@ class SessionProtocol(Protocol):
         self, slice_type: type[T]
     ) -> QueryBuilder[T]: ...
 
-    def install[T: SupportsDataclass](self, slice_type: type[T]) -> None: ...
+    def install[T: SupportsDataclass](
+        self,
+        slice_type: type[T],
+        *,
+        initial: Callable[[], T] | None = None,
+    ) -> None: ...
 
     @property
     def parent(self) -> Self | None: ...

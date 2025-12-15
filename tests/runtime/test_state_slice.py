@@ -199,12 +199,43 @@ def test_install_registers_reducers(session_factory: SessionFactory) -> None:
     assert result.items == ("first", "second")
 
 
-def test_install_rejects_non_state_slice(session_factory: SessionFactory) -> None:
-    """Verify install() rejects classes without @state_slice."""
+def test_install_rejects_non_dataclass(session_factory: SessionFactory) -> None:
+    """Verify install() rejects classes that are not dataclasses."""
     session, _ = session_factory()
 
-    with pytest.raises(TypeError, match="not a state slice"):
+    class NotADataclass:
+        pass
+
+    with pytest.raises(TypeError, match="must be a dataclass"):
+        session.install(NotADataclass)
+
+
+def test_install_rejects_class_without_reducers(
+    session_factory: SessionFactory,
+) -> None:
+    """Verify install() rejects classes without @reducer methods."""
+    session, _ = session_factory()
+
+    with pytest.raises(ValueError, match="no @reducer decorated methods"):
         session.install(AddItem)
+
+
+def test_install_rejects_non_frozen_dataclass(
+    session_factory: SessionFactory,
+) -> None:
+    """Verify install() rejects non-frozen dataclasses."""
+    session, _ = session_factory()
+
+    @dataclass  # Not frozen
+    class MutableSlice:
+        value: int
+
+        @reducer(on=AddItem)
+        def add(self, event: AddItem) -> MutableSlice:
+            return MutableSlice(value=len(event.item))
+
+    with pytest.raises(TypeError, match="must be a frozen dataclass"):
+        session.install(MutableSlice)
 
 
 def test_install_with_initial_factory(session_factory: SessionFactory) -> None:
@@ -435,19 +466,19 @@ def test_reducer_qualname_set_correctly() -> None:
     assert "add_item" in qualname
 
 
-def test_install_state_slice_rejects_non_state_slice() -> None:
-    """Verify install_state_slice raises TypeError for non-state-slice classes."""
+def test_install_state_slice_rejects_class_without_reducers() -> None:
+    """Verify install_state_slice raises ValueError for classes without @reducer."""
     from weakincentives.runtime.session import Session
     from weakincentives.runtime.session.state_slice import install_state_slice
 
     @dataclass(frozen=True)
-    class NotASlice:
+    class NoReducers:
         value: int
 
     session = Session()
 
-    with pytest.raises(TypeError, match="not a state slice"):
-        install_state_slice(session, NotASlice)
+    with pytest.raises(ValueError, match="no @reducer decorated methods"):
+        install_state_slice(session, NoReducers)
 
 
 def test_extract_reducer_handles_none_attributes() -> None:
