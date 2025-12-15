@@ -93,7 +93,8 @@ GEPA's "modules" map directly to Weak Incentives **section paths**:
 |--------------|---------------------------|
 | Module | Section path `tuple[str, ...]` |
 | Module instruction | Section body (via override) |
-| Candidate | Mapping of `path -> override body` |
+| Module examples | `ToolExample` / `TaskExample` instances |
+| Candidate | Mapping of overrides (section bodies + examples) |
 | System trajectory | Session events (`ToolInvoked`, `PromptExecuted`) |
 
 This approach:
@@ -101,6 +102,21 @@ This approach:
 - Works with existing override infrastructure
 - Allows optimizing multiple sections in one prompt (round-robin)
 - Uses section content hashes for staleness detection
+- **Extends to example optimization** via new override types
+
+### Examples as First-Class Optimization Targets
+
+Examples are a powerful optimization lever. GEPA treats examples as optimizable
+modules alongside instruction text:
+
+| Example Type | Description | Optimization Target |
+|--------------|-------------|---------------------|
+| `ToolExample` | Single tool invocation demo | description, input, output |
+| `TaskExample` | Multi-step trajectory | objective, steps, outcome |
+| `TaskExamplesSection` | Container with summary | summary text, child selection |
+
+Multiple `TaskExamplesSection` instances with different summaries enable
+**specialist examples** that GEPA can activate/deactivate based on task type.
 
 ### Alternative: Multi-Prompt Systems
 
@@ -197,6 +213,180 @@ src/weakincentives/prompt/overrides/
   __init__.py          # Export new stores
 ```
 
+## Example Override System
+
+GEPA extends the override system to support example mutations. This enables
+optimizing the few-shot demonstrations that guide model behavior.
+
+### Example Override Types
+
+```python
+@dataclass(slots=True, frozen=True)
+class ToolExampleOverride:
+    """Override for a single ToolExample attached to a tool."""
+
+    tool_name: str
+    example_index: int              # Position in tool.examples tuple
+    expected_hash: HexDigest        # Hash of original example
+    description: str | None = None  # Override description
+    input_json: str | None = None   # Serialized input dataclass
+    output_json: str | None = None  # Serialized output dataclass
+```
+
+```python
+@dataclass(slots=True, frozen=True)
+class TaskStepOverride:
+    """Override for a single step within a TaskExample."""
+
+    step_index: int
+    tool_name: str | None = None           # Override tool reference
+    description: str | None = None         # Override step description
+    input_json: str | None = None          # Serialized input
+    output_json: str | None = None         # Serialized output
+```
+
+```python
+@dataclass(slots=True, frozen=True)
+class TaskExampleOverride:
+    """Override for a TaskExample section."""
+
+    expected_hash: HexDigest           # Hash of original TaskExample
+    objective: str | None = None       # Override objective text
+    outcome_json: str | None = None    # Serialized outcome (str or dataclass)
+    step_overrides: dict[int, TaskStepOverride] = field(default_factory=dict)
+    # Key is step_index
+```
+
+### Extended PromptOverride
+
+The `PromptOverride` dataclass gains two new fields:
+
+```python
+@dataclass(slots=True, frozen=True)
+class PromptOverride:
+    """Runtime replacements for prompt sections validated by an overrides store."""
+
+    ns: str
+    prompt_key: str
+    tag: str
+    sections: dict[tuple[str, ...], SectionOverride] = field(default_factory=dict)
+    tool_overrides: dict[str, ToolOverride] = field(default_factory=dict)
+
+    # NEW: Example overrides
+    tool_example_overrides: dict[tuple[str, int], ToolExampleOverride] = field(
+        default_factory=dict
+    )  # Key: (tool_name, example_index)
+
+    task_example_overrides: dict[tuple[str, ...], TaskExampleOverride] = field(
+        default_factory=dict
+    )  # Key: section_path to TaskExample
+```
+
+### Extended Store Protocol
+
+New methods for example manipulation:
+
+```python
+class PromptOverridesStore(Protocol):
+    # ... existing methods ...
+
+    def set_tool_example_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        tool_name: str,
+        example_index: int,
+        description: str | None = None,
+        input_json: str | None = None,
+        output_json: str | None = None,
+    ) -> PromptOverride: ...
+
+    def set_task_example_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],  # Path to TaskExample section
+        objective: str | None = None,
+        outcome_json: str | None = None,
+        step_overrides: dict[int, TaskStepOverride] | None = None,
+    ) -> PromptOverride: ...
+
+    def add_task_example(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        container_path: tuple[str, ...],  # Path to TaskExamplesSection
+        key: str,
+        objective: str,
+        outcome_json: str,
+        steps_json: str,  # Serialized list of TaskStep
+    ) -> PromptOverride: ...
+
+    def remove_task_example(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],  # Path to TaskExample to remove
+    ) -> PromptOverride: ...
+```
+
+### Example Hash Computation
+
+For staleness detection:
+
+```python
+def hash_tool_example(example: ToolExample) -> HexDigest:
+    """Hash a ToolExample for override validation."""
+    canonical = json.dumps({
+        "description": example.description,
+        "input": dump(example.input),
+        "output": dump(example.output),
+    }, sort_keys=True)
+    return hash_text(canonical)
+
+
+def hash_task_example(example: TaskExample) -> HexDigest:
+    """Hash a TaskExample for override validation."""
+    steps_data = [
+        {
+            "tool_name": step.tool_name,
+            "description": step.example.description,
+            "input": dump(step.example.input),
+            "output": dump(step.example.output),
+        }
+        for step in example.steps
+    ]
+    canonical = json.dumps({
+        "objective": example.objective,
+        "outcome": dump(example.outcome) if not isinstance(example.outcome, str) else example.outcome,
+        "steps": steps_data,
+    }, sort_keys=True)
+    return hash_text(canonical)
+```
+
+### Override Application
+
+When rendering a prompt with example overrides:
+
+1. **ToolExample overrides** - Applied during tool schema generation; the
+   overridden example replaces the original in the rendered examples list
+2. **TaskExample overrides** - Applied during `TaskExample.render()`;
+   individual fields merged with originals
+3. **Added TaskExamples** - Appended to the container's children during render
+4. **Removed TaskExamples** - Filtered out during section traversal
+
+### Validation Rules
+
+- `input_json` and `output_json` must parse to valid dataclass instances
+  matching the tool's type parameters
+- `outcome_json` must match the prompt's output type (string or dataclass)
+- Step indices must be valid (0 to len(steps)-1)
+- Hash mismatches log warnings and skip the override (same as section overrides)
+
 ## GEPA Data Types
 
 ### Example and Feedback
@@ -287,8 +477,12 @@ class GepaConfig:
     minibatch_size: int              # Examples per mutation evaluation
     pareto_set_size: int             # Size of D_pareto validation subset
 
-    # Target sections (modules)
+    # Target sections (instruction modules)
     target_section_paths: tuple[tuple[str, ...], ...]
+
+    # Target examples (example modules) - NEW
+    target_tool_examples: tuple[ToolExampleTarget, ...] = ()
+    target_task_examples: tuple[tuple[str, ...], ...] = ()  # Paths to TaskExample sections
 
     # Dataset
     training_examples: Sequence[GepaExample]
@@ -304,6 +498,11 @@ class GepaConfig:
     seed: int = 0
     enable_merge: bool = False  # Enable GEPA+Merge (Algorithm 3/4)
 
+    # Example optimization settings - NEW
+    enable_example_generation: bool = False  # Allow generating new TaskExamples
+    max_task_examples_per_section: int = 5   # Cap on examples per TaskExamplesSection
+    example_mutation_rate: float = 0.3       # Probability of mutating examples vs instructions
+
     # Robustness
     max_example_chars: int = 6_000
     max_trace_chars: int = 6_000
@@ -314,6 +513,26 @@ class GepaConfig:
     persist_scope: PersistenceScope = PersistenceScope.GLOBAL
 ```
 
+### Example Target Types
+
+```python
+@dataclass(slots=True, frozen=True)
+class ToolExampleTarget:
+    """Identifies a ToolExample for optimization."""
+
+    tool_name: str
+    example_index: int  # Index in tool.examples tuple
+
+
+@dataclass(slots=True, frozen=True)
+class ExampleModule:
+    """Union type for GEPA example modules."""
+
+    kind: Literal["tool_example", "task_example"]
+    tool_target: ToolExampleTarget | None = None
+    task_example_path: tuple[str, ...] | None = None
+```
+
 ## GepaResult
 
 ```python
@@ -321,12 +540,33 @@ class GepaConfig:
 class GepaResult:
     """Result of GEPA optimization."""
 
-    best_candidate_overrides: dict[tuple[str, ...], str]  # path -> body
+    # Section overrides
+    best_section_overrides: dict[tuple[str, ...], str]  # path -> body
+
+    # Example overrides - NEW
+    best_tool_example_overrides: dict[tuple[str, int], ToolExampleOverride]
+    best_task_example_overrides: dict[tuple[str, ...], TaskExampleOverride]
+    generated_task_examples: list[GeneratedTaskExample]  # Newly created examples
+
+    # Metrics
     best_pareto_mean: float
     scores_matrix: list[list[float]]  # candidates x D_pareto
     ancestry: list[int | None]        # Parent index per candidate
     accepted_mutations: int
+    accepted_example_mutations: int   # NEW
     total_rollouts: int
+```
+
+```python
+@dataclass(slots=True, frozen=True)
+class GeneratedTaskExample:
+    """A TaskExample generated during optimization."""
+
+    container_path: tuple[str, ...]  # Path to parent TaskExamplesSection
+    key: str
+    objective: str
+    outcome_json: str
+    steps_json: str
 ```
 
 ## GepaOptimizer
@@ -376,7 +616,18 @@ src/weakincentives/contrib/optimizers/
 class Candidate:
     """Internal representation of a GEPA candidate."""
 
-    overrides: dict[tuple[str, ...], str]  # section_path -> body
+    # Section body overrides
+    section_overrides: dict[tuple[str, ...], str]  # section_path -> body
+
+    # Example overrides - NEW
+    tool_example_overrides: dict[tuple[str, int], ToolExampleOverride] = field(
+        default_factory=dict
+    )
+    task_example_overrides: dict[tuple[str, ...], TaskExampleOverride] = field(
+        default_factory=dict
+    )
+    generated_examples: list[GeneratedTaskExample] = field(default_factory=list)
+
     parent_index: int | None = None
 ```
 
@@ -571,6 +822,159 @@ identified issues. Return ONLY the updated instruction in a fenced block:
 1. Find first `` ```instruction `` block
 2. Fallback: first `` ``` `` block
 3. Fallback: entire response stripped
+
+### Example Mutation via Meta-Prompt
+
+When the module selection picks an example target, GEPA uses specialized
+meta-prompts for example mutation.
+
+#### ToolExample Mutation
+
+````markdown
+## Current Tool Example
+
+Tool: {tool_name}
+Description: {tool_description}
+
+Example {example_index}:
+- Description: {example.description}
+- Input: {json(example.input)}
+- Output: {json(example.output)}
+
+## Training Examples with Feedback
+
+{rollouts with scores and feedback}
+
+## Task
+
+Based on the feedback above, improve this tool example to better demonstrate
+correct usage. The example should help the model understand when and how to
+use this tool effectively.
+
+Return the improved example in this format:
+
+```tool_example
+description: <improved description>
+input: <JSON input matching tool params>
+output: <JSON output matching tool result>
+```
+````
+
+#### TaskExample Mutation
+
+````markdown
+## Current Task Example
+
+Objective: {task_example.objective}
+
+Steps:
+{for step in task_example.steps}
+{step_index}. {step.tool_name}: {step.example.description}
+   Input: {json(step.example.input)}
+   Output: {json(step.example.output)}
+{end for}
+
+Outcome: {task_example.outcome}
+
+## Training Examples with Feedback
+
+{rollouts with scores and feedback}
+
+## Task
+
+Based on the feedback above, improve this task example to better demonstrate
+the workflow. Consider:
+- Is the objective clear and achievable?
+- Are the steps in logical order?
+- Do the intermediate results flow correctly?
+- Does the outcome match what the steps produce?
+
+Return the improved example:
+
+```task_example
+objective: <improved objective>
+steps:
+  - tool: <tool_name>
+    description: <step description>
+    input: <JSON>
+    output: <JSON>
+  - ...
+outcome: <improved outcome>
+```
+````
+
+#### TaskExample Generation
+
+When `enable_example_generation=True` and feedback indicates missing coverage:
+
+````markdown
+## Existing Task Examples
+
+{summaries of current TaskExamples in the section}
+
+## Training Examples with Feedback
+
+{rollouts showing gaps in coverage}
+
+## Task
+
+The feedback indicates scenarios not covered by existing examples. Generate
+a new task example that demonstrates the missing workflow.
+
+Requirements:
+- Use only tools available in the prompt: {available_tools}
+- The objective should be specific and achievable
+- Steps should use realistic input/output values
+- The outcome should reflect successful completion
+
+```new_task_example
+key: <unique_key>
+objective: <specific objective>
+steps:
+  - tool: <tool_name>
+    description: <why this step>
+    input: <JSON>
+    output: <JSON>
+  - ...
+outcome: <expected result>
+```
+````
+
+### Module Selection with Examples
+
+The main loop selects between instruction modules and example modules:
+
+```python
+def _select_module(self, rng: random.Random) -> Module:
+    """Select next module to mutate (instruction or example)."""
+    all_modules = self._build_module_list()
+
+    if rng.random() < self.config.example_mutation_rate:
+        # Prefer example modules when they exist
+        example_modules = [m for m in all_modules if m.is_example]
+        if example_modules:
+            return rng.choice(example_modules)
+
+    # Round-robin through all modules
+    self._module_idx = (self._module_idx + 1) % len(all_modules)
+    return all_modules[self._module_idx]
+```
+
+Where `Module` is:
+
+```python
+@dataclass(slots=True, frozen=True)
+class Module:
+    """A GEPA optimization target."""
+
+    kind: Literal["section", "tool_example", "task_example"]
+    path: tuple[str, ...] | None = None        # For sections and task_examples
+    tool_target: ToolExampleTarget | None = None  # For tool_examples
+
+    @property
+    def is_example(self) -> bool:
+        return self.kind in ("tool_example", "task_example")
+```
 
 ### System-Aware Merge (Optional)
 
@@ -788,7 +1192,91 @@ def _persist_result(
         )
 ```
 
+## Multiple TaskExamplesSection Patterns
+
+Using multiple `TaskExamplesSection` instances enables **specialist examples**
+that GEPA can selectively optimize for different task categories.
+
+### Pattern: Category-Specific Examples
+
+```python
+# Define separate example sections for different task categories
+security_examples = TaskExamplesSection(
+    key="security-examples",
+    title="Security Review Examples",
+    summary="Examples for security-focused code review tasks.",
+    examples=[
+        TaskExample(key="sql-injection", objective="Find SQL injection...", ...),
+        TaskExample(key="xss-detection", objective="Detect XSS...", ...),
+    ],
+)
+
+performance_examples = TaskExamplesSection(
+    key="performance-examples",
+    title="Performance Audit Examples",
+    summary="Examples for performance optimization tasks.",
+    examples=[
+        TaskExample(key="n-plus-one", objective="Find N+1 queries...", ...),
+        TaskExample(key="memory-leak", objective="Detect memory leaks...", ...),
+    ],
+)
+
+template = PromptTemplate(
+    ns="agents/reviewer",
+    key="code-review",
+    sections=[
+        instructions_section,
+        security_examples,
+        performance_examples,
+    ],
+)
+```
+
+### GEPA Optimization of Specialist Examples
+
+Configure GEPA to optimize examples within specific sections:
+
+```python
+config = GepaConfig(
+    # ...
+    target_task_examples=(
+        ("security-examples", "sql-injection"),
+        ("security-examples", "xss-detection"),
+        ("performance-examples", "n-plus-one"),
+    ),
+    enable_example_generation=True,
+    max_task_examples_per_section=3,  # Cap per section
+)
+```
+
+GEPA may:
+- Mutate existing examples to better match training data patterns
+- Generate new examples when coverage gaps are detected
+- Specialize examples within each section for its category
+
+### Pattern: Progressive Complexity
+
+```python
+# Examples ordered by complexity
+basic_examples = TaskExamplesSection(
+    key="basic-examples",
+    title="Basic Workflows",
+    summary="Simple single-tool examples for common tasks.",
+    examples=[...],  # 1-2 step workflows
+)
+
+advanced_examples = TaskExamplesSection(
+    key="advanced-examples",
+    title="Advanced Workflows",
+    summary="Multi-step examples with tool chaining.",
+    visibility=SectionVisibility.SUMMARY,  # Collapsed by default
+    examples=[...],  # 3+ step workflows
+)
+```
+
 ## Usage Example
+
+### Basic: Instruction Optimization Only
 
 ```python
 from weakincentives.contrib.optimizers.gepa import (
@@ -800,7 +1288,7 @@ from weakincentives.contrib.optimizers.gepa import (
 from weakincentives.optimizers import OptimizationContext, PersistenceScope
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 
-# Define examples
+# Define training examples
 examples = [
     GepaExample(id="1", params=(QueryParams(query="..."),), label=expected_output_1),
     GepaExample(id="2", params=(QueryParams(query="..."),), label=expected_output_2),
@@ -813,12 +1301,11 @@ def score_response(
     response: PromptResponse[object],
     session: SessionProtocol,
 ) -> RolloutFeedback:
-    # Compare output to label
     score = compute_similarity(response.output, example.label)
     feedback = generate_feedback(response.output, example.label)
     return RolloutFeedback(score=score, feedback=feedback)
 
-# Configure GEPA
+# Configure GEPA for instruction-only optimization
 config = GepaConfig(
     rollout_budget=500,
     minibatch_size=4,
@@ -832,7 +1319,7 @@ config = GepaConfig(
     seed=42,
 )
 
-# Create optimizer
+# Run optimization
 store = LocalPromptOverridesStore()
 context = OptimizationContext(
     adapter=adapter,
@@ -841,16 +1328,65 @@ context = OptimizationContext(
     overrides_tag="gepa-v1",
 )
 optimizer = GepaOptimizer(context, config)
-
-# Run optimization
 result = optimizer.optimize(prompt, session=session)
 
-# Inspect result
 print(f"Best Pareto mean: {result.best_pareto_mean}")
 print(f"Accepted mutations: {result.accepted_mutations}")
-print(f"Total rollouts: {result.total_rollouts}")
+```
 
-# Best overrides are persisted to store if persist=True
+### Advanced: Combined Instruction and Example Optimization
+
+```python
+from weakincentives.contrib.optimizers.gepa import (
+    GepaConfig,
+    GepaExample,
+    GepaOptimizer,
+    ToolExampleTarget,
+)
+
+# Configure GEPA with example optimization
+config = GepaConfig(
+    rollout_budget=1000,
+    minibatch_size=4,
+    pareto_set_size=15,
+
+    # Instruction modules
+    target_section_paths=(
+        ("instructions",),
+        ("tool-guidance",),
+    ),
+
+    # Example modules
+    target_tool_examples=(
+        ToolExampleTarget(tool_name="search_code", example_index=0),
+        ToolExampleTarget(tool_name="read_file", example_index=0),
+    ),
+    target_task_examples=(
+        ("task-examples", "security-review"),
+        ("task-examples", "refactoring"),
+    ),
+
+    # Example optimization settings
+    enable_example_generation=True,
+    max_task_examples_per_section=5,
+    example_mutation_rate=0.3,  # 30% chance to mutate examples
+
+    training_examples=examples,
+    feedback_fn=score_response,
+    seed=42,
+)
+
+optimizer = GepaOptimizer(context, config)
+result = optimizer.optimize(prompt, session=session)
+
+# Inspect example optimization results
+print(f"Accepted instruction mutations: {result.accepted_mutations}")
+print(f"Accepted example mutations: {result.accepted_example_mutations}")
+print(f"Generated new examples: {len(result.generated_task_examples)}")
+
+# Review generated examples
+for gen_ex in result.generated_task_examples:
+    print(f"  - {gen_ex.key}: {gen_ex.objective[:50]}...")
 ```
 
 ## Testing Strategy
@@ -869,10 +1405,17 @@ print(f"Total rollouts: {result.total_rollouts}")
 - Dollar sign escaping
 - Malformed response handling
 
+**Example mutation parsing (`test_gepa_example_parsing.py`):**
+
+- Parse ToolExample mutation responses
+- Parse TaskExample mutation responses
+- Parse new TaskExample generation responses
+- Handle malformed JSON in example inputs/outputs
+
 **Merge algorithm (`test_gepa_merge.py`):**
 
 - Ancestry tracking
-- Module-level override selection
+- Module-level override selection (including examples)
 - Novel candidate detection
 
 ### Integration Tests
@@ -891,17 +1434,50 @@ def test_gepa_improves_score():
     # - Pareto mean improved
 ```
 
+**Example optimization (`test_gepa_example_optimization.py`):**
+
+```python
+def test_gepa_mutates_tool_examples():
+    # Prompt with tool that has optimizable example
+    # Fake adapter: returns better output when example description
+    # contains specific keyword
+
+    # Assert:
+    # - Example mutation accepted
+    # - Final example override contains keyword
+
+def test_gepa_generates_task_examples():
+    # Prompt with TaskExamplesSection
+    # Feedback indicating coverage gaps
+    # enable_example_generation=True
+
+    # Assert:
+    # - At least one new TaskExample generated
+    # - Generated example passes validation
+    # - Generated example persisted to store
+```
+
 **Store integration (`test_gepa_stores.py`):**
 
 - InMemoryPromptOverridesStore CRUD operations
 - OverlayPromptOverridesStore merging behavior
 - Thread safety under parallel access
+- Example override storage and retrieval
+
+**Example override integration (`test_example_overrides.py`):**
+
+- ToolExampleOverride applied during tool rendering
+- TaskExampleOverride applied during section rendering
+- Generated TaskExample appended to container
+- Hash validation for stale example overrides
 
 ### Robustness Tests
 
 - Mutation validation catches rendering errors
+- Example type validation (input/output match tool types)
 - Truncation respects character limits
 - Seeded RNG produces identical results
+- Generated examples respect `max_task_examples_per_section`
 
 ## Events
 
@@ -909,8 +1485,9 @@ GEPA optimization emits events through the context event bus:
 
 - `GepaOptimizationStarted` - Configuration and prompt descriptor
 - `GepaRolloutCompleted` - Individual rollout feedback
-- `GepaMutationProposed` - Before/after instruction text
+- `GepaMutationProposed` - Before/after content (instruction or example)
 - `GepaMutationAccepted` / `GepaMutationRejected` - Acceptance decision
+- `GepaExampleGenerated` - New TaskExample created (NEW)
 - `GepaOptimizationCompleted` - Final result summary
 
 ## Limitations
@@ -920,4 +1497,7 @@ GEPA optimization emits events through the context event bus:
 - **No auto-retry on provider errors**: Errors convert to zero-score feedback
 - **Memory growth**: Large candidate pools consume memory (no eviction)
 - **Dollar sign escaping**: May interfere with intentional template variables
+- **Example type constraints**: Generated examples must match tool type parameters
+- **No example removal optimization**: GEPA can add/mutate but not remove examples
+- **JSON serialization required**: Example inputs/outputs must be JSON-serializable
 - **Alpha stability**: Interfaces may change without backward compatibility
