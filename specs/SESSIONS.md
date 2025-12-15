@@ -218,8 +218,8 @@ session[Plan].where(lambda p: p.active)
 
 ## Declarative State Slices
 
-The `@state_slice` and `@reducer` decorators enable self-describing state slices
-where reducers are co-located as methods on the dataclass itself.
+The `@reducer` decorator enables self-describing state slices where reducers are
+co-located as methods on the dataclass itself.
 
 ### Motivation
 
@@ -240,7 +240,7 @@ session.install(AgentPlan)  # Registers all @reducer methods
 
 ```python
 from dataclasses import dataclass, replace
-from weakincentives.runtime.session import state_slice, reducer
+from weakincentives.runtime.session import reducer
 
 # Event types (must be defined before the slice)
 @dataclass(frozen=True)
@@ -251,8 +251,7 @@ class AddStep:
 class CompleteStep:
     pass
 
-# Declarative state slice
-@state_slice
+# Declarative state slice - just a frozen dataclass with @reducer methods
 @dataclass(frozen=True)
 class AgentPlan:
     steps: tuple[str, ...]
@@ -281,13 +280,10 @@ latest = session[AgentPlan].latest()
 
 ### Initial State Factory
 
-For slices that need auto-initialization when empty, provide an `initial` factory:
+For slices that need auto-initialization when empty, provide an `initial` factory
+to `session.install()`:
 
 ```python
-def _counters_initial() -> Counters:
-    return Counters()
-
-@state_slice(initial=_counters_initial)
 @dataclass(frozen=True)
 class Counters:
     count: int = 0
@@ -295,6 +291,9 @@ class Counters:
     @reducer(on=Increment)
     def increment(self, event: Increment) -> "Counters":
         return replace(self, count=self.count + event.amount)
+
+# Install with initial factory
+session.install(Counters, initial=Counters)
 ```
 
 With an initial factory, reducers can handle events even when no state exists yet.
@@ -302,8 +301,8 @@ The factory creates the initial instance, then the reducer method is called.
 
 ### How It Works
 
-1. `@state_slice` extracts metadata from `@reducer`-decorated methods
-1. `session.install()` registers a wrapper reducer for each method
+1. `session.install()` scans the class for `@reducer`-decorated methods
+1. It registers a wrapper reducer for each method
 1. When an event dispatches, the wrapper:
    - Gets the latest slice value (or creates via initial factory)
    - Calls the method with the event
@@ -324,7 +323,7 @@ def method_name(self, event: EventType) -> SelfType:
 
 ### Constraints
 
-- The decorated class must be a frozen dataclass
+- The class must be a frozen dataclass
 - Event types must be defined before the slice class
 - Reducer methods receive only `self` and `event` (no context parameter)
 - Methods must return a new instance of the slice type

@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for declarative state slice decorators."""
+"""Tests for declarative @reducer decorator and session.install()."""
 
 from __future__ import annotations
 
@@ -19,12 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from weakincentives.runtime.session import (
-    get_state_slice_meta,
-    is_state_slice,
-    reducer,
-    state_slice,
-)
+from weakincentives.runtime.session import reducer
 
 if TYPE_CHECKING:
     from tests.conftest import SessionFactory
@@ -66,7 +61,6 @@ class Reset:
     """Event to reset counter to zero."""
 
 
-@state_slice
 @dataclass(frozen=True)
 class ItemList:
     """Simple state slice with no initial factory."""
@@ -87,14 +81,9 @@ class ItemList:
         return replace(self, items=())
 
 
-def _counter_initial() -> Counter:
-    return Counter()
-
-
-@state_slice(initial=_counter_initial)
 @dataclass(frozen=True)
 class Counter:
-    """State slice with initial factory."""
+    """State slice for testing with initial factory."""
 
     count: int = 0
 
@@ -106,75 +95,6 @@ class Counter:
     def reset(self, event: Reset) -> Counter:
         del event
         return Counter()
-
-
-# ──────────────────────────────────────────────────────────────────────
-# @state_slice decorator tests
-# ──────────────────────────────────────────────────────────────────────
-
-
-def test_state_slice_marks_class() -> None:
-    """Verify @state_slice adds metadata to the class."""
-    assert is_state_slice(ItemList)
-    assert is_state_slice(Counter)
-
-
-def test_state_slice_extracts_reducers() -> None:
-    """Verify @state_slice extracts @reducer decorated methods."""
-    meta = get_state_slice_meta(ItemList)
-
-    assert meta is not None
-    assert len(meta.reducers) == 3
-
-    event_types = {r.event_type for r in meta.reducers}
-    assert AddItem in event_types
-    assert RemoveItem in event_types
-    assert ClearItems in event_types
-
-
-def test_state_slice_stores_initial_factory() -> None:
-    """Verify @state_slice stores the initial factory."""
-    item_meta = get_state_slice_meta(ItemList)
-    counter_meta = get_state_slice_meta(Counter)
-
-    assert item_meta is not None
-    assert item_meta.initial_factory is None
-
-    assert counter_meta is not None
-    assert counter_meta.initial_factory is not None
-    assert counter_meta.initial_factory() == Counter()
-
-
-def test_state_slice_requires_dataclass() -> None:
-    """Verify @state_slice rejects non-dataclass."""
-    with pytest.raises(TypeError, match="requires a dataclass"):
-
-        @state_slice
-        class NotADataclass:
-            pass
-
-
-def test_state_slice_requires_frozen_dataclass() -> None:
-    """Verify @state_slice rejects non-frozen dataclass."""
-    with pytest.raises(TypeError, match="frozen dataclass"):
-
-        @state_slice
-        @dataclass
-        class NotFrozen:
-            value: int
-
-
-def test_is_state_slice_returns_false_for_non_slices() -> None:
-    """Verify is_state_slice returns False for regular classes."""
-    assert not is_state_slice(str)
-    assert not is_state_slice(int)
-    assert not is_state_slice(AddItem)
-
-
-def test_get_state_slice_meta_returns_none_for_non_slices() -> None:
-    """Verify get_state_slice_meta returns None for regular classes."""
-    assert get_state_slice_meta(str) is None
-    assert get_state_slice_meta(AddItem) is None
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -241,7 +161,7 @@ def test_install_rejects_non_frozen_dataclass(
 def test_install_with_initial_factory(session_factory: SessionFactory) -> None:
     """Verify install() with initial factory handles empty slice."""
     session, _ = session_factory()
-    session.install(Counter)
+    session.install(Counter, initial=Counter)
 
     # Dispatch without seeding - should use initial factory
     session.mutate(Counter).dispatch(Increment(amount=5))
@@ -353,7 +273,7 @@ def test_reducer_method_can_clear_state(session_factory: SessionFactory) -> None
 def test_reducer_method_receives_event(session_factory: SessionFactory) -> None:
     """Verify reducer method receives event data."""
     session, _ = session_factory()
-    session.install(Counter)
+    session.install(Counter, initial=Counter)
 
     session.mutate(Counter).dispatch(Increment(amount=10))
     session.mutate(Counter).dispatch(Increment(amount=5))
@@ -366,7 +286,7 @@ def test_reducer_method_receives_event(session_factory: SessionFactory) -> None:
 def test_reducer_method_reset(session_factory: SessionFactory) -> None:
     """Verify reducer method can reset state."""
     session, _ = session_factory()
-    session.install(Counter)
+    session.install(Counter, initial=Counter)
 
     session.mutate(Counter).dispatch(Increment(amount=100))
     session.mutate(Counter).dispatch(Reset())
@@ -388,7 +308,6 @@ def test_multiple_reducers_for_same_event(session_factory: SessionFactory) -> No
     class SharedEvent:
         value: int
 
-    @state_slice(initial=lambda: SliceA())
     @dataclass(frozen=True)
     class SliceA:
         value: int = 0
@@ -397,7 +316,6 @@ def test_multiple_reducers_for_same_event(session_factory: SessionFactory) -> No
         def handle(self, event: SharedEvent) -> SliceA:
             return replace(self, value=event.value * 2)
 
-    @state_slice(initial=lambda: SliceB())
     @dataclass(frozen=True)
     class SliceB:
         value: int = 0
@@ -407,8 +325,8 @@ def test_multiple_reducers_for_same_event(session_factory: SessionFactory) -> No
             return replace(self, value=event.value * 3)
 
     session, _ = session_factory()
-    session.install(SliceA)
-    session.install(SliceB)
+    session.install(SliceA, initial=SliceA)
+    session.install(SliceB, initial=SliceB)
 
     # Dispatch to SliceA - but since both slices have reducers for
     # SharedEvent, both will be invoked (registered to same event type)
@@ -428,7 +346,7 @@ def test_multiple_reducers_for_same_event(session_factory: SessionFactory) -> No
 def test_chained_dispatches(session_factory: SessionFactory) -> None:
     """Test multiple dispatches in sequence."""
     session, _ = session_factory()
-    session.install(Counter)
+    session.install(Counter, initial=Counter)
 
     for i in range(1, 6):
         session.mutate(Counter).dispatch(Increment(amount=i))
@@ -436,22 +354,6 @@ def test_chained_dispatches(session_factory: SessionFactory) -> None:
     result = session[Counter].latest()
     assert result is not None
     assert result.count == 15  # 1+2+3+4+5
-
-
-def test_state_slice_with_callable_syntax(session_factory: SessionFactory) -> None:
-    """Test @state_slice(...) callable syntax."""
-    # Counter uses the callable syntax with initial parameter
-    meta = get_state_slice_meta(Counter)
-    assert meta is not None
-    assert meta.initial_factory is not None
-
-
-def test_state_slice_without_callable_syntax(session_factory: SessionFactory) -> None:
-    """Test @state_slice decorator syntax."""
-    # ItemList uses the bare decorator syntax
-    meta = get_state_slice_meta(ItemList)
-    assert meta is not None
-    assert meta.initial_factory is None
 
 
 def test_reducer_qualname_set_correctly() -> None:
