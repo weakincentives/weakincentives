@@ -18,6 +18,122 @@ datasets.
 - **Evaluation-first optimization**: Prompt changes are validated against datasets
   before deployment.
 - **Graceful degradation**: LangSmith unavailability does not break agent execution.
+- **Composable with LangSmith SDK**: Works alongside `@traceable` decorator and
+  native LangSmith integrations (e.g., `configure_claude_agent_sdk()`).
+
+## Auto-Instrumentation
+
+WINK provides a single-call configuration function following the pattern
+established by LangSmith's native integrations:
+
+```python
+from weakincentives.contrib.langsmith import configure_wink
+
+# Enable automatic tracing at application start
+configure_wink()
+
+# All WINK evaluations are now traced to LangSmith
+response = adapter.evaluate(prompt, session=session)
+```
+
+### How It Works
+
+`configure_wink()` patches the `InProcessEventBus` class to automatically
+attach telemetry handlers to every new bus instance:
+
+```mermaid
+flowchart LR
+    Configure["configure_wink()"] --> Patch["Patch InProcessEventBus.__init__"]
+    Patch --> NewBus["New EventBus Created"]
+    NewBus --> Attach["Auto-attach LangSmithTelemetryHandler"]
+    Attach --> Events["Events flow to LangSmith"]
+```
+
+### Configuration Options
+
+```python
+configure_wink(
+    # API settings (fall back to LANGCHAIN_* env vars)
+    api_key="...",
+    project="my-project",
+
+    # Tracing behavior
+    tracing_enabled=True,
+    trace_sample_rate=1.0,
+
+    # Hub integration
+    hub_enabled=True,
+
+    # Advanced
+    async_upload=True,
+    flush_on_exit=True,
+)
+```
+
+### Composing with LangSmith's Claude Agent SDK Integration
+
+When using the `ClaudeAgentSDKAdapter`, you can combine WINK's event-based
+tracing with LangSmith's native Claude Agent SDK instrumentation:
+
+```python
+from langsmith.integrations.claude_agent_sdk import configure_claude_agent_sdk
+from weakincentives.contrib.langsmith import configure_wink
+
+# Enable both integrations
+configure_claude_agent_sdk()  # Traces Claude SDK internals
+configure_wink()               # Traces WINK prompt lifecycle
+
+# Claude Agent SDK traces nest under WINK traces
+adapter = ClaudeAgentSDKAdapter(model="claude-sonnet-4-5-20250929")
+response = adapter.evaluate(prompt, session=session)
+```
+
+**Trace Hierarchy:**
+
+```
+WINK: PromptRendered (run_type="chain")
+  └─ LangSmith: Claude SDK Query (run_type="llm")
+       └─ LangSmith: Tool Use (run_type="tool")
+  └─ WINK: ToolInvoked (run_type="tool")
+  └─ WINK: PromptExecuted (updates parent run)
+```
+
+### Integrating with `@traceable`
+
+WINK traces compose naturally with LangSmith's `@traceable` decorator for
+custom application code:
+
+```python
+from langsmith import traceable
+from weakincentives.contrib.langsmith import configure_wink
+
+configure_wink()
+
+@traceable(name="process_user_request")
+def process_request(user_input: str) -> str:
+    # Custom pre-processing (traced)
+    processed = preprocess(user_input)
+
+    # WINK evaluation (automatically traced as child)
+    response = adapter.evaluate(
+        prompt.bind(input=processed),
+        session=session,
+    )
+
+    # Custom post-processing (traced)
+    return postprocess(response.output)
+```
+
+**Resulting Trace:**
+
+```
+process_user_request (run_type="chain")
+  └─ preprocess (if @traceable)
+  └─ WINK: my_prompt (run_type="chain")
+       └─ Provider Call (run_type="llm")
+       └─ Tool: search (run_type="tool")
+  └─ postprocess (if @traceable)
+```
 
 ```mermaid
 flowchart TB
@@ -188,6 +304,140 @@ flowchart TB
     Select -->|publish| Hub["Prompt Hub"]
 ```
 
+## Claude Agent SDK Adapter Integration
+
+The `ClaudeAgentSDKAdapter` presents unique tracing considerations due to its
+hook-based architecture and delegation to Claude Code's native tools.
+
+### Dual Tracing Strategy
+
+When using the Claude Agent SDK adapter, traces can be captured at two levels:
+
+```mermaid
+flowchart TB
+    subgraph WINK["WINK Event Bus"]
+        PR["PromptRendered"]
+        TI["ToolInvoked (from hooks)"]
+        PE["PromptExecuted"]
+    end
+
+    subgraph LS["LangSmith Claude SDK Integration"]
+        Query["sdk.query() → LLM Run"]
+        Tool["Tool Use → Tool Run"]
+    end
+
+    subgraph Combined["Combined Trace"]
+        Root["WINK Chain Run"]
+        LLM["Claude SDK LLM Runs"]
+        Tools["Tool Runs (both sources)"]
+    end
+
+    PR --> Root
+    Query --> LLM
+    TI --> Tools
+    Tool --> Tools
+    PE --> Root
+```
+
+### Hook-to-Run Mapping
+
+The Claude Agent SDK adapter's hooks map to LangSmith runs:
+
+| SDK Hook | WINK Event | LangSmith Run |
+|----------|------------|---------------|
+| `PreToolUse` | (none - internal) | Child span start |
+| `PostToolUse` | `ToolInvoked` | Tool run complete |
+| `Stop` | `PromptExecuted` | Chain run complete |
+
+### Deduplication
+
+When both WINK and LangSmith's native Claude SDK integration are enabled,
+tool invocations may be reported twice. The telemetry handler deduplicates
+based on `call_id`:
+
+```python
+class LangSmithTelemetryHandler:
+    def _on_tool_invoked(self, event: ToolInvoked) -> None:
+        # Skip if LangSmith native integration already traced this call
+        if self._is_traced_by_native_integration(event.call_id):
+            return
+        self._create_tool_run(event)
+```
+
+### MCP Tool Bridge Tracing
+
+Custom WINK tools bridged via MCP are traced through WINK's event bus:
+
+```python
+# Custom tool with handler
+@dataclass(frozen=True)
+class SearchParams:
+    query: str
+
+def search_handler(params: SearchParams, *, context: ToolContext) -> ToolResult[str]:
+    # Handler execution
+    results = do_search(params.query)
+    return ToolResult(message="Found results", value=results, success=True)
+
+# Tool definition
+search_tool = Tool(
+    name="search",
+    description="Search the knowledge base",
+    params=SearchParams,
+    handler=search_handler,
+)
+
+# When invoked via MCP bridge, ToolInvoked event is published
+# and appears in LangSmith as a tool run
+```
+
+### Native Tool Tracing
+
+Claude Code's native tools (Read, Write, Bash, etc.) are traced via:
+
+1. **LangSmith's `configure_claude_agent_sdk()`**: Captures at SDK level
+2. **WINK's `PostToolUse` hook**: Publishes `ToolInvoked` events
+
+To avoid duplication, configure one or the other, or use the deduplication
+logic above.
+
+### Recommended Configuration
+
+```python
+from langsmith.integrations.claude_agent_sdk import configure_claude_agent_sdk
+from weakincentives.contrib.langsmith import configure_wink, LangSmithConfig
+
+# Option 1: WINK-only tracing (full control)
+configure_wink(
+    project="my-agent",
+    trace_native_tools=True,  # Include Claude Code native tools
+)
+
+# Option 2: Combined tracing (richest traces)
+configure_claude_agent_sdk()  # Detailed Claude SDK internals
+configure_wink(
+    project="my-agent",
+    trace_native_tools=False,  # Avoid duplication
+)
+```
+
+### Isolation and Tracing
+
+When using `IsolationConfig`, traces still flow normally since the telemetry
+handler runs in the parent process, not the isolated SDK subprocess:
+
+```python
+adapter = ClaudeAgentSDKAdapter(
+    model="claude-sonnet-4-5-20250929",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.no_network(),
+            # Tracing still works - events published via hooks
+        ),
+    ),
+)
+```
+
 ## Configuration
 
 ### LangSmithConfig
@@ -274,6 +524,40 @@ class TraceContext:
 # Thread-local storage for active contexts
 _active_contexts: ContextVar[dict[UUID, TraceContext]] = ContextVar("langsmith_contexts")
 ```
+
+### RunTree Integration
+
+For advanced scenarios requiring manual control, the telemetry handler exposes
+the underlying `RunTree` for direct manipulation:
+
+```python
+from langsmith.run_trees import RunTree
+from weakincentives.contrib.langsmith import get_current_run_tree
+
+# Within a traced context
+run_tree = get_current_run_tree()
+if run_tree:
+    # Add custom child run
+    with run_tree.create_child(
+        name="custom_step",
+        run_type="chain",
+        inputs={"key": "value"},
+    ) as child:
+        result = do_custom_step()
+        child.end(outputs={"result": result})
+
+    # Add metadata to current run
+    run_tree.add_metadata({"custom_key": "custom_value"})
+
+    # Add tags
+    run_tree.add_tags(["tag1", "tag2"])
+```
+
+**Use Cases:**
+
+- Adding custom spans for non-WINK operations within tool handlers
+- Attaching domain-specific metadata for filtering in LangSmith UI
+- Creating structured traces for complex multi-step tool implementations
 
 ### LangSmithPromptOverridesStore
 
@@ -746,6 +1030,11 @@ def mock_hub():
   may take significant time.
 - **No automatic rollback**: Failed evaluations don't automatically revert Hub
   changes.
+- **Claude Agent SDK deduplication**: When using both `configure_claude_agent_sdk()`
+  and `configure_wink()`, careful configuration is needed to avoid duplicate traces.
+- **Isolated subprocess tracing**: When using `IsolationConfig`, LangSmith's native
+  Claude SDK integration cannot trace the isolated subprocess directly; use WINK's
+  hook-based tracing instead.
 
 ## Future Considerations
 
