@@ -329,149 +329,215 @@ class HostBackend:
 
 ## Session-Filesystem Snapshot Coupling
 
-**Critical**: When a session snapshot is created, the section must also snapshot
-the filesystem. These operations are coupled and must happen together.
+Session snapshots and filesystem snapshots must happen together. This coupling
+is implemented via **session lifecycle hooks** registered during section
+initialization.
 
-### FilesystemSection Coordinates Snapshots
+### Session Hook Protocol
+
+Session exposes hooks for snapshot lifecycle events:
+
+```python
+class Session:
+    def register_snapshot_hook(
+        self,
+        on_snapshot: Callable[[str, Path], None],  # (snapshot_id, snapshot_dir) -> None
+        on_rollback: Callable[[str], None],        # (snapshot_id) -> None
+    ) -> None:
+        """Register callbacks for snapshot lifecycle events."""
+        ...
+```
+
+When `session.snapshot(id)` is called:
+1. Session serializes all slices
+2. Session calls each registered `on_snapshot(id, snapshot_dir)` hook
+3. Hooks write additional state to `snapshot_dir / id / <hook_name>`
+
+When `session.rollback(id)` is called:
+1. Session restores all slices from snapshot
+2. Session calls each registered `on_rollback(id)` hook
+3. Hooks restore additional state from `snapshot_dir / id / <hook_name>`
+
+### FilesystemSection Registers Hooks
+
+During initialization, the section registers hooks to couple filesystem state:
 
 ```python
 class FilesystemSection(MarkdownSection):
     """Base for sections that provide a Filesystem."""
 
+    _HOOK_NAME: ClassVar[str] = "filesystem"
+
     def __init__(self, *, session: Session, snapshot_dir: Path | None = None) -> None:
         self._session = session
         self._snapshot_dir = snapshot_dir or Path(tempfile.gettempdir()) / "wink-fs-snapshots"
-        session.install(FilesystemSnapshot, initial=lambda: FilesystemSnapshot())
+
+        # Register hooks during initialization
+        session.register_snapshot_hook(
+            on_snapshot=self._on_snapshot,
+            on_rollback=self._on_rollback,
+        )
 
     @property
     def filesystem(self) -> Filesystem:
         raise NotImplementedError
 
-    def snapshot(self) -> str:
-        """Snapshot both session and filesystem. Returns snapshot ID."""
-        # 1. Generate snapshot path
-        snapshot_id = f"{uuid.uuid4()}"
-        snapshot_path = self._snapshot_dir / f"{snapshot_id}.snapshot"
+    def _on_snapshot(self, snapshot_id: str, snapshot_dir: Path) -> None:
+        """Hook called by session.snapshot(). Writes filesystem state to file."""
+        fs_snapshot_path = snapshot_dir / snapshot_id / self._HOOK_NAME
+        fs_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        self.filesystem.snapshot(fs_snapshot_path)
 
-        # 2. Snapshot filesystem to file
-        self.filesystem.snapshot(snapshot_path)
-
-        # 3. Record path in session slice
-        self._session.mutate(FilesystemSnapshot).seed(
-            FilesystemSnapshot(path=str(snapshot_path))
-        )
-
-        # 4. Snapshot session (includes FilesystemSnapshot slice)
-        self._session.snapshot(snapshot_id)
-
-        return snapshot_id
-
-    def rollback(self, snapshot_id: str) -> None:
-        """Rollback both session and filesystem."""
-        # 1. Rollback session (restores FilesystemSnapshot slice)
-        self._session.rollback(snapshot_id)
-
-        # 2. Read restored snapshot path from slice
-        fs_snapshot = self._session.query(FilesystemSnapshot).latest()
-        if fs_snapshot and fs_snapshot.path:
-            # 3. Restore filesystem from file
-            self.filesystem.restore(Path(fs_snapshot.path))
+    def _on_rollback(self, snapshot_id: str) -> None:
+        """Hook called by session.rollback(). Restores filesystem state from file."""
+        fs_snapshot_path = self._snapshot_dir / snapshot_id / self._HOOK_NAME
+        if fs_snapshot_path.exists():
+            self.filesystem.restore(fs_snapshot_path)
 ```
 
-### Usage
+### How It Works
+
+```
+User calls session.snapshot("abc123")
+         │
+         ▼
+    Session.snapshot()
+         │
+         ├─► 1. Serialize all slices (InMemoryState, Plan, etc.)
+         │
+         ├─► 2. Write slices to snapshot_dir/abc123/session.json
+         │
+         └─► 3. Call registered hooks:
+                  │
+                  └─► FilesystemSection._on_snapshot("abc123", snapshot_dir)
+                           │
+                           └─► self.filesystem.snapshot(snapshot_dir/abc123/filesystem)
+                                    │
+                                    └─► Write tarball or JSON to file
+
+
+User calls session.rollback("abc123")
+         │
+         ▼
+    Session.rollback()
+         │
+         ├─► 1. Read slices from snapshot_dir/abc123/session.json
+         │
+         ├─► 2. Restore all slices (InMemoryState now has old value)
+         │
+         └─► 3. Call registered hooks:
+                  │
+                  └─► FilesystemSection._on_rollback("abc123")
+                           │
+                           └─► self.filesystem.restore(snapshot_dir/abc123/filesystem)
+                                    │
+                                    └─► Read tarball or JSON from file
+```
+
+### Snapshot Directory Structure
+
+```
+snapshot_dir/
+├── abc123/                     # snapshot_id
+│   ├── session.json            # Session slices (InMemoryState, Plan, etc.)
+│   └── filesystem              # Filesystem snapshot (tarball or JSON)
+├── def456/
+│   ├── session.json
+│   └── filesystem
+└── ...
+```
+
+### Key Points
+
+1. **Registration happens at init**: `FilesystemSection.__init__` registers hooks
+   with the session. No separate registration step needed.
+
+2. **Session drives the lifecycle**: Users call `session.snapshot()` and
+   `session.rollback()` directly. The hooks ensure filesystem is included.
+
+3. **Hooks receive snapshot context**: `on_snapshot` receives the snapshot
+   directory so hooks can write adjacent files.
+
+4. **Section holds the backend reference**: The hook methods access
+   `self.filesystem` to snapshot/restore. The session doesn't know about
+   the filesystem directly—it just calls the registered hooks.
+
+5. **Multiple sections supported**: If a prompt has multiple filesystem sections
+   (unusual but possible), each registers its own hooks with distinct names.
+
+### InMemoryBackend Special Case
+
+For `InMemoryBackend`, the `InMemoryState` slice is already captured by
+`session.snapshot()`. The hook can be a no-op:
 
 ```python
+class VfsSection(FilesystemSection):
+    def _on_snapshot(self, snapshot_id: str, snapshot_dir: Path) -> None:
+        # InMemoryState slice already captured by session
+        # Optionally write redundant backup for consistency
+        pass
+
+    def _on_rollback(self, snapshot_id: str) -> None:
+        # InMemoryState slice already restored by session
+        # Backend reads from restored slice automatically
+        pass
+```
+
+For external backends (Container, Host), the hooks are required:
+
+```python
+class PodmanSection(FilesystemSection):
+    def _on_snapshot(self, snapshot_id: str, snapshot_dir: Path) -> None:
+        # Must write tarball—container state not in session
+        fs_snapshot_path = snapshot_dir / snapshot_id / self._HOOK_NAME
+        fs_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        self.filesystem.snapshot(fs_snapshot_path)
+
+    def _on_rollback(self, snapshot_id: str) -> None:
+        # Must restore from tarball
+        fs_snapshot_path = self._snapshot_dir / snapshot_id / self._HOOK_NAME
+        if fs_snapshot_path.exists():
+            self.filesystem.restore(fs_snapshot_path)
+```
+
+### Persistence (Save/Load)
+
+When saving a session to disk:
+
+```python
+# session.save() includes hook data
+session.save("/path/to/session")
+
+# Creates:
+# /path/to/session.json          (slices)
+# /path/to/session.snapshots/    (hook data, if any active snapshots)
+```
+
+When loading:
+
+```python
+# Load session (slices restored)
+session = Session.load("/path/to/session.json", bus=bus)
+
+# Create section (registers hooks, reads InMemoryState if present)
 section = VfsSection(session=session, mounts=mounts)
 
-# Create coupled snapshot
-snapshot_id = section.snapshot()
-
-# ... operations modify filesystem ...
-section.filesystem.write("config.json", new_config)
-
-# Rollback restores both session state AND filesystem
-section.rollback(snapshot_id)
-
-# Filesystem reflects rolled-back state
-section.filesystem.read("config.json")  # Original content
+# For external backends, manually restore latest state:
+if isinstance(section, PodmanSection):
+    latest_snapshot = session.latest_snapshot_id()
+    if latest_snapshot:
+        section._on_rollback(latest_snapshot)
 ```
 
-### Persistence
+### Summary Table
 
-When saving a session to disk, the filesystem snapshot file must also be preserved:
-
-```python
-def save_session_with_filesystem(session: Session, section: FilesystemSection, path: Path) -> None:
-    """Save session and filesystem snapshot together."""
-    # 1. Snapshot filesystem to file alongside session
-    fs_snapshot_path = path.with_suffix(".fs.tar.gz")
-    section.filesystem.snapshot(fs_snapshot_path)
-
-    # 2. Record path in session
-    session.mutate(FilesystemSnapshot).seed(
-        FilesystemSnapshot(path=str(fs_snapshot_path))
-    )
-
-    # 3. Save session
-    session.save(path)
-
-
-def load_session_with_filesystem(
-    path: Path,
-    bus: EventBus,
-    section_factory: Callable[[Session], FilesystemSection],
-) -> tuple[Session, FilesystemSection]:
-    """Load session and restore filesystem snapshot."""
-    # 1. Load session
-    session = Session.load(path, bus=bus)
-
-    # 2. Create section (backend reads existing InMemoryState if applicable)
-    section = section_factory(session)
-
-    # 3. Restore filesystem from snapshot file if present
-    fs_snapshot = session.query(FilesystemSnapshot).latest()
-    if fs_snapshot and fs_snapshot.path:
-        snapshot_path = Path(fs_snapshot.path)
-        if snapshot_path.exists():
-            section.filesystem.restore(snapshot_path)
-
-    return session, section
-```
-
-### Snapshot File Lifecycle
-
-| Event | Action |
-|-------|--------|
-| `section.snapshot()` | Write to temp file, record path in slice |
-| `section.rollback(id)` | Restore from file at recorded path |
-| `save_session_with_filesystem()` | Write to persistent file alongside session |
-| `load_session_with_filesystem()` | Restore from file recorded in loaded session |
-| Session garbage collection | Caller responsible for cleaning up snapshot files |
-
-### InMemoryBackend: Dual State
-
-For `InMemoryBackend`, state exists in two places:
-
-1. **`InMemoryState` slice** — Always in session, automatically included in session snapshots
-2. **Snapshot file** — Written on explicit `snapshot()` call
-
-The snapshot file is redundant for `InMemoryBackend` but provides a consistent
-interface. Alternatively, `InMemoryBackend.snapshot()` can be a no-op since state
-is already in the session:
-
-```python
-class InMemoryBackend:
-    def snapshot(self, path: Path) -> None:
-        # State already in InMemoryState slice; file is optional backup
-        pass
-
-    def restore(self, path: Path) -> None:
-        # State restored via session.rollback(); file not needed
-        pass
-```
-
-This simplifies the coupling: for `InMemoryBackend`, session snapshot alone
-suffices. For external backends, the file is required.
+| Event | Session Action | Hook Action |
+|-------|----------------|-------------|
+| `session.snapshot(id)` | Serialize slices | `on_snapshot(id, dir)` → write fs to file |
+| `session.rollback(id)` | Restore slices | `on_rollback(id)` → restore fs from file |
+| Section init | — | Register hooks with session |
+| `session.save()` | Write slices + snapshot dir | — |
+| `session.load()` | Read slices | Section re-registers hooks on creation |
 
 ## Section Definitions
 
