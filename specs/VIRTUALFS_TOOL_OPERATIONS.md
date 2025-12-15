@@ -539,65 +539,457 @@ if isinstance(section, PodmanSection):
 | `session.save()` | Write slices + snapshot dir | — |
 | `session.load()` | Read slices | Section re-registers hooks on creation |
 
-## Section Definitions
+## Filesystem Archive Format
 
-Sections create backend and expose it via a property:
+All backends use a **common ZIP archive format** for filesystem snapshots. This
+provides:
+
+1. **Consistency** — Same format for InMemory, Container, and Host backends
+2. **Inspectability** — ZIP is a standard format; can be opened with any tool
+3. **Efficiency** — Compression reduces disk usage
+4. **Integration** — Works with `dump_session_tree` and `wink debug`
+
+### Archive Structure
+
+```
+filesystem.zip
+├── manifest.json           # Metadata about the snapshot
+├── files/                  # Directory containing all files
+│   ├── src/
+│   │   └── main.py
+│   ├── tests/
+│   │   └── test_main.py
+│   └── README.md
+└── (no directories stored explicitly—only files)
+```
+
+### Manifest Format
+
+```json
+{
+  "version": "1",
+  "backend": "InMemoryBackend",
+  "created_at": "2024-01-15T10:30:00+00:00",
+  "file_count": 42,
+  "total_bytes": 123456,
+  "root": ""
+}
+```
+
+### Backend Snapshot Implementation
+
+All backends produce the same ZIP format:
+
+```python
+class InMemoryBackend:
+    def snapshot(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        state = self._state()
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            manifest = {
+                "version": "1",
+                "backend": "InMemoryBackend",
+                "created_at": datetime.now(UTC).isoformat(),
+                "file_count": len(state.files),
+                "total_bytes": sum(f.size_bytes for f in state.files),
+                "root": "",
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+            for file in state.files:
+                zf.writestr(f"files/{file.path}", file.content)
+
+    def restore(self, path: Path) -> None:
+        with zipfile.ZipFile(path, "r") as zf:
+            files = []
+            for name in zf.namelist():
+                if name.startswith("files/") and not name.endswith("/"):
+                    rel_path = name[6:]  # Strip "files/" prefix
+                    content = zf.read(name).decode("utf-8")
+                    files.append(_FileRecord(
+                        path=rel_path,
+                        content=content,
+                        size_bytes=len(content.encode()),
+                    ))
+            self._set_state(InMemoryState(files=tuple(sorted(files, key=lambda f: f.path))))
+
+
+class ContainerBackend:
+    def snapshot(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Create ZIP in container, stream to host
+        self._exec([
+            "python3", "-c", f'''
+import zipfile, os, json
+from datetime import datetime, timezone
+with zipfile.ZipFile("/tmp/snapshot.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+    file_count = 0
+    total_bytes = 0
+    for root, dirs, files in os.walk("{self._workdir}"):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            rel = os.path.relpath(fpath, "{self._workdir}")
+            content = open(fpath, "rb").read()
+            zf.writestr(f"files/{{rel}}", content)
+            file_count += 1
+            total_bytes += len(content)
+    manifest = {{"version": "1", "backend": "ContainerBackend",
+                 "created_at": datetime.now(timezone.utc).isoformat(),
+                 "file_count": file_count, "total_bytes": total_bytes,
+                 "root": "{self._workdir}"}}
+    zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+'''
+        ])
+        # Copy ZIP from container to host
+        self._copy_from_container("/tmp/snapshot.zip", path)
+
+    def restore(self, path: Path) -> None:
+        self._copy_to_container(path, "/tmp/snapshot.zip")
+        self._exec(["rm", "-rf", f"{self._workdir}/*"])
+        self._exec([
+            "python3", "-c", f'''
+import zipfile
+with zipfile.ZipFile("/tmp/snapshot.zip", "r") as zf:
+    for name in zf.namelist():
+        if name.startswith("files/") and not name.endswith("/"):
+            rel = name[6:]
+            target = f"{self._workdir}/{{rel}}"
+            import os
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as f:
+                f.write(zf.read(name))
+'''
+        ])
+
+
+class HostBackend:
+    def snapshot(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+            file_count = 0
+            total_bytes = 0
+            for fpath in self._root.rglob("*"):
+                if fpath.is_file():
+                    rel = fpath.relative_to(self._root)
+                    content = fpath.read_bytes()
+                    zf.writestr(f"files/{rel}", content)
+                    file_count += 1
+                    total_bytes += len(content)
+            manifest = {
+                "version": "1",
+                "backend": "HostBackend",
+                "created_at": datetime.now(UTC).isoformat(),
+                "file_count": file_count,
+                "total_bytes": total_bytes,
+                "root": str(self._root),
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+
+    def restore(self, path: Path) -> None:
+        shutil.rmtree(self._root, ignore_errors=True)
+        self._root.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "r") as zf:
+            for name in zf.namelist():
+                if name.startswith("files/") and not name.endswith("/"):
+                    rel_path = name[6:]
+                    target = self._root / rel_path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(zf.read(name))
+```
+
+## Integration with dump_session_tree
+
+`dump_session_tree` persists session state to JSONL. Filesystem snapshots are
+stored as **adjacent ZIP files** referenced by a session slice.
+
+### FilesystemSnapshotRef Slice
+
+```python
+@dataclass(slots=True, frozen=True)
+class FilesystemSnapshotRef:
+    """Session slice storing reference to filesystem archive."""
+    archive_path: str | None = None  # Relative path to ZIP file
+    backend_type: str | None = None  # "InMemoryBackend", "ContainerBackend", etc.
+    file_count: int = 0
+    total_bytes: int = 0
+```
+
+### Dump Flow
+
+When `dump_session_tree(session, target_dir)` is called:
+
+```
+dump_session_tree(session, "/snapshots")
+         │
+         ├─► 1. Session calls snapshot hooks
+         │        └─► FilesystemSection._on_snapshot() writes ZIP
+         │
+         ├─► 2. Hook updates FilesystemSnapshotRef slice with relative path
+         │
+         ├─► 3. dump_session_tree serializes session to JSONL
+         │
+         └─► Creates:
+              /snapshots/
+              ├── abc123.jsonl              # Session state (includes FilesystemSnapshotRef)
+              └── abc123.fs.zip             # Filesystem archive
+```
+
+### Hook Implementation for dump_session_tree
 
 ```python
 class FilesystemSection(MarkdownSection):
-    """Base for sections that provide a Filesystem."""
+    def _on_snapshot(self, snapshot_id: str, snapshot_dir: Path) -> None:
+        # Write ZIP adjacent to session JSONL
+        archive_path = snapshot_dir / f"{snapshot_id}.fs.zip"
+        self.filesystem.snapshot(archive_path)
+
+        # Read manifest for metadata
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            manifest = json.loads(zf.read("manifest.json"))
+
+        # Update session slice with reference (relative path)
+        ref = FilesystemSnapshotRef(
+            archive_path=f"{snapshot_id}.fs.zip",
+            backend_type=manifest["backend"],
+            file_count=manifest["file_count"],
+            total_bytes=manifest["total_bytes"],
+        )
+        self._session.mutate(FilesystemSnapshotRef).seed(ref)
+```
+
+### JSONL Entry with Filesystem Reference
+
+```json
+{
+  "version": "1",
+  "created_at": "2024-01-15T10:30:00+00:00",
+  "slices": [
+    {
+      "slice_type": "weakincentives.contrib.tools.filesystem.FilesystemSnapshotRef",
+      "items": [{
+        "archive_path": "abc123.fs.zip",
+        "backend_type": "InMemoryBackend",
+        "file_count": 42,
+        "total_bytes": 123456
+      }]
+    },
+    {
+      "slice_type": "weakincentives.contrib.tools.planning.Plan",
+      "items": [...]
+    }
+  ],
+  "tags": {"session_id": "abc123"}
+}
+```
+
+## Integration with wink debug
+
+The `wink debug` command is enhanced to display filesystem contents from the
+adjacent ZIP archive.
+
+### API Routes for Filesystem Inspection
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/filesystem/meta` | GET | Filesystem manifest and summary |
+| `/api/filesystem/tree` | GET | Directory tree structure |
+| `/api/filesystem/file` | GET | Single file content (query: `?path=src/main.py`) |
+| `/api/filesystem/search` | GET | Search files (query: `?pattern=*.py&content=def`) |
+
+### Implementation
+
+```python
+# In debug_app.py
+
+class SnapshotStore:
+    def get_filesystem_archive(self, snapshot_path: Path) -> Path | None:
+        """Find adjacent filesystem ZIP for a snapshot."""
+        # Check for FilesystemSnapshotRef in loaded snapshot
+        ref = self._get_slice(FilesystemSnapshotRef)
+        if ref and ref.archive_path:
+            archive = snapshot_path.parent / ref.archive_path
+            if archive.exists():
+                return archive
+        return None
+
+    def get_filesystem_manifest(self) -> dict | None:
+        archive = self.get_filesystem_archive(self._current_path)
+        if archive is None:
+            return None
+        with zipfile.ZipFile(archive, "r") as zf:
+            return json.loads(zf.read("manifest.json"))
+
+    def get_filesystem_tree(self) -> list[dict]:
+        archive = self.get_filesystem_archive(self._current_path)
+        if archive is None:
+            return []
+        with zipfile.ZipFile(archive, "r") as zf:
+            entries = []
+            for name in sorted(zf.namelist()):
+                if name.startswith("files/") and not name.endswith("/"):
+                    rel_path = name[6:]
+                    info = zf.getinfo(name)
+                    entries.append({
+                        "path": rel_path,
+                        "size_bytes": info.file_size,
+                        "compressed_size": info.compress_size,
+                    })
+            return entries
+
+    def get_filesystem_file(self, path: str) -> str | None:
+        archive = self.get_filesystem_archive(self._current_path)
+        if archive is None:
+            return None
+        with zipfile.ZipFile(archive, "r") as zf:
+            try:
+                return zf.read(f"files/{path}").decode("utf-8")
+            except KeyError:
+                return None
+```
+
+### Web UI Enhancement
+
+The debug UI shows a "Filesystem" tab when `FilesystemSnapshotRef` is present:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ wink debug - Session abc123                                     │
+├─────────────────────────────────────────────────────────────────┤
+│ [Slices] [Events] [Filesystem] [Raw]                            │
+├─────────────────────────────────────────────────────────────────┤
+│ Filesystem: InMemoryBackend                                     │
+│ Files: 42 | Total: 120.5 KB | Archive: abc123.fs.zip           │
+├─────────────────────────────────────────────────────────────────┤
+│ 📁 src/                                                         │
+│   📄 main.py (2.3 KB)                                          │
+│   📄 utils.py (1.1 KB)                                         │
+│ 📁 tests/                                                       │
+│   📄 test_main.py (3.2 KB)                                     │
+│ 📄 README.md (0.5 KB)                                          │
+├─────────────────────────────────────────────────────────────────┤
+│ [Selected: src/main.py]                                         │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ 1  def main():                                              │ │
+│ │ 2      print("Hello, world!")                               │ │
+│ │ 3                                                           │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Lazy Loading at Prompt Rendering Time
+
+Filesystem state is loaded **lazily** when the section's `filesystem` property
+is first accessed, not at section construction. This enables:
+
+1. **Lightweight session loading** — Session loads without reading large archives
+2. **Deferred initialization** — Backend created only when needed
+3. **Prompt rendering triggers load** — Filesystem available when tools execute
+
+### Lazy Backend Pattern
+
+```python
+class FilesystemSection(MarkdownSection):
+    def __init__(self, *, session: Session, snapshot_dir: Path | None = None) -> None:
+        self._session = session
+        self._snapshot_dir = snapshot_dir or Path(tempfile.gettempdir()) / "wink-fs-snapshots"
+        self._backend: Filesystem | None = None
+        self._backend_initialized = False
+
+        # Register hooks
+        session.register_snapshot_hook(
+            on_snapshot=self._on_snapshot,
+            on_rollback=self._on_rollback,
+        )
 
     @property
     def filesystem(self) -> Filesystem:
-        raise NotImplementedError
+        """Lazily initialize and return the filesystem backend."""
+        if not self._backend_initialized:
+            self._initialize_backend()
+            self._backend_initialized = True
+        assert self._backend is not None
+        return self._backend
+
+    def _initialize_backend(self) -> None:
+        """Create backend, restoring from snapshot if available."""
+        raise NotImplementedError  # Subclasses implement
 
 
 class VfsSection(FilesystemSection):
     def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
-        self._backend = InMemoryBackend(session, mounts)
-        super().__init__(
-            title="Virtual Filesystem",
-            key="vfs",
-            template=_VFS_TEMPLATE,
-            tools=FILESYSTEM_TOOLS,
-        )
+        super().__init__(session=session)
+        self._mounts = mounts
 
-    @property
-    def filesystem(self) -> Filesystem:
-        return self._backend
+    def _initialize_backend(self) -> None:
+        self._backend = InMemoryBackend(self._session, self._mounts)
+
+        # Check for existing snapshot to restore
+        ref = self._session.query(FilesystemSnapshotRef).latest()
+        if ref and ref.archive_path:
+            archive_path = self._resolve_archive_path(ref.archive_path)
+            if archive_path.exists():
+                self._backend.restore(archive_path)
 
 
 class PodmanSection(FilesystemSection):
     def __init__(self, *, session: Session, config: PodmanConfig) -> None:
-        self._container = _create_container(config)
+        super().__init__(session=session)
+        self._config = config
+        self._container: Container | None = None
+
+    def _initialize_backend(self) -> None:
+        # Container created lazily
+        self._container = _create_container(self._config)
         self._backend = ContainerBackend(self._container)
-        super().__init__(
-            title="Sandbox",
-            key="podman",
-            template=_PODMAN_TEMPLATE,
-            tools=(*FILESYSTEM_TOOLS, shell_tool, eval_tool),
-        )
 
-    @property
-    def filesystem(self) -> Filesystem:
-        return self._backend
-
-
-class WorkspaceSection(FilesystemSection):
-    def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
-        self._temp_dir = _create_workspace(mounts)
-        self._backend = HostBackend(self._temp_dir)
-        super().__init__(
-            title="Workspace",
-            key="workspace",
-            template=_WORKSPACE_TEMPLATE,
-            tools=(),  # SDK uses native tools
-        )
-
-    @property
-    def filesystem(self) -> Filesystem:
-        return self._backend
+        # Restore from snapshot if available
+        ref = self._session.query(FilesystemSnapshotRef).latest()
+        if ref and ref.archive_path:
+            archive_path = self._resolve_archive_path(ref.archive_path)
+            if archive_path.exists():
+                self._backend.restore(archive_path)
 ```
+
+### Load Timeline
+
+```
+Session.load("/path/to/session.jsonl")
+         │
+         └─► Slices restored (including FilesystemSnapshotRef)
+              But NO filesystem loaded yet
+
+
+section = VfsSection(session=session, mounts=mounts)
+         │
+         └─► Hooks registered, but backend NOT created yet
+
+
+prompt.render(params)
+         │
+         └─► Sections rendered, but filesystem NOT accessed
+
+
+adapter.evaluate(prompt, session=session)
+         │
+         └─► Tool invocation triggers context.filesystem access
+                   │
+                   └─► VfsSection.filesystem property called
+                            │
+                            └─► _initialize_backend()
+                                     │
+                                     ├─► Create InMemoryBackend
+                                     │
+                                     └─► Restore from abc123.fs.zip
+                                              │
+                                              └─► Backend now populated
+```
+
+### Benefits
+
+1. **Fast session load** — Loading a JSONL doesn't require reading potentially
+   large ZIP archives
+2. **Memory efficient** — Filesystem not in memory until needed
+3. **Resumable sessions** — Load session, inspect slices in `wink debug`,
+   then continue execution with filesystem restored on-demand
 
 ## Adapter Integration
 
@@ -689,7 +1081,7 @@ def test_delete(fs: Filesystem) -> None:
         fs.read("a/b.txt")
 
 def test_snapshot_restore(fs: Filesystem, tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.tar.gz"
+    snapshot_path = tmp_path / "snapshot.zip"
     fs.write("file.txt", "original")
     fs.snapshot(snapshot_path)
     fs.write("file.txt", "modified")
@@ -714,19 +1106,64 @@ Container backend tests are integration tests requiring Podman runtime.
 
 ## Summary
 
+### Backend Comparison
+
 | Aspect | InMemoryBackend | ContainerBackend | HostBackend |
 |--------|-----------------|------------------|-------------|
 | State location | Session slice (`InMemoryState`) | Container filesystem | Host temp directory |
-| Snapshot file | Optional (state in slice) | Required (tarball) | Required (tarball) |
-| Session coupling | Automatic via slice | Via `FilesystemSnapshot` path | Via `FilesystemSnapshot` path |
-| Rollback | `section.rollback()` | `section.rollback()` | `section.rollback()` |
+| Archive format | ZIP (same as others) | ZIP | ZIP |
+| Session coupling | Via hooks | Via hooks | Via hooks |
+| Lazy loading | Yes | Yes | Yes |
 
-**Key insight**: Session and filesystem snapshots are coupled. The section
-coordinates both via `section.snapshot()` and `section.rollback()`. Snapshot
-files are stored in temp directory by default; paths are recorded in the
-`FilesystemSnapshot` session slice.
+### Architecture Overview
 
-The `Filesystem` protocol provides eight methods: `read`, `write`, `delete`,
-`list`, `glob`, `grep`, `snapshot`, `restore`. Tool handlers access the
-filesystem via `context.filesystem`. Sections expose backends via a
-`filesystem` property and coordinate snapshot coupling.
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              Tool Layer                                  │
+│   ls, read_file, write_file, edit_file, glob, grep, rm                  │
+│                                  │                                       │
+│                       context.filesystem                                 │
+└──────────────────────────────────┬──────────────────────────────────────┘
+                                   │
+┌──────────────────────────────────┴──────────────────────────────────────┐
+│                         Filesystem Protocol                              │
+│   read, write, delete, list, glob, grep, snapshot, restore              │
+└──────────────────────────────────┬──────────────────────────────────────┘
+                                   │
+        ┌──────────────────────────┼──────────────────────────┐
+        ▼                          ▼                          ▼
+┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐
+│  InMemoryBackend  │   │  ContainerBackend │   │    HostBackend    │
+│                   │   │                   │   │                   │
+│ InMemoryState     │   │ podman exec       │   │ temp dir I/O      │
+│ session slice     │   │                   │   │                   │
+└───────────────────┘   └───────────────────┘   └───────────────────┘
+        │                          │                          │
+        └──────────────────────────┼──────────────────────────┘
+                                   │
+                          ZIP Archive Format
+                      (manifest.json + files/*)
+```
+
+### Key Design Decisions
+
+1. **Filesystem Protocol** — 8 methods: `read`, `write`, `delete`, `list`,
+   `glob`, `grep`, `snapshot`, `restore`
+
+2. **ToolContext carries filesystem** — Not `session.query()`, because
+   `Session.install()` only accepts frozen dataclass slices
+
+3. **Session hooks for coupling** — `session.register_snapshot_hook()` called
+   during section init; hooks fire on `session.snapshot()`/`rollback()`
+
+4. **ZIP archive format** — All backends produce identical ZIP structure with
+   `manifest.json` + `files/*`; enables inspection in any tool
+
+5. **FilesystemSnapshotRef slice** — Session stores relative path to ZIP;
+   `dump_session_tree` writes JSONL + adjacent ZIP
+
+6. **Lazy loading** — Backend created on first `section.filesystem` access;
+   restores from ZIP if `FilesystemSnapshotRef` present
+
+7. **wink debug integration** — New `/api/filesystem/*` routes expose archive
+   contents; UI shows file tree and content viewer
