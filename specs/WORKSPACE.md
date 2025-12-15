@@ -9,12 +9,15 @@ and workspace digest generation.
 
 ## Guiding Principles
 
-- **Sandbox first**: All execution happens in isolated environments with no
-  host disk or network access.
+- **Sandbox first**: Tool surfaces avoid host side effects by default. VFS is
+  in-memory; Podman runs with networking disabled; host filesystem access is
+  limited to explicit mounts.
 - **Predictable paths**: Normalized POSIX-style paths, ASCII-only, relative to
   session root.
 - **Single source of state**: Reducers own all mutations; handlers remain pure.
-- **VFS-compatible surface**: All backends expose the same tool interface.
+- **VFS-compatible surface**: Backends that provide file operations expose the
+  same VFS-style tools (`ls`, `read_file`, `write_file`, `edit_file`, `glob`,
+  `grep`, `rm`).
 
 ```mermaid
 flowchart TB
@@ -31,7 +34,9 @@ flowchart TB
         Edit["edit_file"]
         Glob["glob"]
         Grep["grep"]
-        Exec["execute"]
+        RM["rm"]
+        Shell["shell_execute"]
+        Eval["evaluate_python"]
     end
 
     subgraph State["Session State"]
@@ -49,7 +54,9 @@ flowchart TB
 
 ## Virtual Filesystem
 
-The VFS provides session-scoped file operations without touching the host disk.
+The VFS provides session-scoped file operations without writing to the host
+disk. Content can be hydrated from explicit host mounts at section
+construction time.
 
 ### Data Model
 
@@ -180,13 +187,6 @@ Environment variables:
 - `PODMAN_BASE_URL`, `PODMAN_IDENTITY`, `PODMAN_CONNECTION`
 - `WEAKINCENTIVES_CACHE` for overlay root
 
-### Subagent Isolation
-
-| Level | Session/Bus | Container |
-|-------|-------------|-----------|
-| NO_ISOLATION | Shared | Shared |
-| FULL_ISOLATION | Cloned | New container |
-
 ## Python Evaluation (ASTEval)
 
 `AstevalSection` provides sandboxed Python expression evaluation.
@@ -249,17 +249,21 @@ pip install weakincentives[asteval]
 ### Optimization Workflow
 
 ```python
-result = adapter.optimize(
-    prompt,
-    store_scope=OptimizationScope.SESSION,  # or GLOBAL
+from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
+from weakincentives.optimizers import OptimizationContext, PersistenceScope
+
+context = OptimizationContext(
+    adapter=adapter,
+    event_bus=session.event_bus,
     overrides_store=store,
     overrides_tag="v1",
-    session=session,
 )
+optimizer = WorkspaceDigestOptimizer(context, store_scope=PersistenceScope.SESSION)
+result = optimizer.optimize(prompt, session=session)
 ```
 
-`OptimizationScope.SESSION` stores in session slice only.
-`OptimizationScope.GLOBAL` persists to overrides store.
+`PersistenceScope.SESSION` stores in session slice only.
+`PersistenceScope.GLOBAL` persists to the overrides store.
 
 ### OptimizationResult
 
@@ -282,7 +286,7 @@ Specific to the workspace digest optimizer:
 class WorkspaceDigestResult:
     response: PromptResponse[object]
     digest: str
-    scope: OptimizationScope
+    scope: PersistenceScope
     section_key: str
 ```
 
@@ -291,14 +295,14 @@ class WorkspaceDigestResult:
 ```python
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
-from weakincentives.prompt import Prompt, MarkdownSection
-from weakincentives.contrib.tools import vfs, podman, asteval
+from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
+from weakincentives.contrib.tools import vfs, podman
 
 bus = InProcessEventBus()
 session = Session(bus=bus)
 
 # VFS-based prompt
-vfs_prompt = Prompt(
+vfs_template = PromptTemplate(
     ns="agents/workspace",
     key="vfs-tools",
     sections=[
@@ -313,9 +317,10 @@ vfs_prompt = Prompt(
         ),
     ],
 )
+vfs_prompt = Prompt(vfs_template)
 
 # Podman-based prompt
-podman_prompt = Prompt(
+podman_template = PromptTemplate(
     ns="agents/workspace",
     key="podman-tools",
     sections=[
@@ -327,6 +332,7 @@ podman_prompt = Prompt(
         podman.PodmanSandboxSection(session=session),
     ],
 )
+podman_prompt = Prompt(podman_template)
 
 # After tool invocations
 filesystem = session.query(vfs.VirtualFileSystem).latest()

@@ -23,7 +23,7 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        bus: EventBus,
+        bus: ControlBus,
         config: MainLoopConfig | None = None,
     ) -> None: ...
 
@@ -33,7 +33,7 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
     @abstractmethod
     def create_session(self) -> Session: ...
 
-    def execute(self, request: UserRequestT) -> PromptResponse[OutputT]: ...
+    def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Session]: ...
 ```
 
 ### Events
@@ -90,32 +90,34 @@ flowchart LR
 1. Create session via `create_session()`
 1. Create prompt via `create_prompt(request)`
 1. Evaluate with adapter
-1. On `VisibilityExpansionRequired`: accumulate overrides, retry step 4
+1. On `VisibilityExpansionRequired`: write overrides into session state, retry step 4
 1. Publish `MainLoopCompleted` or `MainLoopFailed`
 
 ### Visibility Handling
 
 ```python
-def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
+def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Session]:
     session = self.create_session()
     prompt = self.create_prompt(request)
-    visibility_overrides: dict[SectionPath, SectionVisibility] = {}
+    budget_tracker = BudgetTracker(budget=self._effective_budget) if self._effective_budget else None
 
     while True:
         try:
-            return self._adapter.evaluate(
+            response = self._adapter.evaluate(
                 prompt,
-                bus=self._bus,
                 session=session,
-                visibility_overrides=visibility_overrides,
-                budget=self._effective_budget,
                 deadline=self._effective_deadline,
+                budget_tracker=budget_tracker,
             )
+            return response, session
         except VisibilityExpansionRequired as e:
-            visibility_overrides.update(e.requested_overrides)
+            for path, visibility in e.requested_overrides.items():
+                session.mutate(VisibilityOverrides).dispatch(
+                    SetVisibilityOverride(path=path, visibility=visibility)
+                )
 ```
 
-Overrides accumulate; session persists across retries; prompt is not recreated.
+Overrides are stored in the session; session persists across retries; prompt is not recreated.
 
 ## Usage
 
@@ -124,8 +126,7 @@ Overrides accumulate; session persists across retries; prompt is not recreated.
 ```python
 loop = MyMainLoop(adapter=adapter, bus=bus)
 
-# Subscribe to concrete type (generic params are compile-time only)
-bus.subscribe(MainLoopRequest, loop.handle_request)
+# MainLoop subscribes to MainLoopRequest in __init__
 
 # With request-specific constraints
 bus.publish(MainLoopRequest(
@@ -142,14 +143,14 @@ in the handler or use separate buses.
 ### Direct
 
 ```python
-response = loop.execute(MyRequest(...))
+response, session = loop.execute(MyRequest(...))
 ```
 
 ## Implementation
 
 ```python
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
-    def __init__(self, *, adapter: ProviderAdapter[ReviewResult], bus: EventBus) -> None:
+    def __init__(self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlBus) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._template = PromptTemplate[ReviewResult](
             ns="reviews",
@@ -212,7 +213,7 @@ optimization runs automatically.
 
 ```python
 def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
-    if not self._session.query(WorkspaceDigest).exists():
+    if self._session.query(WorkspaceDigest).latest() is None:
         self._run_optimization()
     # ... proceed with evaluation
 ```

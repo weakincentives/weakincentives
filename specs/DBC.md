@@ -109,19 +109,18 @@ class Account:
 `@pure` documents that a function is side-effect free. During tests, the
 framework wraps the target callable and instruments it to ensure:
 
-- It reads no global mutable state (best-effort via snapshot comparison of
-  provided globals the function touches).
-- It writes no attributes on arguments or global singletons.
-- It performs no I/O through tracked modules (e.g., `os`, `pathlib`, network
-  sockets).
+- It does not mutate positional or keyword arguments (best-effort via
+  `deepcopy()` + equality comparisons; non-copyable values are skipped).
+- It does not perform a small set of common side effects by calling
+  `builtins.open`, `Path.write_text`, `Path.write_bytes`, or `logging` (enforced
+  by monkeypatching these call sites to raise `AssertionError`).
 
 Instrumentation monkeypatches common side-effect primitives (`open`,
 `Path.write_text`, `Path.write_bytes`, `logging.Logger._log`) to raise when
 invoked from a pure function context. The focus is to catch accidental side
-effects in helper utilities, not to provide complete effect tracking. Deepcopy
-failures fall back to a sentinel, so non-copyable objects are tolerated but not
-validated for mutation. Callers should keep purity contracts narrow and local to
-internal helpers rather than external entry points.
+effects in helper utilities, not to provide complete effect tracking. Callers
+should keep purity contracts narrow and local to internal helpers rather than
+external entry points.
 
 ## Runtime Behavior
 
@@ -196,11 +195,3 @@ fall below zero after adjustments.
 - Snapshot or log-based tests ensure diagnostic messages are actionable.
 - Include regression tests for decorator stacking, inheritance with invariants,
   and async compatibility where relevant.
-
-## Future Extensions
-
-- Add async-aware variants (`async_require`, etc.) if adoption grows.
-- Provide context managers for temporarily disabling contract checks during
-  specific test flows (e.g., fuzzing that intentionally violates contracts).
-- Integrate with static analyzers by emitting metadata describing declared
-  preconditions and postconditions.

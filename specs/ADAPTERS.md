@@ -30,11 +30,8 @@ class ProviderAdapter(ABC):
         self,
         prompt: Prompt[OutputT],
         *,
-        parse_output: bool = True,
-        bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
-        visibility_overrides: Mapping[SectionPath, SectionVisibility] | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]: ...
@@ -43,13 +40,16 @@ class ProviderAdapter(ABC):
 **Parameters:**
 
 - `prompt` - The prompt template to evaluate
-- `parse_output` - Whether to parse structured output from response
-- `bus` - Event bus for telemetry
 - `session` - Session for state management
 - `deadline` - Optional wall-clock deadline
-- `visibility_overrides` - Section visibility controls for progressive disclosure
 - `budget` - Optional token/time budget limits
 - `budget_tracker` - Optional shared tracker for budget consumption
+
+**Notes:**
+
+- Telemetry is published via `session.event_bus`.
+- Visibility overrides are managed via session state (`VisibilityOverrides`),
+  not passed to adapters directly.
 
 ### Configuration
 
@@ -79,7 +79,7 @@ fields are included in request payloads.
 1. **Call** - Issue the provider request with throttle protection and deadline
    checks.
 1. **Parse** - Extract assistant content and dispatch tool calls.
-1. **Emit** - Publish `PromptRendered` and `PromptExecuted` events.
+1. **Emit** - Publish `PromptRendered` and `PromptExecuted` events to `session.event_bus`.
 
 ## Provider Implementations
 
@@ -194,21 +194,22 @@ Adapters implement reactive throttling to protect upstream services.
 
 ```python
 from weakincentives.adapters.shared import ThrottlePolicy, new_throttle_policy
+from datetime import timedelta
 
 policy = new_throttle_policy(
     max_attempts=5,
-    base_delay_ms=500,
-    max_delay_ms=8000,
-    max_total_delay_ms=30000,
+    base_delay=timedelta(milliseconds=500),
+    max_delay=timedelta(seconds=8),
+    max_total_delay=timedelta(seconds=30),
 )
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `max_attempts` | `5` | Maximum retry attempts |
-| `base_delay_ms` | `500` | Initial backoff delay |
-| `max_delay_ms` | `8000` | Cap on individual delays |
-| `max_total_delay_ms` | `30000` | Total time budget |
+| `base_delay` | `500ms` | Initial backoff delay |
+| `max_delay` | `8s` | Cap on individual delays |
+| `max_total_delay` | `30s` | Total time budget |
 
 ### Signal Classification
 
@@ -233,7 +234,7 @@ policy = new_throttle_policy(
 ```python
 @dataclass(slots=True)
 class ThrottleDetails:
-    kind: ThrottleKind  # RATE_LIMIT, QUOTA_EXHAUSTED, TIMEOUT
+    kind: ThrottleKind  # rate_limit, quota_exhausted, timeout, unknown
     retry_after: timedelta | None
     attempts: int
     retry_safe: bool
@@ -287,7 +288,8 @@ flowchart LR
   keys).
 - Dataclass parsing uses `serde.parse`. Validation errors produce
   `ToolResult(success=False)` rather than raising.
-- `ToolContext` exposes prompt, adapter, session, event bus, and deadline.
+- `ToolContext` exposes prompt, adapter, session, and deadline. Tool handlers
+  can access `session.event_bus` when they need to publish telemetry.
 - Handlers run synchronously. Exceptions are logged and converted to failed
   results.
 - Before event emission, the adapter captures a session snapshot. On publish
@@ -331,7 +333,6 @@ tracker = BudgetTracker(budget)
 
 response = adapter.evaluate(
     prompt,
-    bus=bus,
     session=session,
     budget=budget,
     budget_tracker=tracker,
@@ -343,7 +344,7 @@ at defined checkpoints. Budget tracking is thread-safe for concurrent execution.
 
 ## Telemetry
 
-Adapters emit events through the provided `EventBus`:
+Adapters emit events through `session.event_bus`:
 
 | Event | When | Payload |
 |-------|------|---------|

@@ -61,7 +61,7 @@ class TaskExample(Section[TaskExampleParamsT]):
         *,
         key: str,
         objective: str,
-        outcome: str,
+        outcome: str | SupportsDataclass,
         steps: Sequence[TaskStep[Any, Any]],
         title: str | None = None,
         **kwargs: object,
@@ -74,14 +74,14 @@ class TaskExample(Section[TaskExampleParamsT]):
 |----------|----------|-------------|
 | `key` | Yes | Section identifier (e.g., `"example-auth-review"`) |
 | `objective` | Yes | The task goal (1-500 ASCII chars) |
-| `outcome` | Yes | The expected result (1-500 ASCII chars) |
+| `outcome` | Yes | Expected outcome. For prompts without structured output, this must be a `str`. For prompts with structured output, this must be an instance of the prompt's output dataclass type. |
 | `steps` | Yes | Non-empty ordered sequence of `TaskStep` instances |
 | `title` | No | Display title; defaults to truncated objective |
 
 **Section Properties:**
 
 - `objective: str` - The task goal
-- `outcome: str` - The expected result
+- `outcome: str | SupportsDataclass` - The expected outcome payload
 - `steps: tuple[TaskStep, ...]` - Ordered tool invocation sequence
 
 ### TaskExamplesSection
@@ -170,12 +170,9 @@ assert examples_section.children == (auth_example, perf_example)
 All validation occurs at `PromptTemplate` construction time. Invalid examples
 raise `PromptValidationError` immediately.
 
-### Objective and Outcome Validation
+### Objective Validation
 
-- Must be 1-500 ASCII characters (same rules as `ToolExample.description` but
-  with extended limit for richer context)
-- Must not be blank after stripping whitespace
-- Must contain only printable ASCII characters
+- `objective` must be 1-500 printable ASCII characters (stripped).
 
 ```python
 # Valid
@@ -194,6 +191,14 @@ TaskExample(
     steps=[...],
 )
 ```
+
+### Outcome Type Validation
+
+Outcome payloads are validated against the prompt's output declaration:
+
+- If the prompt has **no structured output**, `outcome` must be a `str`.
+- If the prompt declares structured output type `T`, `outcome` must be an
+  instance of `T` (exact type match).
 
 ### Steps Validation
 
@@ -552,10 +557,10 @@ advanced_example = TaskExample[ExampleParams](
 
 ### Cloning
 
-Both section types support cloning with session/bus rewiring:
+Both section types support cloning (deep copy of children and default params):
 
 ```python
-cloned_examples = examples_section.clone(session=new_session, bus=new_bus)
+cloned_examples = examples_section.clone()
 
 # Children are recursively cloned
 assert cloned_examples.children[0] is not examples_section.children[0]
@@ -577,8 +582,7 @@ All validation errors raise `PromptValidationError` with:
 |----------|---------------|
 | Empty objective | `"objective must not be empty"` |
 | Objective too long | `"objective must be <= 500 characters"` |
-| Empty outcome | `"outcome must not be empty"` |
-| Outcome too long | `"outcome must be <= 500 characters"` |
+| Outcome type mismatch | `"Task example outcome type mismatch. Expected: X, got: Y."` |
 | Empty steps | `"steps must not be empty"` |
 | Unknown tool name | `"Unknown tool \"X\" in task example step N"` |
 | Input type mismatch | `"Task example step N input type mismatch for tool \"X\""` |
@@ -716,24 +720,6 @@ template = PromptTemplate(
     ],
 )
 ```
-
-## Implementation Checklist
-
-- [ ] `TaskStep` frozen dataclass with `tool_name` and `example` fields
-- [ ] `TaskExample` extending `Section` with validation in `__init__`
-- [ ] `TaskExamplesSection` extending `Section` with examples validation
-- [ ] Objective/outcome validation (1-500 ASCII chars, non-blank)
-- [ ] Steps non-empty validation
-- [ ] Tool name resolution against prompt's tool registry
-- [ ] Type coherence validation reusing `Tool._validate_examples` logic
-- [ ] Examples type validation (must be `TaskExample`)
-- [ ] Markdown rendering with nested section numbering
-- [ ] Progressive disclosure support for both section types
-- [ ] Conditional rendering via `enabled` predicate
-- [ ] `clone()` implementation with recursive child cloning
-- [ ] Integration tests for validation error messages
-- [ ] Unit tests for rendering output format
-- [ ] Unit tests for section hierarchy traversal
 
 ## Limitations
 

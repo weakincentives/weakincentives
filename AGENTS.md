@@ -85,8 +85,6 @@ a goal at any time.
   dataclass models or serialization.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
   modules.
-- **HOSTED_TOOLS.md**: Provider-executed tools (web search, code interpreter)—
-  when integrating provider-side capabilities.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.

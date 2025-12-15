@@ -8,10 +8,10 @@ modules; callers do not consume it directly. The goals are to:
   modules;
 - make downstream collectors and CLI presentation code resilient to module-level
   change by reusing common field names; and
-- keep loggers module scoped via `logging.getLogger(__name__)` so signals stay
-  attributable without a global registry.
+- keep loggers module scoped via `weakincentives.runtime.logging.get_logger(__name__)`
+  so signals stay attributable without a global registry.
 
-Future changes SHOULD extend this file first to capture intent before altering
+Changes SHOULD extend this file first to capture intent before altering
 logger usage. Treat the schemas and conventions below as the single source of
 truth for the in-repo logging framework.
 
@@ -50,15 +50,17 @@ message wording or add fields without surprising internal consumers.
 ## Current Implementation (Module-Level Loggers)
 
 Runtime modules attach to Python's standard library logging without custom
-handlers. The table below captures the current surface area and should be kept
-in sync with code changes.
+handlers by default, using `StructuredLogger` (a `logging.LoggerAdapter`) to
+enforce an `{event, context}` schema. The table below captures the current
+surface area and should be kept in sync with code changes.
 
 | Module | Logger Variable | Level | Event Name | Context Fields |
 | --- | --- | --- | --- | --- |
 | `runtime/events/__init__.py` | `logger` | `exception` | `event_delivery_failed` | `event_type`, `handler` |
 | `runtime/session/session.py` | `logger` | `exception` | `session_reducer_failed` | `reducer`, `data_type`, `slice_type` |
+| `runtime/session/session.py` | `logger` | `exception` | `session_observer_failed` | `observer`, `slice_type` |
 | `adapters/shared.py` | `log` | `exception` | `tool_handler_exception` | `provider_payload` |
-| `adapters/shared.py` | `log` | `info` | `prompt_execution_started` | `tool_count`, `parse_output` |
+| `adapters/shared.py` | `log` | `info` | `prompt_execution_started` | `tool_count` |
 | `adapters/shared.py` | `log` | `info` | `prompt_execution_succeeded` | `tool_count`, `has_output`, `text_length`, `structured_output`, `handler_count` |
 | `adapters/shared.py` | `log` | `error` | `prompt_execution_publish_failed` | `failure_count`, `failed_handlers` |
 | `adapters/shared.py` | `log` | `debug` | `prompt_rendered_published` | `handler_count` |
@@ -75,7 +77,7 @@ in sync with code changes.
 | `prompt/overrides/local_store.py` | `_LOGGER` | `debug` | `prompt_override_missing` | `ns`, `prompt_key`, `tag` |
 | `prompt/overrides/local_store.py` | `_LOGGER` | `debug` | `prompt_override_empty` | `ns`, `prompt_key`, `tag` |
 | `prompt/overrides/local_store.py` | `_LOGGER` | `debug` | `prompt_override_delete_missing` | `ns`, `prompt_key`, `tag` |
-| `tools/asteval.py` | `_LOGGER` | `debug` | `asteval_run` | `stdout_len`, `stderr_len`, `write_count`, `code_preview` |
+| `contrib/tools/asteval.py` | `_LOGGER` | `debug` | `asteval_run` | `stdout_len`, `stderr_len`, `write_count`, `code_preview` |
 
 ### Module Notes and Caveats
 
@@ -109,8 +111,6 @@ available:
   prompt lifecycle event (e.g., publish failures, adapter execution).
 - `adapter`: Adapter identifier for events emitted from provider adapters.
 - `tool`: Tool identifier when reporting tool invocation outcomes.
-- `mode`: Execution mode for tools that support multiple behaviors (e.g.,
-  `"expr"` vs `"statements"` in the asteval tool).
 
 When a module cannot provide a field (for example, there is no active prompt),
 omit it rather than emitting empty placeholders.
@@ -142,12 +142,11 @@ full context payload.
 ```python
 logger.info(
     "Tool execution completed",
-    extra={
-        "event": "tool.run",
+    event="tool.run",
+    context={
         "prompt_name": prompt.name,
         "adapter": adapter_id,
         "tool": tool.name,
-        "mode": tool.mode,
     },
 )
 ```
@@ -168,11 +167,11 @@ fields propagate alongside the traceback.
   `PromptOverridesError`; DEBUG logs are available to help diagnose stale or
   missing overrides.
 - Tool executions that succeed log a structured DEBUG record (`event`
-  `"asteval.run"`) so telemetry pipelines can aggregate success metrics.
+  `"asteval_run"`) so telemetry pipelines can aggregate success metrics.
 
 ## Backwards-Compatibility & Maintainer Review
 
-- Existing third-party integrations may parse `event="asteval.run"` and the
+- Existing third-party integrations may parse `event="asteval_run"` and the
   accompanying fields; maintain backwards compatibility when renaming or
   expanding this payload.
 - Introduce new structured events by adding an `event` key and documenting the

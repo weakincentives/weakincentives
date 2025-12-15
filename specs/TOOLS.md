@@ -75,7 +75,7 @@ def handle_tool(
 @dataclass
 class ToolResult(Generic[PayloadT]):
     message: str                           # Text forwarded to model
-    value: PayloadT | None = None          # Typed payload
+    value: PayloadT | None                 # Typed payload (may be None)
     success: bool = True                   # Normal vs. failure
     exclude_value_from_context: bool = False  # Hide from provider
 ```
@@ -100,10 +100,11 @@ class ToolContext:
     rendered_prompt: RenderedPromptProtocol[Any] | None
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
-    event_bus: EventBus
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
 ```
+
+Tool handlers that need an event bus should publish via `context.session.event_bus`.
 
 ### ToolExample
 
@@ -151,7 +152,7 @@ Adapters drive tool invocation using a shared dispatcher:
 1. **Deadline check** - Refuse invocation if deadline elapsed
 1. **Context construction** - Build `ToolContext` from active state
 1. **Handler execution** - Run with params/context pair
-1. **Telemetry** - Publish `ToolInvoked` event
+1. **Telemetry** - Publish `ToolInvoked` event to `session.event_bus`
 1. **Response assembly** - Return result to calling loop
 
 ### Exception Handling
@@ -243,9 +244,9 @@ Strategies tune the instructional copy for different reasoning styles.
 
 ```python
 class PlanningStrategy(Enum):
-    REACT = auto()
-    PLAN_ACT_REFLECT = auto()
-    GOAL_DECOMPOSE_ROUTE_SYNTHESISE = auto()
+    REACT = "react"
+    PLAN_ACT_REFLECT = "plan_act_reflect"
+    GOAL_DECOMPOSE_ROUTE_SYNTHESISE = "goal_decompose_route_synthesise"
 ```
 
 ### Usage
@@ -315,7 +316,7 @@ lookup_tool = Tool[LookupParams, LookupResult](
     ),
 )
 
-prompt = Prompt(
+template = PromptTemplate(
     ns="examples/tooling",
     key="demo",
     sections=[
@@ -327,6 +328,7 @@ prompt = Prompt(
         ),
     ],
 )
+prompt = Prompt(template)
 ```
 
 ## Failure Semantics

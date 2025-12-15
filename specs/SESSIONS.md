@@ -15,8 +15,8 @@ event emission and subscription, deadline enforcement, and budget tracking.
   state easy to reconstruct.
 - **Publisher isolation**: Event dispatch is fire-and-forget; handler failures
   are logged and isolated.
-- **No implicit globals**: Callers must provide an `EventBus` instance per
-  evaluation.
+- **Explicit buses**: Callers may provide an `EventBus`. When omitted, `Session`
+  creates an in-process bus for telemetry.
 
 ```mermaid
 flowchart TB
@@ -72,7 +72,7 @@ class Session:
     @property
     def children(self) -> tuple[Session, ...]: ...
     @property
-    def tags(self) -> Mapping[object, object]: ...
+    def tags(self) -> Mapping[str, str]: ...
 
     def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]: ...
 

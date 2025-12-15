@@ -297,28 +297,22 @@ class WorkspaceDigestResult:
 
 ```python
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
+from weakincentives.prompt import Prompt
 
 store = LocalPromptOverridesStore()
 
-# Render with overrides
-response = adapter.evaluate(
-    prompt,
-    params,
-    bus=bus,
-    session=session,
-    overrides_store=store,
-    overrides_tag="stable",
-)
+prompt = Prompt(template, overrides_store=store, overrides_tag="stable").bind(params)
+response = adapter.evaluate(prompt, session=session)
 ```
 
 ### Running Optimization
 
 ```python
 from weakincentives.optimizers import (
-    WorkspaceDigestOptimizer,
     OptimizationContext,
     PersistenceScope,
 )
+from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
 
 context = OptimizationContext(
     adapter=adapter,
@@ -340,31 +334,6 @@ print(f"Digest stored at section: {result.section_key}")
 ```python
 # Bootstrap override file from current prompt
 override = store.seed(prompt, tag="v1")
-```
-
-## Future Optimizers
-
-The abstraction supports diverse algorithms:
-
-**PromptCompressor** - Reduce token usage:
-
-```python
-class PromptCompressor(BasePromptOptimizer[object, CompressionResult]):
-    """Summarize verbose sections to reduce tokens."""
-```
-
-**FewShotSynthesizer** - Generate tool examples:
-
-```python
-class FewShotSynthesizer(BasePromptOptimizer[object, tuple[FewShotResult, ...]]):
-    """Generate representative tool invocation examples."""
-```
-
-**InstructionRefiner** - Improve instructions:
-
-```python
-class InstructionRefiner(BasePromptOptimizer[object, tuple[RefinementResult, ...]]):
-    """Refine section instructions based on model feedback."""
 ```
 
 ## Validation Rules

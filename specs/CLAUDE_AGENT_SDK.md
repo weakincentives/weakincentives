@@ -218,7 +218,8 @@ adapter = ClaudeAgentSDKAdapter(
             ),
             sandbox=SandboxConfig(
                 enabled=True,
-                excluded_commands=("docker",),  # Allow docker commands
+                excluded_commands=("docker",),
+                allow_unsandboxed_commands=True,  # Allow docker outside sandbox
             ),
         ),
     ),
@@ -313,7 +314,7 @@ flowchart TB
     end
 
     subgraph SDK["Claude Agent SDK"]
-        Env["env={HOME: ephemeral}<br/>setting_sources=[]"]
+        Env["env={HOME: ephemeral}<br/>setting_sources=[\"user\"]"]
         CLI["Claude Code CLI"]
     end
 
@@ -328,7 +329,7 @@ flowchart TB
 | Guarantee | Mechanism |
 | ------------------------ | -------------------------------------------------- |
 | No access to `~/.claude` | HOME redirected to ephemeral directory |
-| No host credentials | `setting_sources=[]` prevents config file loading |
+| No host credentials | HOME redirected + env filtering + ephemeral `.claude/settings.json` |
 | Network restrictions | OS sandbox enforces domain allowlist |
 | Filesystem isolation | Sandbox restricts access to workspace only |
 | Clean environment | Sensitive env vars filtered by default |

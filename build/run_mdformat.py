@@ -43,7 +43,10 @@ def _collect_markdown_files(root: Path) -> list[Path]:
         if EXCLUDED_PARTS.intersection(path.parts):
             continue
 
-        files.append(root / path)
+        candidate = root / path
+        if not candidate.exists():
+            continue
+        files.append(candidate)
 
     return sorted(files)
 

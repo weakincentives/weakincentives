@@ -139,55 +139,22 @@ to provide thread-based synchronization only.
   (shared session and bus). If callers spawn isolated sessions per thread, they
   must handle reconciliation manually.
 
-## Target Guarantees
+## Guarantees
 
-1. Multiple threads must be able to register event handlers and publish events
-   concurrently without corrupting the bus state or dropping deliveries.
-1. Session state transitions must be atomic per reducer invocation. Reducers
-   should observe a consistent snapshot of their slice, and readers should see
-   completed updates.
-1. File-backed prompt override operations must be safe when multiple threads
-   seed or update overrides for the same prompt.
-1. Example orchestration classes must not corrupt their history buffers or cause
-   inconsistent console output when multiple threads publish tool events.
+- `InProcessEventBus` is safe for concurrent `subscribe`, `unsubscribe`, and
+  `publish` calls. It snapshots the handler list under an `RLock` before
+  delivering events.
+- `Session` protects reducer registration, state mutation, and snapshot capture
+  behind an `RLock` so slice updates are atomic per reducer application.
+- `LocalPromptOverridesStore` is safe within a single process: root resolution
+  and per-file operations are guarded by locks, and writes use temp + rename.
 
-## Implemented Synchronization
+## Non-Guarantees
 
-### Event Bus
-
-- `threading.RLock` guards `_handlers` mutations.
-- Handler snapshots are taken under the lock before delivery to avoid holding
-  the lock while handlers run.
-- Both `subscribe` and `unsubscribe` are supported and thread-safe.
-- Handlers are expected to be fast; no additional thread pool is used.
-
-### Session
-
-- `threading.RLock` protects `_reducers` and `_state`. All read/modify/write
-  operations acquire the lock.
-- Copy-on-write patterns take the copy inside the critical section.
-- `_attach_to_bus` uses a flag to prevent duplicate handler registration.
-
-### LocalPromptOverridesStore
-
-- `_root` lazy initialization is guarded by a lock.
-- Per-file locks serialize file operations per override path.
-- Atomic file writes use temporary files with locking.
-
-### Code Review Sessions
-
-- When printing to stdout from event handlers, serialize writes or route through
-  the structured logger so output from concurrent publishers does not interleave.
-- Verify that prompt override seeding runs once per session even if multiple
-  threads construct review sessions.
-
-### Testing Strategy
-
-- Add unit tests that spin up threads publishing tool events concurrently to a
-  shared `Session` and assert that all reducers observe the expected counts.
-- Introduce stress tests for `LocalPromptOverridesStore.seed` that
-  call it concurrently and validate the resulting file contents.
-
-Implementing the changes above will let adapters safely share a single session
-and event bus across worker threads, unblock background agents, and document the
-remaining concurrency expectations for contributors.
+- User-provided event handlers and tool handlers are not synchronized by the
+  framework; callers must add their own coordination if they publish from
+  multiple threads.
+- Example orchestration code (e.g., interactive REPL loops) may keep mutable
+  state and is not guaranteed safe under concurrent publishes.
+- The override store does not implement inter-process locking; concurrent
+  writers from multiple processes can race.

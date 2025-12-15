@@ -83,7 +83,9 @@ rendered = prompt.render()
 - `ns` and `key` are required and non-empty.
 - The `(ns, key)` pair identifies a prompt for versioning and overrides.
 - Section keys must match: `^[a-z0-9][a-z0-9._-]{0,63}$`
-- Duplicate parameter types are allowed; instances fan out to matching sections.
+- `Prompt.bind()` maintains at most one bound instance per dataclass type.
+  Rebinding the same type replaces the previous value; providing the same type
+  more than once in a single `bind()` call is rejected during render.
 
 ### Section
 
@@ -123,9 +125,9 @@ tone_section = MarkdownSection[ToneParams](
 
 ## Rendering
 
-`Prompt.render` accepts dataclass instances as positional arguments matched by
-type. Rendering walks the section tree depth-first and produces markdown with
-deterministic headings.
+`Prompt.bind()` collects dataclass instances keyed by type. `Prompt.render()`
+renders using the currently bound parameters, walking the section tree
+depth-first and producing markdown with deterministic headings.
 
 ### Heading Levels
 
@@ -179,13 +181,14 @@ class Summary:
     title: str
     gist: str
 
-prompt = Prompt[Summary](...)
+template = PromptTemplate[Summary](...)
+prompt = Prompt(template)
 ```
 
 ### Declaration
 
-- `Prompt[T]` - JSON object output matching dataclass `T`
-- `Prompt[list[T]]` - JSON array of objects matching `T`
+- `PromptTemplate[T]` - JSON object output matching dataclass `T`
+- `PromptTemplate[list[T]]` - JSON array of objects matching `T`
 - Non-dataclass types raise `PromptValidationError`
 
 Providers must support native structured outputs (JSON schema response format)
@@ -206,7 +209,7 @@ Failures raise `OutputParseError` with the raw response attached.
 ### Configuration
 
 ```python
-prompt = Prompt[Output](
+template = PromptTemplate[Output](
     ...,
     allow_extra_keys=False,  # Default: reject unknown keys
 )
@@ -259,16 +262,17 @@ class VisibilityExpansionRequired(PromptError):
 ### Caller Pattern
 
 ```python
-visibility_overrides = {}
 prompt = Prompt(template).bind(*params)
 
 while True:
     try:
-        rendered = prompt.render(visibility_overrides=visibility_overrides)
-        response = adapter.evaluate(prompt, session=session, bus=bus)
+        response = adapter.evaluate(prompt, session=session)
         break
     except VisibilityExpansionRequired as e:
-        visibility_overrides.update(e.requested_overrides)
+        for path, visibility in e.requested_overrides.items():
+            session.mutate(VisibilityOverrides).dispatch(
+                SetVisibilityOverride(path=path, visibility=visibility)
+            )
 ```
 
 ### Summary Suffix
