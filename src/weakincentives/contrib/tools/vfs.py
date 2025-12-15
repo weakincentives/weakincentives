@@ -28,13 +28,7 @@ from ...errors import ToolValidationError
 from ...prompt import SupportsDataclass, SupportsToolResult
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
-from ...runtime.session import (
-    ReducerContextProtocol,
-    ReducerEvent,
-    Session,
-    TypedReducer,
-    replace_latest,
-)
+from ...runtime.session import Session, reducer
 from ._context import ensure_context_uses_session
 
 FileEncoding = Literal["utf-8"]
@@ -114,6 +108,58 @@ class VfsFile:
 
 
 @FrozenDataclass()
+class WriteFile:
+    path: VfsPath = field(
+        metadata={"description": "Destination file path being written inside the VFS."}
+    )
+    content: str = field(
+        metadata={
+            "description": (
+                "UTF-8 payload that will be persisted to the target file after validation."
+            )
+        }
+    )
+    mode: WriteMode = field(
+        default="create",
+        metadata={
+            "description": (
+                "Write strategy describing whether the file is newly created, overwritten, or appended."
+            )
+        },
+    )
+    encoding: FileEncoding = field(
+        default=_DEFAULT_ENCODING,
+        metadata={
+            "description": (
+                "Codec used to encode the content when persisting it to the virtual filesystem."
+            )
+        },
+    )
+
+    def render(self) -> str:
+        path_label = _format_path(self.path)
+        byte_count = len(self.content.encode(self.encoding))
+        header = (
+            f"{path_label} - mode {self.mode}, {byte_count} bytes ({self.encoding})"
+        )
+        body = self.content or "<empty>"
+        return f"{header}\n\n{body}"
+
+
+@FrozenDataclass()
+class DeleteEntry:
+    path: VfsPath = field(
+        metadata={
+            "description": "Path of the file or directory slated for removal from the VFS."
+        }
+    )
+
+    def render(self) -> str:
+        path_label = _format_path(self.path)
+        return f"Removed entries under {path_label}"
+
+
+@FrozenDataclass()
 class VirtualFileSystem:
     """Immutable snapshot of the virtual filesystem state."""
 
@@ -126,6 +172,53 @@ class VirtualFileSystem:
             )
         },
     )
+
+    @reducer(on=WriteFile)
+    def handle_write(self, event: WriteFile) -> VirtualFileSystem:
+        """Handle file write operations (create, overwrite, append)."""
+        timestamp = _now()
+        files = list(self.files)
+        existing_index = _index_of(files, event.path)
+        existing = files[existing_index] if existing_index is not None else None
+        if event.mode == "append" and existing is not None:
+            content = existing.content + event.content
+            created_at = existing.created_at
+            version = existing.version + 1
+        elif existing is not None:
+            content = event.content
+            created_at = existing.created_at
+            version = existing.version + 1
+        else:
+            content = event.content
+            created_at = timestamp
+            version = 1
+        size = len(content.encode(_DEFAULT_ENCODING))
+        updated_file = VfsFile(
+            path=event.path,
+            content=content,
+            encoding=_DEFAULT_ENCODING,
+            size_bytes=size,
+            version=version,
+            created_at=_truncate_to_milliseconds(created_at),
+            updated_at=_truncate_to_milliseconds(timestamp),
+        )
+        if existing_index is not None:
+            del files[existing_index]
+        files.append(updated_file)
+        files.sort(key=lambda file: file.path.segments)
+        return VirtualFileSystem(files=tuple(files))
+
+    @reducer(on=DeleteEntry)
+    def handle_delete(self, event: DeleteEntry) -> VirtualFileSystem:
+        """Handle file/directory deletion."""
+        target = event.path.segments
+        files = [
+            file
+            for file in self.files
+            if not _is_path_prefix(file.path.segments, target)
+        ]
+        files.sort(key=lambda file: file.path.segments)
+        return VirtualFileSystem(files=tuple(files))
 
 
 @FrozenDataclass()
@@ -472,58 +565,6 @@ class ReadFile:
 
 
 @FrozenDataclass()
-class WriteFile:
-    path: VfsPath = field(
-        metadata={"description": "Destination file path being written inside the VFS."}
-    )
-    content: str = field(
-        metadata={
-            "description": (
-                "UTF-8 payload that will be persisted to the target file after validation."
-            )
-        }
-    )
-    mode: WriteMode = field(
-        default="create",
-        metadata={
-            "description": (
-                "Write strategy describing whether the file is newly created, overwritten, or appended."
-            )
-        },
-    )
-    encoding: FileEncoding = field(
-        default=_DEFAULT_ENCODING,
-        metadata={
-            "description": (
-                "Codec used to encode the content when persisting it to the virtual filesystem."
-            )
-        },
-    )
-
-    def render(self) -> str:
-        path_label = _format_path(self.path)
-        byte_count = len(self.content.encode(self.encoding))
-        header = (
-            f"{path_label} - mode {self.mode}, {byte_count} bytes ({self.encoding})"
-        )
-        body = self.content or "<empty>"
-        return f"{header}\n\n{body}"
-
-
-@FrozenDataclass()
-class DeleteEntry:
-    path: VfsPath = field(
-        metadata={
-            "description": "Path of the file or directory slated for removal from the VFS."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = _format_path(self.path)
-        return f"Removed entries under {path_label}"
-
-
-@FrozenDataclass()
 class HostMount:
     host_path: str = field(
         metadata={
@@ -653,10 +694,8 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         return self._session
 
     def _initialize_session(self, session: Session) -> None:
-        session.mutate(VirtualFileSystem).register(VirtualFileSystem, replace_latest)
+        session.install(VirtualFileSystem, initial=lambda: VirtualFileSystem())
         session.mutate(VirtualFileSystem).seed(self._mount_snapshot)
-        session.mutate(VirtualFileSystem).register(WriteFile, _make_write_reducer())
-        session.mutate(VirtualFileSystem).register(DeleteEntry, _make_delete_reducer())
 
     def latest_snapshot(self) -> VirtualFileSystem:
         snapshot = self._session.query(VirtualFileSystem).latest()
@@ -1480,75 +1519,6 @@ def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
             yield current / name
 
 
-def _make_write_reducer() -> TypedReducer[VirtualFileSystem]:
-    def reducer(
-        slice_values: tuple[VirtualFileSystem, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[VirtualFileSystem, ...]:
-        del context
-        previous = slice_values[-1] if slice_values else VirtualFileSystem()
-        params = cast(WriteFile, event)
-        timestamp = _now()
-        files = list(previous.files)
-        existing_index = _index_of(files, params.path)
-        existing = files[existing_index] if existing_index is not None else None
-        if params.mode == "append" and existing is not None:
-            content = existing.content + params.content
-            created_at = existing.created_at
-            version = existing.version + 1
-        elif existing is not None:
-            content = params.content
-            created_at = existing.created_at
-            version = existing.version + 1
-        else:
-            content = params.content
-            created_at = timestamp
-            version = 1
-        size = len(content.encode(_DEFAULT_ENCODING))
-        updated_file = VfsFile(
-            path=params.path,
-            content=content,
-            encoding=_DEFAULT_ENCODING,
-            size_bytes=size,
-            version=version,
-            created_at=_truncate_to_milliseconds(created_at),
-            updated_at=_truncate_to_milliseconds(timestamp),
-        )
-        if existing_index is not None:
-            del files[existing_index]
-        files.append(updated_file)
-        files.sort(key=lambda file: file.path.segments)
-        snapshot = VirtualFileSystem(files=tuple(files))
-        return (snapshot,)
-
-    return reducer
-
-
-def _make_delete_reducer() -> TypedReducer[VirtualFileSystem]:
-    def reducer(
-        slice_values: tuple[VirtualFileSystem, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[VirtualFileSystem, ...]:
-        del context
-        previous = slice_values[-1] if slice_values else VirtualFileSystem()
-        params = cast(DeleteEntry, event)
-        target = params.path.segments
-        files = [
-            file
-            for file in previous.files
-            if not _is_path_prefix(file.path.segments, target)
-        ]
-        files.sort(key=lambda file: file.path.segments)
-        snapshot = VirtualFileSystem(files=tuple(files))
-        return (snapshot,)
-
-    return reducer
-
-
 def _index_of(files: list[VfsFile], path: VfsPath) -> int | None:
     for index, file in enumerate(files):
         if file.path.segments == path.segments:
@@ -1579,8 +1549,6 @@ format_edit_message = _format_edit_message
 format_glob_message = _format_glob_message
 format_grep_message = _format_grep_message
 find_file = _find_file
-make_write_reducer = _make_write_reducer
-make_delete_reducer = _make_delete_reducer
 
 
 __all__ = [
@@ -1613,8 +1581,6 @@ __all__ = [
     "format_glob_message",
     "format_grep_message",
     "format_write_file_message",
-    "make_delete_reducer",
-    "make_write_reducer",
     "normalize_content",
     "normalize_limit",
     "normalize_offset",

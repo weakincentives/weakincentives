@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportImportCycles=false
+
 """Session-managed visibility overrides for prompt sections.
 
 This module provides the VisibilityOverrides dataclass for storing
@@ -20,68 +22,18 @@ user-provided visibility selector or constant.
 
 from __future__ import annotations
 
-from dataclasses import field
-from typing import TYPE_CHECKING, cast
+from dataclasses import field, replace
+from typing import TYPE_CHECKING
 
 from ..dataclasses import FrozenDataclass
+from ..runtime.session.state_slice import reducer
 from ._visibility import SectionVisibility
 from .errors import SectionPath
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from ..runtime.session._types import ReducerContextProtocol, ReducerEvent
     from ..runtime.session.protocols import SessionProtocol
-
-
-@FrozenDataclass()
-class VisibilityOverrides:
-    """Session state slice for section visibility overrides.
-
-    Store this in session state to control section visibility dynamically
-    based on session state rather than passing visibility_overrides to render.
-
-    Usage::
-
-        from weakincentives.prompt import VisibilityOverrides, SectionVisibility
-
-        # Set initial overrides
-        overrides = VisibilityOverrides(
-            overrides={
-                ("instructions",): SectionVisibility.SUMMARY,
-                ("tools",): SectionVisibility.FULL,
-            }
-        )
-        session.mutate(VisibilityOverrides).seed(overrides)
-
-        # Update overrides via event
-        session.mutate(VisibilityOverrides).dispatch(
-            SetVisibilityOverride(path=("instructions",), visibility=SectionVisibility.FULL)
-        )
-
-    """
-
-    overrides: Mapping[SectionPath, SectionVisibility] = field(
-        default_factory=lambda: dict[SectionPath, SectionVisibility]()
-    )
-
-    def get(self, path: SectionPath) -> SectionVisibility | None:
-        """Return the override for a section path, or None if not set."""
-        return self.overrides.get(path)
-
-    def with_override(
-        self, path: SectionPath, visibility: SectionVisibility
-    ) -> VisibilityOverrides:
-        """Return a new VisibilityOverrides with the given override added."""
-        new_overrides = dict(self.overrides)
-        new_overrides[path] = visibility
-        return VisibilityOverrides(overrides=new_overrides)
-
-    def without_override(self, path: SectionPath) -> VisibilityOverrides:
-        """Return a new VisibilityOverrides with the given override removed."""
-        new_overrides = dict(self.overrides)
-        _ = new_overrides.pop(path, None)
-        return VisibilityOverrides(overrides=new_overrides)
 
 
 @FrozenDataclass()
@@ -110,43 +62,75 @@ class ClearAllVisibilityOverrides:
     """Event to clear all visibility overrides."""
 
 
-def set_visibility_override_reducer(
-    slice_values: tuple[VisibilityOverrides, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[VisibilityOverrides, ...]:
-    """Reducer for SetVisibilityOverride events."""
-    del context
-    typed_event = cast(SetVisibilityOverride, event)
-    current = slice_values[-1] if slice_values else VisibilityOverrides()
-    updated = current.with_override(typed_event.path, typed_event.visibility)
-    return (updated,)
+@FrozenDataclass()
+class VisibilityOverrides:
+    """Session state slice for section visibility overrides.
 
+    Store this in session state to control section visibility dynamically
+    based on session state rather than passing visibility_overrides to render.
 
-def clear_visibility_override_reducer(
-    slice_values: tuple[VisibilityOverrides, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[VisibilityOverrides, ...]:
-    """Reducer for ClearVisibilityOverride events."""
-    del context
-    typed_event = cast(ClearVisibilityOverride, event)
-    current = slice_values[-1] if slice_values else VisibilityOverrides()
-    updated = current.without_override(typed_event.path)
-    return (updated,)
+    Usage::
 
+        from weakincentives.prompt import VisibilityOverrides, SectionVisibility
 
-def clear_all_visibility_overrides_reducer(
-    slice_values: tuple[VisibilityOverrides, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[VisibilityOverrides, ...]:
-    """Reducer for ClearAllVisibilityOverrides events."""
-    del context, event, slice_values
-    return (VisibilityOverrides(),)
+        # Set initial overrides
+        overrides = VisibilityOverrides(
+            overrides={
+                ("instructions",): SectionVisibility.SUMMARY,
+                ("tools",): SectionVisibility.FULL,
+            }
+        )
+        session.mutate(VisibilityOverrides).seed(overrides)
+
+        # Update overrides via event
+        session.mutate(VisibilityOverrides).dispatch(
+            SetVisibilityOverride(path=("instructions",), visibility=SectionVisibility.FULL)
+        )
+
+        # Query using natural syntax
+        session[VisibilityOverrides].latest()
+
+    """
+
+    overrides: Mapping[SectionPath, SectionVisibility] = field(
+        default_factory=lambda: dict[SectionPath, SectionVisibility]()
+    )
+
+    def get(self, path: SectionPath) -> SectionVisibility | None:
+        """Return the override for a section path, or None if not set."""
+        return self.overrides.get(path)
+
+    def with_override(
+        self, path: SectionPath, visibility: SectionVisibility
+    ) -> VisibilityOverrides:
+        """Return a new VisibilityOverrides with the given override added."""
+        new_overrides = dict(self.overrides)
+        new_overrides[path] = visibility
+        return VisibilityOverrides(overrides=new_overrides)
+
+    def without_override(self, path: SectionPath) -> VisibilityOverrides:
+        """Return a new VisibilityOverrides with the given override removed."""
+        new_overrides = dict(self.overrides)
+        _ = new_overrides.pop(path, None)
+        return VisibilityOverrides(overrides=new_overrides)
+
+    @reducer(on=SetVisibilityOverride)
+    def handle_set(self, event: SetVisibilityOverride) -> VisibilityOverrides:
+        """Handle SetVisibilityOverride event."""
+        return self.with_override(event.path, event.visibility)
+
+    @reducer(on=ClearVisibilityOverride)
+    def handle_clear(self, event: ClearVisibilityOverride) -> VisibilityOverrides:
+        """Handle ClearVisibilityOverride event."""
+        return self.without_override(event.path)
+
+    @reducer(on=ClearAllVisibilityOverrides)
+    def handle_clear_all(
+        self, event: ClearAllVisibilityOverrides
+    ) -> VisibilityOverrides:
+        """Handle ClearAllVisibilityOverrides event."""
+        del event
+        return replace(self, overrides={})
 
 
 def register_visibility_reducers(session: SessionProtocol) -> None:
@@ -166,15 +150,7 @@ def register_visibility_reducers(session: SessionProtocol) -> None:
         )
 
     """
-    session.mutate(VisibilityOverrides).register(
-        SetVisibilityOverride, set_visibility_override_reducer
-    )
-    session.mutate(VisibilityOverrides).register(
-        ClearVisibilityOverride, clear_visibility_override_reducer
-    )
-    session.mutate(VisibilityOverrides).register(
-        ClearAllVisibilityOverrides, clear_all_visibility_overrides_reducer
-    )
+    session.install(VisibilityOverrides, initial=VisibilityOverrides)
 
 
 def get_session_visibility_override(
@@ -203,9 +179,6 @@ __all__ = [
     "ClearVisibilityOverride",
     "SetVisibilityOverride",
     "VisibilityOverrides",
-    "clear_all_visibility_overrides_reducer",
-    "clear_visibility_override_reducer",
     "get_session_visibility_override",
     "register_visibility_reducers",
-    "set_visibility_override_reducer",
 ]

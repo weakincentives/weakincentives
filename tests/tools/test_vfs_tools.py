@@ -17,7 +17,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -831,7 +830,6 @@ def test_rm_requires_existing_path(
 
 
 def test_write_reducer_supports_append() -> None:
-    reducer = vfs_module._make_write_reducer()
     initial = VirtualFileSystem(
         files=(
             VfsFile(
@@ -846,8 +844,7 @@ def test_write_reducer_supports_append() -> None:
         )
     )
     event = WriteFile(path=VfsPath(("log.txt",)), content="\nline2", mode="append")
-    context = SimpleNamespace(session=None, event_bus=None)
-    (updated,) = reducer((initial,), event, context=context)
+    updated = initial.handle_write(event)
     file = updated.files[0]
     assert file.content.endswith("line2")
     assert file.version == 2
