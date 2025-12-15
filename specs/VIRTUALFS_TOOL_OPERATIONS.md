@@ -4,74 +4,49 @@
 
 **Draft** — Proposed refactoring for unified filesystem abstraction.
 
-## Problem Statement
+## Non-Goals
 
-Three independent workspace backends exist with overlapping functionality but no
-common interface:
+**Backward compatibility is explicitly not a goal.** This spec describes the
+end state. Existing VFS, Podman, and Claude Agent SDK workspace implementations
+will be replaced, not wrapped or deprecated incrementally.
 
-| Backend | Location | State Model | Tool Surface |
-|---------|----------|-------------|--------------|
-| VirtualFileSystem | In-memory | Session slice + reducers | 7 tools (ls, read_file, write_file, edit_file, glob, grep, rm) |
-| PodmanSandboxSection | Container | Container filesystem | Same 7 tools + shell_execute, evaluate_python |
-| ClaudeAgentWorkspaceSection | Temp directory | Direct OS I/O | None (relies on SDK native tools) |
+## Problem
 
-This creates problems:
+Three backends provide overlapping file operations with no shared interface:
 
-1. **Tool handlers are duplicated** — Podman re-implements all VFS tool logic for
-   container operations
-2. **No polymorphism** — A tool cannot operate on "the filesystem" without knowing
-   which backend is active
-3. **Session integration is inconsistent** — VFS uses reducer-based mutations while
-   Podman uses direct I/O
-4. **Testing burden** — Each backend requires separate test coverage for identical
-   operations
+| Backend | State Model | Duplication |
+|---------|-------------|-------------|
+| VirtualFileSystem | Session slice + reducers | 7 tools + handlers |
+| PodmanSandboxSection | Container exec | Same 7 tools reimplemented |
+| ClaudeAgentWorkspaceSection | Temp directory | None (uses SDK native tools) |
 
-## Design Principles
+Tool handlers cannot operate on "the filesystem" without knowing which backend
+is active. This forces duplication and prevents composition.
 
-1. **Protocol over implementation** — Define what a filesystem *does*, not how
-2. **Session as registry** — Retrieve the active filesystem from session context
-3. **Operations return results, not events** — Tools should work with any backend
-4. **Backend chooses mutation strategy** — In-memory uses reducers; Podman uses
-   shell; SDK uses native tools
+## First Principles
 
-## Proposed Architecture
+A filesystem is a key-value store:
+- **Keys** are paths (strings)
+- **Values** are file contents (strings, UTF-8 only)
+- **Operations**: read, write, delete, list, search
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Tool Layer                               │
-│  ls, read_file, write_file, edit_file, glob, grep, rm           │
-│                              │                                   │
-│                    FilesystemProtocol                            │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-        ┌──────────────────────┼──────────────────────┐
-        ▼                      ▼                      ▼
-┌───────────────┐    ┌─────────────────┐    ┌─────────────────────┐
-│ InMemoryFS    │    │ ContainerFS     │    │ HostFS              │
-│ (VFS slice)   │    │ (Podman exec)   │    │ (temp dir I/O)      │
-│               │    │                 │    │                     │
-│ Session-scoped│    │ Container-scope │    │ Temp dir lifecycle  │
-│ Reducer-based │    │ Direct exec     │    │ Direct I/O          │
-└───────────────┘    └─────────────────┘    └─────────────────────┘
-```
+Everything else—pagination, path normalization, security boundaries—is
+implementation detail handled by backends.
 
-## Core Protocol
+## Filesystem Protocol
 
 ```python
-from typing import Protocol, Iterator
+from typing import Protocol, Literal
 from dataclasses import dataclass
 
 @dataclass(slots=True, frozen=True)
 class FileEntry:
-    """Unified file metadata across backends."""
-    path: str                    # Normalized POSIX path
+    path: str
     kind: Literal["file", "directory"]
-    size_bytes: int | None       # None for directories
-    content_hash: str | None     # Optional content fingerprint
+    size_bytes: int | None = None  # None for directories
 
 @dataclass(slots=True, frozen=True)
 class FileContent:
-    """File content with optional pagination."""
     path: str
     content: str
     total_lines: int
@@ -79,480 +54,395 @@ class FileContent:
     limit: int
 
 @dataclass(slots=True, frozen=True)
-class WriteResult:
-    """Result of a write operation."""
-    path: str
-    bytes_written: int
-    created: bool                # True if file was created, False if modified
-
-@dataclass(slots=True, frozen=True)
-class GlobResult:
-    """Matches from a glob pattern."""
-    pattern: str
-    matches: tuple[FileEntry, ...]
-
-@dataclass(slots=True, frozen=True)
-class GrepResult:
-    """Matches from a regex search."""
-    pattern: str
-    matches: tuple[GrepMatch, ...]
-
-@dataclass(slots=True, frozen=True)
 class GrepMatch:
-    """Single grep match with context."""
     path: str
     line_number: int
     line_content: str
-    match_start: int
-    match_end: int
 
 
-class FilesystemProtocol(Protocol):
-    """Unified filesystem operations for tool handlers."""
+class Filesystem(Protocol):
+    """Minimal filesystem interface for tool handlers."""
 
-    @property
-    def root(self) -> str:
-        """Logical root path (e.g., "/", "/workspace")."""
+    # ─── Core Operations ───────────────────────────────────────────
+
+    def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
+        """Read file content. Raises FileNotFoundError if missing."""
         ...
 
-    # ─── Read Operations ───────────────────────────────────────────
-
-    def list_dir(self, path: str) -> tuple[FileEntry, ...]:
-        """List entries in a directory."""
+    def write(self, path: str, content: str) -> int:
+        """Write content to file. Creates parent directories. Returns bytes written."""
         ...
 
-    def read_file(
-        self,
-        path: str,
-        *,
-        offset: int = 0,
-        limit: int | None = None,
-    ) -> FileContent:
-        """Read file content with optional pagination."""
+    def delete(self, path: str) -> int:
+        """Delete file or directory recursively. Returns count of deleted entries."""
         ...
 
-    def exists(self, path: str) -> bool:
-        """Check if path exists."""
-        ...
-
-    def is_file(self, path: str) -> bool:
-        """Check if path is a file."""
-        ...
-
-    def is_dir(self, path: str) -> bool:
-        """Check if path is a directory."""
-        ...
-
-    # ─── Write Operations ──────────────────────────────────────────
-
-    def write_file(
-        self,
-        path: str,
-        content: str,
-        *,
-        create_only: bool = False,
-    ) -> WriteResult:
-        """Write content to a file.
-
-        Args:
-            path: Target file path.
-            content: UTF-8 content to write.
-            create_only: If True, fail if file exists.
-        """
-        ...
-
-    def delete(self, path: str, *, recursive: bool = False) -> int:
-        """Delete file or directory. Returns count of deleted entries."""
-        ...
-
-    def mkdir(self, path: str, *, parents: bool = False) -> None:
-        """Create directory."""
+    def list(self, path: str = "") -> tuple[FileEntry, ...]:
+        """List directory entries. Empty path means root."""
         ...
 
     # ─── Search Operations ─────────────────────────────────────────
 
-    def glob(self, pattern: str, *, path: str | None = None) -> GlobResult:
+    def glob(self, pattern: str) -> tuple[FileEntry, ...]:
         """Find files matching glob pattern."""
         ...
 
-    def grep(
-        self,
-        pattern: str,
-        *,
-        path: str | None = None,
-        glob_filter: str | None = None,
-        max_matches: int = 100,
-    ) -> GrepResult:
-        """Search file contents with regex."""
+    def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
+        """Search file contents with regex. Optional file glob filter."""
         ...
 ```
 
-## Session Integration
+Six methods. No `exists()`, `is_file()`, `mkdir()`—these are derivable from
+`read()` (catch exception), `list()` (check kind), and `write()` (implicit).
 
-### Registration
+## Session Registration
 
-Each backend registers itself as the active filesystem:
-
-```python
-# In section __init__
-session.install(
-    FilesystemProtocol,
-    initial=lambda: self._create_backend(),
-)
-```
-
-### Retrieval in Tool Handlers
-
-Tools retrieve the filesystem from session, not from section:
+Backends register as the active filesystem:
 
 ```python
-def read_file_handler(
-    params: ReadFileParams,
-    *,
-    context: ToolContext,
-) -> ToolResult[FileContent]:
-    fs = context.session.query(FilesystemProtocol).latest()
-    if fs is None:
-        return ToolResult(
-            message="No filesystem backend configured.",
-            value=None,
-            success=False,
-        )
-    content = fs.read_file(params.path, offset=params.offset, limit=params.limit)
-    return ToolResult(message=_format_content(content), value=content)
-```
-
-### Backend-Specific State
-
-Backends that need session state (like VFS reducers) manage it internally:
-
-```python
-class InMemoryFilesystem:
-    """In-memory VFS backed by session state."""
-
-    def __init__(self, session: Session) -> None:
+class InMemoryBackend:
+    def __init__(self, session: Session, mounts: Sequence[HostMount] = ()) -> None:
         self._session = session
-        session.install(VirtualFileSystem, initial=VirtualFileSystem)
-        session.mutate(VirtualFileSystem).register(WriteFile, VirtualFileSystem.handle_write)
-        session.mutate(VirtualFileSystem).register(DeleteEntry, VirtualFileSystem.handle_delete)
+        # Hydrate from mounts, register reducers...
 
-    def write_file(self, path: str, content: str, *, create_only: bool = False) -> WriteResult:
-        vfs_path = _normalize_path(path)
-        event = WriteFile(path=vfs_path, content=content, mode="create" if create_only else "overwrite")
-        self._session.mutate(VirtualFileSystem).dispatch(event)
-        return WriteResult(path=path, bytes_written=len(content.encode()), created=create_only)
+    def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
+        snapshot = self._session.query(VirtualFileSystem).latest()
+        file = self._find(snapshot, path)
+        return self._paginate(file, offset, limit)
+
+    def write(self, path: str, content: str) -> int:
+        self._session.mutate(VirtualFileSystem).dispatch(WriteFile(path, content))
+        return len(content.encode())
+
+# Section registers backend
+class VfsSection(MarkdownSection):
+    def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
+        backend = InMemoryBackend(session, mounts)
+        session.install(Filesystem, initial=lambda: backend)
+        super().__init__(title="Filesystem", template=..., tools=FILESYSTEM_TOOLS)
 ```
 
-## Tool Suite Simplification
+## Tool Handlers
 
-### Before: Section-Bound Tools
-
-```python
-# vfs.py - 7 tools defined, each bound to VfsToolsSection
-# podman.py - Same 7 tools re-implemented for container
-
-class VfsToolsSection:
-    @property
-    def tools(self) -> tuple[Tool, ...]:
-        return (self._ls, self._read_file, ...)  # Section-specific
-
-class PodmanSandboxSection:
-    @property
-    def tools(self) -> tuple[Tool, ...]:
-        return (self._ls, self._read_file, ...)  # Duplicated implementation
-```
-
-### After: Protocol-Based Tools
+Tools retrieve the filesystem from context and operate generically:
 
 ```python
-# filesystem_tools.py - Single set of tools using protocol
+def read_file_handler(params: ReadParams, *, context: ToolContext) -> ToolResult[FileContent]:
+    fs: Filesystem = context.session.query(Filesystem).latest()
+    content = fs.read(params.path, offset=params.offset, limit=params.limit)
+    return ToolResult(message=_format(content), value=content)
 
-def ls_handler(params: LsParams, *, context: ToolContext) -> ToolResult[tuple[FileEntry, ...]]:
-    fs = _require_filesystem(context)
-    entries = fs.list_dir(params.path)
-    return ToolResult(message=_format_entries(entries), value=entries)
+def write_file_handler(params: WriteParams, *, context: ToolContext) -> ToolResult[int]:
+    fs: Filesystem = context.session.query(Filesystem).latest()
+    bytes_written = fs.write(params.path, params.content)
+    return ToolResult(message=f"Wrote {bytes_written} bytes to {params.path}", value=bytes_written)
 
-ls_tool = Tool(
-    name="ls",
-    description="List directory contents.",
-    handler=ls_handler,
+# Single tool definition used by all sections
+FILESYSTEM_TOOLS = (
+    Tool(name="ls", handler=ls_handler, ...),
+    Tool(name="read_file", handler=read_file_handler, ...),
+    Tool(name="write_file", handler=write_file_handler, ...),
+    Tool(name="edit_file", handler=edit_file_handler, ...),  # Combines read + write
+    Tool(name="glob", handler=glob_handler, ...),
+    Tool(name="grep", handler=grep_handler, ...),
+    Tool(name="rm", handler=rm_handler, ...),
 )
-
-# All 7 tools defined once, work with any FilesystemProtocol backend
-FILESYSTEM_TOOLS = (ls_tool, read_file_tool, write_file_tool, edit_file_tool, glob_tool, grep_tool, rm_tool)
-```
-
-### Section Changes
-
-Sections provide the backend, not the tools:
-
-```python
-class VfsToolsSection(MarkdownSection):
-    def __init__(self, *, session: Session, mounts: Sequence[HostMount], ...):
-        # Install InMemoryFilesystem as the backend
-        self._backend = InMemoryFilesystem(session)
-        session.install(FilesystemProtocol, initial=lambda: self._backend)
-
-        super().__init__(
-            title="Virtual Filesystem",
-            template=_VFS_TEMPLATE,
-            tools=FILESYSTEM_TOOLS,  # Shared tool definitions
-        )
-
-class PodmanSandboxSection(MarkdownSection):
-    def __init__(self, *, session: Session, config: PodmanSandboxConfig, ...):
-        self._backend = ContainerFilesystem(session, config)
-        session.install(FilesystemProtocol, initial=lambda: self._backend)
-
-        super().__init__(
-            title="Podman Sandbox",
-            template=_PODMAN_TEMPLATE,
-            tools=(*FILESYSTEM_TOOLS, shell_execute_tool, evaluate_python_tool),
-        )
 ```
 
 ## Backend Implementations
 
-### InMemoryFilesystem
+### InMemoryBackend
 
-Wraps existing `VirtualFileSystem` slice with protocol interface:
+Uses existing `VirtualFileSystem` slice with reducer-based mutations:
 
 ```python
-class InMemoryFilesystem:
-    def __init__(self, session: Session, *, mounts: Sequence[HostMount] = ()) -> None:
+class InMemoryBackend:
+    def __init__(self, session: Session, mounts: Sequence[HostMount] = ()) -> None:
         self._session = session
-        self._initialize_state(mounts)
+        session.install(VirtualFileSystem, initial=VirtualFileSystem)
+        self._hydrate_mounts(mounts)
 
-    def _snapshot(self) -> VirtualFileSystem:
-        return self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
-
-    def read_file(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
-        vfs = self._snapshot()
-        file = _find_file(vfs.files, path)
+    def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
+        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
+        file = next((f for f in vfs.files if _match(f.path, path)), None)
         if file is None:
             raise FileNotFoundError(path)
-        lines = file.content.splitlines(keepends=True)
-        # Apply pagination...
-        return FileContent(...)
+        return _paginate(file.content, offset, limit)
 
-    def write_file(self, path: str, content: str, *, create_only: bool = False) -> WriteResult:
-        mode = "create" if create_only else "overwrite"
-        event = WriteFile(path=_to_vfs_path(path), content=content, mode=mode)
+    def write(self, path: str, content: str) -> int:
+        event = WriteFile(path=_to_vfs_path(path), content=content, mode="overwrite")
         self._session.mutate(VirtualFileSystem).dispatch(event)
-        return WriteResult(path=path, bytes_written=len(content.encode()), created=...)
+        return len(content.encode())
+
+    def delete(self, path: str) -> int:
+        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
+        count = sum(1 for f in vfs.files if _is_prefix(path, f.path))
+        self._session.mutate(VirtualFileSystem).dispatch(DeleteEntry(path=_to_vfs_path(path)))
+        return count
+
+    def list(self, path: str = "") -> tuple[FileEntry, ...]:
+        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
+        return _list_entries(vfs.files, path)
+
+    def glob(self, pattern: str) -> tuple[FileEntry, ...]:
+        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
+        return tuple(FileEntry(path=_fmt(f.path), kind="file", size_bytes=f.size_bytes)
+                     for f in vfs.files if fnmatch.fnmatch(_fmt(f.path), pattern))
+
+    def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
+        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
+        regex = re.compile(pattern)
+        matches = []
+        for file in vfs.files:
+            if file_glob and not fnmatch.fnmatch(_fmt(file.path), file_glob):
+                continue
+            for i, line in enumerate(file.content.splitlines(), 1):
+                if regex.search(line):
+                    matches.append(GrepMatch(path=_fmt(file.path), line_number=i, line_content=line))
+        return tuple(matches)
 ```
 
-### ContainerFilesystem
+### ContainerBackend
 
-Executes operations via podman exec:
+Executes operations via container exec:
 
 ```python
-class ContainerFilesystem:
-    def __init__(self, container: PodmanContainer, workdir: str = "/workspace") -> None:
+class ContainerBackend:
+    def __init__(self, container: Container, workdir: str = "/workspace") -> None:
         self._container = container
         self._workdir = workdir
 
-    @property
-    def root(self) -> str:
-        return self._workdir
+    def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
+        full = self._resolve(path)
+        result = self._exec(["cat", full])
+        return _paginate(result.stdout, offset, limit)
 
-    def read_file(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
-        full_path = self._resolve(path)
-        result = self._container.exec(["cat", full_path])
-        # Parse and paginate...
-        return FileContent(...)
+    def write(self, path: str, content: str) -> int:
+        full = self._resolve(path)
+        self._exec(["mkdir", "-p", str(Path(full).parent)])
+        self._exec(["tee", full], stdin=content)
+        return len(content.encode())
 
-    def write_file(self, path: str, content: str, *, create_only: bool = False) -> WriteResult:
-        full_path = self._resolve(path)
-        script = _write_script(full_path, content, create_only)
-        self._container.exec(["python3", "-c", script])
-        return WriteResult(...)
+    def delete(self, path: str) -> int:
+        full = self._resolve(path)
+        result = self._exec(["rm", "-rf", full])
+        return 1 if result.returncode == 0 else 0
+
+    def list(self, path: str = "") -> tuple[FileEntry, ...]:
+        full = self._resolve(path) if path else self._workdir
+        result = self._exec(["find", full, "-maxdepth", "1", "-printf", "%y %s %P\n"])
+        return _parse_find_output(result.stdout)
+
+    def glob(self, pattern: str) -> tuple[FileEntry, ...]:
+        result = self._exec(["find", self._workdir, "-name", pattern, "-printf", "%y %s %P\n"])
+        return _parse_find_output(result.stdout)
+
+    def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
+        cmd = ["grep", "-rn", pattern, self._workdir]
+        if file_glob:
+            cmd.extend(["--include", file_glob])
+        result = self._exec(cmd)
+        return _parse_grep_output(result.stdout)
 
     def _resolve(self, path: str) -> str:
-        """Resolve path relative to workspace root."""
         if path.startswith("/"):
             return path
         return f"{self._workdir}/{path}"
+
+    def _exec(self, cmd: list[str], stdin: str | None = None) -> CompletedProcess:
+        return self._container.exec(cmd, stdin=stdin)
 ```
 
-### HostFilesystem
+### HostBackend
 
-Direct OS I/O for Claude Agent SDK workspace:
+Direct OS I/O for temp directory workspaces:
 
 ```python
-class HostFilesystem:
+class HostBackend:
     def __init__(self, root: Path) -> None:
-        self._root = root
+        self._root = root.resolve()
 
-    @property
-    def root(self) -> str:
-        return str(self._root)
+    def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
+        full = self._resolve(path)
+        content = full.read_text()
+        return _paginate(content, offset, limit)
 
-    def read_file(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
-        full_path = self._resolve(path)
-        content = full_path.read_text()
-        # Paginate...
-        return FileContent(...)
+    def write(self, path: str, content: str) -> int:
+        full = self._resolve(path)
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+        return len(content.encode())
 
-    def write_file(self, path: str, content: str, *, create_only: bool = False) -> WriteResult:
-        full_path = self._resolve(path)
-        if create_only and full_path.exists():
-            raise FileExistsError(path)
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content)
-        return WriteResult(...)
+    def delete(self, path: str) -> int:
+        full = self._resolve(path)
+        if full.is_dir():
+            count = sum(1 for _ in full.rglob("*"))
+            shutil.rmtree(full)
+            return count
+        elif full.exists():
+            full.unlink()
+            return 1
+        return 0
+
+    def list(self, path: str = "") -> tuple[FileEntry, ...]:
+        full = self._resolve(path) if path else self._root
+        entries = []
+        for item in full.iterdir():
+            kind = "directory" if item.is_dir() else "file"
+            size = item.stat().st_size if item.is_file() else None
+            entries.append(FileEntry(path=str(item.relative_to(self._root)), kind=kind, size_bytes=size))
+        return tuple(entries)
+
+    def glob(self, pattern: str) -> tuple[FileEntry, ...]:
+        return tuple(
+            FileEntry(path=str(p.relative_to(self._root)), kind="file", size_bytes=p.stat().st_size)
+            for p in self._root.glob(pattern) if p.is_file()
+        )
+
+    def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
+        regex = re.compile(pattern)
+        matches = []
+        for path in (self._root.glob(file_glob) if file_glob else self._root.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                for i, line in enumerate(path.read_text().splitlines(), 1):
+                    if regex.search(line):
+                        matches.append(GrepMatch(
+                            path=str(path.relative_to(self._root)),
+                            line_number=i,
+                            line_content=line,
+                        ))
+            except UnicodeDecodeError:
+                continue
+        return tuple(matches)
 
     def _resolve(self, path: str) -> Path:
-        if Path(path).is_absolute():
-            resolved = Path(path).resolve()
-        else:
-            resolved = (self._root / path).resolve()
-        # Security check
+        resolved = (self._root / path).resolve()
         if not resolved.is_relative_to(self._root):
-            raise SecurityError(f"Path escapes root: {path}")
+            raise ValueError(f"Path escapes root: {path}")
         return resolved
 ```
 
-## Claude Agent SDK Integration
+## Section Definitions
 
-The Claude Agent SDK adapter uses SDK-native tools (Read, Write, Edit, etc.) which
-bypass this abstraction entirely. However, `HostFilesystem` enables:
-
-1. **Prompt-internal tools** — Custom tools added to prompts can use `HostFilesystem`
-2. **State synchronization** — Session can track what files have been modified
-3. **Unified testing** — Same test harness works across backends
+Sections provide backend + tools:
 
 ```python
-class ClaudeAgentWorkspaceSection(MarkdownSection):
-    def __init__(self, *, session: Session, mounts: Sequence[HostMount], ...):
-        self._temp_dir, self._previews = _create_workspace(mounts, ...)
-        self._backend = HostFilesystem(self._temp_dir)
-        session.install(FilesystemProtocol, initial=lambda: self._backend)
+class VfsSection(MarkdownSection):
+    def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
+        self._backend = InMemoryBackend(session, mounts)
+        session.install(Filesystem, initial=lambda: self._backend)
+        super().__init__(
+            title="Virtual Filesystem",
+            key="vfs",
+            template=_VFS_TEMPLATE,
+            tools=FILESYSTEM_TOOLS,
+        )
 
-        # No tools — SDK uses native tools
+class PodmanSection(MarkdownSection):
+    def __init__(self, *, session: Session, config: PodmanConfig) -> None:
+        self._container = _create_container(config)
+        self._backend = ContainerBackend(self._container)
+        session.install(Filesystem, initial=lambda: self._backend)
+        super().__init__(
+            title="Sandbox",
+            key="podman",
+            template=_PODMAN_TEMPLATE,
+            tools=(*FILESYSTEM_TOOLS, shell_tool, eval_tool),
+        )
+
+class WorkspaceSection(MarkdownSection):
+    def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
+        self._temp_dir = _create_workspace(mounts)
+        self._backend = HostBackend(self._temp_dir)
+        session.install(Filesystem, initial=lambda: self._backend)
         super().__init__(
             title="Workspace",
-            template=_render_template(self._previews),
-            tools=(),
+            key="workspace",
+            template=_WORKSPACE_TEMPLATE,
+            tools=(),  # SDK uses native tools
         )
 
     @property
-    def filesystem(self) -> FilesystemProtocol:
-        """Expose filesystem for custom prompt tools."""
+    def filesystem(self) -> Filesystem:
         return self._backend
 ```
 
-## Migration Path
+## edit_file Implementation
 
-### Phase 1: Define Protocol and Results
-
-1. Create `FilesystemProtocol` in `weakincentives.contrib.tools.filesystem`
-2. Define unified result dataclasses (`FileEntry`, `FileContent`, `WriteResult`, etc.)
-3. Keep existing tool implementations unchanged
-
-### Phase 2: Implement Backends
-
-1. Create `InMemoryFilesystem` wrapping existing `VirtualFileSystem` logic
-2. Create `ContainerFilesystem` extracting Podman file operations
-3. Create `HostFilesystem` for temp directory I/O
-4. Each backend implements `FilesystemProtocol`
-
-### Phase 3: Unify Tool Handlers
-
-1. Create shared tool handlers in `filesystem_tools.py`
-2. Tools retrieve backend via `context.session.query(FilesystemProtocol)`
-3. Update sections to register backends and use shared tools
-
-### Phase 4: Deprecate Old Tools
-
-1. Mark section-specific tool implementations as deprecated
-2. Update documentation and examples
-3. Remove deprecated code in next minor release
-
-## Backward Compatibility
-
-- **Tool names unchanged** — `ls`, `read_file`, etc. keep same names
-- **Parameter schemas unchanged** — Existing param dataclasses remain compatible
-- **Result rendering unchanged** — `render()` methods preserved
-- **Session API unchanged** — `query()` and `mutate()` patterns preserved
-
-Sections that previously provided tools continue to work; they just delegate to
-the unified implementation.
-
-## Testing Strategy
-
-### Unit Tests
+`edit_file` is a tool-layer operation combining read + write:
 
 ```python
-@pytest.fixture
-def in_memory_fs(session: Session) -> InMemoryFilesystem:
-    return InMemoryFilesystem(session)
+def edit_file_handler(params: EditParams, *, context: ToolContext) -> ToolResult[str]:
+    fs: Filesystem = context.session.query(Filesystem).latest()
 
-@pytest.fixture
-def host_fs(tmp_path: Path) -> HostFilesystem:
-    return HostFilesystem(tmp_path)
+    # Read current content
+    try:
+        content = fs.read(params.path)
+    except FileNotFoundError:
+        return ToolResult(message=f"File not found: {params.path}", value=None, success=False)
 
-class TestFilesystemProtocol:
-    """Parameterized tests run against all backends."""
+    # Apply edit
+    old = params.old_string
+    new = params.new_string
+    if old not in content.content:
+        return ToolResult(message=f"String not found: {old!r}", value=None, success=False)
 
-    @pytest.fixture(params=["in_memory", "host"])
-    def fs(self, request, in_memory_fs, host_fs) -> FilesystemProtocol:
-        return {"in_memory": in_memory_fs, "host": host_fs}[request.param]
+    if params.replace_all:
+        updated = content.content.replace(old, new)
+    else:
+        updated = content.content.replace(old, new, 1)
 
-    def test_write_and_read(self, fs: FilesystemProtocol) -> None:
-        fs.write_file("test.txt", "hello")
-        content = fs.read_file("test.txt")
-        assert content.content == "hello"
-
-    def test_list_dir(self, fs: FilesystemProtocol) -> None:
-        fs.write_file("a/b.txt", "")
-        entries = fs.list_dir("a")
-        assert len(entries) == 1
-        assert entries[0].path == "a/b.txt"
+    # Write back
+    fs.write(params.path, updated)
+    return ToolResult(message=f"Edited {params.path}", value=updated)
 ```
 
-### Integration Tests
+## Testing
 
-Podman tests require container runtime and run in CI with appropriate markers.
+Parameterized tests cover all backends:
 
-## Open Questions
+```python
+@pytest.fixture(params=["memory", "host"])
+def fs(request, session, tmp_path) -> Filesystem:
+    if request.param == "memory":
+        return InMemoryBackend(session)
+    return HostBackend(tmp_path)
 
-1. **Edit operation** — Should `edit_file` (string replacement) be part of the
-   protocol or remain a higher-level tool that combines `read_file` + `write_file`?
+def test_write_read_roundtrip(fs: Filesystem) -> None:
+    fs.write("test.txt", "hello")
+    content = fs.read("test.txt")
+    assert content.content == "hello"
 
-   *Recommendation*: Keep `edit_file` as a tool-layer operation that uses
-   `read_file` and `write_file` from the protocol. This keeps the protocol
-   minimal and avoids duplicating edit logic in each backend.
+def test_delete(fs: Filesystem) -> None:
+    fs.write("a/b.txt", "x")
+    assert fs.delete("a") == 1
+    with pytest.raises(FileNotFoundError):
+        fs.read("a/b.txt")
 
-2. **Binary files** — Current VFS is text-only. Should the protocol support
-   `read_bytes` / `write_bytes`?
+def test_glob(fs: Filesystem) -> None:
+    fs.write("src/main.py", "")
+    fs.write("src/test.py", "")
+    fs.write("docs/readme.md", "")
+    matches = fs.glob("src/*.py")
+    assert len(matches) == 2
 
-   *Recommendation*: Defer binary support. All current use cases are text-focused.
-   Add `bytes` variants to protocol in future if needed.
+def test_grep(fs: Filesystem) -> None:
+    fs.write("code.py", "def foo():\n    return 42\n")
+    matches = fs.grep(r"return \d+")
+    assert len(matches) == 1
+    assert matches[0].line_number == 2
+```
 
-3. **Event publishing** — Should write operations publish `FileWritten` events
-   to the session event bus?
-
-   *Recommendation*: Yes. Backends publish `FileWritten(path, bytes_written)` after
-   successful writes. This enables telemetry and debugging without coupling
-   tools to specific backends.
-
-4. **Concurrency** — How should concurrent writes be handled?
-
-   *Recommendation*: Backends are not thread-safe by default. Document that
-   concurrent tool invocations require external synchronization. This matches
-   current VFS behavior.
+Container backend tests are integration tests requiring Podman runtime.
 
 ## Summary
 
-This refactoring unifies three divergent workspace implementations behind a
-single `FilesystemProtocol`. Benefits:
+The `Filesystem` protocol provides six methods: `read`, `write`, `delete`,
+`list`, `glob`, `grep`. Three backends implement this protocol for different
+execution contexts. Tool handlers operate generically via
+`context.session.query(Filesystem)`. Sections register backends and attach
+shared tools.
 
-- **Single tool implementation** — 7 tools defined once, not three times
-- **Polymorphic handlers** — Tools work with any registered backend
-- **Cleaner session integration** — Filesystem retrieved from session context
-- **Easier testing** — Parameterized tests cover all backends
-- **Future extensibility** — New backends (S3, Git worktree, etc.) just implement
-  the protocol
-
-The migration is incremental and maintains backward compatibility throughout.
+This eliminates tool duplication and enables composition across backends.
