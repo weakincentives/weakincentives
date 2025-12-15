@@ -19,9 +19,11 @@ import copy
 import logging
 import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import wraps
 from pathlib import Path
+from threading import RLock
 from typing import ParamSpec, Protocol, TypeVar, cast
 
 from ..types import ContractResult
@@ -330,6 +332,95 @@ def invariant(*predicates: ContractCallable) -> Callable[[type[T]], type[T]]:
 
 
 _SNAPSHOT_SENTINEL = object()
+_PURE_STACK_EMPTY: tuple[Callable[..., object], ...] = ()
+_PURE_STACK: ContextVar[tuple[Callable[..., object], ...]] = ContextVar[
+    tuple[Callable[..., object], ...]
+]("weakincentives_pure_stack", default=_PURE_STACK_EMPTY)
+_PURE_PATCH_LOCK = RLock()
+_pure_patch_depth = 0
+_pure_patch_original_open: object | None = None
+_pure_patch_original_write_text: object | None = None
+_pure_patch_original_write_bytes: object | None = None
+_pure_patch_original_log: object | None = None
+
+
+def _pure_guard(target: str) -> None:
+    stack = _PURE_STACK.get()
+    func = stack[-1] if stack else None
+    msg = f"pure contract for {_qualname(func)} forbids calling {target}"
+    raise AssertionError(msg)
+
+
+def _pure_open_guard(*args: object, **kwargs: object) -> object:
+    if _PURE_STACK.get():
+        _pure_guard("builtins.open")
+    if _pure_patch_original_open is None:  # pragma: no cover
+        raise RuntimeError("Pure patch state invalid: builtins.open is missing.")
+    return cast(Callable[..., object], _pure_patch_original_open)(*args, **kwargs)
+
+
+def _pure_write_text_guard(*args: object, **kwargs: object) -> object:
+    if _PURE_STACK.get():
+        _pure_guard("Path.write_text")
+    if _pure_patch_original_write_text is None:  # pragma: no cover
+        raise RuntimeError("Pure patch state invalid: Path.write_text is missing.")
+    return cast(Callable[..., object], _pure_patch_original_write_text)(*args, **kwargs)
+
+
+def _pure_write_bytes_guard(*args: object, **kwargs: object) -> object:
+    if _PURE_STACK.get():
+        _pure_guard("Path.write_bytes")
+    if _pure_patch_original_write_bytes is None:  # pragma: no cover
+        raise RuntimeError("Pure patch state invalid: Path.write_bytes is missing.")
+    return cast(Callable[..., object], _pure_patch_original_write_bytes)(
+        *args, **kwargs
+    )
+
+
+def _pure_log_guard(*args: object, **kwargs: object) -> object:
+    if _PURE_STACK.get():
+        _pure_guard("logging")
+    if _pure_patch_original_log is None:  # pragma: no cover
+        raise RuntimeError("Pure patch state invalid: logging.Logger._log is missing.")
+    return cast(Callable[..., object], _pure_patch_original_log)(*args, **kwargs)
+
+
+def _activate_pure_patches() -> None:
+    global _pure_patch_depth
+    global _pure_patch_original_log
+    global _pure_patch_original_open
+    global _pure_patch_original_write_bytes
+    global _pure_patch_original_write_text
+
+    with _PURE_PATCH_LOCK:
+        if _pure_patch_depth == 0:
+            _pure_patch_original_open = getattr(builtins, "open")  # noqa: B009
+            _pure_patch_original_write_text = getattr(Path, "write_text")  # noqa: B009
+            _pure_patch_original_write_bytes = getattr(Path, "write_bytes")  # noqa: B009
+            _pure_patch_original_log = getattr(logging.Logger, "_log")  # noqa: B009
+
+            setattr(builtins, "open", _pure_open_guard)  # noqa: B010
+            setattr(Path, "write_text", _pure_write_text_guard)  # noqa: B010
+            setattr(Path, "write_bytes", _pure_write_bytes_guard)  # noqa: B010
+            setattr(logging.Logger, "_log", _pure_log_guard)  # noqa: B010
+
+        _pure_patch_depth += 1
+
+
+def _deactivate_pure_patches() -> None:
+    global _pure_patch_depth
+
+    with _PURE_PATCH_LOCK:
+        if _pure_patch_depth <= 0:  # pragma: no cover
+            raise RuntimeError("pure patch depth underflow")
+        _pure_patch_depth -= 1
+        if _pure_patch_depth != 0:
+            return
+
+        setattr(builtins, "open", _pure_patch_original_open)  # noqa: B010
+        setattr(Path, "write_text", _pure_patch_original_write_text)  # noqa: B010
+        setattr(Path, "write_bytes", _pure_patch_original_write_bytes)  # noqa: B010
+        setattr(logging.Logger, "_log", _pure_patch_original_log)  # noqa: B010
 
 
 def _snapshot(value: object) -> object:
@@ -368,42 +459,15 @@ def _compare_snapshots(
             raise AssertionError(msg)
 
 
-def _pure_violation(func: Callable[..., object], target: str) -> Callable[..., object]:
-    def raiser(*args: object, **kwargs: object) -> object:  # pragma: no cover - trivial
-        msg = f"pure contract for {_qualname(func)} forbids calling {target}"
-        raise AssertionError(msg)
-
-    return raiser
-
-
 @contextmanager
 def _pure_environment(func: Callable[..., object]) -> Iterator[None]:
-    with ExitStack() as stack:
-        stack.enter_context(
-            _patch(builtins, "open", _pure_violation(func, "builtins.open"))
-        )
-        stack.enter_context(
-            _patch(Path, "write_text", _pure_violation(func, "Path.write_text"))
-        )
-        stack.enter_context(
-            _patch(Path, "write_bytes", _pure_violation(func, "Path.write_bytes"))
-        )
-        stack.enter_context(
-            _patch(logging.Logger, "_log", _pure_violation(func, "logging"))
-        )
-        yield
-
-
-@contextmanager
-def _patch(
-    obj: object, attribute: str, replacement: Callable[..., object]
-) -> Iterator[None]:
-    original = getattr(obj, attribute)
-    setattr(obj, attribute, replacement)
+    token = _PURE_STACK.set((*_PURE_STACK.get(), func))
+    _activate_pure_patches()
     try:
         yield
     finally:
-        setattr(obj, attribute, original)
+        _PURE_STACK.reset(token)
+        _deactivate_pure_patches()
 
 
 def pure(func: Callable[P, R]) -> Callable[P, R]:  # noqa: UP047

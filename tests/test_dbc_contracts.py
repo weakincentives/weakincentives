@@ -14,7 +14,10 @@
 
 from __future__ import annotations
 
+import builtins
+import logging
 import pathlib
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -160,6 +163,82 @@ def test_pure_detects_io_calls(tmp_path: pathlib.Path) -> None:
 
     with pytest.raises(AssertionError):
         touch_file(tmp_path / "sample.txt")
+
+
+def test_pure_detects_open_calls(tmp_path: pathlib.Path) -> None:
+    @pure
+    def touch_file(path: pathlib.Path) -> None:
+        with builtins.open(path, "w", encoding="utf-8") as handle:  # noqa: PTH123
+            handle.write("hello")
+
+    with pytest.raises(AssertionError):
+        touch_file(tmp_path / "sample.txt")
+
+
+def test_pure_detects_write_bytes_calls(tmp_path: pathlib.Path) -> None:
+    @pure
+    def touch_file(path: pathlib.Path) -> None:
+        path.write_bytes(b"hello")
+
+    with pytest.raises(AssertionError):
+        touch_file(tmp_path / "sample.bin")
+
+
+def test_pure_patching_is_thread_safe(tmp_path: pathlib.Path) -> None:
+    started = threading.Event()
+    done = threading.Event()
+
+    @pure
+    def wait_for_done_signal() -> None:
+        started.set()
+        assert done.wait(timeout=1.0)
+
+    thread = threading.Thread(target=wait_for_done_signal)
+    thread.start()
+    assert started.wait(timeout=1.0)
+
+    with builtins.open(tmp_path / "allowed.txt", "w", encoding="utf-8") as handle:  # noqa: PTH123
+        handle.write("ok")
+    (tmp_path / "allowed-pathlib.txt").write_text("ok")
+    (tmp_path / "allowed.bin").write_bytes(b"ok")
+
+    logger = logging.getLogger("weakincentives.dbc.thread-safety")
+    logger.addHandler(logging.NullHandler())
+    logger.propagate = False
+    logger.warning("message while pure patches are active")
+
+    done.set()
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()
+
+
+def test_pure_patch_depth_is_thread_safe() -> None:
+    started_one = threading.Event()
+    started_two = threading.Event()
+    done = threading.Event()
+
+    @pure
+    def wait_one() -> None:
+        started_one.set()
+        assert done.wait(timeout=1.0)
+
+    @pure
+    def wait_two() -> None:
+        started_two.set()
+        assert done.wait(timeout=1.0)
+
+    thread_one = threading.Thread(target=wait_one)
+    thread_two = threading.Thread(target=wait_two)
+    thread_one.start()
+    thread_two.start()
+    assert started_one.wait(timeout=1.0)
+    assert started_two.wait(timeout=1.0)
+
+    done.set()
+    thread_one.join(timeout=1.0)
+    thread_two.join(timeout=1.0)
+    assert not thread_one.is_alive()
+    assert not thread_two.is_alive()
 
 
 def test_pure_is_inert_when_disabled() -> None:
