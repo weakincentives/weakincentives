@@ -93,16 +93,18 @@ class Filesystem(Protocol):
 
     # ─── Snapshot Operations ───────────────────────────────────────
 
-    def snapshot(self) -> bytes:
-        """Serialize current state for persistence. Backend-specific format."""
+    def snapshot(self, path: Path) -> None:
+        """Write current state to file at path. Creates parent directories."""
         ...
 
-    def restore(self, data: bytes) -> None:
-        """Restore state from serialized snapshot."""
+    def restore(self, path: Path) -> None:
+        """Restore state from file at path. Raises FileNotFoundError if missing."""
         ...
 ```
 
-Eight methods total. `snapshot()` and `restore()` enable persistence and rollback.
+Eight methods total. `snapshot()` and `restore()` write to/read from files
+(default: temp directory) rather than returning bytes, avoiding large base64
+blobs in session JSON.
 
 ## Session and ToolContext Integration
 
@@ -242,127 +244,234 @@ class InMemoryBackend:
         self._set_state(state)
 ```
 
-### Snapshots and Rollback
+## Snapshot Architecture
 
-The session manages state history. When a session snapshot is taken:
+Session snapshots and filesystem snapshots are **coupled**. The section that
+provides the filesystem is responsible for coordinating both.
+
+### Snapshot Protocol
 
 ```python
-# Session stores all slice states including InMemoryState
-snapshot_id = session.snapshot()
+class Filesystem(Protocol):
+    # ... read, write, delete, list, glob, grep ...
+
+    def snapshot(self, path: Path) -> None:
+        """Write current state to file. Creates parent directories."""
+        ...
+
+    def restore(self, path: Path) -> None:
+        """Restore state from file. Raises FileNotFoundError if missing."""
+        ...
+```
+
+Snapshots write to files (not bytes). Default location is a temp file.
+
+### Snapshot Slice
+
+All filesystem sections use a common slice to track snapshot file paths:
+
+```python
+@dataclass(slots=True, frozen=True)
+class FilesystemSnapshot:
+    """Session slice tracking filesystem snapshot location."""
+    path: str | None = None  # Path to snapshot file, None if not snapshotted
+```
+
+### InMemoryBackend Snapshots
+
+For `InMemoryBackend`, state lives in `InMemoryState` slice. Snapshots serialize
+this to a file:
+
+```python
+class InMemoryBackend:
+    def snapshot(self, path: Path) -> None:
+        state = self._state()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(serde.dump(state))
+
+    def restore(self, path: Path) -> None:
+        data = path.read_text()
+        state = serde.parse(InMemoryState, json.loads(data))
+        self._set_state(state)
+```
+
+### ContainerBackend Snapshots
+
+```python
+class ContainerBackend:
+    def snapshot(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Stream tarball directly to file
+        with open(path, "wb") as f:
+            self._exec(["tar", "-czf", "-", "-C", self._workdir, "."], stdout=f)
+
+    def restore(self, path: Path) -> None:
+        self._exec(["rm", "-rf", f"{self._workdir}/*"])
+        with open(path, "rb") as f:
+            self._exec(["tar", "-xzf", "-", "-C", self._workdir], stdin=f)
+```
+
+### HostBackend Snapshots
+
+```python
+class HostBackend:
+    def snapshot(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(path, "w:gz") as tar:
+            tar.add(self._root, arcname=".")
+
+    def restore(self, path: Path) -> None:
+        shutil.rmtree(self._root)
+        self._root.mkdir(parents=True)
+        with tarfile.open(path, "r:gz") as tar:
+            tar.extractall(self._root)
+```
+
+## Session-Filesystem Snapshot Coupling
+
+**Critical**: When a session snapshot is created, the section must also snapshot
+the filesystem. These operations are coupled and must happen together.
+
+### FilesystemSection Coordinates Snapshots
+
+```python
+class FilesystemSection(MarkdownSection):
+    """Base for sections that provide a Filesystem."""
+
+    def __init__(self, *, session: Session, snapshot_dir: Path | None = None) -> None:
+        self._session = session
+        self._snapshot_dir = snapshot_dir or Path(tempfile.gettempdir()) / "wink-fs-snapshots"
+        session.install(FilesystemSnapshot, initial=lambda: FilesystemSnapshot())
+
+    @property
+    def filesystem(self) -> Filesystem:
+        raise NotImplementedError
+
+    def snapshot(self) -> str:
+        """Snapshot both session and filesystem. Returns snapshot ID."""
+        # 1. Generate snapshot path
+        snapshot_id = f"{uuid.uuid4()}"
+        snapshot_path = self._snapshot_dir / f"{snapshot_id}.snapshot"
+
+        # 2. Snapshot filesystem to file
+        self.filesystem.snapshot(snapshot_path)
+
+        # 3. Record path in session slice
+        self._session.mutate(FilesystemSnapshot).seed(
+            FilesystemSnapshot(path=str(snapshot_path))
+        )
+
+        # 4. Snapshot session (includes FilesystemSnapshot slice)
+        self._session.snapshot(snapshot_id)
+
+        return snapshot_id
+
+    def rollback(self, snapshot_id: str) -> None:
+        """Rollback both session and filesystem."""
+        # 1. Rollback session (restores FilesystemSnapshot slice)
+        self._session.rollback(snapshot_id)
+
+        # 2. Read restored snapshot path from slice
+        fs_snapshot = self._session.query(FilesystemSnapshot).latest()
+        if fs_snapshot and fs_snapshot.path:
+            # 3. Restore filesystem from file
+            self.filesystem.restore(Path(fs_snapshot.path))
+```
+
+### Usage
+
+```python
+section = VfsSection(session=session, mounts=mounts)
+
+# Create coupled snapshot
+snapshot_id = section.snapshot()
 
 # ... operations modify filesystem ...
-backend.write("foo.txt", "modified")
+section.filesystem.write("config.json", new_config)
 
-# Rollback restores InMemoryState to previous value
-session.rollback(snapshot_id)
+# Rollback restores both session state AND filesystem
+section.rollback(snapshot_id)
 
 # Filesystem reflects rolled-back state
-backend.read("foo.txt")  # Returns original content or raises FileNotFoundError
+section.filesystem.read("config.json")  # Original content
 ```
 
 ### Persistence
 
-Saving session to disk includes `InMemoryState`:
+When saving a session to disk, the filesystem snapshot file must also be preserved:
 
 ```python
-# Save session (includes all slices)
-session.save("/path/to/session.json")
+def save_session_with_filesystem(session: Session, section: FilesystemSection, path: Path) -> None:
+    """Save session and filesystem snapshot together."""
+    # 1. Snapshot filesystem to file alongside session
+    fs_snapshot_path = path.with_suffix(".fs.tar.gz")
+    section.filesystem.snapshot(fs_snapshot_path)
 
-# Load session
-session = Session.load("/path/to/session.json", bus=bus)
+    # 2. Record path in session
+    session.mutate(FilesystemSnapshot).seed(
+        FilesystemSnapshot(path=str(fs_snapshot_path))
+    )
 
-# Recreate backend pointing at loaded session
-backend = InMemoryBackend(session)  # Reads existing InMemoryState
+    # 3. Save session
+    session.save(path)
+
+
+def load_session_with_filesystem(
+    path: Path,
+    bus: EventBus,
+    section_factory: Callable[[Session], FilesystemSection],
+) -> tuple[Session, FilesystemSection]:
+    """Load session and restore filesystem snapshot."""
+    # 1. Load session
+    session = Session.load(path, bus=bus)
+
+    # 2. Create section (backend reads existing InMemoryState if applicable)
+    section = section_factory(session)
+
+    # 3. Restore filesystem from snapshot file if present
+    fs_snapshot = session.query(FilesystemSnapshot).latest()
+    if fs_snapshot and fs_snapshot.path:
+        snapshot_path = Path(fs_snapshot.path)
+        if snapshot_path.exists():
+            section.filesystem.restore(snapshot_path)
+
+    return session, section
 ```
 
-The `InMemoryState` slice is serialized as JSON via the standard serde module.
+### Snapshot File Lifecycle
 
-## External State: ContainerBackend and HostBackend
+| Event | Action |
+|-------|--------|
+| `section.snapshot()` | Write to temp file, record path in slice |
+| `section.rollback(id)` | Restore from file at recorded path |
+| `save_session_with_filesystem()` | Write to persistent file alongside session |
+| `load_session_with_filesystem()` | Restore from file recorded in loaded session |
+| Session garbage collection | Caller responsible for cleaning up snapshot files |
 
-These backends have state external to the session. They implement `snapshot()`
-and `restore()` differently:
+### InMemoryBackend: Dual State
 
-### ContainerBackend
+For `InMemoryBackend`, state exists in two places:
+
+1. **`InMemoryState` slice** — Always in session, automatically included in session snapshots
+2. **Snapshot file** — Written on explicit `snapshot()` call
+
+The snapshot file is redundant for `InMemoryBackend` but provides a consistent
+interface. Alternatively, `InMemoryBackend.snapshot()` can be a no-op since state
+is already in the session:
 
 ```python
-class ContainerBackend:
-    def __init__(self, container: Container, workdir: str = "/workspace") -> None:
-        self._container = container
-        self._workdir = workdir
+class InMemoryBackend:
+    def snapshot(self, path: Path) -> None:
+        # State already in InMemoryState slice; file is optional backup
+        pass
 
-    def snapshot(self) -> bytes:
-        # Create tarball of workspace
-        result = self._exec(["tar", "-czf", "-", "-C", self._workdir, "."])
-        return result.stdout_bytes
-
-    def restore(self, data: bytes) -> None:
-        # Clear workspace and extract tarball
-        self._exec(["rm", "-rf", f"{self._workdir}/*"])
-        self._exec(["tar", "-xzf", "-", "-C", self._workdir], stdin_bytes=data)
-
-    # ... read, write, delete, list, glob, grep same as before ...
+    def restore(self, path: Path) -> None:
+        # State restored via session.rollback(); file not needed
+        pass
 ```
 
-Container snapshots are expensive (tar/untar). Use sparingly.
-
-### HostBackend
-
-```python
-class HostBackend:
-    def __init__(self, root: Path) -> None:
-        self._root = root.resolve()
-
-    def snapshot(self) -> bytes:
-        # Serialize directory tree to tarball
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
-            tar.add(self._root, arcname=".")
-        return buffer.getvalue()
-
-    def restore(self, data: bytes) -> None:
-        # Clear and restore from tarball
-        shutil.rmtree(self._root)
-        self._root.mkdir(parents=True)
-        buffer = io.BytesIO(data)
-        with tarfile.open(fileobj=buffer, mode="r:gz") as tar:
-            tar.extractall(self._root)
-
-    # ... read, write, delete, list, glob, grep same as before ...
-```
-
-### Session Integration for External Backends
-
-External backends don't automatically participate in session snapshots. For
-explicit snapshot/rollback:
-
-```python
-# Manual snapshot before risky operation
-fs_snapshot = backend.snapshot()
-
-try:
-    backend.write("config.json", new_config)
-    run_tests()
-except TestFailure:
-    backend.restore(fs_snapshot)
-```
-
-To persist external state with session, store snapshot in a session slice:
-
-```python
-@dataclass(slots=True, frozen=True)
-class ExternalFsSnapshot:
-    data: bytes
-
-# Before saving session
-session.mutate(ExternalFsSnapshot).seed(ExternalFsSnapshot(data=backend.snapshot()))
-session.save("/path/to/session.json")
-
-# After loading session
-session = Session.load("/path/to/session.json", bus=bus)
-snapshot = session.query(ExternalFsSnapshot).latest()
-if snapshot:
-    backend.restore(snapshot.data)
-```
+This simplifies the coupling: for `InMemoryBackend`, session snapshot alone
+suffices. For external backends, the file is required.
 
 ## Section Definitions
 
@@ -513,12 +622,26 @@ def test_delete(fs: Filesystem) -> None:
     with pytest.raises(FileNotFoundError):
         fs.read("a/b.txt")
 
-def test_snapshot_restore(fs: Filesystem) -> None:
+def test_snapshot_restore(fs: Filesystem, tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.tar.gz"
     fs.write("file.txt", "original")
-    snap = fs.snapshot()
+    fs.snapshot(snapshot_path)
     fs.write("file.txt", "modified")
-    fs.restore(snap)
+    fs.restore(snapshot_path)
     assert fs.read("file.txt").content == "original"
+
+def test_section_coupled_snapshot(session: Session, tmp_path: Path) -> None:
+    """Section.snapshot() couples session and filesystem snapshots."""
+    section = VfsSection(session=session, snapshot_dir=tmp_path)
+    section.filesystem.write("data.txt", "v1")
+
+    snapshot_id = section.snapshot()
+
+    section.filesystem.write("data.txt", "v2")
+    assert section.filesystem.read("data.txt").content == "v2"
+
+    section.rollback(snapshot_id)
+    assert section.filesystem.read("data.txt").content == "v1"
 ```
 
 Container backend tests are integration tests requiring Podman runtime.
@@ -528,14 +651,16 @@ Container backend tests are integration tests requiring Podman runtime.
 | Aspect | InMemoryBackend | ContainerBackend | HostBackend |
 |--------|-----------------|------------------|-------------|
 | State location | Session slice (`InMemoryState`) | Container filesystem | Host temp directory |
-| Session snapshots | Automatic | Manual via `snapshot()`/`restore()` | Manual |
-| Persistence | Via session save/load | Via `ExternalFsSnapshot` slice | Via `ExternalFsSnapshot` slice |
-| Rollback | Automatic with session | Manual | Manual |
+| Snapshot file | Optional (state in slice) | Required (tarball) | Required (tarball) |
+| Session coupling | Automatic via slice | Via `FilesystemSnapshot` path | Via `FilesystemSnapshot` path |
+| Rollback | `section.rollback()` | `section.rollback()` | `section.rollback()` |
+
+**Key insight**: Session and filesystem snapshots are coupled. The section
+coordinates both via `section.snapshot()` and `section.rollback()`. Snapshot
+files are stored in temp directory by default; paths are recorded in the
+`FilesystemSnapshot` session slice.
 
 The `Filesystem` protocol provides eight methods: `read`, `write`, `delete`,
 `list`, `glob`, `grep`, `snapshot`, `restore`. Tool handlers access the
 filesystem via `context.filesystem`. Sections expose backends via a
-`filesystem` property. The adapter injects the filesystem into tool context.
-
-This eliminates tool duplication while properly addressing state management
-across different backend types.
+`filesystem` property and coordinate snapshot coupling.
