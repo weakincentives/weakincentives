@@ -97,30 +97,18 @@ Six methods. No `exists()`, `is_file()`, `mkdir()`—these are derivable from
 
 ## Session Registration
 
-Backends register as the active filesystem:
+Sections create a backend and register it as the active filesystem:
 
 ```python
-class InMemoryBackend:
-    def __init__(self, session: Session, mounts: Sequence[HostMount] = ()) -> None:
-        self._session = session
-        # Hydrate from mounts, register reducers...
-
-    def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
-        snapshot = self._session.query(VirtualFileSystem).latest()
-        file = self._find(snapshot, path)
-        return self._paginate(file, offset, limit)
-
-    def write(self, path: str, content: str) -> int:
-        self._session.mutate(VirtualFileSystem).dispatch(WriteFile(path, content))
-        return len(content.encode())
-
-# Section registers backend
 class VfsSection(MarkdownSection):
     def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
-        backend = InMemoryBackend(session, mounts)
-        session.install(Filesystem, initial=lambda: backend)
+        self._backend = InMemoryBackend(mounts)
+        session.install(Filesystem, initial=lambda: self._backend)
         super().__init__(title="Filesystem", template=..., tools=FILESYSTEM_TOOLS)
 ```
+
+The backend object lives for the session's lifetime. State is internal to the
+backend—no separate session slices required.
 
 ## Tool Handlers
 
@@ -153,54 +141,76 @@ FILESYSTEM_TOOLS = (
 
 ### InMemoryBackend
 
-Uses existing `VirtualFileSystem` slice with reducer-based mutations:
+Holds file state directly. No separate session slice—the backend *is* the state:
 
 ```python
+@dataclass
+class _File:
+    path: str
+    content: str
+    size_bytes: int
+
 class InMemoryBackend:
-    def __init__(self, session: Session, mounts: Sequence[HostMount] = ()) -> None:
-        self._session = session
-        session.install(VirtualFileSystem, initial=VirtualFileSystem)
+    def __init__(self, mounts: Sequence[HostMount] = ()) -> None:
+        self._files: dict[str, _File] = {}
         self._hydrate_mounts(mounts)
 
     def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
-        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
-        file = next((f for f in vfs.files if _match(f.path, path)), None)
+        file = self._files.get(_normalize(path))
         if file is None:
             raise FileNotFoundError(path)
         return _paginate(file.content, offset, limit)
 
     def write(self, path: str, content: str) -> int:
-        event = WriteFile(path=_to_vfs_path(path), content=content, mode="overwrite")
-        self._session.mutate(VirtualFileSystem).dispatch(event)
-        return len(content.encode())
+        normalized = _normalize(path)
+        size = len(content.encode())
+        self._files[normalized] = _File(path=normalized, content=content, size_bytes=size)
+        return size
 
     def delete(self, path: str) -> int:
-        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
-        count = sum(1 for f in vfs.files if _is_prefix(path, f.path))
-        self._session.mutate(VirtualFileSystem).dispatch(DeleteEntry(path=_to_vfs_path(path)))
-        return count
+        normalized = _normalize(path)
+        # Delete exact match or prefix (directory)
+        to_delete = [p for p in self._files if p == normalized or p.startswith(normalized + "/")]
+        for p in to_delete:
+            del self._files[p]
+        return len(to_delete)
 
     def list(self, path: str = "") -> tuple[FileEntry, ...]:
-        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
-        return _list_entries(vfs.files, path)
+        prefix = _normalize(path)
+        entries = {}
+        for file_path, file in self._files.items():
+            if not file_path.startswith(prefix):
+                continue
+            relative = file_path[len(prefix):].lstrip("/")
+            top_segment = relative.split("/")[0]
+            full_path = f"{prefix}/{top_segment}".lstrip("/")
+            if "/" in relative:
+                entries[full_path] = FileEntry(path=full_path, kind="directory")
+            else:
+                entries[full_path] = FileEntry(path=full_path, kind="file", size_bytes=file.size_bytes)
+        return tuple(entries.values())
 
     def glob(self, pattern: str) -> tuple[FileEntry, ...]:
-        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
-        return tuple(FileEntry(path=_fmt(f.path), kind="file", size_bytes=f.size_bytes)
-                     for f in vfs.files if fnmatch.fnmatch(_fmt(f.path), pattern))
+        return tuple(
+            FileEntry(path=f.path, kind="file", size_bytes=f.size_bytes)
+            for f in self._files.values()
+            if fnmatch.fnmatch(f.path, pattern)
+        )
 
     def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
-        vfs = self._session.query(VirtualFileSystem).latest() or VirtualFileSystem()
         regex = re.compile(pattern)
         matches = []
-        for file in vfs.files:
-            if file_glob and not fnmatch.fnmatch(_fmt(file.path), file_glob):
+        for file in self._files.values():
+            if file_glob and not fnmatch.fnmatch(file.path, file_glob):
                 continue
             for i, line in enumerate(file.content.splitlines(), 1):
                 if regex.search(line):
-                    matches.append(GrepMatch(path=_fmt(file.path), line_number=i, line_content=line))
+                    matches.append(GrepMatch(path=file.path, line_number=i, line_content=line))
         return tuple(matches)
 ```
+
+The backend persists for the session's lifetime via `session.install(Filesystem, ...)`.
+No reducers, no events, no separate VirtualFileSystem dataclass.
 
 ### ContainerBackend
 
@@ -326,12 +336,12 @@ class HostBackend:
 
 ## Section Definitions
 
-Sections provide backend + tools:
+Sections create backend, register it, and attach tools:
 
 ```python
 class VfsSection(MarkdownSection):
     def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
-        self._backend = InMemoryBackend(session, mounts)
+        self._backend = InMemoryBackend(mounts)
         session.install(Filesystem, initial=lambda: self._backend)
         super().__init__(
             title="Virtual Filesystem",
@@ -363,10 +373,6 @@ class WorkspaceSection(MarkdownSection):
             template=_WORKSPACE_TEMPLATE,
             tools=(),  # SDK uses native tools
         )
-
-    @property
-    def filesystem(self) -> Filesystem:
-        return self._backend
 ```
 
 ## edit_file Implementation
@@ -405,9 +411,9 @@ Parameterized tests cover all backends:
 
 ```python
 @pytest.fixture(params=["memory", "host"])
-def fs(request, session, tmp_path) -> Filesystem:
+def fs(request, tmp_path) -> Filesystem:
     if request.param == "memory":
-        return InMemoryBackend(session)
+        return InMemoryBackend()
     return HostBackend(tmp_path)
 
 def test_write_read_roundtrip(fs: Filesystem) -> None:
