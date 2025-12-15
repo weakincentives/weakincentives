@@ -74,14 +74,22 @@ def reducer[E: SupportsDataclass](
 ) -> Callable[[Callable[[Any, E], Any]], Callable[[Any, E], Any]]:
     """Decorator to mark a method as a reducer for a specific event type.
 
-    The decorated method receives `self` (the current slice value) and the
-    event, returning a new instance of the slice type.
+    The decorated method receives ``self`` (the current slice value) and the
+    event, returning a new instance of the slice type. Each event type may
+    only have one reducer method per slice class.
 
     Args:
-        on: The event type this reducer handles.
+        on: The event type this reducer handles. Must be a frozen dataclass.
 
     Returns:
         A decorator that marks the method with reducer metadata.
+
+    Note:
+        The method signature must be ``(self, event: E) -> Self`` where:
+
+        - ``self`` is the current state (used to compute the new state)
+        - ``event`` is the dispatched event of type ``E``
+        - Return type must be the same as the slice class (validated at runtime)
 
     Example::
 
@@ -101,8 +109,13 @@ def reducer[E: SupportsDataclass](
 def _extract_reducer_metadata[T: SupportsDataclass](
     cls: type[T],
 ) -> tuple[ReducerMeta, ...]:
-    """Extract reducer metadata from methods decorated with @reducer."""
+    """Extract reducer metadata from methods decorated with @reducer.
+
+    Raises:
+        ValueError: If multiple methods handle the same event type.
+    """
     reducers: list[ReducerMeta] = []
+    seen_events: dict[type[SupportsDataclass], str] = {}
 
     for name in dir(cls):
         if name.startswith("_"):
@@ -112,6 +125,14 @@ def _extract_reducer_metadata[T: SupportsDataclass](
             continue
         event_type = getattr(attr, _REDUCER_META, None)
         if event_type is not None:
+            # Check for duplicate event handlers
+            if event_type in seen_events:
+                msg = (
+                    f"{cls.__name__} has multiple @reducer methods for "
+                    f"{event_type.__name__}: {seen_events[event_type]} and {name}"
+                )
+                raise ValueError(msg)
+            seen_events[event_type] = name
             reducers.append(ReducerMeta(event_type=event_type, method_name=name))
 
     return tuple(reducers)
@@ -160,6 +181,14 @@ def _create_reducer_for_method[S: SupportsDataclass, E: SupportsDataclass](
         method = getattr(current, method_name)
         result = method(cast(E, event))
 
+        # Validate return type
+        if not isinstance(result, slice_type):
+            msg = (
+                f"{slice_type.__name__}.{method_name} must return "
+                f"{slice_type.__name__}, got {type(result).__name__}"
+            )
+            raise TypeError(msg)
+
         # Return as singleton tuple (replace_latest semantics)
         return (result,)
 
@@ -190,7 +219,8 @@ def install_state_slice[T: SupportsDataclass](
 
     Raises:
         TypeError: If the class is not a frozen dataclass.
-        ValueError: If no @reducer methods are found.
+        ValueError: If no @reducer methods are found, or if multiple methods
+            handle the same event type.
 
     Example::
 

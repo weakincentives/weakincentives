@@ -326,7 +326,40 @@ def method_name(self, event: EventType) -> SelfType:
 - The class must be a frozen dataclass
 - Event types must be defined before the slice class
 - Reducer methods receive only `self` and `event` (no context parameter)
-- Methods must return a new instance of the slice type
+- Methods must return a new instance of the slice type (validated at runtime)
+- Each event type may only have one reducer method per slice class
+
+### When to Use Declarative Reducers
+
+Use `@reducer` methods when:
+
+- **Multiple event types** - The slice handles several distinct events with custom logic
+- **Complex transformations** - Reducers need access to slice state to compute updates
+- **Domain modeling** - The slice represents a domain concept with defined behaviors
+
+Use built-in reducers (`append`, `replace_latest`, etc.) when:
+
+- **Simple accumulation** - Just collecting items without transformation (`append`)
+- **Latest-wins semantics** - Only the most recent value matters (`replace_latest`)
+- **Key-based updates** - Upserting by a derived key (`upsert_by`, `replace_latest_by`)
+
+```python
+# Good fit for @reducer: complex state transitions
+@dataclass(frozen=True)
+class Plan:
+    steps: tuple[PlanStep, ...]
+
+    @reducer(on=UpdateStep)
+    def handle_update(self, event: UpdateStep) -> Plan:
+        # Complex logic: find step, update status, check completion
+        ...
+
+# Good fit for built-in: simple accumulation
+session.mutate(Notification).register(Notification, append)
+
+# Good fit for built-in: latest value only
+session.mutate(PodmanWorkspace).register(PodmanWorkspace, replace_latest)
+```
 
 ### Session Hierarchy
 

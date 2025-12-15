@@ -398,3 +398,61 @@ def test_extract_reducer_handles_none_attributes() -> None:
     # Should not raise, should just skip the None attribute
     reducers = _extract_reducer_metadata(SliceWithNoneAttr)
     assert reducers == ()
+
+
+def test_install_rejects_duplicate_event_handlers(
+    session_factory: SessionFactory,
+) -> None:
+    """Verify install() rejects classes with multiple handlers for same event."""
+
+    @dataclass(frozen=True)
+    class DuplicateEvent:
+        value: int
+
+    @dataclass(frozen=True)
+    class DuplicateHandlers:
+        value: int = 0
+
+        @reducer(on=DuplicateEvent)
+        def handle_first(self, event: DuplicateEvent) -> DuplicateHandlers:
+            return replace(self, value=event.value)
+
+        @reducer(on=DuplicateEvent)
+        def handle_second(self, event: DuplicateEvent) -> DuplicateHandlers:
+            return replace(self, value=event.value * 2)
+
+    session, _ = session_factory()
+
+    with pytest.raises(ValueError, match="multiple @reducer methods"):
+        session.install(DuplicateHandlers)
+
+
+def test_reducer_validates_return_type(
+    session_factory: SessionFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify reducer wrapper validates return type at runtime."""
+    import logging
+
+    @dataclass(frozen=True)
+    class BadEvent:
+        pass
+
+    @dataclass(frozen=True)
+    class WrongReturn:
+        value: int = 0
+
+        @reducer(on=BadEvent)
+        def handle(self, event: BadEvent) -> str:
+            del event
+            return "wrong type"  # Returns str, not WrongReturn
+
+    session, _ = session_factory()
+    session.install(WrongReturn, initial=WrongReturn)
+
+    # Session logs reducer failures instead of raising
+    with caplog.at_level(logging.ERROR):
+        session.mutate(WrongReturn).dispatch(BadEvent())
+
+    # Verify the TypeError was logged
+    assert "must return WrongReturn, got str" in caplog.text
+    assert "Reducer application failed" in caplog.text
