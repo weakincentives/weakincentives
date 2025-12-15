@@ -43,9 +43,9 @@ PromptTemplate[ReviewResponse]
 ├── MarkdownSection (guidance)
 ├── WorkspaceDigestSection     ← auto-generated codebase summary
 ├── MarkdownSection (reference docs, progressive disclosure)
-├── PlanningToolsSection       ← contributes plan_*, reflect tools
+├── PlanningToolsSection       ← contributes planning_* tools
 │   └── (nested planning docs)
-├── VfsToolsSection            ← contributes vfs_list_files, vfs_read_file, …
+├── VfsToolsSection            ← contributes ls/read_file/write_file/...
 │   └── (nested filesystem docs)
 └── MarkdownSection (user request)
 ```
@@ -64,7 +64,7 @@ structure itself.
 
 1. **Co-location.** Instructions and tools live together. The section that
    explains filesystem navigation is the same section that provides the
-   `vfs_read_file` tool. Documentation can't drift from implementation.
+   `read_file` tool. Documentation can't drift from implementation.
 
 1. **Progressive disclosure.** Nest child sections to reveal advanced
    capabilities only when relevant. The LLM sees numbered, hierarchical headings
@@ -207,7 +207,7 @@ vfs_section = VfsToolsSection(
 )
 ```
 
-Agents use `vfs_list_files` and `vfs_read_file` inside the sandbox.
+Agents use `ls` and `read_file` inside the sandbox.
 
 ### 4. Run and get typed results
 
@@ -235,7 +235,7 @@ bus = InProcessEventBus()
 adapter = OpenAIAdapter(model="gpt-5.1")
 loop = ReviewLoop(adapter, bus)
 
-response = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
+response, session = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
 review: ReviewResponse = response.output  # typed, validated
 ```
 
@@ -372,9 +372,9 @@ make integration-tests  # skipped without credentials
 ## Documentation
 
 - `AGENTS.md` — contributor workflow
+- `llms.md` — agent-friendly API overview (also the PyPI README)
 - `specs/` — design documents
 - `ROADMAP.md` — upcoming features
-- `docs/api/` — API reference
 
 ## License
 

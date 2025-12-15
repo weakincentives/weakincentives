@@ -4,44 +4,52 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+- No changes yet.
+
+## v0.14.0 - 2025-12-15
+
 ### Claude Agent SDK Adapter
 
-A new adapter enables running WINK agents through Claude Code's agentic
-infrastructure, with full CLI capabilities and hermetic execution:
+A new adapter enables running WINK prompts through Claude Code's agentic runtime
+with hook-based session synchronization and hermetic isolation options.
 
 ```python
-from weakincentives.adapters import ClaudeAgentSDKAdapter, ClaudeAgentSDKModelConfig
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+from weakincentives.runtime import Session
 
-adapter = ClaudeAgentSDKAdapter(
-    model=ClaudeAgentSDKModelConfig(model="claude-sonnet-4-20250514"),
-)
+session = Session()
+adapter = ClaudeAgentSDKAdapter(model="claude-sonnet-4-5-20250929")
 response = adapter.evaluate(prompt, session=session)
 ```
 
 Key capabilities:
 
-- **Session synchronization**: Hook-based state sync keeps your WINK session
-  as the source of truth while Claude Code executes tools
-- **MCP tool bridging**: WINK tools are exposed to Claude Code via the Model
-  Context Protocol, enabling native tool execution
-- **Workspace mounting**: Mount directories into Claude Code's workspace with
-  configurable read/write permissions
-- **Isolation mode**: Run without affecting the host's `~/.claude` config
-  using ephemeral home directories
-- **Network policies**: Programmatic control over network access
-  (`no_network`, `api_only`, `with_domains`)
+- **Session synchronization**: Hook-based state sync keeps your WINK `Session` as
+  the source of truth while Claude Code executes tools.
+- **MCP tool bridging**: WINK tools with handlers are exposed to Claude Code via
+  MCP so the SDK can call them.
+- **Workspace materialization**: Materialize host paths into a temporary
+  workspace for SDK access via `ClaudeAgentWorkspaceSection`.
+- **Isolation**: Run without touching the host's `~/.claude` config using
+  `IsolationConfig` + `EphemeralHome`.
+- **Network policy (tools only)**: Restrict tool egress with
+  `NetworkPolicy.no_network()` / `NetworkPolicy.with_domains(...)`.
 
 ### Session State Observers
 
-Sessions now support reactive observation of state changes, eliminating the
-need for polling:
+Sessions now support reactive observation of state changes, eliminating the need
+for polling:
 
 ```python
-def on_plan_change(state: list[Plan]) -> None:
-    print(f"Plan updated: {len(state)} items")
+from weakincentives.contrib.tools import Plan
+from weakincentives.runtime import Session
+
+session = Session()
+
+def on_plan_change(old: tuple[Plan, ...], new: tuple[Plan, ...]) -> None:
+    print(f"Plan changed: {len(old)} -> {len(new)} snapshots")
 
 subscription = session.observe(Plan, on_plan_change)
-# ... later
 subscription.unsubscribe()
 ```
 
@@ -53,7 +61,14 @@ Visibility overrides are now managed through session state using Redux-style
 events:
 
 ```python
-from weakincentives.prompt import SetVisibilityOverride, VisibilityOverrides
+from weakincentives.prompt import (
+    SectionVisibility,
+    SetVisibilityOverride,
+    VisibilityOverrides,
+)
+from weakincentives.runtime import Session
+
+session = Session()
 
 session.mutate(VisibilityOverrides).dispatch(
     SetVisibilityOverride(path=("section",), visibility=SectionVisibility.FULL)
@@ -62,39 +77,37 @@ response = adapter.evaluate(prompt, session=session)
 ```
 
 Visibility selectors and enabled predicates now accept an optional `session`
-parameter for dynamic decisions based on session state:
-
-```python
-def dynamic_visibility(params: MyParams, *, session: Session) -> SectionVisibility:
-    state = session.query(MyState).latest()
-    return SectionVisibility.FULL if state and state.expanded else SectionVisibility.SUMMARY
-```
+parameter for dynamic decisions based on session state.
 
 Sessions automatically register visibility reducers—no manual setup required.
+
+### Planning Tools
+
+- Planning tool handlers now return the latest `Plan` snapshot after mutations
+  (`planning_setup_plan`, `planning_add_step`, `planning_update_step`).
+
+### API & Reliability
+
+- `DeadlineExceededError` and `ToolValidationError` are now exported at the
+  package root (`from weakincentives import DeadlineExceededError`).
+- `@pure` contract enforcement is now thread-safe and no longer interferes with
+  file I/O or logging in other threads during concurrent execution.
 
 ### Breaking Changes
 
 - **Visibility overrides moved to Session state**: The `visibility_overrides`
   parameter has been removed from all adapter `evaluate()` methods. Use the
   `VisibilityOverrides` session state slice instead (see above).
-
-- **Tools relocated to `weakincentives.contrib.tools`**: Planning, VFS,
-  Asteval, Podman, and workspace digest tools now live in the `contrib`
-  package. Update imports:
-
-  ```python
-  # Before
-  from weakincentives.tools import PlanningToolsSection, VfsToolsSection
-
-  # After
-  from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection
-  ```
-
-- **Optimizer relocated to `weakincentives.contrib.optimizers`**: The
-  `WorkspaceDigestOptimizer` moved to the contrib package.
-
-- **Error types now at root**: `DeadlineExceededError` and
-  `ToolValidationError` are now exported directly from `weakincentives`.
+- **Tools relocated to `weakincentives.contrib.tools`**: Planning, VFS, asteval,
+  Podman, and workspace digest utilities now live in the `contrib` package.
+- **Optimizer relocated to `weakincentives.contrib.optimizers`**:
+  `WorkspaceDigestOptimizer` moved to contrib.
+- **MainLoop return value**: `MainLoop.execute()` now returns
+  `(response, session)` instead of just `response`.
+- **MainLoop config**: `MainLoopConfig.parse_output` has been removed.
+- **Reducer/event payloads**: Reducers now receive the event dataclass directly
+  (no `.value` wrapper). `ToolInvoked` and `PromptExecuted` no longer expose a
+  `.value` field.
 
 ### Architecture
 
@@ -108,8 +121,13 @@ agent styles":
 
 ### Wink Debugger
 
-- Slice list now displays class names instead of full module paths for
-  improved readability
+- Slice list now displays class names instead of full module paths for improved
+  readability.
+
+### Documentation
+
+- `specs/` is pruned to match what is implemented (unimplemented/aspirational
+  specs removed).
 
 ## v0.13.0 - 2025-12-07
 

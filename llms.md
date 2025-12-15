@@ -25,7 +25,7 @@ An agent harness in WINK wires together five core components:
 
 1. **Session** (`weakincentives.runtime.Session`): Redux-like event ledger that records all prompt renders, tool invocations, and custom state. Creates its own `EventBus` internally (access via `session.event_bus`).
 
-1. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to LLM providers. Call `adapter.evaluate(prompt, bus=session.event_bus, session=session)` to execute.
+1. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to LLM providers. Call `adapter.evaluate(prompt, session=session)` to execute.
 
 1. **Tool handlers**: Functions with signature `(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]` that implement side effects when the model requests tool calls.
 
@@ -95,8 +95,8 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `configure_logging`: Configure the root logger with sensible defaults.
     - `get_logger`: Return a `StructuredLogger` scoped to a name.
     - `parse_structured_output`: Parse a model response into the structured output type declared by the prompt.
-  - Modules: `adapters`, `cli`, `deadlines`, `debug`, `optimizers`, `prompt`,
-    `runtime`, `serde`, `tools`, `types`.
+  - Modules: `adapters`, `cli`, `contrib`, `deadlines`, `debug`, `optimizers`,
+    `prompt`, `runtime`, `serde`, `types`.
 - `weakincentives.adapters`: Provider integrations, configuration, and throttling primitives.
   - Constants: `CLAUDE_AGENT_SDK_ADAPTER_NAME`, `LITELLM_ADAPTER_NAME`, `OPENAI_ADAPTER_NAME`.
   - Types:
@@ -105,8 +105,8 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `PromptResponse`: Structured result emitted by an adapter evaluation.
     - `ProviderAdapter`: Abstract base class describing the synchronous adapter contract.
     - `SessionProtocol`: Protocol describing the session interface required by adapters.
-    - `ThrottleError`: Raised when a throttle policy denies a request.
-    - `ThrottlePolicy`: Protocol for rate limiting policies.
+    - `ThrottleError`: Raised when a provider throttles a request.
+    - `ThrottlePolicy`: Configuration for automatic retry/backoff on throttling.
   - Configuration:
     - `LLMConfig`: Base configuration for common LLM parameters (temperature, max_tokens, top_p, etc.).
     - `OpenAIClientConfig`: Configuration for OpenAI client instantiation (api_key, base_url, timeout).
@@ -223,67 +223,18 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `OptimizationResult`: Generic result container with response, artifact, and metadata.
     - `WorkspaceDigestResult`: Result of workspace digest optimization.
     - `PersistenceScope`: Enum for artifact storage location (`SESSION`, `GLOBAL`).
-  - Concrete implementations:
-    - `WorkspaceDigestOptimizer`: Optimizer for generating task-agnostic workspace summaries.
+  - Concrete implementations live in `weakincentives.contrib.optimizers`.
   - Events:
     - `OptimizationStarted`: Event emitted when optimizer begins work.
     - `OptimizationCompleted`: Event emitted on successful completion.
     - `OptimizationFailed`: Event emitted when optimization raises exception.
-- `weakincentives.tools`: Built-in tool sections and dataclasses.
-  - Planning:
-    - `AddStep`: Add a step to a plan.
-    - `ClearPlan`: Clear the plan.
-    - `MarkStep`: Mark a step in a plan.
-    - `NewPlanStep`: New step for a plan.
-    - `Plan`: A plan.
-    - `PlanStatus`: Status of a plan.
-    - `PlanStep`: A step in a plan.
-    - `PlanningStrategy`: Strategy for planning.
-    - `PlanningToolsSection`: Section for planning tools.
-    - `ReadPlan`: Read the plan.
-    - `SetupPlan`: Setup a plan.
-    - `StepStatus`: Status of a step.
-    - `UpdateStep`: Update a step in a plan.
-  - Sandboxes and VFS:
-    - `AstevalSection`: Section for asteval tools.
-    - `HostMount`: Host mount configuration.
-    - `VirtualFileSystem`: Virtual file system.
-    - `WorkspaceDigest`: Digest of a workspace.
-    - `WorkspaceDigestSection`: Section for workspace digest.
-    - `VfsFile`: Virtual file system file.
-    - `VfsPath`: Virtual file system path.
-    - `VfsToolsSection`: Section for VFS tools.
-    - `clear_workspace_digest`: Clear the workspace digest.
-    - `latest_workspace_digest`: Get the latest workspace digest.
-    - `set_workspace_digest`: Set the workspace digest.
-  - File operations:
-    - `DeleteEntry`: Delete a file or directory.
-    - `EditFileParams`: Parameters for editing a file.
-    - `EvalFileRead`: Read a file for evaluation.
-    - `EvalFileWrite`: Write a file for evaluation.
-    - `EvalParams`: Parameters for evaluation.
-    - `EvalResult`: Result of evaluation.
-    - `FileInfo`: Information about a file.
-    - `GlobMatch`: Match for a glob pattern.
-    - `GlobParams`: Parameters for globbing.
-    - `GrepMatch`: Match for a grep pattern.
-    - `GrepParams`: Parameters for grepping.
-    - `ListDirectory`: List a directory.
-    - `ListDirectoryParams`: Parameters for listing a directory.
-    - `ListDirectoryResult`: Result of listing a directory.
-    - `ReadFile`: Read a file.
-    - `ReadFileParams`: Parameters for reading a file.
-    - `ReadFileResult`: Result of reading a file.
-    - `RemoveParams`: Parameters for removing a file.
-    - `ToolValidationError`: Raised when tool validation fails.
-    - `WriteFile`: Write a file.
-    - `WriteFileParams`: Parameters for writing a file.
-  - Podman extras (lazy-loaded):
-    - `PodmanSandboxConfig`: Configuration for Podman sandbox.
-    - `PodmanSandboxSection`: Section for Podman sandbox.
-    - `PodmanShellParams`: Parameters for Podman shell.
-    - `PodmanShellResult`: Result of Podman shell.
-    - `PodmanWorkspace`: Podman workspace.
+- `weakincentives.contrib`: Optional, domain-specific tools and optimizers.
+  - `weakincentives.contrib.tools`: Planning (`PlanningToolsSection`, `Plan`), VFS
+    (`VfsToolsSection`, `VirtualFileSystem`, `HostMount`), workspace digest
+    (`WorkspaceDigestSection`), and (with extras) `AstevalSection` /
+    `PodmanSandboxSection`.
+  - `weakincentives.contrib.optimizers`: Concrete optimizers (currently
+    `WorkspaceDigestOptimizer`).
 - `weakincentives.serde`: Dataclass serialization helpers.
   - `clone`: Clone a dataclass.
   - `dump`: Dump a dataclass to JSON-compatible types.
@@ -587,7 +538,7 @@ template = PromptTemplate[Result](
     ns="app", key="agent",
     sections=(
         MarkdownSection(title="Task", template="...", key="task"),
-        PlanningToolsSection(session=session),  # setup_plan, add_step, etc.
+        PlanningToolsSection(session=session),  # planning_* tools
         workspace,  # No tools - just provides workspace info
     ),
 )
@@ -600,9 +551,22 @@ response = adapter.evaluate(
     prompt,
     session=session,
     deadline=deadline,                           # Optional timeout
-    visibility_overrides=visibility_overrides,   # Progressive disclosure
     budget=budget,                               # Token/time limits
     budget_tracker=budget_tracker,               # Shared tracker across evaluations
+)
+```
+
+Progressive disclosure is managed via session state:
+
+```python
+from weakincentives.prompt import (
+    SectionVisibility,
+    SetVisibilityOverride,
+    VisibilityOverrides,
+)
+
+session.mutate(VisibilityOverrides).dispatch(
+    SetVisibilityOverride(path=("details",), visibility=SectionVisibility.FULL)
 )
 ```
 
@@ -615,12 +579,16 @@ response.text         # Raw text
 response.prompt_name  # Prompt identifier
 ```
 
-### Rate limiting
+### Throttling
 
 ```python
-from weakincentives.adapters import new_throttle_policy
-policy = new_throttle_policy(requests_per_minute=60)
-response = adapter.evaluate(..., throttle=policy)
+from weakincentives.adapters import ThrottleError
+
+try:
+    response = adapter.evaluate(prompt, session=session)
+except ThrottleError as exc:
+    # exc.kind, exc.retry_after, exc.attempts
+    raise
 ```
 
 ## Runtime & Events (`weakincentives.runtime`)
@@ -642,7 +610,7 @@ response = adapter.evaluate(..., throttle=policy)
   retrieves a module-level logger. `StructuredLogger` is a protocol you can
   implement for custom sinks.
 
-## Built-in Tool Sections (`weakincentives.tools`)
+## Contributed Tool Sections (`weakincentives.contrib.tools`)
 
 ### VfsToolsSection - Sandboxed file operations
 
@@ -656,7 +624,7 @@ vfs = VfsToolsSection(
 )
 ```
 
-Tools: `read_file`, `write_file`, `list_directory`, `glob`, `grep`
+Tools: `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `rm`
 
 ### PlanningToolsSection - Multi-step planning
 
@@ -665,7 +633,7 @@ from weakincentives.contrib.tools import PlanningToolsSection, PlanningStrategy
 planning = PlanningToolsSection(session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT)
 ```
 
-Tools: `setup_plan`, `read_plan`, `add_step`, `update_step`, `mark_step`
+Tools: `planning_setup_plan`, `planning_read_plan`, `planning_add_step`, `planning_update_step`
 
 ### WorkspaceDigestSection
 
@@ -761,7 +729,7 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 
 ```python
 loop = CodeReviewLoop(adapter=adapter, bus=bus)
-response = loop.execute(ReviewRequest(...))
+response, session = loop.execute(ReviewRequest(...))
 ```
 
 ### Bus-driven execution
@@ -769,8 +737,7 @@ response = loop.execute(ReviewRequest(...))
 ```python
 from weakincentives.runtime import MainLoopRequest, MainLoopCompleted, MainLoopFailed
 
-# Subscribe handler
-bus.subscribe(MainLoopRequest, loop.handle_request)
+# MainLoop auto-subscribes to MainLoopRequest in __init__.
 
 # Handle results
 bus.subscribe(MainLoopCompleted, lambda e: print(f"Done: {e.response}"))
@@ -907,11 +874,8 @@ section = MarkdownSection(
 ### Prompt optimizers
 
 ```python
-from weakincentives.optimizers import (
-    OptimizationContext,
-    PersistenceScope,
-    WorkspaceDigestOptimizer,
-)
+from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
+from weakincentives.optimizers import OptimizationContext, PersistenceScope
 
 context = OptimizationContext(
     adapter=adapter,
