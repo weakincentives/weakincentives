@@ -90,39 +90,62 @@ class Filesystem(Protocol):
     def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
         """Search file contents with regex. Optional file glob filter."""
         ...
+
+    # ─── Snapshot Operations ───────────────────────────────────────
+
+    def snapshot(self) -> bytes:
+        """Serialize current state for persistence. Backend-specific format."""
+        ...
+
+    def restore(self, data: bytes) -> None:
+        """Restore state from serialized snapshot."""
+        ...
 ```
 
-Six methods. No `exists()`, `is_file()`, `mkdir()`—these are derivable from
-`read()` (catch exception), `list()` (check kind), and `write()` (implicit).
+Eight methods total. `snapshot()` and `restore()` enable persistence and rollback.
 
-## Session Registration
+## Session and ToolContext Integration
 
-Sections create a backend and register it as the active filesystem:
+### The Problem
+
+`Session.install()` only accepts frozen dataclass slices with `@reducer` methods.
+`Filesystem` is a Protocol with mutable implementations. These don't compose.
+
+### Solution: ToolContext Carries Filesystem
+
+Extend `ToolContext` with an optional filesystem field:
 
 ```python
-class VfsSection(MarkdownSection):
-    def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
-        self._backend = InMemoryBackend(mounts)
-        session.install(Filesystem, initial=lambda: self._backend)
-        super().__init__(title="Filesystem", template=..., tools=FILESYSTEM_TOOLS)
+@dataclass(slots=True, frozen=True)
+class ToolContext:
+    prompt: PromptProtocol[Any]
+    rendered_prompt: RenderedPromptProtocol[Any] | None
+    adapter: ProviderAdapterProtocol[Any]
+    session: SessionProtocol
+    deadline: Deadline | None = None
+    budget_tracker: BudgetTracker | None = None
+    filesystem: Filesystem | None = None  # NEW
 ```
 
-The backend object lives for the session's lifetime. State is internal to the
-backend—no separate session slices required.
+Sections that provide a filesystem set this field when building tool context.
+The adapter's tool dispatch logic checks if the section provides a filesystem
+and injects it into context.
 
-## Tool Handlers
+### Tool Handlers
 
-Tools retrieve the filesystem from context and operate generically:
+Tools access filesystem via context, not session:
 
 ```python
 def read_file_handler(params: ReadParams, *, context: ToolContext) -> ToolResult[FileContent]:
-    fs: Filesystem = context.session.query(Filesystem).latest()
-    content = fs.read(params.path, offset=params.offset, limit=params.limit)
+    if context.filesystem is None:
+        return ToolResult(message="No filesystem available", value=None, success=False)
+    content = context.filesystem.read(params.path, offset=params.offset, limit=params.limit)
     return ToolResult(message=_format(content), value=content)
 
 def write_file_handler(params: WriteParams, *, context: ToolContext) -> ToolResult[int]:
-    fs: Filesystem = context.session.query(Filesystem).latest()
-    bytes_written = fs.write(params.path, params.content)
+    if context.filesystem is None:
+        return ToolResult(message="No filesystem available", value=None, success=False)
+    bytes_written = context.filesystem.write(params.path, params.content)
     return ToolResult(message=f"Wrote {bytes_written} bytes to {params.path}", value=bytes_written)
 
 # Single tool definition used by all sections
@@ -130,91 +153,136 @@ FILESYSTEM_TOOLS = (
     Tool(name="ls", handler=ls_handler, ...),
     Tool(name="read_file", handler=read_file_handler, ...),
     Tool(name="write_file", handler=write_file_handler, ...),
-    Tool(name="edit_file", handler=edit_file_handler, ...),  # Combines read + write
+    Tool(name="edit_file", handler=edit_file_handler, ...),
     Tool(name="glob", handler=glob_handler, ...),
     Tool(name="grep", handler=grep_handler, ...),
     Tool(name="rm", handler=rm_handler, ...),
 )
 ```
 
-## Backend Implementations
+## Session State: InMemoryBackend
 
-### InMemoryBackend
-
-Holds file state directly. No separate session slice—the backend *is* the state:
+For `InMemoryBackend`, state must integrate with session for snapshots and
+rollback. The backend is backed by a frozen dataclass slice:
 
 ```python
-@dataclass
-class _File:
+@dataclass(slots=True, frozen=True)
+class _FileRecord:
     path: str
     content: str
     size_bytes: int
 
+@dataclass(slots=True, frozen=True)
+class InMemoryState:
+    """Session slice holding in-memory filesystem state."""
+    files: tuple[_FileRecord, ...] = ()
+
+
 class InMemoryBackend:
-    def __init__(self, mounts: Sequence[HostMount] = ()) -> None:
-        self._files: dict[str, _File] = {}
+    """Filesystem backed by session state."""
+
+    def __init__(self, session: Session, mounts: Sequence[HostMount] = ()) -> None:
+        self._session = session
+        session.install(InMemoryState, initial=lambda: InMemoryState())
         self._hydrate_mounts(mounts)
 
+    def _state(self) -> InMemoryState:
+        return self._session.query(InMemoryState).latest() or InMemoryState()
+
+    def _set_state(self, state: InMemoryState) -> None:
+        self._session.mutate(InMemoryState).seed(state)
+
     def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
-        file = self._files.get(_normalize(path))
-        if file is None:
+        state = self._state()
+        record = next((f for f in state.files if f.path == _normalize(path)), None)
+        if record is None:
             raise FileNotFoundError(path)
-        return _paginate(file.content, offset, limit)
+        return _paginate(record.content, offset, limit)
 
     def write(self, path: str, content: str) -> int:
         normalized = _normalize(path)
         size = len(content.encode())
-        self._files[normalized] = _File(path=normalized, content=content, size_bytes=size)
+        record = _FileRecord(path=normalized, content=content, size_bytes=size)
+
+        state = self._state()
+        files = [f for f in state.files if f.path != normalized]
+        files.append(record)
+        files.sort(key=lambda f: f.path)
+        self._set_state(InMemoryState(files=tuple(files)))
         return size
 
     def delete(self, path: str) -> int:
         normalized = _normalize(path)
-        # Delete exact match or prefix (directory)
-        to_delete = [p for p in self._files if p == normalized or p.startswith(normalized + "/")]
-        for p in to_delete:
-            del self._files[p]
-        return len(to_delete)
+        state = self._state()
+        remaining = []
+        deleted = 0
+        for f in state.files:
+            if f.path == normalized or f.path.startswith(normalized + "/"):
+                deleted += 1
+            else:
+                remaining.append(f)
+        self._set_state(InMemoryState(files=tuple(remaining)))
+        return deleted
 
     def list(self, path: str = "") -> tuple[FileEntry, ...]:
-        prefix = _normalize(path)
-        entries = {}
-        for file_path, file in self._files.items():
-            if not file_path.startswith(prefix):
-                continue
-            relative = file_path[len(prefix):].lstrip("/")
-            top_segment = relative.split("/")[0]
-            full_path = f"{prefix}/{top_segment}".lstrip("/")
-            if "/" in relative:
-                entries[full_path] = FileEntry(path=full_path, kind="directory")
-            else:
-                entries[full_path] = FileEntry(path=full_path, kind="file", size_bytes=file.size_bytes)
-        return tuple(entries.values())
+        # ... same logic as before, reading from self._state() ...
 
     def glob(self, pattern: str) -> tuple[FileEntry, ...]:
-        return tuple(
-            FileEntry(path=f.path, kind="file", size_bytes=f.size_bytes)
-            for f in self._files.values()
-            if fnmatch.fnmatch(f.path, pattern)
-        )
+        # ... same logic ...
 
     def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
-        regex = re.compile(pattern)
-        matches = []
-        for file in self._files.values():
-            if file_glob and not fnmatch.fnmatch(file.path, file_glob):
-                continue
-            for i, line in enumerate(file.content.splitlines(), 1):
-                if regex.search(line):
-                    matches.append(GrepMatch(path=file.path, line_number=i, line_content=line))
-        return tuple(matches)
+        # ... same logic ...
+
+    def snapshot(self) -> bytes:
+        state = self._state()
+        return _serialize_state(state)
+
+    def restore(self, data: bytes) -> None:
+        state = _deserialize_state(data)
+        self._set_state(state)
 ```
 
-The backend persists for the session's lifetime via `session.install(Filesystem, ...)`.
-No reducers, no events, no separate VirtualFileSystem dataclass.
+### Snapshots and Rollback
+
+The session manages state history. When a session snapshot is taken:
+
+```python
+# Session stores all slice states including InMemoryState
+snapshot_id = session.snapshot()
+
+# ... operations modify filesystem ...
+backend.write("foo.txt", "modified")
+
+# Rollback restores InMemoryState to previous value
+session.rollback(snapshot_id)
+
+# Filesystem reflects rolled-back state
+backend.read("foo.txt")  # Returns original content or raises FileNotFoundError
+```
+
+### Persistence
+
+Saving session to disk includes `InMemoryState`:
+
+```python
+# Save session (includes all slices)
+session.save("/path/to/session.json")
+
+# Load session
+session = Session.load("/path/to/session.json", bus=bus)
+
+# Recreate backend pointing at loaded session
+backend = InMemoryBackend(session)  # Reads existing InMemoryState
+```
+
+The `InMemoryState` slice is serialized as JSON via the standard serde module.
+
+## External State: ContainerBackend and HostBackend
+
+These backends have state external to the session. They implement `snapshot()`
+and `restore()` differently:
 
 ### ContainerBackend
-
-Executes operations via container exec:
 
 ```python
 class ContainerBackend:
@@ -222,127 +290,96 @@ class ContainerBackend:
         self._container = container
         self._workdir = workdir
 
-    def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
-        full = self._resolve(path)
-        result = self._exec(["cat", full])
-        return _paginate(result.stdout, offset, limit)
+    def snapshot(self) -> bytes:
+        # Create tarball of workspace
+        result = self._exec(["tar", "-czf", "-", "-C", self._workdir, "."])
+        return result.stdout_bytes
 
-    def write(self, path: str, content: str) -> int:
-        full = self._resolve(path)
-        self._exec(["mkdir", "-p", str(Path(full).parent)])
-        self._exec(["tee", full], stdin=content)
-        return len(content.encode())
+    def restore(self, data: bytes) -> None:
+        # Clear workspace and extract tarball
+        self._exec(["rm", "-rf", f"{self._workdir}/*"])
+        self._exec(["tar", "-xzf", "-", "-C", self._workdir], stdin_bytes=data)
 
-    def delete(self, path: str) -> int:
-        full = self._resolve(path)
-        result = self._exec(["rm", "-rf", full])
-        return 1 if result.returncode == 0 else 0
-
-    def list(self, path: str = "") -> tuple[FileEntry, ...]:
-        full = self._resolve(path) if path else self._workdir
-        result = self._exec(["find", full, "-maxdepth", "1", "-printf", "%y %s %P\n"])
-        return _parse_find_output(result.stdout)
-
-    def glob(self, pattern: str) -> tuple[FileEntry, ...]:
-        result = self._exec(["find", self._workdir, "-name", pattern, "-printf", "%y %s %P\n"])
-        return _parse_find_output(result.stdout)
-
-    def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
-        cmd = ["grep", "-rn", pattern, self._workdir]
-        if file_glob:
-            cmd.extend(["--include", file_glob])
-        result = self._exec(cmd)
-        return _parse_grep_output(result.stdout)
-
-    def _resolve(self, path: str) -> str:
-        if path.startswith("/"):
-            return path
-        return f"{self._workdir}/{path}"
-
-    def _exec(self, cmd: list[str], stdin: str | None = None) -> CompletedProcess:
-        return self._container.exec(cmd, stdin=stdin)
+    # ... read, write, delete, list, glob, grep same as before ...
 ```
 
-### HostBackend
+Container snapshots are expensive (tar/untar). Use sparingly.
 
-Direct OS I/O for temp directory workspaces:
+### HostBackend
 
 ```python
 class HostBackend:
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
 
-    def read(self, path: str, *, offset: int = 0, limit: int | None = None) -> FileContent:
-        full = self._resolve(path)
-        content = full.read_text()
-        return _paginate(content, offset, limit)
+    def snapshot(self) -> bytes:
+        # Serialize directory tree to tarball
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+            tar.add(self._root, arcname=".")
+        return buffer.getvalue()
 
-    def write(self, path: str, content: str) -> int:
-        full = self._resolve(path)
-        full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(content)
-        return len(content.encode())
+    def restore(self, data: bytes) -> None:
+        # Clear and restore from tarball
+        shutil.rmtree(self._root)
+        self._root.mkdir(parents=True)
+        buffer = io.BytesIO(data)
+        with tarfile.open(fileobj=buffer, mode="r:gz") as tar:
+            tar.extractall(self._root)
 
-    def delete(self, path: str) -> int:
-        full = self._resolve(path)
-        if full.is_dir():
-            count = sum(1 for _ in full.rglob("*"))
-            shutil.rmtree(full)
-            return count
-        elif full.exists():
-            full.unlink()
-            return 1
-        return 0
+    # ... read, write, delete, list, glob, grep same as before ...
+```
 
-    def list(self, path: str = "") -> tuple[FileEntry, ...]:
-        full = self._resolve(path) if path else self._root
-        entries = []
-        for item in full.iterdir():
-            kind = "directory" if item.is_dir() else "file"
-            size = item.stat().st_size if item.is_file() else None
-            entries.append(FileEntry(path=str(item.relative_to(self._root)), kind=kind, size_bytes=size))
-        return tuple(entries)
+### Session Integration for External Backends
 
-    def glob(self, pattern: str) -> tuple[FileEntry, ...]:
-        return tuple(
-            FileEntry(path=str(p.relative_to(self._root)), kind="file", size_bytes=p.stat().st_size)
-            for p in self._root.glob(pattern) if p.is_file()
-        )
+External backends don't automatically participate in session snapshots. For
+explicit snapshot/rollback:
 
-    def grep(self, pattern: str, *, file_glob: str | None = None) -> tuple[GrepMatch, ...]:
-        regex = re.compile(pattern)
-        matches = []
-        for path in (self._root.glob(file_glob) if file_glob else self._root.rglob("*")):
-            if not path.is_file():
-                continue
-            try:
-                for i, line in enumerate(path.read_text().splitlines(), 1):
-                    if regex.search(line):
-                        matches.append(GrepMatch(
-                            path=str(path.relative_to(self._root)),
-                            line_number=i,
-                            line_content=line,
-                        ))
-            except UnicodeDecodeError:
-                continue
-        return tuple(matches)
+```python
+# Manual snapshot before risky operation
+fs_snapshot = backend.snapshot()
 
-    def _resolve(self, path: str) -> Path:
-        resolved = (self._root / path).resolve()
-        if not resolved.is_relative_to(self._root):
-            raise ValueError(f"Path escapes root: {path}")
-        return resolved
+try:
+    backend.write("config.json", new_config)
+    run_tests()
+except TestFailure:
+    backend.restore(fs_snapshot)
+```
+
+To persist external state with session, store snapshot in a session slice:
+
+```python
+@dataclass(slots=True, frozen=True)
+class ExternalFsSnapshot:
+    data: bytes
+
+# Before saving session
+session.mutate(ExternalFsSnapshot).seed(ExternalFsSnapshot(data=backend.snapshot()))
+session.save("/path/to/session.json")
+
+# After loading session
+session = Session.load("/path/to/session.json", bus=bus)
+snapshot = session.query(ExternalFsSnapshot).latest()
+if snapshot:
+    backend.restore(snapshot.data)
 ```
 
 ## Section Definitions
 
-Sections create backend, register it, and attach tools:
+Sections create backend and expose it via a property:
 
 ```python
-class VfsSection(MarkdownSection):
+class FilesystemSection(MarkdownSection):
+    """Base for sections that provide a Filesystem."""
+
+    @property
+    def filesystem(self) -> Filesystem:
+        raise NotImplementedError
+
+
+class VfsSection(FilesystemSection):
     def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
-        self._backend = InMemoryBackend(mounts)
-        session.install(Filesystem, initial=lambda: self._backend)
+        self._backend = InMemoryBackend(session, mounts)
         super().__init__(
             title="Virtual Filesystem",
             key="vfs",
@@ -350,11 +387,15 @@ class VfsSection(MarkdownSection):
             tools=FILESYSTEM_TOOLS,
         )
 
-class PodmanSection(MarkdownSection):
+    @property
+    def filesystem(self) -> Filesystem:
+        return self._backend
+
+
+class PodmanSection(FilesystemSection):
     def __init__(self, *, session: Session, config: PodmanConfig) -> None:
         self._container = _create_container(config)
         self._backend = ContainerBackend(self._container)
-        session.install(Filesystem, initial=lambda: self._backend)
         super().__init__(
             title="Sandbox",
             key="podman",
@@ -362,17 +403,56 @@ class PodmanSection(MarkdownSection):
             tools=(*FILESYSTEM_TOOLS, shell_tool, eval_tool),
         )
 
-class WorkspaceSection(MarkdownSection):
+    @property
+    def filesystem(self) -> Filesystem:
+        return self._backend
+
+
+class WorkspaceSection(FilesystemSection):
     def __init__(self, *, session: Session, mounts: Sequence[HostMount] = ()) -> None:
         self._temp_dir = _create_workspace(mounts)
         self._backend = HostBackend(self._temp_dir)
-        session.install(Filesystem, initial=lambda: self._backend)
         super().__init__(
             title="Workspace",
             key="workspace",
             template=_WORKSPACE_TEMPLATE,
             tools=(),  # SDK uses native tools
         )
+
+    @property
+    def filesystem(self) -> Filesystem:
+        return self._backend
+```
+
+## Adapter Integration
+
+The adapter's tool dispatch finds the filesystem from the section that provides
+the tool and injects it into `ToolContext`:
+
+```python
+def _build_tool_context(
+    tool: Tool,
+    rendered_prompt: RenderedPrompt,
+    session: Session,
+    adapter: ProviderAdapter,
+    ...
+) -> ToolContext:
+    # Find section that owns this tool
+    section = _find_section_for_tool(rendered_prompt, tool)
+
+    # Check if section provides a filesystem
+    filesystem = None
+    if isinstance(section, FilesystemSection):
+        filesystem = section.filesystem
+
+    return ToolContext(
+        prompt=rendered_prompt.prompt,
+        rendered_prompt=rendered_prompt,
+        adapter=adapter,
+        session=session,
+        filesystem=filesystem,
+        ...
+    )
 ```
 
 ## edit_file Implementation
@@ -381,15 +461,16 @@ class WorkspaceSection(MarkdownSection):
 
 ```python
 def edit_file_handler(params: EditParams, *, context: ToolContext) -> ToolResult[str]:
-    fs: Filesystem = context.session.query(Filesystem).latest()
+    if context.filesystem is None:
+        return ToolResult(message="No filesystem available", value=None, success=False)
 
-    # Read current content
+    fs = context.filesystem
+
     try:
         content = fs.read(params.path)
     except FileNotFoundError:
         return ToolResult(message=f"File not found: {params.path}", value=None, success=False)
 
-    # Apply edit
     old = params.old_string
     new = params.new_string
     if old not in content.content:
@@ -400,7 +481,6 @@ def edit_file_handler(params: EditParams, *, context: ToolContext) -> ToolResult
     else:
         updated = content.content.replace(old, new, 1)
 
-    # Write back
     fs.write(params.path, updated)
     return ToolResult(message=f"Edited {params.path}", value=updated)
 ```
@@ -410,11 +490,17 @@ def edit_file_handler(params: EditParams, *, context: ToolContext) -> ToolResult
 Parameterized tests cover all backends:
 
 ```python
-@pytest.fixture(params=["memory", "host"])
-def fs(request, tmp_path) -> Filesystem:
-    if request.param == "memory":
-        return InMemoryBackend()
+@pytest.fixture
+def memory_fs(session: Session) -> Filesystem:
+    return InMemoryBackend(session)
+
+@pytest.fixture
+def host_fs(tmp_path: Path) -> Filesystem:
     return HostBackend(tmp_path)
+
+@pytest.fixture(params=["memory", "host"])
+def fs(request, memory_fs, host_fs) -> Filesystem:
+    return {"memory": memory_fs, "host": host_fs}[request.param]
 
 def test_write_read_roundtrip(fs: Filesystem) -> None:
     fs.write("test.txt", "hello")
@@ -427,28 +513,29 @@ def test_delete(fs: Filesystem) -> None:
     with pytest.raises(FileNotFoundError):
         fs.read("a/b.txt")
 
-def test_glob(fs: Filesystem) -> None:
-    fs.write("src/main.py", "")
-    fs.write("src/test.py", "")
-    fs.write("docs/readme.md", "")
-    matches = fs.glob("src/*.py")
-    assert len(matches) == 2
-
-def test_grep(fs: Filesystem) -> None:
-    fs.write("code.py", "def foo():\n    return 42\n")
-    matches = fs.grep(r"return \d+")
-    assert len(matches) == 1
-    assert matches[0].line_number == 2
+def test_snapshot_restore(fs: Filesystem) -> None:
+    fs.write("file.txt", "original")
+    snap = fs.snapshot()
+    fs.write("file.txt", "modified")
+    fs.restore(snap)
+    assert fs.read("file.txt").content == "original"
 ```
 
 Container backend tests are integration tests requiring Podman runtime.
 
 ## Summary
 
-The `Filesystem` protocol provides six methods: `read`, `write`, `delete`,
-`list`, `glob`, `grep`. Three backends implement this protocol for different
-execution contexts. Tool handlers operate generically via
-`context.session.query(Filesystem)`. Sections register backends and attach
-shared tools.
+| Aspect | InMemoryBackend | ContainerBackend | HostBackend |
+|--------|-----------------|------------------|-------------|
+| State location | Session slice (`InMemoryState`) | Container filesystem | Host temp directory |
+| Session snapshots | Automatic | Manual via `snapshot()`/`restore()` | Manual |
+| Persistence | Via session save/load | Via `ExternalFsSnapshot` slice | Via `ExternalFsSnapshot` slice |
+| Rollback | Automatic with session | Manual | Manual |
 
-This eliminates tool duplication and enables composition across backends.
+The `Filesystem` protocol provides eight methods: `read`, `write`, `delete`,
+`list`, `glob`, `grep`, `snapshot`, `restore`. Tool handlers access the
+filesystem via `context.filesystem`. Sections expose backends via a
+`filesystem` property. The adapter injects the filesystem into tool context.
+
+This eliminates tool duplication while properly addressing state management
+across different backend types.
