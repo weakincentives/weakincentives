@@ -108,7 +108,7 @@ def test_install_registers_reducers(session_factory: SessionFactory) -> None:
     session.install(ItemList)
 
     # Seed initial state
-    session.mutate(ItemList).seed(ItemList(items=()))
+    session[ItemList].seed(ItemList(items=()))
 
     # Apply events - should work via installed reducers
     session[ItemList].apply(AddItem(item="first"))
@@ -206,7 +206,7 @@ def test_getitem_query_latest(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
     session.install(ItemList)
 
-    session.mutate(ItemList).seed(ItemList(items=("a", "b")))
+    session[ItemList].seed(ItemList(items=("a", "b")))
 
     result = session[ItemList].latest()
 
@@ -216,7 +216,7 @@ def test_getitem_query_latest(session_factory: SessionFactory) -> None:
 def test_getitem_query_all(session_factory: SessionFactory) -> None:
     """Verify session[SliceType].all() works."""
     session, _ = session_factory()
-    session.mutate(ItemList).seed([ItemList(items=("a",)), ItemList(items=("b",))])
+    session[ItemList].seed([ItemList(items=("a",)), ItemList(items=("b",))])
 
     result = session[ItemList].all()
 
@@ -226,7 +226,7 @@ def test_getitem_query_all(session_factory: SessionFactory) -> None:
 def test_getitem_query_where(session_factory: SessionFactory) -> None:
     """Verify session[SliceType].where() works."""
     session, _ = session_factory()
-    session.mutate(ItemList).seed(
+    session[ItemList].seed(
         [
             ItemList(items=()),
             ItemList(items=("a",)),
@@ -249,7 +249,7 @@ def test_reducer_method_transforms_state(session_factory: SessionFactory) -> Non
     session, _ = session_factory()
     session.install(ItemList)
 
-    session.mutate(ItemList).seed(ItemList(items=("a", "b", "c")))
+    session[ItemList].seed(ItemList(items=("a", "b", "c")))
     session[ItemList].apply(RemoveItem(item="b"))
 
     result = session[ItemList].latest()
@@ -262,7 +262,7 @@ def test_reducer_method_can_clear_state(session_factory: SessionFactory) -> None
     session, _ = session_factory()
     session.install(ItemList)
 
-    session.mutate(ItemList).seed(ItemList(items=("a", "b")))
+    session[ItemList].seed(ItemList(items=("a", "b")))
     session[ItemList].apply(ClearItems())
 
     result = session[ItemList].latest()

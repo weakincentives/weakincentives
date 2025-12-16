@@ -240,7 +240,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         If no WorkspaceDigest exists in the session, runs optimization first.
         All modes now support workspace optimization: VFS, Podman, and Claude Agent SDK.
         """
-        needs_optimization = self._session.query(WorkspaceDigest).latest() is None
+        needs_optimization = self._session[WorkspaceDigest].latest() is None
         if needs_optimization:
             self._run_optimization()
         effective_deadline = deadline or _default_deadline()

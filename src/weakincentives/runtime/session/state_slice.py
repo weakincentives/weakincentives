@@ -11,6 +11,7 @@
 # limitations under the License.
 
 # pyright: reportImportCycles=false
+# pyright: reportPrivateUsage=false
 
 """Declarative reducer decorator for self-describing session state.
 
@@ -261,7 +262,7 @@ def install_state_slice[T: SupportsDataclass](
             reducer_meta.method_name,
             initial,
         )
-        session.mutation_register_reducer(
+        session._mutation_register_reducer(
             reducer_meta.event_type,
             method_reducer,
             slice_type=slice_type,

@@ -32,7 +32,7 @@ def render_plan_snapshot(session: Session) -> str:
         A formatted string representation of the active plan, or a message
         indicating no active plan exists.
     """
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     if plan is None:
         return "No active plan."
 

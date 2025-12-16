@@ -679,7 +679,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             accepts_overrides=config.accepts_overrides,
         )
 
-        session.mutate(PodmanWorkspace).register(PodmanWorkspace, replace_latest)
+        session[PodmanWorkspace].register(PodmanWorkspace, replace_latest)
 
         self._vfs_suite = _PodmanVfsSuite(section=self)
         self._shell_suite = _PodmanShellSuite(section=self)
@@ -976,7 +976,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 return self._workspace_handle
             handle = self._create_workspace()
             self._workspace_handle = handle
-            self._session.mutate(PodmanWorkspace).seed(handle.descriptor)
+            self._session[PodmanWorkspace].seed(handle.descriptor)
             return handle
 
     def _create_workspace(self) -> _WorkspaceHandle:
@@ -1122,7 +1122,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 descriptor=updated_descriptor,
                 overlay_path=handle.overlay_path,
             )
-            self._session.mutate(PodmanWorkspace).seed(updated_descriptor)
+            self._session[PodmanWorkspace].seed(updated_descriptor)
 
     def _teardown_workspace(self) -> None:
         with self._lock:

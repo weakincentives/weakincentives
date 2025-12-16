@@ -166,7 +166,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         """Evaluate prompt using Claude Agent SDK with hook-based state sync.
 
         Visibility overrides are managed exclusively via Session state using the
-        VisibilityOverrides state slice. Use session.mutate(VisibilityOverrides)
+        VisibilityOverrides state slice. Use session[VisibilityOverrides]
         to set visibility overrides before calling evaluate().
 
         Args:
@@ -238,7 +238,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
 
         # Register Notification reducer if not already registered
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         hook_context = HookContext(
             session=session,

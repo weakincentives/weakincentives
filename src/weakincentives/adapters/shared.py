@@ -187,7 +187,7 @@ class AdapterRenderOptions:
     """Configuration for rendering prompts ahead of provider evaluation.
 
     Visibility overrides are managed exclusively via Session state using the
-    VisibilityOverrides state slice. Use session.mutate(VisibilityOverrides)
+    VisibilityOverrides state slice. Use session[VisibilityOverrides]
     to set visibility overrides before rendering.
     """
 
@@ -787,7 +787,7 @@ def _publish_tool_invocation(
     )
     publish_result = context.session.event_bus.publish(invocation)
     if not publish_result.ok:
-        context.session.mutate().rollback(snapshot)
+        context.session.rollback(snapshot)
         outcome.log.warning(
             "Session rollback triggered after publish failure.",
             event="session_rollback_due_to_publish_failure",

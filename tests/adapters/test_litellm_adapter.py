@@ -494,8 +494,8 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
 
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    session.mutate(ToolPayload).register(ToolPayload, replace_latest)
-    session.mutate(ToolPayload).seed((ToolPayload(answer="baseline"),))
+    session[ToolPayload].register(ToolPayload, replace_latest)
+    session[ToolPayload].seed((ToolPayload(answer="baseline"),))
 
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
@@ -544,7 +544,7 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
     )
     assert "Reducer crashed" in tool_event.result.message
 
-    latest_payload = session.query(ToolPayload).latest()
+    latest_payload = session[ToolPayload].latest()
     assert latest_payload == ToolPayload(answer="baseline")
 
     assert prompt_events

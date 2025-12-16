@@ -1060,7 +1060,7 @@ def test_shell_execute_runs_commands_and_stores_workspace(
     assert result.value.exit_code == 0
     assert "hello world" in result.value.stdout
 
-    workspace = session.query(PodmanWorkspace).all()
+    workspace = session[PodmanWorkspace].all()
     assert workspace
     assert workspace[-1].image == "python:3.12-bookworm"
     handle = section._workspace_handle

@@ -195,18 +195,23 @@ from weakincentives.contrib.tools import Plan, AddStep
 bus = InProcessEventBus()
 session = Session(bus=bus)
 
-# Query state
-plan = session.query(Plan).latest()
-plan = session[Plan].latest()                     # Shorthand for query
+# Query state via indexing
+session[Plan].latest()                            # Most recent value
+session[Plan].all()                               # All values in slice
+session[Plan].where(lambda p: p.active)           # Filter by predicate
 
 # Dispatch events (through reducers)
 session.apply(AddStep(...))                       # Broadcast to all reducers
 session[Plan].apply(AddStep(...))                 # Targeted to Plan slice
 
-# Direct mutations (bypass reducers)
-session.mutate(Plan).seed(initial_plan)           # Initialize slice
-session.mutate(Plan).register(AddStep, reducer)   # Register reducer
-session.mutate().reset()                          # Clear all slices
+# Direct mutations via indexing (bypass reducers)
+session[Plan].seed(initial_plan)                  # Initialize slice
+session[Plan].register(AddStep, reducer)          # Register reducer
+session[Plan].clear()                             # Clear slice
+
+# Global mutations
+session.reset()                                   # Clear all slices
+session.rollback(snapshot)                        # Restore from snapshot
 ```
 
 ### Provider Adapter

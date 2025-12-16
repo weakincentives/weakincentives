@@ -10,12 +10,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportImportCycles=false
+
 """Protocols describing Session behavior exposed to other modules."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Protocol, Self, overload
+from typing import TYPE_CHECKING, Protocol, Self
 
 from ...prompt._types import SupportsDataclass
 from ..events._types import TelemetryBus
@@ -23,15 +25,40 @@ from ._observer_types import SliceObserver, Subscription
 from .snapshots import Snapshot
 
 if TYPE_CHECKING:
-    from .mutation import GlobalMutationBuilder, MutationBuilder
-    from .query import QueryBuilder
     from .slice_accessor import SliceAccessor
 
 type SnapshotProtocol = Snapshot
 
 
 class SessionProtocol(Protocol):
-    """Structural protocol implemented by session state containers."""
+    """Structural protocol implemented by session state containers.
+
+    Session provides a Redux-style state container with typed slices, reducers,
+    and event-driven dispatch. Access slices via indexing::
+
+        # Query operations
+        session[Plan].latest()
+        session[Plan].all()
+        session[Plan].where(lambda p: p.active)
+
+        # Targeted dispatch (slice-scoped)
+        session[Plan].apply(AddStep(step="x"))
+
+        # Direct mutations
+        session[Plan].seed(initial_plan)
+        session[Plan].clear()
+        session[Plan].register(AddStep, reducer)
+
+    For broadcast dispatch (event-type routed to all matching reducers)::
+
+        session.apply(AddStep(step="x"))
+
+    Global operations are available directly on the session::
+
+        session.reset()                  # Clear all slices
+        session.rollback(snapshot)       # Restore from snapshot
+
+    """
 
     def snapshot(self) -> SnapshotProtocol: ...
 
@@ -41,20 +68,6 @@ class SessionProtocol(Protocol):
     def select_all(
         self, slice_type: type[SupportsDataclass]
     ) -> tuple[SupportsDataclass, ...]: ...
-
-    def query[T: SupportsDataclass](self, slice_type: type[T]) -> QueryBuilder[T]: ...
-
-    @overload
-    def mutate[T: SupportsDataclass](
-        self, slice_type: type[T]
-    ) -> MutationBuilder[T]: ...
-
-    @overload
-    def mutate(self) -> GlobalMutationBuilder: ...
-
-    def mutate[T: SupportsDataclass](
-        self, slice_type: type[T] | None = None
-    ) -> MutationBuilder[T] | GlobalMutationBuilder: ...
 
     def observe[T: SupportsDataclass](
         self,
@@ -77,12 +90,12 @@ class SessionProtocol(Protocol):
         """Broadcast an event to all reducers registered for its type."""
         ...
 
-    def apply_to_slice(
-        self,
-        slice_type: type[SupportsDataclass],
-        event: SupportsDataclass,
-    ) -> None:
-        """Dispatch an event to reducers targeting a specific slice."""
+    def reset(self) -> None:
+        """Clear all stored slices while preserving reducer registrations."""
+        ...
+
+    def rollback(self, snapshot: SnapshotProtocol) -> None:
+        """Restore session slices from the provided snapshot."""
         ...
 
     @property

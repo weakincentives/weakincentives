@@ -32,7 +32,6 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.session import (
-    QueryBuilder,
     ReducerContextProtocol,
     ReducerEvent,
     Session,
@@ -133,7 +132,7 @@ def test_tool_invoked_appends_payload_every_time(
     assert first_result.ok
     assert second_result.ok
     # append_all uses ledger semantics - every publish appends
-    assert session.query(ExamplePayload).all() == (
+    assert session[ExamplePayload].all() == (
         ExamplePayload(value=1),
         ExamplePayload(value=1),
     )
@@ -162,7 +161,7 @@ def test_tool_invoked_extracts_value_from_result(
     bus.publish(event)
 
     # Session dispatches result.value to slice reducers
-    assert session.query(ExamplePayload).all() == (payload,)
+    assert session[ExamplePayload].all() == (payload,)
 
 
 def test_prompt_rendered_appends_start_event(
@@ -178,7 +177,7 @@ def test_prompt_rendered_appends_start_event(
     result = bus.publish(event)
 
     assert result.ok
-    lifecycle = session.query(PromptRendered).all()
+    lifecycle = session[PromptRendered].all()
     assert lifecycle == (event,)
     assert lifecycle[0].rendered_prompt == "Rendered prompt text"
     assert isinstance(event.event_id, UUID)
@@ -194,7 +193,7 @@ def test_prompt_executed_emits_multiple_dataclasses(
     result = bus.publish(make_prompt_event(outputs))
 
     assert result.ok
-    assert session.query(ExampleOutput).all() == tuple(outputs)
+    assert session[ExampleOutput].all() == tuple(outputs)
 
 
 def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> None:
@@ -232,14 +231,14 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
         value = cast(ExampleOutput, event)
         return (*slice_values, SecondSlice(value.text))
 
-    session.mutate(FirstSlice).register(ExampleOutput, first)
-    session.mutate(SecondSlice).register(ExampleOutput, second)
+    session[FirstSlice].register(ExampleOutput, first)
+    session[SecondSlice].register(ExampleOutput, second)
 
     result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
     assert call_order == ["first", "second"]
-    assert session.query(FirstSlice).all() == (FirstSlice("hello"),)
-    assert session.query(SecondSlice).all() == (SecondSlice("hello"),)
+    assert session[FirstSlice].all() == (FirstSlice("hello"),)
+    assert session[SecondSlice].all() == (SecondSlice("hello"),)
     assert result.ok
 
 
@@ -251,7 +250,7 @@ def test_default_append_used_when_no_custom_reducer(
     result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
     assert result.ok
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="hello"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="hello"),)
 
 
 def test_prompt_executed_extracts_value_from_result(
@@ -279,7 +278,7 @@ def test_prompt_executed_extracts_value_from_result(
     bus.publish(event)
 
     # Session dispatches result.output to slice reducers
-    assert session.query(ExampleOutput).all() == (output,)
+    assert session[ExampleOutput].all() == (output,)
 
 
 def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> None:
@@ -305,13 +304,13 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
 
     assert first_result.ok
     assert second_result.ok
-    assert session.query(ExamplePayload).all() == (ExamplePayload(value=1),)
+    assert session[ExamplePayload].all() == (ExamplePayload(value=1),)
 
 
 def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExamplePayload).register(
+    session[ExamplePayload].register(
         ExamplePayload, upsert_by(lambda payload: payload.value)
     )
 
@@ -322,7 +321,7 @@ def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> No
     assert first_result.ok
     assert second_result.ok
     assert third_result.ok
-    assert session.query(ExamplePayload).all() == (
+    assert session[ExamplePayload].all() == (
         ExamplePayload(value=1),
         ExamplePayload(value=2),
     )
@@ -333,14 +332,14 @@ def test_replace_latest_keeps_only_newest_value(
 ) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExamplePayload).register(ExamplePayload, replace_latest)
+    session[ExamplePayload].register(ExamplePayload, replace_latest)
 
     first_result = bus.publish(make_tool_event(1))
     second_result = bus.publish(make_tool_event(2))
 
     assert first_result.ok
     assert second_result.ok
-    assert session.query(ExamplePayload).all() == (ExamplePayload(value=2),)
+    assert session[ExamplePayload].all() == (ExamplePayload(value=2),)
 
 
 def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> None:
@@ -364,7 +363,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
     )
     bus.publish(failure_event)
 
-    tool_events = session.query(ToolInvoked).all()
+    tool_events = session[ToolInvoked].all()
     assert len(tool_events) == 2
     # First event has payload via result.value
     assert tool_events[0].result.value == ExamplePayload(value=1)
@@ -378,7 +377,7 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 ) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, append_all)
+    session[ExampleOutput].register(ExampleOutput, append_all)
 
     def faulty(
         slice_values: tuple[ExampleOutput, ...],
@@ -389,11 +388,11 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
         del context
         raise RuntimeError("boom")
 
-    session.mutate(ExampleOutput).register(ExampleOutput, faulty)
+    session[ExampleOutput].register(ExampleOutput, faulty)
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="first"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert first_result.handled_count == 1
 
     # Second publish adds another entry (append_all doesn't dedupe)
@@ -401,7 +400,7 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
     second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
     assert second_result.handled_count == 1
-    assert session.query(ExampleOutput).all() == (
+    assert session[ExampleOutput].all() == (
         ExampleOutput(text="first"),
         ExampleOutput(text="second"),
     )
@@ -415,19 +414,19 @@ def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> 
 
     assert first_result.ok
     assert second_result.ok
-    original_state = session.query(ExampleOutput).all()
+    original_state = session[ExampleOutput].all()
 
     snapshot = session.snapshot()
     raw = snapshot.to_json()
     restored = Snapshot.from_json(raw)
 
     third_result = bus.publish(make_prompt_event(ExampleOutput(text="third")))
-    assert session.query(ExampleOutput).all() != original_state
+    assert session[ExampleOutput].all() != original_state
     assert third_result.ok
 
-    session.mutate().rollback(restored)
+    session.rollback(restored)
 
-    assert session.query(ExampleOutput).all() == original_state
+    assert session[ExampleOutput].all() == original_state
 
 
 def test_snapshot_preserves_custom_reducer_behavior(
@@ -450,21 +449,21 @@ def test_snapshot_preserves_custom_reducer_behavior(
         entries = slice_values[-1].entries if slice_values else ()
         return (Summary((*entries, value.text)),)
 
-    session.mutate(Summary).register(ExampleOutput, aggregate)
+    session[Summary].register(ExampleOutput, aggregate)
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="start")))
     snapshot = session.snapshot()
 
     second_result = bus.publish(make_prompt_event(ExampleOutput(text="after")))
-    assert session.query(Summary).all()[0].entries == ("start", "after")
+    assert session[Summary].all()[0].entries == ("start", "after")
 
-    session.mutate().rollback(snapshot)
+    session.rollback(snapshot)
 
-    assert session.query(Summary).all()[0].entries == ("start",)
+    assert session[Summary].all()[0].entries == ("start",)
 
     third_result = bus.publish(make_prompt_event(ExampleOutput(text="again")))
 
-    assert session.query(Summary).all()[0].entries == ("start", "again")
+    assert session[Summary].all()[0].entries == ("start", "again")
     assert first_result.ok
     assert second_result.ok
     assert third_result.ok
@@ -534,7 +533,7 @@ def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> No
 
     second_child = Session(bus=bus, parent=parent)
 
-    parent.mutate().rollback(parent_snapshot)
+    parent.rollback(parent_snapshot)
 
     assert parent.children == (first_child, second_child)
 
@@ -551,14 +550,14 @@ def test_snapshot_rollback_requires_registered_slices(
     target = Session(bus=InProcessEventBus())
 
     with pytest.raises(SnapshotRestoreError):
-        target.mutate().rollback(snapshot)
+        target.rollback(snapshot)
 
-    assert target.query(ExampleOutput).all() == ()
+    assert target[ExampleOutput].all() == ()
 
 
 def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
-    session.mutate(cast(type[SupportsDataclass], str)).seed(
+    session[cast(type[SupportsDataclass], str)].seed(
         cast(tuple[SupportsDataclass, ...], ("value",)),
     )
 
@@ -569,19 +568,19 @@ def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) 
 def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, append_all)
+    session[ExampleOutput].register(ExampleOutput, append_all)
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert first_result.ok
-    assert session.query(ExampleOutput).all()
+    assert session[ExampleOutput].all()
 
-    session.mutate().reset()
+    session.reset()
 
-    assert session.query(ExampleOutput).all() == ()
+    assert session[ExampleOutput].all() == ()
 
     second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
     assert second_result.ok
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="second"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="second"),)
 
 
 def test_clone_preserves_state_and_reducer_registration(
@@ -593,7 +592,7 @@ def test_clone_preserves_state_and_reducer_registration(
         session_id=provided_session_id, created_at=provided_created_at
     )
 
-    session.mutate(ExampleOutput).register(ExampleOutput, replace_latest)
+    session[ExampleOutput].register(ExampleOutput, replace_latest)
 
     result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert result.ok
@@ -603,19 +602,19 @@ def test_clone_preserves_state_and_reducer_registration(
 
     assert clone.session_id == provided_session_id
     assert clone.created_at == provided_created_at
-    assert clone.query(ExampleOutput).all() == (ExampleOutput(text="first"),)
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="first"),)
+    assert clone[ExampleOutput].all() == (ExampleOutput(text="first"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert clone._reducers.keys() == session._reducers.keys()
 
     clone_bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
-    assert clone.query(ExampleOutput).all()[-1] == ExampleOutput(text="second")
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="first"),)
+    assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="second")
+    assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
 
     bus.publish(make_prompt_event(ExampleOutput(text="third")))
 
-    assert session.query(ExampleOutput).all()[-1] == ExampleOutput(text="third")
-    assert clone.query(ExampleOutput).all()[-1] == ExampleOutput(text="second")
+    assert session[ExampleOutput].all()[-1] == ExampleOutput(text="third")
+    assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="second")
 
 
 def test_clone_attaches_to_new_bus_when_provided(
@@ -634,16 +633,16 @@ def test_clone_attaches_to_new_bus_when_provided(
 
     assert clone.session_id == clone_session_id
     assert clone.created_at == clone_created_at
-    assert clone.query(ExampleOutput).all() == session.query(ExampleOutput).all()
+    assert clone[ExampleOutput].all() == session[ExampleOutput].all()
 
     target_bus.publish(make_prompt_event(ExampleOutput(text="from clone")))
 
-    assert clone.query(ExampleOutput).all()[-1] == ExampleOutput(text="from clone")
-    assert session.query(ExampleOutput).all()[-1] == ExampleOutput(text="first")
+    assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="from clone")
+    assert session[ExampleOutput].all()[-1] == ExampleOutput(text="first")
 
     source_bus.publish(make_prompt_event(ExampleOutput(text="original")))
 
-    assert session.query(ExampleOutput).all()[-1] == ExampleOutput(text="original")
+    assert session[ExampleOutput].all()[-1] == ExampleOutput(text="original")
 
 
 def test_session_requires_timezone_aware_created_at() -> None:
@@ -659,12 +658,12 @@ def test_session_instantiates_default_bus_when_none_provided() -> None:
     assert isinstance(session.event_bus, InProcessEventBus)
 
 
-def test_query_returns_query_builder(session_factory: SessionFactory) -> None:
+def test_indexing_returns_slice_accessor(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
 
-    builder = session.query(ExampleOutput)
+    accessor = session[ExampleOutput]
 
-    assert isinstance(builder, QueryBuilder)
+    assert isinstance(accessor, SliceAccessor)
 
 
 def test_query_all_returns_empty_tuple_when_no_values(
@@ -672,7 +671,7 @@ def test_query_all_returns_empty_tuple_when_no_values(
 ) -> None:
     session, _ = session_factory()
 
-    result = session.query(ExampleOutput).all()
+    result = session[ExampleOutput].all()
 
     assert result == ()
 
@@ -682,7 +681,7 @@ def test_query_latest_returns_none_when_no_values(
 ) -> None:
     session, _ = session_factory()
 
-    result = session.query(ExampleOutput).latest()
+    result = session[ExampleOutput].latest()
 
     assert result is None
 
@@ -692,7 +691,7 @@ def test_query_where_returns_empty_tuple_when_no_values(
 ) -> None:
     session, _ = session_factory()
 
-    result = session.query(ExampleOutput).where(lambda x: True)
+    result = session[ExampleOutput].where(lambda x: True)
 
     assert result == ()
 
@@ -703,7 +702,7 @@ def test_query_all_returns_all_values(session_factory: SessionFactory) -> None:
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
     bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
-    result = session.query(ExampleOutput).all()
+    result = session[ExampleOutput].all()
 
     assert result == (ExampleOutput(text="first"), ExampleOutput(text="second"))
 
@@ -716,7 +715,7 @@ def test_query_latest_returns_most_recent_value(
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
     bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
-    result = session.query(ExampleOutput).latest()
+    result = session[ExampleOutput].latest()
 
     assert result == ExampleOutput(text="second")
 
@@ -728,7 +727,7 @@ def test_query_where_filters_values(session_factory: SessionFactory) -> None:
     bus.publish(make_prompt_event(ExampleOutput(text="banana")))
     bus.publish(make_prompt_event(ExampleOutput(text="apricot")))
 
-    result = session.query(ExampleOutput).where(lambda x: x.text.startswith("a"))
+    result = session[ExampleOutput].where(lambda x: x.text.startswith("a"))
 
     assert result == (ExampleOutput(text="apple"), ExampleOutput(text="apricot"))
 
@@ -740,12 +739,12 @@ def test_query_respects_dbc_purity(session_factory: SessionFactory) -> None:
     bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
     with dbc_enabled():
-        assert session.query(ExampleOutput).all() == (
+        assert session[ExampleOutput].all() == (
             ExampleOutput(text="first"),
             ExampleOutput(text="second"),
         )
-        assert session.query(ExampleOutput).latest() == ExampleOutput(text="second")
-        assert session.query(ExampleOutput).where(lambda x: x.text.startswith("f")) == (
+        assert session[ExampleOutput].latest() == ExampleOutput(text="second")
+        assert session[ExampleOutput].where(lambda x: x.text.startswith("f")) == (
             ExampleOutput(text="first"),
         )
 
@@ -764,7 +763,7 @@ def test_query_where_logs_violate_purity_contract(
         return True
 
     with dbc_enabled(), pytest.raises(AssertionError):
-        session.query(ExampleOutput).where(predicate)
+        session[ExampleOutput].where(predicate)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -772,37 +771,25 @@ def test_query_where_logs_violate_purity_contract(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def test_mutate_returns_mutation_builder(session_factory: SessionFactory) -> None:
-    from weakincentives.runtime.session import GlobalMutationBuilder, MutationBuilder
-
+def test_seed_single_value(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
 
-    slice_builder = session.mutate(ExampleOutput)
-    global_builder = session.mutate()
+    session[ExampleOutput].seed(ExampleOutput(text="seeded"))
 
-    assert isinstance(slice_builder, MutationBuilder)
-    assert isinstance(global_builder, GlobalMutationBuilder)
-
-
-def test_mutate_seed_single_value(session_factory: SessionFactory) -> None:
-    session, _ = session_factory()
-
-    session.mutate(ExampleOutput).seed(ExampleOutput(text="seeded"))
-
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="seeded"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="seeded"),)
 
 
 def test_mutate_seed_iterable_values(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
 
-    session.mutate(ExampleOutput).seed(
+    session[ExampleOutput].seed(
         [
             ExampleOutput(text="first"),
             ExampleOutput(text="second"),
         ]
     )
 
-    assert session.query(ExampleOutput).all() == (
+    assert session[ExampleOutput].all() == (
         ExampleOutput(text="first"),
         ExampleOutput(text="second"),
     )
@@ -813,11 +800,11 @@ def test_mutate_clear_removes_all_values(session_factory: SessionFactory) -> Non
 
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
     bus.publish(make_prompt_event(ExampleOutput(text="second")))
-    assert session.query(ExampleOutput).all()
+    assert session[ExampleOutput].all()
 
-    session.mutate(ExampleOutput).clear()
+    session[ExampleOutput].clear()
 
-    assert session.query(ExampleOutput).all() == ()
+    assert session[ExampleOutput].all() == ()
 
 
 def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
@@ -827,9 +814,9 @@ def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
     bus.publish(make_prompt_event(ExampleOutput(text="banana")))
     bus.publish(make_prompt_event(ExampleOutput(text="apricot")))
 
-    session.mutate(ExampleOutput).clear(lambda x: x.text.startswith("a"))
+    session[ExampleOutput].clear(lambda x: x.text.startswith("a"))
 
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="banana"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="banana"),)
 
 
 def test_slice_accessor_apply_triggers_registered_reducer(
@@ -851,19 +838,19 @@ def test_slice_accessor_apply_triggers_registered_reducer(
         value = cast(SetText, event)
         return (ExampleOutput(text=value.text),)
 
-    session.mutate(ExampleOutput).register(SetText, set_text_reducer)
+    session[ExampleOutput].register(SetText, set_text_reducer)
     session[ExampleOutput].apply(SetText(text="dispatched"))
 
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="dispatched"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="dispatched"),)
 
 
 def test_mutate_append_uses_default_reducer(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
 
-    session.mutate(ExampleOutput).append(ExampleOutput(text="first"))
-    session.mutate(ExampleOutput).append(ExampleOutput(text="second"))
+    session[ExampleOutput].append(ExampleOutput(text="first"))
+    session[ExampleOutput].append(ExampleOutput(text="second"))
 
-    assert session.query(ExampleOutput).all() == (
+    assert session[ExampleOutput].all() == (
         ExampleOutput(text="first"),
         ExampleOutput(text="second"),
     )
@@ -872,40 +859,40 @@ def test_mutate_append_uses_default_reducer(session_factory: SessionFactory) -> 
 def test_mutate_register_adds_reducer(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, replace_latest)
+    session[ExampleOutput].register(ExampleOutput, replace_latest)
 
-    session.mutate(ExampleOutput).append(ExampleOutput(text="first"))
-    session.mutate(ExampleOutput).append(ExampleOutput(text="second"))
+    session[ExampleOutput].append(ExampleOutput(text="first"))
+    session[ExampleOutput].append(ExampleOutput(text="second"))
 
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="second"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="second"),)
 
 
 def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, append_all)
+    session[ExampleOutput].register(ExampleOutput, append_all)
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    assert session.query(ExampleOutput).all()
+    assert session[ExampleOutput].all()
 
-    session.mutate().reset()
+    session.reset()
 
-    assert session.query(ExampleOutput).all() == ()
+    assert session[ExampleOutput].all() == ()
 
 
 def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, append_all)
+    session[ExampleOutput].register(ExampleOutput, append_all)
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     snapshot = session.snapshot()
 
     bus.publish(make_prompt_event(ExampleOutput(text="second")))
-    assert session.query(ExampleOutput).latest() == ExampleOutput(text="second")
+    assert session[ExampleOutput].latest() == ExampleOutput(text="second")
 
-    session.mutate().rollback(snapshot)
+    session.rollback(snapshot)
 
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="first"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -1059,7 +1046,7 @@ def test_observer_exception_does_not_break_other_observers(
     bus.publish(make_prompt_event(ExampleOutput(text="value")))
 
     assert calls == ["called"]
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="value"),)
+    assert session[ExampleOutput].all() == (ExampleOutput(text="value"),)
 
 
 def test_observer_called_on_every_append(
@@ -1095,7 +1082,7 @@ def test_observer_works_with_custom_reducer(session_factory: SessionFactory) -> 
     ) -> None:
         calls.append((old, new))
 
-    session.mutate(ExampleOutput).register(ExampleOutput, replace_latest)
+    session[ExampleOutput].register(ExampleOutput, replace_latest)
     session.observe(ExampleOutput, observer)
 
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
@@ -1230,15 +1217,15 @@ def test_apply_broadcasts_to_all_reducers(session_factory: SessionFactory) -> No
         return (*slice_values, SliceB(value.value))
 
     # Register reducers for the same event type targeting different slices
-    session.mutate(SliceA).register(AddItem, reducer_a)
-    session.mutate(SliceB).register(AddItem, reducer_b)
+    session[SliceA].register(AddItem, reducer_a)
+    session[SliceB].register(AddItem, reducer_b)
 
     # Broadcast dispatch: runs ALL reducers for AddItem
     session.apply(AddItem(value="broadcast"))
 
     assert call_order == ["A", "B"]
-    assert session.query(SliceA).all() == (SliceA("broadcast"),)
-    assert session.query(SliceB).all() == (SliceB("broadcast"),)
+    assert session[SliceA].all() == (SliceA("broadcast"),)
+    assert session[SliceB].all() == (SliceB("broadcast"),)
 
 
 def test_slice_accessor_apply_targets_only_specific_slice(
@@ -1285,15 +1272,15 @@ def test_slice_accessor_apply_targets_only_specific_slice(
         return (*slice_values, SliceB(value.value))
 
     # Register reducers for the same event type targeting different slices
-    session.mutate(SliceA).register(AddItem, reducer_a)
-    session.mutate(SliceB).register(AddItem, reducer_b)
+    session[SliceA].register(AddItem, reducer_a)
+    session[SliceB].register(AddItem, reducer_b)
 
     # Targeted dispatch: only runs reducer for SliceA
     session[SliceA].apply(AddItem(value="targeted"))
 
     assert call_order == ["A"]  # Only A was called
-    assert session.query(SliceA).all() == (SliceA("targeted"),)
-    assert session.query(SliceB).all() == ()  # B was not updated
+    assert session[SliceA].all() == (SliceA("targeted"),)
+    assert session[SliceB].all() == ()  # B was not updated
 
 
 def test_slice_accessor_apply_uses_default_reducer_when_none_registered(
@@ -1348,8 +1335,8 @@ def test_apply_vs_slice_accessor_apply_demonstrates_scope_difference(
         current = slice_values[-1].count if slice_values else 0
         return (CounterB(current + inc.amount),)
 
-    session.mutate(CounterA).register(IncrementCounter, counter_reducer_a)
-    session.mutate(CounterB).register(IncrementCounter, counter_reducer_b)
+    session[CounterA].register(IncrementCounter, counter_reducer_a)
+    session[CounterB].register(IncrementCounter, counter_reducer_b)
 
     # Broadcast: both counters get incremented
     session.apply(IncrementCounter(amount=10))

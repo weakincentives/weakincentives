@@ -56,7 +56,7 @@ class ProviderAdapter(ABC):
         """Evaluate the prompt and return a structured response.
 
         Visibility overrides are managed exclusively via Session state using the
-        VisibilityOverrides state slice. Use session.mutate(VisibilityOverrides)
+        VisibilityOverrides state slice. Use session[VisibilityOverrides]
         to set visibility overrides before calling evaluate().
 
         When ``budget`` is provided and ``budget_tracker`` is not, a new tracker

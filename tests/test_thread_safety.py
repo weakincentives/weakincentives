@@ -140,13 +140,13 @@ def test_session_collects_tool_data_across_threads(
         for future in futures:
             future.result()
 
-    tool_data = session.query(ToolInvoked).all()
+    tool_data = session[ToolInvoked].all()
     assert len(tool_data) == total_events
     assert {data.call_id for data in tool_data} == {
         str(index) for index in range(total_events)
     }
 
-    result_slice = session.query(ExampleResult).all()
+    result_slice = session[ExampleResult].all()
     assert len(result_slice) == total_events
     assert {value.value for value in result_slice} == set(range(total_events))
 
@@ -190,12 +190,12 @@ def test_session_snapshots_restore_across_threads(
         expected_results = snapshot.slices.get(ExampleResult, ())
 
         restored = Session(bus=InProcessEventBus())
-        restored.mutate(ToolInvoked).seed(())
-        restored.mutate(ExampleResult).seed(())
-        restored.mutate().rollback(snapshot)
+        restored[ToolInvoked].seed(())
+        restored[ExampleResult].seed(())
+        restored.rollback(snapshot)
 
-        restored_tool_events = restored.query(ToolInvoked).all()
-        restored_results = restored.query(ExampleResult).all()
+        restored_tool_events = restored[ToolInvoked].all()
+        restored_results = restored[ExampleResult].all()
 
         assert restored_tool_events == expected_tool_events
         assert restored_results == expected_results
@@ -265,10 +265,10 @@ def test_session_reset_clears_runtime_state() -> None:
     session = Session(bus=bus)
 
     seeded_value = ExampleResult(value=1)
-    session.mutate(ExampleResult).seed((seeded_value,))
+    session[ExampleResult].seed((seeded_value,))
 
-    assert session.query(ExampleResult).all() == (seeded_value,)
+    assert session[ExampleResult].all() == (seeded_value,)
 
-    session.mutate().reset()
+    session.reset()
 
-    assert session.query(ExampleResult).all() == ()
+    assert session[ExampleResult].all() == ()

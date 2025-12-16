@@ -80,7 +80,7 @@ class VisibilityOverrides:
                 ("tools",): SectionVisibility.FULL,
             }
         )
-        session.mutate(VisibilityOverrides).seed(overrides)
+        session[VisibilityOverrides].seed(overrides)
 
         # Update overrides via event
         session[VisibilityOverrides].apply(
@@ -168,7 +168,7 @@ def get_session_visibility_override(
     """
     if session is None:
         return None
-    overrides = session.query(VisibilityOverrides).latest()
+    overrides = session[VisibilityOverrides].latest()
     if overrides is None:
         return None
     return overrides.get(path)

@@ -55,7 +55,7 @@ def test_planning_end_to_end_flow() -> None:
         session=session,
     )
 
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     assert plan is not None
     assert [step.title for step in plan.steps] == [
         "triage requests",
@@ -84,7 +84,7 @@ def test_planning_end_to_end_flow() -> None:
         session=session,
     )
 
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     assert plan is not None
     assert plan.status == "completed"
 

@@ -37,7 +37,6 @@ from .main_loop import (
 )
 from .session import (
     DataEvent,
-    QueryBuilder,
     ReducerContext,
     ReducerContextProtocol,
     ReducerEvent,
@@ -70,7 +69,6 @@ __all__ = [
     "PromptExecuted",
     "PromptRendered",
     "PublishResult",
-    "QueryBuilder",
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
