@@ -140,6 +140,7 @@ Consult these specs before modifying related code:
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
+| `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
 | `specs/PROMPTS.md` | Prompt system, composition, structured output |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |

@@ -85,6 +85,8 @@ a goal at any time.
   dataclass models or serialization.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
   modules.
+- **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
+  ToolContext integration—when adding or modifying filesystem operations.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.
