@@ -55,6 +55,9 @@ _MAX_SEGMENT_LENGTH: Final[int] = 80
 _MAX_GREP_MATCHES: Final[int] = 1_000
 _ASCII: Final[str] = "ascii"
 
+#: Pass as `limit` to `Filesystem.read()` to read the entire file without truncation.
+READ_ENTIRE_FILE: Final[int] = -1
+
 
 @dataclass(slots=True, frozen=True)
 class FileStat:
@@ -138,7 +141,7 @@ class Filesystem(Protocol):
             path: Relative path from workspace root.
             offset: Line number to start reading (0-indexed).
             limit: Maximum lines to return. None means backend default (2000).
-                Use -1 to read entire file without truncation.
+                Use READ_ENTIRE_FILE (-1) to read entire file without truncation.
             encoding: Text encoding. Only "utf-8" is guaranteed.
 
         Raises:
@@ -419,8 +422,8 @@ class InMemoryFilesystem:
         lines = file.content.splitlines(keepends=True)
         total_lines = len(lines)
 
-        # limit=-1 means read entire file; None uses default window
-        if limit is not None and limit < 0:
+        # READ_ENTIRE_FILE (-1) reads all lines; None uses default window
+        if limit == READ_ENTIRE_FILE:
             actual_limit = total_lines
         else:
             actual_limit = limit if limit is not None else _DEFAULT_READ_LIMIT
@@ -828,8 +831,8 @@ class HostFilesystem:
             lines = f.readlines()
 
         total_lines = len(lines)
-        # limit=-1 means read entire file; None uses default window
-        if limit is not None and limit < 0:
+        # READ_ENTIRE_FILE (-1) reads all lines; None uses default window
+        if limit == READ_ENTIRE_FILE:
             actual_limit = total_lines
         else:
             actual_limit = limit if limit is not None else _DEFAULT_READ_LIMIT

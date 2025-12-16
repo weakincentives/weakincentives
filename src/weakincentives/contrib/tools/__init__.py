@@ -55,6 +55,7 @@ from .digests import (
     set_workspace_digest,
 )
 from .filesystem import (
+    READ_ENTIRE_FILE,
     FileEntry,
     FileStat,
     Filesystem,
@@ -108,6 +109,9 @@ PodmanShellResult: Any
 PodmanWorkspace: Any
 
 __all__ = [
+    # Constants (SCREAMING_SNAKE_CASE)
+    "READ_ENTIRE_FILE",
+    # Classes and types (CamelCase)
     "AddStep",
     "AstevalSection",
     "DeleteEntry",
@@ -160,6 +164,7 @@ __all__ = [
     "WriteFile",
     "WriteFileParams",
     "WriteResult",
+    # Functions (snake_case)
     "clear_workspace_digest",
     "latest_workspace_digest",
     "set_workspace_digest",

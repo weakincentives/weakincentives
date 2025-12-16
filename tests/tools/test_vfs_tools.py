@@ -25,6 +25,7 @@ import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives import ToolValidationError
 from weakincentives.contrib.tools import (
+    READ_ENTIRE_FILE,
     DeleteEntry,
     EditFileParams,
     FileInfo,
@@ -1203,7 +1204,7 @@ def test_edit_file_preserves_content_beyond_default_read_limit() -> None:
     )
 
     # Verify the edit was applied AND the file wasn't truncated
-    result = fs.read("big.txt", limit=-1)
+    result = fs.read("big.txt", limit=READ_ENTIRE_FILE)
     assert "MODIFIED" in result.content
     assert "line2499" in result.content  # Last line should still be present
     assert result.total_lines == 2500

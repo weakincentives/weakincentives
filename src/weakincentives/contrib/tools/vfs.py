@@ -29,7 +29,7 @@ from ...prompt import SupportsDataclass, SupportsToolResult
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Session
-from .filesystem import Filesystem, InMemoryFilesystem
+from .filesystem import READ_ENTIRE_FILE, Filesystem, InMemoryFilesystem
 
 FileEncoding = Literal["utf-8"]
 WriteMode = Literal["create", "overwrite", "append"]
@@ -805,8 +805,8 @@ class FilesystemToolHandlers:
         path_str = "/".join(path.segments)
 
         try:
-            # Read entire file to avoid truncation (limit=-1)
-            read_result = self._fs.read(path_str, limit=-1)
+            # Read entire file to avoid truncation
+            read_result = self._fs.read(path_str, limit=READ_ENTIRE_FILE)
         except FileNotFoundError:
             raise ToolValidationError(
                 "File does not exist in the filesystem."

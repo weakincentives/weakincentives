@@ -25,6 +25,7 @@ import weakincentives.contrib.tools.asteval as asteval_module
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives import ToolValidationError
 from weakincentives.contrib.tools import (
+    READ_ENTIRE_FILE,
     AstevalSection,
     EvalFileRead,
     EvalFileWrite,
@@ -290,7 +291,7 @@ def test_helper_write_append_preserves_content_beyond_default_read_limit() -> No
     assert result.value.value_repr == "'done'"
 
     # Verify the file wasn't truncated
-    read_result = fs.read("big.txt", limit=-1)
+    read_result = fs.read("big.txt", limit=READ_ENTIRE_FILE)
     assert "line0" in read_result.content
     assert "line2499" in read_result.content  # Last original line
     assert "APPENDED" in read_result.content  # The appended content

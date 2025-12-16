@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from weakincentives.contrib.tools.filesystem import (
+    READ_ENTIRE_FILE,
     FileEntry,
     FileStat,
     GlobMatch,
@@ -90,13 +91,13 @@ class TestInMemoryFilesystemRead:
         with pytest.raises(IsADirectoryError):
             fs.read("mydir")
 
-    def test_read_negative_limit_reads_entire_file(self) -> None:
-        """Test that limit=-1 reads the entire file without truncation."""
+    def test_read_entire_file_with_constant(self) -> None:
+        """Test that READ_ENTIRE_FILE reads the entire file without truncation."""
         fs = InMemoryFilesystem()
         # Create a file with more than the default 2000 line limit
         lines = "\n".join([f"line{i}" for i in range(2500)])
         fs.write("big.txt", lines)
-        result = fs.read("big.txt", limit=-1)
+        result = fs.read("big.txt", limit=READ_ENTIRE_FILE)
         assert result.total_lines == 2500
         assert result.truncated is False
         # Verify all content is present
@@ -528,13 +529,13 @@ class TestHostFilesystemRead:
         with pytest.raises(IsADirectoryError):
             fs.read("mydir")
 
-    def test_read_negative_limit_reads_entire_file(self, tmp_path: Path) -> None:
-        """Test that limit=-1 reads the entire file without truncation."""
+    def test_read_entire_file_with_constant(self, tmp_path: Path) -> None:
+        """Test that READ_ENTIRE_FILE reads the entire file without truncation."""
         # Create a file with more than the default 2000 line limit
         lines = "\n".join([f"line{i}" for i in range(2500)])
         (tmp_path / "big.txt").write_text(lines)
         fs = HostFilesystem(_root=str(tmp_path))
-        result = fs.read("big.txt", limit=-1)
+        result = fs.read("big.txt", limit=READ_ENTIRE_FILE)
         assert result.total_lines == 2500
         assert result.truncated is False
         # Verify all content is present

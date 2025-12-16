@@ -33,7 +33,7 @@ from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
-from .filesystem import Filesystem, InMemoryFilesystem
+from .filesystem import READ_ENTIRE_FILE, Filesystem, InMemoryFilesystem
 from .vfs import VfsPath
 
 _LOGGER: StructuredLogger = get_logger(__name__, context={"component": "tools.asteval"})
@@ -442,8 +442,8 @@ def _apply_writes_to_filesystem(
             continue
 
         if write.mode == "append" and exists:
-            # Read entire existing content and append (limit=-1 avoids truncation)
-            result = fs.read(path_str, limit=-1)
+            # Read entire existing content and append
+            result = fs.read(path_str, limit=READ_ENTIRE_FILE)
             content = result.content + write.content
             _ = fs.write(path_str, content, mode="overwrite")
         else:
