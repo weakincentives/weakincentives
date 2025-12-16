@@ -393,46 +393,91 @@ def read_file_handler(
     )
 ```
 
+## Section Ownership
+
+The `Filesystem` instance is owned by the workspace section that provides file
+tools. Sections implementing `WorkspaceSection` expose their filesystem via the
+`filesystem` property.
+
+### WorkspaceSection Protocol
+
+```python
+class WorkspaceSection(Protocol):
+    """Section that provides filesystem access."""
+
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the filesystem managed by this section."""
+        ...
+```
+
+### Section Implementation
+
+```python
+class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
+    """Prompt section providing virtual filesystem tools."""
+
+    _is_workspace_section: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        *,
+        mounts: Sequence[HostMount] = (),
+        allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
+        accepts_overrides: bool = False,
+    ) -> None:
+        self._filesystem = InMemoryFilesystem()
+
+        # Hydrate from host mounts
+        for mount in mounts:
+            self._filesystem.hydrate_from_host(
+                mount,
+                allowed_roots=allowed_host_roots,
+            )
+
+        # Build tool suite bound to this filesystem
+        tools = self._build_tools()
+        super().__init__(...)
+
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the filesystem managed by this section."""
+        return self._filesystem
+```
+
 ## Prompt Integration
 
 ### Prompt.filesystem() Method
 
-The `Prompt` class exposes a `filesystem()` method that returns the same
-`Filesystem` instance used by tools. This allows prompt construction code to
-inspect or pre-populate the filesystem.
+The `Prompt` class exposes a `filesystem()` method that locates the workspace
+section in the template and returns its filesystem. This provides convenient
+access without requiring callers to navigate the section tree.
 
 ```python
 class Prompt(Generic[OutputT]):
-    def __init__(
-        self,
-        template: PromptTemplate[OutputT],
-        overrides_store: PromptOverridesStore | None = None,
-        overrides_tag: str = "latest",
-        filesystem: Filesystem | None = None,  # New parameter
-    ) -> None:
-        self.template = template
-        self._filesystem = filesystem
-        ...
-
     def filesystem(self) -> Filesystem | None:
-        """Return the filesystem instance bound to this prompt.
+        """Return the filesystem from the workspace section, if present.
 
-        Returns None if no filesystem was provided during construction.
-        The same instance is passed to ToolContext during evaluation.
+        Searches the template's section tree for a section implementing
+        WorkspaceSection and returns its filesystem property.
+
+        Returns None if no workspace section exists in the template.
         """
-        return self._filesystem
+        section = self._find_workspace_section()
+        if section is None:
+            return None
+        return section.filesystem
 
-    def with_filesystem(self, filesystem: Filesystem) -> Prompt[OutputT]:
-        """Return a new Prompt with the specified filesystem.
-
-        This is the preferred way to bind a filesystem after construction.
-        """
-        return Prompt(
-            template=self.template,
-            overrides_store=self._overrides_store,
-            overrides_tag=self._overrides_tag,
-            filesystem=filesystem,
-        )
+    def _find_workspace_section(self) -> WorkspaceSection | None:
+        """Locate the workspace section in the template tree."""
+        for section in self.template.sections:
+            if getattr(section, "_is_workspace_section", False):
+                return cast(WorkspaceSection, section)
+            # Recursively search children
+            found = self._search_children(section)
+            if found is not None:
+                return found
+        return None
 ```
 
 ### Adapter Propagation
@@ -452,7 +497,7 @@ def _build_tool_context(
         adapter=self,
         session=session,
         deadline=rendered.deadline,
-        filesystem=prompt.filesystem(),  # Propagate filesystem
+        filesystem=prompt.filesystem(),  # Propagate from workspace section
     )
 ```
 
@@ -498,7 +543,8 @@ class InMemoryFilesystem:
 
 ### PodmanFilesystem
 
-Wraps container file operations via `podman exec`.
+Wraps container file operations via `podman exec`. Owned by
+`PodmanSandboxSection`.
 
 ```python
 @dataclass(slots=True)
@@ -519,6 +565,24 @@ class PodmanFilesystem:
         return _PodmanReadResult(...)
 
     # ... remaining methods
+
+
+class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
+    """Prompt section providing containerized workspace tools."""
+
+    _is_workspace_section: ClassVar[bool] = True
+
+    def __init__(self, *, image: str = "python:3.12-slim", ...) -> None:
+        self._container = self._create_container(image)
+        self._filesystem = PodmanFilesystem(
+            container_id=self._container.id,
+            _client=self._client,
+        )
+        ...
+
+    @property
+    def filesystem(self) -> Filesystem:
+        return self._filesystem
 ```
 
 ### HostFilesystem
@@ -653,15 +717,18 @@ class MockFilesystem:
 
 ```python
 from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
-from weakincentives.contrib.tools import VfsToolsSection
-from weakincentives.contrib.filesystem import InMemoryFilesystem
+from weakincentives.contrib.tools import VfsToolsSection, HostMount
 
-# Create filesystem with initial content
-fs = InMemoryFilesystem()
-fs.write("README.md", "# My Project\n\nDescription here.")
-fs.write("src/main.py", "def main():\n    pass\n")
+# Build prompt with workspace section
+# The section owns and manages its filesystem
+vfs_section = VfsToolsSection(
+    mounts=(
+        HostMount(host_path="src/", include_glob=("*.py",)),
+        HostMount(host_path="docs/", include_glob=("*.md",)),
+    ),
+    allowed_host_roots=("/path/to/project",),
+)
 
-# Build prompt with filesystem
 template = PromptTemplate(
     ns="agents/coder",
     key="edit-files",
@@ -671,18 +738,22 @@ template = PromptTemplate(
             key="instructions",
             template="Edit files as requested.",
         ),
-        VfsToolsSection(),  # Tools automatically use prompt.filesystem()
+        vfs_section,
     ],
 )
 
-prompt = Prompt(template, filesystem=fs)
+prompt = Prompt(template)
 
-# Verify filesystem is accessible
-assert prompt.filesystem() is fs
-assert prompt.filesystem().exists("README.md")
+# Access filesystem via prompt (delegates to workspace section)
+fs = prompt.filesystem()
+assert fs is vfs_section.filesystem  # Same instance
+
+# Pre-populate or inspect before evaluation
+fs.write("scratch/notes.txt", "Working notes...")
+assert fs.exists("src/main.py")  # Hydrated from host mount
 
 # During evaluation, tools receive the same filesystem via context
-# context.filesystem.read("README.md") works in tool handlers
+# context.filesystem.read("src/main.py") works in tool handlers
 ```
 
 ## Limitations
