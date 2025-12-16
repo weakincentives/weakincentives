@@ -85,6 +85,8 @@ a goal at any time.
   dataclass models or serialization.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
   modules.
+- **EVALS.md**: Evaluation framework—when implementing evals, datasets,
+  evaluators, or metrics aggregation.
 - **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
   ToolContext integration—when adding or modifying filesystem operations.
 - **LANGSMITH.md**: LangSmith integration—when implementing telemetry, prompt
