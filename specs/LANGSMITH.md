@@ -2,10 +2,9 @@
 
 ## Purpose
 
-Enable full observability and optimization of WINK background agents through
-LangSmith. This specification covers telemetry/tracing integration, prompt
-management via LangSmith Hub, and evaluation-driven optimization using LangSmith
-datasets.
+Enable full observability of WINK background agents through LangSmith. This
+specification covers telemetry/tracing integration and prompt management via
+LangSmith Hub.
 
 ## Guiding Principles
 
@@ -15,8 +14,6 @@ datasets.
   to avoid blocking prompt evaluation.
 - **Bidirectional prompt management**: Override system supports both push (publish
   to Hub) and pull (fetch from Hub) workflows.
-- **Evaluation-first optimization**: Prompt changes are validated against datasets
-  before deployment.
 - **Graceful degradation**: LangSmith unavailability does not break agent execution.
 - **Composable with LangSmith SDK**: Works alongside `@traceable` decorator and
   native LangSmith integrations (e.g., `configure_claude_agent_sdk()`).
@@ -147,15 +144,10 @@ flowchart TB
     subgraph LangSmith["LangSmith Platform"]
         Tracing["Tracing"]
         Hub["Prompt Hub"]
-        Datasets["Datasets"]
-        Evaluators["Evaluators"]
     end
 
     EventBus -->|PromptRendered<br/>ToolInvoked<br/>PromptExecuted| Tracing
     OverrideStore <-->|resolve/upsert| Hub
-    Session -->|test cases| Datasets
-    Datasets -->|evaluate| Evaluators
-    Evaluators -->|feedback| Hub
 ```
 
 ## Integration Surface
@@ -212,11 +204,6 @@ class PromptOverridesStore(Protocol):
 | `tag` | Commit hash or alias |
 | `SectionOverride.body` | Prompt template content |
 | `ToolOverride.description` | Tool description in template |
-
-### Optimizer Integration (Datasets & Evaluation)
-
-Optimizers can leverage LangSmith datasets for systematic prompt evaluation
-before deploying overrides.
 
 ## Architecture
 
@@ -284,25 +271,6 @@ flowchart LR
   indefinitely.
 - **Fail-open on network errors**: Use cached value or skip overrides rather than
   failing evaluation.
-
-### Evaluation Layer
-
-```mermaid
-flowchart TB
-    subgraph Optimize["Optimization Loop"]
-        Prompt["Prompt Variant"]
-        Dataset["LangSmith Dataset"]
-        Evaluate["Run Evaluations"]
-        Score["Aggregate Scores"]
-        Select["Select Winner"]
-    end
-
-    Prompt --> Dataset
-    Dataset --> Evaluate
-    Evaluate --> Score
-    Score --> Select
-    Select -->|publish| Hub["Prompt Hub"]
-```
 
 ## Claude Agent SDK Adapter Integration
 
@@ -535,9 +503,6 @@ class LangSmithConfig:
     hub_enabled: bool = True
     cache_ttl_seconds: float = 300.0  # 5 minutes
     cache_versioned_indefinitely: bool = True
-
-    # Evaluation settings
-    evaluation_timeout_seconds: float = 300.0
 ```
 
 ### Environment Variables
@@ -695,58 +660,6 @@ def _override_to_hub_prompt(
     """Convert WINK override to LangSmith Hub prompt format."""
 ```
 
-### LangSmithEvaluatedOptimizer
-
-Optimizer that uses LangSmith datasets for prompt evaluation.
-
-```python
-class LangSmithEvaluatedOptimizer(BasePromptOptimizer[object, EvaluationResult]):
-    """Optimize prompts using LangSmith dataset evaluation."""
-
-    def __init__(
-        self,
-        context: OptimizationContext,
-        *,
-        dataset_name: str,
-        evaluators: Sequence[Evaluator] | None = None,
-        min_score_threshold: float = 0.0,
-        config: LangSmithConfig | None = None,
-    ) -> None: ...
-
-    def optimize(
-        self,
-        prompt: Prompt[object],
-        *,
-        session: SessionProtocol,
-    ) -> EvaluationResult: ...
-
-    def evaluate_variant(
-        self,
-        prompt: Prompt[object],
-        *,
-        override: PromptOverride | None = None,
-    ) -> EvaluationRunResult: ...
-
-    def compare_variants(
-        self,
-        prompt: Prompt[object],
-        variants: Sequence[PromptOverride],
-    ) -> ComparisonResult: ...
-```
-
-**EvaluationResult:**
-
-```python
-@dataclass(slots=True, frozen=True)
-class EvaluationResult:
-    dataset_name: str
-    example_count: int
-    scores: dict[str, float]  # evaluator_name -> aggregate score
-    passed: bool  # All scores above threshold
-    run_url: str | None  # Link to LangSmith UI
-    best_override: PromptOverride | None  # If comparing variants
-```
-
 ## Usage Examples
 
 ### Basic Telemetry
@@ -808,61 +721,6 @@ response = adapter.evaluate(prompt, session=session)
 
 # Push local changes to Hub
 commit_hash = store.push(prompt, tag="staging", commit_message="Improved instructions")
-```
-
-### Evaluation-Driven Optimization
-
-```python
-from weakincentives.contrib.langsmith import (
-    LangSmithConfig,
-    LangSmithEvaluatedOptimizer,
-)
-from weakincentives.optimizers import OptimizationContext
-
-config = LangSmithConfig()
-context = OptimizationContext(
-    adapter=adapter,
-    event_bus=bus,
-    overrides_store=store,
-)
-
-optimizer = LangSmithEvaluatedOptimizer(
-    context,
-    dataset_name="agent-test-cases",
-    evaluators=[correctness_evaluator, helpfulness_evaluator],
-    min_score_threshold=0.8,
-    config=config,
-)
-
-# Evaluate current prompt against dataset
-result = optimizer.optimize(prompt, session=session)
-
-if result.passed:
-    print(f"Prompt passed with scores: {result.scores}")
-    print(f"View results: {result.run_url}")
-else:
-    print(f"Prompt failed threshold: {result.scores}")
-```
-
-### A/B Testing Variants
-
-```python
-# Create variants
-variant_a = store.resolve(descriptor, tag="variant-a")
-variant_b = store.resolve(descriptor, tag="variant-b")
-
-# Compare performance
-comparison = optimizer.compare_variants(
-    prompt,
-    variants=[variant_a, variant_b],
-)
-
-print(f"Best variant: {comparison.winner.tag}")
-print(f"Score improvement: {comparison.score_delta:.2%}")
-
-# Promote winner to production
-if comparison.winner:
-    store.upsert(descriptor, comparison.winner.with_tag("production"))
 ```
 
 ### Full Agent Observability
@@ -989,17 +847,6 @@ class LangSmithPromptOverridesStore:
             return None
 ```
 
-### Evaluation Failures
-
-```python
-result = optimizer.optimize(prompt, session=session)
-
-if result.error:
-    # Partial results may still be available
-    print(f"Evaluation error: {result.error}")
-    print(f"Completed examples: {result.completed_count}/{result.example_count}")
-```
-
 ## Events
 
 ### LangSmith-Specific Events
@@ -1097,10 +944,6 @@ def mock_hub():
   not during streaming.
 - **Hub schema constraints**: Complex WINK prompt structures may require
   flattening for Hub storage.
-- **Evaluation latency**: Dataset evaluations run sequentially; large datasets
-  may take significant time.
-- **No automatic rollback**: Failed evaluations don't automatically revert Hub
-  changes.
 - **Claude Agent SDK deduplication**: When using both `configure_claude_agent_sdk()`
   and `configure_wink()`, careful configuration is needed to avoid duplicate traces.
 - **Isolated subprocess tracing**: When using `IsolationConfig`, LangSmith's native
@@ -1111,10 +954,8 @@ def mock_hub():
 
 - **Streaming telemetry**: Support for token-level streaming events when WINK
   adds streaming support.
-- **Automated prompt evolution**: Use LangSmith experiments to automatically
-  propose and test prompt variants.
+- **Evaluation integration**: Dataset-driven testing and automated prompt
+  optimization via LangSmith experiments.
 - **Multi-project support**: Route different prompt namespaces to different
   LangSmith projects.
-- **Feedback integration**: Collect user feedback via LangSmith and feed into
-  optimization loop.
 - **Cost tracking**: Aggregate token costs per prompt/tool in LangSmith dashboards.
