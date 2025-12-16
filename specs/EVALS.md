@@ -396,10 +396,19 @@ class EvalReport:
 The core function that ties everything together:
 
 ```python
+@dataclass(slots=True, frozen=True)
+class SampleEvaluated:
+    """Emitted after each sample is evaluated."""
+    sample_id: str
+    result: EvalResult
+
+
 def run_eval[I, O, E](
     loop: MainLoop[I, O],
     dataset: tuple[Sample[I, E], ...],
     evaluator: Evaluator[O, E],
+    *,
+    bus: EventBus | None = None,
 ) -> EvalReport:
     """Run evaluation using MainLoop.
 
@@ -407,11 +416,13 @@ def run_eval[I, O, E](
     1. Execute the sample input through MainLoop
     2. Score the output using the evaluator
     3. Record timing
+    4. Publish SampleEvaluated event (if bus provided)
 
     Args:
         loop: MainLoop instance to run samples through
         dataset: Tuple of samples to evaluate
         evaluator: Scoring function for outputs
+        bus: Optional EventBus for progress notifications
 
     Returns:
         EvalReport with all results and aggregate metrics
@@ -424,19 +435,23 @@ def run_eval[I, O, E](
             response, _ = loop.execute(sample.input)
             latency_ms = int((time.monotonic() - start) * 1000)
             score = evaluator(response.output, sample.expected)
-            results.append(EvalResult(
+            result = EvalResult(
                 sample_id=sample.id,
                 score=score,
                 latency_ms=latency_ms,
-            ))
+            )
         except Exception as e:
             latency_ms = int((time.monotonic() - start) * 1000)
-            results.append(EvalResult(
+            result = EvalResult(
                 sample_id=sample.id,
                 score=Score(value=0.0, passed=False, reason=str(e)),
                 latency_ms=latency_ms,
                 error=str(e),
-            ))
+            )
+
+        results.append(result)
+        if bus is not None:
+            bus.publish(SampleEvaluated(sample_id=sample.id, result=result))
 
     return EvalReport(results=tuple(results))
 ```
@@ -530,24 +545,23 @@ report = run_eval(loop, dataset, contains)
 
 ## Observability
 
-MainLoop emits events for each execution. Subscribe to track progress:
+Pass an `EventBus` to `run_eval` to receive progress notifications:
 
 ```python
-def on_complete(event: MainLoopCompleted) -> None:
-    print(f"Completed: {event.request_id}")
+from weakincentives.evals import SampleEvaluated
 
-def on_failed(event: MainLoopFailed) -> None:
-    print(f"Failed: {event.request_id} - {event.error}")
+def on_sample(event: SampleEvaluated) -> None:
+    status = "PASS" if event.result.score.passed else "FAIL"
+    print(f"[{status}] {event.sample_id}: {event.result.score.value:.2f}")
 
 bus = InProcessEventBus()
-bus.subscribe(MainLoopCompleted, on_complete)
-bus.subscribe(MainLoopFailed, on_failed)
+bus.subscribe(SampleEvaluated, on_sample)
 
-loop = QALoop(adapter=adapter, bus=bus)
-report = run_eval(loop, dataset, evaluator)
+loop = QALoop(adapter=adapter, bus=InProcessEventBus())
+report = run_eval(loop, dataset, evaluator, bus=bus)
 ```
 
-With LangSmith enabled, all executions are automatically traced.
+With LangSmith enabled, MainLoop executions are automatically traced.
 
 ## Testing Evaluators
 
