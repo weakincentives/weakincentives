@@ -108,7 +108,6 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         self._placeholder = placeholder.strip()
         super().__init__(title=title, key=key, accepts_overrides=True)
         self.params_type = None
-        self.param_type = None
 
     @override
     def original_body_template(self) -> str:

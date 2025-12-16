@@ -64,7 +64,7 @@ def test_section_defaults_children_and_enabled() -> None:
 
     assert section.children == ()
     assert section.is_enabled(ExampleParams()) is True
-    assert section.param_type is ExampleParams
+    assert section.params_type is ExampleParams
 
 
 def test_section_key_normalization_and_validation() -> None:
@@ -253,7 +253,7 @@ def test_plain_section_render_stubs_result() -> None:
 def test_plain_section_allows_absence_of_params() -> None:
     section = PlainSection(title="Plain", key="plain")
 
-    assert section.param_type is None
+    assert section.params_type is None
     assert section.is_enabled(None) is True
     assert section.render(None, 1, "1") == ""
 

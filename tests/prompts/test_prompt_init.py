@@ -87,7 +87,7 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         ("root", "child"),
         ("root", "sibling"),
     ]
-    assert prompt.param_types == {RootParams, ChildParams, SiblingParams}
+    assert prompt.params_types == {RootParams, ChildParams, SiblingParams}
     assert prompt.name == "demo"
 
 
@@ -133,7 +133,7 @@ def test_prompt_allows_duplicate_param_dataclasses_and_shares_params() -> None:
 
     assert "First: alpha" in rendered.text
     assert "Second: beta" in rendered.text
-    assert template.param_types == {DuplicateParams}
+    assert template.params_types == {DuplicateParams}
 
 
 def test_prompt_reuses_provided_params_for_duplicate_sections() -> None:

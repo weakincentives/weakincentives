@@ -146,7 +146,7 @@ def test_renderer_renders_sections_and_tool_overrides() -> None:
     assert rendered.tool_param_descriptions == {"search": {"query": "New query."}}
 
 
-def test_renderer_rejects_unregistered_param_types() -> None:
+def test_renderer_rejects_unregistered_params_types() -> None:
     registry, _ = _build_registry()
     snapshot = registry.snapshot()
     renderer = PromptRenderer(

@@ -200,12 +200,12 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         }
 
     @property
-    def param_types(self) -> set[type[SupportsDataclass]]:
+    def params_types(self) -> set[type[SupportsDataclass]]:
         """Return the set of parameter types used by this prompt's sections."""
         snapshot = self._snapshot
         if snapshot is None:  # pragma: no cover
             raise RuntimeError("PromptTemplate._snapshot not initialized")
-        return snapshot.param_types
+        return snapshot.params_types
 
     @cached_property
     def descriptor(self) -> PromptDescriptor:
