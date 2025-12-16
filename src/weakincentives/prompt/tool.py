@@ -171,7 +171,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
         self._validate_handler_if_present(
             params_type,
-            raw_result_annotation,
+            raw_result_annotation,  # ty: ignore[invalid-argument-type]  # ty typevar bounds
         )
 
     def _resolve_type_arguments(
@@ -661,7 +661,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         params_type = cast(ParamsType, params_candidate)
         result_annotation = cast(ResultT, result_candidate)
 
-        class _SpecializedTool(cls):
+        class _SpecializedTool(cls):  # ty: ignore[invalid-generic-class]  # dynamic class
             def __post_init__(self) -> None:
                 self.params_type = cast(type[ParamsT], params_type)
                 self._result_annotation = result_annotation

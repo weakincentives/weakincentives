@@ -662,7 +662,9 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         self._connection_name = connection_name
         self._exec_runner: _ExecRunner = config.exec_runner or _default_exec_runner
         self._finalizer = weakref.finalize(
-            self, PodmanSandboxSection._cleanup_from_finalizer, weakref.ref(self)
+            self,  # ty: ignore[invalid-argument-type]  # ty: Self vs concrete type
+            PodmanSandboxSection._cleanup_from_finalizer,
+            weakref.ref(self),
         )
         self._config = PodmanSandboxConfig(
             image=self._image,

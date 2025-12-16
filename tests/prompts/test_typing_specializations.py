@@ -48,7 +48,8 @@ def test_section_rejects_non_dataclass_specialization(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "Expected `SupportsDataclass`, found `str`" in result.stdout
+    # ty 0.0.1a35+ uses "not assignable to upper bound" phrasing
+    assert "str" in result.stdout and "SupportsDataclass" in result.stdout
 
 
 def test_tool_requires_dataclass_parameters(tmp_path: Path) -> None:
@@ -62,7 +63,8 @@ def test_tool_requires_dataclass_parameters(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "Expected `SupportsDataclass | None`, found `str`" in result.stdout
+    # ty 0.0.1a35+ uses "not assignable to upper bound" phrasing
+    assert "str" in result.stdout and "SupportsDataclass | None" in result.stdout
 
 
 def test_tool_requires_dataclass_results(tmp_path: Path) -> None:
@@ -84,9 +86,10 @@ def test_tool_requires_dataclass_results(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
+    # ty 0.0.1a35+ uses "not assignable to upper bound" phrasing
     assert (
-        "Expected `SupportsDataclass | Sequence[SupportsDataclass] | None`, found `str`"
-        in result.stdout
+        "str" in result.stdout
+        and "SupportsDataclass | Sequence[SupportsDataclass] | None" in result.stdout
     )
 
 
