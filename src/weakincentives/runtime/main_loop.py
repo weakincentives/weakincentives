@@ -24,10 +24,7 @@ from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
-from ..prompt.visibility_overrides import (
-    SetVisibilityOverride,
-    VisibilityOverrides,
-)
+from ..prompt.visibility_overrides import SetVisibilityOverride
 from .events._types import ControlBus
 from .session import Session
 
@@ -231,7 +228,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             except VisibilityExpansionRequired as e:
                 # Update session state with requested visibility overrides
                 for path, visibility in e.requested_overrides.items():
-                    session[VisibilityOverrides].apply(
+                    session.broadcast(
                         SetVisibilityOverride(path=path, visibility=visibility)
                     )
             else:

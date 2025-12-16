@@ -819,7 +819,7 @@ def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
     assert session[ExampleOutput].all() == (ExampleOutput(text="banana"),)
 
 
-def test_slice_accessor_apply_triggers_registered_reducer(
+def test_broadcast_triggers_registered_reducer(
     session_factory: SessionFactory,
 ) -> None:
     session, _ = session_factory()
@@ -839,7 +839,7 @@ def test_slice_accessor_apply_triggers_registered_reducer(
         return (ExampleOutput(text=value.text),)
 
     session[ExampleOutput].register(SetText, set_text_reducer)
-    session[ExampleOutput].apply(SetText(text="dispatched"))
+    session.broadcast(SetText(text="dispatched"))
 
     assert session[ExampleOutput].all() == (ExampleOutput(text="dispatched"),)
 
@@ -1175,8 +1175,8 @@ def test_slice_accessor_query_methods_work(session_factory: SessionFactory) -> N
     )
 
 
-def test_apply_broadcasts_to_all_reducers(session_factory: SessionFactory) -> None:
-    """session.apply() broadcasts to ALL reducers registered for that event type."""
+def test_broadcast_dispatches_to_all_reducers(session_factory: SessionFactory) -> None:
+    """session.broadcast() dispatches to ALL reducers registered for that event type."""
 
     @dataclass(slots=True, frozen=True)
     class AddItem:
@@ -1221,134 +1221,8 @@ def test_apply_broadcasts_to_all_reducers(session_factory: SessionFactory) -> No
     session[SliceB].register(AddItem, reducer_b)
 
     # Broadcast dispatch: runs ALL reducers for AddItem
-    session.apply(AddItem(value="broadcast"))
+    session.broadcast(AddItem(value="broadcast"))
 
     assert call_order == ["A", "B"]
     assert session[SliceA].all() == (SliceA("broadcast"),)
     assert session[SliceB].all() == (SliceB("broadcast"),)
-
-
-def test_slice_accessor_apply_targets_only_specific_slice(
-    session_factory: SessionFactory,
-) -> None:
-    """session[SliceType].apply() only runs reducers targeting that slice."""
-
-    @dataclass(slots=True, frozen=True)
-    class AddItem:
-        value: str
-
-    @dataclass(slots=True, frozen=True)
-    class SliceA:
-        value: str
-
-    @dataclass(slots=True, frozen=True)
-    class SliceB:
-        value: str
-
-    session, _ = session_factory()
-
-    call_order: list[str] = []
-
-    def reducer_a(
-        slice_values: tuple[SliceA, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[SliceA, ...]:
-        del context
-        call_order.append("A")
-        value = cast(AddItem, event)
-        return (*slice_values, SliceA(value.value))
-
-    def reducer_b(
-        slice_values: tuple[SliceB, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[SliceB, ...]:
-        del context
-        call_order.append("B")
-        value = cast(AddItem, event)
-        return (*slice_values, SliceB(value.value))
-
-    # Register reducers for the same event type targeting different slices
-    session[SliceA].register(AddItem, reducer_a)
-    session[SliceB].register(AddItem, reducer_b)
-
-    # Targeted dispatch: only runs reducer for SliceA
-    session[SliceA].apply(AddItem(value="targeted"))
-
-    assert call_order == ["A"]  # Only A was called
-    assert session[SliceA].all() == (SliceA("targeted"),)
-    assert session[SliceB].all() == ()  # B was not updated
-
-
-def test_slice_accessor_apply_uses_default_reducer_when_none_registered(
-    session_factory: SessionFactory,
-) -> None:
-    """Targeted dispatch uses default append reducer when no custom reducer exists."""
-    session, _ = session_factory()
-
-    session[ExampleOutput].apply(ExampleOutput(text="default"))
-
-    assert session[ExampleOutput].all() == (ExampleOutput(text="default"),)
-
-
-def test_apply_vs_slice_accessor_apply_demonstrates_scope_difference(
-    session_factory: SessionFactory,
-) -> None:
-    """Demonstrates the key mental model difference between broadcast and targeted."""
-
-    @dataclass(slots=True, frozen=True)
-    class IncrementCounter:
-        amount: int
-
-    @dataclass(slots=True, frozen=True)
-    class CounterA:
-        count: int
-
-    @dataclass(slots=True, frozen=True)
-    class CounterB:
-        count: int
-
-    session, _ = session_factory()
-
-    def counter_reducer_a(
-        slice_values: tuple[CounterA, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[CounterA, ...]:
-        del context
-        inc = cast(IncrementCounter, event)
-        current = slice_values[-1].count if slice_values else 0
-        return (CounterA(current + inc.amount),)
-
-    def counter_reducer_b(
-        slice_values: tuple[CounterB, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[CounterB, ...]:
-        del context
-        inc = cast(IncrementCounter, event)
-        current = slice_values[-1].count if slice_values else 0
-        return (CounterB(current + inc.amount),)
-
-    session[CounterA].register(IncrementCounter, counter_reducer_a)
-    session[CounterB].register(IncrementCounter, counter_reducer_b)
-
-    # Broadcast: both counters get incremented
-    session.apply(IncrementCounter(amount=10))
-    assert session[CounterA].latest() == CounterA(10)
-    assert session[CounterB].latest() == CounterB(10)
-
-    # Targeted to CounterA: only A gets incremented
-    session[CounterA].apply(IncrementCounter(amount=5))
-    assert session[CounterA].latest() == CounterA(15)
-    assert session[CounterB].latest() == CounterB(10)  # Unchanged
-
-    # Targeted to CounterB: only B gets incremented
-    session[CounterB].apply(IncrementCounter(amount=3))
-    assert session[CounterA].latest() == CounterA(15)  # Unchanged
-    assert session[CounterB].latest() == CounterB(13)

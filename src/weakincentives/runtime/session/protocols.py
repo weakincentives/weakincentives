@@ -41,17 +41,14 @@ class SessionProtocol(Protocol):
         session[Plan].all()
         session[Plan].where(lambda p: p.active)
 
-        # Targeted dispatch (slice-scoped)
-        session[Plan].apply(AddStep(step="x"))
-
         # Direct mutations
         session[Plan].seed(initial_plan)
         session[Plan].clear()
         session[Plan].register(AddStep, reducer)
 
-    For broadcast dispatch (event-type routed to all matching reducers)::
+    For broadcast dispatch (routes to all reducers for the event type)::
 
-        session.apply(AddStep(step="x"))
+        session.broadcast(AddStep(step="x"))
 
     Global operations are available directly on the session::
 
@@ -82,7 +79,7 @@ class SessionProtocol(Protocol):
         initial: Callable[[], T] | None = None,
     ) -> None: ...
 
-    def apply(self, event: SupportsDataclass) -> None:
+    def broadcast(self, event: SupportsDataclass) -> None:
         """Broadcast an event to all reducers registered for its type."""
         ...
 

@@ -167,21 +167,16 @@ class Subscription:
 
 ### Mutation API
 
-### Dispatch APIs
+### Dispatch API
 
-Session provides two dispatch methods with explicit scope:
+Session provides broadcast dispatch via `session.broadcast()`:
 
 ```python
-# Broadcast dispatch - runs ALL reducers for the event type
-session.apply(SetupPlan(objective="Build feature"))
-
-# Targeted dispatch - runs only reducers for the specified slice
-session[Plan].apply(SetupPlan(objective="Build feature"))
+# Broadcast dispatch - runs ALL reducers registered for the event type
+session.broadcast(SetupPlan(objective="Build feature"))
 ```
 
-Use **broadcast** (`session.apply()`) for cross-cutting events that affect
-multiple slices. Use **targeted** (`session[SliceType].apply()`) when you want
-to dispatch to a specific slice's reducers only.
+Events are routed by type to all matching reducers across all slices.
 
 ### Mutation Builder
 
@@ -219,16 +214,13 @@ session.mutate().rollback(snapshot)    # Restore from snapshot
 
 ### Slice Accessor (Indexing)
 
-Sessions support indexing for query and targeted dispatch:
+Sessions support indexing for query operations:
 
 ```python
 # Query operations
 session[Plan].latest()                    # Get most recent
 session[Plan].all()                       # Get all items
 session[Plan].where(lambda p: p.active)   # Filter items
-
-# Targeted dispatch
-session[Plan].apply(AddStep(step="x"))    # Dispatch to Plan reducers only
 ```
 
 ## Declarative State Slices
@@ -289,7 +281,7 @@ session.install(AgentPlan)
 
 # Now use the slice
 session.mutate(AgentPlan).seed(AgentPlan(steps=("Research",)))
-session[AgentPlan].apply(AddStep(step="Implement"))
+session.broadcast(AddStep(step="Implement"))
 latest = session[AgentPlan].latest()
 ```
 

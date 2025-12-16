@@ -203,8 +203,7 @@ session[Plan].all()                               # All values in slice
 session[Plan].where(lambda p: p.active)           # Filter by predicate
 
 # Dispatch events (through reducers)
-session.apply(AddStep(...))                       # Broadcast to all reducers
-session[Plan].apply(AddStep(...))                 # Targeted to Plan slice
+session.broadcast(AddStep(...))                   # Broadcast to all reducers
 
 # Direct mutations via indexing (bypass reducers)
 session[Plan].seed(initial_plan)                  # Initialize slice

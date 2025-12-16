@@ -483,7 +483,7 @@ def create_subagent_start_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session[Notification].apply(notification)
+        hook_context.session.broadcast(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_start",
@@ -531,7 +531,7 @@ def create_subagent_stop_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session[Notification].apply(notification)
+        hook_context.session.broadcast(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
@@ -576,7 +576,7 @@ def create_pre_compact_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session[Notification].apply(notification)
+        hook_context.session.broadcast(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.pre_compact",
@@ -621,7 +621,7 @@ def create_notification_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session[Notification].apply(notification)
+        hook_context.session.broadcast(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.notification",

@@ -83,7 +83,7 @@ class VisibilityOverrides:
         session[VisibilityOverrides].seed(overrides)
 
         # Update overrides via event
-        session[VisibilityOverrides].apply(
+        session.broadcast(
             SetVisibilityOverride(path=("instructions",), visibility=SectionVisibility.FULL)
         )
 
@@ -144,8 +144,8 @@ def register_visibility_reducers(session: SessionProtocol) -> None:
 
         session = Session(bus=bus)
 
-        # Reducers are already registered - just apply events
-        session[VisibilityOverrides].apply(
+        # Reducers are already registered - just broadcast events
+        session.broadcast(
             SetVisibilityOverride(path=("section",), visibility=SectionVisibility.SUMMARY)
         )
 
